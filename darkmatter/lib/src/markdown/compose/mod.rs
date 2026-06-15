@@ -110,6 +110,7 @@ pub use shell_expansion::ShellCommandOrigin;
 pub use shell_expansion::ShellExpansionError;
 pub use shell_expansion::ShellTimeoutBehavior;
 pub use state::{EffectiveState, EffectiveStateBuilder};
+pub(crate) use state::ResolvingLookup;
 pub use toc_linking::TocLinkingError;
 pub use transclusion::TransclusionError;
 pub use types::{
@@ -559,6 +560,14 @@ impl Markdown {
 
     /// Internal recursive pipeline runner shared by root and child documents.
     ///
+    /// Frontmatter is resolved in a fixed order before the body stages run:
+    /// **Interp pass 1 → Schema Validation → Shell Expansion → Interp pass 2**.
+    /// Pass 1 resolves `{{ }}` against seed values; schema validation and
+    /// coercion run next; `$(...)` frontmatter values then expand; pass 2
+    /// resolves any keys that were deferred because they referenced
+    /// shell-pending values. Read-side functions and `doc.*` are available in
+    /// both passes.
+    ///
     /// Executes operations in four phases:
     /// 1. **Inline Pre** (serial): TextReplacement, PageBlocks, Interpolation, ShellExpansion, ShellBlocks
     /// 2. **Transclusion** (prepared serially, resolved concurrently): BlockTransclusion,
@@ -619,6 +628,7 @@ impl Markdown {
                     options.context(),
                     options.fail_fast,
                     shell_expansion_enabled,
+                    Some(options.expression_resolution_context(&runtime.remote_fetch)),
                 )?;
                 report.frontmatter_interpolations_applied = fm_report.replacements;
                 report.warnings.extend(fm_report.warnings);
@@ -692,6 +702,7 @@ impl Markdown {
                         options.context(),
                         options.fail_fast,
                         false,
+                        Some(options.expression_resolution_context(&runtime.remote_fetch)),
                     )?;
                     report.frontmatter_interpolations_applied += fm_report.replacements;
                     report.warnings.extend(fm_report.warnings);
@@ -1285,9 +1296,7 @@ impl Markdown {
         // Wrap the effective state with a resolution context so read-side
         // expression functions (`frontmatter`, `file_exists`, `markdown_title`,
         // …) resolve filesystem paths and — when remote reads are enabled —
-        // HTTP(S) URL arguments through the run's remote-fetch runtime. Bare
-        // `EffectiveState` returns no resolution context and those functions
-        // never run.
+        // HTTP(S) URL arguments through the run's remote-fetch runtime.
         let lookup = state::ResolvingLookup::new(
             state,
             options.expression_resolution_context(&runtime.remote_fetch),

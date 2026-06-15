@@ -3,8 +3,30 @@
 //! Scans top-level frontmatter string values for `$(cmd)` shell expressions,
 //! parses them, validates the executable-token interpolation rule, and returns
 //! structured directives ready for execution.
+//!
+//! ## `$()` Token Resolution (the §2 ladder)
+//!
+//! A `$( … )` value is a shell expansion, but a token in **executed position**
+//! (a non-ternary directive body, or a ternary branch) resolves by a precedence
+//! ladder rather than always being a shell command:
+//!
+//! 1. quoted literal → string,
+//! 2. numeric literal → number,
+//! 3. `true` / `false` → boolean (never a command or a property),
+//! 4. `name(...)` (trailing parens) → a **safe** expression function — it spawns
+//!    no process and is excluded from shell approval discovery,
+//! 5. path-bearing token (`/usr/bin/x`, `./x`) → executable, never a property,
+//! 6. bare name found on `PATH` → executable (a shell command), otherwise a
+//!    frontmatter property, and `null` when that property is absent.
+//!
+//! A `$()` is valid only if at least one **executed-position** token is a real
+//! shell command (for a ternary, at least one branch; for a non-ternary, the
+//! directive itself). The condition of a ternary is always expression content
+//! and never counts. A `$()` that resolves to no shell command — e.g.
+//! `"$( file_exists('x') ? 'a' : 'b' )"` — is a user error and is rejected with a
+//! diagnostic suggesting `{{ … }}` interpolation instead.
 
-use super::expression::{evaluate, is_truthy, parse_condition};
+use super::expression::{doc_namespace, evaluate, is_truthy, parse, parse_condition, scalar_string};
 use super::frontmatter_interpolation::FrontmatterSeedState;
 use super::interpolation::{Evaluator, ScanMode, interpolate_text};
 use super::shell_expansion::store::resolve_policy_paths;
@@ -64,6 +86,17 @@ pub(crate) enum FrontmatterShellAst {
 pub(crate) enum Branch {
     /// Literal empty string branch — produces no shell invocation.
     Empty,
+    /// A §2-ladder value branch: a quoted/numeric/boolean literal, a `name(...)`
+    /// expression function, a `doc.*` reference, or a lone bare name that is not
+    /// on `PATH` (a frontmatter property, or `null` when absent). It resolves to
+    /// a value via the expression engine at execute time and contributes **no**
+    /// shell command to the allowlist-reachable set, so it is excluded from
+    /// approval discovery.
+    Value {
+        /// Pre-interpolation branch text, evaluated as an expression at execute
+        /// time.
+        source: String,
+    },
     /// Command pipeline branch — interpolated and tokenized at execute time.
     Pipeline {
         /// Pre-interpolation branch text, exactly as sliced from the original
@@ -99,6 +132,7 @@ impl Branch {
     pub(crate) fn original_text(&self) -> Option<&str> {
         match self {
             Self::Empty => None,
+            Self::Value { source } => Some(source.as_str()),
             Self::Pipeline { original_text } => Some(original_text.as_str()),
         }
     }
@@ -229,6 +263,16 @@ pub(crate) fn parse_shell_value(
             ));
         }
 
+        // §2 validity rule: at least one branch must be a real shell command.
+        // When both branches are value-producing (literals, `name(...)`
+        // functions, or property references), the whole `$()` is expression
+        // content with no command — reject it with a `{{ }}` suggestion.
+        if !matches!(then_branch, Branch::Pipeline { .. })
+            && !matches!(else_branch, Branch::Pipeline { .. })
+        {
+            return Err(no_command_diagnostic(key, ctx, validation_inner));
+        }
+
         return Ok(Some(FrontmatterShellDirective {
             key: key.to_string(),
             raw_command: inner_command.to_string(),
@@ -252,6 +296,15 @@ pub(crate) fn parse_shell_value(
             ctx,
             "Frontmatter shell ternary missing ':' separator after '?'",
         ));
+    }
+
+    // §2 validity rule for a non-ternary directive: the body must be a real
+    // shell command in executed position. A body that resolves to a value
+    // (a quoted/numeric/boolean literal, a `name(...)` function, a `doc.*`
+    // reference, or a bare frontmatter property) is expression content, not a
+    // shell pipeline — reject it with a `{{ }}` suggestion.
+    if !matches!(classify_executed_body(validation_inner), BodyClass::Command) {
+        return Err(no_command_diagnostic(key, ctx, validation_inner));
     }
 
     // Check executable-token interpolation rule if we have the original
@@ -400,26 +453,33 @@ fn parse_branch_from_original(
 ) -> Result<Branch, ShellExpansionError> {
     let original_trim = original.trim();
 
-    if is_empty_string_literal(original_trim) {
-        return Ok(Branch::Empty);
-    }
-
     if original_trim.is_empty() {
         return Err(frontmatter_parse_error(
             key,
             ctx,
             format!(
-                "Frontmatter shell ternary {} must be a command pipeline or an empty string literal",
+                "Frontmatter shell ternary {} must be a command pipeline, an expression value, or an empty string literal",
                 position.name()
             ),
         ));
     }
 
-    validate_branch_no_executable_interpolation(original, position, key, ctx)?;
-
-    Ok(Branch::Pipeline {
-        original_text: original.to_string(),
-    })
+    // Classify the branch per the §2 ladder. Value branches (literals,
+    // `name(...)` functions, `doc.*`, or bare properties) resolve through the
+    // expression engine and carry no shell executable, so the
+    // executable-interpolation guard applies only to command branches.
+    match classify_executed_body(original_trim) {
+        BodyClass::Empty => Ok(Branch::Empty),
+        BodyClass::Value => Ok(Branch::Value {
+            source: original.to_string(),
+        }),
+        BodyClass::Command => {
+            validate_branch_no_executable_interpolation(original, position, key, ctx)?;
+            Ok(Branch::Pipeline {
+                original_text: original.to_string(),
+            })
+        }
+    }
 }
 
 /// Rejects nested ternaries inside a branch slice.
@@ -452,6 +512,147 @@ fn reject_nested_ternary(
 /// Recognizes `''` or `""` as a bare empty-string literal branch form.
 fn is_empty_string_literal(s: &str) -> bool {
     s == "''" || s == "\"\""
+}
+
+/// §2 token-resolution classification of a `$()` executed-position body — a
+/// ternary branch, or the body of a non-ternary directive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BodyClass {
+    /// An empty-string literal (`''` / `""`) — produces `""`.
+    Empty,
+    /// Resolves to a value through the expression engine (literal, `name(...)`
+    /// function, `doc.*`, or a bare frontmatter property / `null`). Not a shell
+    /// command.
+    Value,
+    /// A shell command pipeline (path-bearing executable, a bare name found on
+    /// `PATH`, or any multi-token / chained pipeline).
+    Command,
+}
+
+/// Classifies a `$()` executed-position body per the §2 token-resolution
+/// ladder.
+///
+/// Only a *lone* bare name is ambiguous between command and property: it is a
+/// command when found on `PATH` and a frontmatter property otherwise. Anything
+/// with arguments, pipes, or chain operators is a command. `true`/`false` are
+/// always booleans, path-bearing tokens are always executables, and a token
+/// with trailing parentheses is always a (safe) expression function.
+fn classify_executed_body(body: &str) -> BodyClass {
+    let t = body.trim();
+    if t.is_empty() || is_empty_string_literal(t) {
+        return BodyClass::Empty;
+    }
+    // 1–3: quoted / numeric / boolean literals.
+    if is_quoted_literal(t) || t.parse::<f64>().is_ok() || t == "true" || t == "false" {
+        return BodyClass::Value;
+    }
+    // 4: `name(...)` expression function — no shell executable contains parens.
+    if is_expression_function_call(t) {
+        return BodyClass::Value;
+    }
+    // 5–6: a lone bare name / path. Multi-token bodies are always commands.
+    if is_single_token(t) {
+        // An interpolated executable is still a command attempt; defer to the
+        // executable-interpolation guard to reject it rather than treating the
+        // `{{ … }}` marker as a property name.
+        if t.contains("{{") {
+            return BodyClass::Command;
+        }
+        // Path-bearing tokens are always executables, never properties.
+        if t.contains('/') {
+            return BodyClass::Command;
+        }
+        // `doc.*` is always an explicit frontmatter property reference.
+        if doc_namespace::is_doc_namespace(t) {
+            return BodyClass::Value;
+        }
+        if which::which(t).is_ok() {
+            BodyClass::Command
+        } else {
+            BodyClass::Value
+        }
+    } else {
+        BodyClass::Command
+    }
+}
+
+/// Returns `true` when `t` is a single complete quoted string literal — it
+/// opens with `'` or `"`, closes with the same quote as its final character,
+/// and contains no top-level whitespace.
+fn is_quoted_literal(t: &str) -> bool {
+    let bytes = t.as_bytes();
+    if bytes.len() < 2 {
+        return false;
+    }
+    let quote = bytes[0];
+    (quote == b'\'' || quote == b'"') && bytes[bytes.len() - 1] == quote && is_single_token(t)
+}
+
+/// Returns `true` when `t` is an expression function call: a (dotted)
+/// identifier immediately followed by a parenthesized argument list spanning to
+/// the end of the body. Because no shell executable name may contain `(` or
+/// `)`, this is an unambiguous syntactic test rather than a heuristic.
+fn is_expression_function_call(t: &str) -> bool {
+    let Some(open) = t.find('(') else {
+        return false;
+    };
+    if open == 0 || !t.ends_with(')') {
+        return false;
+    }
+    let name = &t[..open];
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    name.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+}
+
+/// Returns `true` when `body` is a single shell token — it contains no
+/// whitespace outside single quotes, double quotes, parentheses, or backslash
+/// escapes.
+fn is_single_token(body: &str) -> bool {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    let mut paren_depth: u32 = 0;
+
+    for ch in body.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' if !in_single => escaped = true,
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '(' if !in_single && !in_double => paren_depth += 1,
+            ')' if !in_single && !in_double && paren_depth > 0 => paren_depth -= 1,
+            c if c.is_whitespace() && !in_single && !in_double && paren_depth == 0 => {
+                return false;
+            }
+            _ => {}
+        }
+    }
+    true
+}
+
+/// Builds the "no shell command" diagnostic for a `$()` whose executed-position
+/// content is entirely expression-engine material, steering the author toward
+/// `{{ … }}` interpolation.
+fn no_command_diagnostic(key: &str, ctx: &SourceContext, inner: &str) -> ShellExpansionError {
+    let trimmed = inner.trim();
+    frontmatter_parse_error(
+        key,
+        ctx,
+        format!(
+            "Frontmatter shell expression `$( {trimmed} )` contains no shell command in executed \
+             position — it is entirely darkmatter expression content (literals, `name(...)` \
+             functions, or property references), not a shell pipeline. Did you mean to use \
+             `{{{{ {trimmed} }}}}` interpolation instead of `$( … )`?"
+        ),
+    )
 }
 
 /// Per-branch executable-interpolation check.
@@ -780,15 +981,19 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     runtime.shell.ensure_loaded(&policy_paths)?;
 
     // Snapshot frontmatter values for ternary condition lookups. Built lazily
-    // so non-ternary inputs don't pay the cloning cost.
+    // so non-ternary inputs don't pay the cloning cost. The real run carries a
+    // resolution context so a ternary condition and its selected branch can use
+    // the read-side functions (`file_exists`, `frontmatter`, …) and `doc.*`.
+    let resolution_context = options.expression_resolution_context(&runtime.remote_fetch);
     let mut seed_state: Option<FrontmatterSeedState> = None;
 
-    // Either "execute this prepared pipeline" or "short-circuit to empty".
+    // Either "execute this prepared pipeline" or "use this resolved value".
     // PreparedShellDirective is hefty (~432 bytes), so box the variant to
-    // keep the enum compact.
+    // keep the enum compact. `Value` carries an empty-string branch or a §2
+    // value branch already evaluated through the expression engine.
     enum Pending {
         Execute(Box<PreparedShellDirective>),
-        Empty,
+        Value(String),
     }
 
     let mut pending: Vec<(usize, String, Pending)> = Vec::with_capacity(candidates.len());
@@ -822,8 +1027,10 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                             .iter()
                             .map(|(k, v)| (k.clone(), v.clone()))
                             .collect();
-                        seed_state =
-                            Some(FrontmatterSeedState::new(map, options.context().clone()));
+                        seed_state = Some(
+                            FrontmatterSeedState::new(map, options.context().clone())
+                                .with_resolution_context(Some(resolution_context.clone())),
+                        );
                         seed_state.as_ref().unwrap()
                     }
                 };
@@ -862,8 +1069,8 @@ pub(crate) fn execute_frontmatter_shell_expansion(
 
                 let selected = if pick_then { then_prepared } else { else_prepared };
                 match selected {
-                    None => Pending::Empty,
-                    Some(prepared) => Pending::Execute(prepared),
+                    PreparedBranch::Value(value) => Pending::Value(value),
+                    PreparedBranch::Command(prepared) => Pending::Execute(prepared),
                 }
             }
         };
@@ -879,7 +1086,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
             let result = match item {
                 Pending::Execute(prepared) => execute_prepared_directive(&prepared, options)
                     .map(|res| (res.stdout, res.warnings)),
-                Pending::Empty => Ok((String::new(), Vec::new())),
+                Pending::Value(value) => Ok((value, Vec::new())),
             };
             (index, key, result)
         })
@@ -939,6 +1146,12 @@ pub(crate) fn directive_reachable_pipelines(
                 .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
+            // Preflight only: this seed state stays context-free. Discovery
+            // enumerates the reachable pipelines for approval without performing
+            // any expression-driven branch selection, so read-side functions
+            // (which would need a `ResolutionContext`) are intentionally absent
+            // here. The real run in `execute_frontmatter_shell_expansion`
+            // supplies the context.
             let state = FrontmatterSeedState::new(map, options.context().clone());
 
             let mut pipelines = Vec::new();
@@ -1075,14 +1288,26 @@ fn prepare_branch_pipeline(
     prepare_directive(&directive, options, policy_paths, &mut runtime.shell)
 }
 
-/// Prepares one side of a ternary, returning `None` for an empty-string branch.
+/// A ternary branch resolved for execution: either a value produced without a
+/// shell invocation, or an allowlist-checked command pipeline.
+enum PreparedBranch {
+    /// A resolved value — an empty-string branch or a §2 value branch evaluated
+    /// through the expression engine. Runs no shell command.
+    Value(String),
+    /// A prepared, allowlist-checked command pipeline.
+    Command(Box<PreparedShellDirective>),
+}
+
+/// Prepares one side of a ternary.
 ///
-/// `Branch::Empty` short-circuits to no shell invocation and contributes no
-/// command to the allowlist-reachable set, so it is skipped entirely.
-/// `Branch::Pipeline` is interpolated against the seed state, tokenized into
-/// a pipeline, and dispatched through [`prepare_branch_pipeline`] so its
-/// commands are validated against the user's allowlist before the ternary
-/// condition is evaluated. Per-branch interpolation keeps the branch
+/// `Branch::Empty` short-circuits to `""` and contributes no command. A
+/// `Branch::Value` is evaluated through the expression engine (literals,
+/// `name(...)` functions, `doc.*`, or a bare frontmatter property / `null`)
+/// and likewise contributes no command, so it is excluded from approval
+/// discovery. `Branch::Pipeline` is interpolated against the seed state,
+/// tokenized into a pipeline, and dispatched through [`prepare_branch_pipeline`]
+/// so its commands are validated against the user's allowlist before the
+/// ternary condition is evaluated. Per-branch interpolation keeps the branch
 /// boundary anchored to the original ternary AST.
 #[allow(clippy::too_many_arguments)]
 fn prepare_optional_branch(
@@ -1094,9 +1319,16 @@ fn prepare_optional_branch(
     ctx: &SourceContext,
     state: &FrontmatterSeedState,
     position: BranchPosition,
-) -> Result<Option<Box<PreparedShellDirective>>, ShellExpansionError> {
+) -> Result<PreparedBranch, ShellExpansionError> {
     match branch {
-        Branch::Empty => Ok(None),
+        Branch::Empty => Ok(PreparedBranch::Value(String::new())),
+        Branch::Value { source } => Ok(PreparedBranch::Value(evaluate_value_branch(
+            source,
+            state,
+            position,
+            &candidate.key,
+            ctx,
+        )?)),
         Branch::Pipeline { original_text } => {
             // Anchor the static command-set to the ORIGINAL branch text. Any
             // expansion that introduces a new action or changes an executable
@@ -1128,9 +1360,71 @@ fn prepare_optional_branch(
                 runtime,
                 ctx,
             )?;
-            Ok(Some(Box::new(prepared)))
+            Ok(PreparedBranch::Command(Box::new(prepared)))
         }
     }
+}
+
+/// Evaluates a §2 value branch (a literal, `name(...)` function, `doc.*`, or a
+/// bare frontmatter property) against the seed state and returns its scalar
+/// string form.
+///
+/// The branch source is first interpolated (so an embedded `{{ … }}` resolves),
+/// then parsed and evaluated as a template expression. The seed state carries
+/// the [`ResolutionContext`](super::expression::ResolutionContext) when one is
+/// available, so a read-side function such as `file_exists(...)` resolves; an
+/// absent bare property evaluates to `null`, which renders as an empty string.
+fn evaluate_value_branch(
+    source: &str,
+    state: &FrontmatterSeedState,
+    position: BranchPosition,
+    key: &str,
+    ctx: &SourceContext,
+) -> Result<String, ShellExpansionError> {
+    let evaluator = Evaluator::new(state);
+    let rewrite = interpolate_text(
+        source,
+        &evaluator,
+        ScanMode::Plain,
+        true,
+        "frontmatter-shell-ternary-value",
+    )
+    .map_err(|err| {
+        frontmatter_parse_error(
+            key,
+            ctx,
+            format!(
+                "Frontmatter shell ternary {} interpolation failed: {err}",
+                position.name()
+            ),
+        )
+    })?;
+
+    let expression_text = rewrite.output.trim();
+    let parsed = parse(expression_text).map_err(|err| {
+        frontmatter_parse_error(
+            key,
+            ctx,
+            format!(
+                "Frontmatter shell ternary {} failed to parse as an expression: {}",
+                position.name(),
+                err.message
+            ),
+        )
+    })?;
+
+    let value = evaluate(&parsed, state).map_err(|message| {
+        frontmatter_parse_error(
+            key,
+            ctx,
+            format!(
+                "Frontmatter shell ternary {} evaluation failed: {message}",
+                position.name()
+            ),
+        )
+    })?;
+
+    Ok(scalar_string(&value))
 }
 
 /// Interpolates a single branch's pre-interpolation text against the
@@ -1280,6 +1574,46 @@ mod tests {
         original_value: Option<&str>,
     ) -> Result<Option<FrontmatterShellDirective>, ShellExpansionError> {
         super::parse_shell_value(value, key, original_value, &test_ctx())
+    }
+
+    #[test]
+    fn ternary_condition_uses_read_side_functions_with_context() {
+        // A `$()` ternary condition evaluated at the real run carries the
+        // resolution context, so `file_exists(...)` resolves against base_dir.
+        use crate::markdown::compose::types::ComposeContext;
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
+        let rc = super::super::expression::ResolutionContext::new(dir.path().to_path_buf());
+        let state = FrontmatterSeedState::new(
+            std::collections::HashMap::new(),
+            ComposeContext::fixed_for_testing(),
+        )
+        .with_resolution_context(Some(rc));
+
+        assert!(
+            evaluate_ternary_condition("file_exists('Cargo.toml')", &state, "k", &test_ctx())
+                .unwrap()
+        );
+        assert!(
+            !evaluate_ternary_condition("file_exists('nope.toml')", &state, "k", &test_ctx())
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn ternary_condition_without_context_fails_loudly() {
+        // The context-free seed state (preflight-style) cannot evaluate a
+        // read-side function and surfaces a parse/eval error rather than
+        // silently selecting a branch.
+        use crate::markdown::compose::types::ComposeContext;
+        let state = FrontmatterSeedState::new(
+            std::collections::HashMap::new(),
+            ComposeContext::fixed_for_testing(),
+        );
+        assert!(
+            evaluate_ternary_condition("file_exists('Cargo.toml')", &state, "k", &test_ctx())
+                .is_err()
+        );
     }
 
     #[allow(dead_code)]
@@ -1575,7 +1909,7 @@ mod tests {
             Branch::Pipeline { original_text } => {
                 assert_eq!(original_text.trim(), "basename '{{spec}}'");
             }
-            Branch::Empty => panic!("expected then-branch pipeline"),
+            _ => panic!("expected then-branch pipeline"),
         }
         assert!(matches!(else_b, Branch::Empty));
         assert!(directive.pipeline.is_none());
@@ -1680,7 +2014,7 @@ mod tests {
                 // happens at execute time via per-branch interpolation.
                 assert_eq!(original_text.trim(), "basename {{file}}");
             }
-            Branch::Empty => panic!("expected pipeline branch"),
+            _ => panic!("expected pipeline branch"),
         }
     }
 
@@ -1710,7 +2044,7 @@ mod tests {
             Branch::Pipeline { original_text } => {
                 assert_eq!(original_text.trim(), "echo a && echo b");
             }
-            Branch::Empty => panic!("expected pipeline branch"),
+            _ => panic!("expected pipeline branch"),
         }
     }
 
@@ -1784,7 +2118,7 @@ mod tests {
             Branch::Pipeline { original_text } => {
                 assert_eq!(original_text.trim(), "echo two : echo three");
             }
-            Branch::Empty => panic!("expected pipeline else-branch"),
+            _ => panic!("expected pipeline else-branch"),
         }
     }
 
@@ -1801,7 +2135,7 @@ mod tests {
             Branch::Pipeline { original_text } => {
                 assert_eq!(original_text.trim(), "echo http://example.com");
             }
-            Branch::Empty => panic!("expected pipeline then-branch"),
+            _ => panic!("expected pipeline then-branch"),
         }
     }
 
@@ -1816,7 +2150,7 @@ mod tests {
             Branch::Pipeline { original_text } => {
                 assert_eq!(original_text.trim(), "echo http://example.com");
             }
-            Branch::Empty => panic!("expected pipeline else-branch"),
+            _ => panic!("expected pipeline else-branch"),
         }
     }
 
@@ -1844,7 +2178,7 @@ mod tests {
                 // that a naive resplit would have produced.
                 assert_eq!(original_text.trim(), "basename README.md");
             }
-            Branch::Empty => panic!("expected pipeline then-branch"),
+            _ => panic!("expected pipeline then-branch"),
         }
         assert!(matches!(else_b, Branch::Empty));
     }
@@ -1882,6 +2216,158 @@ mod tests {
             directive.timeout_override,
             Some(std::time::Duration::from_secs(5))
         );
+    }
+
+    // ── §2 token-resolution ladder ────────────────────────────────────────
+
+    /// A name guaranteed not to resolve on `PATH`, used to exercise the
+    /// bare-name → frontmatter-property rung of the ladder.
+    const ABSENT_ON_PATH: &str = "dm_definitely_not_a_real_binary_xyz";
+
+    #[test]
+    fn classify_quoted_numeric_and_boolean_literals_are_values() {
+        assert_eq!(super::classify_executed_body("'hello'"), BodyClass::Value);
+        assert_eq!(super::classify_executed_body("\"hello\""), BodyClass::Value);
+        assert_eq!(super::classify_executed_body("42"), BodyClass::Value);
+        assert_eq!(super::classify_executed_body("3.14"), BodyClass::Value);
+        assert_eq!(super::classify_executed_body("true"), BodyClass::Value);
+        assert_eq!(super::classify_executed_body("false"), BodyClass::Value);
+    }
+
+    #[test]
+    fn classify_true_false_are_never_commands_even_when_on_path() {
+        // `true` and `false` are real executables on most systems, but the
+        // ladder pins them to the boolean literal.
+        assert_eq!(super::classify_executed_body("true"), BodyClass::Value);
+        assert_eq!(super::classify_executed_body("false"), BodyClass::Value);
+    }
+
+    #[test]
+    fn classify_expression_function_is_a_safe_value() {
+        // Trailing parentheses mark a safe expression function — no shell
+        // executable can contain `(`/`)`.
+        assert_eq!(
+            super::classify_executed_body("file_exists('Cargo.toml')"),
+            BodyClass::Value
+        );
+        assert_eq!(
+            super::classify_executed_body("markdown_title('a', 'b')"),
+            BodyClass::Value
+        );
+    }
+
+    #[test]
+    fn classify_path_bearing_token_is_always_a_command() {
+        // Path-bearing tokens are executables, never properties — even when no
+        // such file exists.
+        assert_eq!(
+            super::classify_executed_body("/usr/bin/doit"),
+            BodyClass::Command
+        );
+        assert_eq!(super::classify_executed_body("./doit"), BodyClass::Command);
+    }
+
+    #[test]
+    fn classify_bare_name_on_path_is_a_command() {
+        // `echo` is universally present.
+        assert_eq!(super::classify_executed_body("echo"), BodyClass::Command);
+    }
+
+    #[test]
+    fn classify_bare_name_not_on_path_is_a_property_value() {
+        assert_eq!(
+            super::classify_executed_body(ABSENT_ON_PATH),
+            BodyClass::Value
+        );
+    }
+
+    #[test]
+    fn classify_doc_namespace_is_always_a_property_value() {
+        // `doc.*` resolves the frontmatter property even when a same-named
+        // executable exists on `PATH`.
+        assert_eq!(super::classify_executed_body("doc.echo"), BodyClass::Value);
+        assert_eq!(super::classify_executed_body("doc.build"), BodyClass::Value);
+        assert_eq!(super::classify_executed_body("doc"), BodyClass::Value);
+    }
+
+    #[test]
+    fn classify_multi_token_body_is_a_command() {
+        assert_eq!(
+            super::classify_executed_body("echo hello"),
+            BodyClass::Command
+        );
+        assert_eq!(
+            super::classify_executed_body("sniff repo dirty-files"),
+            BodyClass::Command
+        );
+    }
+
+    #[test]
+    fn classify_empty_string_literal_is_empty() {
+        assert_eq!(super::classify_executed_body("''"), BodyClass::Empty);
+        assert_eq!(super::classify_executed_body("\"\""), BodyClass::Empty);
+    }
+
+    #[test]
+    fn non_ternary_all_expression_value_errors_with_brace_suggestion() {
+        // A bare `$()` that resolves to a value (here an expression function)
+        // is a user error — steer them toward `{{ … }}`.
+        let err = parse_shell_value("$(file_exists('x'))", "spec", None).unwrap_err();
+        match err {
+            ShellExpansionError::ParseDirective { message, .. } => {
+                assert!(
+                    message.contains("no shell command") && message.contains("{{"),
+                    "expected a {{{{ }}}} suggestion, got: {message}"
+                );
+            }
+            other => panic!("Expected ParseDirective, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ternary_with_no_command_branch_errors_with_brace_suggestion() {
+        // Both branches are string literals; the condition is an expression
+        // function — the whole `$()` is expression content with no command.
+        let err = parse_shell_value("$( file_exists('x') ? 'a' : 'b' )", "spec", None)
+            .unwrap_err();
+        match err {
+            ShellExpansionError::ParseDirective { message, .. } => {
+                assert!(
+                    message.contains("no shell command") && message.contains("{{"),
+                    "expected a {{{{ }}}} suggestion, got: {message}"
+                );
+            }
+            other => panic!("Expected ParseDirective, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ternary_value_branch_is_classified_as_value_not_pipeline() {
+        // A literal fallback branch is a value, not a command pipeline; the
+        // command branch keeps the directive valid.
+        let directive = parse_shell_value("$(flag ? echo run : 'fallback')", "k", None)
+            .unwrap()
+            .expect("directive should parse");
+        let (_, then_b, else_b) = unwrap_ternary(&directive);
+        assert!(matches!(then_b, Branch::Pipeline { .. }));
+        match else_b {
+            Branch::Value { source } => assert_eq!(source.trim(), "'fallback'"),
+            other => panic!("expected a value else-branch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mixed_expression_condition_with_command_branches_parses() {
+        // The spec's intermixing example: the condition is expression content
+        // (`file_exists(...)`) and both branches are real shell pipelines.
+        let directive =
+            parse_shell_value("$( file_exists('Cargo.toml') ? cargo build : make )", "k", None)
+                .unwrap()
+                .expect("directive should parse");
+        let (cond, then_b, else_b) = unwrap_ternary(&directive);
+        assert_eq!(cond, "file_exists('Cargo.toml')");
+        assert!(matches!(then_b, Branch::Pipeline { .. }));
+        assert!(matches!(else_b, Branch::Pipeline { .. }));
     }
 }
 
@@ -2223,11 +2709,13 @@ mod execution_tests {
     fn ternary_then_branch_must_be_allowlisted_even_when_else_selected() {
         // Phase 4.3: an unallowlisted command in the then-branch fails the
         // entire directive even when the else-branch (Empty) is selected at
-        // runtime.
+        // runtime. The then-branch is a multi-token shell command (`echo
+        // unapproved`) — the §2 ladder classifies it as a command requiring
+        // approval, not as a value branch.
         let temp_dir = TempDir::new().unwrap();
         let mut fm = fm_from_json(json!({
             "flag": false,
-            "out": "$(flag ? not_allowed_cmd : '')"
+            "out": "$(flag ? echo unapproved : '')"
         }));
         let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
             policy_root: Some(temp_dir.path().to_path_buf()),
@@ -2251,10 +2739,11 @@ mod execution_tests {
     fn ternary_else_branch_must_be_allowlisted_even_when_then_selected() {
         // Phase 4.3: an unallowlisted command in the else-branch fails the
         // entire directive even when the then-branch is selected at runtime.
+        // The else-branch is a multi-token shell command (`echo unapproved`).
         let temp_dir = TempDir::new().unwrap();
         let mut fm = fm_from_json(json!({
             "flag": true,
-            "out": "$(flag ? '' : not_allowed_cmd)"
+            "out": "$(flag ? '' : echo unapproved)"
         }));
         let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
             policy_root: Some(temp_dir.path().to_path_buf()),
@@ -2750,5 +3239,131 @@ mod execution_tests {
             execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
         assert_eq!(report.replacements, 1);
         assert_eq!(fm.as_map().get("out"), Some(&json!("http://example.com")));
+    }
+
+    // ── §2 value branches and preflight ───────────────────────────────────
+
+    #[test]
+    fn ternary_value_branch_resolves_literal_fallback() {
+        // The else-branch is a string-literal value. When selected it resolves
+        // to that value with no shell invocation; the then-branch command must
+        // still be allowlisted.
+        let temp_dir = TempDir::new().unwrap();
+        let mut approved = std::collections::HashSet::new();
+        approved.insert("echo run".to_string());
+
+        let mut fm = fm_from_json(json!({
+            "flag": false,
+            "out": "$(flag ? echo run : 'fallback')"
+        }));
+        let options = ComposeOptions::new()
+            .with_pre_approved_commands(approved)
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                ..Default::default()
+            });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(report.replacements, 1);
+        assert_eq!(report.approvals_used, 0);
+        assert_eq!(fm.as_map().get("out"), Some(&json!("fallback")));
+    }
+
+    #[test]
+    fn ternary_value_branch_absent_property_resolves_to_empty() {
+        // A bare property name that does not exist resolves to `null`, which
+        // renders as an empty string.
+        let temp_dir = TempDir::new().unwrap();
+        let mut approved = std::collections::HashSet::new();
+        approved.insert("echo run".to_string());
+
+        let mut fm = fm_from_json(json!({
+            "flag": false,
+            "out": "$(flag ? echo run : dm_absent_property_xyz)"
+        }));
+        let options = ComposeOptions::new()
+            .with_pre_approved_commands(approved)
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                ..Default::default()
+            });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(report.replacements, 1);
+        assert_eq!(fm.as_map().get("out"), Some(&json!("")));
+    }
+
+    #[test]
+    fn ternary_doc_namespace_branch_resolves_property_over_executable() {
+        // `doc.echo` resolves the frontmatter property even though `echo` is a
+        // real executable on PATH.
+        let temp_dir = TempDir::new().unwrap();
+        let mut approved = std::collections::HashSet::new();
+        approved.insert("cat README".to_string());
+
+        let mut fm = fm_from_json(json!({
+            "flag": false,
+            "echo": "property-value",
+            "out": "$(flag ? cat README : doc.echo)"
+        }));
+        let options = ComposeOptions::new()
+            .with_pre_approved_commands(approved)
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                ..Default::default()
+            });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(report.replacements, 1);
+        assert_eq!(fm.as_map().get("out"), Some(&json!("property-value")));
+    }
+
+    #[test]
+    fn preflight_enumerates_command_branch_and_excludes_value_branch() {
+        // Discovery enumerates reachable command pipelines without evaluating
+        // the condition. The string-literal value branch contributes no
+        // command, so only the command branch surfaces for approval.
+        let directive = super::parse_shell_value(
+            "$(some_undefined_flag ? echo yes : 'literal')",
+            "out",
+            None,
+            &test_ctx(),
+        )
+        .unwrap()
+        .unwrap();
+        let fm = fm_from_json(json!({}));
+        let options = ComposeOptions::new();
+
+        let pipelines =
+            super::directive_reachable_pipelines(&directive, &fm, &options, &test_ctx()).unwrap();
+        assert_eq!(pipelines.len(), 1);
+        assert_eq!(pipelines[0].actions[0].command.executable, "echo");
+    }
+
+    #[test]
+    fn preflight_excludes_safe_function_branch_from_approval() {
+        // A `name(...)` expression function is a safe function — it spawns no
+        // process and is never enumerated for approval.
+        let directive = super::parse_shell_value(
+            "$(flag ? cat file : markdown_body_empty('x'))",
+            "out",
+            None,
+            &test_ctx(),
+        )
+        .unwrap()
+        .unwrap();
+        let fm = fm_from_json(json!({}));
+        let options = ComposeOptions::new();
+
+        let pipelines =
+            super::directive_reachable_pipelines(&directive, &fm, &options, &test_ctx()).unwrap();
+        assert_eq!(pipelines.len(), 1);
+        assert_eq!(pipelines[0].actions[0].command.executable, "cat");
     }
 }

@@ -460,8 +460,18 @@ fn scan_one_frontmatter(
     let mut fm_clone = markdown.clone();
     let pre_interpolation_snapshot = prepare_frontmatter_for_compose(&mut fm_clone, options, true);
     if options.is_enabled(ComposeOperation::FrontmatterInterpolation) {
-        let _ =
-            interpolate_frontmatter(fm_clone.frontmatter_mut(), options.context(), false, false);
+        // Preflight only: shell-command discovery enumerates the reachable
+        // pipelines for the approval workflow; it never performs expression
+        // selection, so it stays context-free (no `ResolutionContext`).
+        // Read-side functions are irrelevant here — the real run supplies the
+        // context.
+        let _ = interpolate_frontmatter(
+            fm_clone.frontmatter_mut(),
+            options.context(),
+            false,
+            false,
+            None,
+        );
     }
 
     let scan_ctx = fm_clone.source_context_for_errors();
