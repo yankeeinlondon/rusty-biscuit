@@ -92,7 +92,7 @@ impl<'a> EvaluationLookup for EventMetaExpressionLookup<'a> {
             return Some(event_doc_object(self.meta));
         }
         if let Some(rest) = path.strip_prefix("doc.") {
-            return self.get(rest);
+            return nested_pointer(&event_doc_object(self.meta), rest);
         }
 
         if let Some(env_key) = path.strip_prefix("env.") {
@@ -238,8 +238,10 @@ fn resolve_top_level(meta: &EventMeta, path: &str) -> Option<Value> {
 }
 
 /// Build the reserved `doc` object for the event surface: every resolvable
-/// top-level event field as a JSON object. This mirrors darkmatter's `doc`
+/// top-level event field plus the grouped environment paths (`os`, `hardware`,
+/// `git`, `project`) as a JSON object. This mirrors darkmatter's `doc`
 /// namespace (the whole root object) where the event payload is the document.
+/// Process environment (`env.*`) is deliberately excluded.
 fn event_doc_object(meta: &EventMeta) -> Value {
     const TOP_LEVEL_KEYS: [&str; 14] = [
         "provider",
@@ -263,7 +265,97 @@ fn event_doc_object(meta: &EventMeta) -> Value {
             map.insert(key.to_string(), value);
         }
     }
+    map.insert("os".to_string(), os_doc_object(meta));
+    map.insert("hardware".to_string(), hardware_doc_object(meta));
+    if let Some(git) = git_doc_object(meta) {
+        map.insert("git".to_string(), git);
+    }
+    if let Some(project) = project_doc_object(meta) {
+        map.insert("project".to_string(), project);
+    }
     Value::Object(map)
+}
+
+fn os_doc_object(meta: &EventMeta) -> Value {
+    let mut map = Map::new();
+    map.insert(
+        "name".to_string(),
+        resolve_env_path(meta, "os.name").unwrap_or(Value::Null),
+    );
+    map.insert(
+        "type".to_string(),
+        resolve_env_path(meta, "os.type").unwrap_or(Value::Null),
+    );
+    map.insert(
+        "version".to_string(),
+        resolve_env_path(meta, "os.version").unwrap_or(Value::Null),
+    );
+    map.insert(
+        "hostname".to_string(),
+        resolve_env_path(meta, "os.hostname").unwrap_or(Value::Null),
+    );
+    Value::Object(map)
+}
+
+fn hardware_doc_object(meta: &EventMeta) -> Value {
+    let mut map = Map::new();
+    map.insert(
+        "arch".to_string(),
+        resolve_env_path(meta, "hardware.arch").unwrap_or(Value::Null),
+    );
+    map.insert(
+        "cpu".to_string(),
+        resolve_env_path(meta, "hardware.cpu").unwrap_or(Value::Null),
+    );
+    map.insert(
+        "cores".to_string(),
+        resolve_env_path(meta, "hardware.cores").unwrap_or(Value::Null),
+    );
+    Value::Object(map)
+}
+
+fn git_doc_object(meta: &EventMeta) -> Option<Value> {
+    let fields: [(&str, Option<Value>); 8] = [
+        ("branch", resolve_env_path(meta, "git.branch")),
+        ("is_dirty", resolve_env_path(meta, "git.is_dirty")),
+        ("head_sha", resolve_env_path(meta, "git.head_sha")),
+        ("head_message", resolve_env_path(meta, "git.head_message")),
+        ("remote", resolve_env_path(meta, "git.remote")),
+        ("hosting", resolve_env_path(meta, "git.hosting")),
+        ("repo_name", resolve_env_path(meta, "git.repo_name")),
+        ("repo_org", resolve_env_path(meta, "git.repo_org")),
+    ];
+    if fields.iter().all(|(_, value)| value.is_none()) {
+        return None;
+    }
+    let mut map = Map::new();
+    for (key, value) in fields {
+        if let Some(value) = value {
+            map.insert(key.to_string(), value);
+        }
+    }
+    Some(Value::Object(map))
+}
+
+fn project_doc_object(meta: &EventMeta) -> Option<Value> {
+    let fields: [(&str, Option<Value>); 3] = [
+        ("language", resolve_env_path(meta, "project.language")),
+        ("is_monorepo", resolve_env_path(meta, "project.is_monorepo")),
+        (
+            "monorepo_tool",
+            resolve_env_path(meta, "project.monorepo_tool"),
+        ),
+    ];
+    if fields.iter().all(|(_, value)| value.is_none()) {
+        return None;
+    }
+    let mut map = Map::new();
+    for (key, value) in fields {
+        if let Some(value) = value {
+            map.insert(key.to_string(), value);
+        }
+    }
+    Some(Value::Object(map))
 }
 
 fn extra_as_value(extra: &HashMap<String, Value>) -> Value {
@@ -881,19 +973,55 @@ mod tests {
         let meta = sample_meta();
         let lookup = EventMetaExpressionLookup::new(&meta);
 
-        // doc.<path> resolves the underlying event field.
-        assert_eq!(lookup.get("doc.tool_name"), Some(json!("Bash")));
+        // doc.<path> traverses the same object returned by bare doc.
         assert_eq!(lookup.get("doc.git.branch"), Some(json!("main")));
         assert_eq!(lookup.get("doc.extra.status"), Some(json!("success")));
+        assert_eq!(lookup.get("doc.tool_name"), Some(json!("Bash")));
 
-        // bare doc returns the whole event object.
+        // missing doc.* values do not fall back to another namespace.
+        assert_eq!(lookup.get("doc.missing"), None);
+        // env is process environment, not part of the doc object.
+        assert_eq!(lookup.get("doc.env.PATH"), None);
+
+        // bare doc returns the whole event object, including grouped env paths.
         let obj = lookup.get("doc").expect("bare doc resolves");
         assert!(obj.is_object());
         assert_eq!(obj.get("provider"), Some(&json!("claude")));
         assert_eq!(obj.get("tool_name"), Some(&json!("Bash")));
+        assert_eq!(obj.pointer("/git/branch"), Some(&json!("main")));
+        assert_eq!(obj.pointer("/os/type"), Some(&json!("macos")));
+        assert_eq!(obj.pointer("/hardware/cores"), Some(&json!(16)));
+        assert_eq!(obj.pointer("/project/language"), Some(&json!("Rust")));
+    }
 
-        // missing doc.* values do not fall back to another namespace.
-        assert_eq!(lookup.get("doc.missing"), None);
+    #[test]
+    fn doc_dotted_path_matches_bare_doc_traversal() {
+        let meta = sample_meta();
+        let lookup = EventMetaExpressionLookup::new(&meta);
+
+        let doc = lookup.get("doc").expect("bare doc resolves");
+        assert_eq!(lookup.get("doc.git.branch"), nested_pointer(&doc, "git.branch"));
+        assert_eq!(lookup.get("doc.os.type"), nested_pointer(&doc, "os.type"));
+    }
+
+    #[test]
+    fn doc_env_does_not_resolve_even_when_env_does() {
+        let key = "CLAUDINE_DOC_ENV_TEST_VAR";
+        // SAFETY: tests run sequentially within this module by default; the
+        // env var is unique per test scope and is removed before exit.
+        unsafe {
+            std::env::set_var(key, "value-here");
+        }
+        let meta = sample_meta();
+        let lookup = EventMetaExpressionLookup::new(&meta);
+
+        // The env.* namespace resolves, but doc.env.* must not leak into it.
+        assert_eq!(lookup.get(&format!("env.{key}")), Some(json!("value-here")));
+        assert_eq!(lookup.get(&format!("doc.env.{key}")), None);
+
+        unsafe {
+            std::env::remove_var(key);
+        }
     }
 
     #[test]
