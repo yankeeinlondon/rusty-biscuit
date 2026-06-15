@@ -1,3 +1,9 @@
+---
+created: 2026-06-15
+reviewed: true
+status: finalized for planning and implementation
+---
+
 # Language Grammar Resolution
 
 ## Summary
@@ -84,6 +90,43 @@ pub enum LanguageGrammar {
 The exact variant list can stay `#[non_exhaustive]`. `PlainText` should represent
 syntect's plain-text grammar and be the infallible fallback.
 
+`PlainText` semantics (filling a gap — these were unspecified):
+
+- `LanguageGrammar::resolve` / `resolve_default` for `PlainText` must call
+  `syntax_set.find_syntax_plain_text()` and therefore is **infallible** (it never
+  yields `UnknownGrammar`).
+- `Display` for `PlainText` must produce the **empty string**, not `"plaintext"`.
+  The HTML renderer gates the `class="language-…"` attribute on a non-empty
+  language, and a Markdown fence with no language re-emits an empty info token.
+  Making `PlainText` display empty keeps "unknown input fell back to plain text"
+  byte-identical to today's "no language" path (where `find_syntax` returns
+  `None` and the caller substitutes `find_syntax_plain_text()`).
+- `PlainText` is reserved for the infallible fallback and for direct
+  `LanguageGrammar::plain_text()` / `text()` construction. Explicit fence tokens
+  such as `txt`, `text`, `plain`, `plaintext`, and `plain-text` must resolve
+  through a token-preserving dynamic variant so Markdown round-trip and
+  `language-…` HTML class emission keep the user-provided token.
+
+### Disposition of the Existing `from_fence_token` Constructor
+
+The current code ships an infallible
+`LanguageGrammar::from_fence_token(impl AsRef<str>) -> Self` that returns
+`OtherByToken(token)` (never `PlainText`) for unknown input. It is the
+constructor `CodeBlock::with_fence_language`, `CodeBlock::rust/yaml/json/toml`,
+and `CodeBlock::from_source_file` currently call.
+
+Decision: **remove `from_fence_token`** and replace its call sites with
+`from_token_or_plain_text` (the token-only infallible constructor below). Per the
+Non-Goals, redundant public surface is not preserved for compatibility, and
+`from_fence_token`'s "unknown → `OtherByToken`" behavior is superseded by
+"unknown → `PlainText`". All in-tree callers (`code_block.rs`) must be updated in
+the same change. This is a behavior change for unknown tokens: an unknown fence
+token now stores `PlainText` rather than `OtherByToken("…")`. Because both resolve
+to the plain-text grammar at render time, rendered terminal/HTML output is
+unchanged; the only observable difference is the stored variant and the
+`Display`/fence token for truly unknown languages. Explicit plain-text tokens are
+handled by the token-preserving rule above.
+
 ### Fallible Construction
 
 Implement:
@@ -125,9 +168,22 @@ impl LanguageGrammar {
 }
 ```
 
-Both should use the fallible path and return `LanguageGrammar::PlainText` when no
-match is found. Pick one final public name; `from_token_or_plain_text` is more
-explicit, while `from_lossy` is shorter.
+These constructors are intentionally distinct:
+
+- `from_lossy` is the infallible counterpart of `TryFrom<&str>` / `FromStr`. It
+  runs the **full** resolution, including filename/path detection, so
+  `from_lossy("src/main.rs")` resolves to `Rust`.
+- `from_token_or_plain_text` is the infallible counterpart of `from_token`. It
+  runs **token-only** resolution (no filename detection), so
+  `from_token_or_plain_text("src/main.rs")` reads the token up to the first
+  whitespace (`src/main.rs`), fails to resolve it as a language, and returns
+  `PlainText`.
+
+Both return `LanguageGrammar::PlainText` when their underlying fallible path
+returns `UnknownGrammar`. Keep both names; do not collapse them. Rendering and
+fence paths (which receive a fence info string, never a path) should call
+`from_token_or_plain_text`; general user/CLI input that might be a filename should
+call `from_lossy`.
 
 ### Explicit Constructors
 
@@ -224,8 +280,10 @@ For token-like input, including `TryFrom<&str>` and `from_token`:
 
 Filename detection for `TryFrom<&str>`:
 
-- If the normalized input appears to be a filename or path, extract the final file
-  extension and try extension lookup.
+- If the trimmed input contains unquoted ASCII whitespace, treat it as fence info
+  and use the token path; **skip filename detection entirely.**
+- Otherwise, if the (whitespace-free) normalized input appears to be a filename or
+  path, extract the final file extension and try extension lookup.
 - A string appears to be a filename/path when it contains a path separator, has a
   basename with a dot and a non-empty suffix, or otherwise matches a common
   source filename form that Darkmatter supports.
@@ -241,10 +299,15 @@ When input is not treated as a filename:
 
 ### Resolution
 
-`LanguageGrammar::resolve(&self, syntax_set: &SyntaxSet)` remains the advanced
-resolver for custom syntax sets.
+`LanguageGrammar::resolve(&self, syntax_set: &SyntaxSet)` remains the resolver for
+caller-provided (custom) syntax sets. It is already public, already used, and
+already tested; **keep its name.**
 
-Add an ergonomic default resolver if useful:
+Do not add a separate `resolve_with` method. It would have the same signature and
+behavior as the existing `resolve(&self, &SyntaxSet)`, adding redundant public
+surface without a new capability.
+
+Add the ergonomic default resolver:
 
 ```rust
 impl LanguageGrammar {
@@ -252,21 +315,14 @@ impl LanguageGrammar {
     ///
     /// Known variants such as [`Yaml`] and [`Rust`] are expected to resolve
     /// successfully because Darkmatter treats them as guaranteed grammars.
-    /// Dynamic variants can still fail if they were constructed manually with
-    /// an unsupported extension, name, or token.
+    /// `PlainText` always resolves. Dynamic variants can still fail if they were
+    /// constructed manually with an unsupported extension, name, or token.
     pub fn resolve_default(&self) -> Result<&'static SyntaxReference, LanguageGrammarError>;
-
-    /// Resolves this grammar against a caller-provided syntax set.
-    ///
-    /// This is primarily for tests and future advanced callers that supply a
-    /// custom syntect grammar set. It remains fallible because custom syntax
-    /// sets may omit grammars that Darkmatter's default set guarantees.
-    pub fn resolve_with(
-        &self,
-        syntax_set: &SyntaxSet,
-    ) -> Result<&SyntaxReference, LanguageGrammarError>;
 }
 ```
+
+`resolve_default` is `self.resolve(load_syntax_set())` against the shared static
+two-face set, returning a `'static` reference.
 
 The fallible constructors should validate against Darkmatter's default grammar
 set, which is the two-face extended syntax set already used by code highlighting.
@@ -299,9 +355,22 @@ Required aliases:
 | `c++`, `cpp` | C++ grammar by extension |
 | `dockerfile` | Dockerfile grammar by name/token |
 | `makefile`, `make` | Makefile grammar by name/token |
-| `txt`, `text`, `plain`, `plaintext`, `plain-text` | PlainText |
+| `txt`, `text`, `plain`, `plaintext`, `plain-text` | Plain Text grammar via a token-preserving dynamic variant |
 
-Resolution order should be documented and tested. A reasonable order is:
+Explicit plain-text tokens are intentionally not aliases for
+`LanguageGrammar::PlainText`. They should resolve to syntect's Plain Text grammar
+through `OtherByToken` or `OtherByExtension` so the original fence token and
+`language-…` HTML class survive round-trip. `LanguageGrammar::PlainText` means
+"no grammar matched; use the plain-text fallback."
+
+Resolution order should be documented and tested. The order below governs the
+**token / lossy / `TryFrom` / `FromStr`** paths only.
+
+The explicit constructors (`from_name`, `from_extension`, `from_token`,
+`from_filename`) deliberately do **not** run this full ladder because they express
+known caller intent. `from_extension` does extension lookup plus the extension
+alias map, `from_name` does exact then case-insensitive name lookup, and so on.
+Only inputs of unknown shape walk the full order.
 
 1. Normalize the input.
 2. Apply explicit aliases to known variants.
@@ -312,20 +381,40 @@ Resolution order should be documented and tested. A reasonable order is:
 7. Return `UnknownGrammar` for fallible paths, or `PlainText` for infallible
    paths.
 
+Empty normalized input on a fallible path returns
+`LanguageGrammarError::UnknownGrammar(String::new())` (no new error variant is
+needed); on an infallible path it returns `PlainText`.
+
 ## Migration Plan
 
 ### Code-Block Rendering
 
 Remove the local `find_syntax` helper in
-`darkmatter/lib/src/markdown/output/code_block.rs`.
+`darkmatter/lib/src/markdown/output/code_block.rs` (the `find_syntax` unit tests
+there move to `language_grammar.rs`).
 
-The terminal and HTML code-block renderers should accept either a
-`LanguageGrammar` or normalize their existing `&str` argument through
-`LanguageGrammar::from_token_or_plain_text`, then call `resolve`.
+`render_terminal_code_block` and `render_html_code_block` should accept
+`&LanguageGrammar` instead of `language: &str`. They should call
+`grammar.resolve_default()` for syntax resolution and use a separate display
+label for HTML class / Markdown fence emission. This removes the grammar →
+string → grammar round-trip while keeping labeling and syntax resolution
+decoupled.
 
 `CodeBlock` should not convert a stored `LanguageGrammar` back into a string and
-then rely on a second resolver. Its render path should preserve the grammar value
-until the final syntect lookup.
+then rely on a second resolver for **syntax resolution**. Its render path should
+preserve the grammar value until the final syntect lookup
+(`grammar.resolve_default()` / `resolve`).
+
+`CodeBlock::render` currently derives `language_label` via
+`self.language.as_ref().map(|g| g.to_string())` (`code_block.rs:254`) and the
+Markdown target re-emits the fence as `{lang} {raw_meta}`. Eliminating the
+*resolver* round-trip must not eliminate this *display* string: the HTML
+`language-…` class, the Markdown fence token, and TOC change-detection all depend
+on it. The migration must keep a `Display`-derived or `raw_meta`-derived label
+flowing to those surfaces while routing **resolution** through the typed grammar.
+Explicit plain-text tokens (`txt`, `text`, etc.) must use token-preserving
+dynamic variants so their display label does not collapse to `PlainText`'s empty
+display string.
 
 ### YAML Highlighting
 
@@ -336,17 +425,47 @@ instead of direct `find_syntax_by_extension("yaml")` calls.
 
 `infer_language(path, fallback)` should use `LanguageGrammar::from_filename(path)`
 for validation against the same syntax set used by rendering. It should not load
-or own a separate `SyntaxSet::load_defaults_newlines()`.
+or own a separate `SyntaxSet::load_defaults_newlines()` (the `lazy_static!
+SYNTAX_SET` in `compose/transclusion/code.rs` is deleted).
 
 The returned fence token can remain the lowercase extension for byte-compatible
 Markdown output, but the decision that the extension is supported should come
 from `LanguageGrammar`.
+
+Today `infer_language` validates against `SyntaxSet::load_defaults_newlines()`:
+syntect's **bare default** set. Rendering and `LanguageGrammar` validate against
+the **two-face extended** set, which carries grammars syntect defaults lack
+(TypeScript, TOML, Dockerfile, and others). Unifying on `LanguageGrammar`
+therefore widens the set of extensions `infer_language` recognizes. For a file
+whose extension exists only in two-face (e.g. a `.ts` or `.toml` source
+transcluded via `::code`), `infer_language` previously returned the `fallback`
+token and will now return the real extension token. **This changes the composed
+Markdown output** (the fence info string) for those files.
+
+This is an intended consequence of the feature's central goal: one grammar set
+everywhere. It is desirable because language tagging improves, but it is **not**
+byte-compatible for widened extensions, only for extensions present in both sets.
+Mitigation required by this spec:
+
+- Update any transclusion golden/snapshot tests that assumed the narrower
+  syntect-defaults behavior; add coverage for at least one two-face-only
+  extension (e.g. `.ts`) asserting the real token is now emitted.
+- Note the behavior change in the feature's drift updates (README / skill) so
+  downstream composed documents are not mistaken for regressions.
 
 ### Tests
 
 Keep direct `SyntaxSet::find_syntax_by_*` calls only in tests that intentionally
 assert syntect baseline behavior. Production tests should prefer
 `LanguageGrammar` so they exercise the public contract.
+
+A repo scan found three additional direct `find_syntax_by_extension("yaml")`
+call sites beyond those named in the Migration Plan:
+`render_tree/code_renderer.rs:426`, `render_tree/entrypoints.rs:818`, and
+`cli/src/commands/schema/about.rs:521`. All three are inside `#[cfg(test)]`
+`one_half_yaml_color` helpers, so they are **out of scope** for the production
+migration. They may stay as-is because they assert syntect's own YAML token
+coloring.
 
 ## Documentation
 
@@ -377,9 +496,48 @@ Update the `darkmatter` skill with the same rule:
 - `LanguageGrammar::try_from("unknown-language-xyz")` returns
   `LanguageGrammarError::UnknownGrammar`.
 - The infallible lossy constructor returns `PlainText` for unknown input.
+- `LanguageGrammar::try_from("rust title=\"a.b\"")` resolves to Rust (the dotted
+  metadata is not mistaken for a filename extension).
+- `LanguageGrammar::from_lossy("src/main.rs")` resolves to Rust, while
+  `LanguageGrammar::from_token_or_plain_text("src/main.rs")` returns `PlainText`
+  (filename detection is exclusive to the full/lossy path).
+- Explicit plain-text tokens such as `txt` and `text` resolve to the syntect
+  Plain Text grammar through a token-preserving dynamic variant, not
+  `LanguageGrammar::PlainText`.
 - All production grammar lookup paths in Darkmatter route through
   `LanguageGrammar`.
-- The only production direct `find_syntax_by_*` calls are inside
-  `language_grammar.rs` or syntax-set loading tests.
+- The only **production** (non-`#[cfg(test)]`) direct `find_syntax_by_*` calls are
+  inside `language_grammar.rs`. Direct calls inside `#[cfg(test)]` modules
+  (including the `one_half_yaml_color` helpers in `code_renderer.rs`,
+  `entrypoints.rs`, and `cli/.../schema/about.rs`, and the syntax-set loading
+  tests in `grammars.rs`) are permitted and explicitly out of scope.
+- `from_fence_token` is removed; no in-tree caller references it.
+- `compose/transclusion/code.rs` no longer owns a private
+  `SyntaxSet::load_defaults_newlines()`.
 - Relevant comments and docs no longer claim duplicated resolvers mirror each
   other.
+
+## Follow-Up: Summary-and-Suggest Plan Coordination
+
+The completed plan at
+`darkmatter/features/2026-06-14-summary-and-suggest/plan.md` was written from a
+review that predates this grammar specification. Before executing or re-opening
+that plan, update it so its code-block serialization, rendering, and verification
+steps do not conflict with this feature.
+
+Assume the summary-and-suggest plan will not be executed until this grammar spec
+is implemented. The update should explicitly account for:
+
+- `LanguageGrammar` being the single production grammar lookup path.
+- `from_fence_token` being removed in favor of `from_token_or_plain_text`,
+  `from_lossy`, and the explicit fallible constructors.
+- Code-block render helpers accepting `&LanguageGrammar` for syntax resolution
+  rather than resolving a raw `&str` through a local helper.
+- Explicit plain-text fence tokens (`txt`, `text`, etc.) preserving their display
+  token while resolving to the syntect Plain Text grammar.
+- Code transclusion using the two-face-backed `LanguageGrammar` path rather than
+  a private `SyntaxSet::load_defaults_newlines()`.
+
+The summary-and-suggest plan's acceptance checks should include a guard that no
+completed maintenance step reintroduces direct production
+`SyntaxSet::find_syntax_by_*` lookup outside `language_grammar.rs`.
