@@ -3,64 +3,65 @@ agent: open_code/kimi-for-coding/k2p6
 created: 2026-06-14
 phases: 5
 start_phase: 1
-yolo: "true"
+yolo: 'true'
 source_spec: darkmatter/reviews/2026-06-14-summary-and-suggest/fix.md
 source_review: darkmatter/reviews/2026-06-14-summary-and-suggest/review.md
 source_files_during_phase_1: []
 docs_updated_during_phase_1:
-  - darkmatter/features/2026-06-14-summary-and-suggest/plan.md
+- darkmatter/features/2026-06-14-summary-and-suggest/plan.md
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
 source_files_during_phase_2:
-  - darkmatter/lib/src/markdown/dsl/mod.rs
-  - darkmatter/lib/src/markdown/dsl/parser.rs
-  - darkmatter/cli/src/commands/code_block.rs
-  - darkmatter/cli/tests/code_block.rs
+- darkmatter/lib/src/markdown/dsl/mod.rs
+- darkmatter/lib/src/markdown/dsl/parser.rs
+- darkmatter/cli/src/commands/code_block.rs
+- darkmatter/cli/tests/code_block.rs
 docs_updated_during_phase_2:
-  - darkmatter/features/2026-06-14-summary-and-suggest/plan.md
+- darkmatter/features/2026-06-14-summary-and-suggest/plan.md
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
 source_files_during_phase_3:
-  - darkmatter/cli/src/commands.rs
-  - darkmatter/cli/src/commands/compose.rs
-  - darkmatter/cli/src/output.rs
+- darkmatter/cli/src/commands.rs
+- darkmatter/cli/src/commands/compose.rs
+- darkmatter/cli/src/output.rs
 docs_updated_during_phase_3:
-  - darkmatter/features/2026-06-14-summary-and-suggest/plan.md
+- darkmatter/features/2026-06-14-summary-and-suggest/plan.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
 source_files_during_phase_4:
-  - darkmatter/lib/src/markdown/compose/types.rs
-  - darkmatter/lib/src/markdown/compose/perf.rs
-  - darkmatter/lib/src/markdown/compose/mod.rs
+- darkmatter/lib/src/markdown/compose/types.rs
+- darkmatter/lib/src/markdown/compose/perf.rs
+- darkmatter/lib/src/markdown/compose/mod.rs
 docs_updated_during_phase_4:
-  - darkmatter/features/2026-06-14-summary-and-suggest/plan.md
+- darkmatter/features/2026-06-14-summary-and-suggest/plan.md
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
-  - .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/SKILL.md
 source_files_during_phase_5: []
 docs_updated_during_phase_5:
-  - darkmatter/features/2026-06-14-summary-and-suggest/plan.md
-  - darkmatter/reviews/2026-06-14-summary-and-suggest/fix.md
+- darkmatter/features/2026-06-14-summary-and-suggest/plan.md
+- darkmatter/reviews/2026-06-14-summary-and-suggest/fix.md
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
 source_code:
-  - darkmatter/cli/src/commands.rs
-  - darkmatter/cli/src/commands/code_block.rs
-  - darkmatter/cli/src/commands/compose.rs
-  - darkmatter/cli/src/output.rs
-  - darkmatter/cli/tests/code_block.rs
-  - darkmatter/lib/src/markdown/compose/mod.rs
-  - darkmatter/lib/src/markdown/compose/perf.rs
-  - darkmatter/lib/src/markdown/compose/types.rs
-  - darkmatter/lib/src/markdown/dsl/mod.rs
-  - darkmatter/lib/src/markdown/dsl/parser.rs
+- darkmatter/cli/src/commands.rs
+- darkmatter/cli/src/commands/code_block.rs
+- darkmatter/cli/src/commands/compose.rs
+- darkmatter/cli/src/output.rs
+- darkmatter/cli/tests/code_block.rs
+- darkmatter/lib/src/markdown/compose/mod.rs
+- darkmatter/lib/src/markdown/compose/perf.rs
+- darkmatter/lib/src/markdown/compose/types.rs
+- darkmatter/lib/src/markdown/dsl/mod.rs
+- darkmatter/lib/src/markdown/dsl/parser.rs
 documentation:
-  - darkmatter/features/2026-06-14-summary-and-suggest/plan.md
-  - darkmatter/reviews/2026-06-14-summary-and-suggest/fix.md
+- darkmatter/features/2026-06-14-summary-and-suggest/plan.md
+- darkmatter/reviews/2026-06-14-summary-and-suggest/fix.md
 status: completed
 packages:
-  - darkmatter
-  - darkmatter-cli
+- darkmatter
+- darkmatter-cli
+hash: 5936d5709d8cc45b-7f977b58752eb973
 ---
 
 # Execution Plan: Rendering and Compose Maintenance
@@ -70,11 +71,16 @@ Goal: behavior-preserving maintenance across the Darkmatter package area.
 
 ## Constraints
 
+- This plan assumes the `LanguageGrammar` single-authority feature (`darkmatter/features/2026-06-15-grammar/`) has already landed. All grammar resolution must continue to route through `darkmatter::markdown::language_grammar::LanguageGrammar`; no new direct `SyntaxSet::find_syntax_by_*` production calls are allowed outside `language_grammar.rs`.
 - No public CLI flag, subcommand, or output-format change.
 - No compose operation reorder.
 - No rendering output change except accidental divergence revealed by tests.
 - Do not run `cargo fmt` unless explicitly requested.
 - If a user-visible behavior change is required, stop and update the spec or open a follow-up.
+
+### Code-transclusion behavior note
+
+Because `LanguageGrammar` uses the two-face extended grammar set, code transclusion now recognizes extensions that syntect's bare defaults do not (e.g. `.ts`, `.toml`). For a two-face-only extension, `infer_language` emits the real extension token instead of the fallback token. This is an intended widening, not a regression — composed Markdown fence info strings may change for those files.
 
 ---
 
@@ -247,6 +253,7 @@ Goal: behavior-preserving maintenance across the Darkmatter package area.
 - [x] Run `cargo test -p darkmatter-cli render`.
 - [x] Run `cargo test -p darkmatter-cli compose`.
 - [x] Run the package-area recipe: `cd darkmatter && just test`.
+- [x] Run `rg -n "find_syntax_by_|from_fence_token|SyntaxSet::load_defaults_newlines" darkmatter -S` and confirm production hits outside `language_grammar.rs` are gone; allowed test-only hits remain in `#[cfg(test)]` helpers and syntax-set loading tests.
 - [x] Verify the two artifact files are still absent.
 - [x] Verify no assertion-free debug repro remains in frontmatter interpolation tests.
 - [x] Verify CLI command implementations are split by command family with no duplicated code-block Markdown serialization.
@@ -259,6 +266,7 @@ Goal: behavior-preserving maintenance across the Darkmatter package area.
 - [x] Update `darkmatter/reviews/2026-06-14-summary-and-suggest/fix.md` frontmatter `status` if needed, or record completion in a tracking comment.
 
 **Acceptance criteria (all must pass):**
+- The `LanguageGrammar` single-authority rule is honored: no production direct `SyntaxSet::find_syntax_by_*` lookup exists outside `language_grammar.rs`, and no in-tree caller references `from_fence_token`.
 - The two editor artifact files are absent.
 - No assertion-free debug repro remains in frontmatter interpolation tests.
 - CLI command implementations are split by command family, with no duplicated code-block Markdown serialization.
