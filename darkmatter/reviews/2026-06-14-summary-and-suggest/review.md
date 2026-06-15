@@ -275,7 +275,7 @@ No new crate/package was added to the darkmatter package area in this window. Th
 
 3. Split CLI command handling into modules. `darkmatter/cli/src/commands.rs:194` is 2,819 lines and owns dispatch, compose, render, code-block, hash, graph, frontmatter get/set/rm, validation formatting, and perf reporting. The existing `commands/schema/*` layout is the right pattern; extract `commands/compose.rs`, `commands/hash.rs`, `commands/frontmatter.rs`, and `commands/code_block.rs`. This is a maintainability refactor with moderate churn but little conceptual risk.
 
-4. Reduce `ComposeOperation` metadata drift. Operation count, index, phase, default order, display/perf mapping, and runner behavior are spread across `darkmatter/lib/src/markdown/compose/types.rs:176` and `darkmatter/lib/src/markdown/compose/mod.rs:754`. A single descriptor table would have some up-front complexity, but it would reduce the risk that the next compose stage updates one list and misses another.
+4. Reduce `ComposeOperation` metadata drift. Operation count, index, phase, default order, display/perf mapping, and runner behavior are spread across `darkmatter/lib/src/markdown/compose/types.rs:176` and `darkmatter/lib/src/markdown/compose/mod.rs:754`. A single descriptor table would have some up-front complexity, but it would reduce the risk that the next compose stage updates one list and misses another. 
 
 5. Fix compose phase documentation drift. `darkmatter/lib/src/markdown/compose/mod.rs:4` says the pipeline has three phases, while `ComposePhase` includes `Finalization` at `types.rs:171` and the runner comment at `compose/mod.rs:547` also lists only three phases. Treat the code as ground truth and update the module docs, the runner comment, and related skill/topic docs.
 
