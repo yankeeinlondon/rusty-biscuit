@@ -1,7 +1,7 @@
 ---
 created: 2026-06-14
 reviewed: true
-status: ready for planning and implementation
+status: completed
 area: darkmatter
 source_review: darkmatter/reviews/2026-06-14-summary-and-suggest/review.md
 suggestions: 9
