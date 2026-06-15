@@ -1,7 +1,7 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-a3a36603f418627f
+hash: 87f17662fa397abe-9925c9ed160c85e1
 last_updated: 2026-06-15
 ---
 
@@ -47,6 +47,32 @@ Other entry points:
 | HTML and terminal Markdown renderers | `darkmatter` |
 | Terminal capability detection, images, Mermaid, graph adapters | `biscuit-terminal` |
 | Shared render tree and target-agnostic layout/style types | `renderable` |
+
+## Grammar Authority
+
+`darkmatter::markdown::language_grammar::LanguageGrammar` is the single
+production grammar authority in Darkmatter. All code that resolves a fence
+token, extension, filename, or syntect name to a syntax grammar must route
+through `LanguageGrammar` — do not call
+`syntect::parsing::SyntaxSet::find_syntax_by_extension`,
+`find_syntax_by_name`, or equivalent syntect lookup APIs directly in
+production code outside the `LanguageGrammar` implementation.
+
+Preferred entry points:
+
+- `from_token` — Markdown fence info strings (ignores metadata after the first
+  token).
+- `from_token_or_plain_text` / `from_lossy` — infallible; fall back to
+  `LanguageGrammar::PlainText` for unknown input.
+- `from_extension` / `from_name` / `from_filename` — explicit caller intent.
+- `yaml()`, `rust()`, `json()`, `toml()`, `markdown()` — guaranteed named
+  variants.
+
+Because `LanguageGrammar` resolves against the two-face extended grammar set,
+code transclusion recognizes extensions that syntect's bare defaults lack
+(e.g. `.ts`, `.toml`). A two-face-only extension emits its real token instead
+of the fallback token in composed Markdown output; this is intended widening,
+not a regression.
 
 ## `style:` Frontmatter Status
 
