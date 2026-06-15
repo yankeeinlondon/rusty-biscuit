@@ -43,7 +43,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use darkmatter::markdown::compose::expression::{CtxLookup, EvaluationLookup};
+use darkmatter::markdown::compose::expression::{CtxLookup, EvaluationLookup, ResolutionContext};
 use serde_json::{Map, Value};
 
 use crate::events::EventMeta;
@@ -84,6 +84,17 @@ impl<'a> EventMetaExpressionLookup<'a> {
 
 impl<'a> EvaluationLookup for EventMetaExpressionLookup<'a> {
     fn get(&self, path: &str) -> Option<Value> {
+        // Reserved `doc` namespace: bare `doc` is the whole event object;
+        // `doc.<path>` resolves the underlying event field. Intercepted before
+        // normal key lookup and the `ctx.*` short-circuit so a missing
+        // `doc.<path>` never collapses into another namespace.
+        if path == "doc" {
+            return Some(event_doc_object(self.meta));
+        }
+        if let Some(rest) = path.strip_prefix("doc.") {
+            return self.get(rest);
+        }
+
         if let Some(env_key) = path.strip_prefix("env.") {
             return resolve_env(env_key);
         }
@@ -123,22 +134,30 @@ impl<'a> EvaluationLookup for EventMetaExpressionLookup<'a> {
 /// Composite lookup used for hook `when` evaluation.
 ///
 /// Resolves `ctx.*` via Darkmatter's lazy context capture and delegates
-/// every other path to [`EventMetaExpressionLookup`]. This is the only
-/// surface where `ctx.*` is honored — templates, matchers, and harness
-/// validation deliberately leave `ctx.*` unresolved.
+/// every other path to [`EventMetaExpressionLookup`] (including the reserved
+/// `doc` namespace). This is the only surface where `ctx.*` is honored —
+/// templates, matchers, and harness validation deliberately leave `ctx.*`
+/// unresolved.
+///
+/// The lookup also exposes a [`ResolutionContext`] rooted at `work_dir` so
+/// read-side expression functions (`file_exists`, `absolute`, `relative`, …)
+/// in hook `when=` conditions resolve against the hook's base directory.
 #[derive(Debug)]
 pub struct EventMetaConditionLookup<'a> {
     inner: EventMetaExpressionLookup<'a>,
     ctx: CtxLookup<'a>,
+    base_dir: &'a Path,
 }
 
 impl<'a> EventMetaConditionLookup<'a> {
     /// Wrap an [`EventMeta`] reference and working directory for use with
-    /// Darkmatter's evaluator, including `ctx.*` resolution.
+    /// Darkmatter's evaluator, including `ctx.*` resolution and a `work_dir`-
+    /// rooted resolution context for read-side functions.
     pub fn new(meta: &'a EventMeta, work_dir: &'a Path) -> Self {
         Self {
             inner: EventMetaExpressionLookup::new(meta),
             ctx: CtxLookup::new(work_dir),
+            base_dir: work_dir,
         }
     }
 
@@ -153,6 +172,10 @@ impl<'a> EvaluationLookup for EventMetaConditionLookup<'a> {
             return self.ctx.get(path);
         }
         self.inner.get(path)
+    }
+
+    fn resolution_context(&self) -> Option<ResolutionContext> {
+        Some(ResolutionContext::new(self.base_dir.to_path_buf()))
     }
 }
 
@@ -212,6 +235,35 @@ fn resolve_top_level(meta: &EventMeta, path: &str) -> Option<Value> {
         "extra" => Some(extra_as_value(&meta.extra)),
         _ => None,
     }
+}
+
+/// Build the reserved `doc` object for the event surface: every resolvable
+/// top-level event field as a JSON object. This mirrors darkmatter's `doc`
+/// namespace (the whole root object) where the event payload is the document.
+fn event_doc_object(meta: &EventMeta) -> Value {
+    const TOP_LEVEL_KEYS: [&str; 14] = [
+        "provider",
+        "event",
+        "timestamp",
+        "session_id",
+        "cwd",
+        "tool_name",
+        "tool_input",
+        "tool_response",
+        "error",
+        "prompt",
+        "agent_type",
+        "notification_type",
+        "notification_message",
+        "extra",
+    ];
+    let mut map = Map::new();
+    for key in TOP_LEVEL_KEYS {
+        if let Some(value) = resolve_top_level(meta, key) {
+            map.insert(key.to_string(), value);
+        }
+    }
+    Value::Object(map)
 }
 
 fn extra_as_value(extra: &HashMap<String, Value>) -> Value {
@@ -822,6 +874,53 @@ mod tests {
         );
 
         assert_eq!(value, json!("fast"));
+    }
+
+    #[test]
+    fn doc_namespace_resolves_event_surface() {
+        let meta = sample_meta();
+        let lookup = EventMetaExpressionLookup::new(&meta);
+
+        // doc.<path> resolves the underlying event field.
+        assert_eq!(lookup.get("doc.tool_name"), Some(json!("Bash")));
+        assert_eq!(lookup.get("doc.git.branch"), Some(json!("main")));
+        assert_eq!(lookup.get("doc.extra.status"), Some(json!("success")));
+
+        // bare doc returns the whole event object.
+        let obj = lookup.get("doc").expect("bare doc resolves");
+        assert!(obj.is_object());
+        assert_eq!(obj.get("provider"), Some(&json!("claude")));
+        assert_eq!(obj.get("tool_name"), Some(&json!("Bash")));
+
+        // missing doc.* values do not fall back to another namespace.
+        assert_eq!(lookup.get("doc.missing"), None);
+    }
+
+    #[test]
+    fn condition_lookup_doc_namespace_resolves() {
+        let meta = sample_meta();
+        let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+
+        assert_eq!(lookup.get("doc.tool_name"), Some(json!("Bash")));
+        assert!(lookup.get("doc").is_some_and(|value| value.is_object()));
+    }
+
+    #[test]
+    fn condition_lookup_read_side_function_resolves_against_base_dir() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("artifact"), "ready").unwrap();
+        let meta = sample_meta();
+        let lookup = EventMetaConditionLookup::new(&meta, dir.path());
+
+        assert!(lookup.resolution_context().is_some());
+        assert_eq!(
+            parse_and_evaluate("file_exists('artifact')", ParseMode::Condition, &lookup),
+            json!(true)
+        );
+        assert_eq!(
+            parse_and_evaluate("file_exists('missing')", ParseMode::Condition, &lookup),
+            json!(false)
+        );
     }
 
     #[test]
