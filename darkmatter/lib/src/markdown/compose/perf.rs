@@ -3,7 +3,7 @@
 //! When `ComposeOptions::perf_enabled` is `true`, a `PerfCollector`
 //! records per-stage timings. When disabled, all methods are no-ops.
 
-use super::types::{ComposePerfMetric, ComposePerfReport, ComposeStage, ShellCommandSpan};
+use super::types::{ComposeOperationPerfMetric, ComposePerfMetric, ComposePerfReport, ComposeStage, ShellCommandSpan};
 use std::time::{Duration, Instant};
 
 /// Metric kinds corresponding to compose pipeline stages.
@@ -76,6 +76,25 @@ impl PerfMetricKind {
             Self::Normalization,
             Self::LinkNormalization,
         ]
+    }
+}
+
+impl ComposeOperationPerfMetric {
+    /// Convert the operation-level metric to the runner's `PerfMetricKind`.
+    pub(crate) fn to_perf_metric_kind(self) -> PerfMetricKind {
+        match self {
+            Self::FrontmatterInterpolation => PerfMetricKind::FrontmatterInterpolation,
+            Self::FrontmatterShellExpansion => PerfMetricKind::FrontmatterShellExpansion,
+            Self::TextReplacement => PerfMetricKind::TextReplacement,
+            Self::PageBlocks => PerfMetricKind::PageBlocks,
+            Self::Interpolation => PerfMetricKind::Interpolation,
+            Self::ShellExpansion => PerfMetricKind::ShellExpansion,
+            Self::ShellBlocks => PerfMetricKind::ShellBlocks,
+            Self::LinkResolve => PerfMetricKind::LinkResolve,
+            Self::Cleanup => PerfMetricKind::Cleanup,
+            Self::Normalization => PerfMetricKind::Normalization,
+            Self::LinkNormalization => PerfMetricKind::LinkNormalization,
+        }
     }
 }
 

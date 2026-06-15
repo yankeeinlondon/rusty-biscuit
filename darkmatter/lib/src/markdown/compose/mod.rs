@@ -1,14 +1,14 @@
 //! Compose pipeline for markdown document preparation and transclusion.
 //!
 //! This module provides the `compose()` family of methods on `Markdown`
-//! for running operations in three phases:
+//! for running operations in four phases:
 //!
 //! **Inline Pre** (serial):
 //! 0. **Frontmatter Interpolation** - Resolve `{{variable}}` in frontmatter values.
 //!    When shell expansion is enabled, templated keys that reference
 //!    shell-pending values (top-level `$(...)`) are deferred for a second
 //!    interpolation pass after step 2 completes.
-//! 1. **Schema Validation** - Validate frontmatter against `$schema` or
+//! 1. **Schema Validation** (pre-operation stage) - Validate frontmatter against `$schema` or
 //!    `ComposeOptions::baseline_schema`. Runs after `--set` / `--state`
 //!    overrides and frontmatter interpolation are applied, but before
 //!    frontmatter shell expansion.
@@ -53,6 +53,20 @@
 //!     .disable(ComposeOperation::Normalization);
 //! let report = md.compose_with(options).unwrap();
 //! ```
+//!
+//! ## Maintenance
+//!
+//! Keep this module from becoming a "god file":
+//!
+//! - New user-toggleable compose stages must add a [`ComposeOperationDescriptor`]
+//!   entry in `types.rs` and a dedicated stage module under `markdown/compose/`.
+//! - Non-toggleable pipeline sub-stages (schema validation, effective-state build,
+//!   transclusion parse/prepare/resolve/apply) stay in `perf.rs` and are not added
+//!   to the operation descriptor table.
+//! - New render-tree block extensions extend a dedicated `markdown/render_tree/`
+//!   module rather than inline code in the fold.
+//! - Large in-file test suites move to a sibling `tests` module when production
+//!   code around them changes.
 
 pub(crate) mod cache;
 pub mod conditions;
@@ -99,9 +113,10 @@ pub use state::{EffectiveState, EffectiveStateBuilder};
 pub use toc_linking::TocLinkingError;
 pub use transclusion::TransclusionError;
 pub use types::{
-    ComposeContext, ComposeOperation, ComposeOperationSet, ComposeOptions, ComposePerfMetric,
-    ComposePerfReport, ComposePhase, ComposeReport, ComposeSource, ComposeStage, ComposeWarning,
-    ShellCommandSpan, SourceRange, redact_shell_command,
+    ComposeContext, ComposeOperation, ComposeOperationDescriptor, ComposeOperationPerfMetric,
+    ComposeOperationSet, ComposeOptions, ComposePerfMetric, ComposePerfReport, ComposePhase,
+    ComposeReport, ComposeSource, ComposeStage, ComposeWarning, ShellCommandSpan, SourceRange,
+    redact_shell_command,
 };
 
 // Internal re-exports for crate modules that still use TransclusionOptions
@@ -544,11 +559,12 @@ impl Markdown {
 
     /// Internal recursive pipeline runner shared by root and child documents.
     ///
-    /// Executes operations in three phases:
+    /// Executes operations in four phases:
     /// 1. **Inline Pre** (serial): TextReplacement, PageBlocks, Interpolation, ShellExpansion, ShellBlocks
     /// 2. **Transclusion** (prepared serially, resolved concurrently): BlockTransclusion,
     ///    FrontmatterTransclusion, CodeTransclusion, TocLinking, FileLinks
     /// 3. **Inline Post** (serial): Cleanup, Normalization
+    /// 4. **Finalization** (root-only serial): LinkNormalization
     #[instrument(skip_all, fields(source = ?options.source))]
     pub(crate) fn run_compose_pipeline_internal(
         &mut self,
@@ -769,37 +785,10 @@ impl Markdown {
                             &mut report,
                             &mut perf,
                         )?;
-                        if let Some(start) = op_start {
-                            let kind = match operation {
-                                ComposeOperation::FrontmatterInterpolation => {
-                                    Some(perf::PerfMetricKind::FrontmatterInterpolation)
-                                }
-                                ComposeOperation::FrontmatterShellExpansion => {
-                                    Some(perf::PerfMetricKind::FrontmatterShellExpansion)
-                                }
-                                ComposeOperation::TextReplacement => {
-                                    Some(perf::PerfMetricKind::TextReplacement)
-                                }
-                                ComposeOperation::PageBlocks => {
-                                    Some(perf::PerfMetricKind::PageBlocks)
-                                }
-                                ComposeOperation::Interpolation => {
-                                    Some(perf::PerfMetricKind::Interpolation)
-                                }
-                                ComposeOperation::ShellExpansion => {
-                                    Some(perf::PerfMetricKind::ShellExpansion)
-                                }
-                                ComposeOperation::ShellBlocks => {
-                                    Some(perf::PerfMetricKind::ShellBlocks)
-                                }
-                                ComposeOperation::LinkResolve => {
-                                    Some(perf::PerfMetricKind::LinkResolve)
-                                }
-                                _ => unreachable!(),
-                            };
-                            if let Some(kind) = kind {
-                                perf.record(kind, start.elapsed());
-                            }
+                        if let Some(start) = op_start
+                            && let Some(kind) = operation.perf_metric()
+                        {
+                            perf.record(kind.to_perf_metric_kind(), start.elapsed());
                         }
                     }
                     ComposePhase::Transclusion => {
@@ -828,29 +817,20 @@ impl Markdown {
                     ComposePhase::InlinePost => {
                         let op_start = perf.is_enabled().then(std::time::Instant::now);
                         self.run_inline_post_operation(*operation, &options, &mut report)?;
-                        if let Some(start) = op_start {
-                            let kind = match operation {
-                                ComposeOperation::Cleanup => perf::PerfMetricKind::Cleanup,
-                                ComposeOperation::Normalization => {
-                                    perf::PerfMetricKind::Normalization
-                                }
-                                _ => unreachable!(),
-                            };
-                            perf.record(kind, start.elapsed());
+                        if let Some(start) = op_start
+                            && let Some(kind) = operation.perf_metric()
+                        {
+                            perf.record(kind.to_perf_metric_kind(), start.elapsed());
                         }
                     }
                     ComposePhase::Finalization => {
                         if runtime.transclusion.depth() <= 1 {
                             let op_start = perf.is_enabled().then(std::time::Instant::now);
                             self.run_finalization_operation(*operation, &options, &mut report)?;
-                            if let Some(start) = op_start {
-                                let kind = match operation {
-                                    ComposeOperation::LinkNormalization => {
-                                        perf::PerfMetricKind::LinkNormalization
-                                    }
-                                    _ => unreachable!(),
-                                };
-                                perf.record(kind, start.elapsed());
+                            if let Some(start) = op_start
+                                && let Some(kind) = operation.perf_metric()
+                            {
+                                perf.record(kind.to_perf_metric_kind(), start.elapsed());
                             }
                         }
                     }

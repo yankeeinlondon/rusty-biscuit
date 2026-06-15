@@ -18,10 +18,11 @@ use url::Url;
 
 /// Every discrete operation in the compose pipeline.
 ///
-/// Operations are grouped into three phases for execution:
+/// Operations are grouped into four phases for execution:
 /// - **Inline Pre**: serial, runs before transclusion
 /// - **Transclusion**: concurrent, recursive document inclusion
 /// - **Inline Post**: serial, runs after transclusion
+/// - **Finalization**: root-only serial, runs after Inline Post on the outermost document
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ComposeOperation {
     /// Resolves `{{ variable }}` expressions inside frontmatter values
@@ -93,6 +94,193 @@ pub enum ComposeOperation {
     /// paths).
     LinkNormalization,
 }
+
+/// Operation-level performance metric kinds.
+///
+/// These correspond to the user-toggleable [`ComposeOperation`] variants that
+/// have dedicated timing metrics in the runner. Transclusion operations are
+/// measured as parse/prepare/resolve/apply sub-stages rather than per
+/// operation, so they have no entry here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ComposeOperationPerfMetric {
+    /// Frontmatter interpolation.
+    FrontmatterInterpolation,
+    /// Frontmatter shell expansion.
+    FrontmatterShellExpansion,
+    /// Text replacement.
+    TextReplacement,
+    /// Page blocks.
+    PageBlocks,
+    /// Body interpolation.
+    Interpolation,
+    /// Shell directive expansion.
+    ShellExpansion,
+    /// Shell block execution.
+    ShellBlocks,
+    /// Local link resolution to absolute paths.
+    LinkResolve,
+    /// Cleanup formatting pass.
+    Cleanup,
+    /// Heading normalization.
+    Normalization,
+    /// Link normalization to portable forms.
+    LinkNormalization,
+}
+
+/// Metadata describing a single compose pipeline operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ComposeOperationDescriptor {
+    /// The operation this descriptor describes.
+    pub operation: ComposeOperation,
+    /// Stable index used for fixed-size operation sets and reports.
+    pub index: usize,
+    /// Execution phase this operation belongs to.
+    pub phase: ComposePhase,
+    /// Whether the operation is enabled by default.
+    pub default_enabled: bool,
+    /// Human-readable label for reports and diagnostics.
+    pub label: &'static str,
+    /// Operation-level perf metric, if one exists.
+    pub perf_kind: Option<ComposeOperationPerfMetric>,
+}
+
+/// Authoritative metadata table for every [`ComposeOperation`] variant.
+///
+/// Entries are ordered by default execution order (the order returned by
+/// [`ComposeOperation::default_order`]) so that the descriptor table is the
+/// single source of truth for both operation metadata and run order. The
+/// `index` field is a stable identifier that matches the historical enum
+/// discriminant values used by [`ComposeOperationSet`].
+const COMPOSE_OPERATION_DESCRIPTORS: &[ComposeOperationDescriptor] = &[
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::FrontmatterInterpolation,
+        index: 0,
+        phase: ComposePhase::InlinePre,
+        default_enabled: true,
+        label: "frontmatter interpolation",
+        perf_kind: Some(ComposeOperationPerfMetric::FrontmatterInterpolation),
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::FrontmatterShellExpansion,
+        index: 1,
+        phase: ComposePhase::InlinePre,
+        default_enabled: true,
+        label: "frontmatter shell expansion",
+        perf_kind: Some(ComposeOperationPerfMetric::FrontmatterShellExpansion),
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::TextReplacement,
+        index: 2,
+        phase: ComposePhase::InlinePre,
+        default_enabled: true,
+        label: "text replacement",
+        perf_kind: Some(ComposeOperationPerfMetric::TextReplacement),
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::PageBlocks,
+        index: 3,
+        phase: ComposePhase::InlinePre,
+        default_enabled: true,
+        label: "page blocks",
+        perf_kind: Some(ComposeOperationPerfMetric::PageBlocks),
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::Interpolation,
+        index: 4,
+        phase: ComposePhase::InlinePre,
+        default_enabled: true,
+        label: "interpolation",
+        perf_kind: Some(ComposeOperationPerfMetric::Interpolation),
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::ShellExpansion,
+        index: 5,
+        phase: ComposePhase::InlinePre,
+        default_enabled: true,
+        label: "shell expansion",
+        perf_kind: Some(ComposeOperationPerfMetric::ShellExpansion),
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::ShellBlocks,
+        index: 6,
+        phase: ComposePhase::InlinePre,
+        default_enabled: true,
+        label: "shell blocks",
+        perf_kind: Some(ComposeOperationPerfMetric::ShellBlocks),
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::LinkResolve,
+        index: 14,
+        phase: ComposePhase::InlinePre,
+        default_enabled: true,
+        label: "link resolve",
+        perf_kind: Some(ComposeOperationPerfMetric::LinkResolve),
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::BlockTransclusion,
+        index: 7,
+        phase: ComposePhase::Transclusion,
+        default_enabled: true,
+        label: "block transclusion",
+        perf_kind: None,
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::FrontmatterTransclusion,
+        index: 8,
+        phase: ComposePhase::Transclusion,
+        default_enabled: true,
+        label: "frontmatter transclusion",
+        perf_kind: None,
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::CodeTransclusion,
+        index: 9,
+        phase: ComposePhase::Transclusion,
+        default_enabled: true,
+        label: "code transclusion",
+        perf_kind: None,
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::TocLinking,
+        index: 10,
+        phase: ComposePhase::Transclusion,
+        default_enabled: true,
+        label: "TOC linking",
+        perf_kind: None,
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::FileLinks,
+        index: 11,
+        phase: ComposePhase::Transclusion,
+        default_enabled: true,
+        label: "file links",
+        perf_kind: None,
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::Cleanup,
+        index: 12,
+        phase: ComposePhase::InlinePost,
+        default_enabled: true,
+        label: "cleanup",
+        perf_kind: Some(ComposeOperationPerfMetric::Cleanup),
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::Normalization,
+        index: 13,
+        phase: ComposePhase::InlinePost,
+        default_enabled: true,
+        label: "normalization",
+        perf_kind: Some(ComposeOperationPerfMetric::Normalization),
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::LinkNormalization,
+        index: 15,
+        phase: ComposePhase::Finalization,
+        default_enabled: true,
+        label: "link normalization",
+        perf_kind: Some(ComposeOperationPerfMetric::LinkNormalization),
+    },
+];
 
 /// Fixed-size operation set keyed by [`ComposeOperation`] discriminants.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -175,52 +363,27 @@ pub enum ComposePhase {
 
 impl ComposeOperation {
     /// Total number of compose operations.
-    pub const COUNT: usize = 16;
+    pub const COUNT: usize = COMPOSE_OPERATION_DESCRIPTORS.len();
+
+    /// Returns the descriptor for this operation.
+    ///
+    /// Descriptors are ordered by default execution order. The lookup is a
+    /// small linear search because the table is fixed at 16 entries.
+    pub fn descriptor(self) -> &'static ComposeOperationDescriptor {
+        COMPOSE_OPERATION_DESCRIPTORS
+            .iter()
+            .find(|d| d.operation == self)
+            .expect("every ComposeOperation has a descriptor")
+    }
 
     /// Stable discriminant index for fixed-size operation sets.
     pub const fn index(self) -> usize {
-        match self {
-            Self::FrontmatterInterpolation => 0,
-            Self::FrontmatterShellExpansion => 1,
-            Self::TextReplacement => 2,
-            Self::PageBlocks => 3,
-            Self::Interpolation => 4,
-            Self::ShellExpansion => 5,
-            Self::ShellBlocks => 6,
-            Self::BlockTransclusion => 7,
-            Self::FrontmatterTransclusion => 8,
-            Self::CodeTransclusion => 9,
-            Self::TocLinking => 10,
-            Self::FileLinks => 11,
-            Self::Cleanup => 12,
-            Self::Normalization => 13,
-            Self::LinkResolve => 14,
-            Self::LinkNormalization => 15,
-        }
+        self as usize
     }
 
     /// Returns the default phase this operation belongs to.
     pub fn phase(&self) -> ComposePhase {
-        match self {
-            Self::FrontmatterInterpolation
-            | Self::FrontmatterShellExpansion
-            | Self::TextReplacement
-            | Self::PageBlocks
-            | Self::Interpolation
-            | Self::ShellExpansion
-            | Self::ShellBlocks
-            | Self::LinkResolve => ComposePhase::InlinePre,
-
-            Self::BlockTransclusion
-            | Self::FrontmatterTransclusion
-            | Self::CodeTransclusion
-            | Self::TocLinking
-            | Self::FileLinks => ComposePhase::Transclusion,
-
-            Self::Cleanup | Self::Normalization => ComposePhase::InlinePost,
-
-            Self::LinkNormalization => ComposePhase::Finalization,
-        }
+        self.descriptor().phase
     }
 
     /// Returns all operations in their default execution order.
@@ -247,6 +410,16 @@ impl ComposeOperation {
             // Finalization (root-only)
             Self::LinkNormalization,
         ]
+    }
+
+    /// Human-readable label for reports and diagnostics.
+    pub fn label(self) -> &'static str {
+        self.descriptor().label
+    }
+
+    /// Operation-level perf metric, if one exists.
+    pub fn perf_metric(self) -> Option<ComposeOperationPerfMetric> {
+        self.descriptor().perf_kind
     }
 
     /// Returns the set of all operations.
@@ -2924,5 +3097,97 @@ mod tests {
         assert_eq!(config.remote_ttl, Some(Duration::from_secs(60)));
         assert!(config.refresh);
         assert_eq!(config.freshness_mode, RemoteFreshnessMode::Fallback);
+    }
+
+    #[test]
+    fn compose_operation_descriptors_cover_all_variants() {
+        assert_eq!(COMPOSE_OPERATION_DESCRIPTORS.len(), ComposeOperation::COUNT);
+
+        let mut seen_indices = std::collections::HashSet::new();
+        for descriptor in COMPOSE_OPERATION_DESCRIPTORS.iter() {
+            assert!(
+                seen_indices.insert(descriptor.index),
+                "duplicate descriptor index {} for {:?}",
+                descriptor.index,
+                descriptor.operation
+            );
+            assert_eq!(
+                descriptor.index,
+                descriptor.operation.index(),
+                "descriptor index mismatch for {:?}",
+                descriptor.operation
+            );
+        }
+
+        assert_eq!(seen_indices.len(), ComposeOperation::COUNT);
+        for expected in 0..ComposeOperation::COUNT {
+            assert!(
+                seen_indices.contains(&expected),
+                "missing descriptor index {expected}"
+            );
+        }
+
+        // Every enum variant must appear exactly once in the descriptor table.
+        let descriptor_ops: std::collections::HashSet<_> = COMPOSE_OPERATION_DESCRIPTORS
+            .iter()
+            .map(|d| d.operation)
+            .collect();
+        assert_eq!(descriptor_ops.len(), ComposeOperation::COUNT);
+        for operation in ComposeOperation::default_order() {
+            assert!(
+                descriptor_ops.contains(operation),
+                "missing descriptor for {:?}",
+                operation
+            );
+        }
+    }
+
+    #[test]
+    fn compose_operation_default_order_matches_descriptor_enabled_order() {
+        let expected: Vec<_> = COMPOSE_OPERATION_DESCRIPTORS
+            .iter()
+            .filter(|d| d.default_enabled)
+            .map(|d| d.operation)
+            .collect();
+        assert_eq!(
+            ComposeOperation::default_order(),
+            expected.as_slice(),
+            "default_order() must equal descriptors filtered by default_enabled"
+        );
+    }
+
+    #[test]
+    fn compose_operation_perf_mapping_is_exhaustive_and_consistent() {
+        for operation in ComposeOperation::default_order() {
+            let descriptor = operation.descriptor();
+            match operation.phase() {
+                ComposePhase::InlinePre | ComposePhase::InlinePost | ComposePhase::Finalization => {
+                    assert!(
+                        descriptor.perf_kind.is_some(),
+                        "{:?} in phase {:?} must have an operation-level perf metric",
+                        operation,
+                        operation.phase()
+                    );
+                }
+                ComposePhase::Transclusion => {
+                    assert!(
+                        descriptor.perf_kind.is_none(),
+                        "{:?} is a transclusion operation and must use transclusion sub-stage \
+                         perf metrics (parse/prepare/resolve/apply) rather than an operation-level metric",
+                        operation
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn compose_operation_label_returns_descriptor_label() {
+        assert_eq!(
+            ComposeOperation::FrontmatterInterpolation.label(),
+            "frontmatter interpolation"
+        );
+        assert_eq!(ComposeOperation::BlockTransclusion.label(), "block transclusion");
+        assert_eq!(ComposeOperation::LinkNormalization.label(), "link normalization");
     }
 }
