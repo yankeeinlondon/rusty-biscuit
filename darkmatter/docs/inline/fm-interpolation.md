@@ -137,8 +137,10 @@ possible_spec: "{{dir}}/spec.md"
 spec: "{{ file_exists(possible_spec) ? possible_spec : '' }}"
 ```
 
-The frontmatter context is local-filesystem only: a remote URL argument fails
-loudly here (use body interpolation or the post-shell pass for remote reads).
+The frontmatter context is local-filesystem only — this holds for both the
+pre-shell and post-shell interpolation passes, and for the `$()` shell ternary
+condition/branch: a remote URL argument fails loudly here (use body
+interpolation for remote reads).
 
 Dotted access into nested seed values is supported:
 

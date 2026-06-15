@@ -58,6 +58,13 @@ is rejected with a diagnostic suggesting `{{ … }}` instead. Mixed forms such a
 See [Token Resolution in `$()` Shell Expressions](../topics/darkmatter-expressions.md#token-resolution-in--shell-expressions)
 for the full ladder, the validity rule, and preflight behavior.
 
+## Remote URLs
+
+The `$()` shell ternary condition/branch shares the same local-filesystem-only
+resolution context as frontmatter interpolation. A remote URL argument passed
+to a read-side function there fails loudly rather than being fetched. Use body
+interpolation for remote reads.
+
 ## Pipeline Placement
 
 Frontmatter Shell Expansion runs in the **Inline Pre** phase, bracketed by the

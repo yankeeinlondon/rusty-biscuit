@@ -390,21 +390,22 @@ path arguments. The context is supplied automatically on every
 
 | Function | Reads | Remote URL arg? |
 | --- | --- | --- |
-| `file_exists(path)` | whether a file exists | yes (body/post-shell only) |
-| `frontmatter(path)` | another file's frontmatter object | yes (body/post-shell only) |
-| `markdown_title(path)` | another file's first H1 title | yes (body/post-shell only) |
-| `markdown_body_empty(path)` | whether another file's body is empty | yes (body/post-shell only) |
-| `validate_schema(path)` | a file against its `$schema` | yes (body/post-shell only) |
+| `file_exists(path)` | whether a file exists | yes (body only) |
+| `frontmatter(path)` | another file's frontmatter object | yes (body only) |
+| `markdown_title(path)` | another file's first H1 title | yes (body only) |
+| `markdown_body_empty(path)` | whether another file's body is empty | yes (body only) |
+| `validate_schema(path)` | a file against its `$schema` | yes (body only) |
 | `absolute(path)` | the absolute form of a path | **no — local-only path transform** |
 | `relative(path)` | a path relative to the base dir | **no — local-only path transform** |
 
 `absolute` and `relative` only rewrite a path string; they never touch the
 network and are **not** registered as remote egress.
 
-Remote URL arguments are only honored where a remote runtime exists (body
-interpolation and the post-shell frontmatter pass). In the **pre-shell
-frontmatter** context the resolution context is local-filesystem only, so a
-remote URL argument **fails loudly** rather than silently returning a default.
+Remote URL arguments are only honored in **body interpolation**, where a remote
+runtime exists. The **frontmatter** resolution context — both the pre-shell and
+post-shell interpolation passes, and the `$()` shell ternary condition/branch —
+is local-filesystem only, so a remote URL argument there **fails loudly** rather
+than silently returning a default.
 
 ### Function Contracts
 
@@ -720,7 +721,7 @@ To add a function:
 For a read-side function, obtain paths through the `ResolutionContext`
 (`base_dir`, magic search paths, optional remote runtime) rather than the
 process CWD. Honor remote URL arguments only when the context carries a remote
-runtime; in a local-only context (the pre-shell frontmatter pass) a remote URL
+runtime; in a local-only context (any frontmatter surface) a remote URL
 must **fail loudly**, not silently default. Because every surface now supplies a
 context, a read-side function either resolves or fails loudly on every surface —
 it never leaks an unresolved `{{ … }}` literal.

@@ -14,9 +14,10 @@ read-side expression surfaces used for local files.
   quoted string literal, e.g. `{{ markdown_title("https://example.com/doc.md") }}`,
   because the interpolation expression parser only accepts a string literal
   there.
-- **Remote URL arguments are body / post-shell only.** They are honored only on
-  surfaces that carry a remote runtime — body interpolation and the post-shell
-  frontmatter pass. The **pre-shell frontmatter** resolution context is
+- **Remote URL arguments are body-interpolation only.** They are honored only on
+  surfaces that carry a remote runtime, which is body interpolation. The
+  **frontmatter** resolution context — both the pre-shell and post-shell
+  interpolation passes, and the `$()` shell ternary condition/branch — is
   local-filesystem only, so a remote URL argument to a read-side function in
   frontmatter **fails loudly** rather than silently returning a default (e.g.
   `file_exists(url)` errors instead of returning `false`).
