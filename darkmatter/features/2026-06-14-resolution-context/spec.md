@@ -1,7 +1,7 @@
 ---
 created: 2026-06-14
-reviewed: false
-status: draft
+reviewed: true
+status: ready for planning and implementation
 area: darkmatter, claudine
 component: markdown/compose expression evaluation (resolution context, token resolution)
 ---
@@ -117,6 +117,15 @@ out of scope, asymmetry documented. Non-expression surfaces are unaffected: the
   (including `file_exists(url)`, which must error rather than silently return
   `false`). Extending the remote pre-fetch discovery sweep to frontmatter is a
   deferred follow-up.
+- **C — `doc.*` dependency ordering in frontmatter → explicit root dependencies
+  (DECIDED).** During frontmatter interpolation, `doc.<root>` is dependency-ordered
+  exactly like the bare `<root>` reference. For example, `b: "{{ doc.a }}"` waits
+  for templated key `a`; `doc.doc` waits for the literal frontmatter key `doc`.
+  Bare `doc` is intentionally a snapshot of the currently available seed plus
+  already-resolved templated values and does **not** wait for every templated key.
+  This avoids turning every `{{ doc }}` use into an all-keys dependency or a
+  self-cycle. Authors who need the complete final frontmatter object should read
+  `doc` from body interpolation, `when=`, or another post-frontmatter surface.
 
 ## §1 — Resolution Context (surfaces #1–#8)
 
@@ -217,6 +226,15 @@ Add `doc` as a third explicit lookup namespace alongside the existing `ctx.*`
   the `doc.` prefix exactly like the existing `env.`/`ctx.` prefixes (strip →
   resolve against root frontmatter). During frontmatter interpolation it reads the
   incrementally-resolved map (the same source bare names already use).
+- **Lookup precedence:** `doc` / `doc.*` is a reserved namespace and must be
+  intercepted before normal key lookup and before the legacy unprefixed fallback to
+  `ctx.*`. A missing frontmatter property named `doc` therefore never causes bare
+  `doc` to resolve to `ctx.doc`; bare `doc` always means the frontmatter object.
+- **Frontmatter dependency ordering:** `doc.<root>` contributes the same dependency
+  root as `<root>` when `frontmatter_interpolation.rs` extracts variable roots.
+  `doc` by itself contributes no dependency and returns the current snapshot; this
+  is a deliberate trade-off to avoid all-key dependencies and self-cycles during
+  incremental interpolation.
 - **Distinct from `frontmatter()`:** `doc.build` is *this* document; the
   `frontmatter('other.md')` function reads *another* file's frontmatter. The docs
   must state the distinction.
@@ -279,7 +297,8 @@ unbuilt behavior in the interim.
 - `frontmatter_interpolation.rs:1-5, 44-51` (F) — module doc + `FrontmatterSeedState`:
   add `doc.*` and the resolution context to the inputs; drop "only seed/ctx/env".
 - `frontmatter_interpolation.rs:402-404` (F) — `collect_variable_roots`: state how
-  `doc.<key>` is treated for dependency ordering (mechanism-dependent).
+  `doc.<key>` is treated for dependency ordering (`doc.<root>` contributes `<root>`;
+  bare `doc` contributes no dependency and reads the current snapshot).
 - `state.rs:307-315` (F) — `ResolvingLookup` doc: generalize beyond "the
   interpolation stage"; note `absolute`/`relative` are local-only.
 - `mod.rs:1285-1290` (F) — body-wrap comment: drop the "those functions never run"
@@ -385,7 +404,11 @@ unbuilt behavior in the interim.
 - **Unit (`$()` preflight):** both branches enumerated for approval without
   evaluating the condition; safe functions never approved.
 - **Unit (`doc.*`):** resolves in frontmatter, body, `when=`, `$()` condition, and
-  claudine loop conditions; distinct from `frontmatter('other.md')`.
+  claudine loop conditions; distinct from `frontmatter('other.md')`; bare `doc`
+  does not fall back to `ctx.doc`.
+- **Unit (`doc.*` dependency ordering):** `b: "{{ doc.a }}"` waits for templated
+  `a`, `doc.doc` waits for a literal key named `doc`, and bare `doc` in
+  frontmatter returns the seed/resolved snapshot without self-cycling.
 - **Unit (claudine):** `loop.until="file_exists('artifact')"` flips false→true as
   the file appears; a hook `when=` read-side function resolves against its base dir.
 - **Integration (compose):** the motivating `spec: file` document composes, with
@@ -417,13 +440,16 @@ unbuilt behavior in the interim.
   empty-string value as absent/valid (see Decided Sub-Behaviors).
 - **B — Remote in frontmatter: local-only, fail loud.** No remote runtime in the
   frontmatter context; remote URL args fail loudly (see Decided Sub-Behaviors).
-- **C-condition scope: keep.** Read-side functions remain usable in the `$()`
+- **C — `doc.*` dependency ordering.** In frontmatter interpolation,
+  `doc.<root>` depends on `<root>`; bare `doc` is a snapshot and contributes no
+  dependency. This keeps `doc` useful without creating all-key dependencies.
+- **D — Condition scope: keep.** Read-side functions remain usable in the `$()`
   ternary **condition** (surfaces #3/#4 in scope); the §2 ladder + `doc.*` keep it
   coherent.
-- **D — `ShortcutLookup` (#6): accept.** The `work_dir`-based context makes
+- **E — `ShortcutLookup` (#6): accept.** The `work_dir`-based context makes
   read-side functions resolve for external callers of `evaluate_condition_against`.
   This is a public-API capability addition — note it in the changelog.
-- **E — Fix mechanism: override.** Store an `Option<ResolutionContext>` on each
+- **F — Fix mechanism: override.** Store an `Option<ResolutionContext>` on each
   lookup and override `resolution_context()`. `ResolvingLookup` is `pub(crate)` and
   hard-wired to `EffectiveState`, so it cannot wrap the seed states, and claudine
   (separate crate) cannot use it at all — the override is the only approach that
