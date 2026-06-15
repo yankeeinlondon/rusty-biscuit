@@ -103,18 +103,19 @@ let output = DarkmatterPage::new(&term)
 
 ## Compose Pipeline
 
-The compose pipeline runs in three phases:
+The compose pipeline runs in four phases:
 
 **Inline Pre** (serial):
 
 1. **Frontmatter Interpolation** - Resolve `{{ variable }}` in frontmatter values.
-2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Coerces** schema-recognized top-level scalars to their declared types (default-on, e.g. the string `"true"` → real boolean) and writes the coerced values back into frontmatter, skipping `$(...)`-pending values. Problems on fields still holding `$(...)` are deferred to downstream re-validation only when frontmatter shell expansion is enabled; when it is disabled they fail fast.
+2. **Schema Validation** (pre-operation stage) - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Coerces** schema-recognized top-level scalars to their declared types (default-on, e.g. the string `"true"` → real boolean) and writes the coerced values back into frontmatter, skipping `$(...)`-pending values. Problems on fields still holding `$(...)` are deferred to downstream re-validation only when frontmatter shell expansion is enabled; when it is disabled they fail fast.
 3. **Frontmatter Shell Expansion** - Execute top-level `$(cmd)` frontmatter values.
 4. **Text Replacement** - Replace literal strings from `replace:` map.
 5. **Page Blocks** - Evaluate `::block`/`::end-block` conditional regions.
 6. **Interpolation** - Expand `{{ variable }}` in body content.
 7. **Shell Expansion** - Execute `::shell` directives.
-8. **Link Resolve** - Resolve local links to absolute paths.
+8. **Shell Blocks** - Execute `::shell-block` directives.
+9. **Link Resolve** - Resolve local links to absolute paths.
 
 **Transclusion** (concurrent):
 
