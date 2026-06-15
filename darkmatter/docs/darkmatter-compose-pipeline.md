@@ -11,9 +11,10 @@ block-beta
         columns 1
         preTitle["<b>1. Inline Pre</b> (<i>serial</i>)"]
         preFlightChecks("<a href='./inline/preflight-checks.md'>0. Pre-flight checks 🏁</a>")
-        fmInterpolate("<a href='./inline/fm-interpolation.md'>1. Frontmatter Interpolation 🏁</a>")
+        fmInterpolate("<a href='./inline/fm-interpolation.md'>1. Frontmatter Interpolation — pass 1 🏁</a>")
         schemaValidation("<a href='./inline/schema-validation.md'>2. Schema Validation 🏁</a>")
         shellExp("<a href='./inline/fm-shell-expansion.md'>3. Frontmatter Shell Expansion 🏁</a>")
+        fmInterpolate2("<a href='./inline/fm-interpolation.md'>3b. Frontmatter Interpolation — pass 2 (post-shell) 🏁</a>")
         textReplacement("<a href='./inline/text-replacement.md'>4. Text Replacement 🏁</a>")
         pageBlocks("<a href='./inline/page-blocks.md'>5. Page Blocks 🏁</a>")
         interpolation("<a href='./inline/interpolation.md'>6. Interpolation 🏁</a>")

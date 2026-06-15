@@ -1,13 +1,38 @@
 # Darkmatter Expressions
 
-Darkmatter exposes a single expression language used in two surfaces:
+Darkmatter exposes a single expression language used in two kinds of surface:
 
 - **interpolation** — `{{ ... }}` expansions in document content and frontmatter
 - **conditions** — `when="..."` attributes on [page blocks](../inline/page-blocks.md), [transclusion directives](../transclusion/block-transclusion.md), and reference-graph conditional extraction
 
-Both surfaces share the same lexer, parser, and evaluator, so the operator
+Both kinds share the same lexer, parser, and evaluator, so the operator
 set, truthiness rules, helper functions, and access semantics described here
 are identical everywhere.
+
+### Availability across every surface
+
+The same grammar — including the [read-side functions](#read-side-functions)
+and the [`doc.*` namespace](#namespaces) — evaluates identically on every
+surface that runs it:
+
+| Surface | Form |
+| --- | --- |
+| Frontmatter interpolation (pass 1, pre-shell) | `key: "{{ ... }}"` |
+| Frontmatter interpolation (pass 2, post-shell) | `key: "{{ ... }}"` |
+| `$()` frontmatter shell ternary condition | `key: "$( cond ? a : b )"` |
+| `$()` frontmatter shell ternary branch | `key: "$( cond ? a : b )"` |
+| Body interpolation | `{{ ... }}` |
+| `::block` / `::file` / `::code` conditions | `when="..."` |
+| Reference-graph conditional extraction | `when="..."` |
+| Public condition API | `evaluate_condition_against(...)` |
+| Claudine loop conditions | `until=` / `while=` / `action=` |
+| Claudine hook conditions | `when=` |
+
+This is the **availability invariant**: a read-side function or `doc.*`
+reference resolves on every surface above. (The historical asymmetry — where
+read-side functions worked only in body interpolation — is gone.) The single
+documented exception is the `markdown::transform` pipeline, which uses a bare
+state and is not in scope.
 
 > Earlier docs called this "Boolean Conditional Logic". The language is now
 > general-purpose and supports arithmetic, member/index access, type
@@ -31,12 +56,15 @@ The parser, AST, and evaluator live in the [`expression`](../../lib/src/markdown
 Expressions evaluate against Darkmatter's effective state, which can include:
 
 - frontmatter values from the current document
+- the whole frontmatter object and its properties under `doc` / `doc.*` (see [Namespaces](#namespaces))
 - inherited state passed from parent documents during recursive composition
 - runtime context values under `ctx.*`
 - environment variables under `env.*`
 
 When an unprefixed key is not found in frontmatter or inherited state,
-Darkmatter falls back to `ctx.<key>`. So `repo` resolves to `ctx.repo`.
+Darkmatter falls back to `ctx.<key>`. So `repo` resolves to `ctx.repo`. The
+reserved `doc` namespace is intercepted **before** this fallback, so bare `doc`
+always means the frontmatter object and never falls back to `ctx.doc`.
 
 ## Operator Precedence
 
@@ -132,6 +160,49 @@ access returns `null` and never errors.
 | `config["key"]` where `config` is a string | `null` |
 | `obj["missing"]` | `null` |
 | `obj[0]` where `obj` is an object | `null` |
+
+## Namespaces
+
+Three reserved prefixes select a distinct value source. They are intercepted
+before ordinary key lookup, so a frontmatter property that happens to share a
+namespace name never shadows the namespace.
+
+| Namespace | Resolves to |
+| --- | --- |
+| `doc` / `doc.*` | the **current** document's frontmatter (this document) |
+| `ctx.*` | runtime context (date/time, repo, OS, hardware, …) — see [context variables](./context-variables.md) |
+| `env.*` | process environment variables |
+
+### The `doc` namespace
+
+- **Bare `doc`** is the whole root frontmatter object.
+- **`doc.<path>`** is a root frontmatter property, with dotted traversal for
+  nested values: `doc.build`, `doc.config.retries`.
+- A property literally named `doc` is reached as **`doc.doc`** (its nested child
+  as `doc.doc.child`).
+
+`doc.*` is available in every expression surface (frontmatter and body
+interpolation, `when=` conditions, the `$()` ternary condition/branches, and
+claudine loop/hook conditions). It is the explicit, unambiguous form of a bare
+property reference — useful when a property name collides with an executable
+during [`$()` token resolution](#token-resolution-in--shell-expressions), where
+`doc.build` bypasses the executable-first ladder and always reads the property.
+
+`doc.*` is distinct from the [`frontmatter()`](#read-side-functions) function:
+`doc.build` reads *this* document's frontmatter, whereas
+`frontmatter('other.md')` reads *another* file's frontmatter.
+
+During frontmatter interpolation, `doc.<root>` is dependency-ordered exactly
+like the bare `<root>` reference: `b: "{{ doc.a }}"` waits for the templated key
+`a`, and `doc.doc` waits for a literal key named `doc`. Bare `doc` is a snapshot
+of the currently-resolved frontmatter and contributes no dependency — it does
+not wait for every templated key (which would create all-key dependencies or a
+self-cycle). To read the complete final frontmatter object, reference `doc` from
+body interpolation, `when=`, or another post-frontmatter surface.
+
+> **Breaking change.** Bare `doc` previously resolved to a frontmatter
+> *property* named `doc`; it now means the whole object. Existing bare `{{doc}}`
+> references that mean the property must migrate to `{{doc.doc}}`.
 
 ## Interpolation vs. Condition Mode
 
@@ -308,6 +379,33 @@ The `[YYYY]` token includes the year only when it differs from the current
 year. Invalid ISO input or an unknown format token returns an error; a `null`
 argument propagates as `null`.
 
+### Read-Side Functions
+
+Seven functions are **read-side**: unlike the helpers above (which report only
+on values already in scope), they read the filesystem — and, for some, remote
+URLs. They are pure in the sense that they mutate no state, but they require a
+**resolution context** (a document-relative base directory) to resolve their
+path arguments. The context is supplied automatically on every
+[surface](#availability-across-every-surface).
+
+| Function | Reads | Remote URL arg? |
+| --- | --- | --- |
+| `file_exists(path)` | whether a file exists | yes (body/post-shell only) |
+| `frontmatter(path)` | another file's frontmatter object | yes (body/post-shell only) |
+| `markdown_title(path)` | another file's first H1 title | yes (body/post-shell only) |
+| `markdown_body_empty(path)` | whether another file's body is empty | yes (body/post-shell only) |
+| `validate_schema(path)` | a file against its `$schema` | yes (body/post-shell only) |
+| `absolute(path)` | the absolute form of a path | **no — local-only path transform** |
+| `relative(path)` | a path relative to the base dir | **no — local-only path transform** |
+
+`absolute` and `relative` only rewrite a path string; they never touch the
+network and are **not** registered as remote egress.
+
+Remote URL arguments are only honored where a remote runtime exists (body
+interpolation and the post-shell frontmatter pass). In the **pre-shell
+frontmatter** context the resolution context is local-filesystem only, so a
+remote URL argument **fails loudly** rather than silently returning a default.
+
 ### Function Contracts
 
 All functions added in the expression-syntax expansion follow a consistent
@@ -363,6 +461,65 @@ predicates and never error or null-propagate; they always return a boolean.
 - return `false` on `null` or any invalid input
 - use the operator's timezone semantics (local or UTC) for the reference date
 
+## Token Resolution in `$()` Shell Expressions
+
+A frontmatter `$( … )` value is a **shell expansion**, but the engine and the
+shell coexist inside it. A token in **executed position** (a non-ternary
+directive body, or a ternary branch) resolves by this precedence ladder:
+
+1. **Quoted** (single/double) → string literal.
+2. **Numeric** → number literal.
+3. **`true` / `false`** → boolean literal. *Never* a command or a property.
+4. **`name(...)`** (trailing parentheses) → an expression function. These are
+   **safe functions** — they spawn no process and require **no
+   preflight/approval**. No shell executable contains `(` or `)`, so this is an
+   unambiguous syntactic distinction.
+5. **Bare name / path:**
+   - **Path-bearing** (`/usr/bin/doit`, `./doit`) → an **executable**: it exists
+     and is executable, or it does not. Never a frontmatter property.
+   - **Bare relative** (`doit`):
+     - found on `PATH` → an **executable** (a shell command, subject to
+       preflight/approval),
+     - not found on `PATH` → a **frontmatter property**,
+     - property absent → **`null`**.
+
+Because a bare name can resolve to an executable *or* a property depending on
+what is installed, use [`doc.<name>`](#namespaces) to force the property
+reading: `doc.build` always reads the `build` frontmatter property even when a
+`build` executable is on `PATH`.
+
+### Validity rule and the no-command diagnostic
+
+A `$()` is valid only if at least one **executed-position** token is a real
+shell command (for a ternary, at least one branch; for a non-ternary, the
+directive itself). The **condition** of a ternary is always expression content
+and never counts as the command.
+
+A `$()` that contains no shell command — e.g.
+`"$( file_exists('x') ? 'a' : 'b' )"`, which is entirely expression-engine
+content — is a user error. It is rejected with a targeted diagnostic suggesting
+`{{ … }}` interpolation instead.
+
+Intermixing is fully supported when a real command is present:
+
+```yaml
+build: "$( file_exists('Cargo.toml') ? cargo build : make )"
+```
+
+Here the condition uses the engine (and resolves read-side functions against the
+resolution context at the real run), while the chosen branch is a shell
+pipeline (`cargo build` or `make`).
+
+### Preflight behavior
+
+Shell-approval preflight does **not** evaluate the expression engine and needs
+**no resolution context**: it enumerates **both** ternary branches so the
+approved set is a superset of what can run, and nothing executes unapproved. It
+performs a read-only `PATH` probe to classify bare names (executable → needs
+approval; otherwise property/null → ignored). Safe `name(...)` functions are
+excluded by construction. The resolution context is needed only by the **real
+run**, so the chosen branch's condition resolves.
+
 ## Programmatic Evaluation
 
 Darkmatter exposes the condition evaluator as a Rust API so external tools and
@@ -389,10 +546,16 @@ assert!(result);
 
 This shortcut resolves variables in the same order as the compose pipeline:
 
-1. Top-level and nested paths against the provided `data`.
-2. `env.*` against the system environment.
-3. `ctx.*` via lazy runtime context capture.
-4. Unprefixed missing keys fall back to `ctx.*` (same as `EffectiveState`).
+1. `doc` / `doc.*` against the provided `data` (intercepted first; never falls back to `ctx.doc`).
+2. Top-level and nested paths against the provided `data`.
+3. `env.*` against the system environment.
+4. `ctx.*` via lazy runtime context capture.
+5. Unprefixed missing keys fall back to `ctx.*` (same as `EffectiveState`).
+
+The `work_dir` argument supplies the resolution context, so the
+[read-side functions](#read-side-functions) (`file_exists`, `absolute`,
+`relative`, …) resolve against it — a public-API capability for external
+callers.
 
 ### `evaluate_condition`
 
@@ -527,6 +690,40 @@ Unsupported or easy-to-misread forms:
 - `a && b` inside `{{ ... }}` interpolation — only `when="..."` accepts it
 - a single `&` (always a lexer error)
 - numeric dot access like `foo.0` — use `foo[0]` instead
+
+## Authoring a New Expression Function
+
+Expression functions live in
+[`expression/functions.rs`](../../lib/src/markdown/compose/expression/functions.rs)
+and split into two registries:
+
+- **Pure functions** (`PURE_FUNCTIONS`) — depend only on their arguments. Most
+  helpers (`length`, `min`, `kebab_case`, `is_today`, …) are pure. Dispatched by
+  `dispatch`, which needs no context.
+- **Context-aware / read-side functions** (`FS_FUNCTIONS`) — need a
+  [`ResolutionContext`](../../lib/src/markdown/compose/expression/resolve_ctx.rs)
+  to resolve path arguments. The seven [read-side functions](#read-side-functions)
+  live here. Dispatched by `dispatch_fs`, which receives the context; `is_fs_function`
+  reports membership so the evaluator can emit the "requires a document
+  resolution context" error when no context is available.
+
+To add a function:
+
+1. Implement it and register it in the correct slice (`PURE_FUNCTIONS` or
+   `FS_FUNCTIONS`).
+2. Add a matching descriptor to `EXPRESSION_FUNCTION_DESCRIPTORS` in
+   [`catalog.rs`](../../lib/src/markdown/compose/expression/catalog.rs). This is
+   **mandatory**: parity tests enforce exact bidirectional set equality between
+   the registered functions and the descriptor catalog, so a missing or extra
+   descriptor fails the build.
+
+For a read-side function, obtain paths through the `ResolutionContext`
+(`base_dir`, magic search paths, optional remote runtime) rather than the
+process CWD. Honor remote URL arguments only when the context carries a remote
+runtime; in a local-only context (the pre-shell frontmatter pass) a remote URL
+must **fail loudly**, not silently default. Because every surface now supplies a
+context, a read-side function either resolves or fails loudly on every surface —
+it never leaks an unresolved `{{ … }}` literal.
 
 ## See Also
 
