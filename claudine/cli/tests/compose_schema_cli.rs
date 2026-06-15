@@ -98,6 +98,69 @@ Plan for {{topic}}.
 
 #[cfg(unix)]
 #[test]
+fn compose_frontmatter_interactive_true_still_reports_missing_on_non_tty() {
+    // A document with `interactive: true` frontmatter selects interactive
+    // session mode by default, but schema collection depends on TTY signals,
+    // not on the resolved session interactivity. When stdin/stderr are piped,
+    // the missing required property must surface as a typed MissingProperties
+    // report without hanging or prompting.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let count_path = workspace.path().join("call-count.txt");
+
+    let md_file = workspace.path().join("plan.md");
+    fs::write(
+        &md_file,
+        r#"---
+$schema:
+  topic: 'string(required)'
+interactive: true
+---
+Plan for {{topic}}.
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\necho touched >> {count}\nexit 0\n",
+            count = count_path.display()
+        ),
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["compose", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("CompositionError"),
+        "expected typed CompositionError surface (not raw MarkdownError); stderr:\n{plain}"
+    );
+    assert!(
+        plain.to_lowercase().contains("missing properties"),
+        "expected a missing-properties report; stderr:\n{plain}"
+    );
+    assert!(
+        plain.contains("topic"),
+        "expected the `topic` property name; stderr:\n{plain}"
+    );
+    assert!(
+        !count_path.exists(),
+        "no provider session should have been launched; stub recorded a call"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn compose_set_override_satisfies_required_schema() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");

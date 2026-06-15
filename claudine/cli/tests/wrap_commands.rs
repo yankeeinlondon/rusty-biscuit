@@ -3355,7 +3355,7 @@ exit 0
         .assert()
         .code(1)
         .stderr(contains(
-            "inline-compose with --interactive is not supported",
+            "inline-compose in interactive mode (from --interactive) is not supported",
         ));
 }
 
