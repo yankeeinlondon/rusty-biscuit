@@ -14,7 +14,7 @@ are identical everywhere.
 > predicates, and date helpers, so this topic is the authoritative reference
 > under its new name.
 
-All functions provided here DO NOT mutate state, they only _report_ on state. If you are looking for ways to mutate state then you should go to the [side effects](./side-effects.md) documentation. Of course you _can_ use these functions to assign the value of a frontmatter property on the local document you are in but never more than that.
+All functions provided here DO NOT mutate state, they only _report_ on state. If you are looking for ways to mutate state then you should go to the [side effects](./side-effects.md) documentation. Most functions report only on values already in scope, but the read-side functions (such as `frontmatter(...)` and `file_exists(...)`) also _read_ other files — and, for some, remote URLs — so they report on more than just the local document.
 
 ## Core Expression Engine
 
