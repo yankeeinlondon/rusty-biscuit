@@ -1,7 +1,7 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-235f5c808cb85e5d
+hash: 87f17662fa397abe-a3a36603f418627f
 last_updated: 2026-06-15
 ---
 
@@ -167,10 +167,11 @@ links are preserved and not fetched.
 - The side-effect `EffectEngine::http_post` uses the same shared fetch policy
   for host allowlist enforcement.
 - Remote URL arguments to read-side functions work only on surfaces with a
-  remote runtime (body interpolation, post-shell frontmatter pass). The
-  **pre-shell frontmatter** context is local-only, so a remote URL there
-  **fails loudly**. `absolute` and `relative` are local-only path transforms —
-  never remote, never part of remote-fetch discovery.
+  remote runtime — body interpolation. The **frontmatter** context (both the
+  pre-shell and post-shell interpolation passes, and the `$()` shell ternary
+  condition/branch) is local-only, so a remote URL there **fails loudly**.
+  `absolute` and `relative` are local-only path transforms — never remote,
+  never part of remote-fetch discovery.
 
 See `darkmatter/docs/topics/remote-url-references.md` for public guidance.
 

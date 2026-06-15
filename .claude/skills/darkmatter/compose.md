@@ -116,8 +116,9 @@ Expressions between `{{ }}` are evaluated and replaced with values.
 
 Read-side functions and `doc.*` resolve identically on every surface
 (frontmatter both passes, body, `when=`, `$()` ternary condition/branches,
-claudine loop/hook). The pre-shell frontmatter context is local-only, so a
-remote URL argument fails loudly there. See
+claudine loop/hook). Every frontmatter surface (both interpolation passes and
+the `$()` ternary condition/branch) is local-only, so a remote URL argument
+fails loudly there; only body interpolation carries a remote runtime. See
 `darkmatter/docs/topics/darkmatter-expressions.md`.
 
 ### Context Values (`ctx.*`)
