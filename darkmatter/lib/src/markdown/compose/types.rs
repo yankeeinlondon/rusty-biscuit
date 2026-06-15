@@ -1192,6 +1192,20 @@ impl ComposeOptions {
         }
     }
 
+    /// The document's base directory: relative and `@` references resolve here.
+    ///
+    /// File sources resolve to the directory the source file lives in; all other
+    /// sources (string/stdin) fall back to the current directory.
+    fn resolution_base_dir(&self) -> PathBuf {
+        match &self.source {
+            ComposeSource::File(path) => path
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from(".")),
+            _ => PathBuf::from("."),
+        }
+    }
+
     /// Builds the [`ResolutionContext`] used by read-side expression functions
     /// during interpolation.
     ///
@@ -1205,17 +1219,30 @@ impl ComposeOptions {
         &self,
         remote_fetch: &super::remote_fetch::RemoteFetchRuntime,
     ) -> super::expression::ResolutionContext {
-        let base_dir = match &self.source {
-            ComposeSource::File(path) => path
-                .parent()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| PathBuf::from(".")),
-            _ => PathBuf::from("."),
-        };
         super::expression::ResolutionContext {
-            base_dir,
+            base_dir: self.resolution_base_dir(),
             magic_paths: self.magic_paths.clone(),
             remote_fetch: self.remote_reads_enabled().then(|| remote_fetch.clone()),
+        }
+    }
+
+    /// Builds the local-only [`ResolutionContext`] used by read-side expression
+    /// functions on **frontmatter** surfaces (both interpolation passes and the
+    /// `$()` shell ternary condition/branch evaluation).
+    ///
+    /// Unlike [`expression_resolution_context`], this never attaches a
+    /// remote-fetch runtime: per Decision B of the resolution-context spec,
+    /// frontmatter is local-filesystem only. A remote URL argument to a
+    /// read-side function in frontmatter therefore fails loudly rather than
+    /// performing a network read.
+    ///
+    /// [`expression_resolution_context`]: Self::expression_resolution_context
+    /// [`ResolutionContext`]: super::expression::ResolutionContext
+    pub(crate) fn frontmatter_resolution_context(&self) -> super::expression::ResolutionContext {
+        super::expression::ResolutionContext {
+            base_dir: self.resolution_base_dir(),
+            magic_paths: self.magic_paths.clone(),
+            remote_fetch: None,
         }
     }
 

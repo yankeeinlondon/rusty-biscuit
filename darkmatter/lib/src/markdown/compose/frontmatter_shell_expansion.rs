@@ -984,7 +984,9 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     // so non-ternary inputs don't pay the cloning cost. The real run carries a
     // resolution context so a ternary condition and its selected branch can use
     // the read-side functions (`file_exists`, `frontmatter`, …) and `doc.*`.
-    let resolution_context = options.expression_resolution_context(&runtime.remote_fetch);
+    // Frontmatter is local-only (Decision B): this context never attaches a
+    // remote-fetch runtime, so a remote URL argument here fails loudly.
+    let resolution_context = options.frontmatter_resolution_context();
     let mut seed_state: Option<FrontmatterSeedState> = None;
 
     // Either "execute this prepared pipeline" or "use this resolved value".

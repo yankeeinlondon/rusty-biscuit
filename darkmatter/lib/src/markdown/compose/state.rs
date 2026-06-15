@@ -314,16 +314,18 @@ impl super::expression::EvaluationLookup for EffectiveState {
 
 /// Wraps an [`EffectiveState`] with a [`ResolutionContext`] so any surface that
 /// evaluates the grammar against the effective state — body interpolation,
-/// `when=` conditions, the post-shell pass — can run the read-side expression
+/// `when=` conditions, page blocks — can run the read-side expression
 /// functions (`frontmatter`, `file_exists`, `markdown_title`,
 /// `markdown_body_empty`, `validate_schema`, `absolute`, `relative`).
 ///
 /// Bare `EffectiveState` returns `None` from `resolution_context()`, which
 /// disables those functions; this adapter supplies the document-relative base
-/// directory, magic search paths, and the run's remote-fetch runtime so they
-/// resolve filesystem paths and HTTP(S) URL arguments. `absolute` and `relative`
-/// are local-only path transforms — they require the context for the base
-/// directory but never touch the network.
+/// directory, magic search paths, and — when the supplied context enables remote
+/// reads — the run's remote-fetch runtime so HTTP(S) URL arguments resolve from
+/// the fetch cache. These body-side surfaces are the only ones that carry a
+/// remote runtime; frontmatter surfaces are local-only (Decision B). `absolute`
+/// and `relative` are local-only path transforms — they require the context for
+/// the base directory but never touch the network.
 pub(crate) struct ResolvingLookup<'a> {
     state: &'a EffectiveState,
     resolution_context: super::expression::ResolutionContext,
