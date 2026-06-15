@@ -533,45 +533,49 @@ pub(crate) fn execute_sequence(
             replace_file: shared.replace_system_prompt.clone(),
         };
 
-        let request = CompositionExecutionRequest {
-            mode: if inline_mode {
-                CompositionMode::InlineFrontmatterPrompt
-            } else {
-                CompositionMode::ChainedDocument
-            },
-            file_ref: source.original_ref.clone(),
-            prepared,
-            resolved_target,
-            explicit_provider: shared.explicit_provider(),
-            excluded: shared.excluded(),
-            sequence: true,
-            yolo: shared.yolo,
-            include: shared.include.clone(),
-            model: shared.model.clone(),
-            output: shared.output,
-            system_prompt_args,
-            timeout: shared.timeout.clone(),
-            step_timeout: shared.step_timeout.clone(),
-            operation: shared.operation.clone(),
-            sandbox: shared.sandbox,
-            repo: shared.repo,
-            dry_run: shared.dry_run,
-            mcp: shared.mcp,
-            mcp_use: shared.mcp_use.clone(),
-            strict: shared.strict,
-            session_interactive: shared.interactive,
-            quiet: shared.quiet,
-            silent: shared.silent,
-            env_overrides: step_ctx.env_overrides.clone(),
-            shared_approval_cache: Some(Arc::clone(&shared_approval_cache)),
-            installed_snapshot: Some(prep_context.installed_snapshot.clone()),
-            prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
-            prep_launch_context: Some(prep_context.launch_context.clone()),
-            prep_env_context: Some(prep_context.env_context.clone()),
-            prep_launch_detection_error: prep_context.launch_detection_error.clone(),
-            // Sequence steps render their header in-pipeline: per-step
-            // prep already ran up front, so the executor's emit is timely.
-            header_emitted: false,
+        let request = {
+            let resolved = shared.resolve_session_interactivity(prepared.selection_hints.interactive);
+            CompositionExecutionRequest {
+                mode: if inline_mode {
+                    CompositionMode::InlineFrontmatterPrompt
+                } else {
+                    CompositionMode::ChainedDocument
+                },
+                file_ref: source.original_ref.clone(),
+                prepared,
+                resolved_target,
+                explicit_provider: shared.explicit_provider(),
+                excluded: shared.excluded(),
+                sequence: true,
+                yolo: shared.yolo,
+                include: shared.include.clone(),
+                model: shared.model.clone(),
+                output: shared.output,
+                system_prompt_args,
+                timeout: shared.timeout.clone(),
+                step_timeout: shared.step_timeout.clone(),
+                operation: shared.operation.clone(),
+                sandbox: shared.sandbox,
+                repo: shared.repo,
+                dry_run: shared.dry_run,
+                mcp: shared.mcp,
+                mcp_use: shared.mcp_use.clone(),
+                strict: shared.strict,
+                session_interactive: resolved.value,
+                session_interactive_source: resolved.source,
+                quiet: shared.quiet,
+                silent: shared.silent,
+                env_overrides: step_ctx.env_overrides.clone(),
+                shared_approval_cache: Some(Arc::clone(&shared_approval_cache)),
+                installed_snapshot: Some(prep_context.installed_snapshot.clone()),
+                prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
+                prep_launch_context: Some(prep_context.launch_context.clone()),
+                prep_env_context: Some(prep_context.env_context.clone()),
+                prep_launch_detection_error: prep_context.launch_detection_error.clone(),
+                // Sequence steps render their header in-pipeline: per-step
+                // prep already ran up front, so the executor's emit is timely.
+                header_emitted: false,
+            }
         };
 
         let step_result = super::composition::execute_composition_request_inner(

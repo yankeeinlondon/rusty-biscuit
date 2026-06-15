@@ -22,8 +22,9 @@ use claudine::composition::lifecycle::{
 use claudine::composition::{
     AgentResolutionState, CompositionClosurePlan, CompositionError, CompositionExecutionRequest,
     CompositionMode, InlineClosurePlan, ModelResolutionReason, ResolvedExecutionTarget,
-    SelectionReason, agent_state_breakdown, build_installed_snapshot, build_picker_plan,
-    classify_agent_resolution, invalid_agent_message, resolve_target_non_tty_with_catalog,
+    SelectionReason, SessionInteractivitySource, agent_state_breakdown, build_installed_snapshot,
+    build_picker_plan, classify_agent_resolution, invalid_agent_message,
+    resolve_target_non_tty_with_catalog,
 };
 use claudine::config::claudine_config::ProviderModelOverride;
 use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
@@ -821,6 +822,37 @@ pub(crate) fn emit_execution_header(
     true
 }
 
+/// Format the timeout-conflict error message, attributing the resolved
+/// interactive mode to its source so users can tell a frontmatter-driven
+/// conflict from a flag-driven one, and naming the conflicting timeout flag
+/// (`--timeout` or `--step-timeout`).
+fn format_interactive_timeout_conflict(
+    source: SessionInteractivitySource,
+    flag: &str,
+) -> String {
+    format!("interactive mode (from {source}) cannot be used with {flag}")
+}
+
+/// Extract a top-level frontmatter timeout duration (`timeout` /
+/// `step_timeout`) for the resolved-interactive conflict check.
+///
+/// Returns `None` when the key is absent or its value is not a parseable
+/// duration string. A malformed value is surfaced later by
+/// [`claudine::harness::parse_harness_plan`], so swallowing the parse error
+/// here is intentional — the syntax diagnostic takes precedence over the
+/// interactive conflict.
+fn frontmatter_timeout_duration(
+    frontmatter: &serde_json::Value,
+    key: &str,
+    source_path: &std::path::Path,
+) -> Option<std::time::Duration> {
+    frontmatter
+        .as_object()
+        .and_then(|obj| obj.get(key))
+        .and_then(|v| v.as_str())
+        .and_then(|raw| claudine::harness::parse_timeout(raw, source_path).ok())
+}
+
 /// Execute a composition request through the wrapper-grade pipeline.
 ///
 /// Handles provider selection, environment setup, harness detection from
@@ -1100,7 +1132,11 @@ pub(crate) fn execute_composition_request_inner(
     // -- Inline + interactive check ---------------------------------------
 
     if request.session_interactive && is_inline && !profile.supports_interactive_inline_closure() {
-        return Err(CompositionError::InlineInteractiveUnsupported(provider.to_string()).into());
+        return Err(CompositionError::InlineInteractiveUnsupported {
+            provider: provider.to_string(),
+            source_kind: request.session_interactive_source,
+        }
+        .into());
     }
 
     let effective_non_interactive = !request.session_interactive;
@@ -1515,9 +1551,43 @@ pub(crate) fn execute_composition_request_inner(
 
     record_substage(&mut perf_collector, &mut last_checkpoint, "system prompt");
 
-    // Timeout validation
-    if request.timeout.is_some() && request.session_interactive {
-        return Err(eyre!("--timeout cannot be used with --interactive mode"));
+    // Timeout/interactive conflict, evaluated against the RESOLVED session
+    // mode and the RESOLVED timeout plan. Interactive sessions never honor a
+    // wall-clock or step-silence deadline, so an explicitly requested timeout
+    // from any source — CLI flag, composed frontmatter, or env var — conflicts
+    // with a resolved-interactive session. The built-in 30m step_timeout
+    // default is excluded (`built_in: None` below): it is always present and
+    // is simply ignored in interactive mode, so it must not trip the conflict.
+    // The early CLI-only guards in the command entry points stay as fast
+    // syntax feedback; this is the authoritative check now that frontmatter
+    // (`interactive: true`) can also select interactive mode.
+    if request.session_interactive {
+        let fm = &request.prepared.effective_frontmatter;
+        let sp = request.prepared.resolved_path.as_path();
+        let explicit_timeout = resolve_single_timeout(TimeoutResolutionInput {
+            cli: request.timeout.clone(),
+            frontmatter: frontmatter_timeout_duration(fm, "timeout", sp),
+            env_var: "CLAUDINE_TIMEOUT",
+            built_in: None,
+        });
+        let explicit_step_timeout = resolve_single_timeout(TimeoutResolutionInput {
+            cli: request.step_timeout.clone(),
+            frontmatter: frontmatter_timeout_duration(fm, "step_timeout", sp),
+            env_var: "CLAUDINE_STEP_TIMEOUT",
+            built_in: None,
+        });
+        if explicit_timeout.is_some() {
+            return Err(eyre!(format_interactive_timeout_conflict(
+                request.session_interactive_source,
+                "--timeout",
+            )));
+        }
+        if explicit_step_timeout.is_some() {
+            return Err(eyre!(format_interactive_timeout_conflict(
+                request.session_interactive_source,
+                "--step-timeout",
+            )));
+        }
     }
 
     child_args.extend(mcp_extra_args);
@@ -3082,5 +3152,123 @@ mod tests {
                 "state {state:?} should not show a pre-prompt message"
             );
         }
+    }
+
+    // -- Interactive timeout conflict (Phase 3) -------------------------------
+
+    #[test]
+    fn timeout_conflict_message_names_source_and_flag() {
+        assert_eq!(
+            format_interactive_timeout_conflict(
+                SessionInteractivitySource::Frontmatter,
+                "--timeout"
+            ),
+            "interactive mode (from frontmatter) cannot be used with --timeout"
+        );
+        assert_eq!(
+            format_interactive_timeout_conflict(
+                SessionInteractivitySource::InteractiveFlag,
+                "--timeout"
+            ),
+            "interactive mode (from --interactive) cannot be used with --timeout"
+        );
+        assert_eq!(
+            format_interactive_timeout_conflict(
+                SessionInteractivitySource::Default,
+                "--timeout"
+            ),
+            "interactive mode (from default) cannot be used with --timeout"
+        );
+        // The step-silence flag is named distinctly so a `--step-timeout`
+        // conflict does not mis-report as `--timeout`.
+        assert_eq!(
+            format_interactive_timeout_conflict(
+                SessionInteractivitySource::Frontmatter,
+                "--step-timeout"
+            ),
+            "interactive mode (from frontmatter) cannot be used with --step-timeout"
+        );
+    }
+
+    /// The conflict check resolves both timeouts against CLI + frontmatter +
+    /// env sources, excluding the built-in `step_timeout` default. This mirrors
+    /// the executor guard's source resolution so the unit test catches a
+    /// regression that drops the `step_timeout` (or frontmatter) source.
+    fn explicit_timeouts_for(
+        cli_timeout: Option<&str>,
+        cli_step_timeout: Option<&str>,
+        fm: &serde_json::Value,
+    ) -> (Option<std::time::Duration>, Option<std::time::Duration>) {
+        let sp = std::path::Path::new("<test>");
+        let timeout = resolve_single_timeout(TimeoutResolutionInput {
+            cli: cli_timeout.map(str::to_string),
+            frontmatter: frontmatter_timeout_duration(fm, "timeout", sp),
+            env_var: "CLAUDINE_TIMEOUT_TEST_UNSET",
+            built_in: None,
+        });
+        let step_timeout = resolve_single_timeout(TimeoutResolutionInput {
+            cli: cli_step_timeout.map(str::to_string),
+            frontmatter: frontmatter_timeout_duration(fm, "step_timeout", sp),
+            env_var: "CLAUDINE_STEP_TIMEOUT_TEST_UNSET",
+            built_in: None,
+        });
+        (timeout, step_timeout)
+    }
+
+    #[test]
+    fn step_timeout_alone_is_an_explicit_conflict_source() {
+        // `--step-timeout` with no `--timeout` must still register as an
+        // explicit timeout, so a resolved-interactive session rejects it.
+        let empty = serde_json::json!({});
+        let (timeout, step_timeout) = explicit_timeouts_for(None, Some("30s"), &empty);
+        assert!(timeout.is_none(), "no wall-clock timeout was requested");
+        assert!(
+            step_timeout.is_some(),
+            "an explicit --step-timeout must count as a conflict source"
+        );
+    }
+
+    #[test]
+    fn frontmatter_timeout_is_an_explicit_conflict_source() {
+        // A composed-frontmatter `timeout` (the harness wall-clock key) must
+        // register as an explicit timeout even without any CLI flag.
+        let fm = serde_json::json!({ "timeout": "5m" });
+        let (timeout, step_timeout) = explicit_timeouts_for(None, None, &fm);
+        assert_eq!(timeout, Some(std::time::Duration::from_secs(300)));
+        assert!(step_timeout.is_none());
+    }
+
+    #[test]
+    fn no_explicit_timeout_when_all_sources_empty() {
+        // With no CLI flags, no frontmatter timeouts, and the built-in
+        // step_timeout default excluded, an interactive session has nothing to
+        // conflict with.
+        let empty = serde_json::json!({});
+        let (timeout, step_timeout) = explicit_timeouts_for(None, None, &empty);
+        assert!(timeout.is_none() && step_timeout.is_none());
+    }
+
+    // -- Inline interactive unsupported source (Phase 3) ----------------------
+
+    #[test]
+    fn inline_interactive_unsupported_names_frontmatter_source() {
+        let err = CompositionError::InlineInteractiveUnsupported {
+            provider: Provider::Claude.to_string(),
+            source_kind: SessionInteractivitySource::Frontmatter,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("Claude"), "{msg}");
+        assert!(msg.contains("frontmatter"), "{msg}");
+    }
+
+    #[test]
+    fn inline_interactive_unsupported_names_flag_source() {
+        let err = CompositionError::InlineInteractiveUnsupported {
+            provider: Provider::Claude.to_string(),
+            source_kind: SessionInteractivitySource::InteractiveFlag,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("Claude"), "{msg}");
+        assert!(msg.contains("--interactive"), "{msg}");
     }
 }
