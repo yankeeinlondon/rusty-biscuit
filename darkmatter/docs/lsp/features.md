@@ -8,7 +8,7 @@ This document inventories a probable set of feature we will want in the Darkmatt
 
 ## 1. DSL Surface Area
 
-Darkmatter's compose pipeline runs in three serial phases (`Inline Pre`, `Transclusion`, `Inline Post`). The LSP must understand every textual artefact that authors can write inside the document — both inside the YAML frontmatter and inside the Markdown body.
+Darkmatter's compose pipeline runs in four phases (`Inline Pre`, `Transclusion`, `Inline Post`, `Finalization`). The LSP must understand every textual artifact that authors can write inside the document — both inside the YAML frontmatter and inside the Markdown body.
 
 > **Note:** the _compose_ functionality that Darkmatter's library provides can convert any Markdown document into it's completed form which is always a valid Markdown document
 

@@ -286,3 +286,29 @@ No new crate/package was added to the darkmatter package area in this window. Th
 8. Delay theme resolution for compose outputs that do not need it. `darkmatter/cli/src/commands.rs:1136` resolves themes before matching the compose output format, but `Auto`/`Markdown` output does not use the theme. Moving resolution into the `MarkdownPlus` and `Html` arms is a small performance win with only upside.
 
 9. Keep watch on god-file pressure in the render fold and compose module. `darkmatter/lib/src/markdown/render_tree/fold.rs` is 2,674 lines and now owns CommonMark folding, inline extension dispatch, embedded render-tree regions, disclosure handling, diagnostics, and a large in-file test suite. `darkmatter/lib/src/markdown/compose/mod.rs` is 6,807 lines. Avoid speculative splits, but the next feature that adds another block extension or compose stage should come with an extraction boundary rather than adding another large section to these files.
+
+---
+
+## Post-Spec Validation (2026-06-15)
+
+_Re-evaluated after the `2026-06-15-grammar` and `2026-06-14-resolution-context` specs completed._ Full activity log: `log.md` in this directory.
+
+Each suggestion was re-checked against (a) whether the two newly-completed specs obsoleted or relocated the underlying concern, and (b) the current codebase state.
+
+| # | Suggestion | Disposition | Spec that touched it | Evidence (file:line) |
+|---|---|---|---|---|
+| 1 | Remove `.orig` / `.bak` artifacts | Already implemented | none (summary-and-suggest plan) | Both files absent from disk and git tracking |
+| 2 | Replace debug-only frontmatter repro | Already implemented | none (summary-and-suggest plan) | `compose/mod.rs:4523` is now an `assert!(…)` inside a regression test; no `DM_DEBUG` / `dbg!` remains in `lib/src/markdown/compose/`; the only `eprintln!` is the legitimate multi-H1 warning at `expression/functions.rs:940` |
+| 3 | Split CLI commands into modules | Already implemented | none (summary-and-suggest plan) | `cli/src/commands.rs` is 1,037 lines (was 2,819); `cli/src/commands/{compose,hash,frontmatter,code_block,schema}/` exist with `run_*` entrypoints |
+| 4 | Reduce `ComposeOperation` metadata drift | Already implemented | none (summary-and-suggest plan) | `ComposeOperationDescriptor` at `compose/types.rs:132`; static table `COMPOSE_OPERATION_DESCRIPTORS` at `:154`; invariant tests at `:3129` (contiguous indices, default-order filter) |
+| 5 | Fix compose phase docs (three → four) | Implemented; follow-up doc drift fixed 2026-06-16 | resolution-context (touched `mod.rs:560-567` for the frontmatter ordering invariant); three→four fix from summary-and-suggest plan | `compose/mod.rs:4` says "four phases"; `:571` lists Inline Pre / Transclusion / Inline Post / Finalization; `review-2.md` found stale phase wording in `.claude/skills/darkmatter/compose.md`, `.claude/skills/darkmatter/structure.md`, and `darkmatter/docs/lsp/features.md`; those references now name all four phases |
+| 6 | DRY `md code-block --output markdown` serialization | Already implemented | none (summary-and-suggest plan) | `code_block_markdown` helper at `cli/src/commands/code_block.rs:165`, called once at `:101` and reused by both stdout (`:120`) and `--show` (`:140`); 7 tests at `:232-296` including byte-identical-artifact |
+| 7 | Avoid highlight parser drift | Already implemented | none (summary-and-suggest plan) | `pub fn parse_highlight_spec` at `lib/src/markdown/dsl/mod.rs:201`; `parse_code_info` calls it at `dsl/parser.rs:120`; CLI-local `parse_highlight_cli` deleted; `cli/src/commands/code_block.rs:9,92` imports and calls the shared helper |
+| 8 | Delay theme resolution | Already implemented | none (summary-and-suggest plan) | `ResolvedTheme::from_cli` exists at only 3 sites, all in `cli/src/output.rs` (`:62` terminal, `:526` HTML, `:554` MarkdownPlus); `markdown_artifact` (`:512`) and `json_artifact` (`:576`) skip theme resolution; compose gating at `cli/src/commands/compose.rs:472-511` |
+| 9 | God-file guardrails | Already implemented (process) | none (summary-and-suggest plan Phase 4d) | Extraction rules codified at `compose/mod.rs:57-69` ("## Maintenance" section: new toggleable stages add a `ComposeOperationDescriptor` + dedicated module; new render-tree blocks extend a dedicated `render_tree/` module; large in-file tests move to a sibling `tests` module). `fold.rs` unchanged at 2,674 lines and `compose/mod.rs` at 6,919 — by design (no speculative split) |
+
+**Outcome.** No suggestion was obsoleted by the grammar or resolution-context specs — those specs touched several of the same files (`compose/mod.rs`, `frontmatter_interpolation.rs`, `frontmatter_shell_expansion.rs`, `code_block.rs`, the skill files) but for different concerns. All nine suggestions were resolved by the existing `darkmatter/features/2026-06-14-summary-and-suggest/plan.md` work, which is marked `status: completed` and was written to assume the grammar spec had landed.
+
+**Remaining-valid items requiring implementation: none.** Phase 3 of the follow-up was a no-op; see `log.md`.
+
+**Follow-up correction (2026-06-16).** `review-2.md` found that suggestion 5 was only partially complete: three skill/topic docs still described the compose pipeline as three phases or omitted Finalization. Those references were updated to name all four phases.
