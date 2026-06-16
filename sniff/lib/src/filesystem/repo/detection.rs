@@ -283,9 +283,9 @@ pub(crate) fn detect_repo_inner_with_shared(
 
     // Polyglot leaf-marker build systems contribute one outcome per workspace
     // root (Bazel segments nested `WORKSPACE` subtrees into their own layer).
-    collect_outcomes(detect_bazel_workspace(root)?, &mut packages, &mut outcomes);
-    collect_outcomes(detect_pants_workspace(root)?, &mut packages, &mut outcomes);
-    collect_outcomes(detect_buck2_workspace(root)?, &mut packages, &mut outcomes);
+    collect_outcomes(root, detect_bazel_workspace(root)?, &mut packages, &mut outcomes);
+    collect_outcomes(root, detect_pants_workspace(root)?, &mut packages, &mut outcomes);
+    collect_outcomes(root, detect_buck2_workspace(root)?, &mut packages, &mut outcomes);
 
     // Root-manifest standards (pnpm, npm, Go, Gradle, Maven, ...) only fired
     // at the supplied root above. Walk the tree once for their marker files
@@ -472,15 +472,21 @@ fn collect_standard_outcome(
 ///
 /// Leaf-marker detectors (Bazel/Pants/Buck2) may report more than one workspace
 /// root, so they hand back a list of [`DetectorOutcome`]s rather than a single
-/// [`RepoInfo`]. Each outcome's packages also join the flat `packages` list so
-/// `RepoInfo` continues to surface them.
+/// [`RepoInfo`]. Each outcome's packages are layer-root-relative; before joining
+/// the flat `packages` list they are rebased to repo-root-relative so
+/// `RepoInfo.packages` stays uniformly framed.
 fn collect_outcomes(
+    repo_root: &Path,
     detected: Vec<DetectorOutcome>,
     packages: &mut Vec<Package>,
     outcomes: &mut Vec<DetectorOutcome>,
 ) {
     for outcome in detected {
-        packages.extend(outcome.packages.clone());
+        let mut flat_packages = outcome.packages.clone();
+        for pkg in &mut flat_packages {
+            rebase_package_to_root(pkg, repo_root);
+        }
+        packages.extend(flat_packages);
         outcomes.push(outcome);
     }
 }
@@ -926,6 +932,19 @@ fn make_package_area(relative: &str) -> String {
         Some(parent) if !parent.as_os_str().is_empty() => parent.to_string_lossy().to_string(),
         _ => "root".to_string(),
     }
+}
+
+/// Rebase a package's `relative` and `package_area` fields against `new_root`,
+/// deriving both from the package's absolute `path`.
+///
+/// sniff keeps two path frames explicit: [`DetectorOutcome`] packages are
+/// layer-root-relative (so [`MonorepoLayer`] paths and lockfile matching stay
+/// correct), while the flat `RepoInfo.packages` list is repo-root-relative
+/// (so dirty/staged matching, `--package-area`, and JSON reporting work).
+/// This helper is the boundary between the two frames.
+pub(crate) fn rebase_package_to_root(pkg: &mut Package, new_root: &Path) {
+    pkg.relative = make_relative_path(&pkg.path, new_root);
+    pkg.package_area = make_package_area(&pkg.relative);
 }
 
 /// Detects structured file metadata in a package directory.

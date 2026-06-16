@@ -20,7 +20,7 @@ use ignore::WalkBuilder;
 use crate::Result;
 use crate::filesystem::file_types::should_skip_directory_name;
 
-use super::detection::create_package;
+use super::detection::{create_package, rebase_package_to_root};
 use super::standard::MonorepoStandard;
 use super::topology::DetectorOutcome;
 use super::types::{MonorepoTool, Package, PackageDiscoverySource};
@@ -100,8 +100,10 @@ fn into_outcomes(
 /// A directory's owning workspace is the deepest `nested_root` marker on the
 /// path from `root` to the directory (inclusive); `root` itself is always a
 /// workspace. When `nested_roots` is empty there is no segmentation and every
-/// package belongs to `root`. Package paths are built relative to `root` so they
-/// stay consistent with the rest of sniff's repo-root-relative reporting.
+/// package belongs to `root`. Package paths are built relative to their owning
+/// workspace root (`ws_root`) so [`DetectorOutcome`] packages are consistently
+/// layer-root-relative; the caller rebases them to repo-root-relative when
+/// folding into the flat `RepoInfo.packages` list.
 fn walk_leaf_workspaces(
     root: &Path,
     leaf_files: &[&str],
@@ -141,13 +143,15 @@ fn walk_leaf_workspaces(
             let packages = leaf_dirs
                 .into_iter()
                 .map(|dir| {
-                    create_package(
+                    let mut pkg = create_package(
                         &dir,
                         root,
                         MonorepoTool::Unknown,
                         &lock_versions,
                         PackageDiscoverySource::ManifestScan,
-                    )
+                    );
+                    rebase_package_to_root(&mut pkg, &ws_root);
+                    pkg
                 })
                 .collect();
             LeafWorkspace {
@@ -229,9 +233,11 @@ mod tests {
             nested.packages.iter().map(|p| p.relative.clone()).collect();
         nested_rels.sort();
         // The nested subtree is owned by the nested workspace, never the parent.
+        // Layer paths are relative to the nested workspace root: the root package
+        // itself has an empty relative path, and `sub` is one level down.
         assert_eq!(
             nested_rels,
-            vec!["nested".to_string(), "nested/sub".to_string()]
+            vec!["".to_string(), "sub".to_string()]
         );
     }
 

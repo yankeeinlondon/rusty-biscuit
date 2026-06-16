@@ -364,6 +364,37 @@ fn test_nested_pnpm_under_cargo_is_discovered_as_its_own_layer() {
         .expect("nested pnpm workspace must produce its own layer");
     assert_eq!(pnpm_layer.root, path.join("web"));
     assert_eq!(pnpm_layer.packages.len(), 2);
+
+    // Layer packages are relative to the nested workspace root (`web/`), not
+    // the repo root — so `packages/app`, not `web/packages/app`.
+    let layer_rels: Vec<String> = pnpm_layer
+        .packages
+        .iter()
+        .map(|p| p.relative.to_string_lossy().into_owned())
+        .collect();
+    assert!(layer_rels.contains(&"packages/app".to_string()));
+    assert!(
+        !layer_rels.contains(&"web/packages/app".to_string()),
+        "layer packages must stay layer-root-relative, got: {layer_rels:?}"
+    );
+
+    // The flat `RepoInfo.packages` list is repo-root-relative: the nested pnpm
+    // packages appear under their `web/` prefix so dirty/staged matching and
+    // `--package-area` filtering see the real on-disk paths.
+    let flat_rels: Vec<String> = repo
+        .packages
+        .iter()
+        .flatten()
+        .map(|p| p.relative.clone())
+        .collect();
+    assert!(
+        flat_rels.contains(&"web/packages/app".to_string()),
+        "flat package list must be repo-root-relative, got: {flat_rels:?}"
+    );
+    assert!(
+        !flat_rels.contains(&"packages/app".to_string()),
+        "layer-relative paths must not leak into the flat list: {flat_rels:?}"
+    );
 }
 
 #[test]
@@ -430,6 +461,32 @@ fn test_nested_cargo_under_pnpm_is_discovered_as_its_own_layer() {
         cargo_layer.packages.len(),
         2,
         "nested Cargo workspace must resolve both members"
+    );
+
+    // Layer packages are relative to the nested Cargo root (`crates/`), not the
+    // repo root — so `alpha` / `beta`, not `crates/alpha` / `crates/beta`.
+    let layer_rels: Vec<String> = cargo_layer
+        .packages
+        .iter()
+        .map(|p| p.relative.to_string_lossy().into_owned())
+        .collect();
+    assert!(layer_rels.contains(&"alpha".to_string()));
+    assert!(
+        !layer_rels.contains(&"crates/alpha".to_string()),
+        "layer packages must stay layer-root-relative, got: {layer_rels:?}"
+    );
+
+    // The flat list stays repo-root-relative so dirty/staged matching sees the
+    // real `crates/alpha` paths.
+    let flat_rels: Vec<String> = repo
+        .packages
+        .iter()
+        .flatten()
+        .map(|p| p.relative.clone())
+        .collect();
+    assert!(
+        flat_rels.contains(&"crates/alpha".to_string()),
+        "flat package list must be repo-root-relative, got: {flat_rels:?}"
     );
 }
 
@@ -1110,7 +1167,22 @@ fn test_bazel_workspace_segments_nested_workspace_into_its_own_layer() {
         .iter()
         .map(|p| p.relative.to_string_lossy().into_owned())
         .collect();
-    assert_eq!(nested_rels, vec!["nested".to_string()]);
+    // Layer paths are relative to the nested workspace root, so the package at
+    // `nested/BUILD` has an empty relative path.
+    assert_eq!(nested_rels, vec!["".to_string()]);
+
+    // The flat `RepoInfo.packages` list stays repo-root-relative: the nested
+    // package appears under its repo-root prefix `nested`.
+    let flat_rels: Vec<String> = repo
+        .packages
+        .iter()
+        .flatten()
+        .map(|p| p.relative.clone())
+        .collect();
+    assert!(
+        flat_rels.contains(&"nested".to_string()),
+        "flat package list must be repo-root-relative, got: {flat_rels:?}"
+    );
 }
 
 #[test]

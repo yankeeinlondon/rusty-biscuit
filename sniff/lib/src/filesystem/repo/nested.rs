@@ -177,6 +177,7 @@ pub(crate) fn discover_nested_workspace_outcomes(
             dispatch_detector_at(
                 standard,
                 &candidate.root,
+                root,
                 manifest_index,
                 workspace_tools,
                 packages,
@@ -290,9 +291,14 @@ fn walk_for_nested_markers(root: &Path) -> Vec<Candidate> {
 
 /// Dispatch the detector for `standard` at `target`, folding any
 /// [`RepoInfo`] it returns into the shared collections.
+///
+/// `repo_root` is the outer repository root, used to rebase packages from the
+/// detector's layer-root-relative frame into the repo-root-relative frame the
+/// flat `packages` list requires. Outcome packages stay layer-root-relative.
 fn dispatch_detector_at(
     standard: MonorepoStandard,
     target: &Path,
+    repo_root: &Path,
     manifest_index: Option<&super::manifest_index::ManifestIndex>,
     workspace_tools: &mut Vec<MonorepoTool>,
     packages: &mut Vec<Package>,
@@ -302,6 +308,7 @@ fn dispatch_detector_at(
         MonorepoStandard::CargoWorkspace => {
             collect_repo_info(
                 detect_cargo_workspace(target)?,
+                repo_root,
                 workspace_tools,
                 packages,
                 outcomes,
@@ -311,6 +318,7 @@ fn dispatch_detector_at(
         MonorepoStandard::NpmWorkspaces => {
             collect_repo_info(
                 detect_npm_workspace(target)?,
+                repo_root,
                 workspace_tools,
                 packages,
                 outcomes,
@@ -320,6 +328,7 @@ fn dispatch_detector_at(
         MonorepoStandard::PnpmWorkspaces => {
             collect_repo_info(
                 detect_pnpm_workspace(target)?,
+                repo_root,
                 workspace_tools,
                 packages,
                 outcomes,
@@ -329,6 +338,7 @@ fn dispatch_detector_at(
         MonorepoStandard::YarnWorkspaces => {
             collect_repo_info(
                 detect_yarn_workspace(target)?,
+                repo_root,
                 workspace_tools,
                 packages,
                 outcomes,
@@ -336,18 +346,37 @@ fn dispatch_detector_at(
             );
         }
         MonorepoStandard::BunWorkspaces => {
-            collect_standard_outcome(detect_bun_workspace(target)?, standard, packages, outcomes);
+            collect_standard_outcome(
+                detect_bun_workspace(target)?,
+                standard,
+                repo_root,
+                packages,
+                outcomes,
+            );
         }
         MonorepoStandard::UvWorkspace => {
-            collect_standard_outcome(detect_uv_workspace(target)?, standard, packages, outcomes);
+            collect_standard_outcome(
+                detect_uv_workspace(target)?,
+                standard,
+                repo_root,
+                packages,
+                outcomes,
+            );
         }
         MonorepoStandard::GoWorkspace => {
-            collect_standard_outcome(detect_go_workspace(target)?, standard, packages, outcomes);
+            collect_standard_outcome(
+                detect_go_workspace(target)?,
+                standard,
+                repo_root,
+                packages,
+                outcomes,
+            );
         }
         MonorepoStandard::GradleMultiProject => {
             collect_standard_outcome(
                 detect_gradle_workspace(target)?,
                 standard,
+                repo_root,
                 packages,
                 outcomes,
             );
@@ -356,6 +385,7 @@ fn dispatch_detector_at(
             collect_standard_outcome(
                 detect_maven_workspace(target)?,
                 standard,
+                repo_root,
                 packages,
                 outcomes,
             );
@@ -364,16 +394,24 @@ fn dispatch_detector_at(
             collect_standard_outcome(
                 detect_dotnet_solution(target)?,
                 standard,
+                repo_root,
                 packages,
                 outcomes,
             );
         }
         MonorepoStandard::RushStack => {
-            collect_standard_outcome(detect_rush_workspace(target)?, standard, packages, outcomes);
+            collect_standard_outcome(
+                detect_rush_workspace(target)?,
+                standard,
+                repo_root,
+                packages,
+                outcomes,
+            );
         }
         MonorepoStandard::Nx => {
             collect_repo_info(
                 detect_nx(target, manifest_index)?,
+                repo_root,
                 workspace_tools,
                 packages,
                 outcomes,
@@ -383,6 +421,7 @@ fn dispatch_detector_at(
         MonorepoStandard::Turborepo => {
             collect_repo_info(
                 detect_turborepo(target, manifest_index)?,
+                repo_root,
                 workspace_tools,
                 packages,
                 outcomes,
@@ -392,6 +431,7 @@ fn dispatch_detector_at(
         MonorepoStandard::Lerna => {
             collect_repo_info(
                 detect_lerna(target, manifest_index)?,
+                repo_root,
                 workspace_tools,
                 packages,
                 outcomes,
@@ -410,8 +450,14 @@ fn dispatch_detector_at(
 /// Fold a detector's [`RepoInfo`] into the shared collections, attributing the
 /// outcome to `standard` regardless of the legacy [`MonorepoTool`] the
 /// detector reported.
+///
+/// Outcome packages stay layer-root-relative (relative to the detector's own
+/// root); the flat `packages` list receives repo-root-relative clones so
+/// `RepoInfo.packages` stays uniformly framed for dirty/staged matching and
+/// `--package-area` filtering.
 fn collect_repo_info(
     info: Option<RepoInfo>,
+    repo_root: &Path,
     workspace_tools: &mut Vec<MonorepoTool>,
     packages: &mut Vec<Package>,
     outcomes: &mut Vec<DetectorOutcome>,
@@ -438,13 +484,21 @@ fn collect_repo_info(
         root: info.root,
         packages: detected_packages.clone(),
     });
-    packages.extend(detected_packages);
+    let mut flat_packages = detected_packages;
+    for pkg in &mut flat_packages {
+        super::detection::rebase_package_to_root(pkg, repo_root);
+    }
+    packages.extend(flat_packages);
 }
 
 /// Fold a new-standard detector's result into the topology collections.
+///
+/// Outcome packages stay layer-root-relative; the flat `packages` list receives
+/// repo-root-relative clones (see [`collect_repo_info`]).
 fn collect_standard_outcome(
     info: Option<RepoInfo>,
     standard: MonorepoStandard,
+    repo_root: &Path,
     packages: &mut Vec<Package>,
     outcomes: &mut Vec<DetectorOutcome>,
 ) {
@@ -457,5 +511,9 @@ fn collect_standard_outcome(
         root: info.root,
         packages: detected_packages.clone(),
     });
-    packages.extend(detected_packages);
+    let mut flat_packages = detected_packages;
+    for pkg in &mut flat_packages {
+        super::detection::rebase_package_to_root(pkg, repo_root);
+    }
+    packages.extend(flat_packages);
 }
