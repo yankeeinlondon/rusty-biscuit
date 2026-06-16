@@ -43,8 +43,6 @@ use syntect::highlighting::Color;
 #[cfg(test)]
 pub(crate) use code_block::compute_highlight_bg;
 #[cfg(test)]
-pub(crate) use code_block::find_syntax;
-#[cfg(test)]
 pub(crate) use code_block::render_terminal_code_block as highlight_code;
 
 /// Parse image alt text to extract optional width specification.
@@ -907,6 +905,7 @@ pub(crate) fn adjust_background(
 mod tests {
     use super::*;
     use crate::markdown::highlighting::CodeHighlighter;
+    use crate::markdown::language_grammar::LanguageGrammar;
     use crate::testing::strip_ansi_codes;
 
     fn test_options() -> TerminalOptions {
@@ -1114,7 +1113,7 @@ mod tests {
         let code = "fn main() {}";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1139,7 +1138,7 @@ mod tests {
         let code = "fn main() {}";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1184,7 +1183,7 @@ mod tests {
         let code = "fn main() {}";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1220,7 +1219,7 @@ mod tests {
         let code = "test";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1262,7 +1261,7 @@ mod tests {
         let code = "line 1\nline 2\nline 3";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1306,7 +1305,7 @@ mod tests {
         let code = "line 1\nline 2\nline 3\nline 4\nline 5";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1346,7 +1345,7 @@ mod tests {
         let code = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1391,7 +1390,7 @@ mod tests {
         let code = "line 1\nline 2\nline 3";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1437,7 +1436,7 @@ mod tests {
             "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1474,7 +1473,7 @@ mod tests {
         let code = "let x = 1;";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1533,7 +1532,7 @@ mod tests {
         let code = "line 1\nline 2\nline 3";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1579,7 +1578,7 @@ mod tests {
         let code = "line 1\nline 2\nline 3\nline 4\nline 5";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1647,98 +1646,6 @@ mod tests {
         assert_eq!(highlight_bg.g, 225); // 240 - 15
         assert_eq!(highlight_bg.b, 240); // unchanged
         assert_eq!(highlight_bg.a, 255);
-    }
-
-    #[test]
-    fn test_find_syntax_by_extension() {
-        let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-        let syntax = find_syntax("rs", highlighter.syntax_set());
-
-        assert!(syntax.is_some());
-        assert_eq!(syntax.unwrap().name, "Rust");
-    }
-
-    #[test]
-    fn test_find_syntax_unknown_language() {
-        let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-        let syntax = find_syntax("unknown_language", highlighter.syntax_set());
-
-        // Should return None for unknown languages
-        assert!(syntax.is_none());
-    }
-
-    #[test]
-    fn test_find_syntax_case_insensitive() {
-        let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-
-        // These should all find the Rust syntax
-        assert!(
-            find_syntax("rust", highlighter.syntax_set()).is_some(),
-            "lowercase 'rust' should find Rust syntax"
-        );
-        assert!(
-            find_syntax("Rust", highlighter.syntax_set()).is_some(),
-            "exact 'Rust' should find Rust syntax"
-        );
-        assert!(
-            find_syntax("RUST", highlighter.syntax_set()).is_some(),
-            "uppercase 'RUST' should find Rust syntax"
-        );
-        assert!(
-            find_syntax("rs", highlighter.syntax_set()).is_some(),
-            "extension 'rs' should find Rust syntax"
-        );
-
-        // Python
-        assert!(
-            find_syntax("python", highlighter.syntax_set()).is_some(),
-            "lowercase 'python' should find Python syntax"
-        );
-        assert!(
-            find_syntax("Python", highlighter.syntax_set()).is_some(),
-            "exact 'Python' should find Python syntax"
-        );
-        assert!(
-            find_syntax("py", highlighter.syntax_set()).is_some(),
-            "extension 'py' should find Python syntax"
-        );
-    }
-
-    #[test]
-    fn test_find_syntax_aliases() {
-        let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-
-        // Bash aliases
-        assert!(
-            find_syntax("bash", highlighter.syntax_set()).is_some(),
-            "'bash' should find Bash syntax"
-        );
-        assert!(
-            find_syntax("sh", highlighter.syntax_set()).is_some(),
-            "'sh' should find Bash syntax"
-        );
-        assert!(
-            find_syntax("shell", highlighter.syntax_set()).is_some(),
-            "'shell' alias should find Bash syntax"
-        );
-
-        // JavaScript/TypeScript
-        assert!(
-            find_syntax("js", highlighter.syntax_set()).is_some(),
-            "'js' should find JavaScript syntax"
-        );
-        assert!(
-            find_syntax("javascript", highlighter.syntax_set()).is_some(),
-            "'javascript' alias should find JS syntax"
-        );
-        assert!(
-            find_syntax("ts", highlighter.syntax_set()).is_some(),
-            "'ts' should find TypeScript syntax"
-        );
-        assert!(
-            find_syntax("typescript", highlighter.syntax_set()).is_some(),
-            "'typescript' alias should find TS syntax"
-        );
     }
 
     #[test]

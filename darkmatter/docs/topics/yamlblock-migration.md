@@ -60,7 +60,7 @@ A few other quick conversions:
 - `CodeBlock::new(code)` — plain text; add a language with
   `.with_fence_language("language")`
 - `CodeBlock::with_fence_language(token)` — resolves via
-  [`LanguageGrammar::from_fence_token`](../../lib/src/markdown/language_grammar.rs)
+  [`LanguageGrammar::from_token_or_plain_text`](../../lib/src/markdown/language_grammar.rs)
   (preserves the `sh` / `shell` / `python` / `py` / `yml` / `yaml` aliases)
 - `CodeBlock::with_meta(meta)` — sets `CodeBlockMeta` (title, line
   numbering, highlight ranges) used by the renderer
@@ -135,7 +135,7 @@ path. Removal is tracked separately.
 - `darkmatter/lib/src/markdown/yaml_block.rs` — the deprecated
   `YamlBlock` wrapper (its render methods delegate to `CodeBlock`).
 - `darkmatter/lib/src/markdown/language_grammar.rs` —
-  `LanguageGrammar::from_fence_token` and the guaranteed aliases.
+  `LanguageGrammar` and the guaranteed aliases.
 - `darkmatter/lib/src/markdown/highlighting/themes.rs` —
   `ThemePair::resolve_for_surface` is the single boundary resolver for
   terminal and browser theme/mode selection.

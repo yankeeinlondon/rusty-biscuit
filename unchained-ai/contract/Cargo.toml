@@ -1,0 +1,36 @@
+[package]
+name = "unchained-ai-contract"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+description = "InferenceAdapter backed by the unchained-ai provider abstraction"
+
+[lib]
+name = "unchained_ai_contract"
+path = "src/lib.rs"
+
+[dependencies]
+# Internal
+biscuit-contract = { path = "../../biscuit-contract/lib" }
+unchained-ai = { path = "../lib" }
+
+# Trait object-safety (matches biscuit-contract's #[async_trait] Send bound)
+async-trait = "0.1"
+
+# Async runtime for adapter tests and the execution surface
+tokio = { version = "1", features = ["rt", "macros"] }
+
+# Structured-output schema + payload values, and adapter-owned JSON Schema validation
+serde_json = "1.0"
+jsonschema = { version = "0.42", default-features = false }
+
+# Adapter-internal error type, mapped to InferenceError at the trait boundary
+thiserror = "2.0"
+
+# Redacted diagnostics (secrets never leave tracing)
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+serial_test = "3.0"
+wiremock = "0.6"

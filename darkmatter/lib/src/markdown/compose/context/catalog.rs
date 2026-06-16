@@ -820,6 +820,23 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 6,
     },
+    // ── Agent ───────────────────────────────────────────────────────
+    ContextVariableDescriptor {
+        name: "agent",
+        display_type: ContextValueType::String,
+        description: "Name of the executing agentic CLI, trimmed from the AGENT env var; defaults to \"unknown\".",
+        category: "Agent",
+        subsection: "",
+        order: 1,
+    },
+    ContextVariableDescriptor {
+        name: "model",
+        display_type: ContextValueType::String,
+        description: "Active model identifier, trimmed from the MODEL env var; defaults to \"default\".",
+        category: "Agent",
+        subsection: "",
+        order: 2,
+    },
 ];
 
 /// Returns all context variable descriptors in display order.

@@ -77,6 +77,7 @@ pub fn default_branch() -> Result<String, WorktreeError> {
 /// Parse `git worktree list --porcelain` output into entries.
 pub fn parse_worktree_list(porcelain_output: &str) -> Vec<WorktreeEntry> {
     let cwd = std::env::current_dir().unwrap_or_default();
+    let cwd_canonical = std::fs::canonicalize(&cwd).unwrap_or(cwd.clone());
 
     let mut entries = Vec::new();
     let mut path: Option<PathBuf> = None;
@@ -88,7 +89,7 @@ pub fn parse_worktree_list(porcelain_output: &str) -> Vec<WorktreeEntry> {
         if let Some(rest) = line.strip_prefix("worktree ") {
             // Flush previous entry
             if let Some(p) = path.take() {
-                let is_current = cwd.starts_with(&p);
+                let is_current = is_current_worktree(&cwd, &cwd_canonical, &p);
                 entries.push(WorktreeEntry {
                     path: p,
                     branch: branch.take(),
@@ -109,7 +110,7 @@ pub fn parse_worktree_list(porcelain_output: &str) -> Vec<WorktreeEntry> {
 
     // Flush last entry
     if let Some(p) = path {
-        let is_current = cwd.starts_with(&p);
+        let is_current = is_current_worktree(&cwd, &cwd_canonical, &p);
         entries.push(WorktreeEntry {
             path: p,
             branch: branch.take(),
@@ -121,6 +122,34 @@ pub fn parse_worktree_list(porcelain_output: &str) -> Vec<WorktreeEntry> {
     entries
 }
 
+/// Determine whether a worktree path is the current working directory.
+///
+/// On macOS, system temp directories live under `/var`, which is a symlink to
+/// `/private/var`. `current_dir()` resolves the symlink while git stores the
+/// unresolved path, so a naive `starts_with` check fails. We compare both the
+/// raw and canonicalized forms to handle this.
+fn is_current_worktree(cwd: &Path, cwd_canonical: &Path, worktree_path: &Path) -> bool {
+    if cwd.starts_with(worktree_path) {
+        return true;
+    }
+    if let Ok(wt_canonical) = std::fs::canonicalize(worktree_path)
+        && cwd_canonical.starts_with(&wt_canonical)
+    {
+        return true;
+    }
+    false
+}
+
+/// A snapshot of the worktree listing for a single invocation.
+///
+/// Captures the default branch name resolved by [`list_worktrees`] so callers
+/// do not need to re-derive it (and re-invoke git) downstream.
+#[derive(Debug)]
+pub struct WorktreeList {
+    pub default_branch: String,
+    pub statuses: Vec<WorktreeStatus>,
+}
+
 /// Get status for all worktrees.
 ///
 /// Each worktree's per-entry git work is dispatched in parallel via
@@ -129,16 +158,16 @@ pub fn parse_worktree_list(porcelain_output: &str) -> Vec<WorktreeEntry> {
 /// call (`git merge-tree --write-tree` does a real 3-way merge) so it's only
 /// invoked when both `ahead > 0` and `behind > 0` — otherwise the merge is
 /// trivially a fast-forward and known clean.
-pub fn list_worktrees() -> Result<Vec<WorktreeStatus>, WorktreeError> {
+pub fn list_worktrees() -> Result<WorktreeList, WorktreeError> {
     let porcelain = git_command(&["worktree", "list", "--porcelain"])?;
     let entries = parse_worktree_list(&porcelain);
-    let default = default_branch()?;
+    let default_branch = default_branch()?;
 
     let statuses = std::thread::scope(|scope| {
         let handles: Vec<_> = entries
             .into_iter()
             .map(|entry| {
-                let default = default.as_str();
+                let default = default_branch.as_str();
                 scope.spawn(move || {
                     let dirty_handle = {
                         let path = entry.path.clone();
@@ -180,7 +209,10 @@ pub fn list_worktrees() -> Result<Vec<WorktreeStatus>, WorktreeError> {
             .collect::<Vec<_>>()
     });
 
-    Ok(statuses)
+    Ok(WorktreeList {
+        default_branch,
+        statuses,
+    })
 }
 
 /// A snapshot of the uncommitted files in a worktree, classified by content kind.
@@ -529,6 +561,7 @@ branch refs/heads/fix/bug-42
     }
 
     #[test]
+    #[serial_test::serial]
     fn default_branch_detection() {
         // Should work inside this monorepo
         let result = default_branch();

@@ -465,8 +465,18 @@ fn scan_one_frontmatter(
         // `dir`'s still-literal `$(...)` text and becomes `$(...)/x`, which then
         // trips `scan_frontmatter`'s "trailing content" guard. Deferral keeps it
         // as template text so only the real `$(...)` directive (`dir`) is scanned.
-        let _ =
-            interpolate_frontmatter(fm_clone.frontmatter_mut(), options.context(), false, true);
+        //
+        // Preflight only: shell-command discovery enumerates the reachable
+        // pipelines for the approval workflow; it never performs expression
+        // selection, so it stays context-free (no `ResolutionContext`). The real
+        // run supplies the context.
+        let _ = interpolate_frontmatter(
+            fm_clone.frontmatter_mut(),
+            options.context(),
+            false,
+            true,
+            None,
+        );
     }
 
     let scan_ctx = fm_clone.source_context_for_errors();

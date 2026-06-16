@@ -2,7 +2,7 @@ use crate::args::{Cli, CliFill};
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::layout::{DarkmatterPage, PageComponent};
-use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
+use darkmatter::markdown::highlighting::{ColorMode, ThemePair, detect_code_theme, detect_prose_theme};
 use darkmatter::markdown::output::MermaidMode;
 use darkmatter::markdown::output::terminal::TerminalImageMode;
 use darkmatter::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode};
@@ -24,27 +24,47 @@ pub struct OutputArtifact {
     pub label: &'static str,
 }
 
+/// Resolved theme configuration for an output path that needs one.
+///
+/// The page surface and the nested code-block panel must share a single
+/// source of truth. The `color_mode` is always taken from the [`Terminal`]
+/// that will actually render the page, so the prose/code themes and the
+/// layout context cannot drift.
+#[derive(Debug)]
+struct ResolvedTheme {
+    prose: ThemePair,
+    code: ThemePair,
+    color_mode: ColorMode,
+}
+
+impl ResolvedTheme {
+    fn from_cli(cli: &Cli, terminal: &Terminal) -> Self {
+        let prose = cli.theme.unwrap_or_else(detect_prose_theme);
+        let code = cli.code_theme.unwrap_or_else(|| detect_code_theme(prose));
+        let color_mode = terminal.color_mode();
+        Self {
+            prose,
+            code,
+            color_mode,
+        }
+    }
+}
+
 pub fn render_terminal_output(
     md: &Markdown,
     input_path: Option<&PathBuf>,
     cli: &Cli,
     term: Terminal,
-    prose_theme: ThemePair,
-    code_theme: ThemePair,
-    color_mode: ColorMode,
 ) -> Result<()> {
-    // The `Terminal` is now passed in by the caller (`run_render` in
-    // `commands.rs`) so the page surface and the nested code-block panel
-    // resolve against the same source — Phase 2's "single `Terminal` is
-    // the source of truth" invariant. The `color_mode` parameter is kept
-    // for the `DarkmatterPage::with_color_mode` call so the page's
-    // `LayoutContext::from_page` uses it as the fallback for
-    // `ColorMode::Unknown` (matching the layout context's `surface_mode`
-    // resolution).
+    // Resolve the theme from the same `Terminal` that will render the page.
+    // This keeps the page surface and the nested code-block panel aligned on
+    // a single `color_mode` source of truth.
+    let theme = ResolvedTheme::from_cli(cli, &term);
+
     let mut page = DarkmatterPage::new(&term)
-        .with_prose_theme(prose_theme.kebab_name())
-        .with_code_theme(code_theme.kebab_name())
-        .with_color_mode(color_mode)
+        .with_prose_theme(theme.prose.kebab_name())
+        .with_code_theme(theme.code.kebab_name())
+        .with_color_mode(theme.color_mode)
         .with_code_block_mode(cli.code_block.into())
         .with_image_mode(terminal_image_mode_from_env())
         .with_mermaid_mode(if cli.mermaid {
@@ -499,18 +519,16 @@ pub fn markdown_artifact(md: &Markdown) -> OutputArtifact {
 
 pub fn html_artifact(
     md: &Markdown,
-    prose_theme: ThemePair,
-    code_theme: ThemePair,
-    color_mode: ColorMode,
     cli: &Cli,
     input_path: Option<&PathBuf>,
 ) -> Result<OutputArtifact> {
     let term = Terminal::new_optimistic(120);
+    let theme = ResolvedTheme::from_cli(cli, &term);
     let mut page = apply_cli_layout_flags(
         DarkmatterPage::new(&term)
-            .with_prose_theme(prose_theme.kebab_name())
-            .with_code_theme(code_theme.kebab_name())
-            .with_color_mode(color_mode),
+            .with_prose_theme(theme.prose.kebab_name())
+            .with_code_theme(theme.code.kebab_name())
+            .with_color_mode(theme.color_mode),
         cli,
     );
 
@@ -529,18 +547,16 @@ pub fn html_artifact(
 
 pub fn markdown_plus_artifact(
     md: &Markdown,
-    prose_theme: ThemePair,
-    code_theme: ThemePair,
-    color_mode: ColorMode,
     cli: &Cli,
     input_path: Option<&PathBuf>,
 ) -> Result<OutputArtifact> {
     let term = Terminal::new_optimistic(120);
+    let theme = ResolvedTheme::from_cli(cli, &term);
     let mut page = apply_cli_layout_flags(
         DarkmatterPage::new(&term)
-            .with_prose_theme(prose_theme.kebab_name())
-            .with_code_theme(code_theme.kebab_name())
-            .with_color_mode(color_mode),
+            .with_prose_theme(theme.prose.kebab_name())
+            .with_code_theme(theme.code.kebab_name())
+            .with_color_mode(theme.color_mode),
         cli,
     );
 
