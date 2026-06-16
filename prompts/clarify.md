@@ -21,7 +21,7 @@ Given the functional specification document: {{doc}}. Analyze this document and 
 
 1. what the document clearly defines
 2. what it implies but does not explicitly define
-3. what is ambiguous, underspecified, contradictory, or missing
+3. what is ambiguous, under-specified, contradictory, or missing
 4. what decisions still require explicit human judgment
 5. what questions must be answered before implementation should proceed
 
@@ -91,10 +91,11 @@ Drive the conversation forward through structured human-in-the-loop clarificatio
 
       - For each question the subagent should be sure to provide:
           - the question
-          - adequate contextual information, using examples where appropriate
+          - adequate contextual information, using examples of how this problem presents
       - Provide 3-4 solutions for each question:
           - these solutions should be well thought out and clearly articulated
-          - you should recommend one of the solutions and say why you're recommending it
+            - each solution must include a description, pros/cons of this solution, and an example of what this solution would look like
+          - you must recommend one of the solutions and say WHY you are recommending it
       - Each question should allow the user to choose an option you've provided, or specify a question or offer an alternative solution
 
 2. Present the questions (along with the sub-agent's solutions) to the user one at a time:
