@@ -1,6 +1,7 @@
 # Compose Pipeline
 
-The darkmatter compose pipeline provides document preparation through three phases.
+The darkmatter compose pipeline provides document preparation through four phases:
+Inline Pre, Transclusion, Inline Post, and Finalization.
 
 ## Pipeline Overview
 
