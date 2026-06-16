@@ -10,10 +10,12 @@ use crate::filesystem::file_types::{
     ProgrammingLanguageStats,
 };
 use crate::filesystem::repo::detection::canonicalize_path;
+use crate::filesystem::repo::standard::{DetectedStandard, MonorepoLayer};
 use crate::package::DependencyEntry;
 
 /// Supported monorepo tools and package managers
 #[non_exhaustive]
+#[deprecated(note = "Use MonorepoStandard via RepoInfo::monorepo_layers instead")]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MonorepoTool {
     /// Rust Cargo workspace
@@ -76,7 +78,7 @@ pub enum PackageDiscoverySource {
 }
 
 /// Information about a detected repository
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RepoInfo {
     /// Whether this is a monorepo
     pub is_monorepo: bool,
@@ -103,6 +105,15 @@ pub struct RepoInfo {
     /// Packages within the monorepo (only present when is_monorepo is true)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub packages: Option<Vec<Package>>,
+    /// Standards detected at the repo root, each with its acting binary and
+    /// detection confidence. Additive to the legacy `monorepo_tool` /
+    /// `workspace_tools` fields.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub monorepo_standards: Vec<DetectedStandard>,
+    /// Membership layers: each authority that declares packages plus any
+    /// orchestrators riding on top. A forest, even for single-root repos.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub monorepo_layers: Vec<MonorepoLayer>,
 }
 
 /// A package within a monorepo.
@@ -410,6 +421,8 @@ mod tests {
             dev_dependencies: None,
             peer_dependencies: None,
             optional_dependencies: None,
+            monorepo_standards: Vec::new(),
+            monorepo_layers: Vec::new(),
             packages: Some(vec![
                 Package {
                     path: PathBuf::from("/repo/crates"),
@@ -495,6 +508,8 @@ mod tests {
             dev_dependencies: None,
             peer_dependencies: None,
             optional_dependencies: None,
+            monorepo_standards: Vec::new(),
+            monorepo_layers: Vec::new(),
             packages: Some(vec![
                 Package {
                     path: PathBuf::from("/repo/sniff/lib"),

@@ -1,16 +1,30 @@
 pub mod area;
 pub mod cargo;
 pub mod detection;
+pub mod dotnet;
+pub mod glob;
 pub mod go;
+pub mod gradle;
 pub mod identity;
 pub(crate) mod manifest_index;
+pub mod maven;
 pub mod npm;
 pub mod nx_turbo;
+pub mod polyglot;
 pub mod python;
+pub mod standard;
+pub(crate) mod topology;
 pub mod types;
+pub mod uv;
 
 pub use area::{AreaError, detect_area};
 pub use identity::{RepoIdentity, detect_repo_identity, detect_repo_identity_with_repo};
+pub use standard::{
+    BinarySource, BinarySpec, DetectedStandard, DetectionConfidence, GlobDialect,
+    InvocationTemplate, LayerPackage, Marker, MarkerConfidence, MarkerContent, MembershipModel,
+    MonorepoLayer, MonorepoStandard, MonorepoStandardSpec, NestingPolicy, PackageProvenance,
+    ResolvedBinary, Role, RootMembership, Token, WorkspaceMultiplicity, WrapperScript,
+};
 pub use types::{
     MonorepoTool, Package, PackageDiscoverySource, PackageEcosystem, RepoInfo, detect_repo,
     detect_repo_structure, detect_repo_with_inventory,

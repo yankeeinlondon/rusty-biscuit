@@ -1,3 +1,10 @@
+// `MonorepoTool` is deprecated in favor of `MonorepoStandard` but remains in
+// use across the library while the legacy `RepoInfo::monorepo_tool` /
+// `workspace_tools` fields are preserved for backward compatibility. The
+// deprecation warning is intentional on the type definition; internal uses
+// during this migration period are expected and should not spam the build.
+#![allow(deprecated)]
+
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Instant;

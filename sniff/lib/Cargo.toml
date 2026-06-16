@@ -14,6 +14,7 @@ dirs = "6"
 ec4rs = "1"
 futures = { version = "0.3", optional = true }
 getifaddrs = "0.6.0"
+globset = "0.4"
 # Production git access is pure-Rust gix. git2 (libgit2) is retained ONLY as a
 # dev-dependency, and only for the fixture operations gix has no write API for —
 # worktree-snapshot commits, checkout, and linked-worktree creation — plus the
