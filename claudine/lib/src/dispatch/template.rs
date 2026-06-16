@@ -179,10 +179,10 @@ impl TemplateVariable {
             TemplateVariable::EnvIsMonorepo => "Monorepo detection (true/false)",
             TemplateVariable::EnvMonorepoStandard => {
                 "Monorepo authority standard (cargo-workspace, pnpm-workspaces, etc.)"
-            },
+            }
             TemplateVariable::EnvMonorepoOrchestrators => {
                 "Orchestrators on the primary monorepo layer (nx, turborepo, lerna)"
-            },
+            }
             TemplateVariable::EnvMonorepoTool => "Deprecated alias for project.monorepo_standard",
         }
     }
@@ -371,7 +371,7 @@ impl TemplateVariable {
             // Environment: Repo
             TemplateVariable::EnvLanguage => {
                 opt_nested_to_cow(meta.env.primary_language.as_deref())
-            },
+            }
             TemplateVariable::EnvIsMonorepo => Cow::Owned(
                 meta.env
                     .repo

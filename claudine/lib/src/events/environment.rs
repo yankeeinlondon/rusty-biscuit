@@ -273,8 +273,7 @@ impl From<sniff::SniffResult> for EnvironmentContext {
         let repo = fs.as_ref().and_then(|f| {
             f.repo.as_ref().map(|r| {
                 let (monorepo_standard, monorepo_orchestrators) = r
-                    .monorepo_layers
-                    .first()
+                    .primary_layer()
                     .map(|layer| {
                         let standard = layer.authority.spec().id.to_string();
                         let orchestrators = layer
@@ -527,11 +526,11 @@ mod tests {
 
     #[test]
     fn from_sniff_result_populates_monorepo_topology() {
+        use sniff::filesystem::FilesystemInfo;
+        use sniff::filesystem::repo::Package;
         use sniff::filesystem::repo::standard::{
             MonorepoLayer, MonorepoStandard, PackageProvenance,
         };
-        use sniff::filesystem::repo::Package;
-        use sniff::filesystem::FilesystemInfo;
 
         let repo = sniff::filesystem::repo::RepoInfo {
             is_monorepo: true,
@@ -572,6 +571,34 @@ mod tests {
         );
         assert_eq!(repo_ctx.monorepo_orchestrators, vec!["nx"]);
         assert_eq!(repo_ctx.monorepo_tool.as_deref(), Some("cargo-workspace"));
+    }
+
+    #[test]
+    fn detect_environment_fast_on_rusty_biscuit_preserves_template_values() {
+        // Regression: template consumers rely on these values staying stable
+        // on the rusty-biscuit repository after topology changes.
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
+        let ctx = detect_environment_fast(repo_root);
+
+        let repo_ctx = ctx.repo.expect("rusty-biscuit should produce repo context");
+        assert!(repo_ctx.is_monorepo);
+        assert_eq!(
+            repo_ctx.monorepo_standard.as_deref(),
+            Some("cargo-workspace"),
+            "monorepo_standard must be cargo-workspace on rusty-biscuit"
+        );
+        assert_eq!(
+            repo_ctx.monorepo_orchestrators,
+            Vec::<String>::new(),
+            "rusty-biscuit has no orchestrators"
+        );
+        assert_eq!(
+            repo_ctx.monorepo_tool.as_deref(),
+            Some("cargo-workspace"),
+            "deprecated monorepo_tool alias must equal monorepo_standard"
+        );
+        assert!(!repo_ctx.packages.is_empty(), "rusty-biscuit has packages");
     }
 
     #[test]
