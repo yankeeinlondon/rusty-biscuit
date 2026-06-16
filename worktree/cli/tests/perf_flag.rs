@@ -10,7 +10,7 @@ fn temp_repo() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("create temp dir");
     let path = dir.path();
 
-    run_git(path, &["init"]);
+    run_git(path, &["init", "-b", "main"]);
     run_git(path, &["config", "user.email", "test@example.com"]);
     run_git(path, &["config", "user.name", "Test User"]);
     run_git(path, &["config", "commit.gpgsign", "false"]);
