@@ -1,0 +1,37 @@
+---
+source: sniff/cli/tests/snapshots.rs
+expression: stable_topology_json(&json)
+---
+{
+  "is_monorepo": true,
+  "monorepo_layers": [
+    {
+      "authority": "cargo-workspace",
+      "orchestrators": [],
+      "packages": [
+        {
+          "name": "pkg-a",
+          "provenance": "globbed",
+          "standard": "cargo-workspace"
+        },
+        {
+          "name": "pkg-b",
+          "provenance": "globbed",
+          "standard": "cargo-workspace"
+        }
+      ],
+      "provenance": "globbed"
+    }
+  ],
+  "monorepo_standards": [
+    {
+      "confidence": "marker-confirmed",
+      "standard": "cargo-workspace"
+    }
+  ],
+  "monorepo_tool": "CargoWorkspace",
+  "package_count": 2,
+  "workspace_tools": [
+    "CargoWorkspace"
+  ]
+}

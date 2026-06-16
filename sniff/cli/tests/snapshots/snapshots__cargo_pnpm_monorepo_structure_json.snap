@@ -1,0 +1,49 @@
+---
+source: sniff/cli/tests/snapshots.rs
+expression: stable_topology_json(&json)
+---
+{
+  "is_monorepo": true,
+  "monorepo_layers": [
+    {
+      "authority": "cargo-workspace",
+      "orchestrators": [],
+      "packages": [
+        {
+          "name": "rust-a",
+          "provenance": "globbed",
+          "standard": "cargo-workspace"
+        }
+      ],
+      "provenance": "globbed"
+    },
+    {
+      "authority": "pnpm-workspaces",
+      "orchestrators": [],
+      "packages": [
+        {
+          "name": "js-a",
+          "provenance": "globbed",
+          "standard": "pnpm-workspaces"
+        }
+      ],
+      "provenance": "globbed"
+    }
+  ],
+  "monorepo_standards": [
+    {
+      "confidence": "marker-confirmed",
+      "standard": "cargo-workspace"
+    },
+    {
+      "confidence": "inferred",
+      "standard": "pnpm-workspaces"
+    }
+  ],
+  "monorepo_tool": "CargoWorkspace",
+  "package_count": 2,
+  "workspace_tools": [
+    "CargoWorkspace",
+    "PnpmWorkspaces"
+  ]
+}

@@ -1,0 +1,12 @@
+---
+source: sniff/cli/tests/snapshots.rs
+expression: "normalize_snapshot_paths(&stdout, &path)"
+---
+
+Repository (2 layers)
+
+- Cargo Workspace — 1 package
+- pnpm Workspaces — 1 package
+- root
+    - js-a v0.1.0 (js-a)
+    - rust-a v0.1.0 (rust-a) [Rust]
