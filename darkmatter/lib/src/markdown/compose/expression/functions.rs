@@ -12,10 +12,201 @@ use chrono::{Datelike, Local, NaiveDate, NaiveDateTime, Utc};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+use biscuit_terminal::components::prose::Prose;
+
 use super::{json_number, scalar_string, to_number, to_number_coerce};
 use super::resolve_ctx::{ResolutionContext, is_remote_url, normalize_path_arg};
 use crate::markdown::Markdown;
 use crate::markdown::schemas::DarkmatterSchemas;
+
+/// Parsed components of an indexed filename stem.
+///
+/// The indexed grammar is `(?P<base>.+)-(?P<digits>[0-9]+)` with the additional
+/// constraint that the separating hyphen is not preceded by another hyphen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) struct IndexedName {
+    pub base: String,
+    pub index: u64,
+}
+
+/// Parses a filename stem against the indexed-file grammar.
+///
+/// Accepts `review-1`, `review-100`, and `review-001`. Rejects `review1`,
+/// `review_1`, `review-`, and `review--1`.
+#[allow(dead_code)]
+pub(crate) fn parse_indexed_stem(stem: &str) -> Option<IndexedName> {
+    let last_hyphen = stem.rfind('-')?;
+    if last_hyphen == 0 {
+        return None;
+    }
+    // The hyphen immediately before the index must not itself be preceded by a
+    // hyphen; otherwise the base would end with `-` (e.g. `review--1`).
+    if stem.as_bytes().get(last_hyphen - 1) == Some(&b'-') {
+        return None;
+    }
+    let base = &stem[..last_hyphen];
+    let digits = &stem[last_hyphen + 1..];
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let index = digits.parse::<u64>().ok()?;
+    Some(IndexedName {
+        base: base.to_string(),
+        index,
+    })
+}
+
+/// Returns the extension portion of a basename using `std::path` semantics.
+///
+/// The extension is everything after the final `.`; an empty string is returned
+/// when the path has no extension. This mirrors `Path::extension` so the
+/// indexed-stem parser and the future `ext()` function agree.
+#[allow(dead_code)]
+pub(crate) fn file_extension(basename: &str) -> String {
+    Path::new(basename)
+        .extension()
+        .map(|e| e.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
+/// Returns the stem portion of a basename using `std::path` semantics.
+#[allow(dead_code)]
+pub(crate) fn file_stem(basename: &str) -> String {
+    Path::new(basename)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| basename.to_string())
+}
+
+/// Renders a path with `/` separators for stable Markdown output.
+///
+/// Platform path semantics are used for parsing; the result is normalized to
+/// forward slashes so composed Markdown is portable.
+#[allow(dead_code)]
+pub(crate) fn display_path_with_forward_slashes(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+/// Resolves skill roots for an executing agent with injectable directories.
+///
+/// User-scoped roots are derived from `home_dir`; local-scoped roots are derived
+/// from `local_root` (typically the nearest git root or document base dir).
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub(crate) struct SkillRoots {
+    home_dir: PathBuf,
+    local_root: PathBuf,
+}
+
+impl SkillRoots {
+    #[allow(dead_code)]
+    pub(crate) fn new(home_dir: PathBuf, local_root: PathBuf) -> Self {
+        Self {
+            home_dir,
+            local_root,
+        }
+    }
+
+    /// Normalizes an agent name to its canonical form.
+    ///
+    /// Returns `Some("claude" | "opencode" | "codex")` for recognized names and
+    /// aliases; returns `None` for unknown agents.
+    #[allow(dead_code)]
+    pub(crate) fn normalize_agent(name: &str) -> Option<&'static str> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "claude" | "claude_code" | "claude-code" => Some("claude"),
+            "opencode" | "open_code" | "open-code" => Some("opencode"),
+            "codex" => Some("codex"),
+            _ => None,
+        }
+    }
+
+    #[allow(dead_code)]
+    fn user_root(&self, canonical: &str) -> Option<PathBuf> {
+        match canonical {
+            "claude" => Some(self.home_dir.join(".claude").join("skills")),
+            "opencode" => Some(self.home_dir.join(".config").join("opencode").join("skill")),
+            "codex" => Some(self.home_dir.join(".codex").join("skills")),
+            _ => None,
+        }
+    }
+
+    #[allow(dead_code)]
+    fn local_roots(&self, canonical: Option<&str>) -> Vec<PathBuf> {
+        match canonical {
+            Some("claude") => vec![
+                self.local_root.join(".claude").join("skills"),
+                self.local_root.join(".agents").join("skills"),
+                self.local_root.join(".codex").join("skills"),
+            ],
+            Some("opencode") => vec![
+                self.local_root.join(".opencode").join("skill"),
+                self.local_root.join(".agents").join("skills"),
+                self.local_root.join(".codex").join("skills"),
+            ],
+            Some("codex") => vec![
+                self.local_root.join(".codex").join("skills"),
+                self.local_root.join(".agents").join("skills"),
+            ],
+            _ => vec![
+                self.local_root.join(".agents").join("skills"),
+                self.local_root.join(".codex").join("skills"),
+            ],
+        }
+    }
+
+    /// Returns every root that should be searched for the given agent.
+    ///
+    /// For recognized agents this includes the user-scoped root plus the
+    /// relevant local-scoped roots. Unknown agents search only the generic
+    /// `.agents/skills` and `.codex/skills` local roots.
+    #[allow(dead_code)]
+    pub(crate) fn roots_for_agent(&self, name: &str) -> Vec<PathBuf> {
+        let canonical = Self::normalize_agent(name);
+        let mut roots = Vec::new();
+        if let Some(c) = canonical
+            && let Some(user) = self.user_root(c)
+        {
+            roots.push(user);
+        }
+        roots.extend(self.local_roots(canonical));
+        roots
+    }
+}
+
+/// Removes strict `YYYY-MM-DD` substrings that parse as real calendar dates.
+///
+/// Invalid dates such as `2026-02-30` are left untouched. Datetime strings keep
+/// only their date portion removed. Whitespace and punctuation around removed
+/// substrings are preserved.
+#[allow(dead_code)]
+pub(crate) fn remove_date_substrings(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i + 10 <= s.len() {
+        let candidate = &s[i..i + 10];
+        let bytes = candidate.as_bytes();
+        if bytes[4] == b'-'
+            && bytes[7] == b'-'
+            && parse_iso_date(candidate).is_some()
+        {
+            i += 10;
+            continue;
+        }
+        // Push one UTF-8 character at a time so multi-byte input is handled
+        // correctly even though the date candidate is byte-aligned ASCII.
+        let ch = s[i..].chars().next().expect("valid UTF-8");
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    while i < s.len() {
+        let ch = s[i..].chars().next().expect("valid UTF-8");
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
 
 /// Tests whether the value is "empty" per the spec: `null`, empty string,
 /// empty array, or empty object. Numbers, booleans, and non-empty containers
@@ -97,6 +288,38 @@ pub fn is_object(args: &[Value]) -> Result<Value, String> {
 pub fn is_empty_fn(args: &[Value]) -> Result<Value, String> {
     require_args("is_empty", args, 1)?;
     Ok(Value::Bool(is_empty(&args[0])))
+}
+
+/// `is_positive(val)` — `true` only when `to_number(val) > 0`.
+pub fn is_positive(args: &[Value]) -> Result<Value, String> {
+    require_args("is_positive", args, 1)?;
+    match to_number(&args[0]) {
+        Some(n) => Ok(Value::Bool(n > 0.0)),
+        None => Err("is_positive() cannot coerce argument to a number".to_string()),
+    }
+}
+
+/// `is_negative(val)` — `true` only when `to_number(val) < 0`.
+pub fn is_negative(args: &[Value]) -> Result<Value, String> {
+    require_args("is_negative", args, 1)?;
+    match to_number(&args[0]) {
+        Some(n) => Ok(Value::Bool(n < 0.0)),
+        None => Err("is_negative() cannot coerce argument to a number".to_string()),
+    }
+}
+
+/// `is_integer(val)` — inspecting predicate; `true` only for JSON numbers with
+/// no fractional component. Never errors and does not null-propagate.
+pub fn is_integer(args: &[Value]) -> Result<Value, String> {
+    require_args("is_integer", args, 1)?;
+    let ok = match &args[0] {
+        Value::Number(n) => n
+            .as_f64()
+            .map(|f| f.is_finite() && f.fract() == 0.0)
+            .unwrap_or(false),
+        _ => false,
+    };
+    Ok(Value::Bool(ok))
 }
 
 /// `min(a, b)`.
@@ -302,6 +525,120 @@ pub fn title_case(args: &[Value]) -> Result<Value, String> {
         }
         parts.join(" ")
     })
+}
+
+/// `without_date(string)` — removes strict `YYYY-MM-DD` substrings that parse
+/// as real calendar dates. Null-propagates; non-string arguments error.
+pub fn without_date(args: &[Value]) -> Result<Value, String> {
+    require_args("without_date", args, 1)?;
+    if args[0].is_null() {
+        return Ok(Value::Null);
+    }
+    let s = require_string("without_date", &args[0])?;
+    Ok(Value::String(remove_date_substrings(s)))
+}
+
+/// Whether a scalar JSON value is usable as a string/number operand for
+/// `ensure_leading` / `ensure_trailing`. Arrays, objects, and booleans are
+/// rejected; strings and numbers are accepted.
+fn ensure_operand(value: &Value) -> Result<String, String> {
+    match value {
+        Value::String(s) => Ok(s.clone()),
+        Value::Number(n) => Ok(scalar_string(value)),
+        Value::Bool(_) => Err("ensure_leading() does not accept boolean arguments".to_string()),
+        Value::Array(_) | Value::Object(_) => {
+            Err("ensure_leading() does not accept array or object arguments".to_string())
+        }
+        Value::Null => Ok(String::new()),
+    }
+}
+
+/// Returns `true` when `s` parses as a finite number.
+fn is_numberlike_string(s: &str) -> bool {
+    s.parse::<f64>().map(|f| f.is_finite()).unwrap_or(false)
+}
+
+/// Builds a numeric result from concatenated decimal string forms, falling
+/// back to a string when the value is not representable as JSON number.
+fn ensure_numeric_concat(concatenated: &str) -> Result<Value, String> {
+    if let Some(n) = concatenated.parse::<f64>().ok().filter(|f| f.is_finite()) {
+        if let Ok(v) = json_number(n) {
+            return Ok(v);
+        }
+    }
+    Ok(Value::String(concatenated.to_string()))
+}
+
+/// `ensure_leading(var, prefix)` — ensures the string form of `var` starts
+/// with the string form of `prefix`. Preserves the original JSON type when
+/// already prefixed; returns a JSON number when `var` is a number and the
+/// result is representable.
+pub fn ensure_leading(args: &[Value]) -> Result<Value, String> {
+    require_args("ensure_leading", args, 2)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let var = &args[0];
+    let prefix = &args[1];
+    if matches!(var, Value::Bool(_) | Value::Array(_) | Value::Object(_))
+        || matches!(prefix, Value::Bool(_) | Value::Array(_) | Value::Object(_))
+    {
+        return Err("ensure_leading() arguments must be strings or numbers".to_string());
+    }
+    let var_str = ensure_operand(var)?;
+    let prefix_str = ensure_operand(prefix)?;
+    if var_str.starts_with(&prefix_str) {
+        return Ok(var.clone());
+    }
+    let combined = format!("{prefix_str}{var_str}");
+    if matches!(var, Value::Number(_))
+        && (matches!(prefix, Value::Number(_)) || is_numberlike_string(&prefix_str))
+    {
+        ensure_numeric_concat(&combined)
+    } else {
+        Ok(Value::String(combined))
+    }
+}
+
+/// `ensure_trailing(var, postfix)` — ensures the string form of `var` ends
+/// with the string form of `postfix`. Same type-preservation rules as
+/// [`ensure_leading`].
+pub fn ensure_trailing(args: &[Value]) -> Result<Value, String> {
+    require_args("ensure_trailing", args, 2)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let var = &args[0];
+    let postfix = &args[1];
+    if matches!(var, Value::Bool(_) | Value::Array(_) | Value::Object(_))
+        || matches!(postfix, Value::Bool(_) | Value::Array(_) | Value::Object(_))
+    {
+        return Err("ensure_trailing() arguments must be strings or numbers".to_string());
+    }
+    let var_str = ensure_operand(var)?;
+    let postfix_str = ensure_operand(postfix)?;
+    if var_str.ends_with(&postfix_str) {
+        return Ok(var.clone());
+    }
+    let combined = format!("{var_str}{postfix_str}");
+    if matches!(var, Value::Number(_))
+        && (matches!(postfix, Value::Number(_)) || is_numberlike_string(&postfix_str))
+    {
+        ensure_numeric_concat(&combined)
+    } else {
+        Ok(Value::String(combined))
+    }
+}
+
+/// `terminal(string)` — renders Prose markup to a terminal string with
+/// deterministic, non-interactive terminal settings.
+pub fn terminal(args: &[Value]) -> Result<Value, String> {
+    require_args("terminal", args, 1)?;
+    if args[0].is_null() {
+        return Ok(Value::Null);
+    }
+    let s = require_string("terminal", &args[0])?;
+    Ok(Value::String(Prose::new(s).render_optimistic(None)))
 }
 
 /// Parses a strict ISO date `YYYY-MM-DD`.
@@ -906,6 +1243,9 @@ pub const PURE_FUNCTIONS: &[PureFunction] = &[
     PureFunction { canonical: "is_null", aliases: &["isnull"], signatures: &["is_null(x)"], handler: is_null },
     PureFunction { canonical: "is_object", aliases: &["isobject"], signatures: &["is_object(x)"], handler: is_object },
     PureFunction { canonical: "is_empty", aliases: &["isempty"], signatures: &["is_empty(x)"], handler: is_empty_fn },
+    PureFunction { canonical: "is_positive", aliases: &["ispositive"], signatures: &["is_positive(val)"], handler: is_positive },
+    PureFunction { canonical: "is_negative", aliases: &["isnegative"], signatures: &["is_negative(val)"], handler: is_negative },
+    PureFunction { canonical: "is_integer", aliases: &["isinteger"], signatures: &["is_integer(val)"], handler: is_integer },
     // Math helpers
     PureFunction { canonical: "min", aliases: &[], signatures: &["min(a, b)"], handler: min_fn },
     PureFunction { canonical: "max", aliases: &[], signatures: &["max(a, b)"], handler: max_fn },
@@ -931,6 +1271,11 @@ pub const PURE_FUNCTIONS: &[PureFunction] = &[
     PureFunction { canonical: "camel_case", aliases: &["camelcase"], signatures: &["camel_case(x)"], handler: camel_case },
     PureFunction { canonical: "pascal_case", aliases: &["pascalcase"], signatures: &["pascal_case(x)"], handler: pascal_case },
     PureFunction { canonical: "title_case", aliases: &["titlecase"], signatures: &["title_case(x)"], handler: title_case },
+    PureFunction { canonical: "without_date", aliases: &["withoutdate"], signatures: &["without_date(string)"], handler: without_date },
+    PureFunction { canonical: "ensure_leading", aliases: &["ensureleading"], signatures: &["ensure_leading(var, prefix)"], handler: ensure_leading },
+    PureFunction { canonical: "ensure_trailing", aliases: &["ensuretrailing"], signatures: &["ensure_trailing(var, postfix)"], handler: ensure_trailing },
+    // Rendering
+    PureFunction { canonical: "terminal", aliases: &["terminal"], signatures: &["terminal(string)"], handler: terminal },
     // Date formatting
     PureFunction { canonical: "date", aliases: &[], signatures: &["date(iso, fmt)"], handler: date_fn },
     // Strict date validators
@@ -1780,6 +2125,164 @@ mod fn_remote_tests {
         assert!(
             err.contains("remote reads are not enabled"),
             "unexpected message: {err}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod phase1_helpers {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn parse_indexed_stem_accepts_spec_examples() {
+        assert_eq!(
+            parse_indexed_stem("review-1"),
+            Some(IndexedName {
+                base: "review".to_string(),
+                index: 1,
+            })
+        );
+        assert_eq!(
+            parse_indexed_stem("review-100"),
+            Some(IndexedName {
+                base: "review".to_string(),
+                index: 100,
+            })
+        );
+        assert_eq!(
+            parse_indexed_stem("review-001"),
+            Some(IndexedName {
+                base: "review".to_string(),
+                index: 1,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_indexed_stem_rejects_spec_examples() {
+        assert!(parse_indexed_stem("review1").is_none());
+        assert!(parse_indexed_stem("review_1").is_none());
+        assert!(parse_indexed_stem("review-").is_none());
+        assert!(parse_indexed_stem("review--1").is_none());
+        assert!(parse_indexed_stem("-1").is_none());
+    }
+
+    #[test]
+    fn file_stem_and_extension_split_basenames() {
+        assert_eq!(file_stem("review-1.md"), "review-1");
+        assert_eq!(file_extension("review-1.md"), "md");
+        assert_eq!(file_stem("review"), "review");
+        assert_eq!(file_extension("review"), "");
+        assert_eq!(file_stem("foo.tar.gz"), "foo.tar");
+        assert_eq!(file_extension("foo.tar.gz"), "gz");
+    }
+
+    #[test]
+    fn display_path_with_forward_slashes_normalizes_separators() {
+        assert_eq!(
+            display_path_with_forward_slashes(Path::new("foo/bar/baz.md")),
+            "foo/bar/baz.md"
+        );
+        assert_eq!(
+            display_path_with_forward_slashes(Path::new("/tmp/foo/bar.md")),
+            "/tmp/foo/bar.md"
+        );
+        // Backslashes are normalized even if the running platform does not use
+        // them as separators, so composed Markdown stays portable.
+        assert_eq!(
+            display_path_with_forward_slashes(Path::new("foo\\bar\\baz.md")),
+            "foo/bar/baz.md"
+        );
+    }
+
+    #[test]
+    fn skill_roots_normalizes_agent_aliases() {
+        assert_eq!(SkillRoots::normalize_agent("claude"), Some("claude"));
+        assert_eq!(SkillRoots::normalize_agent("claude_code"), Some("claude"));
+        assert_eq!(SkillRoots::normalize_agent("claude-code"), Some("claude"));
+        assert_eq!(SkillRoots::normalize_agent("opencode"), Some("opencode"));
+        assert_eq!(SkillRoots::normalize_agent("open_code"), Some("opencode"));
+        assert_eq!(SkillRoots::normalize_agent("open-code"), Some("opencode"));
+        assert_eq!(SkillRoots::normalize_agent("codex"), Some("codex"));
+        assert_eq!(SkillRoots::normalize_agent("Codex"), Some("codex"));
+        assert_eq!(SkillRoots::normalize_agent("unknown"), None);
+        assert_eq!(SkillRoots::normalize_agent("  claude  "), Some("claude"));
+    }
+
+    #[test]
+    fn skill_roots_selects_known_agent_roots() {
+        let home = tempfile::TempDir::new().unwrap();
+        let local = tempfile::TempDir::new().unwrap();
+        let roots = SkillRoots::new(home.path().to_path_buf(), local.path().to_path_buf());
+
+        let expected: Vec<PathBuf> = vec![
+            home.path().join(".claude").join("skills"),
+            local.path().join(".claude").join("skills"),
+            local.path().join(".agents").join("skills"),
+            local.path().join(".codex").join("skills"),
+        ];
+        assert_eq!(roots.roots_for_agent("claude-code"), expected);
+    }
+
+    #[test]
+    fn skill_roots_selects_generic_roots_for_unknown_agent() {
+        let home = tempfile::TempDir::new().unwrap();
+        let local = tempfile::TempDir::new().unwrap();
+        let roots = SkillRoots::new(home.path().to_path_buf(), local.path().to_path_buf());
+
+        let expected: Vec<PathBuf> = vec![
+            local.path().join(".agents").join("skills"),
+            local.path().join(".codex").join("skills"),
+        ];
+        assert_eq!(roots.roots_for_agent("somebody"), expected);
+    }
+
+    #[test]
+    fn skill_roots_user_roots_are_omitted_for_unknown_agent() {
+        let home = tempfile::TempDir::new().unwrap();
+        let local = tempfile::TempDir::new().unwrap();
+        let roots = SkillRoots::new(home.path().to_path_buf(), local.path().to_path_buf());
+
+        for root in roots.roots_for_agent("mystery") {
+            assert!(!root.starts_with(home.path()));
+        }
+    }
+
+    #[test]
+    fn remove_date_substrings_removes_only_valid_dates() {
+        assert_eq!(remove_date_substrings("plan 2026-06-15 review"), "plan  review");
+        assert_eq!(
+            remove_date_substrings("dates 2024-01-01 and 2024-12-31"),
+            "dates  and "
+        );
+        assert_eq!(
+            remove_date_substrings("invalid 2026-02-30 stays"),
+            "invalid 2026-02-30 stays"
+        );
+    }
+
+    #[test]
+    fn remove_date_substrings_only_removes_date_portion_of_datetimes() {
+        assert_eq!(
+            remove_date_substrings("meeting 2026-06-15T10:30:00 here"),
+            "meeting T10:30:00 here"
+        );
+        assert_eq!(
+            remove_date_substrings("created 2026-06-15T10:30:00Z"),
+            "created T10:30:00Z"
+        );
+    }
+
+    #[test]
+    fn remove_date_substrings_preserves_surrounding_punctuation_and_whitespace() {
+        assert_eq!(
+            remove_date_substrings("x 2026-06-15, y"),
+            "x , y"
+        );
+        assert_eq!(
+            remove_date_substrings("start--2026-06-15--end"),
+            "start----end"
         );
     }
 }
