@@ -7,13 +7,16 @@ status: "ready for planning and implementation"
 
 This feature adds a small agent context group plus new expression functions for
 path shaping, numeric predicates, string mutation, Markdown link generation,
-terminal escaping, and skill availability checks.
+terminal Prose rendering, and skill availability checks.
 
 Reader's note: this review turns the draft inventory into a contract. The
 important decisions are that path-shape helpers are context-aware
 `FS_FUNCTIONS`, `ctx.agent` and `ctx.model` are always present strings, and the
 new helpers follow Darkmatter's existing null-propagation and type-mismatch
-rules unless explicitly called out below.
+rules unless explicitly called out below. The path helpers also separate
+resolution from rendering: they resolve through `FileReference` so magic paths
+and document-relative behavior stay correct, then render path-shaped output
+with stable `/` separators for Markdown.
 
 ## Goals
 
@@ -77,7 +80,13 @@ Shared path rules:
 - Normalize with the existing `normalize_path_arg()` behavior before parsing.
 - Resolve through `biscuit_file::FileReference::new(...)`, forward
   `ResolutionContext.magic_paths`, then call `resolve_from(ctx.base_dir)`.
-- Use the resolved absolute path string as the input to path-shape logic.
+- Use the resolved absolute path for validation and filesystem-aware splitting.
+- For returned path strings, use the same display policy as `relative(file)`:
+  repo-root relative when inside the repo, otherwise `ctx.base_dir` relative,
+  otherwise `~`-aliased when inside the user's home, otherwise absolute.
+  `basename`, `basename_without_index`, `ext`, and `parent_dir` return only
+  path components, so this policy affects only the larger path shape being
+  inspected.
 - If parsing or resolution errors, return an evaluation error.
 - If resolution returns `Ok(None)`, return an evaluation error.
 - Do not call `Path::exists()` or otherwise require the target to exist.
@@ -85,6 +94,8 @@ Shared path rules:
   return an evaluation error.
 - Use platform path semantics from `std::path` for splitting, but return `/` as
   the separator in composed strings for stable Markdown output.
+- Examples below use display paths for readability; they must hold exactly when
+  `ctx.base_dir` is the directory above `foo`.
 
 Indexed filename grammar:
 
@@ -120,14 +131,14 @@ Functions:
   - `foo/review-1.md` becomes `review.md`.
   - Non-indexed basenames are returned unchanged.
 - `dir(file) -> string`
-  - Returns the directory portion of the resolved path.
+  - Returns the directory portion of the display path.
 - `ext(file) -> string`
   - Returns the final extension without `.`.
   - Returns `""` when no extension exists.
 - `parent_dir(file) -> string`
-    - Returns the directory segment immediately above the basename
-    - `foo/bar/baz/test.md` becomes `baz`
-    - If there is no parent directory then returns an empty string
+  - Returns the directory segment immediately above the basename.
+  - `foo/bar/baz/test.md` becomes `baz`.
+  - If there is no parent directory, returns an empty string.
 - `file_trailing(file) -> string`
   - Returns the last directory segment and basename.
   - `foo/bar/baz/test.md` becomes `baz/test.md`.
@@ -135,10 +146,20 @@ Functions:
 - `dir_leading(file) -> string`
   - Returns the directory path before the last directory segment.
   - `foo/bar/baz/test.md` becomes `foo/bar`.
-  - If there is no leading directory -- which happens when file path has no directories or just a parent directory -- returns an empty string.
-- `join(file, file) -> string`
-    - Joins two file paths together, ensuring no duplicate '\\', '//' character and that the file path is a valid file path
-    - example: `join('foo/bar/','/baz/bax.md')` -> `foo/bar/baz/bax.md`
+  - If there is no leading directory, which happens when the file path has no
+    directories or only one parent directory, returns an empty string.
+- `join(left, right) -> string`
+  - Joins two local path strings lexically, then validates the joined result
+    through the shared path rules.
+  - `left` and `right` must be JSON strings.
+  - `left` may be relative, absolute, or a magic path reference.
+  - Strip leading separators from `right` before joining so `right` appends to
+    `left` rather than replacing it. `join("foo/bar/", "/baz/bax.md")`
+    returns `foo/bar/baz/bax.md`.
+  - Collapse duplicate separators in the returned string and emit `/`
+    separators.
+  - Reject HTTP(S) URL arguments.
+  - Do not check whether the joined path exists.
 
 ## Type Predicate Functions
 
@@ -170,10 +191,14 @@ pure functions. Register `link` as a context-aware `FS_FUNCTIONS` entry.
   - `2026-02-30` is not removed because it is not a real calendar date.
   - Full datetimes are not removed as a single token; only their valid
     `YYYY-MM-DD` substring is removed.
+  - Remove only the matched date substring. Do not collapse leftover whitespace,
+    punctuation, or duplicate separators; callers can compose this with existing
+    string helpers when they want additional cleanup.
   - Compact dates, ordinal dates, and parser-discovered variants are out of scope.
 - `ensure_leading(var, prefix) -> string | number`
   - `var` and `prefix` may be JSON strings or JSON numbers.
-  - Arrays, objects, booleans, and null raise an error.
+  - A `null` argument propagates to `null`.
+  - Arrays, objects, and booleans raise an error.
   - If the string form of `var` already starts with the string form of `prefix`,
     return `var` unchanged, preserving its original JSON type.
   - If `var` is a JSON number and `prefix` is a JSON number or numberlike string,
@@ -192,6 +217,7 @@ pure functions. Register `link` as a context-aware `FS_FUNCTIONS` entry.
   - Resolve the file through the shared filesystem path rules.
   - The description is `relative(file)` style output from the existing helper.
   - The destination is the resolved absolute path.
+  - Use the same destination escaping rules as the two-argument form.
 - `link(target, desc) -> string | Error`
   - `desc` must be a JSON string.
   - Accepts either an HTTP(S) URL string or a local file reference.
@@ -210,6 +236,8 @@ pure functions. Register `link` as a context-aware `FS_FUNCTIONS` entry.
     mutate the user's live terminal during expression evaluation.
   - Return the rendered terminal string, including ANSI SGR sequences when
     `Prose` emits them.
+  - Treat the argument as Prose markup, not untrusted plain text. Callers that
+    want literal angle brackets must escape them before calling this function.
 
 ## Context Functions
 
@@ -220,6 +248,8 @@ the filesystem and need the document base directory for local-scoped skill roots
   - `name` must be a JSON string.
   - Returns whether a direct child directory with that exact basename exists in
     any known user-scoped or local-scoped skill root for the executing agent.
+  - Reject names containing path separators or `..`; skill lookup is by
+    basename only.
 - `has_local_skill(name) -> boolean`
   - Same as `has_skill`, but checks only local-scoped roots.
 
@@ -246,11 +276,22 @@ Skill root discovery:
 - Only direct child directories count. Nested directories and files named like a
   skill do not count.
 - Missing roots are normal and return `false`, not an error.
+- The library implementation must make user-home and local-root discovery
+  injectable for tests. Tests must not mutate or depend on the developer's real
+  home directory.
 
 ## CLI Documentation
 
-The Claudine CLI let's users see all of the expression engine's functions: `claudine context --expressions`.
+The Claudine CLI lets users see all of the expression engine's functions:
+`claudine context --expressions`.
 
+- This is done by an existing anti-drift implementation in Darkmatter that is
+  exposed to Claudine.
+- This feature must represent the new functions in that shared catalog so
+  Claudine picks them up with the rest of the expression surface.
+- Add or update a regression test that proves the new descriptor entries appear
+  in the exported expression catalog consumed by Claudine. Do not add a
+  Claudine-only hardcoded list.
 
 ## Documentation and Tests
 
@@ -258,6 +299,8 @@ Update:
 
 - `darkmatter/docs/topics/context-variables.md`
 - `darkmatter/docs/topics/darkmatter-expressions.md`
+- `.claude/skills/darkmatter/SKILL.md` compose/context summary if this feature
+  changes the authoritative public context/function inventory.
 - Context variable descriptor catalog
 - Expression function descriptor catalog
 
@@ -269,7 +312,8 @@ Required tests:
   behavior.
 - File helper tests covering relative paths, magic paths, missing files,
   invalid file references, extensionless names, zero-padded indexes, non-indexed
-  names, and remote URL rejection.
+  names, `join` with leading/trailing separators, display-path rendering, and
+  remote URL rejection.
 - Link tests covering one-argument file links, two-argument file links,
   two-argument HTTP(S) links, link-text escaping, and destination escaping.
 - Skill tests using temporary directory roots; tests must not depend on the
