@@ -48,6 +48,44 @@ source_files_during_phase_4:
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - sniff/cli/src/args/mod.rs
+docs_updated_during_phase_5:
+  - sniff/docs/cli/repo_is-monorepo.md
+  - sniff/docs/cli/repo_structure.md
+  - sniff/docs/cli/repo.md
+  - sniff/docs/cli/repo_package-count.md
+  - sniff/docs/cli/repo_version.md
+  - sniff/docs/topics/json-output.md
+  - sniff/cli/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_code:
+  - sniff/lib/src/filesystem/repo/types.rs
+  - sniff/lib/src/filesystem/repo/standard.rs
+  - sniff/lib/src/filesystem/repo/topology.rs
+  - sniff/lib/tests/integration.rs
+  - sniff/cli/src/output/repo_json.rs
+  - sniff/cli/src/output/filesystem/repo.rs
+  - claudine/lib/src/events/environment.rs
+  - sniff/cli/tests/snapshots/snapshots__cargo_monorepo_structure_text.snap
+  - sniff/cli/tests/snapshots/snapshots__cargo_pnpm_monorepo_structure_text.snap
+  - sniff/cli/tests/snapshots/snapshots__pnpm_nx_monorepo_structure_text.snap
+  - sniff/cli/src/args/repo.rs
+  - sniff/cli/src/args/mod.rs
+  - sniff/cli/src/output/filesystem/mod.rs
+  - sniff/cli/src/output/mod.rs
+  - sniff/cli/src/commands/mod.rs
+  - sniff/cli/tests/cli.rs
+documentation:
+  - sniff/features/2026-06-16-monorepo-cli/plan.md
+  - sniff/docs/cli/repo_is-monorepo.md
+  - sniff/docs/cli/repo_structure.md
+  - sniff/docs/cli/repo.md
+  - sniff/docs/cli/repo_package-count.md
+  - sniff/docs/cli/repo_version.md
+  - sniff/docs/topics/json-output.md
+  - sniff/cli/README.md
 packages:
   - sniff
   - claudine
@@ -310,7 +348,7 @@ text.
 
 **Validation checkpoint 4**
 - [x] `cargo test -p sniff -p sniff-cli -p claudine` (or `cargo nextest run`) all green.
-- [ ] `git grep -n "monorepo_layers.first()" sniff claudine` clean for the
+- [x] `git grep -n "monorepo_layers.first()" sniff claudine` clean for the
   primary-layer decision.
 
 ---
@@ -319,7 +357,7 @@ text.
 
 Depends on Phases 1–4 (final contract settled). Drift-maintenance per repo rules.
 
-- [ ] **(D5 docs)** Rewrite `sniff/docs/cli/repo_is-monorepo.md` for the D5
+- [x] **(D5 docs)** Rewrite `sniff/docs/cli/repo_is-monorepo.md` for the D5
   contract: replace `yes`/`no` with label /
   `{orchestrator_label} (using {authority_label})` / `false` text; document the
   predicate exit code (non-zero outside a monorepo, `0` inside) and `--no-error`
@@ -329,26 +367,42 @@ Depends on Phases 1–4 (final contract settled). Drift-maintenance per repo rul
   (snake_case key, kebab ids); note the aggregate `sniff repo --json` still emits
   the legacy unwrapped `"is-monorepo"` bool. **No** remaining `yes`/`no` or
   `{ "is-monorepo": bool }` for the focused leaf.
-- [ ] **(D4/D5 docs)** Update `sniff/docs/cli/repo_structure.md` (Default
+- [x] **(D4/D5 docs)** Update `sniff/docs/cli/repo_structure.md` (Default
   Behavior + Package Listing sections): show the unified per-standard label and
   shared `{orchestrator_label} (using {authority_label})` template instead of
   `display_name` / `<dim>+ {orchestrator}</dim>`. Confirm the `--json` example
   stays byte-identical (`monorepo_layers[].packages` still `/`-separated strings).
   **No** remaining `display_name`-style or `<dim>+ {orchestrator}</dim>` form.
-- [ ] **(docs)** Update the Sniff skill (`.claude/skills/sniff/`) for: the focused
+- [x] **(docs)** Update the Sniff skill (`.claude/skills/sniff/`) for: the focused
   `is-monorepo` contract, the aggregate exception, and the unified monorepo label
   wording. Regenerate the skill's `hash:` frontmatter (`md hash <file>`) after
   editing.
-- [ ] **(docs)** Update CLI README / `--help` examples so users see the new
+- [x] **(docs)** Update CLI README / `--help` examples so users see the new
   focused `is-monorepo` contract without implying the aggregate shape changed.
-- [ ] **(drift)** If crate dependencies changed (none expected), update
+- [x] **(drift)** If crate dependencies changed (none expected), update
   `docs/dependencies.md`. Confirm no other READMEs reference the old
   `is-monorepo` text or `display_name` monorepo naming.
 
 **Final validation checkpoint**
-- [ ] `just test` and `just lint` (or `cargo clippy -p sniff -p sniff-cli -p claudine`)
+- [x] `just test` and `just lint` (or `cargo clippy -p sniff -p sniff-cli -p claudine`)
   green; `just doctest` where applicable.
-- [ ] Acceptance sweep against spec §"Testing and acceptance criteria":
+- [x] Acceptance sweep against spec §"Testing and acceptance criteria":
+  - [x] `primary_layer()` fixtures (single/shared/multi-root) + `.first()` regression.
+  - [x] No `monorepo_layers.first()` for the primary-layer decision (git grep clean).
+  - [x] `MonorepoLayer.packages` is `Vec<String>`; each entry resolves 1:1 to a
+    `Package.relative`.
+  - [x] `repo` / `repo structure` JSON byte-identical; text re-baselined with
+    rationale.
+  - [x] Aggregate `repo --json` `"is-monorepo"` bool unchanged; focused
+    `repo is-monorepo --json` is the only switched JSON surface.
+  - [x] One shared label+template helper; no `display_name` in the monorepo summary
+    (git grep clean).
+  - [x] claudine template values unchanged on rusty-biscuit.
+  - [x] D5 text examples (`cargo`; `pnpm workspaces`; `Nx (using pnpm workspaces)`;
+    `false`), exit-code behavior, `--no-error` scope, and both `--json` branches
+    all verified.
+  - [x] A per-standard label defined for **every** `MonorepoStandard`, incl. `unknown`.
+  - [x] Both CLI docs updated with no remaining old-behavior references.
   - `primary_layer()` fixtures (single/shared/multi-root) + `.first()` regression.
   - No `monorepo_layers.first()` for the primary-layer decision (git grep clean).
   - `MonorepoLayer.packages` is `Vec<String>`; each entry resolves 1:1 to a
