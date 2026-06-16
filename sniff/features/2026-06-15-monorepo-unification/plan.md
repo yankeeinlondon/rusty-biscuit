@@ -10,7 +10,184 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1:
   - sniff/features/2026-06-15-monorepo-unification/phase-1-audit.md
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+  - sniff/lib/src/filesystem/repo/standard.rs
+  - sniff/lib/src/filesystem/repo/types.rs
+  - sniff/lib/src/filesystem/repo/detection.rs
+  - sniff/lib/src/filesystem/repo/glob.rs
+  - sniff/lib/src/filesystem/repo/manifest_index.rs
+  - sniff/lib/src/filesystem/repo/cargo.rs
+  - sniff/lib/src/filesystem/repo/npm.rs
+  - sniff/lib/src/filesystem/repo/nx_turbo.rs
+  - sniff/lib/src/filesystem/repo/uv.rs
+  - sniff/lib/src/filesystem/repo/go.rs
+  - sniff/lib/src/filesystem/repo/gradle.rs
+  - sniff/lib/src/filesystem/repo/maven.rs
+  - sniff/lib/src/filesystem/repo/dotnet.rs
+  - sniff/lib/src/filesystem/repo/polyglot.rs
+  - sniff/cli/src/output/filesystem/mod.rs
+  - sniff/cli/src/output/repo_json.rs
+  - sniff/lib/src/filesystem/git/recent_commits.rs
+  - claudine/cli/src/commands/wrap/env.rs
+docs_updated_during_phase_2:
+  - sniff/features/2026-06-15-monorepo-unification/plan.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/lib/src/events/environment.rs
+  - claudine/lib/src/dispatch/template.rs
+  - claudine/lib/src/dispatch/expression.rs
+  - claudine/lib/src/dispatch/runner/mod.rs
+  - claudine/cli/src/commands/wrap/env.rs
+  - claudine/cli/tests/level2_prompt_reporting_capture.rs
+docs_updated_during_phase_3:
+  - claudine/lib/README.md
+  - claudine/docs/topics/unified-events.md
+  - claudine/docs/topics/configuring-actions.md
+  - claudine/docs/topics/log-reporting.md
+  - sniff/features/2026-06-15-monorepo-unification/plan.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/claudine/architecture.md
+  - .claude/skills/claudine/hook-actions.md
+source_files_during_phase_4:
+  - sniff/lib/src/filesystem/repo/standard.rs
+  - sniff/lib/src/filesystem/repo/topology.rs
+  - sniff/lib/src/filesystem/repo/detection.rs
+  - sniff/lib/src/filesystem/repo/polyglot.rs
+  - sniff/lib/src/filesystem/repo/nested.rs
+  - sniff/lib/src/filesystem/repo/mod.rs
+  - sniff/cli/src/output/repo_json.rs
+  - sniff/cli/tests/snapshots.rs
+  - sniff/lib/tests/integration.rs
+  - sniff/cli/tests/snapshots/snapshots__cargo_monorepo_structure_json.snap
+  - sniff/cli/tests/snapshots/snapshots__cargo_pnpm_monorepo_structure_json.snap
+  - sniff/cli/tests/snapshots/snapshots__pnpm_nx_monorepo_structure_json.snap
+docs_updated_during_phase_4:
+  - sniff/features/2026-06-15-monorepo-unification/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .opencode/skill/sniff/SKILL.md
+source_files_during_phase_5:
+  - sniff/lib/src/filesystem/repo/types.rs
+  - sniff/lib/src/filesystem/repo/mod.rs
+  - sniff/lib/src/filesystem/mod.rs
+  - sniff/lib/src/filesystem/repo/detection.rs
+  - sniff/lib/src/filesystem/repo/glob.rs
+  - sniff/lib/src/filesystem/repo/manifest_index.rs
+  - sniff/lib/src/filesystem/repo/gradle.rs
+  - sniff/lib/src/filesystem/repo/go.rs
+  - sniff/lib/src/filesystem/repo/uv.rs
+  - sniff/lib/src/filesystem/repo/nx_turbo.rs
+  - sniff/lib/src/filesystem/repo/maven.rs
+  - sniff/lib/src/filesystem/repo/dotnet.rs
+  - sniff/lib/src/filesystem/repo/npm.rs
+  - sniff/lib/src/filesystem/repo/polyglot.rs
+  - sniff/lib/src/filesystem/git/recent_commits.rs
+  - sniff/cli/src/output/repo_json.rs
+  - sniff/cli/src/output/filesystem/mod.rs
+  - claudine/cli/src/commands/wrap/env.rs
+docs_updated_during_phase_5:
+  - sniff/features/2026-06-15-monorepo-unification/plan.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+  - sniff/lib/src/filesystem/repo/types.rs
+  - sniff/lib/src/filesystem/repo/topology.rs
+  - sniff/lib/src/filesystem/repo/detection.rs
+  - sniff/lib/src/filesystem/repo/nested.rs
+  - sniff/lib/src/filesystem/repo/glob.rs
+  - sniff/lib/src/filesystem/repo/manifest_index.rs
+  - sniff/lib/src/filesystem/repo/cargo.rs
+  - sniff/lib/src/filesystem/repo/npm.rs
+  - sniff/lib/src/filesystem/repo/nx_turbo.rs
+  - sniff/lib/src/filesystem/repo/uv.rs
+  - sniff/lib/src/filesystem/repo/go.rs
+  - sniff/lib/src/filesystem/repo/gradle.rs
+  - sniff/lib/src/filesystem/repo/maven.rs
+  - sniff/lib/src/filesystem/repo/dotnet.rs
+  - sniff/lib/src/filesystem/repo/polyglot.rs
+  - sniff/lib/src/filesystem/repo/mod.rs
+  - sniff/lib/src/filesystem/mod.rs
+  - sniff/lib/src/lib.rs
+  - sniff/lib/tests/integration.rs
+  - sniff/cli/src/lib.rs
+  - sniff/cli/src/output/filesystem/repo.rs
+  - sniff/cli/src/output/filesystem/mod.rs
+  - sniff/cli/src/output/repo_json.rs
+  - sniff/cli/tests/snapshots.rs
+  - sniff/cli/tests/snapshots/snapshots__cargo_monorepo_structure_json.snap
+  - sniff/cli/tests/snapshots/snapshots__cargo_pnpm_monorepo_structure_json.snap
+  - sniff/cli/tests/snapshots/snapshots__pnpm_nx_monorepo_structure_json.snap
+docs_updated_during_phase_6:
+  - sniff/features/2026-06-15-monorepo-unification/plan.md
+skills_files_updated_during_phase_6: []
+source_files_during_phase_7:
+  - sniff/cli/src/output/repo_json.rs
+docs_updated_during_phase_7:
+  - sniff/features/2026-06-15-monorepo-unification/plan.md
+  - sniff/docs/cli/repo_structure.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .opencode/skill/sniff/SKILL.md
+source_files_during_phase_8:
+  - sniff/lib/src/filesystem/repo/detection.rs
+  - sniff/lib/tests/integration.rs
+  - sniff/cli/tests/cli.rs
+  - claudine/lib/src/events/environment.rs
+  - claudine/cli/src/commands/wrap/env.rs
+docs_updated_during_phase_8: []
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+  - .opencode/skill/sniff/SKILL.md
+source_code:
+  - sniff/lib/src/filesystem/repo/standard.rs
+  - sniff/lib/src/filesystem/repo/types.rs
+  - sniff/lib/src/filesystem/repo/detection.rs
+  - sniff/lib/src/filesystem/repo/glob.rs
+  - sniff/lib/src/filesystem/repo/manifest_index.rs
+  - sniff/lib/src/filesystem/repo/cargo.rs
+  - sniff/lib/src/filesystem/repo/npm.rs
+  - sniff/lib/src/filesystem/repo/nx_turbo.rs
+  - sniff/lib/src/filesystem/repo/uv.rs
+  - sniff/lib/src/filesystem/repo/go.rs
+  - sniff/lib/src/filesystem/repo/gradle.rs
+  - sniff/lib/src/filesystem/repo/maven.rs
+  - sniff/lib/src/filesystem/repo/dotnet.rs
+  - sniff/lib/src/filesystem/repo/polyglot.rs
+  - sniff/lib/src/filesystem/repo/topology.rs
+  - sniff/lib/src/filesystem/repo/nested.rs
+  - sniff/lib/src/filesystem/repo/mod.rs
+  - sniff/lib/src/filesystem/mod.rs
+  - sniff/lib/src/filesystem/git/recent_commits.rs
+  - sniff/lib/src/lib.rs
+  - sniff/lib/tests/integration.rs
+  - sniff/cli/src/lib.rs
+  - sniff/cli/src/output/filesystem/mod.rs
+  - sniff/cli/src/output/filesystem/repo.rs
+  - sniff/cli/src/output/repo_json.rs
+  - sniff/cli/tests/snapshots.rs
+  - sniff/cli/tests/cli.rs
+  - sniff/cli/tests/snapshots/snapshots__cargo_monorepo_structure_json.snap
+  - sniff/cli/tests/snapshots/snapshots__cargo_pnpm_monorepo_structure_json.snap
+  - sniff/cli/tests/snapshots/snapshots__pnpm_nx_monorepo_structure_json.snap
+  - claudine/lib/src/events/environment.rs
+  - claudine/lib/src/dispatch/template.rs
+  - claudine/lib/src/dispatch/expression.rs
+  - claudine/lib/src/dispatch/runner/mod.rs
+  - claudine/cli/src/commands/wrap/env.rs
+  - claudine/cli/tests/level2_prompt_reporting_capture.rs
+documentation:
+  - sniff/features/2026-06-15-monorepo-unification/plan.md
+  - sniff/features/2026-06-15-monorepo-unification/phase-1-audit.md
+  - claudine/lib/README.md
+  - claudine/docs/topics/unified-events.md
+  - claudine/docs/topics/configuring-actions.md
+  - claudine/docs/topics/log-reporting.md
+  - sniff/docs/cli/repo_structure.md
+packages:
+  - claudine
+  - sniff
 ---
 
 # Monorepo Type Unification — Execution Plan
@@ -210,11 +387,11 @@ phase is **purely additive**: the legacy `discovery_sources` field stays, the
 legacy `MonorepoTool` stays, and both old and new representations coexist so
 compilation is green at every step. No JSON contract changes yet.
 
-- [ ] If Phase 1C chose a new variant, add `PackageProvenance::ManifestScan` to
+- [x] If Phase 1C chose a new variant, add `PackageProvenance::ManifestScan` to
   `sniff/lib/src/filesystem/repo/standard.rs` (kebab-case serde:
   `"manifest-scan"`). Add a unit test asserting its wire value and that
   `MonorepoStandard::Unknown.spec()` membership is consistent with it.
-- [ ] Add two fields to `Package` in `types.rs`:
+- [x] Add two fields to `Package` in `types.rs`:
   ```rust
   pub standard: MonorepoStandard,
   pub provenance: PackageProvenance,
@@ -223,30 +400,30 @@ compilation is green at every step. No JSON contract changes yet.
   `PackageProvenance::Explicit` (or the manifest-scan variant if added) so
   existing `Package::default()` and `..Package::default()` literals compile
   unchanged. Import `MonorepoStandard` / `PackageProvenance` into `types.rs`.
-- [ ] Change `create_package` in `detection.rs` to accept
+- [x] Change `create_package` in `detection.rs` to accept
   `standard: MonorepoStandard` and `provenance: PackageProvenance` (replacing or
   supplementing the current `tool` + `discovery_source` params). Populate the two
   new `Package` fields from them. **Keep the legacy params for now** so callers
   compile; the full signature cleanup lands in Phases 5–6.
-- [ ] Change `expand_membership_globs` in `glob.rs` to accept `standard` +
+- [x] Change `expand_membership_globs` in `glob.rs` to accept `standard` +
   `provenance` alongside the existing `tool` param, forwarding them to
   `create_package`. Derive `provenance` from the standard's
   `membership_provenance()` inside the expander when the caller does not override
   it.
-- [ ] Change the `discover_packages_*` functions in `manifest_index.rs` to accept
+- [x] Change the `discover_packages_*` functions in `manifest_index.rs` to accept
   `standard` + `provenance`, forwarding to `create_package`. The nested-package
   discovery call in `detect_repo_inner_with_shared` (line ~281) passes
   `MonorepoStandard::Unknown` + the manifest-scan provenance from Phase 1C.
-- [ ] Update `merge_package_into` in `detection.rs` so that when two package
+- [x] Update `merge_package_into` in `detection.rs` so that when two package
   records merge, a non-`Unknown` incoming `standard` upgrades an `Unknown`
   existing one (the authority wins over the manifest-scan default). Provenance
   follows the surviving authority. This mirrors the current
   `discovery_sources` dedup semantics.
-- [ ] Apply **D4**: add a rustdoc `## Notes` block to `PackageEcosystem` in
+- [x] Apply **D4**: add a rustdoc `## Notes` block to `PackageEcosystem` in
   `types.rs` stating why it is distinct from both `MonorepoStandard::spec().primary_language`
   (a property of the standard) and `Package.primary_language` (rich-mode-only file
   scan). Follow the repo's H2 section order; no `# H1`.
-- [ ] Update the `detect_repo` doc example in `types.rs` (currently references
+- [x] Update the `detect_repo` doc example in `types.rs` (currently references
   `info.monorepo_tool` at line ~355) so it no longer demonstrates the soon-to-be
   deleted field — read `info.monorepo_layers` instead, or simplify to
   `info.is_monorepo` / `info.packages`.
@@ -274,25 +451,25 @@ from `monorepo_layers` instead. This phase adds the new fields, repoints the
 population logic, and updates the template/expression surface — all while the
 legacy field still exists, so claudine compiles throughout.
 
-- [ ] Extend `RepoContext` in `claudine/lib/src/events/environment.rs` with:
+- [x] Extend `RepoContext` in `claudine/lib/src/events/environment.rs` with:
   ```rust
   pub monorepo_standard: Option<String>,
   pub monorepo_orchestrators: Vec<String>,
   ```
   Keep `monorepo_tool: Option<String>` for now (removed in the cleanup task
   below or retained as a deprecated alias — see decision below).
-- [ ] Update `From<SniffResult> for EnvironmentContext` so `monorepo_standard`
+- [x] Update `From<SniffResult> for EnvironmentContext` so `monorepo_standard`
   is populated from `r.monorepo_layers.first().authority` (serialized to its
   kebab-case wire value via `serde_json` or `spec().id`) and
   `monorepo_orchestrators` from the first layer's `orchestrators` Vec. Gate on
   `!r.monorepo_layers.is_empty()`.
-- [ ] Add template variables `EnvMonorepoStandard` (`project.monorepo_standard`)
+- [x] Add template variables `EnvMonorepoStandard` (`project.monorepo_standard`)
   and `EnvMonorepoOrchestrators` (`project.monorepo_orchestrators`) to
   `claudine/lib/src/dispatch/template.rs`, including `key()`, `description()`,
   `category()`, `all()`, and `resolve()` arms.
-- [ ] Add the corresponding expression lookups for `project.monorepo_standard`
+- [x] Add the corresponding expression lookups for `project.monorepo_standard`
   and `project.monorepo_orchestrators` in `claudine/lib/src/dispatch/expression.rs`.
-- [ ] **`{{project.monorepo_tool}}` disposition.** Either (a) derive it from
+- [x] **`{{project.monorepo_tool}}` disposition.** Either (a) derive it from
   `monorepo_standard` and mark it deprecated in docs + code
   (`#[deprecated]`-style doc note), keeping it for one release; or (b) remove it
   outright. Recommendation: **(a)** for one release, since template variables are
@@ -300,11 +477,11 @@ legacy field still exists, so claudine compiles throughout.
   `monorepo_standard`, never from a deleted sniff field. If kept, update
   `resolve()` so `EnvMonorepoTool` reads `repo.monorepo_standard` (the new
   claudine field), not `repo.monorepo_tool`.
-- [ ] Update `claudine/lib/src/events/environment.rs` tests: the
+- [x] Update `claudine/lib/src/events/environment.rs` tests: the
   `deserialize_with_git_context` test (line ~458) uses `"monorepo_tool":
   "cargoworkspace"` — add `monorepo_standard` / `monorepo_orchestrators` to the
   fixture and assert the new fields round-trip.
-- [ ] Update `claudine/cli/src/commands/wrap/env.rs` test literals that
+- [x] Update `claudine/cli/src/commands/wrap/env.rs` test literals that
   construct `Package { discovery_sources: vec![], ... }` — these compile
   against the sniff `Package` struct and will break when Phase 5 removes the
   field. Defer the literal cleanup to Phase 5/8; here, only ensure the new
@@ -333,23 +510,23 @@ Phase 5–6 deletions rely on.
 the `LayerPackage` struct. Every layer package path must resolve to exactly one
 `RepoInfo.packages[].relative` entry.
 
-- [ ] Change `MonorepoLayer.packages` in `standard.rs` from `Vec<LayerPackage>`
+- [x] Change `MonorepoLayer.packages` in `standard.rs` from `Vec<LayerPackage>`
   to `Vec<PathBuf>`. Update the struct doc comment to state the paths are
   repo-relative (matching `Package.relative`) so JSON consumers can join layers
   to package details without normalizing path bases.
-- [ ] Delete the `LayerPackage` struct from `standard.rs`.
-- [ ] Update `build_monorepo_layers` in `topology.rs` so each layer's `packages`
+- [x] Delete the `LayerPackage` struct from `standard.rs`.
+- [x] Update `build_monorepo_layers` in `topology.rs` so each layer's `packages`
   Vec is built from `outcome.packages[].relative` (repo-relative strings
   converted to `PathBuf`), not from `LayerPackage { .. }` literals. The
   `standard` and `provenance` are already on each `Package`; the layer no longer
   re-records them per package.
-- [ ] Remove the `LayerPackage` re-export from
+- [x] Remove the `LayerPackage` re-export from
   `sniff/lib/src/filesystem/repo/mod.rs` and `sniff/lib/src/filesystem/mod.rs`.
-- [ ] Add an invariant test in `topology.rs`: after `build_monorepo_layers`,
+- [x] Add an invariant test in `topology.rs`: after `build_monorepo_layers`,
   every `layer.packages[].relative` resolves to exactly one entry in a synthetic
   `RepoInfo.packages` catalog — no dangling references, no package name joins
   required.
-- [ ] Update the `layer_with` test helper and all topology unit tests to the new
+- [x] Update the `layer_with` test helper and all topology unit tests to the new
   `Vec<PathBuf>` shape.
 
 **Validation checkpoint:**
@@ -373,22 +550,22 @@ Remove the `PackageDiscoverySource` enum, the `discovery_sources` field, and the
 `MonorepoTool` enum intentionally survives this phase because `discovery_source_for_tool`
 and several detectors still reference it — it is removed in Phase 6.
 
-- [ ] Remove `discovery_sources: Vec<PackageDiscoverySource>` from `Package` in
+- [x] Remove `discovery_sources: Vec<PackageDiscoverySource>` from `Package` in
   `types.rs`. Remove the field from every `Package { ... }` literal identified in
   the Phase 1B audit (`detection.rs` tests, `types.rs` tests,
   `recent_commits.rs`, `darkmatter/.../capture.rs`, `sniff/cli` test modules,
   `claudine/cli/.../env.rs`).
-- [ ] Delete the `PackageDiscoverySource` enum from `types.rs` and its re-export
+- [x] Delete the `PackageDiscoverySource` enum from `types.rs` and its re-export
   from `sniff/lib/src/filesystem/repo/mod.rs`.
-- [ ] Delete `discovery_source_for_tool` from `detection.rs`.
-- [ ] Remove the `discovery_source` parameter from `create_package`,
+- [x] Delete `discovery_source_for_tool` from `detection.rs`.
+- [x] Remove the `discovery_source` parameter from `create_package`,
   `expand_membership_globs`, and the `discover_packages_*` family in
   `manifest_index.rs`. The `provenance` parameter (added in Phase 2) is the
   replacement.
-- [ ] Remove the `discovery_sources` merge loop from `merge_package_into` in
+- [x] Remove the `discovery_sources` merge loop from `merge_package_into` in
   `detection.rs` (lines ~835–839). The `standard`/`provenance` merge logic from
   Phase 2 already covers the authority-wins semantics.
-- [ ] Remove the `PackageDiscoverySource::ManifestScan` argument from the nested
+- [x] Remove the `PackageDiscoverySource::ManifestScan` argument from the nested
   `discover_packages_from_index` call in `detect_repo_inner_with_shared`
   (line ~286); the manifest-scan `PackageProvenance` variant from Phase 2
   replaces it.
@@ -415,7 +592,7 @@ Delete the `MonorepoTool` enum, the `RepoInfo.monorepo_tool` /
 directly to the topology builder instead of routing through the legacy enum.
 The PascalCase JSON keys (`monorepo_tool`, `workspace_tools`) disappear.
 
-- [ ] Refactor every detector (`cargo.rs`, `npm.rs`, `nx_turbo.rs`, `gradle.rs`,
+- [x] Refactor every detector (`cargo.rs`, `npm.rs`, `nx_turbo.rs`, `gradle.rs`,
   `maven.rs`, `dotnet.rs`, `go.rs`, `uv.rs`) so it no longer constructs a
   `RepoInfo` with `monorepo_tool` / `workspace_tools`. Each detector returns its
   packages (tagged with `standard` + `provenance` via Phase 2) and its root; the
@@ -423,26 +600,26 @@ The PascalCase JSON keys (`monorepo_tool`, `workspace_tools`) disappear.
   `RepoInfo` return shape temporarily, set the legacy fields to `None` / empty —
   but the cleaner path is to return `(MonorepoStandard, PathBuf, Vec<Package>)`
   or reuse `DetectorOutcome` directly.
-- [ ] Merge `collect_repo_info` and `collect_standard_outcome` in `detection.rs`
+- [x] Merge `collect_repo_info` and `collect_standard_outcome` in `detection.rs`
   into a single collector that takes `(Option<DetectorOutcome>)` and folds it
   into `packages` + `outcomes`. There is no longer a split between "legacy tool
   detectors" and "new standard detectors" — every detector is a standard
   detector.
-- [ ] Delete `standard_for_tool` from `topology.rs` and its unit test
+- [x] Delete `standard_for_tool` from `topology.rs` and its unit test
   (`standard_for_tool_round_trips_every_variant`).
-- [ ] Remove `monorepo_tool` and `workspace_tools` from `RepoInfo` in
+- [x] Remove `monorepo_tool` and `workspace_tools` from `RepoInfo` in
   `types.rs`. Remove the `let mut workspace_tools = Vec::new();` accumulation in
   `detect_repo_inner_with_shared` and the `monorepo_tool: workspace_tools.first().copied()`
   / `workspace_tools` fields from the final `RepoInfo` literal.
-- [ ] Delete the `MonorepoTool` enum from `types.rs` and its re-export from
+- [x] Delete the `MonorepoTool` enum from `types.rs` and its re-export from
   `sniff/lib/src/filesystem/repo/mod.rs`.
-- [ ] Remove the now-dead `tool: MonorepoTool` parameter from `create_package`,
+- [x] Remove the now-dead `tool: MonorepoTool` parameter from `create_package`,
   `expand_membership_globs`, and the `discover_packages_*` family (it survived
   Phase 5 because `discovery_source_for_tool` consumed it; that function is now
   gone).
-- [ ] Delete `format_monorepo_tool` from `sniff/cli/src/output/filesystem/repo.rs`
+- [x] Delete `format_monorepo_tool` from `sniff/cli/src/output/filesystem/repo.rs`
   (lines 142–155).
-- [ ] Re-derive the CLI "primary tool" one-liner in `render_repo_section`
+- [x] Re-derive the CLI "primary tool" one-liner in `render_repo_section`
   (lines 469–473 and 871–875) from `repo.monorepo_layers.first()`:
   `authority.spec().display_name`, appending
   `<dim> + {orchestrator.display_name}</dim>` for each orchestrator on the first
@@ -471,33 +648,33 @@ match the spec's impact table, CLI text renders authority + orchestrators via
 `biscuit-terminal` renderables, and all documentation reflects the breaking
 change.
 
-- [ ] Verify `structure_value` / `build_aggregate_value` in `repo_json.rs`
+- [x] Verify `structure_value` / `build_aggregate_value` in `repo_json.rs`
   serialize the updated `RepoInfo` / `Package` shapes correctly. The removed keys
   (`monorepo_tool`, `workspace_tools`, `discovery_sources`) must be **absent**
   (not `null`) — confirm the fields are gone from the structs (Phase 6) so serde
   cannot emit them. The new keys (`package.standard`, `package.provenance`) are
   always present; `monorepo_layers[].packages[]` are path strings.
-- [ ] Add a CLI snapshot test (using `insta` with `NO_COLOR=1`) covering the
+- [x] Add a CLI snapshot test (using `insta` with `NO_COLOR=1`) covering the
   post-unification text output for a Cargo monorepo: the one-liner reads
   "Cargo Workspace" from the authority layer, and the package list renders
   unchanged.
-- [ ] Add a CLI snapshot for an authority + orchestrator repo (pnpm + Nx):
+- [x] Add a CLI snapshot for an authority + orchestrator repo (pnpm + Nx):
   the one-liner appends ` + Nx`.
-- [ ] Update `sniff/lib/README.md`: remove the `monorepo_tool` / `workspace_tools`
+- [x] Update `sniff/lib/README.md`: remove the `monorepo_tool` / `workspace_tools`
   / `discovery_sources` documentation; document `package.standard`,
   `package.provenance`, and the now-canonical `monorepo_layers[].packages` path
   strings. Fix the doc example that prints `info.monorepo_tool`.
-- [ ] Update `sniff/cli/README.md` and `sniff/docs/cli/repo_structure.md`: the
+- [x] Update `sniff/cli/README.md` and `sniff/docs/cli/repo_structure.md`: the
   JSON example (currently `"monorepo_tool": "Cargo"`, `"workspace_tools":
   ["Cargo"]` at lines 152–153) is replaced with the `monorepo_layers` shape and
   the new per-package `standard` / `provenance` keys.
-- [ ] Update `claudine/lib/README.md`: document `{{project.monorepo_standard}}`
+- [x] Update `claudine/lib/README.md`: document `{{project.monorepo_standard}}`
   and `{{project.monorepo_orchestrators}}`; mark `{{project.monorepo_tool}}`
   deprecated if the Phase 3 alias was retained, or remove it.
-- [ ] Update `claudine/docs/topics/unified-events.md`,
+- [x] Update `claudine/docs/topics/unified-events.md`,
   `configuring-actions.md`, and `log-reporting.md` wherever
   `monorepo_tool` appears in examples or tables.
-- [ ] Update `.opencode/skill/sniff/SKILL.md` with a section on the unified
+- [x] Update `.opencode/skill/sniff/SKILL.md` with a section on the unified
   topology model: `Package` is canonical, layers carry repo-relative path
   references, `MonorepoTool` / `PackageDiscoverySource` are gone.
 
@@ -520,33 +697,33 @@ tests that prove the unification did not silently change a package's owning
 authority. This is the phase where the spec's "Testing and acceptance criteria"
 section is satisfied in full.
 
-- [ ] Update every `Package { ... }` and `RepoInfo { ... }` literal in
+- [x] Update every `Package { ... }` and `RepoInfo { ... }` literal in
   `sniff/lib/tests/integration.rs`, `sniff/lib/tests/fixtures.rs`, and the CLI
   test modules so they compile against the final shapes (no `discovery_sources`,
   no `monorepo_tool` / `workspace_tools`; `standard` + `provenance` populated
   where the test asserts them).
-- [ ] Regenerate all `insta` snapshots under `sniff/cli/tests/snapshots/` with
+- [x] Regenerate all `insta` snapshots under `sniff/cli/tests/snapshots/` with
   `cargo nextest run -p sniff-cli -- --review` (or `INSTA_UPDATE=always`). Confirm
   the removed keys are absent and the new keys are present in every snapshot.
-- [ ] Add a **parity test** over the rusty-biscuit repo: the package set and
+- [x] Add a **parity test** over the rusty-biscuit repo: the package set and
   each package's owning authority (derived from `Package.standard`) match the
   pre-unification `discovery_sources`-derived view. No package silently changes
   owner. (Use the Phase 1B audit as the baseline.)
-- [ ] Add the **"Nx delegates to pnpm" regression test**: a fixture with both
+- [x] Add the **"Nx delegates to pnpm" regression test**: a fixture with both
   `nx.json` and `pnpm-workspace.yaml` at the same root asserts that a package's
   `standard == MonorepoStandard::PnpmWorkspaces` (the authority), **not** `Nx` —
   proving the legacy category error is fixed, not preserved. The orchestrator
   `Nx` appears only on `monorepo_layers[0].orchestrators`.
-- [ ] Add an **assertable-from-catalog test**: a package's owning standard and
+- [x] Add an **assertable-from-catalog test**: a package's owning standard and
   provenance are readable directly off `RepoInfo.packages` without consulting
   `monorepo_layers`. Conversely, every `monorepo_layers[].packages[]` path
   resolves to exactly one `RepoInfo.packages[].relative` entry.
-- [ ] Confirm **no external monorepo binary** is required by any test (inherited
+- [x] Confirm **no external monorepo binary** is required by any test (inherited
   constraint): `cargo nextest run -p sniff` passes on a host without `cargo`,
   `pnpm`, `go`, etc. on PATH (the existing synthetic-`ExecutableIndex` pattern).
-- [ ] Confirm **stdout / stderr discipline**: `--json` output is valid JSON on
+- [x] Confirm **stdout / stderr discipline**: `--json` output is valid JSON on
   stdout with nothing else; diagnostics (if any) go to stderr.
-- [ ] Run the full PR gate: `just lint && just doctest && just test && just test-l2`
+- [x] Run the full PR gate: `just lint && just doctest && just test && just test-l2`
   from the `sniff/` directory (and the equivalent for claudine).
 
 **Validation checkpoint (acceptance gate):**
