@@ -43,11 +43,11 @@ use super::{
 use crate::log;
 
 pub(crate) mod dry_run;
-pub(crate) mod inline_guards;
+pub(crate) mod inline_cleanup;
 pub(crate) mod prep_context;
 
 // Re-export helpers still used by inline.rs and other callers.
-pub(crate) use inline_guards::{cleanup_inline_output, split_frontmatter_and_body};
+pub(crate) use inline_cleanup::{cleanup_inline_output, split_frontmatter_and_body};
 pub(crate) use prep_context::CompositionPrepContext;
 
 /// W0 instrumentation counter: increments every time
@@ -1638,7 +1638,7 @@ pub(crate) fn execute_composition_request_inner(
 
     // -- Harness plan preflight -------------------------------------------
     // Every non-dry-run document is parsed into a harness plan. Documents
-    // without harness frontmatter yield the bare (all-empty) plan; the loop
+    // lacking harness frontmatter yield the bare (all-empty) plan; the loop
     // re-parses from the materialized frontmatter on retry attempts. Inline
     // composition gets a system-owned writability pre-check injected here
     // so handler recovery paths can respond to permission failures.
@@ -1732,9 +1732,6 @@ pub(crate) fn execute_composition_request_inner(
         eyre!("{e}")
     })?;
 
-    // Plan is validated; the harness loop will re-parse if needed.
-    drop(plan);
-
     // Emit the preflight-complete indicator for direct compose and
     // inline-compose runs. This must sit *before* the dry-run seam below:
     // dry-run returns early, so a completion message placed after it would
@@ -1764,6 +1761,35 @@ pub(crate) fn execute_composition_request_inner(
     // `--quiet` / `--silent` do not suppress this render: the dry-run output
     // *is* the command's purpose.
     if request.dry_run {
+        // Dry-run never launches the provider or mutates the source, but it
+        // must still surface pre-check failures — chiefly the system-owned
+        // inline `has_write_permission` rule injected by
+        // `finalize_effective_plan`. Otherwise a read-only (`0444`) inline
+        // source would render a clean dry-run and exit 0, masking a write
+        // failure the live run would hit. Evaluate the finalized effective
+        // plan's pre-checks with the same `WrapperHarnessPermissionProbe`
+        // the harness loop uses, then hard-fail on any failure: there is no
+        // handler-resolution step here because no provider will run.
+        let permission_probe = super::policy::WrapperHarnessPermissionProbe::new(
+            provider,
+            args_before_prompt.clone(),
+            effective_repo_root,
+        );
+        let pre_report = claudine::harness::evaluate_pre_checks(&plan, Some(&permission_probe));
+        if !pre_report.all_passed() {
+            let failures = pre_report.failures();
+            guard.emit_blocked_or_failure();
+            return Err(eyre!(
+                "pre-check validation failed ({} {})",
+                failures.len(),
+                if failures.len() == 1 {
+                    "failure"
+                } else {
+                    "failures"
+                }
+            ));
+        }
+
         let render = dry_run::DryRunRender::from_request(&request);
 
         crate::log::data(&render.body);
@@ -1790,6 +1816,10 @@ pub(crate) fn execute_composition_request_inner(
         }
         return Ok(outcome);
     }
+
+    // Plan is validated; the harness loop re-parses from the materialized
+    // frontmatter, so the live path no longer needs this copy.
+    drop(plan);
 
     // -- Preflight output (env details + prompt block) ---------------------
     // The execution header was already emitted (up front by compose /

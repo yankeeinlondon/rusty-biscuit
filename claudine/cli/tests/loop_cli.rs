@@ -713,6 +713,87 @@ exit 0
     );
 }
 
+/// Sibling to `compose_loop_rate_limit_abort_exits_75`, exercising the same
+/// rate-limit abort contract on a document with minimal harness frontmatter.
+/// The always-harness unification routes parsed-harness documents through
+/// `run_harness_loop`, so the terminal-attempt rate-limit signal must still
+/// reach the loop policy and halt with EX_TEMPFAIL (75).
+#[cfg(unix)]
+#[test]
+fn compose_loop_rate_limit_abort_exits_75_on_harness_doc() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    // `post_checks: []` is a harmless harness key: it forces the parsed-harness
+    // plan path without adding any check that would alter the run.
+    let md_file = workspace.path().join("loop.md");
+    fs::write(
+        &md_file,
+        r#"---
+post_checks: []
+loop:
+  while: "true"
+  actions:
+    - "increment(counter)"
+  max: 3
+---
+Iteration {{counter}}
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' '{"type":"init","session_id":"loop-rate","model":"test-model"}'
+printf '%s\n' '{"type":"finish","sessionID":"loop-rate"}'
+printf '%s\n' 'ERROR 2026-04-15T19:26:02 +3054ms service=llm providerID=zai-coding-plan modelID=glm-5.1 error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"code\":\"1308\",\"message\":\"Usage limit reached. Your limit will reset at 2099-01-01 00:00:00\"}}"}]}}' >&2
+exit 0
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("OPENCODE_MODEL", "test-model")
+        .current_dir(workspace.path())
+        .args([
+            "compose",
+            "--opencode",
+            "--on-rate-limit",
+            "abort",
+            md_file.to_str().unwrap(),
+        ])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .failure();
+
+    let exit_code = assert.get_output().status.code().unwrap_or(-1);
+    assert_eq!(
+        exit_code,
+        75,
+        "parsed-harness rate-limit abort must exit with EX_TEMPFAIL (75); got {exit_code}, stderr: {}",
+        String::from_utf8_lossy(&assert.get_output().stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("rate limited") || plain.contains("rate_limit"),
+        "stderr must surface the rate-limit halt; got: {plain}"
+    );
+    assert!(
+        !plain.contains("invalid loop definition"),
+        "rate-limit halt must not be mislabeled; got: {plain}"
+    );
+}
+
 /// `--on-rate-limit pause` waits out a usable reset clock and then runs
 /// the next iteration. A reset_at ~3s in the future should produce a
 /// noticeable but bounded delay (no unbounded blocking) before iteration 2

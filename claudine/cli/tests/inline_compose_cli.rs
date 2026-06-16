@@ -35,6 +35,52 @@ exit 0
     );
 }
 
+/// Dry-run must still run the inline writability pre-check before returning.
+/// A read-only (`0444`) inline source must fail the pre-check — not render a
+/// clean dry-run and exit 0 — while leaving the source file untouched.
+#[cfg(unix)]
+#[test]
+fn inline_compose_dry_run_fails_on_read_only_source() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    // A binary must resolve on PATH (dry-run resolves it before the seam),
+    // but the dry-run path never launches it.
+    stage_opencode_inline_body_writer(&path_dir);
+
+    let source = workspace.path().join("readonly.md");
+    let original = "---\nprompt: Generate the body\n---\nOriginal body.\n";
+    fs::write(&source, original).unwrap();
+    fs::set_permissions(&source, fs::Permissions::from_mode(0o444)).unwrap();
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("OPENCODE_MODEL", "test-model")
+        .current_dir(workspace.path())
+        .args([
+            "inline-compose",
+            "--opencode",
+            "--dry-run",
+            source.to_str().unwrap(),
+        ])
+        .assert()
+        .failure();
+
+    // The source must be untouched: same content and still read-only.
+    let after = fs::read_to_string(&source).unwrap();
+    assert_eq!(
+        after, original,
+        "dry-run must not mutate the source file; got:\n{after}"
+    );
+    let mode = fs::metadata(&source).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o444, "dry-run must leave permissions unchanged");
+}
+
 #[cfg(unix)]
 #[test]
 fn inline_compose_non_harness_and_harness_write_identical_final_body() {
