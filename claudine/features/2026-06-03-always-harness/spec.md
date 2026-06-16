@@ -56,6 +56,7 @@ An earlier draft described adding `max_retries: 0` to `HarnessPlan`. That does n
 - Remove `composition/structured.rs::run_structured_branch` once its logic has moved into or is already covered by the harness attempt path.
 - Remove `composition/inline_guards.rs::apply_inline_closure`; inline closure must consistently flow through `wrap/inline.rs::try_inline_closure`.
 - Preserve direct compose and inline-compose CLI behavior unless this spec explicitly calls out an intentional behavior change.
+- Route interactive composition sessions through `run_harness_loop` as well. `interactive` is not a harness key, so `interactive: true` documents (and `--interactive`/resolved-interactive sessions) currently reach the agent only through `execute_without_harness`. See [Interactive Sessions](#interactive-sessions).
 - Update docs and comments that still describe separate harness and non-harness execution paths.
 
 ### Out of Scope
@@ -64,6 +65,7 @@ An earlier draft described adding `max_retries: 0` to `HarnessPlan`. That does n
 - Adding per-document retry-limit syntax.
 - Changing handler action semantics.
 - Changing provider profiles or stream parsing beyond the wiring needed to use the existing harness attempt path.
+- Changing interactive-session semantics: the `interactive` frontmatter property, `--interactive`/`--no-interactive` resolution, the `supports_interactive_inline_closure` provider gate, and the interactive ↔ `timeout`/`step_timeout` conflict check are inputs the unified path must preserve, not redesign.
 - Changing sequence orchestration semantics. `sequence` already delegates to composition per step; it should benefit from this refactor without gaining a new sequence-specific execution model.
 - Moving `--dry-run` into the harness launch loop.
 
@@ -84,6 +86,8 @@ Add a small helper for bare plan construction. It may live in the library harnes
 | `programmatic_handler` | `None` | `None` |
 
 The helper must not add a retry field. One-attempt behavior follows from the empty handler table.
+
+The bare plan is mode-agnostic. Interactivity is not encoded in `HarnessPlan`; it travels through `effective_non_interactive` and the prompt state, so the same bare plan serves interactive and non-interactive runs. See [Interactive Sessions](#interactive-sessions).
 
 If implementation can reuse `parse_harness_plan` against empty effective frontmatter without a dedicated helper, that is acceptable, but tests must still pin the resulting bare-plan shape for direct and inline composition.
 
@@ -108,6 +112,20 @@ The dry-run output split remains unchanged: composed body to stdout, finalized f
 The outer `LifecycleRunGuard` in `execute_composition_request` must be defused before calling `run_harness_loop` for both parsed and bare plans. The harness loop becomes the single lifecycle owner for non-dry-run composition.
 
 Pre-launch failures still emit blocked/failure lifecycle signals according to the existing guard contract. Provider-launched failures still emit failure. Successful runs emit success once.
+
+### Interactive Sessions
+
+`interactive` is a recently added composition property (`interactive: true` frontmatter, plus the `--interactive` / resolved-interactive session flag) and is **not** a harness key. `has_harness_properties` therefore returns `false` for a document whose only special property is `interactive`, so such runs currently reach the agent through `execute_without_harness`. Removing that function means interactive composition must route through `run_harness_loop` instead.
+
+This is an extension of existing behavior, not a new capability. `run_harness_loop` already accepts `effective_non_interactive`, and a harness-enabled document (one declaring `post_checks`, `timeout`, and the like) can already run interactively today. Unification applies the same routing to bare-plan documents.
+
+The interactive controls the unified path must preserve already live in the shared prelude of `execute_composition_request`, *before* the harness/non-harness branch, so no relocation is required:
+
+- the `supports_interactive_inline_closure` provider gate that fails fast for inline + interactive on providers without post-hoc final-message recovery,
+- the interactive ↔ `timeout` / `step_timeout` conflict check,
+- the final-response capture seam (`use_structured || (session_interactive && is_inline)`) that decides when structured capture runs, so interactive inline closure still observes a final response.
+
+Closure itself is already mode-agnostic: `apply_inline_closure` ignores its `session_interactive` argument (it is bound as `_session_interactive`), so `try_inline_closure` — which has no such parameter — is behaviorally equivalent for the closure step.
 
 ### Provider Failure Exit Codes
 
@@ -148,27 +166,28 @@ Closure remains before post-check evaluation in the harness loop so file-state c
 
 ## Migration Steps
 
-1. **Add convergence tests.** Before structural changes, add tests that compare the same `compose` and `inline-compose` invocations with and without minimal harness frontmatter. The inline case must include interstitial assistant narration before a tool call and final body content after the last tool call; both variants must write the same final body.
+1. **Add convergence tests.** Before structural changes, add tests that compare the same `compose` and `inline-compose` invocations with and without minimal harness frontmatter. The inline case must include interstitial assistant narration before a tool call and final body content after the last tool call; both variants must write the same final body. Where a provider supports interactive inline closure, add a variant that confirms interactive inline compose still rewrites the body through the unified path.
 
 2. **Add or pin bare-plan construction.** Unit-test the direct and inline bare-plan shapes. Confirm there is no retry field and that inline mode gets exactly one system-owned `HasWritePermission` pre-check.
 
 3. **Preflight both parsed and bare plans.** Keep template shell approval unchanged. Run harness shell approval against the parsed or bare plan. Remove the separate non-harness inline permission branch after inline writability is represented by the bare plan.
 
-4. **Route all composition through `run_harness_loop`.** Build `HarnessPromptState` for both direct and inline composition and pass the same base args, env, child cwd, structured output settings, noise filters, stream verbosity, dispatch context, timeout CLI values, and materialized prompt data that the current harness branch receives.
+4. **Route all composition through `run_harness_loop`.** Build `HarnessPromptState` for both direct and inline composition and pass the same base args, env, child cwd, interactive mode (`effective_non_interactive`), structured output settings, noise filters, stream verbosity, dispatch context, timeout CLI values, and materialized prompt data that the current harness branch receives. Include the compose-path state threaded through since this spec was drafted — `shell_working_directory`, `bind_agent_workspace`, and the `MODEL` / `YOLO` environment exposure — so the unified route does not silently drop it.
 
-5. **Preserve result surfaces.** Ensure provider failure exit codes, lifecycle signals, performance collection, prompt timing, summary emission, and inline closure behavior match the contracts above.
+5. **Preserve result surfaces.** Ensure provider failure exit codes, lifecycle signals, performance collection, prompt timing, summary emission, inline closure behavior, and the interactive gates (provider gate, timeout conflict, capture seam) match the contracts above.
 
 6. **Remove dead code.** Delete `execute_without_harness`, `CompositionExecutionMode`, `run_structured_branch`, the obsolete `inline_guards` closure wrapper, and any legacy branch modules or match arms that have no remaining call sites.
 
-7. **Clean documentation drift.** Update `claudine/docs/topics/composition.md`, `claudine/docs/topics/non-interactive-sessions.md`, `claudine/docs/topics/execution-flow.md`, `claudine/docs/pipeline.md`, and the Claudine skill docs if they still describe separate harness and non-harness execution paths.
+7. **Clean documentation drift.** Update `claudine/docs/topics/composition.md`, `claudine/docs/topics/non-interactive-sessions.md`, `claudine/docs/topics/execution-flow.md`, `claudine/docs/pipeline.md`, and the Claudine skill docs under `.claude/skills/claudine/` if they still describe separate harness and non-harness execution paths.
 
 8. **Verify.** Run the new convergence tests, targeted existing composition tests, `cargo check -p claudine -p claudine-cli --color=never`, and the claudine-area test recipe that matches current repo convention.
 
 ## Acceptance Criteria
 
-- `rg -n "execute_without_harness|CompositionExecutionMode|run_structured_branch|inline_guards|non-harness path|without harness" claudine/cli/src claudine/docs claudine/.claude/skills` returns no live-code or current-doc references to the removed path.
+- `rg -n "execute_without_harness|CompositionExecutionMode|run_structured_branch|inline_guards|non-harness path|without harness" claudine/cli/src claudine/docs .claude/skills/claudine` returns no live-code or current-doc references to the removed path. (Claudine skill docs live at the repo-root `.claude/skills/claudine/`, not under `claudine/.claude/skills`.)
 - Bare direct compose and parsed-harness direct compose both execute through `run_harness_loop`.
 - Bare inline compose and parsed-harness inline compose both execute through `run_harness_loop`.
+- Interactive composition (`interactive: true` or `--interactive`) executes through `run_harness_loop`, and interactive inline closure still rewrites the body.
 - Inline body replacement uses final response only in both bare and parsed-harness runs.
 - A provider process that exits non-zero preserves that exit code at the CLI boundary.
 - Dry-run does not launch the provider and does not mutate inline source files.
@@ -196,3 +215,4 @@ None. The reviewed design decisions are:
 - Keep dry-run outside `run_harness_loop`.
 - Preserve provider exit codes through the harness loop.
 - Use the harness summary and inline-closure paths as the single source of truth after unification.
+- Route interactive composition through the bare-plan harness loop too; preserve (do not redesign) the interactive provider gate, the timeout conflict check, and the final-response capture seam that already live in the shared prelude.
