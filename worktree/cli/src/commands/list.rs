@@ -88,10 +88,12 @@ fn run_pipeline(
         &parsed_width,
         verbose,
     );
-    if needs_graph
-        && let Some(start) = t0
-    {
-        perf::record(&mut collector, "graph gather", start.elapsed());
+    if let Some(start) = t0 {
+        if needs_graph {
+            perf::record(&mut collector, "graph gather", start.elapsed());
+        } else if needs_verbose {
+            perf::record(&mut collector, "verbose gather", start.elapsed());
+        }
     }
 
     if needs_graph {
@@ -778,6 +780,59 @@ mod tests {
     /// `gather_branch` twice would have to bypass this boundary. The test uses
     /// a crafted `statuses` Vec to simulate a non-main current worktree without
     /// needing linked worktrees in the fixture.
+    /// Verbose data gathering on a non-image terminal must be reported as a
+    /// distinct stage. Without this attribution the cost of `gather_branch`
+    /// (merge-base + commit log) is folded into `unattributed`, undercutting
+    /// the `--perf` diagnostic for `wt list -v` slowdowns.
+    #[test]
+    #[serial_test::serial]
+    fn run_pipeline_non_image_verbose_includes_verbose_gather_stage() {
+        let repo = temp_repo_with_feature_branch();
+        let repo_path = repo.path();
+        let feature_path = repo_path
+            .parent()
+            .expect("temp dir has a parent")
+            .join(format!(
+                "{}-feature",
+                repo_path.file_name().unwrap().to_string_lossy()
+            ));
+        run_git(repo_path, &["worktree", "add", feature_path.to_str().unwrap(), "feature-a"]);
+        let _guard = DirGuard::enter(&feature_path);
+        let terminal = Terminal::default();
+
+        let collector = super::run_pipeline(
+            None,
+            true,
+            true,
+            std::time::Instant::now(),
+            ImageSupport::None,
+            &terminal,
+        )
+        .expect("run_pipeline should succeed");
+
+        let stages = collector
+            .as_ref()
+            .expect("collector should be present when perf is true")
+            .recorded_stages();
+        let names: Vec<_> = stages.iter().map(|(name, _)| *name).collect();
+        assert!(
+            names.contains(&"verbose gather"),
+            "verbose gather should be recorded on non-image verbose path, got: {names:?}"
+        );
+        assert!(
+            names.contains(&"verbose render"),
+            "verbose render should be recorded, got: {names:?}"
+        );
+        assert!(
+            !names.contains(&"graph gather"),
+            "graph gather should not be recorded on non-image path, got: {names:?}"
+        );
+        assert!(
+            !names.contains(&"graph image render (biscuit-terminal)"),
+            "graph image render should not be recorded, got: {names:?}"
+        );
+    }
+
     #[test]
     #[serial_test::serial]
     fn gather_data_shares_one_merge_base_for_graph_and_verbose() {
