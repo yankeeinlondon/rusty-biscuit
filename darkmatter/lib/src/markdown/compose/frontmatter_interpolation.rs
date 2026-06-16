@@ -198,16 +198,6 @@ pub(crate) fn interpolate_frontmatter(
         HashSet::new()
     };
 
-    if std::env::var("DM_DEBUG_DEFER").is_ok() {
-        eprintln!("DM_DEBUG: defer_shell_pending={defer_shell_pending} shell_pending_keys={shell_pending_keys:?}");
-        for (k, v) in fm.iter() {
-            if let Value::String(s) = v {
-                let refs = extract_frontmatter_key_refs(v);
-                eprintln!("DM_DEBUG: key={k:?} value={s:?} refs={refs:?}");
-            }
-        }
-    }
-
     let mut seed_map: HashMap<String, Value> = HashMap::new();
     let templated_keys: Vec<String> = fm
         .iter()
