@@ -22,10 +22,10 @@ use tracing::debug;
 
 use crate::filesystem::file_types::should_skip_directory_name;
 
-use super::detection::{create_package, discovery_source_for_tool};
+use super::detection::create_package;
 use super::manifest_index::CargoLockVersions;
 use super::standard::{GlobDialect, MonorepoStandard, PackageProvenance};
-use super::types::{MonorepoTool, Package};
+use super::types::Package;
 
 /// Manifest file names that mark a directory as a package boundary.
 const MANIFEST_FILES: [&str; 4] = ["Cargo.toml", "package.json", "pyproject.toml", "go.mod"];
@@ -49,12 +49,10 @@ pub(crate) fn expand_membership_globs(
     root: &Path,
     patterns: &[String],
     dialect: GlobDialect,
-    tool: MonorepoTool,
     standard: MonorepoStandard,
     provenance: Option<PackageProvenance>,
     lock_versions: &Option<CargoLockVersions>,
 ) -> Vec<Package> {
-    let discovery_source = discovery_source_for_tool(tool);
     let provenance = provenance.unwrap_or_else(|| standard.membership_provenance());
     // BTreeSet dedupes directories matched by overlapping patterns and yields a
     // deterministic order before the (relatively expensive) package build.
@@ -112,7 +110,7 @@ pub(crate) fn expand_membership_globs(
 
     matched
         .into_iter()
-        .map(|path| create_package(&path, root, tool, standard, provenance, lock_versions, discovery_source))
+        .map(|path| create_package(&path, root, standard, provenance, lock_versions))
         .collect()
 }
 

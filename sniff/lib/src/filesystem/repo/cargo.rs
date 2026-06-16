@@ -7,14 +7,12 @@ use biscuit_file::toml_crate;
 use crate::package::{DependencyEntry, DependencyKind};
 use crate::{Result, SniffError};
 
+use super::detection::{DetectorOutcome, resolve_internal_deps};
 use super::glob::expand_membership_globs;
 use super::manifest_index::CargoLockVersions;
 use super::standard::{GlobDialect, MonorepoStandard};
-use super::types::{MonorepoTool, RepoInfo};
 
-use super::detection::resolve_internal_deps;
-
-pub(super) fn detect_cargo_workspace(root: &Path) -> Result<Option<RepoInfo>> {
+pub(super) fn detect_cargo_workspace(root: &Path) -> Result<Option<DetectorOutcome>> {
     let cargo_toml = root.join("Cargo.toml");
     if !cargo_toml.exists() {
         return Ok(None);
@@ -68,7 +66,8 @@ pub(super) fn detect_cargo_workspace(root: &Path) -> Result<Option<RepoInfo>> {
         root,
         &members,
         dialect,
-        MonorepoTool::CargoWorkspace,
+        MonorepoStandard::CargoWorkspace,
+        None,
         &lock_versions,
     );
 
@@ -77,7 +76,8 @@ pub(super) fn detect_cargo_workspace(root: &Path) -> Result<Option<RepoInfo>> {
         root,
         &excludes,
         dialect,
-        MonorepoTool::CargoWorkspace,
+        MonorepoStandard::CargoWorkspace,
+        None,
         &lock_versions,
     );
     for pkg in &mut excluded_packages {
@@ -88,18 +88,10 @@ pub(super) fn detect_cargo_workspace(root: &Path) -> Result<Option<RepoInfo>> {
     // Resolve internal dependency graph
     resolve_internal_deps(&mut packages);
 
-    Ok(Some(RepoInfo {
-        is_monorepo: true,
-        monorepo_tool: Some(MonorepoTool::CargoWorkspace),
-        workspace_tools: vec![MonorepoTool::CargoWorkspace],
+    Ok(Some(DetectorOutcome {
+        standard: MonorepoStandard::CargoWorkspace,
         root: root.to_path_buf(),
-        dependencies: None,
-        dev_dependencies: None,
-        peer_dependencies: None,
-        optional_dependencies: None,
-        monorepo_standards: Vec::new(),
-        monorepo_layers: Vec::new(),
-        packages: Some(packages),
+        packages,
     }))
 }
 

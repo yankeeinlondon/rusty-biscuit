@@ -22,13 +22,13 @@ pub use area::{AreaError, detect_area};
 pub use identity::{RepoIdentity, detect_repo_identity, detect_repo_identity_with_repo};
 pub use standard::{
     BinarySource, BinarySpec, DetectedStandard, DetectionConfidence, GlobDialect,
-    InvocationTemplate, LayerPackage, Marker, MarkerConfidence, MarkerContent, MembershipModel,
-    MonorepoLayer, MonorepoStandard, MonorepoStandardSpec, NestingPolicy, PackageProvenance,
-    ResolvedBinary, Role, RootMembership, Token, WorkspaceMultiplicity, WrapperScript,
+    InvocationTemplate, Marker, MarkerConfidence, MarkerContent, MembershipModel, MonorepoLayer,
+    MonorepoStandard, MonorepoStandardSpec, NestingPolicy, PackageProvenance, ResolvedBinary, Role,
+    RootMembership, Token, WorkspaceMultiplicity, WrapperScript,
 };
 pub use types::{
-    MonorepoTool, Package, PackageDiscoverySource, PackageEcosystem, RepoInfo, detect_repo,
-    detect_repo_structure, detect_repo_with_inventory,
+    Package, PackageEcosystem, RepoInfo, detect_repo, detect_repo_structure,
+    detect_repo_with_inventory,
 };
 
 pub use crate::package::{DependencyEntry, DependencyKind};

@@ -7,10 +7,9 @@ use biscuit_file::serde_yaml_ng;
 use crate::package::{DependencyEntry, DependencyKind};
 use crate::{Result, SniffError};
 
-use super::detection::{create_package, dedupe_packages, resolve_internal_deps};
+use super::detection::{DetectorOutcome, create_package, dedupe_packages, resolve_internal_deps};
 use super::glob::expand_membership_globs;
-use super::standard::{GlobDialect, MonorepoStandard};
-use super::types::{MonorepoTool, PackageDiscoverySource, RepoInfo};
+use super::standard::{GlobDialect, MonorepoStandard, PackageProvenance};
 
 /// Parses a single dependency section from package.json.
 pub(super) fn parse_package_json_dep_section(
@@ -113,7 +112,7 @@ pub(super) fn npm_package_version(parsed: &serde_json::Value) -> Option<String> 
         .map(String::from)
 }
 
-pub(super) fn detect_pnpm_workspace(root: &Path) -> Result<Option<RepoInfo>> {
+pub(super) fn detect_pnpm_workspace(root: &Path) -> Result<Option<DetectorOutcome>> {
     let pnpm_workspace = root.join("pnpm-workspace.yaml");
     if !pnpm_workspace.exists() {
         return Ok(None);
@@ -133,24 +132,17 @@ pub(super) fn detect_pnpm_workspace(root: &Path) -> Result<Option<RepoInfo>> {
         root,
         &packages,
         dialect,
-        MonorepoTool::PnpmWorkspaces,
+        MonorepoStandard::PnpmWorkspaces,
+        None,
         &lock_versions,
     );
     package_locations = dedupe_packages(package_locations);
     resolve_internal_deps(&mut package_locations);
 
-    Ok(Some(RepoInfo {
-        is_monorepo: true,
-        monorepo_tool: Some(MonorepoTool::PnpmWorkspaces),
-        workspace_tools: vec![MonorepoTool::PnpmWorkspaces],
+    Ok(Some(DetectorOutcome {
+        standard: MonorepoStandard::PnpmWorkspaces,
         root: root.to_path_buf(),
-        dependencies: None,
-        dev_dependencies: None,
-        peer_dependencies: None,
-        optional_dependencies: None,
-        monorepo_standards: Vec::new(),
-        monorepo_layers: Vec::new(),
-        packages: Some(package_locations),
+        packages: package_locations,
     }))
 }
 
@@ -162,7 +154,7 @@ fn has_bun_lockfile(root: &Path) -> bool {
     root.join("bun.lock").exists() || root.join("bun.lockb").exists()
 }
 
-pub(super) fn detect_bun_workspace(root: &Path) -> Result<Option<RepoInfo>> {
+pub(super) fn detect_bun_workspace(root: &Path) -> Result<Option<DetectorOutcome>> {
     if !has_bun_lockfile(root) {
         return Ok(None);
     }
@@ -186,28 +178,21 @@ pub(super) fn detect_bun_workspace(root: &Path) -> Result<Option<RepoInfo>> {
         root,
         &workspaces,
         dialect,
-        MonorepoTool::Unknown,
+        MonorepoStandard::BunWorkspaces,
+        None,
         &lock_versions,
     );
     packages = dedupe_packages(packages);
     resolve_internal_deps(&mut packages);
 
-    Ok(Some(RepoInfo {
-        is_monorepo: true,
-        monorepo_tool: None,
-        workspace_tools: Vec::new(),
+    Ok(Some(DetectorOutcome {
+        standard: MonorepoStandard::BunWorkspaces,
         root: root.to_path_buf(),
-        dependencies: None,
-        dev_dependencies: None,
-        peer_dependencies: None,
-        optional_dependencies: None,
-        monorepo_standards: Vec::new(),
-        monorepo_layers: Vec::new(),
-        packages: Some(packages),
+        packages,
     }))
 }
 
-pub(super) fn detect_npm_workspace(root: &Path) -> Result<Option<RepoInfo>> {
+pub(super) fn detect_npm_workspace(root: &Path) -> Result<Option<DetectorOutcome>> {
     let package_json = root.join("package.json");
     if !package_json.exists() {
         return Ok(None);
@@ -233,28 +218,21 @@ pub(super) fn detect_npm_workspace(root: &Path) -> Result<Option<RepoInfo>> {
         root,
         &workspaces,
         dialect,
-        MonorepoTool::NpmWorkspaces,
+        MonorepoStandard::NpmWorkspaces,
+        None,
         &lock_versions,
     );
     packages = dedupe_packages(packages);
     resolve_internal_deps(&mut packages);
 
-    Ok(Some(RepoInfo {
-        is_monorepo: true,
-        monorepo_tool: Some(MonorepoTool::NpmWorkspaces),
-        workspace_tools: vec![MonorepoTool::NpmWorkspaces],
+    Ok(Some(DetectorOutcome {
+        standard: MonorepoStandard::NpmWorkspaces,
         root: root.to_path_buf(),
-        dependencies: None,
-        dev_dependencies: None,
-        peer_dependencies: None,
-        optional_dependencies: None,
-        monorepo_standards: Vec::new(),
-        monorepo_layers: Vec::new(),
-        packages: Some(packages),
+        packages,
     }))
 }
 
-pub(super) fn detect_yarn_workspace(root: &Path) -> Result<Option<RepoInfo>> {
+pub(super) fn detect_yarn_workspace(root: &Path) -> Result<Option<DetectorOutcome>> {
     if !root.join("yarn.lock").exists() {
         return Ok(None);
     }
@@ -278,28 +256,21 @@ pub(super) fn detect_yarn_workspace(root: &Path) -> Result<Option<RepoInfo>> {
         root,
         &workspaces,
         dialect,
-        MonorepoTool::YarnWorkspaces,
+        MonorepoStandard::YarnWorkspaces,
+        None,
         &lock_versions,
     );
     packages = dedupe_packages(packages);
     resolve_internal_deps(&mut packages);
 
-    Ok(Some(RepoInfo {
-        is_monorepo: true,
-        monorepo_tool: Some(MonorepoTool::YarnWorkspaces),
-        workspace_tools: vec![MonorepoTool::YarnWorkspaces],
+    Ok(Some(DetectorOutcome {
+        standard: MonorepoStandard::YarnWorkspaces,
         root: root.to_path_buf(),
-        dependencies: None,
-        dev_dependencies: None,
-        peer_dependencies: None,
-        optional_dependencies: None,
-        monorepo_standards: Vec::new(),
-        monorepo_layers: Vec::new(),
-        packages: Some(packages),
+        packages,
     }))
 }
 
-pub(super) fn detect_rush_workspace(root: &Path) -> Result<Option<RepoInfo>> {
+pub(super) fn detect_rush_workspace(root: &Path) -> Result<Option<DetectorOutcome>> {
     let rush_json = root.join("rush.json");
     if !rush_json.exists() {
         return Ok(None);
@@ -321,9 +292,9 @@ pub(super) fn detect_rush_workspace(root: &Path) -> Result<Option<RepoInfo>> {
         packages.push(create_package(
             &member_path,
             root,
-            MonorepoTool::Unknown,
+            MonorepoStandard::RushStack,
+            PackageProvenance::Explicit,
             &lock_versions,
-            PackageDiscoverySource::ManifestScan,
         ));
     }
 
@@ -334,18 +305,10 @@ pub(super) fn detect_rush_workspace(root: &Path) -> Result<Option<RepoInfo>> {
     packages = dedupe_packages(packages);
     resolve_internal_deps(&mut packages);
 
-    Ok(Some(RepoInfo {
-        is_monorepo: true,
-        monorepo_tool: None,
-        workspace_tools: Vec::new(),
+    Ok(Some(DetectorOutcome {
+        standard: MonorepoStandard::RushStack,
         root: root.to_path_buf(),
-        dependencies: None,
-        dev_dependencies: None,
-        peer_dependencies: None,
-        optional_dependencies: None,
-        monorepo_standards: Vec::new(),
-        monorepo_layers: Vec::new(),
-        packages: Some(packages),
+        packages,
     }))
 }
 
@@ -432,13 +395,13 @@ pub(super) fn parse_package_json_workspace_patterns(
 }
 
 pub(super) fn resolve_js_package_manager(
-    tool: MonorepoTool,
+    standard: MonorepoStandard,
     root: &Path,
     package_managers: &[String],
 ) -> &'static str {
-    match tool {
-        MonorepoTool::PnpmWorkspaces => return "pnpm",
-        MonorepoTool::YarnWorkspaces => return "yarn",
+    match standard {
+        MonorepoStandard::PnpmWorkspaces => return "pnpm",
+        MonorepoStandard::YarnWorkspaces => return "yarn",
         _ => {}
     }
 

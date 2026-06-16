@@ -13,7 +13,7 @@ use tracing::debug;
 
 use super::detection::{create_package, normalize_path};
 use super::standard::{MonorepoStandard, PackageProvenance};
-use super::types::{MonorepoTool, Package, PackageDiscoverySource};
+use super::types::Package;
 
 /// Resolved versions from Cargo.lock.
 pub(crate) struct CargoLockVersions {
@@ -295,25 +295,21 @@ pub(crate) fn is_fixture_manifest(path: &Path) -> bool {
 
 pub(super) fn discover_packages_from_manifests(
     root: &Path,
-    tool: MonorepoTool,
     standard: MonorepoStandard,
     provenance: PackageProvenance,
     lock_versions: &Option<CargoLockVersions>,
-    discovery_source: PackageDiscoverySource,
 ) -> Vec<Package> {
     discover_packages_from_manifests_in_tree(
-        root, root, tool, standard, provenance, lock_versions, discovery_source,
+        root, root, standard, provenance, lock_versions,
     )
 }
 
 /// Discover packages using manifest index if available, otherwise walk filesystem.
 pub(super) fn discover_packages_with_optional_index(
     root: &Path,
-    tool: MonorepoTool,
     standard: MonorepoStandard,
     provenance: PackageProvenance,
     lock_versions: &Option<CargoLockVersions>,
-    discovery_source: PackageDiscoverySource,
     index: Option<&ManifestIndex>,
 ) -> Vec<Package> {
     if let Some(idx) = index {
@@ -321,21 +317,19 @@ pub(super) fn discover_packages_with_optional_index(
         // discover_packages_from_manifests_in_tree which skips search_root)
         idx.package_dirs_in_tree(root, root)
             .iter()
-            .map(|path| create_package(path, root, tool, standard, provenance, lock_versions, discovery_source))
+            .map(|path| create_package(path, root, standard, provenance, lock_versions))
             .collect()
     } else {
-        discover_packages_from_manifests(root, tool, standard, provenance, lock_versions, discovery_source)
+        discover_packages_from_manifests(root, standard, provenance, lock_versions)
     }
 }
 
 pub(super) fn discover_packages_from_manifests_in_tree(
     search_root: &Path,
     repo_root: &Path,
-    tool: MonorepoTool,
     standard: MonorepoStandard,
     provenance: PackageProvenance,
     lock_versions: &Option<CargoLockVersions>,
-    discovery_source: PackageDiscoverySource,
 ) -> Vec<Package> {
     let mut discovered_dirs = HashSet::new();
 
@@ -389,27 +383,26 @@ pub(super) fn discover_packages_from_manifests_in_tree(
     dirs.sort();
 
     dirs.iter()
-        .map(|path| create_package(path, repo_root, tool, standard, provenance, lock_versions, discovery_source))
+        .map(|path| create_package(path, repo_root, standard, provenance, lock_versions))
         .collect()
 }
 
 /// Discover packages from manifest index (optimized path).
 ///
 /// Uses pre-built manifest index instead of walking the filesystem.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn discover_packages_from_index(
     search_root: &Path,
     repo_root: &Path,
-    tool: MonorepoTool,
     standard: MonorepoStandard,
     lock_versions: &Option<CargoLockVersions>,
     provenance: PackageProvenance,
-    discovery_source: PackageDiscoverySource,
     index: &ManifestIndex,
 ) -> Vec<Package> {
     let dirs = index.package_dirs_in_tree(search_root, repo_root);
 
     dirs.iter()
-        .map(|path| create_package(path, repo_root, tool, standard, provenance, lock_versions, discovery_source))
+        .map(|path| create_package(path, repo_root, standard, provenance, lock_versions))
         .collect()
 }
 

@@ -38,15 +38,10 @@ use super::python::{
     pyproject_package_version,
 };
 use super::standard::{MonorepoLayer, MonorepoStandard, PackageProvenance, resolve_acting_binary};
-use super::topology::{
-    DetectorOutcome, build_detected_standards, build_monorepo_layers, layers_imply_monorepo,
-    standard_for_tool,
-};
-use super::types::{
-    MonorepoTool, Package, PackageDiscoverySource, PackageEcosystem, PackageFiles,
-    PackageScanResult, RepoInfo,
-};
+pub(crate) use super::topology::DetectorOutcome;
+use super::topology::{build_detected_standards, build_monorepo_layers, layers_imply_monorepo};
 use super::uv::detect_uv_workspace;
+use super::types::{Package, PackageEcosystem, PackageFiles, PackageScanResult, RepoInfo};
 
 pub(crate) fn detect_repo_inner(
     root: &Path,
@@ -188,95 +183,68 @@ pub(crate) fn detect_repo_inner_with_shared(
         };
     let manifest_index = shared_manifest_index.or(manifest_index.as_ref());
 
-    let mut workspace_tools = Vec::new();
     let mut packages = Vec::new();
     let mut outcomes: Vec<DetectorOutcome> = Vec::new();
 
-    collect_repo_info(
-        detect_cargo_workspace(root)?,
-        &mut workspace_tools,
-        &mut packages,
-        &mut outcomes,
-    );
-    collect_repo_info(
-        detect_nx(root, manifest_index)?,
-        &mut workspace_tools,
-        &mut packages,
-        &mut outcomes,
-    );
-    collect_repo_info(
+    collect_outcome(detect_cargo_workspace(root)?, &mut packages, &mut outcomes);
+    collect_outcome(detect_nx(root, manifest_index)?, &mut packages, &mut outcomes);
+    collect_outcome(
         detect_turborepo(root, manifest_index)?,
-        &mut workspace_tools,
         &mut packages,
         &mut outcomes,
     );
-    collect_repo_info(
+    collect_outcome(
         detect_pnpm_workspace(root)?,
-        &mut workspace_tools,
         &mut packages,
         &mut outcomes,
     );
-    collect_repo_info(
+    collect_outcome(
         detect_yarn_workspace(root)?,
-        &mut workspace_tools,
         &mut packages,
         &mut outcomes,
     );
-    collect_repo_info(
+    collect_outcome(
         detect_npm_workspace(root)?,
-        &mut workspace_tools,
         &mut packages,
         &mut outcomes,
     );
-    collect_repo_info(
+    collect_outcome(
         detect_lerna(root, manifest_index)?,
-        &mut workspace_tools,
         &mut packages,
         &mut outcomes,
     );
-
-    // New membership authorities (Bun, uv, Go) have no legacy `MonorepoTool`
-    // counterpart, so they contribute only to the new topology collections via an
-    // explicit standard rather than through `workspace_tools`.
-    collect_standard_outcome(
+    collect_outcome(
         detect_bun_workspace(root)?,
-        MonorepoStandard::BunWorkspaces,
         &mut packages,
         &mut outcomes,
     );
-    collect_standard_outcome(
+    collect_outcome(
         detect_uv_workspace(root)?,
-        MonorepoStandard::UvWorkspace,
         &mut packages,
         &mut outcomes,
     );
-    collect_standard_outcome(
+    collect_outcome(
         detect_go_workspace(root)?,
-        MonorepoStandard::GoWorkspace,
         &mut packages,
         &mut outcomes,
     );
-    collect_standard_outcome(
+    collect_outcome(
         detect_gradle_workspace(root)?,
-        MonorepoStandard::GradleMultiProject,
         &mut packages,
         &mut outcomes,
     );
-    collect_standard_outcome(
+    collect_outcome(
         detect_maven_workspace(root)?,
-        MonorepoStandard::MavenMultiModule,
         &mut packages,
         &mut outcomes,
     );
-    collect_standard_outcome(
+    collect_outcome(
         detect_dotnet_solution(root)?,
-        MonorepoStandard::DotNetSolution,
         &mut packages,
         &mut outcomes,
     );
-    collect_standard_outcome(
+    collect_outcome(
         detect_rush_workspace(root)?,
-        MonorepoStandard::RushStack,
         &mut packages,
         &mut outcomes,
     );
@@ -311,12 +279,11 @@ pub(crate) fn detect_repo_inner_with_shared(
         root,
         manifest_index,
         &forbids_nested_roots,
-        &mut workspace_tools,
         &mut packages,
         &mut outcomes,
     )?;
 
-    if workspace_tools.is_empty() && outcomes.is_empty() {
+    if outcomes.is_empty() {
         return Ok((None, None));
     }
 
@@ -335,8 +302,6 @@ pub(crate) fn detect_repo_inner_with_shared(
 
     // Build the topology from membership-declaring detectors. `is_monorepo` is
     // now the honest predicate: at least one layer must resolve non-degenerately.
-    // The legacy `monorepo_tool` / `workspace_tools` fields below stay populated
-    // exactly as before so existing JSON consumers see no change.
     let mut monorepo_layers = build_monorepo_layers(&outcomes);
     let is_monorepo = layers_imply_monorepo(&monorepo_layers);
     let mut monorepo_standards =
@@ -353,7 +318,7 @@ pub(crate) fn detect_repo_inner_with_shared(
     // Upgrade provenance to `Lockfile` for ecosystems where the committed
     // lockfile is a high-fidelity membership source.
     for layer in &mut monorepo_layers {
-        upgrade_provenance_with_lockfile(layer);
+        upgrade_provenance_with_lockfile(layer, &mut packages);
     }
 
     if !structure_only {
@@ -365,11 +330,9 @@ pub(crate) fn detect_repo_inner_with_shared(
             packages.extend(discover_packages_from_index(
                 &package.path,
                 root,
-                MonorepoTool::Unknown,
                 MonorepoStandard::Unknown,
                 &lock_versions,
                 PackageProvenance::ManifestScan,
-                PackageDiscoverySource::ManifestScan,
                 index,
             ));
         }
@@ -391,8 +354,6 @@ pub(crate) fn detect_repo_inner_with_shared(
     Ok((
         Some(RepoInfo {
             is_monorepo,
-            monorepo_tool: workspace_tools.first().copied(),
-            workspace_tools,
             root: root.to_path_buf(),
             dependencies: None,
             dev_dependencies: None,
@@ -406,77 +367,37 @@ pub(crate) fn detect_repo_inner_with_shared(
     ))
 }
 
-fn collect_repo_info(
-    info: Option<RepoInfo>,
-    workspace_tools: &mut Vec<MonorepoTool>,
-    packages: &mut Vec<Package>,
-    outcomes: &mut Vec<DetectorOutcome>,
-) {
-    let Some(info) = info else {
-        return;
-    };
-
-    if let Some(tool) = info.monorepo_tool
-        && !workspace_tools.contains(&tool)
-    {
-        workspace_tools.push(tool);
-    }
-
-    if !info.workspace_tools.is_empty() {
-        for tool in info.workspace_tools {
-            if !workspace_tools.contains(&tool) {
-                workspace_tools.push(tool);
-            }
-        }
-    }
-
-    let detected_packages = info.packages.unwrap_or_default();
-    // Record this detector's membership outcome for the topology builder before
-    // the packages are folded into the legacy flat list. Each detector reports a
-    // single tool, so one outcome is produced per matched standard.
-    if let Some(tool) = info.monorepo_tool {
-        outcomes.push(DetectorOutcome {
-            standard: standard_for_tool(tool),
-            root: info.root.clone(),
-            packages: detected_packages.clone(),
-        });
-    }
-    packages.extend(detected_packages);
-}
-
-/// Fold a new-standard detector's result into the topology collections.
+/// Fold a single detector outcome into the shared collections.
 ///
-/// Unlike [`collect_repo_info`], this does not touch the legacy
-/// `workspace_tools` list: Bun, uv, and Go have no [`MonorepoTool`] counterpart,
-/// so they are reported purely through `monorepo_standards` / `monorepo_layers`.
-/// The detected packages still join the flat `packages` list so `RepoInfo`
-/// continues to surface them.
-fn collect_standard_outcome(
-    info: Option<RepoInfo>,
-    standard: MonorepoStandard,
+/// Only membership-authority outcomes contribute packages to the canonical
+/// `RepoInfo.packages` catalog. Orchestrator-only standards (Nx, Turborepo,
+/// Lerna) are still recorded as outcomes so they appear in
+/// `monorepo_standards` and as orchestrators on layers, but their packages do
+/// not own entries in the flat catalog.
+fn collect_outcome(
+    outcome: Option<DetectorOutcome>,
     packages: &mut Vec<Package>,
     outcomes: &mut Vec<DetectorOutcome>,
 ) {
-    let Some(info) = info else {
+    let Some(outcome) = outcome else {
         return;
     };
-
-    let detected_packages = info.packages.unwrap_or_default();
-    outcomes.push(DetectorOutcome {
-        standard,
-        root: info.root.clone(),
-        packages: detected_packages.clone(),
-    });
-    packages.extend(detected_packages);
+    if outcome.standard.defines_membership() {
+        packages.extend(outcome.packages.clone());
+    }
+    outcomes.push(outcome);
 }
 
-/// Fold a multi-root detector's outcomes into the topology collections.
+/// Fold a multi-root detector's outcomes into the shared collections.
 ///
 /// Leaf-marker detectors (Bazel/Pants/Buck2) may report more than one workspace
-/// root, so they hand back a list of [`DetectorOutcome`]s rather than a single
-/// [`RepoInfo`]. Each outcome's packages are layer-root-relative; before joining
-/// the flat `packages` list they are rebased to repo-root-relative so
-/// `RepoInfo.packages` stays uniformly framed.
+/// root, so they hand back a list of [`DetectorOutcome`]s. Each outcome's
+/// packages are layer-root-relative; before joining the flat `packages` list
+/// they are rebased to repo-root-relative so `RepoInfo.packages` stays
+/// uniformly framed.
+///
+/// Like [`collect_outcome`], only membership-authority outcomes contribute
+/// packages; polyglot standards define membership and therefore keep theirs.
 fn collect_outcomes(
     repo_root: &Path,
     detected: Vec<DetectorOutcome>,
@@ -484,11 +405,13 @@ fn collect_outcomes(
     outcomes: &mut Vec<DetectorOutcome>,
 ) {
     for outcome in detected {
-        let mut flat_packages = outcome.packages.clone();
-        for pkg in &mut flat_packages {
-            rebase_package_to_root(pkg, repo_root);
+        if outcome.standard.defines_membership() {
+            let mut flat_packages = outcome.packages.clone();
+            for pkg in &mut flat_packages {
+                rebase_package_to_root(pkg, repo_root);
+            }
+            packages.extend(flat_packages);
         }
-        packages.extend(flat_packages);
         outcomes.push(outcome);
     }
 }
@@ -498,12 +421,12 @@ fn collect_outcomes(
 ///
 /// The manifest remains the authority when lockfile and manifest disagree; the
 /// mismatch is recorded in `lockfile_match` so consumers can spot stale lockfiles.
-fn upgrade_provenance_with_lockfile(layer: &mut MonorepoLayer) {
+fn upgrade_provenance_with_lockfile(layer: &mut MonorepoLayer, packages: &mut [Package]) {
     let authority = layer.authority;
     let lockfile_result = match authority {
-        MonorepoStandard::PnpmWorkspaces => pnpm_lockfile_matches(layer),
-        MonorepoStandard::UvWorkspace => uv_lockfile_matches(layer),
-        MonorepoStandard::CargoWorkspace => cargo_lockfile_matches(layer),
+        MonorepoStandard::PnpmWorkspaces => pnpm_lockfile_matches(layer, packages),
+        MonorepoStandard::UvWorkspace => uv_lockfile_matches(layer, packages),
+        MonorepoStandard::CargoWorkspace => cargo_lockfile_matches(layer, packages),
         _ => return,
     };
 
@@ -514,10 +437,28 @@ fn upgrade_provenance_with_lockfile(layer: &mut MonorepoLayer) {
     layer.lockfile_match = Some(matches);
     if matches {
         layer.provenance = PackageProvenance::Lockfile;
-        for pkg in &mut layer.packages {
-            pkg.provenance = PackageProvenance::Lockfile;
+        for relative in &layer.packages {
+            let key = normalize_layer_package_relative(relative);
+            for pkg in packages.iter_mut().filter(|p| p.relative == key) {
+                pkg.provenance = PackageProvenance::Lockfile;
+            }
         }
     }
+}
+
+/// Normalize a repo-relative layer package path for comparison with
+/// [`Package::relative`]. Empty paths are preserved so they match root
+/// packages (e.g. uv's always-counted workspace root).
+fn normalize_layer_package_relative(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+/// Compute a path relative to a layer root, normalizing separators.
+///
+/// Returns `None` when `path` is not under `layer_root`.
+fn layer_relative_path(path: &Path, layer_root: &Path) -> Option<String> {
+    let rel = path.strip_prefix(layer_root).ok()?;
+    Some(normalize_layer_package_relative(rel))
 }
 
 /// Parse `pnpm-lock.yaml` and compare its `importers:` keys to the layer's
@@ -529,7 +470,7 @@ fn upgrade_provenance_with_lockfile(layer: &mut MonorepoLayer) {
 /// The pnpm root importer key `"."` is normalized away because the manifest
 /// globs never list the root — both sides are compared as member sets without
 /// the workspace root.
-fn pnpm_lockfile_matches(layer: &MonorepoLayer) -> Option<bool> {
+fn pnpm_lockfile_matches(layer: &MonorepoLayer, packages: &[Package]) -> Option<bool> {
     let lock_path = layer.root.join("pnpm-lock.yaml");
     let content = std::fs::read_to_string(&lock_path).ok()?;
     let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).ok()?;
@@ -553,7 +494,13 @@ fn pnpm_lockfile_matches(layer: &MonorepoLayer) -> Option<bool> {
     let manifest_members: std::collections::HashSet<String> = layer
         .packages
         .iter()
-        .map(|p| p.relative.to_string_lossy().into_owned().replace('\\', "/"))
+        .filter_map(|rel| {
+            let key = normalize_layer_package_relative(rel);
+            packages
+                .iter()
+                .find(|p| p.relative == key)
+                .and_then(|p| layer_relative_path(&p.path, &layer.root))
+        })
         .collect();
 
     Some(manifest_members == lock_members)
@@ -567,7 +514,7 @@ fn pnpm_lockfile_matches(layer: &MonorepoLayer) -> Option<bool> {
 /// The uv root member (`"."`) is kept on both sides because uv's
 /// `RootMembership::Always` adds the root to `layer.packages`, so both sets
 /// include the root.
-fn uv_lockfile_matches(layer: &MonorepoLayer) -> Option<bool> {
+fn uv_lockfile_matches(layer: &MonorepoLayer, packages: &[Package]) -> Option<bool> {
     let lock_path = layer.root.join("uv.lock");
     let content = std::fs::read_to_string(&lock_path).ok()?;
     let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
@@ -593,11 +540,14 @@ fn uv_lockfile_matches(layer: &MonorepoLayer) -> Option<bool> {
     let manifest_members: std::collections::HashSet<String> = layer
         .packages
         .iter()
-        .map(|p| {
-            let s = p.relative.to_string_lossy().into_owned().replace('\\', "/");
-            // uv counts the workspace root (`.`) as a member; represent the
-            // empty relative path the same way the lockfile does.
-            if s.is_empty() { ".".to_string() } else { s }
+        .filter_map(|rel| {
+            let key = normalize_layer_package_relative(rel);
+            packages.iter().find(|p| p.relative == key).and_then(|p| {
+                let s = layer_relative_path(&p.path, &layer.root)?;
+                // uv counts the workspace root (`.`) as a member; represent the
+                // empty relative path the same way the lockfile does.
+                Some(if s.is_empty() { ".".to_string() } else { s })
+            })
         })
         .collect();
 
@@ -606,12 +556,14 @@ fn uv_lockfile_matches(layer: &MonorepoLayer) -> Option<bool> {
 
 /// Check that every globbed Cargo member has a `[package].name` present in the
 /// root `Cargo.lock` `[[package]]` table.
-fn cargo_lockfile_matches(layer: &MonorepoLayer) -> Option<bool> {
+fn cargo_lockfile_matches(layer: &MonorepoLayer, packages: &[Package]) -> Option<bool> {
     let lock_path = layer.root.join("Cargo.lock");
     let lock_versions = CargoLockVersions::parse(&lock_path)?;
 
-    for pkg in &layer.packages {
-        let cargo_toml = layer.root.join(&pkg.relative).join("Cargo.toml");
+    for relative in &layer.packages {
+        let key = normalize_layer_package_relative(relative);
+        let pkg = packages.iter().find(|p| p.relative == key)?;
+        let cargo_toml = pkg.path.join("Cargo.toml");
         let name = std::fs::read_to_string(&cargo_toml)
             .ok()
             .and_then(|content| toml_crate::from_str::<toml_crate::Value>(&content).ok())
@@ -1008,19 +960,6 @@ fn detect_package_managers(path: &Path) -> Vec<String> {
     managers
 }
 
-pub(crate) fn discovery_source_for_tool(tool: MonorepoTool) -> PackageDiscoverySource {
-    match tool {
-        MonorepoTool::CargoWorkspace => PackageDiscoverySource::CargoWorkspace,
-        MonorepoTool::PnpmWorkspaces => PackageDiscoverySource::PnpmWorkspace,
-        MonorepoTool::NpmWorkspaces => PackageDiscoverySource::NpmWorkspace,
-        MonorepoTool::YarnWorkspaces => PackageDiscoverySource::YarnWorkspace,
-        MonorepoTool::Nx => PackageDiscoverySource::Nx,
-        MonorepoTool::Turborepo => PackageDiscoverySource::Turborepo,
-        MonorepoTool::Lerna => PackageDiscoverySource::Lerna,
-        MonorepoTool::Unknown => PackageDiscoverySource::ManifestScan,
-    }
-}
-
 fn detect_package_ecosystem(path: &Path) -> PackageEcosystem {
     if path.join("Cargo.toml").exists() {
         return PackageEcosystem::Cargo;
@@ -1102,12 +1041,6 @@ fn merge_package_into(existing: &mut Package, incoming: Package) {
     {
         existing.standard = incoming.standard;
         existing.provenance = incoming.provenance;
-    }
-
-    for source in incoming.discovery_sources {
-        if !existing.discovery_sources.contains(&source) {
-            existing.discovery_sources.push(source);
-        }
     }
 
     for manager in incoming.package_managers {
@@ -1347,20 +1280,16 @@ pub fn refresh_package_boundaries(
 /// Re-export wrapper for use by sibling submodules.
 pub(crate) fn discover_packages_with_optional_index(
     root: &Path,
-    tool: MonorepoTool,
     standard: MonorepoStandard,
     provenance: PackageProvenance,
     lock_versions: &Option<CargoLockVersions>,
-    discovery_source: PackageDiscoverySource,
     index: Option<&ManifestIndex>,
 ) -> Vec<Package> {
     mi_discover_packages_with_optional_index(
         root,
-        tool,
         standard,
         provenance,
         lock_versions,
-        discovery_source,
         index,
     )
 }
@@ -1369,11 +1298,9 @@ pub(crate) fn discover_packages_with_optional_index(
 pub(crate) fn create_package(
     path: &Path,
     root: &Path,
-    tool: MonorepoTool,
     standard: MonorepoStandard,
     provenance: PackageProvenance,
     lock_versions: &Option<CargoLockVersions>,
-    discovery_source: PackageDiscoverySource,
 ) -> Package {
     let mut ctx = PackageBuildContext::new(lock_versions);
     let relative = make_relative_path(path, root);
@@ -1415,7 +1342,7 @@ pub(crate) fn create_package(
     // Parse package.json dependency sections when available.
     let package_json = path.join("package.json");
     if package_json.exists() {
-        let js_package_manager = resolve_js_package_manager(tool, root, &package_managers);
+        let js_package_manager = resolve_js_package_manager(standard, root, &package_managers);
         if let Some(parsed) = ctx.manifests.npm(&package_json) {
             let (normal, dev, peer, optional) =
                 package_json_dependencies_from_value(parsed, js_package_manager);
@@ -1484,7 +1411,6 @@ pub(crate) fn create_package(
         ecosystem,
         standard,
         provenance,
-        discovery_sources: vec![discovery_source],
         nested_packages: Vec::new(),
         primary_language: None,
         secondary_languages: Vec::new(),
@@ -1524,7 +1450,6 @@ mod tests {
             ecosystem: PackageEcosystem::Unknown,
             standard: MonorepoStandard::Unknown,
             provenance: PackageProvenance::ManifestScan,
-            discovery_sources: Vec::new(),
             nested_packages: Vec::new(),
             primary_language: None,
             secondary_languages: Vec::new(),

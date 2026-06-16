@@ -42,8 +42,8 @@ pub use just::{JustRecipe, JustRecipeParam, JustfileInfo, detect_justfiles};
 pub use languages::{LanguageBreakdown, LanguageStats, detect_languages};
 pub use repo::{
     DependencyEntry, DependencyKind, DetectedStandard, DetectionConfidence, MonorepoLayer,
-    MonorepoStandard, MonorepoStandardSpec, MonorepoTool, Package, PackageDiscoverySource,
-    PackageEcosystem, PackageProvenance, RepoInfo, detect_repo, detect_repo_structure,
+    MonorepoStandard, MonorepoStandardSpec, Package, PackageEcosystem,
+    PackageProvenance, RepoInfo, detect_repo, detect_repo_structure,
 };
 
 #[deprecated(note = "Use `Package` instead")]

@@ -13,29 +13,6 @@ use crate::filesystem::repo::detection::canonicalize_path;
 use crate::filesystem::repo::standard::{DetectedStandard, MonorepoLayer, MonorepoStandard, PackageProvenance};
 use crate::package::DependencyEntry;
 
-/// Supported monorepo tools and package managers
-#[non_exhaustive]
-#[deprecated(note = "Use MonorepoStandard via RepoInfo::monorepo_layers instead")]
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum MonorepoTool {
-    /// Rust Cargo workspace
-    CargoWorkspace,
-    /// npm workspaces
-    NpmWorkspaces,
-    /// pnpm workspaces
-    PnpmWorkspaces,
-    /// Yarn workspaces
-    YarnWorkspaces,
-    /// Nx monorepo tool
-    Nx,
-    /// Turborepo
-    Turborepo,
-    /// Lerna
-    Lerna,
-    /// Unknown monorepo tool
-    Unknown,
-}
-
 /// The primary ecosystem associated with a package boundary.
 ///
 /// This is a property of the individual package, inferred from its own
@@ -66,40 +43,11 @@ pub enum PackageEcosystem {
     Unknown,
 }
 
-/// Describes how a package boundary was discovered.
-#[non_exhaustive]
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
-pub enum PackageDiscoverySource {
-    /// Cargo workspace member
-    CargoWorkspace,
-    /// pnpm workspace package
-    PnpmWorkspace,
-    /// npm workspace package
-    NpmWorkspace,
-    /// Yarn workspace package
-    YarnWorkspace,
-    /// Nx-discovered package
-    Nx,
-    /// Turborepo-discovered package
-    Turborepo,
-    /// Lerna-discovered package
-    Lerna,
-    /// Directly discovered from a package manifest
-    ManifestScan,
-}
-
 /// Information about a detected repository
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RepoInfo {
     /// Whether this is a monorepo
     pub is_monorepo: bool,
-    /// The tool managing the monorepo (if is_monorepo is true)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub monorepo_tool: Option<MonorepoTool>,
-    /// All workspace tools detected at the repo root.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub workspace_tools: Vec<MonorepoTool>,
     /// Root directory of the repository
     pub root: PathBuf,
     /// Dependencies (for non-monorepo projects only)
@@ -118,8 +66,7 @@ pub struct RepoInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub packages: Option<Vec<Package>>,
     /// Standards detected at the repo root, each with its acting binary and
-    /// detection confidence. Additive to the legacy `monorepo_tool` /
-    /// `workspace_tools` fields.
+    /// detection confidence.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub monorepo_standards: Vec<DetectedStandard>,
     /// Membership layers: each authority that declares packages plus any
@@ -143,9 +90,6 @@ pub struct Package {
     /// The package ecosystem inferred from its manifests.
     #[serde(default)]
     pub ecosystem: PackageEcosystem,
-    /// How this package boundary was discovered.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub discovery_sources: Vec<PackageDiscoverySource>,
     /// The monorepo standard that owns this package.
     #[serde(default)]
     pub standard: MonorepoStandard,
@@ -432,8 +376,6 @@ mod tests {
     fn repo_info_package_for_dir_finds_deepest_match() {
         let repo = RepoInfo {
             is_monorepo: true,
-            monorepo_tool: None,
-            workspace_tools: Vec::new(),
             root: PathBuf::from("/repo"),
             dependencies: None,
             dev_dependencies: None,
@@ -475,8 +417,6 @@ mod tests {
     fn monorepo_with_areas() -> RepoInfo {
         RepoInfo {
             is_monorepo: true,
-            monorepo_tool: None,
-            workspace_tools: Vec::new(),
             root: PathBuf::from("/repo"),
             dependencies: None,
             dev_dependencies: None,

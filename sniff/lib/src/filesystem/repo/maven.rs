@@ -7,10 +7,10 @@ use regex::Regex;
 
 use crate::Result;
 
-use super::detection::{create_package, dedupe_packages, resolve_internal_deps};
-use super::types::{MonorepoTool, PackageDiscoverySource, RepoInfo};
+use super::detection::{DetectorOutcome, create_package, dedupe_packages, resolve_internal_deps};
+use super::standard::{MonorepoStandard, PackageProvenance};
 
-pub(super) fn detect_maven_workspace(root: &Path) -> Result<Option<RepoInfo>> {
+pub(super) fn detect_maven_workspace(root: &Path) -> Result<Option<DetectorOutcome>> {
     let pom = root.join("pom.xml");
     if !pom.exists() {
         return Ok(None);
@@ -32,9 +32,9 @@ pub(super) fn detect_maven_workspace(root: &Path) -> Result<Option<RepoInfo>> {
         packages.push(create_package(
             &module_path,
             root,
-            MonorepoTool::Unknown,
+            MonorepoStandard::MavenMultiModule,
+            PackageProvenance::Explicit,
             &lock_versions,
-            PackageDiscoverySource::ManifestScan,
         ));
     }
 
@@ -45,18 +45,10 @@ pub(super) fn detect_maven_workspace(root: &Path) -> Result<Option<RepoInfo>> {
     packages = dedupe_packages(packages);
     resolve_internal_deps(&mut packages);
 
-    Ok(Some(RepoInfo {
-        is_monorepo: true,
-        monorepo_tool: None,
-        workspace_tools: Vec::new(),
+    Ok(Some(DetectorOutcome {
+        standard: MonorepoStandard::MavenMultiModule,
         root: root.to_path_buf(),
-        dependencies: None,
-        dev_dependencies: None,
-        peer_dependencies: None,
-        optional_dependencies: None,
-        monorepo_standards: Vec::new(),
-        monorepo_layers: Vec::new(),
-        packages: Some(packages),
+        packages,
     }))
 }
 

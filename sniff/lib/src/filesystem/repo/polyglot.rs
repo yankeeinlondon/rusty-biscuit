@@ -20,10 +20,10 @@ use ignore::WalkBuilder;
 use crate::Result;
 use crate::filesystem::file_types::should_skip_directory_name;
 
-use super::detection::{create_package, rebase_package_to_root};
-use super::standard::MonorepoStandard;
+use super::detection::create_package;
+use super::standard::{MonorepoStandard, PackageProvenance};
 use super::topology::DetectorOutcome;
-use super::types::{MonorepoTool, Package, PackageDiscoverySource};
+use super::types::Package;
 
 /// Bazel project-root markers. Any one of these promotes a directory to a
 /// (parent or nested) workspace root.
@@ -51,7 +51,7 @@ pub(super) fn detect_bazel_workspace(root: &Path) -> Result<Vec<DetectorOutcome>
     if !has_any_marker(root, &BAZEL_ROOT_MARKERS) {
         return Ok(Vec::new());
     }
-    let workspaces = walk_leaf_workspaces(root, &BAZEL_LEAF_FILES, &BAZEL_ROOT_MARKERS);
+    let workspaces = walk_leaf_workspaces(root, &BAZEL_LEAF_FILES, &BAZEL_ROOT_MARKERS, MonorepoStandard::Bazel);
     Ok(into_outcomes(workspaces, MonorepoStandard::Bazel))
 }
 
@@ -60,7 +60,7 @@ pub(super) fn detect_pants_workspace(root: &Path) -> Result<Vec<DetectorOutcome>
     if !root.join("pants.toml").exists() {
         return Ok(Vec::new());
     }
-    let workspaces = walk_leaf_workspaces(root, &PANTS_LEAF_FILES, &[]);
+    let workspaces = walk_leaf_workspaces(root, &PANTS_LEAF_FILES, &[], MonorepoStandard::Pants);
     Ok(into_outcomes(workspaces, MonorepoStandard::Pants))
 }
 
@@ -69,7 +69,7 @@ pub(super) fn detect_buck2_workspace(root: &Path) -> Result<Vec<DetectorOutcome>
     if !root.join(".buckconfig").exists() {
         return Ok(Vec::new());
     }
-    let workspaces = walk_leaf_workspaces(root, &BUCK2_LEAF_FILES, &[]);
+    let workspaces = walk_leaf_workspaces(root, &BUCK2_LEAF_FILES, &[], MonorepoStandard::Buck2);
     Ok(into_outcomes(workspaces, MonorepoStandard::Buck2))
 }
 
@@ -100,14 +100,14 @@ fn into_outcomes(
 /// A directory's owning workspace is the deepest `nested_root` marker on the
 /// path from `root` to the directory (inclusive); `root` itself is always a
 /// workspace. When `nested_roots` is empty there is no segmentation and every
-/// package belongs to `root`. Package paths are built relative to their owning
-/// workspace root (`ws_root`) so [`DetectorOutcome`] packages are consistently
-/// layer-root-relative; the caller rebases them to repo-root-relative when
-/// folding into the flat `RepoInfo.packages` list.
+/// package belongs to `root`. Package paths are built relative to the supplied
+/// `root` so both [`DetectorOutcome`] packages and the flat `RepoInfo.packages`
+/// list use repo-root-relative framing.
 fn walk_leaf_workspaces(
     root: &Path,
     leaf_files: &[&str],
     nested_roots: &[&str],
+    standard: MonorepoStandard,
 ) -> Vec<LeafWorkspace> {
     let dirs = walk_dirs(root);
 
@@ -143,15 +143,13 @@ fn walk_leaf_workspaces(
             let packages = leaf_dirs
                 .into_iter()
                 .map(|dir| {
-                    let mut pkg = create_package(
+                    create_package(
                         &dir,
                         root,
-                        MonorepoTool::Unknown,
+                        standard,
+                        PackageProvenance::LeafMarkers,
                         &lock_versions,
-                        PackageDiscoverySource::ManifestScan,
-                    );
-                    rebase_package_to_root(&mut pkg, &ws_root);
-                    pkg
+                    )
                 })
                 .collect();
             LeafWorkspace {
@@ -233,11 +231,11 @@ mod tests {
             nested.packages.iter().map(|p| p.relative.clone()).collect();
         nested_rels.sort();
         // The nested subtree is owned by the nested workspace, never the parent.
-        // Layer paths are relative to the nested workspace root: the root package
-        // itself has an empty relative path, and `sub` is one level down.
+        // With repo-root-relative framing the nested workspace root and its sub
+        // package both carry the `nested/` prefix.
         assert_eq!(
             nested_rels,
-            vec!["".to_string(), "sub".to_string()]
+            vec!["nested".to_string(), "nested/sub".to_string()]
         );
     }
 

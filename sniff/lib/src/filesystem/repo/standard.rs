@@ -1,7 +1,7 @@
 //! Monorepo standard model: a higher-fidelity description of how a monorepo is
-//! organized than the legacy [`MonorepoTool`] enum can express.
+//! organized than the legacy flat-tool enum could express.
 //!
-//! [`MonorepoStandard`] separates the three axes `MonorepoTool` conflates:
+//! [`MonorepoStandard`] separates three axes the legacy model conflated:
 //! membership format (what file declares which packages belong), role (what the
 //! tool does — defines membership, orchestrates tasks, manages dependencies),
 //! and acting binary (what you actually run). Richness lives in a const
@@ -11,8 +11,6 @@
 //! This module is pure data and accessors: detection wiring, the glob expander,
 //! and CLI output land in later phases. See the feature spec at
 //! `sniff/features/2026-06-15-improved-monorepo-capture/spec.md`.
-//!
-//! [`MonorepoTool`]: super::types::MonorepoTool
 
 use serde::{Deserialize, Serialize};
 #[cfg(test)]
@@ -390,21 +388,10 @@ pub struct MonorepoLayer {
     /// member) is correctly treated as degenerate.
     #[serde(default)]
     pub root_is_package: bool,
-    /// Packages resolved for this layer, with paths relative to the layer root.
-    pub packages: Vec<LayerPackage>,
-}
-
-/// A package resolved within a [`MonorepoLayer`].
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct LayerPackage {
-    /// Native package name.
-    pub name: String,
-    /// Path relative to the layer root.
-    pub relative: PathBuf,
-    /// The standard that owns this package.
-    pub standard: MonorepoStandard,
-    /// How this package was derived.
-    pub provenance: PackageProvenance,
+    /// Packages resolved for this layer, with repo-relative paths matching
+    /// [`Package::relative`]. Each entry resolves to exactly one package in the
+    /// canonical `RepoInfo.packages` catalog.
+    pub packages: Vec<PathBuf>,
 }
 
 impl MonorepoStandard {
@@ -2012,12 +1999,7 @@ mod tests {
 
     fn layer_with(authority: MonorepoStandard, package_count: usize) -> MonorepoLayer {
         let packages = (0..package_count)
-            .map(|i| LayerPackage {
-                name: format!("pkg-{i}"),
-                relative: PathBuf::from(format!("packages/pkg-{i}")),
-                standard: authority,
-                provenance: PackageProvenance::Globbed,
-            })
+            .map(|i| PathBuf::from(format!("packages/pkg-{i}")))
             .collect();
         // The helper mirrors the typical "single member plus non-package root"
         // Cargo virtual layout only when explicitly asked. By default the test

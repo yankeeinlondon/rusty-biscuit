@@ -6,12 +6,11 @@ use biscuit_file::toml_crate;
 
 use crate::{Result, SniffError};
 
-use super::detection::{create_package, dedupe_packages, resolve_internal_deps};
+use super::detection::{DetectorOutcome, create_package, dedupe_packages, resolve_internal_deps};
 use super::glob::expand_membership_globs;
-use super::standard::{GlobDialect, MonorepoStandard};
-use super::types::{MonorepoTool, PackageDiscoverySource, RepoInfo};
+use super::standard::{GlobDialect, MonorepoStandard, PackageProvenance};
 
-pub(super) fn detect_uv_workspace(root: &Path) -> Result<Option<RepoInfo>> {
+pub(super) fn detect_uv_workspace(root: &Path) -> Result<Option<DetectorOutcome>> {
     let pyproject = root.join("pyproject.toml");
     if !pyproject.exists() {
         return Ok(None);
@@ -30,7 +29,8 @@ pub(super) fn detect_uv_workspace(root: &Path) -> Result<Option<RepoInfo>> {
         root,
         &members,
         dialect,
-        MonorepoTool::Unknown,
+        MonorepoStandard::UvWorkspace,
+        None,
         &lock_versions,
     );
 
@@ -39,26 +39,18 @@ pub(super) fn detect_uv_workspace(root: &Path) -> Result<Option<RepoInfo>> {
     packages.push(create_package(
         root,
         root,
-        MonorepoTool::Unknown,
+        MonorepoStandard::UvWorkspace,
+        PackageProvenance::Globbed,
         &lock_versions,
-        PackageDiscoverySource::ManifestScan,
     ));
 
     packages = dedupe_packages(packages);
     resolve_internal_deps(&mut packages);
 
-    Ok(Some(RepoInfo {
-        is_monorepo: true,
-        monorepo_tool: None,
-        workspace_tools: Vec::new(),
+    Ok(Some(DetectorOutcome {
+        standard: MonorepoStandard::UvWorkspace,
         root: root.to_path_buf(),
-        dependencies: None,
-        dev_dependencies: None,
-        peer_dependencies: None,
-        optional_dependencies: None,
-        monorepo_standards: Vec::new(),
-        monorepo_layers: Vec::new(),
-        packages: Some(packages),
+        packages,
     }))
 }
 

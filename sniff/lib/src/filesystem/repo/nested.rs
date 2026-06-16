@@ -44,7 +44,7 @@ use super::npm::{
 use super::nx_turbo::{detect_lerna, detect_nx, detect_turborepo};
 use super::standard::{MonorepoStandard, NestingPolicy};
 use super::topology::DetectorOutcome;
-use super::types::{MonorepoTool, Package, RepoInfo};
+use super::types::Package;
 use super::uv::detect_uv_workspace;
 use crate::Result;
 use crate::filesystem::file_types::should_skip_directory_name;
@@ -139,7 +139,6 @@ pub(crate) fn discover_nested_workspace_outcomes(
     root: &Path,
     manifest_index: Option<&super::manifest_index::ManifestIndex>,
     forbids_nested_roots: &[(PathBuf, MonorepoStandard)],
-    workspace_tools: &mut Vec<MonorepoTool>,
     packages: &mut Vec<Package>,
     outcomes: &mut Vec<DetectorOutcome>,
 ) -> Result<()> {
@@ -179,7 +178,6 @@ pub(crate) fn discover_nested_workspace_outcomes(
                 &candidate.root,
                 root,
                 manifest_index,
-                workspace_tools,
                 packages,
                 outcomes,
             )?;
@@ -290,7 +288,7 @@ fn walk_for_nested_markers(root: &Path) -> Vec<Candidate> {
 }
 
 /// Dispatch the detector for `standard` at `target`, folding any
-/// [`RepoInfo`] it returns into the shared collections.
+/// [`DetectorOutcome`] it returns into the shared collections.
 ///
 /// `repo_root` is the outer repository root, used to rebase packages from the
 /// detector's layer-root-relative frame into the repo-root-relative frame the
@@ -300,220 +298,51 @@ fn dispatch_detector_at(
     target: &Path,
     repo_root: &Path,
     manifest_index: Option<&super::manifest_index::ManifestIndex>,
-    workspace_tools: &mut Vec<MonorepoTool>,
     packages: &mut Vec<Package>,
     outcomes: &mut Vec<DetectorOutcome>,
 ) -> Result<()> {
-    match standard {
-        MonorepoStandard::CargoWorkspace => {
-            collect_repo_info(
-                detect_cargo_workspace(target)?,
-                repo_root,
-                workspace_tools,
-                packages,
-                outcomes,
-                standard,
-            );
-        }
-        MonorepoStandard::NpmWorkspaces => {
-            collect_repo_info(
-                detect_npm_workspace(target)?,
-                repo_root,
-                workspace_tools,
-                packages,
-                outcomes,
-                standard,
-            );
-        }
-        MonorepoStandard::PnpmWorkspaces => {
-            collect_repo_info(
-                detect_pnpm_workspace(target)?,
-                repo_root,
-                workspace_tools,
-                packages,
-                outcomes,
-                standard,
-            );
-        }
-        MonorepoStandard::YarnWorkspaces => {
-            collect_repo_info(
-                detect_yarn_workspace(target)?,
-                repo_root,
-                workspace_tools,
-                packages,
-                outcomes,
-                standard,
-            );
-        }
-        MonorepoStandard::BunWorkspaces => {
-            collect_standard_outcome(
-                detect_bun_workspace(target)?,
-                standard,
-                repo_root,
-                packages,
-                outcomes,
-            );
-        }
-        MonorepoStandard::UvWorkspace => {
-            collect_standard_outcome(
-                detect_uv_workspace(target)?,
-                standard,
-                repo_root,
-                packages,
-                outcomes,
-            );
-        }
-        MonorepoStandard::GoWorkspace => {
-            collect_standard_outcome(
-                detect_go_workspace(target)?,
-                standard,
-                repo_root,
-                packages,
-                outcomes,
-            );
-        }
-        MonorepoStandard::GradleMultiProject => {
-            collect_standard_outcome(
-                detect_gradle_workspace(target)?,
-                standard,
-                repo_root,
-                packages,
-                outcomes,
-            );
-        }
-        MonorepoStandard::MavenMultiModule => {
-            collect_standard_outcome(
-                detect_maven_workspace(target)?,
-                standard,
-                repo_root,
-                packages,
-                outcomes,
-            );
-        }
-        MonorepoStandard::DotNetSolution => {
-            collect_standard_outcome(
-                detect_dotnet_solution(target)?,
-                standard,
-                repo_root,
-                packages,
-                outcomes,
-            );
-        }
-        MonorepoStandard::RushStack => {
-            collect_standard_outcome(
-                detect_rush_workspace(target)?,
-                standard,
-                repo_root,
-                packages,
-                outcomes,
-            );
-        }
-        MonorepoStandard::Nx => {
-            collect_repo_info(
-                detect_nx(target, manifest_index)?,
-                repo_root,
-                workspace_tools,
-                packages,
-                outcomes,
-                standard,
-            );
-        }
-        MonorepoStandard::Turborepo => {
-            collect_repo_info(
-                detect_turborepo(target, manifest_index)?,
-                repo_root,
-                workspace_tools,
-                packages,
-                outcomes,
-                standard,
-            );
-        }
-        MonorepoStandard::Lerna => {
-            collect_repo_info(
-                detect_lerna(target, manifest_index)?,
-                repo_root,
-                workspace_tools,
-                packages,
-                outcomes,
-                standard,
-            );
-        }
+    let outcome = match standard {
+        MonorepoStandard::CargoWorkspace => detect_cargo_workspace(target)?,
+        MonorepoStandard::NpmWorkspaces => detect_npm_workspace(target)?,
+        MonorepoStandard::PnpmWorkspaces => detect_pnpm_workspace(target)?,
+        MonorepoStandard::YarnWorkspaces => detect_yarn_workspace(target)?,
+        MonorepoStandard::BunWorkspaces => detect_bun_workspace(target)?,
+        MonorepoStandard::UvWorkspace => detect_uv_workspace(target)?,
+        MonorepoStandard::GoWorkspace => detect_go_workspace(target)?,
+        MonorepoStandard::GradleMultiProject => detect_gradle_workspace(target)?,
+        MonorepoStandard::MavenMultiModule => detect_maven_workspace(target)?,
+        MonorepoStandard::DotNetSolution => detect_dotnet_solution(target)?,
+        MonorepoStandard::RushStack => detect_rush_workspace(target)?,
+        MonorepoStandard::Nx => detect_nx(target, manifest_index)?,
+        MonorepoStandard::Turborepo => detect_turborepo(target, manifest_index)?,
+        MonorepoStandard::Lerna => detect_lerna(target, manifest_index)?,
         // Bazel/Pants/Buck2 self-walk; Unknown is not a real detector.
         MonorepoStandard::Bazel
         | MonorepoStandard::Pants
         | MonorepoStandard::Buck2
-        | MonorepoStandard::Unknown => {}
-    }
+        | MonorepoStandard::Unknown => None,
+    };
+    collect_outcome(outcome, repo_root, packages, outcomes);
     Ok(())
 }
 
-/// Fold a detector's [`RepoInfo`] into the shared collections, attributing the
-/// outcome to `standard` regardless of the legacy [`MonorepoTool`] the
-/// detector reported.
+/// Fold a detector's [`DetectorOutcome`] into the shared collections.
 ///
-/// Outcome packages stay layer-root-relative (relative to the detector's own
-/// root); the flat `packages` list receives repo-root-relative clones so
-/// `RepoInfo.packages` stays uniformly framed for dirty/staged matching and
-/// `--package-area` filtering.
-fn collect_repo_info(
-    info: Option<RepoInfo>,
-    repo_root: &Path,
-    workspace_tools: &mut Vec<MonorepoTool>,
-    packages: &mut Vec<Package>,
-    outcomes: &mut Vec<DetectorOutcome>,
-    standard: MonorepoStandard,
-) {
-    let Some(info) = info else {
-        return;
-    };
-
-    if let Some(tool) = info.monorepo_tool
-        && !workspace_tools.contains(&tool)
-    {
-        workspace_tools.push(tool);
-    }
-    for tool in info.workspace_tools {
-        if !workspace_tools.contains(&tool) {
-            workspace_tools.push(tool);
-        }
-    }
-
-    let detected_packages = info.packages.unwrap_or_default();
-    outcomes.push(DetectorOutcome {
-        standard,
-        root: info.root,
-        packages: detected_packages.clone(),
-    });
-    let mut flat_packages = detected_packages;
-    for pkg in &mut flat_packages {
-        super::detection::rebase_package_to_root(pkg, repo_root);
-    }
-    packages.extend(flat_packages);
-}
-
-/// Fold a new-standard detector's result into the topology collections.
-///
-/// Outcome packages stay layer-root-relative; the flat `packages` list receives
-/// repo-root-relative clones (see [`collect_repo_info`]).
-fn collect_standard_outcome(
-    info: Option<RepoInfo>,
-    standard: MonorepoStandard,
+/// Outcome packages are rebased to `repo_root` so `MonorepoLayer.packages`
+/// carries repo-relative paths matching the canonical `RepoInfo.packages`
+/// catalog; the same rebased clones populate the flat `packages` list.
+fn collect_outcome(
+    outcome: Option<DetectorOutcome>,
     repo_root: &Path,
     packages: &mut Vec<Package>,
     outcomes: &mut Vec<DetectorOutcome>,
 ) {
-    let Some(info) = info else {
+    let Some(mut outcome) = outcome else {
         return;
     };
-    let detected_packages = info.packages.unwrap_or_default();
-    outcomes.push(DetectorOutcome {
-        standard,
-        root: info.root,
-        packages: detected_packages.clone(),
-    });
-    let mut flat_packages = detected_packages;
-    for pkg in &mut flat_packages {
+    for pkg in &mut outcome.packages {
         super::detection::rebase_package_to_root(pkg, repo_root);
     }
-    packages.extend(flat_packages);
+    packages.extend(outcome.packages.clone());
+    outcomes.push(outcome);
 }

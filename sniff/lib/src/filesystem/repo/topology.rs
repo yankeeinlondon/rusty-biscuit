@@ -5,20 +5,15 @@
 //! membership model resolved. This module groups those outcomes by root, splits
 //! each root's standards into the authority that declares membership and the
 //! orchestrators riding on top, and decides whether the resulting forest is
-//! rich enough to call the repo a monorepo. The legacy `monorepo_tool` /
-//! `workspace_tools` fields are populated separately and unchanged; this is
-//! purely additive.
+//! rich enough to call the repo a monorepo.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use biscuit_file::toml_crate;
 
-use super::standard::{
-    DetectedStandard, DetectionConfidence, LayerPackage, MonorepoLayer, MonorepoStandard,
-    RootMembership,
-};
-use super::types::{MonorepoTool, Package};
+use super::standard::{DetectedStandard, DetectionConfidence, MonorepoLayer, MonorepoStandard, RootMembership};
+use super::types::Package;
 
 /// One detector's contribution to the topology: the standard it matched, the
 /// root its marker lives at, and the packages its membership model resolved.
@@ -26,20 +21,6 @@ pub(crate) struct DetectorOutcome {
     pub(crate) standard: MonorepoStandard,
     pub(crate) root: PathBuf,
     pub(crate) packages: Vec<Package>,
-}
-
-/// Map a legacy [`MonorepoTool`] to its [`MonorepoStandard`] counterpart.
-pub(crate) fn standard_for_tool(tool: MonorepoTool) -> MonorepoStandard {
-    match tool {
-        MonorepoTool::CargoWorkspace => MonorepoStandard::CargoWorkspace,
-        MonorepoTool::NpmWorkspaces => MonorepoStandard::NpmWorkspaces,
-        MonorepoTool::PnpmWorkspaces => MonorepoStandard::PnpmWorkspaces,
-        MonorepoTool::YarnWorkspaces => MonorepoStandard::YarnWorkspaces,
-        MonorepoTool::Nx => MonorepoStandard::Nx,
-        MonorepoTool::Turborepo => MonorepoStandard::Turborepo,
-        MonorepoTool::Lerna => MonorepoStandard::Lerna,
-        MonorepoTool::Unknown => MonorepoStandard::Unknown,
-    }
 }
 
 /// Build the membership layers from detector outcomes.
@@ -72,12 +53,7 @@ pub(crate) fn build_monorepo_layers(outcomes: &[DetectorOutcome]) -> Vec<Monorep
             let packages = outcome
                 .packages
                 .iter()
-                .map(|pkg| LayerPackage {
-                    name: pkg.name.clone(),
-                    relative: PathBuf::from(&pkg.relative),
-                    standard: outcome.standard,
-                    provenance,
-                })
+                .map(|pkg| PathBuf::from(&pkg.relative))
                 .collect();
             layers.push(MonorepoLayer {
                 root: root.to_path_buf(),
@@ -243,19 +219,6 @@ mod tests {
     }
 
     #[test]
-    fn standard_for_tool_round_trips_every_variant() {
-        assert_eq!(
-            standard_for_tool(MonorepoTool::CargoWorkspace),
-            MonorepoStandard::CargoWorkspace
-        );
-        assert_eq!(standard_for_tool(MonorepoTool::Nx), MonorepoStandard::Nx);
-        assert_eq!(
-            standard_for_tool(MonorepoTool::Unknown),
-            MonorepoStandard::Unknown
-        );
-    }
-
-    #[test]
     fn authority_and_orchestrator_collapse_into_one_layer() {
         let outcomes = vec![
             outcome(MonorepoStandard::PnpmWorkspaces, vec![pkg("a"), pkg("b")]),
@@ -362,5 +325,47 @@ mod tests {
             DetectionConfidence::Inferred,
             "degenerate sibling must stay inferred"
         );
+    }
+
+    #[test]
+    fn layer_package_paths_resolve_to_canonical_catalog() {
+        // Every path in `MonorepoLayer.packages` must resolve to exactly one
+        // entry in the repo-root-relative `RepoInfo.packages` catalog.
+        let outcomes = vec![
+            outcome_at(
+                MonorepoStandard::CargoWorkspace,
+                "/repo",
+                vec![pkg("server")],
+            ),
+            outcome_at(
+                MonorepoStandard::PnpmWorkspaces,
+                "/repo",
+                vec![pkg("web"), pkg("api")],
+            ),
+        ];
+        let layers = build_monorepo_layers(&outcomes);
+
+        let catalog: std::collections::HashMap<String, usize> = outcomes
+            .iter()
+            .flat_map(|o| o.packages.iter())
+            .fold(std::collections::HashMap::new(), |mut acc, pkg| {
+                *acc.entry(pkg.relative.clone()).or_insert(0) += 1;
+                acc
+            });
+
+        for layer in &layers {
+            for rel in &layer.packages {
+                let key = normalize_path_for_catalog(rel);
+                let count = catalog.get(&key).copied().unwrap_or(0);
+                assert_eq!(
+                    count, 1,
+                    "layer package {key:?} must resolve to exactly one catalog entry"
+                );
+            }
+        }
+    }
+
+    fn normalize_path_for_catalog(path: &std::path::Path) -> String {
+        path.to_string_lossy().replace('\\', "/")
     }
 }

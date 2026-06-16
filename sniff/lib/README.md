@@ -462,10 +462,9 @@ Detects monorepo standards, package structure, and acting binaries.
 **Key Types:**
 
 - `RepoInfo` - Repository metadata and packages
-- `MonorepoStandard` - Standard-based monorepo descriptor (preferred)
+- `MonorepoStandard` - Standard-based monorepo descriptor
 - `MonorepoLayer` - One membership layer: authority + orchestrators + packages
 - `DetectedStandard` - A matched standard with its resolved binary and confidence
-- `MonorepoTool` - **Deprecated**; use `MonorepoStandard` via `RepoInfo::monorepo_layers`
 - `Package` - Package path, languages, managers, dependencies
 - `DependencyEntry` - Dependency with version requirements
 
@@ -484,9 +483,6 @@ if let Some(info) = repo {
             println!("Orchestrators: {:?}", layer.orchestrators);
             println!("Packages: {}", layer.packages.len());
         }
-
-        // Legacy fields are still populated for backward compatibility.
-        println!("Monorepo tool: {:?}", info.monorepo_tool);
 
         if let Some(packages) = info.packages {
             println!("Packages: {}", packages.len());
@@ -513,8 +509,6 @@ When `RepoInfo` is serialized, the new keys appear only when populated:
 
 - `monorepo_standards` — array of detected standards with resolved binary metadata.
 - `monorepo_layers` — array of layers, each with `authority`, `orchestrators`, `provenance`, and `packages`.
-
-The legacy keys `monorepo_tool` and `workspace_tools` are still emitted for existing consumers but are formally deprecated.
 
 #### Language Analysis
 

@@ -5,10 +5,10 @@ use std::path::Path;
 use crate::Result;
 use crate::package::{DependencyEntry, DependencyKind};
 
-use super::detection::{create_package, dedupe_packages, resolve_internal_deps};
-use super::types::{MonorepoTool, PackageDiscoverySource, RepoInfo};
+use super::detection::{DetectorOutcome, create_package, dedupe_packages, resolve_internal_deps};
+use super::standard::{MonorepoStandard, PackageProvenance};
 
-pub(super) fn detect_go_workspace(root: &Path) -> Result<Option<RepoInfo>> {
+pub(super) fn detect_go_workspace(root: &Path) -> Result<Option<DetectorOutcome>> {
     let go_work = root.join("go.work");
     if !go_work.exists() {
         return Ok(None);
@@ -30,9 +30,9 @@ pub(super) fn detect_go_workspace(root: &Path) -> Result<Option<RepoInfo>> {
         packages.push(create_package(
             &member_path,
             root,
-            MonorepoTool::Unknown,
+            MonorepoStandard::GoWorkspace,
+            PackageProvenance::Explicit,
             &lock_versions,
-            PackageDiscoverySource::ManifestScan,
         ));
     }
 
@@ -43,18 +43,10 @@ pub(super) fn detect_go_workspace(root: &Path) -> Result<Option<RepoInfo>> {
     packages = dedupe_packages(packages);
     resolve_internal_deps(&mut packages);
 
-    Ok(Some(RepoInfo {
-        is_monorepo: true,
-        monorepo_tool: None,
-        workspace_tools: Vec::new(),
+    Ok(Some(DetectorOutcome {
+        standard: MonorepoStandard::GoWorkspace,
         root: root.to_path_buf(),
-        dependencies: None,
-        dev_dependencies: None,
-        peer_dependencies: None,
-        optional_dependencies: None,
-        monorepo_standards: Vec::new(),
-        monorepo_layers: Vec::new(),
-        packages: Some(packages),
+        packages,
     }))
 }
 

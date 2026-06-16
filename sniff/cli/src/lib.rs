@@ -5,11 +5,6 @@
 //! integration tests can drive the real rendering code through the same
 //! module tree the production binary uses.
 
-// `MonorepoTool` is deprecated in favor of `MonorepoStandard` but the CLI
-// still reads the legacy fields for backward-compatible rendering during the
-// migration period. Silence the expected deprecation noise.
-#![allow(deprecated)]
-
 pub mod args;
 pub mod commands;
 pub mod install;

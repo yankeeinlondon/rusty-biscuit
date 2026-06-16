@@ -7,8 +7,8 @@ use regex::Regex;
 
 use crate::Result;
 
-use super::detection::{create_package, dedupe_packages, resolve_internal_deps};
-use super::types::{MonorepoTool, PackageDiscoverySource, RepoInfo};
+use super::detection::{DetectorOutcome, create_package, dedupe_packages, resolve_internal_deps};
+use super::standard::{MonorepoStandard, PackageProvenance};
 
 /// Project file extensions a solution entry must carry to count as a package.
 ///
@@ -16,7 +16,7 @@ use super::types::{MonorepoTool, PackageDiscoverySource, RepoInfo};
 /// a project extension, so filtering by extension drops them.
 const PROJECT_EXTENSIONS: [&str; 3] = [".csproj", ".fsproj", ".vbproj"];
 
-pub(super) fn detect_dotnet_solution(root: &Path) -> Result<Option<RepoInfo>> {
+pub(super) fn detect_dotnet_solution(root: &Path) -> Result<Option<DetectorOutcome>> {
     let solutions = find_solution_files(root);
     if solutions.is_empty() {
         return Ok(None);
@@ -44,9 +44,9 @@ pub(super) fn detect_dotnet_solution(root: &Path) -> Result<Option<RepoInfo>> {
             packages.push(create_package(
                 &project_dir,
                 root,
-                MonorepoTool::Unknown,
+                MonorepoStandard::DotNetSolution,
+                PackageProvenance::Explicit,
                 &lock_versions,
-                PackageDiscoverySource::ManifestScan,
             ));
         }
     }
@@ -58,18 +58,10 @@ pub(super) fn detect_dotnet_solution(root: &Path) -> Result<Option<RepoInfo>> {
     packages = dedupe_packages(packages);
     resolve_internal_deps(&mut packages);
 
-    Ok(Some(RepoInfo {
-        is_monorepo: true,
-        monorepo_tool: None,
-        workspace_tools: Vec::new(),
+    Ok(Some(DetectorOutcome {
+        standard: MonorepoStandard::DotNetSolution,
         root: root.to_path_buf(),
-        dependencies: None,
-        dev_dependencies: None,
-        peer_dependencies: None,
-        optional_dependencies: None,
-        monorepo_standards: Vec::new(),
-        monorepo_layers: Vec::new(),
-        packages: Some(packages),
+        packages,
     }))
 }
 
