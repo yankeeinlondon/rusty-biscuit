@@ -6,12 +6,18 @@ use tracing::debug;
 
 use crate::Result;
 
-use super::detection::{DetectorOutcome, collect_default_workspace_patterns, dedupe_packages, dedupe_patterns, discover_packages_with_optional_index, resolve_internal_deps};
+use super::detection::{
+    DetectorOutcome, collect_default_workspace_patterns, dedupe_packages, dedupe_patterns,
+    discover_packages_with_optional_index, resolve_internal_deps,
+};
 use super::glob::expand_membership_globs;
 use super::manifest_index::ManifestIndex;
 use super::standard::{GlobDialect, MonorepoStandard, PackageProvenance};
 
-pub(super) fn detect_nx(root: &Path, index: Option<&ManifestIndex>) -> Result<Option<DetectorOutcome>> {
+pub(super) fn detect_nx(
+    root: &Path,
+    index: Option<&ManifestIndex>,
+) -> Result<Option<DetectorOutcome>> {
     let nx_json = root.join("nx.json");
     if !nx_json.exists() {
         return Ok(None);
@@ -113,7 +119,10 @@ pub(super) fn detect_turborepo(
     }))
 }
 
-pub(super) fn detect_lerna(root: &Path, index: Option<&ManifestIndex>) -> Result<Option<DetectorOutcome>> {
+pub(super) fn detect_lerna(
+    root: &Path,
+    index: Option<&ManifestIndex>,
+) -> Result<Option<DetectorOutcome>> {
     let lerna_json = root.join("lerna.json");
     if !lerna_json.exists() {
         return Ok(None);

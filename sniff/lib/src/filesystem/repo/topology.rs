@@ -12,7 +12,9 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::toml_crate;
 
-use super::standard::{DetectedStandard, DetectionConfidence, MonorepoLayer, MonorepoStandard, RootMembership};
+use super::standard::{
+    DetectedStandard, DetectionConfidence, MonorepoLayer, MonorepoStandard, RootMembership,
+};
 use super::types::Package;
 
 /// One detector's contribution to the topology: the standard it matched, the
@@ -304,12 +306,13 @@ mod tests {
         ];
         let layers = build_monorepo_layers(&outcomes);
         assert!(layers_imply_monorepo(&layers));
-        let standards =
-            build_detected_standards(Path::new("/repo"), &outcomes, &layers, true);
+        let standards = build_detected_standards(Path::new("/repo"), &outcomes, &layers, true);
 
         let root_pnpm = standards
             .iter()
-            .find(|s| s.standard == MonorepoStandard::PnpmWorkspaces && s.root == Path::new("/repo"))
+            .find(|s| {
+                s.standard == MonorepoStandard::PnpmWorkspaces && s.root == Path::new("/repo")
+            })
             .expect("root pnpm standard must be present");
         assert_eq!(
             root_pnpm.confidence,

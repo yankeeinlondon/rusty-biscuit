@@ -34,7 +34,9 @@ use crate::filesystem::file_types::ProgrammingLanguage;
 /// via [`spec`](Self::spec). Variants serialize as kebab-case, and each
 /// variant's `spec().id` matches that wire value.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum MonorepoStandard {
     // Membership authorities (workspace standards)

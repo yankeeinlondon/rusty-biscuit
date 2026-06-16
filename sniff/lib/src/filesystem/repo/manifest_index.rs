@@ -299,9 +299,7 @@ pub(super) fn discover_packages_from_manifests(
     provenance: PackageProvenance,
     lock_versions: &Option<CargoLockVersions>,
 ) -> Vec<Package> {
-    discover_packages_from_manifests_in_tree(
-        root, root, standard, provenance, lock_versions,
-    )
+    discover_packages_from_manifests_in_tree(root, root, standard, provenance, lock_versions)
 }
 
 /// Discover packages using manifest index if available, otherwise walk filesystem.

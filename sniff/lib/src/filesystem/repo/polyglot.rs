@@ -51,7 +51,12 @@ pub(super) fn detect_bazel_workspace(root: &Path) -> Result<Vec<DetectorOutcome>
     if !has_any_marker(root, &BAZEL_ROOT_MARKERS) {
         return Ok(Vec::new());
     }
-    let workspaces = walk_leaf_workspaces(root, &BAZEL_LEAF_FILES, &BAZEL_ROOT_MARKERS, MonorepoStandard::Bazel);
+    let workspaces = walk_leaf_workspaces(
+        root,
+        &BAZEL_LEAF_FILES,
+        &BAZEL_ROOT_MARKERS,
+        MonorepoStandard::Bazel,
+    );
     Ok(into_outcomes(workspaces, MonorepoStandard::Bazel))
 }
 

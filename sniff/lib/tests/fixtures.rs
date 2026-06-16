@@ -879,11 +879,7 @@ pub fn create_pnpm_forest_with_degenerate_sibling() -> (TempDir, PathBuf) {
     for name in ["app", "lib"] {
         let pkg = root.join("packages").join(name);
         fs::create_dir_all(&pkg).unwrap();
-        fs::write(
-            pkg.join("package.json"),
-            format!(r#"{{"name":"{name}"}}"#),
-        )
-        .unwrap();
+        fs::write(pkg.join("package.json"), format!(r#"{{"name":"{name}"}}"#)).unwrap();
     }
 
     // Nested pnpm workspace under nested/ — degenerate (one member). pnpm

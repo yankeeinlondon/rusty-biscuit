@@ -10,7 +10,9 @@ use crate::filesystem::file_types::{
     ProgrammingLanguageStats,
 };
 use crate::filesystem::repo::detection::canonicalize_path;
-use crate::filesystem::repo::standard::{DetectedStandard, MonorepoLayer, MonorepoStandard, PackageProvenance};
+use crate::filesystem::repo::standard::{
+    DetectedStandard, MonorepoLayer, MonorepoStandard, PackageProvenance,
+};
 use crate::package::DependencyEntry;
 
 /// The primary ecosystem associated with a package boundary.
@@ -182,15 +184,13 @@ impl RepoInfo {
             return None;
         }
         let root = canonicalize_path(&self.root);
-        self.monorepo_layers
-            .iter()
-            .min_by_key(|layer| {
-                let layer_root = canonicalize_path(&layer.root);
-                let root_match = layer_root == root;
-                let depth = layer_root.components().count();
-                let authority_order = layer.authority;
-                (!root_match, depth, authority_order)
-            })
+        self.monorepo_layers.iter().min_by_key(|layer| {
+            let layer_root = canonicalize_path(&layer.root);
+            let root_match = layer_root == root;
+            let depth = layer_root.components().count();
+            let authority_order = layer.authority;
+            (!root_match, depth, authority_order)
+        })
     }
 
     /// Find the package whose directory tree contains `dir`.
@@ -346,7 +346,7 @@ pub(crate) struct PackageScanResult {
 /// if let Some(info) = detect_repo(root).unwrap() {
 ///     if info.is_monorepo {
 ///         println!("Packages: {}", info.packages.as_ref().map(|p| p.len()).unwrap_or(0));
-///         if let Some(layer) = info.monorepo_layers.first() {
+///         if let Some(layer) = info.primary_layer() {
 ///             println!("Authority: {:?}", layer.authority);
 ///         }
 ///     }
@@ -622,8 +622,8 @@ mod tests {
     #[test]
     fn primary_layer_reproduces_first_on_rusty_biscuit_repo() {
         // Regression: on the rusty-biscuit repo, `primary_layer()` must agree
-        // with `monorepo_layers.first()` — and select Cargo over the pnpm
-        // workspace that also lives at the repo root.
+        // with the first layer — and select Cargo over the pnpm workspace that
+        // also lives at the repo root.
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
         let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
         let info = detect_repo_structure(repo_root)

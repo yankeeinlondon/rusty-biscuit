@@ -40,8 +40,8 @@ use super::python::{
 use super::standard::{MonorepoLayer, MonorepoStandard, PackageProvenance, resolve_acting_binary};
 pub(crate) use super::topology::DetectorOutcome;
 use super::topology::{build_detected_standards, build_monorepo_layers, layers_imply_monorepo};
-use super::uv::detect_uv_workspace;
 use super::types::{Package, PackageEcosystem, PackageFiles, PackageScanResult, RepoInfo};
+use super::uv::detect_uv_workspace;
 
 pub(crate) fn detect_repo_inner(
     root: &Path,
@@ -187,73 +187,52 @@ pub(crate) fn detect_repo_inner_with_shared(
     let mut outcomes: Vec<DetectorOutcome> = Vec::new();
 
     collect_outcome(detect_cargo_workspace(root)?, &mut packages, &mut outcomes);
-    collect_outcome(detect_nx(root, manifest_index)?, &mut packages, &mut outcomes);
+    collect_outcome(
+        detect_nx(root, manifest_index)?,
+        &mut packages,
+        &mut outcomes,
+    );
     collect_outcome(
         detect_turborepo(root, manifest_index)?,
         &mut packages,
         &mut outcomes,
     );
-    collect_outcome(
-        detect_pnpm_workspace(root)?,
-        &mut packages,
-        &mut outcomes,
-    );
-    collect_outcome(
-        detect_yarn_workspace(root)?,
-        &mut packages,
-        &mut outcomes,
-    );
-    collect_outcome(
-        detect_npm_workspace(root)?,
-        &mut packages,
-        &mut outcomes,
-    );
+    collect_outcome(detect_pnpm_workspace(root)?, &mut packages, &mut outcomes);
+    collect_outcome(detect_yarn_workspace(root)?, &mut packages, &mut outcomes);
+    collect_outcome(detect_npm_workspace(root)?, &mut packages, &mut outcomes);
     collect_outcome(
         detect_lerna(root, manifest_index)?,
         &mut packages,
         &mut outcomes,
     );
-    collect_outcome(
-        detect_bun_workspace(root)?,
-        &mut packages,
-        &mut outcomes,
-    );
-    collect_outcome(
-        detect_uv_workspace(root)?,
-        &mut packages,
-        &mut outcomes,
-    );
-    collect_outcome(
-        detect_go_workspace(root)?,
-        &mut packages,
-        &mut outcomes,
-    );
-    collect_outcome(
-        detect_gradle_workspace(root)?,
-        &mut packages,
-        &mut outcomes,
-    );
-    collect_outcome(
-        detect_maven_workspace(root)?,
-        &mut packages,
-        &mut outcomes,
-    );
-    collect_outcome(
-        detect_dotnet_solution(root)?,
-        &mut packages,
-        &mut outcomes,
-    );
-    collect_outcome(
-        detect_rush_workspace(root)?,
-        &mut packages,
-        &mut outcomes,
-    );
+    collect_outcome(detect_bun_workspace(root)?, &mut packages, &mut outcomes);
+    collect_outcome(detect_uv_workspace(root)?, &mut packages, &mut outcomes);
+    collect_outcome(detect_go_workspace(root)?, &mut packages, &mut outcomes);
+    collect_outcome(detect_gradle_workspace(root)?, &mut packages, &mut outcomes);
+    collect_outcome(detect_maven_workspace(root)?, &mut packages, &mut outcomes);
+    collect_outcome(detect_dotnet_solution(root)?, &mut packages, &mut outcomes);
+    collect_outcome(detect_rush_workspace(root)?, &mut packages, &mut outcomes);
 
     // Polyglot leaf-marker build systems contribute one outcome per workspace
     // root (Bazel segments nested `WORKSPACE` subtrees into their own layer).
-    collect_outcomes(root, detect_bazel_workspace(root)?, &mut packages, &mut outcomes);
-    collect_outcomes(root, detect_pants_workspace(root)?, &mut packages, &mut outcomes);
-    collect_outcomes(root, detect_buck2_workspace(root)?, &mut packages, &mut outcomes);
+    collect_outcomes(
+        root,
+        detect_bazel_workspace(root)?,
+        &mut packages,
+        &mut outcomes,
+    );
+    collect_outcomes(
+        root,
+        detect_pants_workspace(root)?,
+        &mut packages,
+        &mut outcomes,
+    );
+    collect_outcomes(
+        root,
+        detect_buck2_workspace(root)?,
+        &mut packages,
+        &mut outcomes,
+    );
 
     // Root-manifest standards (pnpm, npm, Go, Gradle, Maven, ...) only fired
     // at the supplied root above. Walk the tree once for their marker files
@@ -1285,13 +1264,7 @@ pub(crate) fn discover_packages_with_optional_index(
     lock_versions: &Option<CargoLockVersions>,
     index: Option<&ManifestIndex>,
 ) -> Vec<Package> {
-    mi_discover_packages_with_optional_index(
-        root,
-        standard,
-        provenance,
-        lock_versions,
-        index,
-    )
+    mi_discover_packages_with_optional_index(root, standard, provenance, lock_versions, index)
 }
 
 /// Creates a Package with all metadata and parsed dependencies.

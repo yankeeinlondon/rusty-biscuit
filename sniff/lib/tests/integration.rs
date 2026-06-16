@@ -355,11 +355,7 @@ fn test_nested_pnpm_under_cargo_is_discovered_as_its_own_layer() {
     // Layer packages use the same repo-root-relative framing as the canonical
     // `RepoInfo.packages` catalog, so nested packages carry their `web/`
     // prefix.
-    let layer_rels: Vec<String> = pnpm_layer
-        .packages
-        .iter()
-        .map(|p| p.clone())
-        .collect();
+    let layer_rels: Vec<String> = pnpm_layer.packages.iter().map(|p| p.clone()).collect();
     assert!(layer_rels.contains(&"web/packages/app".to_string()));
     assert!(
         !layer_rels.contains(&"packages/app".to_string()),
@@ -448,11 +444,7 @@ fn test_nested_cargo_under_pnpm_is_discovered_as_its_own_layer() {
     // Layer packages use the same repo-root-relative framing as the canonical
     // `RepoInfo.packages` catalog, so nested packages carry their `crates/`
     // prefix.
-    let layer_rels: Vec<String> = cargo_layer
-        .packages
-        .iter()
-        .map(|p| p.clone())
-        .collect();
+    let layer_rels: Vec<String> = cargo_layer.packages.iter().map(|p| p.clone()).collect();
     assert!(layer_rels.contains(&"crates/alpha".to_string()));
     assert!(
         !layer_rels.contains(&"alpha".to_string()),
@@ -580,18 +572,15 @@ fn test_per_root_confidence_in_same_standard_forest() {
         .monorepo_standards
         .iter()
         .filter(|s| s.standard == MonorepoStandard::PnpmWorkspaces)
-        .fold(
-            (None, None),
-            |(root_c, nested_c), s| {
-                if s.root == path {
-                    (Some(s.confidence), nested_c)
-                } else if s.root == nested_root {
-                    (root_c, Some(s.confidence))
-                } else {
-                    (root_c, nested_c)
-                }
-            },
-        );
+        .fold((None, None), |(root_c, nested_c), s| {
+            if s.root == path {
+                (Some(s.confidence), nested_c)
+            } else if s.root == nested_root {
+                (root_c, Some(s.confidence))
+            } else {
+                (root_c, nested_c)
+            }
+        });
 
     // Root pnpm workspace is non-degenerate (two members).
     assert_eq!(
@@ -924,7 +913,10 @@ fn test_rusty_biscuit_repo_topology_parity() {
         "pnpm-workspaces authority missing: {authorities:?}"
     );
 
-    let packages = repo.packages.as_deref().expect("packages should be present");
+    let packages = repo
+        .packages
+        .as_deref()
+        .expect("packages should be present");
     assert!(!packages.is_empty());
 
     // The pnpm workspace package must be owned by pnpm.
@@ -994,7 +986,10 @@ fn test_nx_delegates_package_ownership_to_pnpm() {
         .expect("pnpm should be the membership authority");
     assert_eq!(pnpm_layer.orchestrators, vec![MonorepoStandard::Nx]);
 
-    let packages = repo.packages.as_deref().expect("packages should be present");
+    let packages = repo
+        .packages
+        .as_deref()
+        .expect("packages should be present");
     assert!(!packages.is_empty());
 
     // Every package is owned by the membership authority, never by Nx.
@@ -1018,7 +1013,10 @@ fn test_monorepo_layer_packages_resolve_to_canonical_catalog() {
         .unwrap()
         .expect("nx + pnpm workspace should be detected");
 
-    let packages = repo.packages.as_deref().expect("packages should be present");
+    let packages = repo
+        .packages
+        .as_deref()
+        .expect("packages should be present");
     assert!(!packages.is_empty());
 
     // Each package carries its owning standard and provenance directly.
@@ -1126,11 +1124,7 @@ fn test_go_workspace_resolves_explicit_use_paths() {
     let layer = &repo.monorepo_layers[0];
     assert_eq!(layer.authority, MonorepoStandard::GoWorkspace);
 
-    let mut relatives: Vec<String> = layer
-        .packages
-        .iter()
-        .map(|p| p.clone())
-        .collect();
+    let mut relatives: Vec<String> = layer.packages.iter().map(|p| p.clone()).collect();
     relatives.sort();
     assert_eq!(relatives, vec!["svc-a".to_string(), "svc-b".to_string()]);
 }
@@ -1166,11 +1160,7 @@ fn test_gradle_workspace_authority_is_gradle() {
     let layer = &repo.monorepo_layers[0];
     assert_eq!(layer.authority, MonorepoStandard::GradleMultiProject);
 
-    let mut relatives: Vec<String> = layer
-        .packages
-        .iter()
-        .map(|p| p.clone())
-        .collect();
+    let mut relatives: Vec<String> = layer.packages.iter().map(|p| p.clone()).collect();
     relatives.sort();
     assert_eq!(relatives, vec!["app".to_string(), "core".to_string()]);
     // The repo-local `gradlew` wrapper presence is recorded for Phase 7 to act on.
@@ -1204,11 +1194,7 @@ fn test_maven_workspace_authority_is_maven() {
     let layer = &repo.monorepo_layers[0];
     assert_eq!(layer.authority, MonorepoStandard::MavenMultiModule);
 
-    let mut relatives: Vec<String> = layer
-        .packages
-        .iter()
-        .map(|p| p.clone())
-        .collect();
+    let mut relatives: Vec<String> = layer.packages.iter().map(|p| p.clone()).collect();
     relatives.sort();
     assert_eq!(relatives, vec!["core".to_string(), "web".to_string()]);
 }
@@ -1240,11 +1226,7 @@ fn test_dotnet_solution_authority_is_dotnet() {
     let layer = &repo.monorepo_layers[0];
     assert_eq!(layer.authority, MonorepoStandard::DotNetSolution);
 
-    let mut relatives: Vec<String> = layer
-        .packages
-        .iter()
-        .map(|p| p.clone())
-        .collect();
+    let mut relatives: Vec<String> = layer.packages.iter().map(|p| p.clone()).collect();
     relatives.sort();
     // Each project's directory (the `.csproj` parent) becomes a package.
     assert_eq!(
@@ -1291,11 +1273,7 @@ fn test_bazel_workspace_segments_nested_workspace_into_its_own_layer() {
         .iter()
         .find(|l| l.root == path)
         .expect("parent layer rooted at repo root");
-    let mut parent_rels: Vec<String> = parent
-        .packages
-        .iter()
-        .map(|p| p.clone())
-        .collect();
+    let mut parent_rels: Vec<String> = parent.packages.iter().map(|p| p.clone()).collect();
     parent_rels.sort();
     // The nested subtree must be excluded from the parent's package list.
     assert_eq!(parent_rels, vec!["a".to_string(), "b".to_string()]);
@@ -1305,11 +1283,7 @@ fn test_bazel_workspace_segments_nested_workspace_into_its_own_layer() {
         .iter()
         .find(|l| l.root == path.join("nested"))
         .expect("nested layer rooted at nested/");
-    let nested_rels: Vec<String> = nested
-        .packages
-        .iter()
-        .map(|p| p.clone())
-        .collect();
+    let nested_rels: Vec<String> = nested.packages.iter().map(|p| p.clone()).collect();
     // Layer packages are repo-root-relative, so the nested workspace root is
     // represented as `nested`.
     assert_eq!(nested_rels, vec!["nested".to_string()]);
@@ -1413,11 +1387,7 @@ fn test_rush_workspace_authority_is_rush() {
     let layer = &repo.monorepo_layers[0];
     assert_eq!(layer.authority, MonorepoStandard::RushStack);
 
-    let mut relatives: Vec<String> = layer
-        .packages
-        .iter()
-        .map(|p| p.clone())
-        .collect();
+    let mut relatives: Vec<String> = layer.packages.iter().map(|p| p.clone()).collect();
     relatives.sort();
     assert_eq!(
         relatives,
