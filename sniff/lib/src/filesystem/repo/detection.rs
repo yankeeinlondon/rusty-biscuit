@@ -366,7 +366,9 @@ pub(crate) fn detect_repo_inner_with_shared(
                 &package.path,
                 root,
                 MonorepoTool::Unknown,
+                MonorepoStandard::Unknown,
                 &lock_versions,
+                PackageProvenance::ManifestScan,
                 PackageDiscoverySource::ManifestScan,
                 index,
             ));
@@ -1093,6 +1095,15 @@ fn merge_package_into(existing: &mut Package, incoming: Package) {
         existing.ecosystem = incoming.ecosystem;
     }
 
+    // A non-Unknown incoming standard wins over an Unknown existing one; the
+    // provenance follows the surviving authority.
+    if existing.standard == MonorepoStandard::Unknown
+        && incoming.standard != MonorepoStandard::Unknown
+    {
+        existing.standard = incoming.standard;
+        existing.provenance = incoming.provenance;
+    }
+
     for source in incoming.discovery_sources {
         if !existing.discovery_sources.contains(&source) {
             existing.discovery_sources.push(source);
@@ -1337,11 +1348,21 @@ pub fn refresh_package_boundaries(
 pub(crate) fn discover_packages_with_optional_index(
     root: &Path,
     tool: MonorepoTool,
+    standard: MonorepoStandard,
+    provenance: PackageProvenance,
     lock_versions: &Option<CargoLockVersions>,
     discovery_source: PackageDiscoverySource,
     index: Option<&ManifestIndex>,
 ) -> Vec<Package> {
-    mi_discover_packages_with_optional_index(root, tool, lock_versions, discovery_source, index)
+    mi_discover_packages_with_optional_index(
+        root,
+        tool,
+        standard,
+        provenance,
+        lock_versions,
+        discovery_source,
+        index,
+    )
 }
 
 /// Creates a Package with all metadata and parsed dependencies.
@@ -1349,6 +1370,8 @@ pub(crate) fn create_package(
     path: &Path,
     root: &Path,
     tool: MonorepoTool,
+    standard: MonorepoStandard,
+    provenance: PackageProvenance,
     lock_versions: &Option<CargoLockVersions>,
     discovery_source: PackageDiscoverySource,
 ) -> Package {
@@ -1459,6 +1482,8 @@ pub(crate) fn create_package(
         package_area,
         name,
         ecosystem,
+        standard,
+        provenance,
         discovery_sources: vec![discovery_source],
         nested_packages: Vec::new(),
         primary_language: None,
@@ -1497,6 +1522,8 @@ mod tests {
             relative: name.to_string(),
             package_area: "root".to_string(),
             ecosystem: PackageEcosystem::Unknown,
+            standard: MonorepoStandard::Unknown,
+            provenance: PackageProvenance::ManifestScan,
             discovery_sources: Vec::new(),
             nested_packages: Vec::new(),
             primary_language: None,

@@ -10,7 +10,7 @@ use crate::filesystem::file_types::{
     ProgrammingLanguageStats,
 };
 use crate::filesystem::repo::detection::canonicalize_path;
-use crate::filesystem::repo::standard::{DetectedStandard, MonorepoLayer};
+use crate::filesystem::repo::standard::{DetectedStandard, MonorepoLayer, MonorepoStandard, PackageProvenance};
 use crate::package::DependencyEntry;
 
 /// Supported monorepo tools and package managers
@@ -37,6 +37,18 @@ pub enum MonorepoTool {
 }
 
 /// The primary ecosystem associated with a package boundary.
+///
+/// This is a property of the individual package, inferred from its own
+/// manifest in both `structure()` and `full()` modes. It is distinct from
+/// [`MonorepoStandard::spec`]`().primary_language` (a property of the *standard*
+/// that owns the package) and from [`Package::primary_language`] (a rich-mode
+/// file-scan result).
+///
+/// ## Notes
+///
+/// A Cargo workspace's standard has `primary_language = Rust`, but a member
+/// package with a `package.json` may report `ecosystem = Node`. Conversely, a
+/// Rust-only member still has no `primary_language` in `structure()` mode.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
@@ -134,6 +146,12 @@ pub struct Package {
     /// How this package boundary was discovered.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub discovery_sources: Vec<PackageDiscoverySource>,
+    /// The monorepo standard that owns this package.
+    #[serde(default)]
+    pub standard: MonorepoStandard,
+    /// How this package boundary was derived.
+    #[serde(default)]
+    pub provenance: PackageProvenance,
     /// Nested package names detected beneath this package root.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub nested_packages: Vec<String>,
@@ -353,9 +371,9 @@ pub(crate) struct PackageScanResult {
 /// let root = Path::new("/path/to/project");
 /// if let Some(info) = detect_repo(root).unwrap() {
 ///     if info.is_monorepo {
-///         println!("Monorepo tool: {:?}", info.monorepo_tool);
-///         if let Some(ref packages) = info.packages {
-///             println!("Packages: {}", packages.len());
+///         println!("Packages: {}", info.packages.as_ref().map(|p| p.len()).unwrap_or(0));
+///         if let Some(layer) = info.monorepo_layers.first() {
+///             println!("Authority: {:?}", layer.authority);
 ///         }
 ///     }
 /// }
@@ -430,29 +448,7 @@ mod tests {
                     package_area: "root".to_string(),
                     name: "crates".to_string(),
                     ecosystem: PackageEcosystem::Cargo,
-                    discovery_sources: Vec::new(),
-                    nested_packages: Vec::new(),
-                    primary_language: None,
-                    secondary_languages: Vec::new(),
-                    languages: Vec::new(),
-                    frameworks: Vec::new(),
-                    file_associations: Vec::new(),
-                    configuration: Vec::new(),
-                    documentation: Vec::new(),
-                    editor_config: None,
-                    command_runner: Vec::new(),
-                    package_managers: Vec::new(),
-                    version: None,
-                    features: Vec::new(),
-                    depends_on: Vec::new(),
-                    used_by: Vec::new(),
-                    dependencies: None,
-                    dev_dependencies: None,
-                    peer_dependencies: None,
-                    optional_dependencies: None,
-                    is_updatable: None,
-                    has_major_update: None,
-                    is_excluded: false,
+                    ..Package::default()
                 },
                 Package {
                     path: PathBuf::from("/repo/crates/pkg-a"),
@@ -460,29 +456,7 @@ mod tests {
                     package_area: "crates".to_string(),
                     name: "pkg-a".to_string(),
                     ecosystem: PackageEcosystem::Cargo,
-                    discovery_sources: Vec::new(),
-                    nested_packages: Vec::new(),
-                    primary_language: None,
-                    secondary_languages: Vec::new(),
-                    languages: Vec::new(),
-                    frameworks: Vec::new(),
-                    file_associations: Vec::new(),
-                    configuration: Vec::new(),
-                    documentation: Vec::new(),
-                    editor_config: None,
-                    command_runner: Vec::new(),
-                    package_managers: Vec::new(),
-                    version: None,
-                    features: Vec::new(),
-                    depends_on: Vec::new(),
-                    used_by: Vec::new(),
-                    dependencies: None,
-                    dev_dependencies: None,
-                    peer_dependencies: None,
-                    optional_dependencies: None,
-                    is_updatable: None,
-                    has_major_update: None,
-                    is_excluded: false,
+                    ..Package::default()
                 },
             ]),
         };

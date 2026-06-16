@@ -36,7 +36,7 @@ use crate::filesystem::file_types::ProgrammingLanguage;
 /// via [`spec`](Self::spec). Variants serialize as kebab-case, and each
 /// variant's `spec().id` matches that wire value.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum MonorepoStandard {
     // Membership authorities (workspace standards)
@@ -77,6 +77,7 @@ pub enum MonorepoStandard {
     /// Lerna orchestrator (`lerna.json`).
     Lerna,
     /// Fallback when a monorepo is inferred but no standard is confirmed.
+    #[default]
     Unknown,
 }
 
@@ -315,7 +316,7 @@ pub enum BinarySource {
 
 /// How a layer's package list was derived. sniff only ever reports
 /// filesystem-derived provenance — there is deliberately no `Tool` variant.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum PackageProvenance {
     /// Expanded membership globs. Best-effort; bounded by the glob expander.
@@ -329,6 +330,11 @@ pub enum PackageProvenance {
     /// Parsed the committed lockfile's resolved member set. High fidelity,
     /// still filesystem-only.
     Lockfile,
+    /// Discovered by walking for per-directory manifests without a confirming
+    /// membership authority. This is the fallback provenance for packages found
+    /// by manifest index scans.
+    #[default]
+    ManifestScan,
 }
 
 /// Whether a detection was marker-confirmed or merely inferred.
@@ -433,6 +439,12 @@ impl MonorepoStandard {
     /// The [`PackageProvenance`] a layer rooted on this standard's membership
     /// model carries. Packages in the layer inherit it.
     pub(crate) fn membership_provenance(self) -> PackageProvenance {
+        // Unknown is the fallback when no membership authority is confirmed; the
+        // packages were discovered by manifest index scan, not by an explicit
+        // member list.
+        if self == MonorepoStandard::Unknown {
+            return PackageProvenance::ManifestScan;
+        }
         match self.spec().membership {
             MembershipModel::RootGlobs { .. } => PackageProvenance::Globbed,
             MembershipModel::RootExplicit => PackageProvenance::Explicit,
@@ -2039,6 +2051,24 @@ mod tests {
         assert_eq!(
             MonorepoStandard::PnpmWorkspaces.membership_provenance(),
             PackageProvenance::Globbed
+        );
+    }
+
+    #[test]
+    fn manifest_scan_provenance_wire_value_and_unknown_consistency() {
+        // Manifest-scan is the provenance for packages discovered without a
+        // confirming membership authority, and it serializes as kebab-case.
+        let wire = serde_json::to_string(&PackageProvenance::ManifestScan)
+            .unwrap()
+            .trim_matches('"')
+            .to_string();
+        assert_eq!(wire, "manifest-scan");
+
+        // The fallback Unknown standard has no membership authority, so its
+        // derived provenance is manifest-scan rather than Explicit.
+        assert_eq!(
+            MonorepoStandard::Unknown.membership_provenance(),
+            PackageProvenance::ManifestScan
         );
     }
 
