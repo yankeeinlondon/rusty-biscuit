@@ -1,6 +1,6 @@
 ---
-status: draft
-reviewed: false
+status: ready for planning and implementation
+reviewed: true
 depends-on: 2026-06-15-monorepo-unification
 ---
 
@@ -25,10 +25,13 @@ standard a repo uses, building on the primary-layer accessor from D1.
   for its surface impact). Their **text** does intentionally change, however:
   the monorepo standard is now rendered with the unified per-standard label and
   shared `{orchestrator_label} (using {authority_label})` template instead of
-  `display_name` (e.g. `Cargo` → `cargo`, `pnpm <dim>+ Nx</dim>` →
-  `Nx (using pnpm workspaces)`). D5 deliberately changes the `sniff repo
-  is-monorepo` leaf's text and JSON contract — that break is scoped to that one
-  leaf and is the point of D5.
+  `display_name` (e.g. `Cargo Workspace` → `cargo`,
+  `pnpm Workspaces <dim>+ Nx</dim>` → `Nx (using pnpm workspaces)`). D5
+  deliberately changes the focused `sniff repo is-monorepo` leaf's text, JSON
+  body, and exit-code contract — that break is scoped to that focused leaf and
+  is the point of D5. Bare aggregate `sniff repo --json` remains
+  byte-identical and continues to expose the existing unwrapped
+  `"is-monorepo": bool` member keyed by subcommand name.
 
 ## Background: what the review found
 
@@ -198,11 +201,11 @@ it also stops rendering `layer.authority.spec().display_name` and instead
 composes the unified label via the shared CLI helper introduced in D5 (the
 per-standard label + `{orchestrator_label} (using {authority_label})` template,
 or `{authority_label}` alone when no orchestrator). So its output **changes**
-(e.g. `Cargo` → `cargo`; `pnpm <dim>+ Nx</dim>` → `Nx (using pnpm
-workspaces)`). The dead-branch removal still stands, and the *selected layer* is
-unchanged (it remains the primary layer) — only the standard naming switches
-from `display_name` to the unified label. See D5 for the shared helper and the
-multi-layer listing.
+(e.g. `Cargo Workspace` → `cargo`; `pnpm Workspaces <dim>+ Nx</dim>` →
+`Nx (using pnpm workspaces)`). The dead-branch removal still stands, and the
+*selected layer* is unchanged (it remains the primary layer) — only the standard
+naming switches from `display_name` to the unified label. See D5 for the shared
+helper and the multi-layer listing.
 
 - **Surface impact:** `sniff repo` / `sniff repo structure` single-layer
   summary **text** changes (`display_name` → unified label); JSON is untouched.
@@ -226,12 +229,19 @@ standard the repo uses.
 **Exit code is the predicate:** non-zero (error) when **not** in a monorepo,
 `0` when it is. This enables `if sniff repo is-monorepo; then …`.
 
-**`--no-error` flag:** suppresses **only** the "not a monorepo" predicate. With
+**`--no-error` flag:** add a command-local flag to `sniff repo is-monorepo`
+matching the existing locator-leaf pattern (`worktree`, `version`, `package`,
+`package-area`). It suppresses **only** the "not a monorepo" predicate. With
 `--no-error`, the not-a-monorepo outcome prints `false` to STDOUT and exits `0`
 instead of non-zero. It does **not** turn the command into "never fails":
 genuine failures — the path is not a git repo, detection itself errors, or a
 bad/nonexistent path — STILL exit non-zero and report to STDERR even under
 `--no-error`. For callers that want the predicate value without an error exit.
+
+The flag applies equally in text and `--json` modes: JSON is printed first as a
+valid object on STDOUT, then the process exits with the predicate status
+(`1`/non-zero outside a monorepo, `0` inside, or `0` for the
+not-a-monorepo predicate when `--no-error` is set).
 
 **`--json` → STDOUT:** shape is
 
@@ -251,6 +261,14 @@ kebab `MonorepoStandard::spec().id` values (e.g. `cargo-workspace`,
 `pnpm-workspaces`, `nx`) — the **same** vocabulary claudine emits as
 `monorepo_standard`. Note the JSON key is snake_case `is_monorepo`, a **rename**
 from today's `is-monorepo`.
+
+**Aggregate JSON is not changed by D5.** Bare `sniff repo --json` is an
+aggregate keyed by participating child command names, not a direct replay of
+each focused child's object shape. To preserve the explicit D1–D4 non-break
+contract, the aggregate keeps `"is-monorepo": true|false` as an unwrapped bool.
+The standard/orchestrator details are already available in
+`structure.monorepo_layers` for aggregate consumers that need them. Do not add
+`authority` / `orchestrators` next to the aggregate boolean in this feature.
 
 **Multi-layer repos report the PRIMARY layer** (per D1) for the single
 `authority` / `orchestrators` fields.
@@ -322,11 +340,17 @@ authority/orchestrators requires sourcing from the full `RepoInfo`
 (`detect_repo_structure`) or otherwise obtaining the primary layer — an
 implementation requirement of this decision.
 
+Reader note: this is the intentional cost/shape trade-off for D5. The old leaf
+could answer a cheap predicate from `RepoIdentity`; the new leaf promises
+standard identity, so it must read the topology model. Keep the request scoped
+to repo structure only; do not run network-primary paths or deep git/package
+analysis just to answer `is-monorepo`.
+
 - **Surface impact:** breaking on this leaf only. Text (`yes`/`no` → label /
   `false`), JSON key (`is-monorepo` → `is_monorepo`), JSON shape (bare bool →
   object with `authority`/`orchestrators`), and exit code (was always `0` → now
   predicate-driven, with `--no-error` to opt back into always-`0`). The `sniff
-  repo` / `sniff repo structure` JSON is untouched.
+  repo` aggregate / `sniff repo structure` JSON is untouched.
 
 ## Implementation scope (provisional)
 
@@ -352,11 +376,19 @@ implementation requirement of this decision.
    text snapshots, with explanation and approval (D4/D5).
 8. Redesign the `is-monorepo` handler (D5): source from `RepoInfo` /
    `primary_layer()` instead of `detect_repo_identity`; add the clap `--no-error`
-   flag; emit the new STDOUT text via the shared label helper (`{authority_label}`
-   / `{orchestrator_label} (using {authority_label})` / `false`); emit the new
-   `--json` shape (`is_monorepo` + `authority` + `orchestrators` array, kebab
-   ids); make the exit code the predicate (non-zero outside a monorepo, `0`
-   inside, `--no-error` forces `0`).
+   flag and update `RepoAction::IsMonorepo` to carry it; emit the new STDOUT
+   text via the shared label helper (`{authority_label}` /
+   `{orchestrator_label} (using {authority_label})` / `false`); emit the new
+   focused `--json` shape (`is_monorepo` + `authority` + `orchestrators` array,
+   kebab ids); make the exit code the predicate in both text and JSON modes
+   (non-zero outside a monorepo, `0` inside, `--no-error` forces `0` only for
+   the not-a-monorepo predicate).
+9. Leave the bare `sniff repo --json` aggregate `"is-monorepo": bool` entry
+   unchanged and document why the focused leaf and aggregate intentionally
+   differ. Update the CLI README/help examples so users see the new focused
+   contract without implying the aggregate shape changed.
+10. Update the Sniff skill and CLI docs for the focused `is-monorepo` contract,
+    the aggregate exception, and the unified monorepo label wording.
 
 ## Testing and acceptance criteria
 
@@ -373,10 +405,14 @@ implementation requirement of this decision.
 - Existing `sniff repo` / `sniff repo structure` **JSON** snapshots are
   unchanged (byte-identical; serde ids are unaffected). The **text** snapshots
   **will** change — the monorepo standard renders via the unified label instead
-  of `display_name` (e.g. `Cargo` → `cargo`; `pnpm <dim>+ Nx</dim>` →
-  `Nx (using pnpm workspaces)`) — and must be deliberately re-baselined with
-  explanation and approval, never silently. Any **JSON** diff (which is not
-  expected) must likewise be explained and approved.
+  of `display_name` (e.g. `Cargo Workspace` → `cargo`; `pnpm Workspaces
+  <dim>+ Nx</dim>` → `Nx (using pnpm workspaces)`) — and must be deliberately
+  re-baselined with explanation and approval, never silently. Any **JSON** diff
+  (which is not expected) must likewise be explained and approved.
+- Bare aggregate `sniff repo --json` remains byte-identical for the
+  `is-monorepo` member: it is still an unwrapped bool under the existing
+  hyphenated subcommand key. Focused `sniff repo is-monorepo --json` is the only
+  JSON surface that switches to `{ "is_monorepo": ..., ... }`.
 - Both `sniff repo` / `sniff repo structure` and `sniff repo is-monorepo`
   render the same monorepo standard via the **same** shared label + template
   helper (one source for the phrasing). `git grep` shows no `display_name` use
@@ -386,6 +422,10 @@ implementation requirement of this decision.
   repo.
 - Terminal output continues to use `biscuit-terminal` renderables; `stdout` for
   main content, `stderr` for diagnostics only.
+- CLI help, shell argument parsing tests, README examples, and the `sniff`
+  skill document the focused `is-monorepo` output as label/`false` text plus the
+  new JSON object shape; they also document that aggregate `sniff repo --json`
+  keeps the legacy unwrapped `"is-monorepo"` bool.
 - **D5 — `sniff repo is-monorepo`:**
   - Text output examples: `cargo`; `pnpm workspaces`;
     `Nx (using pnpm workspaces)`; `false` when not a monorepo.
@@ -401,6 +441,9 @@ implementation requirement of this decision.
     `{ "is_monorepo": true, "authority": "<kebab-id>", "orchestrators":
     ["<kebab-id>", …] }`, with `orchestrators` an array (omitted/empty when
     none) and ids drawn from `MonorepoStandard::spec().id`.
+  - `--json` preserves valid JSON on STDOUT even when the predicate exits
+    non-zero; diagnostics for genuine failures go to STDERR and do not corrupt
+    STDOUT.
   - Multi-layer repos report the primary layer (per D1) in `authority` /
     `orchestrators`.
   - A per-standard natural-language label is defined for **every**
@@ -444,3 +487,9 @@ Both former open questions are now decided (see D1):
   retired from the monorepo summary. Consequence: the `sniff repo` / `sniff repo
   structure` **text** changes (and its snapshots are re-baselined with
   approval); its **JSON** stays byte-identical.
+- **Focused leaf vs aggregate JSON.** Focused
+  `sniff repo is-monorepo --json` changes to the new snake_case object shape and
+  predicate exit semantics. Bare aggregate `sniff repo --json` keeps the
+  existing unwrapped `"is-monorepo": bool` member because that surface is
+  explicitly outside the D5 break; consumers that need standard identity should
+  read `structure.monorepo_layers` from the aggregate.
