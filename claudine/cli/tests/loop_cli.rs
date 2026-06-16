@@ -979,3 +979,143 @@ exit 0
         strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr))
     );
 }
+
+// ============================================================================
+// Phase 1: loop iteration signals from structured stream
+// ============================================================================
+
+/// Regression safety net for the always-harness unification work. A loop
+/// whose iteration emits a structured `exit_reason` must surface that reason
+/// in `LoopIterationFailed` (honest error cause). This variant has no harness
+/// frontmatter, so it exercises the current non-harness path and should pass
+/// today.
+#[cfg(unix)]
+#[test]
+fn compose_loop_exit_reason_surfaces_on_non_harness_doc() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("loop.md");
+    fs::write(
+        &md_file,
+        r#"---
+loop:
+  while: "true"
+  max: 1
+---
+Iteration {{counter}}
+"#,
+    )
+    .unwrap();
+
+    // Fake opencode emits an error event with a structured error_kind and
+    // exits non-zero. The loop must surface the exit_reason honestly instead
+    // of mislabeling it as an invalid loop definition.
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' '{"type":"init","session_id":"loop-exit","model":"test-model"}'
+printf '%s\n' '{"type":"step_start","sessionID":"loop-exit"}'
+printf '%s\n' '{"type":"error","error_type":"api_timeout","error_message":"upstream timeout"}'
+exit 1
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("OPENCODE_MODEL", "test-model")
+        .current_dir(workspace.path())
+        .args(["compose", "--opencode", md_file.to_str().unwrap()])
+        .timeout(std::time::Duration::from_secs(30))
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("Iteration 1 exited with code 1"),
+        "stderr must surface the loop iteration failure; got: {plain}"
+    );
+    assert!(
+        plain.contains("api_timeout"),
+        "stderr must carry the structured exit_reason; got: {plain}"
+    );
+    assert!(
+        !plain.contains("invalid loop definition"),
+        "honest exit_reason must not be mislabeled as invalid loop definition; got: {plain}"
+    );
+}
+
+/// Sibling to the above test, exercising the same signal contract on a
+/// document with minimal harness frontmatter. Phase 2 of the always-harness
+/// plan surfaces terminal-attempt signals from `run_harness_loop`, so this
+/// test should now pass alongside the non-harness variant.
+#[cfg(unix)]
+#[test]
+fn compose_loop_exit_reason_surfaces_on_harness_doc() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("loop.md");
+    fs::write(
+        &md_file,
+        r#"---
+post_checks: []
+loop:
+  while: "true"
+  max: 1
+---
+Iteration {{counter}}
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' '{"type":"init","session_id":"loop-exit","model":"test-model"}'
+printf '%s\n' '{"type":"step_start","sessionID":"loop-exit"}'
+printf '%s\n' '{"type":"error","error_type":"api_timeout","error_message":"upstream timeout"}'
+exit 1
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("OPENCODE_MODEL", "test-model")
+        .current_dir(workspace.path())
+        .args(["compose", "--opencode", md_file.to_str().unwrap()])
+        .timeout(std::time::Duration::from_secs(30))
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("Iteration 1 exited with code 1"),
+        "stderr must surface the loop iteration failure; got: {plain}"
+    );
+    assert!(
+        plain.contains("api_timeout"),
+        "stderr must carry the structured exit_reason; got: {plain}"
+    );
+    assert!(
+        !plain.contains("invalid loop definition"),
+        "honest exit_reason must not be mislabeled as invalid loop definition; got: {plain}"
+    );
+}
+
