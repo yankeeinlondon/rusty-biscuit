@@ -1723,6 +1723,7 @@ fn test_repo_info(root: PathBuf, is_monorepo: bool, packages: Option<Vec<Package
         peer_dependencies: None,
         optional_dependencies: None,
         packages,
+        ..Default::default()
     }
 }
 
