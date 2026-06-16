@@ -41,10 +41,18 @@ start:
 
     # The stack: ordered list of conditional actions
     stack:
+        # conditional action, using key/value action
         - when: "env.AGENT == 'claude'"
           action: say
           message: "Using Claude provider"
-        - "shell(git status --short)"
+        # conditional action, shorthand action
+        - when: "env.AGENT == 'codex'"
+          action: "say(using codex)"
+        # unconditional actions, using shorthand form
+        - action: "shell(git status --short)"
+        - action: "echo 'hi there'"
+        # conditional multi-action
+        - when: "file_exists('/path/to/file.md') && "
 ```
 
 ### Top-Level Communication Properties
