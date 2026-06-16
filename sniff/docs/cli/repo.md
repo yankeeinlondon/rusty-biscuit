@@ -23,7 +23,7 @@ These flags apply to all `sniff repo` subcommands:
 |------------|-------------|
 | [`name`](./repo_name.md) | Repository name (default when no subcommand is given) |
 | [`language`](./repo_language.md) | Primary programming language for the repository |
-| [`is-monorepo`](./repo_is-monorepo.md) | Whether the repository is a monorepo (`yes`/`no`; `{ "is-monorepo": bool }` with `--json`) |
+| [`is-monorepo`](./repo_is-monorepo.md) | Monorepo label (e.g. `cargo`; `false` if not). Exits non-zero when false unless `--no-error`. `--json` emits `{ "is_monorepo": true, "authority": "...", "orchestrators": [...] }` / `{ "is_monorepo": false }` |
 | [`package-count`](./repo_package-count.md) | Number of discovered packages (`{ "package-count": N }` with `--json`) |
 | [`version`](./repo_version.md) | Repository version from the root manifest (`{ "version": "..." \| null }` with `--json`) |
 | [`worktree`](./repo_worktree.md) | Name of the current Git linked worktree |
@@ -115,7 +115,7 @@ Passing both flags produces the AND intersection: the resolved package must live
 
 ## JSON Output (`--json`)
 
-All display subcommands support `--json`. Path subcommands emit a `{ "root": "..." }` (or `{ "name": "..." }`) object under `--json` while still honoring exit codes. Exit-code leaves such as `is-monorepo`, `version`, `is-current-package-area-dirty`, `package-area-has-source-code-changes`, and `has-merge-conflict` emit a stable single-key object under `--json` (e.g. `{ "is-monorepo": true }`) alongside their exit code, so scripts can branch on `$?` without parsing the body. Without `--json` they produce plain text or no output.
+All display subcommands support `--json`. Path subcommands emit a `{ "root": "..." }` (or `{ "name": "..." }`) object under `--json` while still honoring exit codes. Most exit-code leaves such as `version`, `is-current-package-area-dirty`, `package-area-has-source-code-changes`, and `has-merge-conflict` emit a stable single-key object under `--json` (e.g. `{ "version": "0.1.0" }`) alongside their exit code, so scripts can branch on `$?` without parsing the body. The focused `is-monorepo` leaf emits the object documented in [`repo_is-monorepo.md`](./repo_is-monorepo.md); the bare `sniff repo --json` aggregate still keeps `"is-monorepo": bool` as a single-key leaf. Without `--json` subcommands produce plain text or no output.
 
 ```bash
 sniff --json repo git-status

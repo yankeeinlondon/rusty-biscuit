@@ -1,10 +1,12 @@
 ---
 blast_radius:
-  - sniff/cli/src/args.rs
-  - sniff/cli/src/commands.rs
-  - sniff/cli/src/output/filesystem.rs
-  - sniff/lib/src/filesystem/repo.rs
-  - sniff/lib/src/filesystem/mod.rs
+  - sniff/cli/src/args/repo.rs
+  - sniff/cli/src/args/mod.rs
+  - sniff/cli/src/output/filesystem/repo.rs
+  - sniff/cli/src/output/repo_json.rs
+  - sniff/lib/src/filesystem/repo/types.rs
+  - sniff/lib/src/filesystem/repo/standard.rs
+  - sniff/lib/src/filesystem/repo/topology.rs
 ---
 
 # The `sniff repo structure` Subcommand
@@ -33,21 +35,25 @@ Repository
 
 ### Monorepo
 
-For monorepos, the heading shows the primary authority (plus any orchestrators) and package count:
+For monorepos, the heading shows the unified per-standard label and package
+count:
 
-- Prose::new(`<b><u>Repository</u></b> <dim>({authority} / {total_count} packages)</dim>`)
-- Prose::new(`<b><u>Repository</u></b> <dim>({authority} + {orchestrator} / {total_count} packages)</dim>`)
+- `Prose::new(`<b><u>Repository</u></b> <dim>({authority_label} / {total_count} packages)</dim>`)`
+- `Prose::new(`<b><u>Repository</u></b> <dim>({orchestrator_label} (using {authority_label}) / {total_count} packages)</dim>`)`
+
+Both `{authority_label}` and `{orchestrator_label}` are drawn from each
+standard's `spec().label` (for example, `cargo`, `pnpm workspaces`, `Nx`).
 
 When filtering reduces the set:
 
-- Prose::new(`<b><u>Repository</u></b> <dim>({authority} / showing {shown} of {total} packages)</dim>`)
+- `Prose::new(`<b><u>Repository</u></b> <dim>({authority_label} / showing {shown} of {total} packages)</dim>`)`
 
 ### Package Listing
 
 Packages are grouped by **package area** (top-level directory), displayed in hierarchical order:
 
 ```
-Repository (Cargo / 35 packages)
+Repository (cargo / 35 packages)
 
   sniff
     sniff-cli v0.1.0 (sniff/cli) [Rust]

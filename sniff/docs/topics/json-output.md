@@ -61,6 +61,9 @@ sniff repo --json
 # single-key leaves contribute their unwrapped value; multi-field children
 # contribute their whole scope object. Network-primary children (`remote`,
 # `pr`) and parameterized children (`hash`) are excluded from the aggregate.
+#
+# Note: the focused `sniff repo is-monorepo --json` leaf uses a different
+# snake_case object shape (`{ "is_monorepo": ... }`); see its subcommand docs.
 
 sniff repo
 # (with no --json: dispatches to the default subcommand `name` and prints the name)

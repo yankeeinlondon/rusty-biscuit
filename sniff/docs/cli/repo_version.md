@@ -82,5 +82,5 @@ sniff repo version --json --no-error
 | Subcommand | Output |
 |------------|--------|
 | [`name`](./repo_name.md) | Repository name |
-| [`is-monorepo`](./repo_is-monorepo.md) | Whether the repository is a monorepo |
+| [`is-monorepo`](./repo_is-monorepo.md) | Monorepo label (e.g. `cargo`; `false` if not) |
 | [`package-count`](./repo_package-count.md) | Number of discovered packages |

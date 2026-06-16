@@ -129,7 +129,7 @@ sniff repo untracked-files       # Untracked files
 sniff repo                 # Repository name (default text dispatch; --json returns the aggregate)
 sniff repo name            # Repository name only
 sniff repo name -v         # Repository name only (verbose styling; no foreign fields)
-sniff repo is-monorepo     # Whether the repo is a monorepo (yes/no)
+sniff repo is-monorepo     # Monorepo label (e.g. `cargo`; `false` if not). Exits non-zero when false unless `--no-error`. `--json` emits `{ "is_monorepo": true, "authority": "...", "orchestrators": [...] }` / `{ "is_monorepo": false }`
 sniff repo package-count   # Number of discovered packages
 sniff repo version         # Repository version from root manifest
 sniff repo language        # Primary programming language for the repository
@@ -360,11 +360,11 @@ Git Repository:
   Status: dirty (3 staged, 2 unstaged, 1 untracked)
   Remote origin: GitHub (15 branches)
 
-Monorepo: CargoWorkspace
+Monorepo: cargo
   Packages: 8
-    sniff/cli (Rust)
-    sniff/lib (Rust)
-    research/cli (Rust)
+    sniff-cli v0.1.0 (sniff/cli) [Rust]
+    sniff v0.1.0 (sniff/lib) [Rust]
+    research-cli v0.1.0 (research/cli) [Rust]
     ...
 ```
 
@@ -459,7 +459,7 @@ table summarises the contract; see the per-subcommand docs under
 | `repo structure` | Full `RepoInfo` blob (`is_monorepo`, `packages`, `dependencies`, ...). Includes `monorepo_standards` and `monorepo_layers` when the repo is a monorepo. |
 | `repo name` | `{ "name": "..." }` |
 | `repo language` | `{ "language": "..." \| null }` (or full language breakdown with `--breakdown`) |
-| `repo is-monorepo` | `{ "is-monorepo": true \| false }` |
+| `repo is-monorepo` | `{ "is_monorepo": true, "authority": "...", "orchestrators": [...] }` / `{ "is_monorepo": false }` |
 | `repo package-count` | `{ "package-count": N }` |
 | `repo version` | `{ "version": "..." \| null }` |
 | `repo git-status` | `GitInfo` object directly (`repo_root`, `status`, `recent`, `branches`, ...) |
@@ -866,8 +866,13 @@ cargo test -p sniff-cli cli_parsing
 sniff --json > build-context.json
 
 # Check if running in a monorepo
+if sniff repo is-monorepo --no-error | grep -q '^cargo$'; then
+    echo "Detected cargo monorepo"
+fi
+
+# The bare aggregate still exposes the legacy unwrapped bool
 if sniff repo --json | jq -e '."is-monorepo"'; then
-    echo "Detected monorepo"
+    echo "Detected monorepo via aggregate"
 fi
 ```
 

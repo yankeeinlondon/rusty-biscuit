@@ -65,6 +65,6 @@ echo "Workspace has $COUNT packages"
 
 | Subcommand | Output |
 |------------|--------|
-| [`is-monorepo`](./repo_is-monorepo.md) | Whether the repository is a monorepo |
+| [`is-monorepo`](./repo_is-monorepo.md) | Monorepo label (e.g. `cargo`; `false` if not) |
 | [`packages`](./repo_packages.md) | The package names themselves |
 | [`structure`](./repo_structure.md) | Full hierarchical package overview |

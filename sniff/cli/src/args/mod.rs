@@ -1115,8 +1115,9 @@ Identity:
   sniff repo name                     Repository name (plain text)
   sniff repo name -v                  Repository name only (verbose styling, no extra fields)
   sniff repo -v                       Rich one-liner: name + version + language/package count
-  sniff repo is-monorepo              Whether the repo is a monorepo (yes/no, or { \"is-monorepo\": bool } with --json)
-  sniff repo is-monorepo --json       { \"is-monorepo\": true }
+  sniff repo is-monorepo              Monorepo label (e.g. `cargo`; `false` if not; exits non-zero when false)
+  sniff repo is-monorepo --json       { \"is_monorepo\": true, \"authority\": \"...\", \"orchestrators\": [...] }
+  sniff repo is-monorepo --no-error   Exit 0 while still printing `false` outside a monorepo
   sniff repo package-count            Number of discovered packages (or { \"package-count\": N } with --json)
   sniff repo package-count --json     { \"package-count\": 48 }
   sniff repo version                  Repository version from root manifest (or { \"version\": \"...\" } with --json)
