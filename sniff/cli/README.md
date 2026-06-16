@@ -456,7 +456,7 @@ table summarises the contract; see the per-subcommand docs under
 | Subcommand | JSON shape |
 |---|---|
 | `repo` (bare, `--json`) | Scope-complete aggregate of participating child subcommands, keyed by subcommand name; see [`sniff/docs/topics/json-output.md`](../../docs/topics/json-output.md) |
-| `repo structure` | Full `RepoInfo` blob (`is_monorepo`, `packages`, `dependencies`, ...) |
+| `repo structure` | Full `RepoInfo` blob (`is_monorepo`, `packages`, `dependencies`, ...). Includes `monorepo_standards` and `monorepo_layers` when the repo is a monorepo. The legacy `monorepo_tool` / `workspace_tools` keys are still present but deprecated. |
 | `repo name` | `{ "name": "..." }` |
 | `repo language` | `{ "language": "..." \| null }` (or full language breakdown with `--breakdown`) |
 | `repo is-monorepo` | `{ "is-monorepo": true \| false }` |
@@ -546,7 +546,9 @@ The library provides modular detection across six domains:
    - Optional remote refresh: branch inventory, default branch, behind status, commit containment
 
 2. **Repository Detection** (`filesystem/repo/`):
-   - Monorepo tool detection (Cargo workspaces, pnpm, npm, yarn, Nx, Turborepo, Lerna)
+   - Monorepo standard detection (Cargo, pnpm/npm/Yarn/Bun workspaces, uv, Go, Gradle, Maven, .NET, Bazel, Pants, Buck2, Rush Stack, Nx, Turborepo, Lerna)
+   - Authority-vs-orchestrator topology via `monorepo_standards` and `monorepo_layers`
+   - Resolved acting binary (`Path`, `Wrapper`, or missing) and version satisfaction
    - Package enumeration with glob pattern expansion
    - Per-package language detection
    - Per-package dependency manager detection (cargo, npm, pnpm, yarn, pip, go)
