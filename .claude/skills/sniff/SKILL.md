@@ -105,14 +105,14 @@ let result = detect_with_config(config)?;
 | `get_current_worktree_name` | Early-return helper: returns the basename of the linked worktree directory, or `None` if in the main worktree |
 | `MonorepoStandard` | Standard-based monorepo descriptor (Cargo, pnpm, Nx, Bazel, etc.) with `BinarySpec` and advisory `InvocationTemplate`s |
 | `DetectedStandard` | Detected instance of a `MonorepoStandard`, including a `ResolvedBinary` (`Path`, `Wrapper`, or missing) and version satisfaction |
-| `MonorepoLayer` | One layer of the repo topology; includes `provenance` (Manifest, Globbed, Lockfile) and `lockfile_match` for lockfile-vs-manifest parity |
+| `MonorepoLayer` | One layer of the repo topology; includes `authority`, `orchestrators`, `provenance`, and `packages` (repo-relative path references matching `Package.relative`) |
 
 ## Monorepo Topology Model
 
-`RepoInfo` exposes two additive fields for the new standard-based model:
+`RepoInfo` exposes two additive fields for the standard-based model:
 
 - `monorepo_standards: Vec<DetectedStandard>` — every standard whose root marker matched, each with its resolved acting binary and `DetectionConfidence`.
-- `monorepo_layers: Vec<MonorepoLayer>` — membership layers, one per root. Each layer has an `authority` (the standard that defines membership) and zero or more `orchestrators` (standards that only run tasks across packages, such as `Nx`, `Turborepo`, or `Lerna`).
+- `monorepo_layers: Vec<MonorepoLayer>` — membership layers, one per root. Each layer has an `authority` (the standard that defines membership), zero or more `orchestrators` (standards that only run tasks across packages), and `packages` — repo-relative path strings that each resolve to exactly one entry in `RepoInfo.packages`.
 
 A standard can hold one or more `Role`s:
 
@@ -124,11 +124,28 @@ A standard can hold one or more `Role`s:
 
 - Authorities own the package list (`CargoWorkspace`, `PnpmWorkspaces`, `GoWorkspace`, `Bazel`, etc.).
 - Orchestrators ride on top of an authority and appear in `MonorepoLayer::orchestrators`. A repo with only an orchestrator (e.g. an `nx.json` and no workspace authority) is **not** reported as a monorepo.
+- Orchestrator-only standards (`Nx`, `Turborepo`, `Lerna`) never appear as `Package.standard`; they only appear as orchestrators on a layer whose authority owns the packages.
 - A layer can have multiple standards when a membership authority and one or more orchestrators share the same root (e.g. pnpm + Nx).
 
-### Legacy Fields
+### Package Catalog
 
-`monorepo_tool` and `workspace_tools` are deprecated in favor of `monorepo_standards` / `monorepo_layers` but remain populated for backward compatibility until a follow-up cleanup spec removes them.
+The canonical package catalog is `RepoInfo.packages`. Each package carries its owning `standard` and `provenance` directly:
+
+- `Package.standard` — the membership authority that owns this package (`CargoWorkspace`, `PnpmWorkspaces`, etc.).
+- `Package.provenance` — how the boundary was derived (`Globbed`, `RootExplicit`, `LeafMarkers`, `Lockfile`, `ManifestScan`, etc.).
+
+`MonorepoLayer.packages` does not duplicate package metadata; it holds repo-relative paths that point into the canonical catalog.
+
+### Unified Topology Model
+
+The legacy `MonorepoTool` enum, `RepoInfo.monorepo_tool` / `workspace_tools`, and `Package.discovery_sources` were removed during the monorepo type unification. The `MonorepoStandard` / `MonorepoLayer` / `Package.standard` / `Package.provenance` model is now the sole surface:
+
+- `RepoInfo.monorepo_standards` lists every detected standard with its acting binary and confidence.
+- `RepoInfo.monorepo_layers` lists membership layers; each layer has one `authority` and zero or more `orchestrators`.
+- `RepoInfo.packages` is the canonical catalog; each package carries `standard` and `provenance`.
+- `MonorepoLayer.packages` contains repo-relative path strings that each resolve to exactly one `RepoInfo.packages[].relative` entry.
+
+CLI text derives the one-liner from `monorepo_layers[0].authority.spec().display_name` plus `<dim> + {orchestrator.display_name}</dim>` for each orchestrator. JSON output no longer contains `monorepo_tool`, `workspace_tools`, or `discovery_sources`.
 
 ## Shared-Work Highlights
 
