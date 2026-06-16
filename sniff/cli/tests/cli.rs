@@ -670,7 +670,10 @@ fn repo_is_monorepo_no_error_exits_zero_when_false() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = std::str::from_utf8(&output.stdout).expect("utf8").trim();
-    assert_eq!(stdout, "false", "--no-error in a non-monorepo must print false");
+    assert_eq!(
+        stdout, "false",
+        "--no-error in a non-monorepo must print false"
+    );
 }
 
 #[test]

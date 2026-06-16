@@ -1,5 +1,5 @@
-use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use clap::{CommandFactory, Parser};
 use clap_complete::{CompleteEnv, Shell};
@@ -745,8 +745,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 };
                 if cli.json {
-                    let outcome =
-                        output::repo_json::is_monorepo_outcome(info.as_ref(), *no_error);
+                    let outcome = output::repo_json::is_monorepo_outcome(info.as_ref(), *no_error);
                     output::print_json_value(outcome.value, perf.build_report().as_ref());
                     if let Some(code) = outcome.exit_code {
                         std::process::exit(code);

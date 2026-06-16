@@ -386,11 +386,8 @@ pub(crate) fn is_monorepo_outcome(info: Option<&RepoInfo>, no_error: bool) -> Bu
             });
             value["authority"] = json!(layer.authority.spec().id);
             if !layer.orchestrators.is_empty() {
-                let orchestrators: Vec<&str> = layer
-                    .orchestrators
-                    .iter()
-                    .map(|s| s.spec().id)
-                    .collect();
+                let orchestrators: Vec<&str> =
+                    layer.orchestrators.iter().map(|s| s.spec().id).collect();
                 value["orchestrators"] = json!(orchestrators);
             }
             BuildOutcome::pure(value)

@@ -106,10 +106,10 @@ pub(crate) use packages::{
     select_dirty_package_names, select_repo_packages, select_staged_package_names,
     select_unstaged_package_names,
 };
+pub(crate) use repo::format_monorepo_label;
 pub use repo::{
     render_filesystem_section, render_repo_default_verbose, render_repo_name, render_repo_section,
 };
-pub(crate) use repo::format_monorepo_label;
 
 /// Format a commit datetime to a relative date string and 12hr time string.
 ///
