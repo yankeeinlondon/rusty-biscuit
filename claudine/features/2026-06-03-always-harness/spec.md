@@ -69,9 +69,9 @@ An earlier draft described adding `max_retries: 0` to `HarnessPlan`. That does n
 - Changing sequence orchestration semantics. `sequence` already delegates to composition per step; it should benefit from this refactor without gaining a new sequence-specific execution model.
 - Moving `--dry-run` into the harness launch loop.
 
-## Bare Plan Construction
+## Effective Plan Construction
 
-Add a small helper for bare plan construction. It may live in the library harness layer if tests or future callers need it there, or in the CLI composition layer if it is purely orchestration glue. The helper must return a normal `HarnessPlan`:
+Add a small helper for effective plan construction. It may live in the library harness layer if tests or future callers need it there, or in the CLI composition layer if it is purely orchestration glue. The helper starts from a parsed `HarnessPlan` when harness frontmatter exists, or from an empty parsed plan when it does not, and then applies system-owned composition rules. For documents with no harness properties, the resulting plan must have this shape:
 
 | Field | Direct `compose` | `inline-compose` |
 |-------|------------------|------------------|
@@ -89,7 +89,15 @@ The helper must not add a retry field. One-attempt behavior follows from the emp
 
 The bare plan is mode-agnostic. Interactivity is not encoded in `HarnessPlan`; it travels through `effective_non_interactive` and the prompt state, so the same bare plan serves interactive and non-interactive runs. See [Interactive Sessions](#interactive-sessions).
 
-If implementation can reuse `parse_harness_plan` against empty effective frontmatter without a dedicated helper, that is acceptable, but tests must still pin the resulting bare-plan shape for direct and inline composition.
+If implementation can reuse `parse_harness_plan` against empty effective frontmatter before applying system rules, that is acceptable, but tests must still pin the resulting effective bare-plan shape for direct and inline composition.
+
+### Inline Writability Ownership
+
+The system-owned inline writability rule must be injected exactly once per plan evaluation. Today the composition preflight branch and the harness loop both insert `inline_writability_pre_check` for inline mode because parsed-harness and non-harness execution are separate paths. After unification, duplicate insertion would produce duplicate status lines and could run the same permission probe twice.
+
+Design decision: make final-plan construction a single helper that accepts a parsed-or-empty `HarnessPlan` plus the composition mode and returns the effective plan that will be audited and executed. That helper owns insertion of the inline writability rule. Both preflight and the harness loop must call the same helper, or the harness loop must accept the already-finalized plan from preflight. Do not keep independent ad hoc insertions in both locations.
+
+The helper should preserve author rule order after the system rule: inline writability is prepended, and authored rules retain their relative order after it. Preserve the established system-rule ID convention (`ValidationRuleId(u32::MAX)`) unless the implementation deliberately changes that contract and updates the affected validation-reporting tests. Handler matching must continue to see the system rule as `ValidationEvent::HasWritePermission` with no markdown source origin.
 
 ## Execution Semantics
 
@@ -158,6 +166,16 @@ The non-harness path has a bespoke summary emission path (`summary::emit_composi
 
 If the old `defer_section_separator` behavior differs from the harness loop's section-stream emission, the harness loop's approach wins, provided inline-closure validation messages remain readable and are not split by a stray section separator. Tests should assert the intended order rather than snapshotting incidental blank-line differences.
 
+### Loop Iteration Signals
+
+Direct `compose --loop` currently depends on `SingleCompositionOutcome.iteration_signals` from the non-harness structured path. Those signals carry provider rate-limit trailers, structured exit reasons such as `step_timeout`, error messages, provider IDs, and model IDs into the loop engine so it can pause, abort with `LoopRateLimited`, or report `LoopIterationFailed` with an honest cause.
+
+The current harness branch sets `iteration_signals: None`. If every direct composition run moves into the harness branch without replacing that surface, bare `compose --loop` would lose rate-limit-aware pauses and structured exit-reason reporting.
+
+Design decision: the harness loop must return the last attempt's stream summary signals to `execute_composition_request` for direct composition. A successful bare or parsed-harness iteration with a rate-limit trailer must still feed the loop engine's rate-limit policy. A failed iteration must still surface the structured `exit_reason` and `error_message` used by `LoopIterationFailed`.
+
+For handler-driven retries, redirects, or resumes, only the terminal attempt of the step should populate `iteration_signals`; intermediate failed attempts are recovery-internal and must not cause the outer loop engine to pause or abort early. If the terminal attempt succeeds but an intermediate attempt saw a rate-limit trailer, the trailer should be ignored unless the terminal attempt's summary also carries one.
+
 ### Inline Closure
 
 Inline closure must use the structured `final_response` captured after the last tool call. It must not fall back to accumulated `assistant_text` except for providers that explicitly recover a post-hoc final message through their supported mechanism.
@@ -168,13 +186,13 @@ Closure remains before post-check evaluation in the harness loop so file-state c
 
 1. **Add convergence tests.** Before structural changes, add tests that compare the same `compose` and `inline-compose` invocations with and without minimal harness frontmatter. The inline case must include interstitial assistant narration before a tool call and final body content after the last tool call; both variants must write the same final body. Where a provider supports interactive inline closure, add a variant that confirms interactive inline compose still rewrites the body through the unified path.
 
-2. **Add or pin bare-plan construction.** Unit-test the direct and inline bare-plan shapes. Confirm there is no retry field and that inline mode gets exactly one system-owned `HasWritePermission` pre-check.
+2. **Add or pin effective-plan construction.** Unit-test the direct and inline bare-plan shapes and the parsed-harness inline shape after system-rule injection. Confirm there is no retry field and that inline mode gets exactly one system-owned `HasWritePermission` pre-check in both preflight and execution.
 
 3. **Preflight both parsed and bare plans.** Keep template shell approval unchanged. Run harness shell approval against the parsed or bare plan. Remove the separate non-harness inline permission branch after inline writability is represented by the bare plan.
 
 4. **Route all composition through `run_harness_loop`.** Build `HarnessPromptState` for both direct and inline composition and pass the same base args, env, child cwd, interactive mode (`effective_non_interactive`), structured output settings, noise filters, stream verbosity, dispatch context, timeout CLI values, and materialized prompt data that the current harness branch receives. Include the compose-path state threaded through since this spec was drafted — `shell_working_directory`, `bind_agent_workspace`, and the `MODEL` / `YOLO` environment exposure — so the unified route does not silently drop it.
 
-5. **Preserve result surfaces.** Ensure provider failure exit codes, lifecycle signals, performance collection, prompt timing, summary emission, inline closure behavior, and the interactive gates (provider gate, timeout conflict, capture seam) match the contracts above.
+5. **Preserve result surfaces.** Ensure provider failure exit codes, lifecycle signals, performance collection, prompt timing, summary emission, inline closure behavior, loop iteration signals, and the interactive gates (provider gate, timeout conflict, capture seam) match the contracts above.
 
 6. **Remove dead code.** Delete `execute_without_harness`, `CompositionExecutionMode`, `run_structured_branch`, the obsolete `inline_guards` closure wrapper, and any legacy branch modules or match arms that have no remaining call sites.
 
@@ -193,6 +211,8 @@ Closure remains before post-check evaluation in the harness loop so file-state c
 - Dry-run does not launch the provider and does not mutate inline source files.
 - Lifecycle notifications fire once per run.
 - Timeout precedence remains CLI > frontmatter > env > built-in for parsed harness plans and CLI > env > built-in for bare plans.
+- `compose --loop` still receives rate-limit and exit-reason signals from bare direct composition and parsed-harness direct composition.
+- Inline composition evaluates exactly one system-owned writability pre-check per attempt.
 - Targeted convergence and composition tests pass.
 
 ## Risk
@@ -205,6 +225,8 @@ Mitigations:
 - Keep the bare plan trivial and handler-free.
 - Preserve dry-run outside the provider launch loop.
 - Preserve provider failure exit codes explicitly rather than relying on generic error propagation.
+- Preserve `compose --loop` iteration signals before deleting the non-harness structured path.
+- Centralize inline writability injection so the unified route cannot double-run the system-owned rule.
 - Delete the old path only after the harness route compiles and tests pass, so the final diff clearly separates migration from cleanup.
 
 ## Open Questions
@@ -216,3 +238,5 @@ None. The reviewed design decisions are:
 - Preserve provider exit codes through the harness loop.
 - Use the harness summary and inline-closure paths as the single source of truth after unification.
 - Route interactive composition through the bare-plan harness loop too; preserve (do not redesign) the interactive provider gate, the timeout conflict check, and the final-response capture seam that already live in the shared prelude.
+- Preserve `compose --loop` rate-limit and exit-reason signals by returning terminal-attempt summary signals from the harness loop.
+- Centralize system-owned inline writability injection so preflight and execution evaluate one identical effective plan.
