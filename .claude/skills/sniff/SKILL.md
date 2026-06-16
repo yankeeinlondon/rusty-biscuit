@@ -1,6 +1,7 @@
 ---
 name: sniff
 description: Expert knowledge for sniff-lib and sniff-cli, a cross-platform system detection library and CLI for Rust. Use when detecting OS/hardware/network/filesystem info, program detection, service detection, adding new detection capabilities, or optimizing detection performance.
+hash: 3cd50ffff2b8b5db-b551e783afb6ee47
 ---
 
 # sniff
@@ -145,7 +146,7 @@ The legacy `MonorepoTool` enum, `RepoInfo.monorepo_tool` / `workspace_tools`, an
 - `RepoInfo.packages` is the canonical catalog; each package carries `standard` and `provenance`.
 - `MonorepoLayer.packages` contains repo-relative path strings that each resolve to exactly one `RepoInfo.packages[].relative` entry.
 
-CLI text derives the one-liner from `monorepo_layers[0].authority.spec().display_name` plus `<dim> + {orchestrator.display_name}</dim>` for each orchestrator. JSON output no longer contains `monorepo_tool`, `workspace_tools`, or `discovery_sources`.
+CLI text derives the one-liner from `RepoInfo::primary_layer()`. The shared label helper composes `{orchestrator_label} (using {authority_label})` when an orchestrator is present, otherwise `{authority_label}` alone. Both parts read each standard's `spec().label` (e.g. `cargo`, `pnpm workspaces`, `Nx`) — never `display_name`. JSON output no longer contains `monorepo_tool`, `workspace_tools`, or `discovery_sources`.
 
 ## Shared-Work Highlights
 
@@ -178,7 +179,7 @@ sniff just                 # Justfiles and recipes
 sniff repo                 # Repository name (bare `sniff repo` is distinct from `sniff repo name`)
 sniff repo name            # Repository name only
 sniff repo name -v         # Repository name only (verbose styling)
-sniff repo is-monorepo     # Whether the repo is a monorepo (yes/no; `{ "is-monorepo": bool }` with --json)
+sniff repo is-monorepo     # Monorepo label (e.g. `cargo`; `false` if not). Exits non-zero when false unless `--no-error`. `--json` emits `{ "is_monorepo": true, "authority": "...", "orchestrators": [...] }` / `{ "is_monorepo": false }`
 sniff repo package-count   # Number of discovered packages (`{ "package-count": N }` with --json)
 sniff repo version         # Repository version from root manifest (`{ "version": "..." | null }` with --json)
 sniff repo git-status      # Git status with commit history
@@ -199,7 +200,7 @@ sniff hardware --json      # Subcommand with JSON output
 - With subcommand: Text (default), `--json` for JSON, `--plain` for unstyled
 
 **`sniff repo --json` aggregate:**
-Bare `sniff repo --json` returns a scope-complete aggregate of all participating child subcommands, keyed by subcommand name. Single-key leaves (e.g. `name`, `version`, `is-monorepo`, `package-count`, `worktree`, `package`) contribute their unwrapped value; multi-field children (e.g. `structure`, `deps`, `packages`, `package-areas`, `git-status`, `worktrees`, file-list leaves, package-change families, boolean leaves, commit families) contribute their whole scope object. Network-primary subcommands (`remote`, `pr`) and parameterized subcommands (`hash`) are excluded, and no network requests are made by the aggregate.
+Bare `sniff repo --json` returns a scope-complete aggregate of all participating child subcommands, keyed by subcommand name. Single-key leaves (e.g. `name`, `version`, `is-monorepo`, `package-count`, `worktree`, `package`) contribute their unwrapped value; multi-field children (e.g. `structure`, `deps`, `packages`, `package-areas`, `git-status`, `worktrees`, file-list leaves, package-change families, boolean leaves, commit families) contribute their whole scope object. Network-primary subcommands (`remote`, `pr`) and parameterized subcommands (`hash`) are excluded, and no network requests are made by the aggregate. Note that the focused `sniff repo is-monorepo --json` leaf uses the snake_case object shape `{ "is_monorepo": ... }`; the aggregate keeps the legacy unwrapped `"is-monorepo"` bool key for compatibility.
 
 ## Detailed Topics
 

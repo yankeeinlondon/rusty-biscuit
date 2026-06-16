@@ -1,68 +1,105 @@
+---
+reviewed: true
+status: ready for planning and implementation
+---
+
 # More Repo Feature
 
-In this feature we will add more sub-commands to the `sniff repo` CLI as well as extend the sniff library where needed.
+In this feature we will:
+
+- Modify the structure of how the CLI presents software
+- Add **Test Runner** infrastructure ([details](./test-runner-strategy.md))
+- Add new CLI commands
+- Sort out the messy `sniff repo --json` structure
+
+This feature adds more subcommands to the `sniff repo` CLI and extends the Sniff library where needed.
 
 - remember that the CLI should own reporting but the library should always own business logic and functionality
 - use the 'cli', 'rust-devops', and 'sniff' agent skills
 
 ## Sniff Software
 
-The `sniff software` subcommand is the logical parent to:
+`sniff software` replaces the current top-level installed-programs surface. It is the logical parent for the existing program aggregate plus every program category:
 
+- `sniff programs`
 - `sniff editors`
 - `sniff utilities`
+- `sniff language-package-managers`
+- `sniff os-package-managers`
 - `sniff tts-clients`
 - `sniff terminal-apps`
 - `sniff audio-players`
 - `sniff notification-helpers`
 - `sniff agents`
+- `sniff software test-runners` (new; see [Test Runners Design](./test-runner-strategy.md))
 
 These SHOULD be subcommands of `sniff software`:
 
+- `sniff software` (aggregate, equivalent to today's `sniff programs`)
 - `sniff software editors`
 - `sniff software utilities`
+- `sniff software language-package-managers`
+- `sniff software os-package-managers`
 - etc.
 
-### Adding Testing Runners
+This is a hard break: the old top-level paths (`sniff programs`, `sniff editors`, `sniff utilities`, `sniff language-package-managers`, `sniff os-package-managers`, `sniff tts-clients`, `sniff terminal-apps`, `sniff audio-players`, `sniff notification-helpers`, `sniff agents`) are removed entirely. There are no backward-compatible aliases, so the only invocation forms are `sniff software` and `sniff software <subcommand>`.
 
-In addition to restructuring we need to add another type of software: "Test Runners":
+Reader note: the earlier draft listed only seven categories and accidentally omitted the two existing package-manager categories and the aggregate `programs` command. This spec intentionally rehomes the whole installed-programs surface so the CLI does not keep two competing nouns for the same feature.
 
-- `sniff software test-runners`
-- is meant to primarily mean unit (and possible) integration test runner but not benchmarking or load testing, etc.
-- includes:
-    - rust:
-        - cargo test
-        - nextest
-    - JS/TS
-        - vitest
-        - Jest
-        - Mocha
-        - AVA
-        - Node Test Runner (built into node)
-    - Python:
-        - pytest
-        - unittest
-        - nose2
-        - tox
-        - nox
-    - PHP
-        - PHPUnit
-        - Pest
-        - Codecaption
-        - Behat
-        - atoum
-    - ...
-- need to be able to look at key files in repo to determine both what the repo uses as well as whether the host has this runner installed
 
-## New Repo Local Commands
+## Adding Testing Runners
+
+We need to add some library code to better track and report on the "test runner(s)" that a repo is using:
+
+- the primary design document for this is [Test Runners Design](./test-runner-strategy.md)
+
+### `sniff repo test-runner` CLI
+
+Determines what test runner is declared by the current repo/package context. Host installation is reported by `sniff software test-runners`; this command reports repository usage.
+
+- if this is a non-monorepo or a package in a monorepo then report that package's runner set
+- if this is a monorepo:
+    - if we're in a package-area then we should evaluate the test runners used across the contained packages
+        - if they are all the same then just report the singular test runner
+        - if there is variance across the packages then just report a unique list of test runners (csv,list,md-list)
+    - if we're at the root of the monorepo then we should again evaluate across all packages
+        - if all use the same test runner then just list it in the singular
+
+The design decisions in `test-runner-strategy.md` are accepted for v1:
+
+- `sniff software test-runners` searches project-local bins as well as global `PATH`, and reports `availability` (`installed`, `local`, `via_parent`, `not_found`) instead of a bare boolean.
+- package-manager global bin directories that are not on `PATH` are deferred to a follow-up.
+- built-in ecosystem defaults are reported with `source: EcosystemDefault`.
+- orchestrators such as `tox` and `nox` are reported with `kind: orchestrator`.
+- `Package.test_runners` uses typed `TestRunnerUsage` values with evidence, not strings.
+- v1 includes the full runner catalog from the strategy document.
+
+## New Local Commands
 
 ### `sniff repo branches`
 
 - lists out the local branches found in the git repo
+- marks branches that are also represented by a locally known remote-tracking branch
+- default behavior does not fetch from the network; if this command gets a refresh option, it must be explicit (for example `--refresh-remotes`) and follow the same non-interactive `GIT_TERMINAL_PROMPT=0` constraints as existing git remote refresh code
+- text output is rendered through `biscuit-terminal` (`Prose` or a reusable renderable component), not hand-written ANSI
+- stdout carries the branch list; stderr may carry a short legend such as `* indicates the branch is available on a remote git host`, but `--json` stdout must remain valid JSON and should not emit the legend
+- JSON shape is an array of branch objects, not decorated text:
+
+```ts
+type BranchInfo = {
+    name: string;
+    current: boolean;
+    sha: string | null;
+    remote_represented: boolean;
+    upstream: string | null;
+    ahead: number | null;
+    behind: number | null;
+};
+```
 
 ### `sniff repo package-manager`
 
-provides the name of the package manager of the CWD:
+Provides the name of the package manager of the CWD:
 
 - if this is a non-monorepo or a package in a monorepo then this is always just a singular value
 - if this is a monorepo:
@@ -71,25 +108,14 @@ provides the name of the package manager of the CWD:
         - if there is variance across the packages then just report a unique list of package managers (csv,list,md-list)
     - if we're at the root of the monorepo then we should again evaluate across all packages
         - if all use the same package manager then just list it in the singular
-        - 
 
-
-### `sniff repo test-runner`
-
-Determines what "test-runner" is being used in repo/package.
-
-- if this is a non-monorepo or a package in a monorepo then this is always just a singular value
-- if this is a monorepo:
-    - if we're in a package-area then we should evaluate the test runners used across the contained packages
-        - if they are all the same then just report the singular package manager
-        - if there is variance across the packages then just report a unique list of test runners (csv,list,md-list)
-    - if we're at the root of the monorepo then we should again evaluate across all packages
-        - if all use the same package manager then just list it in the singular
-
+The package-manager collapse logic should live in the library and be shared with `sniff repo test-runner`. The CLI only selects the output format and renders the value.
 
 ### `sniff repo dependencies`
 
-> We need to rename the existing `sniff repo deps` to avoid semantic conflict; we will rename to `sniff repo packages` (as this is purely calling out monorepo package dependencies)
+This command reports external dependencies declared by repo packages.
+
+Reader note: an earlier draft proposed renaming the existing `sniff repo deps` command to `sniff repo packages`. That conflicts with the already-established `sniff repo packages` contract, which lists package names and is used for shell automation. Keep `sniff repo packages` unchanged. Rename the existing internal workspace dependency graph command from `sniff repo deps` to `sniff repo package-dependencies`, and use `sniff repo dependencies` for external dependencies.
 
 - we already return this kind of information but the structure of this information needs to be improved at the `sniff repo` level and with that re-structuring the reporting on "external-dependencies" will be easier
 - there are the following sub-types of external dependencies:
@@ -98,75 +124,37 @@ Determines what "test-runner" is being used in repo/package.
     - `optional-dependencies`
     - `dependencies`
 - each of these sub-types will be filterable with a CLI switch (e.g., `--dev-dependencies` shows only development dependencies, etc.)
+- `sniff repo package-dependencies` keeps the current internal monorepo graph behavior, including the Mermaid `--ui` rendering path
+- `sniff repo deps` is removed as part of the hard break; there is no alias
 
+## New Remote Commands — deferred to a future feature
 
+The remote commands (`sniff repo ci-cd` / `ci` with `id` / `last` / `list`, and `sniff repo issues`) are **deferred to a dedicated future feature**. That feature will fully specify them with 4-provider parity (GitHub, GitLab, Gitea, Bitbucket) and acceptance criteria, and will also cover back-porting the improved CI/CD reporting to `sniff repo remote`.
 
-## New Remote Commands
-
-> Note: these commands need to work on all Cloud Git providers that we support (Github, Gitlab, Gitea, Bitbucket, etc.)
-
-### `sniff repo ci-cd` (alias `sniff repo ci`)
-
-- reports on the CI/CD pipeline status
-- today when we run `sniff repo remote` we get information on CI/CD but it is not good enough
-    - the improvements we make here should be back-ported to the reporting we do for 
-- we will add the following subcommands:
-    - `id <id>` - rather than list jobs, this will provide detail on a particular job
-    - `last` - provides details on the last CI/CD action
-    - `list <#>` - (this is the default command for `sniff repo remote`)
-        - lists the last 5 (overridden by optional numeric parameter) CI/CD jobs, their id, status, and other key metadata
-
-### `sniff repo issues`
-
-
-### `sniff repo`
+They are carved out here because `sniff repo issues` has no body or acceptance criteria yet, and `ci-cd id` / `last` require a new provider-trait method (a `get_workflow_run`-style single-run + "last" primitive) implemented across all four providers — the current `RemoteProvider` trait only exposes `list_workflow_runs(limit)`.
 
 ## Fix
 
-### Fix `sniff repo is-monorepo` -> false | kind
+### `sniff repo is-monorepo` — owned by `2026-06-16-monorepo-cli` (D5)
 
-- right now `sniff repo is-monorepo` seems to always return "yes"
-- it should NEVER return "yes"!
-
-The correct behavior is:
-
-- `sniff repo is-monorepo` returns `false` (and an error exit code) when it is NOT a monorepo
-    - we need to include a `--no-error` switch which will return `false` but NOT an error exit code
-- when it is run inside a monorepo -- instead of reporting `true` -- it returns the monorepo standard that defines it (cargo, pnpm, etc.)
-
-This approach solves the following problems:
-
-1. you can do shell true/false branching with the exit code
-2. the value reported on STDOUT can be considered a valid branching value too if you use "truthiness" as the test (which many languages will do by default)
-3. if it is a monorepo you not only know that it IS but what technology standard the monorepo is based on
-
-The `--json` output should return:
-
-```ts
-type Json = {
-    is_monorepo: false;
-} | {
-    is_monorepo: true;
-    kind: "cargo" | "pnpm" | ...
-    /** 
-     * whether the user has the required binary to operate with 
-     * the monorepo tech 
-     */
-    installed: boolean;
-
-    /**
-     * the binary name used to manage this type of monorepo
-     */
-    binary: string;
-}
-```
+The focused `sniff repo is-monorepo` leaf is owned and already delivered by the `2026-06-16-monorepo-cli` feature (decision D5). Its redesign — the `false`/label STDOUT text, the predicate exit code, the `--no-error` switch, and the snake_case `{ is_monorepo, authority, orchestrators[] }` JSON — is therefore **out of scope here**. The `installed` / `binary` host-probe idea from an earlier draft of this spec is dropped and not carried forward.
 
 ### Fix `sniff repo version`
 
-This needs to work on all programming languages but it's highly inconsistent. 
+This needs to work across supported package ecosystems, but it is currently inconsistent.
 
 - Seems to work in a Typescript project
 - Doesn't work in Rust (including this monorepo)
+
+Implement version detection in the library, not in the CLI. The command should inspect the repo root / package root manifest selected by existing repo detection and return the manifest version when the ecosystem has one:
+
+- Cargo: `[package].version` in the root package manifest, or the workspace package that represents the root when the root is a package
+- Node: `package.json.version`
+- Python: `pyproject.toml [project].version`, then common tool-specific fallbacks only if already parsed by repo detection
+- Go: `null` unless the repo has an explicit version source already modeled by Sniff
+- JVM/.NET/PHP/Ruby/Elixir: use the ecosystem manifest version when the parser added for this feature can read it safely; otherwise return `null`
+
+`sniff repo version --json` keeps the focused leaf shape `{ "version": string | null }`. A missing version is not an error.
 
 ### Fix Base JSON payload for `sniff repo --json`
 
@@ -186,7 +174,7 @@ On this repo a single `sniff repo --json` produces **~2.48 MB** of JSON across *
 
 The full `Package` catalog (`name`, `path`, `languages`, `dependencies`, `documentation`, `configuration`, `ecosystem`, `file_associations`, `package_managers`, `discovery_sources`, …) is serialized **three times** — in `structure.packages`, `deps.packages`, and `recent-commits.packages` — even though the top-level `packages` key already lists the package *names* (and is the correct, cheap representation for an aggregate). Likewise the full worktree set is serialized **twice in two different shapes** (top-level `worktrees` and `git-status.worktrees`).
 
-The aggregate is assembled key-by-key in `sniff/cli/src/output/repo_json.rs` (the bare-`repo` builder around lines 640–840). Each helper is individually fine for its *focused* subcommand (`sniff repo deps --json`, `sniff repo git-status --json`, etc.); the problem is that the **aggregate re-emits the heavy whole-scope objects** that those focused commands return, instead of contributing a lean projection. The fix is mostly in the aggregate builder and a few `serde` shapes — not a rewrite of the library.
+The aggregate is assembled key-by-key in `sniff/cli/src/output/repo_json.rs` (the bare-`repo` builder around lines 640–840). Each helper is individually fine for its *focused* subcommand (`sniff repo deps --json` in the current implementation, renamed to `sniff repo package-dependencies --json` by this feature; `sniff repo git-status --json`; etc.). The problem is that the aggregate re-emits the heavy whole-scope objects that those focused commands return, instead of contributing a lean projection. The fix is mostly in the aggregate builder and a few `serde` shapes — not a rewrite of the library.
 
 ### Design principles
 
@@ -194,16 +182,18 @@ The bare `sniff repo` aggregate is meant to be a **complete information rollup o
 
 1. **Complete, but each fact once.** Every informational child still contributes its facts, but a package, a worktree, a branch, or a commit's file list is serialized exactly once. Everything else references it by name/sha.
 2. **No property without variance.** Drop any field whose value is fully determined by its key (e.g. `scope: "dirty"` under the `dirty-*` key) or is constant across the run (e.g. `base_branch: "main"` repeated 15×).
-3. **Aggregate ≠ verbatim concatenation of focused commands.** A focused child command (`repo deps`, `repo git-status`, `repo recent-commits`) may return a rich/heavy shape; the aggregate contributes a **lean projection** of that same data, not a re-emission of the whole scope object.
+3. **Aggregate ≠ verbatim concatenation of focused commands.** A focused child command (`repo package-dependencies`, `repo git-status`, `repo recent-commits`) may return a rich/heavy shape; the aggregate contributes a **lean projection** of that same data, not a re-emission of the whole scope object.
 4. **`snake_case` keys, consistently.** Today the aggregate mixes `kebab-case` top-level keys (`dirty-source-code`, `git-status`) with `snake_case` inner keys. Standardize on `snake_case`.
 5. **Empty means empty array** — never an error string, never a `{kind,scope,paths:[]}` envelope.
+
+> **Sequencing note (supersedes monorepo-cli D5's byte-identical aggregate guarantee).** `2026-06-16-monorepo-cli` (D5) deliberately kept the bare aggregate's `is-monorepo` member byte-identical (an unwrapped `"is-monorepo": bool`). This redesign lands **after** monorepo-cli and intentionally reshapes that aggregate: as part of the `snake_case` standardization in principle #4 above, the aggregate's `is-monorepo` member is renamed to snake_case `is_monorepo` (see the consolidated `SniffRepo` type below). This is a sequenced supersession, not a contradiction — D5's guarantee held until this feature lands.
 
 ### Child subcommand taxonomy — what the aggregate contains
 
 `sniff repo` has ~40 children. "Contain everything from the children" is the goal *for the informational ones* — but several children are queries, network calls, or parameterized lookups that legitimately do **not** belong in a no-arg, no-network aggregate. Classify them explicitly:
 
 **A. Repo-wide facts — include (the core of the aggregate).**
-`name`, `version`, `is-monorepo`, `package-count`, `language`, `root`, `packages`, `package-areas`, `structure`, `deps`, `worktrees`, `branches` (new), `git-status`, `recent-commits`, `source-code-changes`, `documentation-changes`, and the change-scope families. These describe the repository itself and are identical regardless of where in the tree you invoke them.
+`name`, `version`, `is-monorepo`, `package-count`, `language`, `root`, `packages`, `package-areas`, `structure`, `package-dependencies`, `dependencies`, `package-manager`, `test-runner`, `worktrees`, `branches` (new), `git-status`, `recent-commits`, `source-code-changes`, `documentation-changes`, and the change-scope families. These describe the repository itself and are identical regardless of where in the tree you invoke them.
 
 **B. Context / cwd-relative queries — include, but keep them distinct from repo-wide facts.**
 `package`, `package-area`, `area`, `package-root`, `package-area-root`, `worktree` (current), `is-current-package-area-dirty`, `package-area-has-source-code-changes`. These answer **"where am I right now?"** — their values change with the working directory, unlike group A. They are cheap and worth including, but mixing them flat with repo-wide facts is what makes the current 38-key blob feel arbitrary. **Recommendation:** group them under a single `context` object so a consumer can tell "this is about my cwd" from "this is about the repo":
@@ -340,7 +330,7 @@ Pick **one**. Recommended: a single top-level `worktrees: WorktreeEntry[]` array
 
 - **`base_branch`** is `"main"` for every worktree (no variance in practice). Either drop it from the per-worktree object and surface a single top-level `default_branch` if it's ever needed, or keep it only where it actually differs. Do **not** repeat a constant 15×.
 
-### Target top-level shape (consolidated)
+### Cleanup `sniff repo --json` data structure (consolidated)
 
 ```ts
 type SniffRepo = {
@@ -354,6 +344,8 @@ type SniffRepo = {
 
     packages: string[];           // names only (cheap) — the ONE package list in the aggregate
     package_areas: string[];      // names only
+    package_manager: string | string[] | null;
+    test_runner: string | string[] | null;
 
     branches: BranchInfo[];       // promoted out of git-status (Fix 2)
     worktrees: WorktreeEntry[];   // single flattened representation (Fix 4)
@@ -395,9 +387,12 @@ type SniffRepo = {
         package_area_has_source_code_changes: boolean;
     };
 
-    // structure / deps stay available but must NOT re-embed the full package catalog
-    // in the aggregate — `deps` keeps the dependency projection; `structure` keeps
-    // workspace tooling + monorepo flags but references packages by name.
+    package_dependencies: PackageDependencySummary; // renamed focused `repo deps` projection
+    dependencies: ExternalDependencySummary;        // external dependency projection
+
+    // structure / dependency summaries stay available but must NOT re-embed the
+    // full package catalog in the aggregate. `structure` keeps workspace tooling
+    // + monorepo flags but references packages by name.
     // (D. `remote`, `pr`, `hash` are excluded — network / parameterized.)
 };
 ```
@@ -414,4 +409,17 @@ All of the above lives in **`sniff/cli/src/output/repo_json.rs`** (the bare-`rep
 - `worktrees_value()` (`repo_json.rs:406`) → flatten the double-`worktrees` nesting and drop constant `base_branch` (Fix 4).
 - Promote branches: emit a top-level `branches` from `GitInfo.branches`.
 
-Because the focused subcommands (`sniff repo deps`, `repo structure`, `repo git-status`, `repo recent-commits`, …) keep their current rich shapes, these changes are scoped to the **aggregate builder** and are low-risk to the per-command contracts. Update the L1 aggregate integration tests and the `sniff` skill's "`sniff repo --json` aggregate" description accordingly.
+Because the focused subcommands (`sniff repo package-dependencies`, `repo dependencies`, `repo structure`, `repo git-status`, `repo recent-commits`, …) keep their current rich shapes, these changes are scoped to the **aggregate builder** and are low-risk to the per-command contracts. Update the L1 aggregate integration tests and the `sniff` skill's "`sniff repo --json` aggregate" description accordingly.
+
+## Backwards Compatibility & Acceptance Criteria
+
+The remaining breaking changes in this feature — reparenting installed-program commands under `sniff software`, renaming `sniff repo deps` → `sniff repo package-dependencies`, adding `sniff repo dependencies`, the bare `sniff repo --json` redesign (kebab→snake_case keys, collapsed change-family envelopes, dropped embedded package catalog), and the `sniff repo version` fix — are a **coordinated hard break**. There are **no deprecation aliases, no legacy-shape flag, and no schema versioning**; the old surfaces are removed outright. `sniff` is depended on by ~16 in-repo packages, and claudine consumes its `repo --json`, so every call site is updated in the same change.
+
+Acceptance criteria:
+
+- **Call-site audit (in-repo invocations).** `git grep` across the monorepo for `sniff repo deps` invocations (and any scripted `repo --json` consumers) and update every call site to `sniff repo package-dependencies` / the new snake_case JSON shape **in the same change**. No call site is left invoking the renamed/removed surface.
+- **Reparented command audit (in-repo invocations).** `git grep` across the monorepo for the 10 reparented commands (`sniff programs`, `sniff editors`, `sniff utilities`, `sniff language-package-managers`, `sniff os-package-managers`, `sniff tts-clients`, `sniff terminal-apps`, `sniff audio-players`, `sniff notification-helpers`, `sniff agents`) and update every invocation to the `sniff software` / `sniff software <x>` form **in the same change**. No call site is left invoking the removed top-level path.
+- **claudine consumer migration.** claudine's `sniff repo --json` consumer(s) are updated to the new snake_case / restructured shape in the same change — no consumer is left reading the old kebab-case keys or the removed embedded package catalog.
+- **`--json` redesign validation.** The `--json` redesign is validated against the "Diagnosis (measured)" fixtures above: assert the byte-size reduction, the presence of snake_case keys, the absence of the triplicated package catalog, and the flat `ScopeBucket` shape.
+
+> The remote commands (`sniff repo issues`, `sniff repo ci-cd` / `ci`) are **not** part of this break — they are deferred to a future feature (see "New Remote Commands — deferred to a future feature").

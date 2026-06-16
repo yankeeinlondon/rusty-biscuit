@@ -387,8 +387,26 @@ analysis just to answer `is-monorepo`.
    unchanged and document why the focused leaf and aggregate intentionally
    differ. Update the CLI README/help examples so users see the new focused
    contract without implying the aggregate shape changed.
-10. Update the Sniff skill and CLI docs for the focused `is-monorepo` contract,
-    the aggregate exception, and the unified monorepo label wording.
+10. Update documentation alongside the code (per the repo's drift-maintenance
+    rules). Explicitly:
+    - **`sniff/docs/cli/repo_is-monorepo.md`** — rewrite for the D5 contract:
+      replace the `yes`/`no` text behavior with the label /
+      `{orchestrator_label} (using {authority_label})` / `false` output; document
+      the new predicate-driven exit code (non-zero outside a monorepo, `0`
+      inside) and the `--no-error` flag (including its limited scope — genuine
+      failures still exit non-zero); replace the `{ "is-monorepo": bool }` JSON
+      section with the new `{ "is_monorepo": ... }` object shape (snake_case key,
+      `authority`, `orchestrators` array, kebab ids); note the aggregate
+      `sniff repo --json` still emits the legacy unwrapped `"is-monorepo"` bool.
+    - **`sniff/docs/cli/repo_structure.md`** — update the monorepo summary /
+      heading rendering (Default Behavior and Package Listing sections) to show
+      the unified per-standard label and shared
+      `{orchestrator_label} (using {authority_label})` template instead of
+      `display_name` / `<dim>+ {orchestrator}</dim>`; confirm the `--json`
+      example stays byte-identical (`monorepo_layers[].packages` is still an
+      array of `/`-separated strings after the D2 `Vec<String>` change).
+    - The Sniff skill (`.claude/skills/sniff/`) for the focused `is-monorepo`
+      contract, the aggregate exception, and the unified monorepo label wording.
 
 ## Testing and acceptance criteria
 
@@ -426,6 +444,16 @@ analysis just to answer `is-monorepo`.
   skill document the focused `is-monorepo` output as label/`false` text plus the
   new JSON object shape; they also document that aggregate `sniff repo --json`
   keeps the legacy unwrapped `"is-monorepo"` bool.
+- The two affected CLI docs are updated and no longer describe the old behavior:
+  - `sniff/docs/cli/repo_is-monorepo.md` describes the D5 contract — label /
+    `false` text, predicate exit code, `--no-error` flag, and the
+    `{ "is_monorepo": ..., "authority": ..., "orchestrators": [...] }` JSON
+    object — with **no** remaining `yes`/`no` text or `{ "is-monorepo": bool }`
+    JSON example for the focused leaf.
+  - `sniff/docs/cli/repo_structure.md` describes the monorepo summary/heading via
+    the unified per-standard label and shared template, with **no** remaining
+    reference to `display_name`-style naming or the `<dim>+ {orchestrator}</dim>`
+    form; its `--json` example remains byte-identical.
 - **D5 — `sniff repo is-monorepo`:**
   - Text output examples: `cargo`; `pnpm workspaces`;
     `Nx (using pnpm workspaces)`; `false` when not a monorepo.
