@@ -1,7 +1,7 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-9925c9ed160c85e1
+hash: 87f17662fa397abe-b4ff566298eef5fc
 last_updated: 2026-06-15
 ---
 
@@ -157,7 +157,8 @@ The compose pipeline runs in four phases:
 - Link normalization (absolute → portable paths).
 
 Context capture happens once at compose start, driven by `sniff` (OS, hardware,
-git repo structure, monorepo discovery, file changes, document inventory).
+git repo structure, monorepo discovery, file changes, document inventory) and
+simple environment reads (`AGENT`, `MODEL`).
 Only the context groups actually referenced by the document are captured
 (demand-driven). The `--allow-ctx-override` CLI flag downgrades non-object
 `ctx` frontmatter errors to warnings.
@@ -251,7 +252,7 @@ Open only the topic file needed for the task:
 |-------|------|
 | Compose pipeline | `compose.md` |
 | Expressions (read-side functions, `doc.*`/`ctx.*`/`env.*` namespaces, `$()` token resolution, authoring guide) | `darkmatter/docs/topics/darkmatter-expressions.md` |
-| Context variables (`ctx.*`: date/time, repo, file changes, OS, hardware, docs) | `darkmatter/docs/topics/context-variables.md` |
+| Context variables (`ctx.*`: date/time, repo, file changes, OS, hardware, docs, agent/model) | `darkmatter/docs/topics/context-variables.md` |
 | Schema validation | `darkmatter/docs/topics/schema-definition.md` |
 | Terminal rendering options | `terminal.md` |
 | Frontmatter model | `frontmatter.md` |

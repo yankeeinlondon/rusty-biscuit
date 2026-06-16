@@ -240,6 +240,11 @@ Numeric strings auto-convert for comparisons.
 
 {{ round(3.7) }}             // Round to integer (4)
 {{ round(value, 0) }}        // With default
+
+{{ link(doc.path) }}         // Markdown link using relative text and absolute destination
+{{ link("https://example.com", "Example") }}  // Link with explicit description
+{{ has_skill("rust") }}      // true when a skill directory exists in user or local roots
+{{ has_local_skill("rust") }} // true when a skill directory exists in local roots only
 ```
 
 ### Code Region Protection

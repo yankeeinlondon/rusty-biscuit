@@ -327,6 +327,16 @@ null-safety applies — see [Function Contracts](#function-contracts)).
 
 - `is_string(x)`, `is_number(x)`, `is_array(x)`, `is_null(x)`, `is_object(x)`
 - `is_empty(x)` — `true` for `null`, `""`, `[]`, `{}`; `false` for numbers (including `0`), booleans, and non-empty containers
+- `is_integer(val)` — `true` only for JSON numbers with no fractional component; never errors and does not null-propagate
+
+### Numeric Predicates
+
+- `is_positive(val)` — `true` when the value coerces to a number greater than zero
+- `is_negative(val)` — `true` when the value coerces to a number less than zero
+
+Both predicates use the same coercion as `number()`. `0` is neither positive nor
+negative. Non-numeric values (including `null`) return an error rather than
+propagating.
 
 ### Collection Helpers
 
@@ -342,6 +352,22 @@ null-safety applies — see [Function Contracts](#function-contracts)).
 
 - `lower(x)`, `upper(x)`, `capitalize(x)`
 - `kebab_case(x)`, `snake_case(x)`, `camel_case(x)`, `pascal_case(x)`, `title_case(x)`
+- `without_date(string)` — removes valid `YYYY-MM-DD` substrings; invalid dates such as `2026-02-30` are left untouched
+- `ensure_leading(var, prefix)` — ensures the string form of `var` starts with `prefix`
+- `ensure_trailing(var, postfix)` — ensures the string form of `var` ends with `postfix`
+
+`ensure_leading` and `ensure_trailing` accept strings or numbers. If `var`
+already has the prefix/suffix, the original value is returned unchanged
+(including its JSON type). When `var` is a number and the result is
+representable as a number, a JSON number is returned; otherwise a string is
+returned.
+
+```md
+{{ ensure_leading("foobar", "foo") }}    ⇒ "foobar"
+{{ ensure_leading("bar", "foo") }}       ⇒ "foobar"
+{{ ensure_leading(123, 4) }}             ⇒ 4123
+{{ ensure_leading("123", 4) }}           ⇒ "4123"
+```
 
 ### Date Validators
 
@@ -349,8 +375,8 @@ Strict format validators (strings only, exact format required):
 
 - `is_date(x)` — `YYYY-MM-DD`
 - `is_date_utc(x)` — same format
-- `is_datetime(x)` — ISO 8601 datetime
-- `is_datetime_utc(x)` — same format
+- `is_date_time(x)` — ISO 8601 datetime (also accepted as `is_datetime(x)`)
+- `is_date_time_utc(x)` — same format (also accepted as `is_datetime_utc(x)`)
 
 Relative validators (accept date *and* datetime strings):
 
@@ -379,33 +405,96 @@ The `[YYYY]` token includes the year only when it differs from the current
 year. Invalid ISO input or an unknown format token returns an error; a `null`
 argument propagates as `null`.
 
+### Rendering
+
+- `terminal(string)` — renders the input as **Prose markup** and returns the
+  resulting terminal string, including ANSI SGR sequences. The input is markup,
+  not literal text, so angle brackets that should appear literally must be
+  escaped before calling. Rendering uses deterministic, non-interactive
+  terminal settings and does not probe the live terminal. `null` propagates.
+
 ### Read-Side Functions
 
-Seven functions are **read-side**: unlike the helpers above (which report only
-on values already in scope), they read the filesystem — and, for some, remote
-URLs. They are pure in the sense that they mutate no state, but they require a
+Read-side functions report on the filesystem — and, for some, remote URLs. They
+are pure in the sense that they mutate no state, but they require a
 **resolution context** (a document-relative base directory) to resolve their
 path arguments. The context is supplied automatically on every
 [surface](#availability-across-every-surface).
+
+All path arguments are resolved through the shared rules below. With the
+exception of `file_exists`, read-side functions do not check whether a local
+path exists; they operate on the resolved path shape.
+
+#### Shared Path Rules
+
+- Paths are resolved through `FileReference` plus the document's magic paths,
+  package paths, and git-root fallbacks.
+- Output paths use `/` as the separator, regardless of platform.
+- Missing local files are generally **not** an error for path helpers; existence
+  is checked only when the operation genuinely needs it.
+- HTTP(S) URL strings are rejected by the path helpers. URL support for the
+  document-reading functions (`file_exists`, `frontmatter`, `markdown_title`,
+  `markdown_body_empty`, `validate_schema`) is available only in **body
+  interpolation**, where a remote runtime exists.
+- `absolute` and `relative` are local-only path transforms; they never perform
+  remote egress.
+
+#### Filesystem Helpers
 
 | Function | Reads | Remote URL arg? |
 | --- | --- | --- |
 | `file_exists(path)` | whether a file exists | yes (body only) |
 | `frontmatter(path)` | another file's frontmatter object | yes (body only) |
+| `frontmatter(path, prop)` | a single property from another file's frontmatter | yes (body only) |
 | `markdown_title(path)` | another file's first H1 title | yes (body only) |
 | `markdown_body_empty(path)` | whether another file's body is empty | yes (body only) |
-| `validate_schema(path)` | a file against its `$schema` | yes (body only) |
-| `absolute(path)` | the absolute form of a path | **no — local-only path transform** |
-| `relative(path)` | a path relative to the base dir | **no — local-only path transform** |
+| `validate_schema(path)` | a file against its declared `$schema` | yes (body only) |
+| `validate_schema(path, obj)` | accepted for forward compatibility | yes (body only) |
+| `absolute(path)` | the absolute form of a path | **no** |
+| `relative(path)` | a path relative to the base dir | **no** |
 
-`absolute` and `relative` only rewrite a path string; they never touch the
-network and are **not** registered as remote egress.
+#### Indexed and Path Helpers
 
-Remote URL arguments are only honored in **body interpolation**, where a remote
-runtime exists. The **frontmatter** resolution context — both the pre-shell and
-post-shell interpolation passes, and the `$()` shell ternary condition/branch —
-is local-filesystem only, so a remote URL argument there **fails loudly** rather
-than silently returning a default.
+A filename matches the indexed grammar when its stem ends with `-` followed by
+one or more digits, where the hyphen is not preceded by another hyphen:
+`review-1.md`, `review-100.md`, and `review-001.md` match; `review1.md`,
+`review_1.md`, `review-.md`, and `review--1.md` do not.
+
+| Function | Description |
+| --- | --- |
+| `is_indexed_file(file)` | `true` when the filename stem matches `base-NNN` |
+| `file_index(file)` | the parsed index suffix, or `-1` when non-indexed |
+| `increment_file_index(file)` | bumps the index; non-indexed files start at `2`; preserves zero-padding width |
+| `decrement_file_index(file)` | decrements the index, clamped at `0`; non-indexed files start at `0` |
+| `basename(file)` | final component including extension |
+| `basename_without_index(file)` | basename with any indexed suffix removed from the stem |
+| `dir(file)` | directory portion of the display path |
+| `ext(file)` | final extension without the leading dot; `""` when none |
+| `parent_dir(file)` | directory segment immediately above the basename |
+| `file_trailing(file)` | last directory segment plus basename |
+| `dir_leading(file)` | directory path before the last segment |
+| `join(left, right)` | joins two path strings, normalizing separators |
+
+#### Link Helpers
+
+- `link(file)` — emits `[relative](absolute)` for a local file. The one-argument
+  form rejects HTTP(S) URLs because a description is required.
+- `link(target, desc)` — emits `[desc](destination)`. `target` may be a local
+  file reference or an HTTP(S) URL; `desc` must be a string. Link text escapes
+  `[` and `]`; destinations that would break CommonMark are wrapped in angle
+  brackets or percent-encoded.
+
+#### Skill Helpers
+
+- `has_skill(name)` — `true` when a direct child directory named `name` exists
+  in any user-scoped or local-scoped skill root for the executing agent.
+- `has_local_skill(name)` — `true` when a direct child directory named `name`
+  exists in any local-scoped skill root for the executing agent.
+
+The agent is derived from `ctx.agent` when available, otherwise from the `AGENT`
+environment variable. Recognized agent aliases are normalized to `claude`,
+`opencode`, or `codex`. Names containing path separators or `..` are rejected.
+Missing skill roots return `false`, not an error.
 
 ### Function Contracts
 
@@ -420,11 +509,14 @@ This applies to:
 - math: `min`, `max`, `abs`
 - collections: `first`, `last`
 - string predicates: `starts_with`, `ends_with`
-- string mutations: `lower`, `upper`, `capitalize`, `kebab_case`, `camel_case`, `pascal_case`, `snake_case`, `title_case`
+- string mutations: `lower`, `upper`, `capitalize`, `kebab_case`, `camel_case`, `pascal_case`, `snake_case`, `title_case`, `without_date`, `ensure_leading`, `ensure_trailing`
+- rendering: `terminal`
 - date formatting: `date`
 
-`is_string`/`is_number`/`is_array`/`is_null`/`is_object`/`is_empty` are inspecting
-predicates and never error or null-propagate; they always return a boolean.
+`is_string`/`is_number`/`is_array`/`is_null`/`is_object`/`is_empty`/`is_integer`
+are inspecting predicates and never error or null-propagate; they always return
+a boolean. `is_positive` and `is_negative` are coercing predicates: they error
+when their argument cannot be coerced to a number (including `null`).
 
 ## Null Propagation Summary
 
@@ -449,7 +541,8 @@ predicates and never error or null-propagate; they always return a boolean.
 
 ### Date Validator Input Contracts
 
-**Strict format validators** (`is_date`, `is_datetime`, and UTC variants):
+**Strict format validators** (`is_date`, `is_date_time`, and UTC variants;
+`is_datetime` and `is_datetime_utc` are accepted aliases):
 
 - accept **strings only**
 - return `false` for non-string inputs, including `null`
@@ -703,7 +796,7 @@ and split into two registries:
   `dispatch`, which needs no context.
 - **Context-aware / read-side functions** (`FS_FUNCTIONS`) — need a
   [`ResolutionContext`](../../lib/src/markdown/compose/expression/resolve_ctx.rs)
-  to resolve path arguments. The seven [read-side functions](#read-side-functions)
+  to resolve path arguments. The [read-side functions](#read-side-functions)
   live here. Dispatched by `dispatch_fs`, which receives the context; `is_fs_function`
   reports membership so the evaluator can emit the "requires a document
   resolution context" error when no context is available.
