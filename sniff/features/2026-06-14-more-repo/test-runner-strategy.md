@@ -20,9 +20,9 @@ The 8 existing software categories (editors, utilities, …) all assume **one pr
 | **A — Path binary** | A real standalone executable discoverable on `PATH` | `which` (standard `ExecutableIndex`) ✅ | `cargo-nextest`, `gotestsum`, `ginkgo`, `rspec`, `pytest`, `nose2`, `tox`, `nox`, `atoum`/`phpunit` PHAR |
 | **B — Ecosystem subcommand** | A subcommand built into a parent tool; no binary of its own | parent binary on `PATH` | `cargo test`→`cargo`, `go test`→`go`, `mvn test`→`mvn`, `gradle test`→`gradle`, `dotnet test`→`dotnet`, `mix test`→`mix` |
 | **C — Runtime module** | Invoked through a language runtime; no binary, no install | runtime binary on `PATH` | `python -m unittest`→`python`, `node --test`→`node`, Minitest/test-unit→`ruby`/`rake` |
-| **D — Project-local** | A vendored binary under the project tree, not global | **cannot be host-detected reliably** ❌ | `vitest`/`jest`/`mocha`/`ava`/`jasmine`/`tap`/`uvu` (`node_modules/.bin`), `phpunit`/`pest`/`codecept`/`behat` (`vendor/bin`) |
+| **D — Project-local** | A vendored binary under the project tree, not on `PATH` | search project bin dirs (cwd-relative) ✅ | `vitest`/`jest`/`mocha`/`ava`/`jasmine`/`tap`/`uvu` (`node_modules/.bin`), `phpunit`/`pest`/`codecept`/`behat` (`vendor/bin`) |
 
-**Consequence for `sniff software test-runners`:** a Class-D runner will report *"not installed"* on the host even in a repo that uses it heavily, because the binary lives in `node_modules/.bin` / `vendor/bin`, not on `PATH`. This is correct-but-surprising and must be designed for explicitly (see §3), not papered over.
+**Consequence for `sniff software test-runners`:** a Class-D runner is **not** on `PATH`, so a bare `which` misses it — but it *is* installed and runnable, just under the project tree (`node_modules/.bin`, `vendor/bin`). We must **capture these locally-installed variants** by searching the ecosystem's project bin dirs relative to the cwd (see §3). The same caveat applies to several Class-A Python runners: `pytest`/`tox`/`nox`/`nose2` very often live only in a project virtualenv (`.venv/bin/pytest`), never on the global `PATH`. So "local install detection" is a cross-class concern, not a Class-D special case.
 
 **Consequence for `sniff repo test-runner`:** host installation is irrelevant here. Repo usage is determined by **manifest dependency keys + config files**, which every runner has and which are reliable regardless of invocation class. This is the stronger, primary signal (see §4).
 
@@ -88,26 +88,46 @@ Follow the established 9th-category pattern (the `Editor`/`Utility` blueprint):
 4. Add `test_runners` field to `ProgramsInfo`; detect in parallel via the shared `Arc<ExecutableIndex>` in `ProgramsInfo::detect()`.
 5. CLI: `define_program_action!(TestRunnerAction, …)`, add `SoftwareTestRunners` to the `Commands`/`OutputFilter` enums, render via `render_programs_markdown` / `build_programs_json`.
 
-**Per-class host-detection rule (the new business logic — lives in the library):**
+### Local-install detection (capturing project-local variants)
+
+The standard `ExecutableIndex` only scans global `PATH` (+ macOS bundles / Windows registry). To capture **locally-installed variants** we add an ecosystem-aware **project bin search** that probes well-known per-project bin directories relative to the cwd. Each ecosystem has its own roots, searched closest-first:
+
+| Ecosystem | Project bin roots (searched relative to cwd) | Walk behavior |
+|-----------|----------------------------------------------|---------------|
+| Node | `node_modules/.bin/<bin>` (`<bin>.cmd`/`.ps1` on Windows) | **walk up** cwd→repo-root (mirrors node resolution; catches hoisted/workspace-root installs) |
+| PHP | `vendor/bin/<bin>` | cwd, then repo root |
+| Python | `.venv/bin/<bin>`, `venv/bin/<bin>`, `env/bin/<bin>` (`Scripts/` on Windows); honor `$VIRTUAL_ENV` if set | cwd, then repo root |
+| Ruby | `bin/<bin>` binstub (Bundler), `$(bundle exec)` resolution | cwd |
+
+A second, optional tier covers **package-manager global bins that aren't on `PATH`**: npm/pnpm/yarn global prefix, Composer global (`~/.composer/vendor/bin`, `~/.config/composer/vendor/bin`), `gem` user dir, pipx (`~/.local/bin`). Recommend deferring this tier to a follow-up unless it proves necessary — the project-local tier covers the common case.
+
+This logic belongs in the **library** (a `LocalBinIndex` or an extension of `ExecutableIndex` taking extra search roots), keeping the CLI a pure reporter. Note this makes `sniff software test-runners` **cwd-sensitive** — like the spec's group-B context queries — which is intentional and should be documented: the command answers "what's installed and runnable *from here*," complementing `sniff repo test-runner`'s "what the repo *declares*."
+
+**Per-class host-detection rule (the new business logic — lives in the library).** Search roots are tried in priority order; the first hit wins and records *where* it was found:
 
 ```text
-match runner.spec().invocation {
-    Class A => ExecutableIndex::find(binary_name)            // standard
-    Class B | Class C => ExecutableIndex::find(parent_binary) // "available via cargo/go/node/python"
-    Class D => not host-detectable -> report Availability::ProjectLocal
-}
+resolve(runner):
+    1. project bin dirs   (ecosystem-specific, cwd-relative)  -> Availability::Local { path, root }
+    2. global PATH index  (ExecutableIndex)                    -> Availability::Installed { path }
+    3. parent binary      (class B/C: cargo/go/node/python/…)  -> Availability::ViaParent { parent }
+    4. none of the above                                       -> Availability::NotFound
 ```
 
-So the JSON entry gains an `availability` discriminator instead of a bare `installed: bool`:
+Class A/D both search steps 1→2 (most JS/PHP land at step 1, most global CLIs at step 2). Class B/C resolve at step 3 via `parent_binary`. Version is probed from the resolved path via `version_from_path`, so a venv/`node_modules` runner reports its real local version.
+
+So the JSON entry replaces a bare `installed: bool` with an `availability` discriminator that distinguishes global from local installs:
 
 ```jsonc
-{ "name": "nextest",   "availability": "installed",    "path": "…/cargo-nextest" }  // A
-{ "name": "cargo-test","availability": "via_parent",   "parent": "cargo" }          // B
-{ "name": "unittest",  "availability": "via_parent",   "parent": "python3" }        // C
-{ "name": "vitest",    "availability": "project_local" }                            // D — see `sniff repo test-runner`
+{ "name": "nextest",    "availability": "installed", "path": "~/.cargo/bin/cargo-nextest" }            // A global
+{ "name": "pytest",     "availability": "local",     "path": ".venv/bin/pytest",        "root": ".venv" }       // A in venv
+{ "name": "vitest",     "availability": "local",     "path": "node_modules/.bin/vitest", "root": "node_modules" }// D project-local
+{ "name": "phpunit",    "availability": "local",     "path": "vendor/bin/phpunit",       "root": "vendor" }      // D vendored
+{ "name": "cargo-test", "availability": "via_parent","parent": "cargo" }                                         // B
+{ "name": "unittest",   "availability": "via_parent","parent": "python3" }                                       // C
+{ "name": "ava",        "availability": "not_found" }                                                            // absent
 ```
 
-> **Open decision (D1):** For Class-D runners on the host surface, do we (a) emit `project_local` and direct the user to `sniff repo test-runner`, or (b) omit them entirely from `sniff software test-runners` (they're a repo concern, not a host concern)? Recommendation: **(a)** — list them with `project_local` so the catalog stays complete and discoverable, with a stderr INFO line ("project-local runners are detected per-repo; see `sniff repo test-runner`"). Per the CLI stdout/stderr rule, that hint goes to **stderr** and is suppressed under `--json`.
+`ExecutableSource` (`contract.rs:20`) gains a `ProjectLocal { root }` variant (and optionally `PackageManagerGlobal`) so the existing source-tracking carries the new locations.
 
 ---
 
@@ -246,7 +266,7 @@ Verified June 2026. `dep key` = exact manifest dependency name; `config` = exact
 
 ## 6. Open decisions for the user
 
-- **D1 (host Class-D handling)** — list project-local runners under `sniff software test-runners` with `availability: project_local`, or omit them? *(Recommend: list, with stderr pointer.)*
+- **D1 (host Class-D handling) — RESOLVED:** capture locally-installed variants. `sniff software test-runners` searches project bin dirs (`node_modules/.bin`, `vendor/bin`, `.venv/bin`, …) in addition to global `PATH`, and reports `availability: local` with the resolved path + root (§3). *Remaining sub-decision (D1a):* second-tier package-manager global bins (npm -g, composer global, …) — include now or defer? *(Recommend: defer.)*
 - **D2 (ecosystem default reporting)** — when a package has no explicit runner config, report the implicit built-in (`cargo test`, `go test`, `unittest`, …) with `source: EcosystemDefault`, or report "none configured"? *(Recommend: report the default, tagged so it's distinguishable.)*
 - **D3 (orchestrators)** — do `tox`/`nox` count as the package's "test runner," or as a wrapper around one? *(Recommend: report with `kind: orchestrator`; let the consumer decide.)*
 - **D4 (typed vs string)** — `package_managers` is `Vec<String>` today; should the new `test_runners` field be a typed `Vec<TestRunnerUsage>` (richer, evidence-carrying) even though it diverges from the string convention? *(Recommend: typed — the evidence/source is worth it, and `package-manager` could later adopt the same shape.)*
@@ -261,7 +281,9 @@ Verified June 2026. `dep key` = exact manifest dependency name; `config` = exact
 - `programs/enums/metadata.rs` — add `TEST_RUNNER_INFO` table; `impl ProgramMetadata for TestRunner`.
 - `programs/contract.rs` — `impl CategoryEnum for TestRunner`.
 - `programs/mod.rs` — add `test_runners` to `ProgramsInfo` + parallel detect in `detect()`.
-- New: `InvocationClass` host rule (A/B/C/D) so detection resolves parent binaries for B/C and short-circuits D.
+- New: `InvocationClass` host rule (A/B/C/D) resolving the §3 search order (project bin → PATH → parent).
+- New: `LocalBinIndex` (or `ExecutableIndex` extra-roots mode) implementing the ecosystem project-bin search (`node_modules/.bin` walk-up, `vendor/bin`, `.venv/bin`/`Scripts`), platform-aware.
+- `programs/contract.rs` — add `ExecutableSource::ProjectLocal { root }`.
 
 **Library — repo surface (§4):**
 - `filesystem/repo/types.rs:108` — add `test_runners: Vec<TestRunnerUsage>` to `Package`.
@@ -274,6 +296,6 @@ Verified June 2026. `dep key` = exact manifest dependency name; `config` = exact
 - `args/repo.rs` — `RepoSubcommand::TestRunner` + `RepoAction::TestRunner`.
 - `args/mod.rs:683` — map in `to_repo_action()`.
 - `commands/repo.rs` — `handle_repo_test_runner()` modeled on `handle_repo_packages()`, using the shared `aggregate_distinct` helper (also back-fits `package-manager`).
-- `output/programs.rs` — render `availability` discriminator (installed / via_parent / project_local) instead of bare bool.
+- `output/programs.rs` — render the `availability` discriminator (`installed` / `local` / `via_parent` / `not_found`) plus path+root for local installs, instead of a bare bool.
 
-**Business-logic stays in the library** (invocation-class rules, manifest/config signal tables, aggregation collapse). The CLI only reports. stdout carries the runner data; the "project-local runners are per-repo" hint goes to **stderr** and is suppressed under `--json`.
+**Business-logic stays in the library** (invocation-class rules, project-bin search roots, manifest/config signal tables, aggregation collapse). The CLI only reports. stdout carries the runner data; any "searched from cwd; see `sniff repo test-runner` for declared usage" hint goes to **stderr** and is suppressed under `--json`.
