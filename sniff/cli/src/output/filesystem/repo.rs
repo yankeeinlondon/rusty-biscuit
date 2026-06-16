@@ -169,7 +169,10 @@ fn format_monorepo_tool(repo: &RepoInfo) -> String {
     if let Some(layer) = repo.monorepo_layers.first() {
         let mut s = format_monorepo_standard(layer.authority).to_string();
         for orch in &layer.orchestrators {
-            s.push_str(&format!(" <dim>+ {}</dim>", format_monorepo_standard(*orch)));
+            s.push_str(&format!(
+                " <dim>+ {}</dim>",
+                format_monorepo_standard(*orch)
+            ));
         }
         s
     } else if let Some(tool) = repo.monorepo_tool.as_ref() {
@@ -190,7 +193,12 @@ fn format_monorepo_layer(layer: &sniff::filesystem::repo::MonorepoLayer) -> Stri
         .join(", ");
     let count = layer.packages.len();
     if orch.is_empty() {
-        format!("{} — {} {}", authority, format_number(count), package_word(count))
+        format!(
+            "{} — {} {}",
+            authority,
+            format_number(count),
+            package_word(count)
+        )
     } else {
         format!(
             "{} <dim>+ {}</dim> — {} {}",
@@ -626,7 +634,8 @@ pub fn render_repo_section(
         let tool_name = format_monorepo_tool(repo);
         let title = Prose::new(format!(
             "<b><u>Repository</u></b> <dim>({} / {} packages)</dim>",
-            tool_name, format_number(total_count),
+            tool_name,
+            format_number(total_count),
         ));
         writeln!(out, "\n{}\n", title.render(&terminal)).unwrap();
     }
@@ -939,7 +948,10 @@ pub fn render_filesystem_section(
         let layer_count = repo.monorepo_layers.len();
 
         let header = if layer_count > 1 {
-            Prose::new(format!("<b>Packages:</b> <dim>({} layers)</dim>", layer_count))
+            Prose::new(format!(
+                "<b>Packages:</b> <dim>({} layers)</dim>",
+                layer_count
+            ))
         } else {
             Prose::new(format!(
                 "<b>Packages:</b> <dim>({} / {} packages)</dim>",

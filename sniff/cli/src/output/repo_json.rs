@@ -2440,6 +2440,7 @@ mod tests {
                     orchestrators: vec![MonorepoStandard::Nx],
                     provenance: PackageProvenance::Globbed,
                     lockfile_match: None,
+                    root_is_package: false,
                     packages: vec![
                         LayerPackage {
                             name: "pkg-a".to_string(),
@@ -2553,8 +2554,8 @@ mod tests {
                 package_count: Some(2),
             };
 
-            let value = build_aggregate_value(&result, None, &identity)
-                .expect("aggregate should build");
+            let value =
+                build_aggregate_value(&result, None, &identity).expect("aggregate should build");
 
             assert!(
                 value["structure"]["monorepo_standards"].is_array(),
@@ -2564,7 +2565,10 @@ mod tests {
                 value["structure"]["monorepo_layers"].is_array(),
                 "aggregate.structure must carry layers: {value}"
             );
-            assert_eq!(value["structure"]["monorepo_layers"][0]["authority"], "cargo-workspace");
+            assert_eq!(
+                value["structure"]["monorepo_layers"][0]["authority"],
+                "cargo-workspace"
+            );
         }
     }
 }

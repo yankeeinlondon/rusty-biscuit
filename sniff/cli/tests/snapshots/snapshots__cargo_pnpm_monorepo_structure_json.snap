@@ -13,6 +13,11 @@ expression: stable_topology_json(&json)
           "name": "rust-a",
           "provenance": "globbed",
           "standard": "cargo-workspace"
+        },
+        {
+          "name": "rust-b",
+          "provenance": "globbed",
+          "standard": "cargo-workspace"
         }
       ],
       "provenance": "globbed"
@@ -23,6 +28,11 @@ expression: stable_topology_json(&json)
       "packages": [
         {
           "name": "js-a",
+          "provenance": "globbed",
+          "standard": "pnpm-workspaces"
+        },
+        {
+          "name": "js-b",
           "provenance": "globbed",
           "standard": "pnpm-workspaces"
         }
@@ -36,12 +46,12 @@ expression: stable_topology_json(&json)
       "standard": "cargo-workspace"
     },
     {
-      "confidence": "inferred",
+      "confidence": "marker-confirmed",
       "standard": "pnpm-workspaces"
     }
   ],
   "monorepo_tool": "CargoWorkspace",
-  "package_count": 2,
+  "package_count": 4,
   "workspace_tools": [
     "CargoWorkspace",
     "PnpmWorkspaces"

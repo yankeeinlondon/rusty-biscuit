@@ -211,43 +211,54 @@ fn create_cargo_pnpm_monorepo_fixture() -> (tempfile::TempDir, std::path::PathBu
     std::fs::write(
         dir.path().join("Cargo.toml"),
         r#"[workspace]
-members = ["rust-a"]
+members = ["rust-a", "rust-b"]
 "#,
     )
     .unwrap();
 
-    let rust_a = dir.path().join("rust-a");
-    std::fs::create_dir_all(rust_a.join("src")).unwrap();
-    std::fs::write(
-        rust_a.join("Cargo.toml"),
-        r#"[package]
-name = "rust-a"
+    for (name, pkg_name) in [("rust-a", "rust-a"), ("rust-b", "rust-b")] {
+        let pkg = dir.path().join(name);
+        std::fs::create_dir_all(pkg.join("src")).unwrap();
+        std::fs::write(
+            pkg.join("Cargo.toml"),
+            format!(
+                r#"[package]
+name = "{}"
 version = "0.1.0"
 edition = "2024"
 "#,
-    )
-    .unwrap();
-    std::fs::write(rust_a.join("src/lib.rs"), "pub fn a() {}").unwrap();
+                pkg_name
+            ),
+        )
+        .unwrap();
+        std::fs::write(pkg.join("src/lib.rs"), "pub fn a() {}").unwrap();
+    }
 
     std::fs::write(
         dir.path().join("pnpm-workspace.yaml"),
         r#"packages:
   - "js-a"
+  - "js-b"
 "#,
     )
     .unwrap();
 
-    let js_a = dir.path().join("js-a");
-    std::fs::create_dir_all(&js_a).unwrap();
-    std::fs::write(
-        js_a.join("package.json"),
-        r#"{
-  "name": "js-a",
+    for (name, pkg_name) in [("js-a", "js-a"), ("js-b", "js-b")] {
+        let pkg = dir.path().join(name);
+        std::fs::create_dir_all(&pkg).unwrap();
+        std::fs::write(
+            pkg.join("package.json"),
+            format!(
+                r#"{{
+  "name": "{}",
   "version": "0.1.0"
-}
+}}
 "#,
-    )
-    .unwrap();
+                pkg_name
+            ),
+        )
+        .unwrap();
+    }
 
     commit_all(&repo, "initial cargo + pnpm monorepo");
     let path = dir.path().to_path_buf();
@@ -301,11 +312,7 @@ fn create_degenerate_cargo_fixture() -> (tempfile::TempDir, std::path::PathBuf) 
     let dir = tempfile::tempdir().unwrap();
     let repo = init_git_repo(dir.path());
 
-    std::fs::write(
-        dir.path().join("Cargo.toml"),
-        "[workspace]\nmembers = []\n",
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
 
     commit_all(&repo, "initial degenerate workspace");
     let path = dir.path().to_path_buf();
@@ -335,7 +342,13 @@ fn run_repo_structure(base: &std::path::Path) -> String {
 
 fn run_repo_structure_json(base: &std::path::Path) -> serde_json::Value {
     let output = cargo_bin_cmd!("sniff")
-        .args(["--base", base.to_str().unwrap(), "repo", "structure", "--json"])
+        .args([
+            "--base",
+            base.to_str().unwrap(),
+            "repo",
+            "structure",
+            "--json",
+        ])
         .env("NO_COLOR", "1")
         .output()
         .expect("run sniff repo structure --json");
@@ -442,7 +455,10 @@ fn cargo_pnpm_monorepo_structure_text_snapshot() {
 fn cargo_pnpm_monorepo_structure_json_snapshot() {
     let (_dir, path) = create_cargo_pnpm_monorepo_fixture();
     let json = run_repo_structure_json(&path);
-    insta::assert_json_snapshot!("cargo_pnpm_monorepo_structure_json", stable_topology_json(&json));
+    insta::assert_json_snapshot!(
+        "cargo_pnpm_monorepo_structure_json",
+        stable_topology_json(&json)
+    );
 }
 
 #[test]
@@ -459,7 +475,10 @@ fn pnpm_nx_monorepo_structure_text_snapshot() {
 fn pnpm_nx_monorepo_structure_json_snapshot() {
     let (_dir, path) = create_pnpm_nx_monorepo_fixture();
     let json = run_repo_structure_json(&path);
-    insta::assert_json_snapshot!("pnpm_nx_monorepo_structure_json", stable_topology_json(&json));
+    insta::assert_json_snapshot!(
+        "pnpm_nx_monorepo_structure_json",
+        stable_topology_json(&json)
+    );
 }
 
 #[test]
