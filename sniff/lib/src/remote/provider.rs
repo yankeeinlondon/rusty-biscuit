@@ -172,7 +172,11 @@ pub trait RemoteRepoProvider: Send + Sync {
                     .unwrap_or_default()
             },
             async { self.list_issues(owner, repo).await.unwrap_or_default() },
-            async { self.get_tags_and_releases(owner, repo).await.unwrap_or_default() },
+            async {
+                self.get_tags_and_releases(owner, repo)
+                    .await
+                    .unwrap_or_default()
+            },
             // Try to fetch actual workflow runs first; fall back to presence detection
             async {
                 match self.list_workflow_runs(owner, repo, 5).await {
