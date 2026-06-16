@@ -103,6 +103,32 @@ let result = detect_with_config(config)?;
 | `Package` | Package path, languages, managers, dependencies |
 | `GitRepo` | `gix::Repository` handle from trusted discovery. All git access (status, diff, history, refs, remotes, config, worktrees) is pure-Rust gix; git2/libgit2 is gone from production and retained only as a dev-dependency for test/bench fixtures. |
 | `get_current_worktree_name` | Early-return helper: returns the basename of the linked worktree directory, or `None` if in the main worktree |
+| `MonorepoStandard` | Standard-based monorepo descriptor (Cargo, pnpm, Nx, Bazel, etc.) with `BinarySpec` and advisory `InvocationTemplate`s |
+| `DetectedStandard` | Detected instance of a `MonorepoStandard`, including a `ResolvedBinary` (`Path`, `Wrapper`, or missing) and version satisfaction |
+| `MonorepoLayer` | One layer of the repo topology; includes `provenance` (Manifest, Globbed, Lockfile) and `lockfile_match` for lockfile-vs-manifest parity |
+
+## Monorepo Topology Model
+
+`RepoInfo` exposes two additive fields for the new standard-based model:
+
+- `monorepo_standards: Vec<DetectedStandard>` — every standard whose root marker matched, each with its resolved acting binary and `DetectionConfidence`.
+- `monorepo_layers: Vec<MonorepoLayer>` — membership layers, one per root. Each layer has an `authority` (the standard that defines membership) and zero or more `orchestrators` (standards that only run tasks across packages, such as `Nx`, `Turborepo`, or `Lerna`).
+
+A standard can hold one or more `Role`s:
+
+- `DefinesMembership` — declares which packages belong to the monorepo.
+- `OrchestratesTasks` — runs tasks across packages.
+- `ManagesDependencies` — resolves and installs dependencies.
+
+### Authority vs. Orchestrator
+
+- Authorities own the package list (`CargoWorkspace`, `PnpmWorkspaces`, `GoWorkspace`, `Bazel`, etc.).
+- Orchestrators ride on top of an authority and appear in `MonorepoLayer::orchestrators`. A repo with only an orchestrator (e.g. an `nx.json` and no workspace authority) is **not** reported as a monorepo.
+- A layer can have multiple standards when a membership authority and one or more orchestrators share the same root (e.g. pnpm + Nx).
+
+### Legacy Fields
+
+`monorepo_tool` and `workspace_tools` are deprecated in favor of `monorepo_standards` / `monorepo_layers` but remain populated for backward compatibility until a follow-up cleanup spec removes them.
 
 ## Shared-Work Highlights
 
