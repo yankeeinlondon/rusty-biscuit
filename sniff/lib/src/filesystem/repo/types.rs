@@ -163,6 +163,36 @@ pub struct Package {
 }
 
 impl RepoInfo {
+    /// The layer that best represents the repository as a whole.
+    ///
+    /// ## Returns
+    ///
+    /// Selection rule:
+    /// 1. The layer whose `root` equals the repo root, if one exists.
+    /// 2. Otherwise the layer with the shallowest root (fewest path
+    ///    components).
+    /// 3. Ties are broken by `MonorepoStandard` enum-declaration order
+    ///    (Cargo first … Unknown last) — **not** detector push-order, so
+    ///    reordering detectors cannot silently change the primary layer.
+    ///
+    /// For the canonical Cargo + uv-at-repo-root case this selects Cargo,
+    /// matching today's `.first()` output.
+    pub fn primary_layer(&self) -> Option<&MonorepoLayer> {
+        if self.monorepo_layers.is_empty() {
+            return None;
+        }
+        let root = canonicalize_path(&self.root);
+        self.monorepo_layers
+            .iter()
+            .min_by_key(|layer| {
+                let layer_root = canonicalize_path(&layer.root);
+                let root_match = layer_root == root;
+                let depth = layer_root.components().count();
+                let authority_order = layer.authority;
+                (!root_match, depth, authority_order)
+            })
+    }
+
     /// Find the package whose directory tree contains `dir`.
     ///
     /// Returns `None` when `dir` is not inside any package.
@@ -520,5 +550,97 @@ mod tests {
             repo.package_area_label_for_dir(Path::new("/repo/reaper/lib")),
             None
         );
+    }
+
+    // ============================================================================
+    // primary_layer tests
+    // ============================================================================
+
+    fn layer_at(root: &str, authority: MonorepoStandard) -> MonorepoLayer {
+        MonorepoLayer {
+            root: PathBuf::from(root),
+            authority,
+            orchestrators: Vec::new(),
+            provenance: crate::filesystem::repo::standard::PackageProvenance::Globbed,
+            lockfile_match: None,
+            root_is_package: false,
+            packages: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn primary_layer_returns_none_when_no_layers() {
+        let repo = RepoInfo {
+            root: PathBuf::from("/repo"),
+            ..RepoInfo::default()
+        };
+        assert!(repo.primary_layer().is_none());
+    }
+
+    #[test]
+    fn primary_layer_selects_single_root_layer() {
+        let repo = RepoInfo {
+            root: PathBuf::from("/repo"),
+            monorepo_layers: vec![layer_at("/repo", MonorepoStandard::CargoWorkspace)],
+            ..RepoInfo::default()
+        };
+        let layer = repo.primary_layer().unwrap();
+        assert_eq!(layer.authority, MonorepoStandard::CargoWorkspace);
+    }
+
+    #[test]
+    fn primary_layer_selects_cargo_over_uv_at_shared_root() {
+        // The canonical shared-root case: Cargo + uv both at the repo root.
+        // Enum-declaration order must break the tie in favor of Cargo.
+        let repo = RepoInfo {
+            root: PathBuf::from("/repo"),
+            monorepo_layers: vec![
+                layer_at("/repo", MonorepoStandard::UvWorkspace),
+                layer_at("/repo", MonorepoStandard::CargoWorkspace),
+            ],
+            ..RepoInfo::default()
+        };
+        let layer = repo.primary_layer().unwrap();
+        assert_eq!(layer.authority, MonorepoStandard::CargoWorkspace);
+    }
+
+    #[test]
+    fn primary_layer_selects_shallowest_root() {
+        let repo = RepoInfo {
+            root: PathBuf::from("/repo"),
+            monorepo_layers: vec![
+                layer_at("/repo/nested", MonorepoStandard::PnpmWorkspaces),
+                layer_at("/repo", MonorepoStandard::CargoWorkspace),
+            ],
+            ..RepoInfo::default()
+        };
+        let layer = repo.primary_layer().unwrap();
+        assert_eq!(layer.authority, MonorepoStandard::CargoWorkspace);
+        assert_eq!(layer.root, PathBuf::from("/repo"));
+    }
+
+    #[test]
+    fn primary_layer_reproduces_first_on_rusty_biscuit_repo() {
+        // Regression: on the rusty-biscuit repo, `primary_layer()` must agree
+        // with `monorepo_layers.first()` — and select Cargo over the pnpm
+        // workspace that also lives at the repo root.
+        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
+        let info = detect_repo_structure(repo_root)
+            .expect("detect_repo_structure should succeed")
+            .expect("rusty-biscuit should be a repo");
+        assert!(info.is_monorepo, "rusty-biscuit should be a monorepo");
+
+        let primary = info
+            .primary_layer()
+            .expect("primary_layer must resolve on rusty-biscuit");
+        let first = info
+            .monorepo_layers
+            .first()
+            .expect("rusty-biscuit has at least one layer");
+
+        assert_eq!(primary.authority, first.authority);
+        assert_eq!(primary.authority, MonorepoStandard::CargoWorkspace);
+        assert_eq!(primary.orchestrators, first.orchestrators);
     }
 }

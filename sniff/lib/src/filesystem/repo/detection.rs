@@ -449,8 +449,8 @@ fn upgrade_provenance_with_lockfile(layer: &mut MonorepoLayer, packages: &mut [P
 /// Normalize a repo-relative layer package path for comparison with
 /// [`Package::relative`]. Empty paths are preserved so they match root
 /// packages (e.g. uv's always-counted workspace root).
-fn normalize_layer_package_relative(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
+fn normalize_layer_package_relative(path: &str) -> String {
+    path.replace('\\', "/")
 }
 
 /// Compute a path relative to a layer root, normalizing separators.
@@ -458,7 +458,7 @@ fn normalize_layer_package_relative(path: &Path) -> String {
 /// Returns `None` when `path` is not under `layer_root`.
 fn layer_relative_path(path: &Path, layer_root: &Path) -> Option<String> {
     let rel = path.strip_prefix(layer_root).ok()?;
-    Some(normalize_layer_package_relative(rel))
+    rel.to_str().map(normalize_layer_package_relative)
 }
 
 /// Parse `pnpm-lock.yaml` and compare its `importers:` keys to the layer's

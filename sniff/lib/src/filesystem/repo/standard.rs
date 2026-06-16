@@ -34,7 +34,7 @@ use crate::filesystem::file_types::ProgrammingLanguage;
 /// via [`spec`](Self::spec). Variants serialize as kebab-case, and each
 /// variant's `spec().id` matches that wire value.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum MonorepoStandard {
     // Membership authorities (workspace standards)
@@ -260,6 +260,9 @@ pub struct MonorepoStandardSpec {
     pub id: &'static str,
     /// Human-facing name (e.g. `"Cargo Workspace"`).
     pub display_name: &'static str,
+    /// Natural-language label for CLI rendering (e.g. `"cargo"`,
+    /// `"pnpm workspaces"`, `"Nx"`).
+    pub label: &'static str,
     /// Roles this standard holds.
     pub roles: &'static [Role],
     /// Primary language, or `None` for polyglot standards.
@@ -391,7 +394,7 @@ pub struct MonorepoLayer {
     /// Packages resolved for this layer, with repo-relative paths matching
     /// [`Package::relative`]. Each entry resolves to exactly one package in the
     /// canonical `RepoInfo.packages` catalog.
-    pub packages: Vec<PathBuf>,
+    pub packages: Vec<String>,
 }
 
 impl MonorepoStandard {
@@ -635,6 +638,7 @@ fn min_version_satisfies(version: &Option<String>, min_version: Option<&str>) ->
 const CARGO_WORKSPACE_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
     id: "cargo-workspace",
     display_name: "Cargo Workspace",
+    label: "cargo",
     roles: &[
         Role::DefinesMembership,
         Role::OrchestratesTasks,
@@ -682,6 +686,7 @@ const CARGO_WORKSPACE_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
 const NPM_WORKSPACES_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
     id: "npm-workspaces",
     display_name: "npm Workspaces",
+    label: "npm workspaces",
     roles: &[
         Role::DefinesMembership,
         Role::OrchestratesTasks,
@@ -733,6 +738,7 @@ const NPM_WORKSPACES_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
 const PNPM_WORKSPACES_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
     id: "pnpm-workspaces",
     display_name: "pnpm Workspaces",
+    label: "pnpm workspaces",
     roles: &[
         Role::DefinesMembership,
         Role::OrchestratesTasks,
@@ -781,6 +787,7 @@ const PNPM_WORKSPACES_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
 const YARN_WORKSPACES_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
     id: "yarn-workspaces",
     display_name: "Yarn Workspaces",
+    label: "yarn workspaces",
     roles: &[
         Role::DefinesMembership,
         Role::OrchestratesTasks,
@@ -830,6 +837,7 @@ const YARN_WORKSPACES_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
 const NX_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
     id: "nx",
     display_name: "Nx",
+    label: "Nx",
     roles: &[Role::OrchestratesTasks],
     primary_language: None,
     markers: &[Marker {
@@ -868,6 +876,7 @@ const NX_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
 const TURBOREPO_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
     id: "turborepo",
     display_name: "Turborepo",
+    label: "Turborepo",
     roles: &[Role::OrchestratesTasks],
     primary_language: None,
     markers: &[Marker {
@@ -913,6 +922,7 @@ const TURBOREPO_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
 const LERNA_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
     id: "lerna",
     display_name: "Lerna",
+    label: "Lerna",
     roles: &[Role::OrchestratesTasks],
     primary_language: None,
     markers: &[Marker {
@@ -956,6 +966,7 @@ const LERNA_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
 const UNKNOWN_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
     id: "unknown",
     display_name: "Unknown",
+    label: "unknown",
     roles: &[],
     primary_language: None,
     markers: &[],
@@ -974,6 +985,7 @@ const UNKNOWN_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
 const BUN_WORKSPACES_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
     id: "bun-workspaces",
     display_name: "Bun Workspaces",
+    label: "bun workspaces",
     roles: &[
         Role::DefinesMembership,
         Role::OrchestratesTasks,
@@ -1020,6 +1032,7 @@ const BUN_WORKSPACES_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
 const UV_WORKSPACE_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
     id: "uv-workspace",
     display_name: "uv Workspace",
+    label: "uv workspace",
     roles: &[
         Role::DefinesMembership,
         Role::OrchestratesTasks,
@@ -1069,6 +1082,7 @@ const UV_WORKSPACE_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
 const GO_WORKSPACE_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
     id: "go-workspace",
     display_name: "Go Workspace",
+    label: "go workspace",
     roles: &[
         Role::DefinesMembership,
         Role::OrchestratesTasks,
@@ -1110,6 +1124,7 @@ const GO_WORKSPACE_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
 const GRADLE_MULTI_PROJECT_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
     id: "gradle-multi-project",
     display_name: "Gradle Multi-Project Build",
+    label: "Gradle",
     roles: &[
         Role::DefinesMembership,
         Role::OrchestratesTasks,
@@ -1161,6 +1176,7 @@ const GRADLE_MULTI_PROJECT_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
 const MAVEN_MULTI_MODULE_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
     id: "maven-multi-module",
     display_name: "Maven Multi-Module Build",
+    label: "Maven",
     roles: &[
         Role::DefinesMembership,
         Role::OrchestratesTasks,
@@ -1202,6 +1218,7 @@ const MAVEN_MULTI_MODULE_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
 const DOTNET_SOLUTION_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
     id: "dot-net-solution",
     display_name: ".NET Solution",
+    label: ".NET solution",
     roles: &[Role::DefinesMembership, Role::OrchestratesTasks],
     primary_language: Some(ProgrammingLanguage::CSharp),
     markers: &[Marker {
@@ -1241,6 +1258,7 @@ const DOTNET_SOLUTION_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
 const BAZEL_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
     id: "bazel",
     display_name: "Bazel",
+    label: "Bazel",
     roles: &[
         Role::DefinesMembership,
         Role::OrchestratesTasks,
@@ -1296,6 +1314,7 @@ const BAZEL_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
 const PANTS_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
     id: "pants",
     display_name: "Pants",
+    label: "Pants",
     roles: &[
         Role::DefinesMembership,
         Role::OrchestratesTasks,
@@ -1338,6 +1357,7 @@ const PANTS_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
 const BUCK2_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
     id: "buck2",
     display_name: "Buck2",
+    label: "Buck2",
     roles: &[
         Role::DefinesMembership,
         Role::OrchestratesTasks,
@@ -1380,6 +1400,7 @@ const BUCK2_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
 const RUSH_STACK_SPEC: MonorepoStandardSpec = MonorepoStandardSpec {
     id: "rush-stack",
     display_name: "Rush Stack",
+    label: "Rush",
     roles: &[Role::DefinesMembership, Role::OrchestratesTasks],
     primary_language: Some(ProgrammingLanguage::JavaScript),
     markers: &[Marker {
@@ -1999,7 +2020,7 @@ mod tests {
 
     fn layer_with(authority: MonorepoStandard, package_count: usize) -> MonorepoLayer {
         let packages = (0..package_count)
-            .map(|i| PathBuf::from(format!("packages/pkg-{i}")))
+            .map(|i| format!("packages/pkg-{i}"))
             .collect();
         // The helper mirrors the typical "single member plus non-package root"
         // Cargo virtual layout only when explicitly asked. By default the test

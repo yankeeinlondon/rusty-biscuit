@@ -358,7 +358,7 @@ fn test_nested_pnpm_under_cargo_is_discovered_as_its_own_layer() {
     let layer_rels: Vec<String> = pnpm_layer
         .packages
         .iter()
-        .map(|p| p.to_string_lossy().into_owned())
+        .map(|p| p.clone())
         .collect();
     assert!(layer_rels.contains(&"web/packages/app".to_string()));
     assert!(
@@ -451,7 +451,7 @@ fn test_nested_cargo_under_pnpm_is_discovered_as_its_own_layer() {
     let layer_rels: Vec<String> = cargo_layer
         .packages
         .iter()
-        .map(|p| p.to_string_lossy().into_owned())
+        .map(|p| p.clone())
         .collect();
     assert!(layer_rels.contains(&"crates/alpha".to_string()));
     assert!(
@@ -643,7 +643,7 @@ fn test_pnpm_lockfile_parity_upgrades_provenance() {
     // Per-package provenance lives on the canonical `RepoInfo.packages` entries.
     let packages = repo.packages.as_ref().expect("packages should be present");
     for rel in &layer.packages {
-        let key = rel.to_string_lossy().replace('\\', "/");
+        let key = rel.replace('\\', "/");
         let pkg = packages
             .iter()
             .find(|p| p.relative == key)
@@ -969,9 +969,9 @@ fn test_rusty_biscuit_repo_topology_parity() {
     let catalog: HashSet<&str> = packages.iter().map(|p| p.relative.as_str()).collect();
     for layer in &repo.monorepo_layers {
         for layer_pkg in &layer.packages {
-            let rel = layer_pkg.to_string_lossy();
+            let rel = layer_pkg.as_str();
             assert!(
-                catalog.contains(rel.as_ref()),
+                catalog.contains(rel),
                 "layer package {rel:?} not found in canonical catalog"
             );
         }
@@ -1035,9 +1035,9 @@ fn test_monorepo_layer_packages_resolve_to_canonical_catalog() {
     let catalog: HashSet<&str> = packages.iter().map(|p| p.relative.as_str()).collect();
     for layer in &repo.monorepo_layers {
         for layer_pkg in &layer.packages {
-            let rel = layer_pkg.to_string_lossy();
+            let rel = layer_pkg.as_str();
             assert!(
-                catalog.contains(rel.as_ref()),
+                catalog.contains(rel),
                 "layer package {rel:?} not found in canonical catalog"
             );
         }
@@ -1129,7 +1129,7 @@ fn test_go_workspace_resolves_explicit_use_paths() {
     let mut relatives: Vec<String> = layer
         .packages
         .iter()
-        .map(|p| p.to_string_lossy().into_owned())
+        .map(|p| p.clone())
         .collect();
     relatives.sort();
     assert_eq!(relatives, vec!["svc-a".to_string(), "svc-b".to_string()]);
@@ -1169,7 +1169,7 @@ fn test_gradle_workspace_authority_is_gradle() {
     let mut relatives: Vec<String> = layer
         .packages
         .iter()
-        .map(|p| p.to_string_lossy().into_owned())
+        .map(|p| p.clone())
         .collect();
     relatives.sort();
     assert_eq!(relatives, vec!["app".to_string(), "core".to_string()]);
@@ -1207,7 +1207,7 @@ fn test_maven_workspace_authority_is_maven() {
     let mut relatives: Vec<String> = layer
         .packages
         .iter()
-        .map(|p| p.to_string_lossy().into_owned())
+        .map(|p| p.clone())
         .collect();
     relatives.sort();
     assert_eq!(relatives, vec!["core".to_string(), "web".to_string()]);
@@ -1243,7 +1243,7 @@ fn test_dotnet_solution_authority_is_dotnet() {
     let mut relatives: Vec<String> = layer
         .packages
         .iter()
-        .map(|p| p.to_string_lossy().into_owned())
+        .map(|p| p.clone())
         .collect();
     relatives.sort();
     // Each project's directory (the `.csproj` parent) becomes a package.
@@ -1294,7 +1294,7 @@ fn test_bazel_workspace_segments_nested_workspace_into_its_own_layer() {
     let mut parent_rels: Vec<String> = parent
         .packages
         .iter()
-        .map(|p| p.to_string_lossy().into_owned())
+        .map(|p| p.clone())
         .collect();
     parent_rels.sort();
     // The nested subtree must be excluded from the parent's package list.
@@ -1308,7 +1308,7 @@ fn test_bazel_workspace_segments_nested_workspace_into_its_own_layer() {
     let nested_rels: Vec<String> = nested
         .packages
         .iter()
-        .map(|p| p.to_string_lossy().into_owned())
+        .map(|p| p.clone())
         .collect();
     // Layer packages are repo-root-relative, so the nested workspace root is
     // represented as `nested`.
@@ -1416,7 +1416,7 @@ fn test_rush_workspace_authority_is_rush() {
     let mut relatives: Vec<String> = layer
         .packages
         .iter()
-        .map(|p| p.to_string_lossy().into_owned())
+        .map(|p| p.clone())
         .collect();
     relatives.sort();
     assert_eq!(

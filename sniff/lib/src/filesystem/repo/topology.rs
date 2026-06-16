@@ -48,12 +48,16 @@ pub(crate) fn build_monorepo_layers(outcomes: &[DetectorOutcome]) -> Vec<Monorep
             .collect();
 
         for outcome in group.iter().filter(|o| o.standard.defines_membership()) {
+            debug_assert!(
+                outcome.standard.defines_membership(),
+                "is_monorepo implies primary authority defines membership (never Unknown)"
+            );
             let provenance = outcome.standard.membership_provenance();
             let root_is_package = root_declares_package(outcome.standard, root);
             let packages = outcome
                 .packages
                 .iter()
-                .map(|pkg| PathBuf::from(&pkg.relative))
+                .map(|pkg| pkg.relative.clone())
                 .collect();
             layers.push(MonorepoLayer {
                 root: root.to_path_buf(),
@@ -365,7 +369,7 @@ mod tests {
         }
     }
 
-    fn normalize_path_for_catalog(path: &std::path::Path) -> String {
-        path.to_string_lossy().replace('\\', "/")
+    fn normalize_path_for_catalog(path: &str) -> String {
+        path.replace('\\', "/")
     }
 }
