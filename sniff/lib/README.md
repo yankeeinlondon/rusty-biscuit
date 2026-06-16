@@ -445,22 +445,27 @@ if let Some(worktrees) = sniff::filesystem::git::list_worktrees(Path::new("."))?
 
 #### Repository Detection
 
-Detects monorepo tools and package structure.
+Detects monorepo standards, package structure, and acting binaries.
 
-**Supported Tools:**
+**Supported Standards:**
 
 - Cargo workspaces (Rust)
-- pnpm workspaces
-- npm workspaces
-- Yarn workspaces
-- Nx
-- Turborepo
-- Lerna
+- pnpm / npm / Yarn / Bun workspaces (JavaScript)
+- uv workspaces (Python)
+- Go workspaces
+- Gradle multi-project builds and Maven multi-module builds (JVM)
+- .NET solutions
+- Bazel, Pants, Buck2 (polyglot build systems)
+- Rush Stack
+- Nx, Turborepo, Lerna (orchestrators layered on a membership authority)
 
 **Key Types:**
 
 - `RepoInfo` - Repository metadata and packages
-- `MonorepoTool` - Detected monorepo tool
+- `MonorepoStandard` - Standard-based monorepo descriptor (preferred)
+- `MonorepoLayer` - One membership layer: authority + orchestrators + packages
+- `DetectedStandard` - A matched standard with its resolved binary and confidence
+- `MonorepoTool` - **Deprecated**; use `MonorepoStandard` via `RepoInfo::monorepo_layers`
 - `Package` - Package path, languages, managers, dependencies
 - `DependencyEntry` - Dependency with version requirements
 
@@ -473,13 +478,22 @@ use std::path::Path;
 let repo = detect_repo(Path::new("."))?;
 if let Some(info) = repo {
     if info.is_monorepo {
+        // New topology model
+        for layer in &info.monorepo_layers {
+            println!("Authority: {:?}", layer.authority);
+            println!("Orchestrators: {:?}", layer.orchestrators);
+            println!("Packages: {}", layer.packages.len());
+        }
+
+        // Legacy fields are still populated for backward compatibility.
         println!("Monorepo tool: {:?}", info.monorepo_tool);
+
         if let Some(packages) = info.packages {
             println!("Packages: {}", packages.len());
             for pkg in packages {
                 println!("  {} at {}", pkg.name, pkg.path.display());
                 println!("    Language: {:?}", pkg.primary_language);
-                println!("    Managers: {:?}", pkg.detected_managers);
+                println!("    Managers: {:?}", pkg.package_managers);
 
                 if let Some(deps) = pkg.dependencies {
                     println!("    Dependencies:");
@@ -492,6 +506,15 @@ if let Some(info) = repo {
     }
 }
 ```
+
+**Topology JSON:**
+
+When `RepoInfo` is serialized, the new keys appear only when populated:
+
+- `monorepo_standards` — array of detected standards with resolved binary metadata.
+- `monorepo_layers` — array of layers, each with `authority`, `orchestrators`, `provenance`, and `packages`.
+
+The legacy keys `monorepo_tool` and `workspace_tools` are still emitted for existing consumers but are formally deprecated.
 
 #### Language Analysis
 
