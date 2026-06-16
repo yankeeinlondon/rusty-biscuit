@@ -131,10 +131,10 @@ pub(crate) struct SingleCompositionOutcome {
     /// Iteration-level summary signals lifted from the structured stream
     /// for consumption by the `compose --loop` orchestrator.
     ///
-    /// Populated for the non-harness structured-stream path (the only
-    /// path that can carry a rate-limit trailer or a watchdog
-    /// `error_kind`). `None` for the dry-run, harness, and legacy paths
-    /// where these signals aren't available at this layer.
+    /// Non-dry-run composition carries the harness loop's terminal-attempt
+    /// structured summary signals when available (the rate-limit trailer or
+    /// watchdog `error_kind`). `None` for the dry-run path, which never
+    /// launches a provider.
     pub iteration_signals: Option<IterationSummarySignals>,
 }
 
