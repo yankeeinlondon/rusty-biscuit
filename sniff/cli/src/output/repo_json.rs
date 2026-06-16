@@ -890,6 +890,8 @@ mod tests {
             dev_dependencies: None,
             peer_dependencies: None,
             optional_dependencies: None,
+            monorepo_standards: Vec::new(),
+            monorepo_layers: Vec::new(),
             packages: None,
         };
         let filesystem = FilesystemInfo {
@@ -928,6 +930,8 @@ mod tests {
             dev_dependencies: None,
             peer_dependencies: None,
             optional_dependencies: None,
+            monorepo_standards: Vec::new(),
+            monorepo_layers: Vec::new(),
             packages: None,
         };
         let filesystem = FilesystemInfo {
@@ -1115,6 +1119,8 @@ mod tests {
                 dev_dependencies: None,
                 peer_dependencies: None,
                 optional_dependencies: None,
+                monorepo_standards: Vec::new(),
+                monorepo_layers: Vec::new(),
                 packages: Some(packages),
             };
             let mut git = fixture_git_info();
@@ -1341,6 +1347,8 @@ mod tests {
                 dev_dependencies: None,
                 peer_dependencies: None,
                 optional_dependencies: None,
+                monorepo_standards: Vec::new(),
+                monorepo_layers: Vec::new(),
                 packages: Some(vec![
                     make_package("alpha", "area-a"),
                     make_package("beta", "area-b"),
@@ -1680,6 +1688,8 @@ mod tests {
                 dev_dependencies: None,
                 peer_dependencies: None,
                 optional_dependencies: None,
+                monorepo_standards: Vec::new(),
+                monorepo_layers: Vec::new(),
                 packages: Some(vec![alpha, beta]),
             }
         }
@@ -1975,6 +1985,8 @@ mod tests {
                 dev_dependencies: None,
                 peer_dependencies: None,
                 optional_dependencies: None,
+                monorepo_standards: Vec::new(),
+                monorepo_layers: Vec::new(),
                 packages: Some(vec![
                     make_package("alpha", "area-a"),
                     make_package("beta", "area-b"),
@@ -2119,6 +2131,8 @@ mod tests {
                 dev_dependencies: None,
                 peer_dependencies: None,
                 optional_dependencies: None,
+                monorepo_standards: Vec::new(),
+                monorepo_layers: Vec::new(),
                 packages: None,
             };
             let mut git = fixture_git_info();
@@ -2378,6 +2392,179 @@ mod tests {
                 outcome.is_err(),
                 "aggregate must fail rather than emit partial JSON"
             );
+        }
+    }
+
+    mod monorepo_topology {
+        //! Phase 8 — monorepo topology JSON surface.
+        //!
+        //! `RepoInfo::monorepo_standards` and `RepoInfo::monorepo_layers` use
+        //! `#[serde(default, skip_serializing_if = "Vec::is_empty")]`, so they
+        //! appear only when detection populated them. `structure_value` and
+        //! `build_aggregate_value` get them for free by serializing `RepoInfo`.
+
+        use super::*;
+        use sniff::filesystem::repo::standard::{
+            BinarySource, DetectedStandard, DetectionConfidence, LayerPackage, MonorepoLayer,
+            MonorepoStandard, PackageProvenance, ResolvedBinary,
+        };
+        use sniff::filesystem::repo::types::RepoInfo;
+        use std::path::PathBuf;
+
+        fn repo_with_layers() -> RepoInfo {
+            RepoInfo {
+                is_monorepo: true,
+                monorepo_tool: None,
+                workspace_tools: Vec::new(),
+                root: PathBuf::from("/tmp/repo"),
+                dependencies: None,
+                dev_dependencies: None,
+                peer_dependencies: None,
+                optional_dependencies: None,
+                monorepo_standards: vec![DetectedStandard {
+                    standard: MonorepoStandard::CargoWorkspace,
+                    root: PathBuf::from("/tmp/repo"),
+                    matched_markers: vec![PathBuf::from("Cargo.toml")],
+                    binary: Some(ResolvedBinary {
+                        name: "cargo".to_string(),
+                        path: Some(PathBuf::from("/usr/bin/cargo")),
+                        version: Some("1.80.0".to_string()),
+                        satisfies_min_version: None,
+                        source: BinarySource::Path,
+                    }),
+                    confidence: DetectionConfidence::MarkerConfirmed,
+                }],
+                monorepo_layers: vec![MonorepoLayer {
+                    root: PathBuf::from("/tmp/repo"),
+                    authority: MonorepoStandard::CargoWorkspace,
+                    orchestrators: vec![MonorepoStandard::Nx],
+                    provenance: PackageProvenance::Globbed,
+                    lockfile_match: None,
+                    packages: vec![
+                        LayerPackage {
+                            name: "pkg-a".to_string(),
+                            relative: PathBuf::from("pkg-a"),
+                            standard: MonorepoStandard::CargoWorkspace,
+                            provenance: PackageProvenance::Globbed,
+                        },
+                        LayerPackage {
+                            name: "pkg-b".to_string(),
+                            relative: PathBuf::from("pkg-b"),
+                            standard: MonorepoStandard::CargoWorkspace,
+                            provenance: PackageProvenance::Globbed,
+                        },
+                    ],
+                }],
+                packages: None,
+            }
+        }
+
+        fn result_with_repo(repo: RepoInfo) -> SniffResult {
+            let filesystem = FilesystemInfo {
+                repo: Some(repo),
+                ..Default::default()
+            };
+            SniffResult {
+                os: None,
+                hardware: None,
+                network: None,
+                filesystem: Some(filesystem),
+                performance: None,
+            }
+        }
+
+        #[test]
+        fn structure_value_includes_monorepo_topology_when_present() {
+            let result = result_with_repo(repo_with_layers());
+            let action = RepoAction::Structure {
+                filter: Vec::new(),
+                latest_versions: false,
+                package: None,
+                package_area: None,
+            };
+
+            let value = build(&result, Some(&action), None);
+            assert!(
+                value.get("monorepo_standards").is_some(),
+                "structure JSON must include `monorepo_standards`: {value}"
+            );
+            assert!(
+                value.get("monorepo_layers").is_some(),
+                "structure JSON must include `monorepo_layers`: {value}"
+            );
+
+            let standards = value["monorepo_standards"].as_array().unwrap();
+            assert_eq!(standards.len(), 1);
+            assert_eq!(standards[0]["standard"], "cargo-workspace");
+
+            let layers = value["monorepo_layers"].as_array().unwrap();
+            assert_eq!(layers.len(), 1);
+            assert_eq!(layers[0]["authority"], "cargo-workspace");
+            assert_eq!(layers[0]["orchestrators"], json!(["nx"]));
+            assert_eq!(layers[0]["provenance"], "globbed");
+        }
+
+        #[test]
+        fn structure_value_omits_empty_monorepo_topology() {
+            let repo = RepoInfo {
+                is_monorepo: false,
+                monorepo_tool: None,
+                workspace_tools: Vec::new(),
+                root: PathBuf::from("/tmp/repo"),
+                dependencies: None,
+                dev_dependencies: None,
+                peer_dependencies: None,
+                optional_dependencies: None,
+                monorepo_standards: Vec::new(),
+                monorepo_layers: Vec::new(),
+                packages: None,
+            };
+            let result = result_with_repo(repo);
+            let action = RepoAction::Structure {
+                filter: Vec::new(),
+                latest_versions: false,
+                package: None,
+                package_area: None,
+            };
+
+            let value = build(&result, Some(&action), None);
+            assert!(
+                value.get("monorepo_standards").is_none(),
+                "empty `monorepo_standards` must be omitted: {value}"
+            );
+            assert!(
+                value.get("monorepo_layers").is_none(),
+                "empty `monorepo_layers` must be omitted: {value}"
+            );
+            // Legacy keys are still absent on a non-monorepo repo.
+            assert!(value.get("monorepo_tool").is_none());
+            assert!(value.get("workspace_tools").is_none());
+        }
+
+        #[test]
+        fn aggregate_structure_child_includes_monorepo_topology() {
+            let repo = repo_with_layers();
+            let result = result_with_repo(repo);
+            let identity = RepoIdentity {
+                name: "fixture-repo".to_string(),
+                version: Some("1.0.0".to_string()),
+                language: None,
+                is_monorepo: true,
+                package_count: Some(2),
+            };
+
+            let value = build_aggregate_value(&result, None, &identity)
+                .expect("aggregate should build");
+
+            assert!(
+                value["structure"]["monorepo_standards"].is_array(),
+                "aggregate.structure must carry standards: {value}"
+            );
+            assert!(
+                value["structure"]["monorepo_layers"].is_array(),
+                "aggregate.structure must carry layers: {value}"
+            );
+            assert_eq!(value["structure"]["monorepo_layers"][0]["authority"], "cargo-workspace");
         }
     }
 }

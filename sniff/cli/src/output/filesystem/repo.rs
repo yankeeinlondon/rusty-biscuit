@@ -7,7 +7,7 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::git::BehindStatus;
-use sniff::filesystem::repo::{DependencyEntry, Package, RepoIdentity, RepoInfo};
+use sniff::filesystem::repo::{DependencyEntry, MonorepoStandard, Package, RepoIdentity, RepoInfo};
 
 use super::language::render_framework_summary;
 use super::packages::select_repo_packages;
@@ -139,8 +139,14 @@ fn append_area_section(
         output.push(RenderableTerminalContent::Component(Rc::new(inner_list)));
     }
 }
-/// Format a MonorepoTool for display.
-fn format_monorepo_tool(tool: &sniff::filesystem::repo::MonorepoTool) -> &'static str {
+/// Format a single `MonorepoStandard` for display.
+fn format_monorepo_standard(standard: MonorepoStandard) -> &'static str {
+    standard.spec().display_name
+}
+
+/// Format the legacy `MonorepoTool` enum for display.
+#[allow(deprecated)]
+fn format_legacy_monorepo_tool(tool: &sniff::filesystem::repo::MonorepoTool) -> &'static str {
     use sniff::filesystem::repo::MonorepoTool;
     match tool {
         MonorepoTool::CargoWorkspace => "Cargo Workspace",
@@ -150,7 +156,49 @@ fn format_monorepo_tool(tool: &sniff::filesystem::repo::MonorepoTool) -> &'stati
         MonorepoTool::Nx => "Nx",
         MonorepoTool::Turborepo => "Turborepo",
         MonorepoTool::Lerna => "Lerna",
+        MonorepoTool::Unknown => "Unknown",
         _ => "Unknown",
+    }
+}
+
+/// Format the monorepo tool/layer summary for display.
+///
+/// Delegates to [`format_monorepo_standard`] when the new topology fields are
+/// populated, preserving the legacy `MonorepoTool` text only as a fallback.
+fn format_monorepo_tool(repo: &RepoInfo) -> String {
+    if let Some(layer) = repo.monorepo_layers.first() {
+        let mut s = format_monorepo_standard(layer.authority).to_string();
+        for orch in &layer.orchestrators {
+            s.push_str(&format!(" <dim>+ {}</dim>", format_monorepo_standard(*orch)));
+        }
+        s
+    } else if let Some(tool) = repo.monorepo_tool.as_ref() {
+        format_legacy_monorepo_tool(tool).to_string()
+    } else {
+        "Unknown".to_string()
+    }
+}
+
+/// Build a one-line summary of a single `MonorepoLayer`.
+fn format_monorepo_layer(layer: &sniff::filesystem::repo::MonorepoLayer) -> String {
+    let authority = format_monorepo_standard(layer.authority);
+    let orch = layer
+        .orchestrators
+        .iter()
+        .map(|&o| format_monorepo_standard(o))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let count = layer.packages.len();
+    if orch.is_empty() {
+        format!("{} — {} {}", authority, format_number(count), package_word(count))
+    } else {
+        format!(
+            "{} <dim>+ {}</dim> — {} {}",
+            authority,
+            orch,
+            format_number(count),
+            package_word(count)
+        )
     }
 }
 
@@ -466,30 +514,47 @@ pub fn render_repo_section(
     }
 
     // Monorepo heading
-    let tool_name = repo
-        .monorepo_tool
-        .as_ref()
-        .map(format_monorepo_tool)
-        .unwrap_or("Unknown");
-
     let total_count = repo.packages.as_ref().map(|p| p.len()).unwrap_or(0);
+    let layer_count = repo.monorepo_layers.len();
 
     if let Some(ref packages) = repo.packages {
         let filtered = select_repo_packages(packages, repo_filter, package, package_area);
         let showing_count = filtered.len();
 
         let any_scope = !repo_filter.is_empty() || package.is_some() || package_area.is_some();
-        let title_suffix = if any_scope && showing_count != total_count {
-            format!(
-                " <dim>({} / showing {} of {} packages)</dim>",
-                tool_name, showing_count, total_count,
-            )
+        let title_suffix = if layer_count > 1 {
+            format!(" <dim>({} layers)</dim>", layer_count)
         } else {
-            format!(" <dim>({} / {} packages)</dim>", tool_name, total_count)
+            let tool_name = format_monorepo_tool(repo);
+            if any_scope && showing_count != total_count {
+                format!(
+                    " <dim>({} / showing {} of {} packages)</dim>",
+                    tool_name,
+                    format_number(showing_count),
+                    format_number(total_count),
+                )
+            } else {
+                format!(
+                    " <dim>({} / {} packages)</dim>",
+                    tool_name,
+                    format_number(total_count),
+                )
+            }
         };
 
         let title = Prose::new(format!("<b><u>Repository</u></b>{}", title_suffix));
         writeln!(out, "\n{}\n", title.render(&terminal)).unwrap();
+
+        // For multiple layers, list each layer's authority + orchestrators.
+        if layer_count > 1 {
+            let layer_items: Vec<String> = repo
+                .monorepo_layers
+                .iter()
+                .map(format_monorepo_layer)
+                .collect();
+            let layer_list = UnorderedList::new(layer_items);
+            writeln!(out, "{}", layer_list.render(&terminal)).unwrap();
+        }
 
         let update_summary =
             summarize_repo_updates(repo, Some(filtered.as_slice()), latest_versions_requested);
@@ -558,9 +623,10 @@ pub fn render_repo_section(
             writeln!(out, "{}", Prose::new(&legend).render(&terminal)).unwrap();
         }
     } else {
+        let tool_name = format_monorepo_tool(repo);
         let title = Prose::new(format!(
             "<b><u>Repository</u></b> <dim>({} / {} packages)</dim>",
-            tool_name, total_count,
+            tool_name, format_number(total_count),
         ));
         writeln!(out, "\n{}\n", title.render(&terminal)).unwrap();
     }
@@ -868,18 +934,30 @@ pub fn render_filesystem_section(
             return out;
         }
 
-        let tool_name = repo
-            .monorepo_tool
-            .as_ref()
-            .map(format_monorepo_tool)
-            .unwrap_or("Unknown");
+        let tool_name = format_monorepo_tool(repo);
         let pkg_count = repo.packages.as_ref().map(|p| p.len()).unwrap_or(0);
+        let layer_count = repo.monorepo_layers.len();
 
-        let header = Prose::new(format!(
-            "<b>Packages:</b> <dim>({} / {} packages)</dim>",
-            tool_name, pkg_count,
-        ));
+        let header = if layer_count > 1 {
+            Prose::new(format!("<b>Packages:</b> <dim>({} layers)</dim>", layer_count))
+        } else {
+            Prose::new(format!(
+                "<b>Packages:</b> <dim>({} / {} packages)</dim>",
+                tool_name,
+                format_number(pkg_count),
+            ))
+        };
         writeln!(out, "{}", header.render_optimistic(None)).unwrap();
+
+        if layer_count > 1 {
+            let layer_items: Vec<String> = repo
+                .monorepo_layers
+                .iter()
+                .map(format_monorepo_layer)
+                .collect();
+            let layer_list = UnorderedList::new(layer_items);
+            writeln!(out, "{}", layer_list.render_optimistic(None)).unwrap();
+        }
 
         if let Some(ref packages) = repo.packages {
             let mut items: Vec<RenderableTerminalContent> = Vec::new();

@@ -2350,6 +2350,8 @@ mod tests {
                 dev_dependencies: None,
                 peer_dependencies: None,
                 optional_dependencies: None,
+                monorepo_standards: Vec::new(),
+                monorepo_layers: Vec::new(),
                 packages: if packages.is_empty() {
                     None
                 } else {
@@ -2538,6 +2540,8 @@ mod tests {
                 dev_dependencies: None,
                 peer_dependencies: None,
                 optional_dependencies: None,
+                monorepo_standards: Vec::new(),
+                monorepo_layers: Vec::new(),
                 packages: if packages.is_empty() {
                     None
                 } else {
