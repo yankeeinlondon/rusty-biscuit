@@ -460,8 +460,23 @@ fn scan_one_frontmatter(
     let mut fm_clone = markdown.clone();
     let pre_interpolation_snapshot = prepare_frontmatter_for_compose(&mut fm_clone, options, true);
     if options.is_enabled(ComposeOperation::FrontmatterInterpolation) {
-        let _ =
-            interpolate_frontmatter(fm_clone.frontmatter_mut(), options.context(), false, false);
+        // Defer templated keys that reference a shell-pending (`$(...)`) value.
+        // Without this, a key like `review: "{{ dir + '/x' }}"` resolves against
+        // `dir`'s still-literal `$(...)` text and becomes `$(...)/x`, which then
+        // trips `scan_frontmatter`'s "trailing content" guard. Deferral keeps it
+        // as template text so only the real `$(...)` directive (`dir`) is scanned.
+        //
+        // Preflight only: shell-command discovery enumerates the reachable
+        // pipelines for the approval workflow; it never performs expression
+        // selection, so it stays context-free (no `ResolutionContext`). The real
+        // run supplies the context.
+        let _ = interpolate_frontmatter(
+            fm_clone.frontmatter_mut(),
+            options.context(),
+            false,
+            true,
+            None,
+        );
     }
 
     let scan_ctx = fm_clone.source_context_for_errors();
@@ -609,6 +624,27 @@ mod tests {
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].normalized, "echo hello");
+    }
+
+    #[test]
+    fn defers_keys_referencing_shell_pending_values() {
+        // `review` interpolates `dir`, whose value is a `$(...)` directive. The
+        // discovery scan must defer `review` so it is not resolved against
+        // `dir`'s still-literal `$(...)` text (which would yield
+        // `$(...)/review-1.md` and trip the "trailing content" guard). Only the
+        // real directive (`dir`) should be discovered.
+        let content = "---\ndir: \"$(dirname '{{spec}}')\"\nreview: \"{{ dir + '/review-' + iteration + '.md' }}\"\n---\nbody\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new().with_set_overrides(serde_json::json!({
+            "spec": "features/rough-edges/spec.md",
+            "iteration": "1",
+        }));
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].executable, "dirname");
+        assert_eq!(entries[0].args, vec!["features/rough-edges/spec.md"]);
     }
 
     #[test]

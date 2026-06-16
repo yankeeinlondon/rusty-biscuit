@@ -156,4 +156,41 @@ mod tests {
             "Bare 'ctx' token should return None"
         );
     }
+
+    /// `ctx.agent` and `ctx.model` resolve lazily and capture only the Agent
+    /// group, without pulling in repo, OS, or hardware probes.
+    #[test]
+    #[serial_test::serial(env_agent_model)]
+    fn ctx_lookup_resolves_agent_and_model() {
+        let previous = std::env::var("AGENT").ok();
+        let previous_model = std::env::var("MODEL").ok();
+        unsafe {
+            std::env::set_var("AGENT", "opencode");
+            std::env::set_var("MODEL", "glm-5.2");
+        }
+
+        let lookup = CtxLookup::new(Path::new("."));
+        assert_eq!(lookup.get("ctx.agent"), Some(Value::String("opencode".to_string())));
+        assert_eq!(lookup.get("ctx.model"), Some(Value::String("glm-5.2".to_string())));
+
+        let captured = lookup.captured_groups();
+        assert_eq!(
+            captured.len(),
+            1,
+            "Only the Agent group should be captured, got {:?}",
+            captured
+        );
+        assert!(captured.contains(&ContextGroup::Agent));
+
+        unsafe {
+            match previous {
+                Some(v) => std::env::set_var("AGENT", v),
+                None => std::env::remove_var("AGENT"),
+            }
+            match previous_model {
+                Some(v) => std::env::set_var("MODEL", v),
+                None => std::env::remove_var("MODEL"),
+            }
+        }
+    }
 }

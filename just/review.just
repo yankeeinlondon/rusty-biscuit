@@ -16,8 +16,8 @@ cyan := '\033[36m'
 
 # Specify a feature with a spec file, a design file, or both which has now been implemented
 # and you want to run a review on.
-[arg("design", long="design")]
-[arg("spec", long="spec")]
+[arg("design")]
+[arg("spec")]
 review feat="" agent="" spec="" design="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -177,20 +177,11 @@ review feat="" agent="" spec="" design="":
         echo -e "🤨 the 'ready' frontmatter property was not set!"
         echo
     fi
-
-    if [[ "$(just _confirm "Ready to implement the suggestions from the review?")" == "n" ]]; then
-        echo
-        echo -e "Ok bye"
-        echo
-        exit 0
-    fi
-    echo -e "Running the {{ bold }}implement-feature-review{{ reset }} recipe for:"
-    echo -e "  - Review: {{ blue }}$(just _link "${review}"){{ reset }}"
-    echo -e "  - Specification File: {{ blue }}$(just _link "${spec_file}"){{ reset }}"
-    if [[ ! -z "${design_file}" ]]; then
-        echo -e "  - Design File: {{ blue }}$(just _link "${design_file}"){{ reset }}"
-    fi
-    just implement-feature-review --review="${review}" --spec="${spec_file}" --design="${design_file}"
+    echo
+    echo -e "- run the following command when you're ready to implement the suggestions:"
+    echo
+    echo -e "  {{ blue }}claudine compose prompts/implement-review.md -y spec="{{ spec }}" iteration=${iteration} {{ reset }} when you're ready to implement the"
+    echo
 
 # implement a review that was conducted (not a feature review)
 implement-review filter="":
@@ -223,8 +214,8 @@ implement-review filter="":
     )
 
 # implements the suggestions from a review of a feature or fix
-[arg("design", long="design")]
-[arg("review", long="review")]
+[arg("design")]
+[arg("review")]
 [arg("spec", long="spec")]
 implement-feature-review filter="" review="" spec="" design="" agent="":
     #!/usr/bin/env bash

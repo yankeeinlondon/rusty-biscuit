@@ -39,6 +39,7 @@ Variables are organized into capture groups. The expensive I/O for each group ru
 | **OS** | `detect_os_with_request` | `os`, `os_distro`, `os_package_manager`, `os_version` |
 | **Hardware** | `detect_hardware_summary` | `memory_total`, `memory_used`, `memory_avail`, `cpu_cores`, `cpu_arch` |
 | **GPU** | `detect_gpus` (subprocess on macOS) | `gpu` |
+| **Agent** | Reads `AGENT` and `MODEL` env vars | `agent`, `model` |
 
 
 ## Information Provided
@@ -228,3 +229,20 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 | `cpu_cores`    | `Number`        | Number of logical CPU cores                                |
 | `cpu_arch`     | `String`        | CPU architecture (e.g., `aarch64`, `x86_64`)               |
 | `gpu`          | `String \| null` | GPU device name(s), comma-separated; null if none detected |
+
+### Agent
+
+The **Agent** group is captured when `ctx.agent` or `ctx.model` is referenced.
+It performs no host probes: it reads the `AGENT` and `MODEL` environment
+variables, trims ASCII whitespace, and applies simple defaults.
+
+| Variable | Type     | Description                                                |
+|----------|----------|------------------------------------------------------------|
+| `agent`  | `String` | Executing agentic CLI name (from `AGENT` env var); defaults to `"unknown"` |
+| `model`  | `String` | Active model identifier (from `MODEL` env var); defaults to `"default"` |
+
+- Missing or empty values receive the defaults above.
+- Values are trimmed before use.
+- There is no model allowlist; any value is accepted as-is.
+- The recognized agent names and aliases are: `claude` / `claude_code` /
+  `claude-code`, `opencode` / `open_code` / `open-code`, and `codex`.

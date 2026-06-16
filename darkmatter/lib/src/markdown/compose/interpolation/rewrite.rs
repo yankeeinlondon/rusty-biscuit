@@ -276,7 +276,7 @@ mod tests {
         let state = make_state(json!({"spec": "a/b/spec.md"}));
         let evaluator = Evaluator::new(&state);
         let result = interpolate_text(
-            "{{ dir(spec) }}",
+            "{{ unknown_fn(spec) }}",
             &evaluator,
             ScanMode::Plain,
             false,
@@ -285,7 +285,7 @@ mod tests {
         let Err(err) = result else {
             panic!("unknown function must be fatal");
         };
-        assert!(err.to_string().contains("Unknown function: dir"));
+        assert!(err.to_string().contains("Unknown function: unknown_fn"));
     }
 
     #[test]

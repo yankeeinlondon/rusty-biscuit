@@ -16,6 +16,8 @@ pub use themes::{
 
 pub(crate) use resolve::Surface;
 
+use crate::markdown::language_grammar::LanguageGrammar;
+
 use syntect::easy::HighlightLines;
 use syntect::highlighting::Theme as SyntectTheme;
 use syntect::parsing::SyntaxSet;
@@ -155,11 +157,9 @@ pub fn highlight_yaml_lines_with_theme(
         CodeBlockMode::Same,
     );
     let highlighter = CodeHighlighter::from_theme(resolved.theme, resolved.color_mode);
-    let syntax = highlighter
-        .syntax_set()
-        .find_syntax_by_extension("yaml")
-        .or_else(|| highlighter.syntax_set().find_syntax_by_name("YAML"))
-        .unwrap_or_else(|| highlighter.syntax_set().find_syntax_plain_text());
+    let syntax = LanguageGrammar::yaml()
+        .resolve(highlighter.syntax_set())
+        .unwrap_or_else(|_| highlighter.syntax_set().find_syntax_plain_text());
     let mut hl = HighlightLines::new(syntax, highlighter.theme());
 
     // `LinesWithEndings::from("")` yields nothing; emit one empty line in

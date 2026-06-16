@@ -1,19 +1,21 @@
 # Compose Pipeline
 
-The darkmatter compose pipeline provides document preparation through three phases.
+The darkmatter compose pipeline provides document preparation through four phases:
+Inline Pre, Transclusion, Inline Post, and Finalization.
 
 ## Pipeline Overview
 
 **Inline Pre** (serial):
 
-1. **Frontmatter Interpolation** - `{{ variable }}` in frontmatter resolves before effective state is built
+1. **Frontmatter Interpolation (pass 1)** - `{{ variable }}` in frontmatter resolves before effective state is built; keys referencing a whole-value `$(...)` are deferred to pass 2
 2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Coerces** schema-recognized top-level scalars to their declared types (default-on, e.g. the string `"true"` → real boolean) and writes the coerced values back into frontmatter, skipping `$(...)`-pending values. Problems on fields still holding `$(...)` are deferred to downstream re-validation only when frontmatter shell expansion is enabled; when it is disabled they fail fast
-3. **Frontmatter Shell Expansion** - top-level `$(cmd)` frontmatter values execute after interpolation and write trimmed `stdout` back into frontmatter
-4. **Text Replacement** - `replace:` frontmatter replaces literal strings
-5. **Page Blocks** - `::block`/`::end-block` conditional regions
-6. **Interpolation** - `{{ variable }}` expressions expand to values
-7. **Shell Expansion** - Execute `::shell` directives execute approved commands and inject combined `stdout` + `stderr`
-8. **Link Resolve** - Resolve all local link targets (Markdown hyperlinks/images and supported HTML embeds) to absolute paths
+3. **Frontmatter Shell Expansion** - top-level `$(cmd)` frontmatter values execute after interpolation and write trimmed `stdout` back into frontmatter. Tokens in executed position follow the `$()` token-resolution ladder (literal → `name(...)` safe function → executable → frontmatter property → null); an all-expression `$()` is rejected with a `{{ }}` suggestion
+4. **Frontmatter Interpolation (pass 2)** - resolves the keys deferred in pass 1 against the now-concrete shell-expanded values
+5. **Text Replacement** - `replace:` frontmatter replaces literal strings
+6. **Page Blocks** - `::block`/`::end-block` conditional regions
+7. **Interpolation** - `{{ variable }}` expressions expand to values
+8. **Shell Expansion** - Execute `::shell` directives execute approved commands and inject combined `stdout` + `stderr`
+9. **Link Resolve** - Resolve all local link targets (Markdown hyperlinks/images and supported HTML embeds) to absolute paths
 
 **Transclusion** (prepared serially, resolved concurrently via Rayon):
 
@@ -107,8 +109,18 @@ Expressions between `{{ }}` are evaluated and replaced with values.
 |---------|-------------|
 | `{{ foo }}` | Frontmatter value |
 | `{{ user.name }}` | Nested object path |
+| `{{ doc }}` | The whole frontmatter object |
+| `{{ doc.build }}` | A frontmatter property by the `doc.*` namespace (a property literally named `doc` is `doc.doc`); intercepted before any `ctx.*` fallback |
 | `{{ ctx.today }}` | Runtime context |
 | `{{ env.HOME }}` | Environment variable |
+| `{{ file_exists(path) }}` | Read-side function (also `frontmatter`, `markdown_title`, `markdown_body_empty`, `validate_schema`, `absolute`, `relative`); resolves on every surface, both interpolation passes included |
+
+Read-side functions and `doc.*` resolve identically on every surface
+(frontmatter both passes, body, `when=`, `$()` ternary condition/branches,
+claudine loop/hook). Every frontmatter surface (both interpolation passes and
+the `$()` ternary condition/branch) is local-only, so a remote URL argument
+fails loudly there; only body interpolation carries a remote runtime. See
+`darkmatter/docs/topics/darkmatter-expressions.md`.
 
 ### Context Values (`ctx.*`)
 
@@ -181,6 +193,8 @@ properties are computed.
 | `ctx.cpu_cores` | Number of logical CPU cores |
 | `ctx.cpu_arch` | CPU architecture (e.g., aarch64, x86_64) |
 | `ctx.gpu` | GPU device name(s), comma-separated; null if none |
+| `ctx.agent` | Executing agentic CLI name (from `AGENT` env var); defaults to `"unknown"` |
+| `ctx.model` | Active model identifier (from `MODEL` env var); defaults to `"default"` |
 
 All date/time variables have `_utc` variants (e.g., `today_utc`, `day_utc`,
 `year_utc`). Week boundary variables are also available:
@@ -227,6 +241,11 @@ Numeric strings auto-convert for comparisons.
 
 {{ round(3.7) }}             // Round to integer (4)
 {{ round(value, 0) }}        // With default
+
+{{ link(doc.path) }}         // Markdown link using relative text and absolute destination
+{{ link("https://example.com", "Example") }}  // Link with explicit description
+{{ has_skill("rust") }}      // true when a skill directory exists in user or local roots
+{{ has_local_skill("rust") }} // true when a skill directory exists in local roots only
 ```
 
 ### Code Region Protection
@@ -355,11 +374,15 @@ darkmatter/lib/src/
     │   ├── merge.rs     # User ctx + runtime ctx merge policy
     │   └── diagnostics.rs # ContextMergeDiagnostic types
     ├── expression/       # Expression language (shared by interpolation & conditions)
-    │   ├── mod.rs       # EvaluationLookup trait, evaluate()
+    │   ├── mod.rs       # EvaluationLookup trait, evaluate(), fs gate
     │   ├── lexer.rs     # Tokenizer
     │   ├── ast.rs       # AST types
     │   ├── parser.rs    # Expression parser
-    │   └── evaluator.rs # AST evaluation + built-in functions
+    │   ├── functions.rs # PURE_FUNCTIONS + FS_FUNCTIONS dispatch (read-side fns)
+    │   ├── catalog.rs   # Descriptor catalog (parity-tested against functions)
+    │   ├── ctx.rs       # CtxLookup (ctx.* runtime context)
+    │   ├── doc_namespace.rs # Reserved doc / doc.* namespace resolution
+    │   └── resolve_ctx.rs   # ResolutionContext (base_dir, magic paths, remote)
     └── interpolation/
         ├── mod.rs       # Module exports
         ├── lexer.rs     # Expression finder

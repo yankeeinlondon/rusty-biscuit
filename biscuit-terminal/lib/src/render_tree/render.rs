@@ -1075,7 +1075,20 @@ impl Writer<'_> {
             }
             NodeKind::InlineCode { value } => {
                 let mut child_effective = effective.clone();
-                child_effective.emphasis.inverse = true;
+                // The background (and foreground) come from the prose theme
+                // reduced to the page color mode, forwarded by the darkmatter
+                // entry point. A caller that builds the context directly leaves
+                // them unset, so inline code falls back to a dim run rather than
+                // reverse-video.
+                match self.opts.context.inline_code_background {
+                    Some(bg) => {
+                        child_effective.background = Some(rgb_style_color(bg));
+                        if let Some(fg) = self.opts.context.inline_code_color {
+                            child_effective.color = Some(rgb_style_color(fg));
+                        }
+                    }
+                    None => child_effective.emphasis.dim = true,
+                }
                 let open = style::text_appearance_sgr(&child_effective, term);
                 let close = style::appearance_close(&open, effective, term);
                 Ok(apply_classes(&format!("{open}{value}{close}"), &node.attrs.classes, effective, term))
@@ -2312,6 +2325,25 @@ fn prefix_first_line(prefix: &str, body: &str) -> String {
     out
 }
 
+/// Wraps an opaque RGB triple as a universal terminal [`Style`] color value.
+///
+/// The ANSI fallback is chosen by luminance so a 16-color terminal degrades a
+/// dark band to black and a light band to white.
+fn rgb_style_color(
+    (r, g, b): (u8, u8, u8),
+) -> renderable::layout::TargetValue<renderable::style::PerMode<renderable::style::PaintColor>> {
+    use renderable::color::{BasicColor, Color, RgbColor};
+    use renderable::layout::TargetValue;
+    use renderable::style::PerMode;
+
+    let fallback = if u16::from(r) + u16::from(g) + u16::from(b) < 384 {
+        BasicColor::Black
+    } else {
+        BasicColor::White
+    };
+    TargetValue::universal(PerMode::universal(Color::Rgb(RgbColor::new(r, g, b, fallback))))
+}
+
 /// Applies recognized semantic classes as direct SGR escapes.
 ///
 /// `mark` highlights via reverse video, `dim` dims, and `sup`/`sub` are
@@ -2851,7 +2883,41 @@ mod render_tree_tests {
     }
 
     #[test]
-    fn render_tree_inline_code_uses_reverse_video() {
+    fn render_tree_inline_code_uses_theme_background() {
+        // With a theme-resolved background supplied (as the darkmatter entry
+        // point does), inline code paints that background band — not the
+        // reverse-video block the regression introduced.
+        let node = RenderNode::paragraph(vec![
+            RenderNode::text("use "),
+            RenderNode::inline_code("code"),
+            RenderNode::text(" here"),
+        ]);
+        let mut opts = opts(RenderStrictness::Warn);
+        opts.context.inline_code_color = Some((220, 220, 220));
+        opts.context.inline_code_background = Some((50, 50, 55));
+        let out = render_terminal_node(&node, &opts).expect("render");
+
+        assert!(
+            out.output.contains("\x1b[48;2;50;50;55m"),
+            "inline code should paint the theme background band: {:?}",
+            out.output,
+        );
+        assert!(
+            !out.output.contains("\x1b[7m"),
+            "inline code must not use reverse video: {:?}",
+            out.output,
+        );
+        assert!(
+            strip_escape_codes(&out.output).contains("use code here"),
+            "inline code text should remain visible: {:?}",
+            out.output,
+        );
+    }
+
+    #[test]
+    fn render_tree_inline_code_falls_back_to_dim_without_theme() {
+        // A context built directly (no theme surface) keeps inline code distinct
+        // with a dim run rather than reverse-video.
         let node = RenderNode::paragraph(vec![
             RenderNode::text("use "),
             RenderNode::inline_code("code"),
@@ -2860,13 +2926,13 @@ mod render_tree_tests {
         let out = render(&node);
 
         assert!(
-            out.output.contains("\x1b[7mcode"),
-            "inline code should use reverse video, not dim-only styling: {:?}",
+            out.output.contains("\x1b[2m"),
+            "inline code should fall back to a dim run: {:?}",
             out.output,
         );
         assert!(
-            strip_escape_codes(&out.output).contains("use code here"),
-            "inline code text should remain visible: {:?}",
+            !out.output.contains("\x1b[7m"),
+            "inline code must not use reverse video: {:?}",
             out.output,
         );
     }
