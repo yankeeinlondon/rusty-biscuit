@@ -9,6 +9,8 @@ dir: "$(dirname '{{plan}}')"
 # spec: "{{ frontmatter( }}"
 area: "{{ctx.current_package_area == 'root' ? ctx.current_package || '' : ctx.current_package_area}}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
+possible_spec: "{{dir}}/spec.md"
+spec: "{{ file_exists(possible_spec) ? possible_spec : '' }}"
 start:
     message: "🎬  starting the implementation of phase **#{{phase}}** of `{{ctx.current_package_area}}/{{plan}}`"
 success: 
@@ -34,6 +36,10 @@ Your task is to implement phase {{phase}} of the plan found in '@{{area}}/{{plan
 
 ::block when="memory"
 > **NOTE:** for context you should read the lessons learned discovered in earlier stages of this plan. You will find these lessons learned in memory/{{memory}}.md. 
+::end-block
+
+::block when="spec"
+> **NOTE:** this plan is based on the specification file: {{spec}}
 ::end-block
 
 You are done when:

@@ -12,9 +12,13 @@ area: "{{ ctx.area }}"
 dir: "$(dirname '{{spec}}')"
 review: "{{ dir + '/review-' + iteration + '.md'  }}"
 log: "{{ 'review-implementation-log-' + iteration + '.md' }}"
-review_path: "@{{area}}/{{review}}"
-spec_path: "@{{area}}/{{dir}}/{{spec || 'spec.md'}}"
-log_path: "@{{area}}/{{dir}}/{{log}}"
+review_path: "{{review}}"
+spec_path: "{{spec}}"
+log_path: "{{dir}}/{{log}}"
+
+success:
+    effect: select-4
+    say: "Implementation of review suggestions complete in {{ctx.area}}"
 ---
 
 ::block when="spec && iteration"
@@ -30,20 +34,6 @@ The review was done to evaluate the fidelity of the implementation to the specif
 
 ## Task
 
-::block when="file_exists(review_path) && frontmatter(review_path, 'ready') == true"
-You have been asked to implement a review's suggestions; but the review concluded that the current state is already 
-**production ready** so you are NOT obliged to implement anything. Instead your only task is to report back the findings of the review. Make sure to include
-any future implementation suggestions which were included in the review (if there were any). 
-
-In closing simply report:
-
-- Specification File: **{{spec_path}}**
-- Final Review: **{{review_path}}**
-- Ready: true
-- 
-::end-block
-
-::block when="frontmatter(review_path, 'ready') != true"
 
 1. Create a log file for this task at '{{log_path}}'
 
@@ -73,7 +63,6 @@ In closing simply report:
 - do not commit your work to git (this will be done as an independent process which you are not responsible for)
 ::file ./you-are-non-interactive.md
 
-::end-block
 ::end-block
 
 ::block when="!spec && review"

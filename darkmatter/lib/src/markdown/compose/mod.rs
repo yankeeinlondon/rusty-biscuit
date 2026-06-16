@@ -1,14 +1,14 @@
 //! Compose pipeline for markdown document preparation and transclusion.
 //!
 //! This module provides the `compose()` family of methods on `Markdown`
-//! for running operations in three phases:
+//! for running operations in four phases:
 //!
 //! **Inline Pre** (serial):
 //! 0. **Frontmatter Interpolation** - Resolve `{{variable}}` in frontmatter values.
 //!    When shell expansion is enabled, templated keys that reference
 //!    shell-pending values (top-level `$(...)`) are deferred for a second
 //!    interpolation pass after step 2 completes.
-//! 1. **Schema Validation** - Validate frontmatter against `$schema` or
+//! 1. **Schema Validation** (pre-operation stage) - Validate frontmatter against `$schema` or
 //!    `ComposeOptions::baseline_schema`. Runs after `--set` / `--state`
 //!    overrides and frontmatter interpolation are applied, but before
 //!    frontmatter shell expansion.
@@ -53,6 +53,20 @@
 //!     .disable(ComposeOperation::Normalization);
 //! let report = md.compose_with(options).unwrap();
 //! ```
+//!
+//! ## Maintenance
+//!
+//! Keep this module from becoming a "god file":
+//!
+//! - New user-toggleable compose stages must add a [`ComposeOperationDescriptor`]
+//!   entry in `types.rs` and a dedicated stage module under `markdown/compose/`.
+//! - Non-toggleable pipeline sub-stages (schema validation, effective-state build,
+//!   transclusion parse/prepare/resolve/apply) stay in `perf.rs` and are not added
+//!   to the operation descriptor table.
+//! - New render-tree block extensions extend a dedicated `markdown/render_tree/`
+//!   module rather than inline code in the fold.
+//! - Large in-file test suites move to a sibling `tests` module when production
+//!   code around them changes.
 
 pub(crate) mod cache;
 pub mod conditions;
@@ -96,12 +110,14 @@ pub use shell_expansion::ShellCommandOrigin;
 pub use shell_expansion::ShellExpansionError;
 pub use shell_expansion::ShellTimeoutBehavior;
 pub use state::{EffectiveState, EffectiveStateBuilder};
+pub(crate) use state::ResolvingLookup;
 pub use toc_linking::TocLinkingError;
 pub use transclusion::TransclusionError;
 pub use types::{
-    ComposeContext, ComposeOperation, ComposeOperationSet, ComposeOptions, ComposePerfMetric,
-    ComposePerfReport, ComposePhase, ComposeReport, ComposeSource, ComposeStage, ComposeWarning,
-    ShellCommandSpan, SourceRange, redact_shell_command,
+    ComposeContext, ComposeOperation, ComposeOperationDescriptor, ComposeOperationPerfMetric,
+    ComposeOperationSet, ComposeOptions, ComposePerfMetric, ComposePerfReport, ComposePhase,
+    ComposeReport, ComposeSource, ComposeStage, ComposeWarning, ShellCommandSpan, SourceRange,
+    redact_shell_command,
 };
 
 // Internal re-exports for crate modules that still use TransclusionOptions
@@ -544,11 +560,20 @@ impl Markdown {
 
     /// Internal recursive pipeline runner shared by root and child documents.
     ///
-    /// Executes operations in three phases:
+    /// Frontmatter is resolved in a fixed order before the body stages run:
+    /// **Interp pass 1 → Schema Validation → Shell Expansion → Interp pass 2**.
+    /// Pass 1 resolves `{{ }}` against seed values; schema validation and
+    /// coercion run next; `$(...)` frontmatter values then expand; pass 2
+    /// resolves any keys that were deferred because they referenced
+    /// shell-pending values. Read-side functions and `doc.*` are available in
+    /// both passes.
+    ///
+    /// Executes operations in four phases:
     /// 1. **Inline Pre** (serial): TextReplacement, PageBlocks, Interpolation, ShellExpansion, ShellBlocks
     /// 2. **Transclusion** (prepared serially, resolved concurrently): BlockTransclusion,
     ///    FrontmatterTransclusion, CodeTransclusion, TocLinking, FileLinks
     /// 3. **Inline Post** (serial): Cleanup, Normalization
+    /// 4. **Finalization** (root-only serial): LinkNormalization
     #[instrument(skip_all, fields(source = ?options.source))]
     pub(crate) fn run_compose_pipeline_internal(
         &mut self,
@@ -603,6 +628,7 @@ impl Markdown {
                     options.context(),
                     options.fail_fast,
                     shell_expansion_enabled,
+                    Some(options.frontmatter_resolution_context()),
                 )?;
                 report.frontmatter_interpolations_applied = fm_report.replacements;
                 report.warnings.extend(fm_report.warnings);
@@ -676,6 +702,7 @@ impl Markdown {
                         options.context(),
                         options.fail_fast,
                         false,
+                        Some(options.frontmatter_resolution_context()),
                     )?;
                     report.frontmatter_interpolations_applied += fm_report.replacements;
                     report.warnings.extend(fm_report.warnings);
@@ -769,37 +796,10 @@ impl Markdown {
                             &mut report,
                             &mut perf,
                         )?;
-                        if let Some(start) = op_start {
-                            let kind = match operation {
-                                ComposeOperation::FrontmatterInterpolation => {
-                                    Some(perf::PerfMetricKind::FrontmatterInterpolation)
-                                }
-                                ComposeOperation::FrontmatterShellExpansion => {
-                                    Some(perf::PerfMetricKind::FrontmatterShellExpansion)
-                                }
-                                ComposeOperation::TextReplacement => {
-                                    Some(perf::PerfMetricKind::TextReplacement)
-                                }
-                                ComposeOperation::PageBlocks => {
-                                    Some(perf::PerfMetricKind::PageBlocks)
-                                }
-                                ComposeOperation::Interpolation => {
-                                    Some(perf::PerfMetricKind::Interpolation)
-                                }
-                                ComposeOperation::ShellExpansion => {
-                                    Some(perf::PerfMetricKind::ShellExpansion)
-                                }
-                                ComposeOperation::ShellBlocks => {
-                                    Some(perf::PerfMetricKind::ShellBlocks)
-                                }
-                                ComposeOperation::LinkResolve => {
-                                    Some(perf::PerfMetricKind::LinkResolve)
-                                }
-                                _ => unreachable!(),
-                            };
-                            if let Some(kind) = kind {
-                                perf.record(kind, start.elapsed());
-                            }
+                        if let Some(start) = op_start
+                            && let Some(kind) = operation.perf_metric()
+                        {
+                            perf.record(kind.to_perf_metric_kind(), start.elapsed());
                         }
                     }
                     ComposePhase::Transclusion => {
@@ -828,29 +828,20 @@ impl Markdown {
                     ComposePhase::InlinePost => {
                         let op_start = perf.is_enabled().then(std::time::Instant::now);
                         self.run_inline_post_operation(*operation, &options, &mut report)?;
-                        if let Some(start) = op_start {
-                            let kind = match operation {
-                                ComposeOperation::Cleanup => perf::PerfMetricKind::Cleanup,
-                                ComposeOperation::Normalization => {
-                                    perf::PerfMetricKind::Normalization
-                                }
-                                _ => unreachable!(),
-                            };
-                            perf.record(kind, start.elapsed());
+                        if let Some(start) = op_start
+                            && let Some(kind) = operation.perf_metric()
+                        {
+                            perf.record(kind.to_perf_metric_kind(), start.elapsed());
                         }
                     }
                     ComposePhase::Finalization => {
                         if runtime.transclusion.depth() <= 1 {
                             let op_start = perf.is_enabled().then(std::time::Instant::now);
                             self.run_finalization_operation(*operation, &options, &mut report)?;
-                            if let Some(start) = op_start {
-                                let kind = match operation {
-                                    ComposeOperation::LinkNormalization => {
-                                        perf::PerfMetricKind::LinkNormalization
-                                    }
-                                    _ => unreachable!(),
-                                };
-                                perf.record(kind, start.elapsed());
+                            if let Some(start) = op_start
+                                && let Some(kind) = operation.perf_metric()
+                            {
+                                perf.record(kind.to_perf_metric_kind(), start.elapsed());
                             }
                         }
                     }
@@ -1305,9 +1296,7 @@ impl Markdown {
         // Wrap the effective state with a resolution context so read-side
         // expression functions (`frontmatter`, `file_exists`, `markdown_title`,
         // …) resolve filesystem paths and — when remote reads are enabled —
-        // HTTP(S) URL arguments through the run's remote-fetch runtime. Bare
-        // `EffectiveState` returns no resolution context and those functions
-        // never run.
+        // HTTP(S) URL arguments through the run's remote-fetch runtime.
         let lookup = state::ResolvingLookup::new(
             state,
             options.expression_resolution_context(&runtime.remote_fetch),
@@ -5648,6 +5637,7 @@ Rounded: {{ round(pi) }}"#;
     mod remote_transclusion_tests {
         use super::*;
         use crate::markdown::compose::remote::RemoteReadConfig;
+        use std::collections::HashSet;
         use wiremock::{Mock, MockServer, ResponseTemplate};
         use wiremock::matchers::{method, path};
 
@@ -5807,14 +5797,152 @@ Rounded: {{ round(pi) }}"#;
             composed.content().to_string()
         }
 
+        /// The `frontmatter()` read-side **function** is remote-capable when
+        /// called from the **body** surface: body interpolation carries the
+        /// run's remote-fetch runtime, so reading another document's frontmatter
+        /// property over HTTP(S) succeeds. (Decision B restricts only the
+        /// frontmatter *surface*, not this function — see the loud-failure test
+        /// `frontmatter_value_remote_url_fails_loudly` below.)
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-        async fn remote_frontmatter_expression_reads_url() {
+        async fn remote_frontmatter_function_in_body_reads_url() {
             let text = compose_expr_against_doc(
                 "---\ntitle: Remote Title\nstatus: draft\n---\n# H1\n\nBody\n",
                 "S: {{ frontmatter(\"{URL}\", \"status\") }}\n",
             )
             .await;
             assert_eq!(text, "S: draft\n");
+        }
+
+        /// Decision B: the frontmatter *surface* is local-filesystem only. A
+        /// remote URL argument to a read-side function written in a frontmatter
+        /// value must fail loudly rather than performing a network read — even
+        /// when the run otherwise allows the host for body/transclusion fetches.
+        /// With the default (non-fail-fast) policy the loud failure surfaces as a
+        /// frontmatter-interpolation warning and the value is left unsubstituted.
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn frontmatter_value_remote_url_fails_loudly() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/doc.md"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_string("---\nstatus: draft\n---\n# H1\n"),
+                )
+                .mount(&server)
+                .await;
+            let url = format!("{}/doc.md", server.uri());
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            // The expression lives in a frontmatter value, not the body.
+            let content = format!(
+                "---\nstatus: '{{{{ frontmatter(\"{url}\", \"status\") }}}}'\n---\n# H1\n"
+            );
+            std::fs::write(&root, &content).unwrap();
+
+            let (_, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            // No network read occurred and a helpful diagnostic was emitted.
+            assert_eq!(report.remote_fetch_stats.unwrap().fetched, 0);
+            assert!(
+                report.warnings.iter().any(|w| {
+                    w.stage == "frontmatter-interpolation"
+                        && w.message.contains("remote reads are not enabled")
+                        && w.message.contains(&url)
+                }),
+                "expected a local-only frontmatter diagnostic, got: {:?}",
+                report.warnings
+            );
+        }
+
+        /// Decision B also applies to `file_exists()`: a remote URL argument in
+        /// a frontmatter value must fail loudly rather than silently reporting
+        /// the URL as absent.
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn frontmatter_file_exists_remote_url_fails_loudly() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/doc.md"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("# Present\n"))
+                .mount(&server)
+                .await;
+            let url = format!("{}/doc.md", server.uri());
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let content = format!(
+                "---\npresent: '{{{{ file_exists(\"{url}\") }}}}'\n---\n# H1\n"
+            );
+            std::fs::write(&root, &content).unwrap();
+
+            let (_, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            assert_eq!(report.remote_fetch_stats.unwrap().fetched, 0);
+            assert!(
+                report.warnings.iter().any(|w| {
+                    w.stage == "frontmatter-interpolation"
+                        && w.message.contains("local-only")
+                        && w.message.contains(&url)
+                }),
+                "expected a local-only frontmatter diagnostic for file_exists, got: {:?}",
+                report.warnings
+            );
+        }
+
+        /// Decision B covers the `$()` shell-ternary condition surface too: a
+        /// read-side function call in the condition is evaluated with the
+        /// local-only frontmatter context, so a remote URL argument errors
+        /// before any branch is selected or executed.
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn frontmatter_shell_ternary_remote_url_condition_fails_loudly() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/doc.md"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("# Present\n"))
+                .mount(&server)
+                .await;
+            let url = format!("{}/doc.md", server.uri());
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let content = format!(
+                "---\nresult: $(file_exists(\"{url}\") ? echo yes : echo no)\n---\n# H1\n"
+            );
+            std::fs::write(&root, &content).unwrap();
+
+            let mut approved = HashSet::new();
+            approved.insert("echo yes".to_string());
+            approved.insert("echo no".to_string());
+
+            let md: Markdown = content.into();
+            let config = RemoteReadConfig {
+                allowed_hosts: vec!["127.0.0.1".into()],
+                ..Default::default()
+            };
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .with_allow_remote_transclusion(true)
+                .with_remote_read_config(config)
+                .with_pre_approved_commands(approved)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let result = md.compose_with(options);
+
+            assert!(
+                result.is_err(),
+                "expected compose to fail because the ternary condition uses a remote URL in local-only frontmatter"
+            );
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains("local-only") && err.contains(&url),
+                "expected helpful local-only diagnostic, got: {err}"
+            );
         }
 
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

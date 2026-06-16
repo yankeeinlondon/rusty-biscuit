@@ -516,9 +516,8 @@ mod tests {
 
     fn one_half_yaml_color(mode: MarkdownColorMode, line: &str, token: &str) -> Color {
         let highlighter = CodeHighlighter::new(ThemePair::OneHalf, mode);
-        let syntax = highlighter
-            .syntax_set()
-            .find_syntax_by_extension("yaml")
+        let syntax = darkmatter::markdown::language_grammar::LanguageGrammar::yaml()
+            .resolve(highlighter.syntax_set())
             .expect("yaml syntax");
         let mut hl = HighlightLines::new(syntax, highlighter.theme());
         let token_start = line

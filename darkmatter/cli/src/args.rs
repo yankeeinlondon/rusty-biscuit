@@ -419,7 +419,7 @@ pub enum Command {
         /// Language for the code block (e.g. `rust`, `py`, `yaml`).
         ///
         /// Resolved through
-        /// [`LanguageGrammar::from_fence_token`](darkmatter::markdown::LanguageGrammar::from_fence_token);
+        /// [`LanguageGrammar::from_token_or_plain_text`](darkmatter::markdown::LanguageGrammar::from_token_or_plain_text);
         /// aliases such as `yml`→`yaml`, `py`→`python`, `ts`→`typescript` are
         /// honored. Overrides the extension-derived language for file input.
         #[arg(long, value_name = "LANG")]

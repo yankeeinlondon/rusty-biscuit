@@ -24,6 +24,7 @@ use renderable::tree::{CodeRenderer, NodeAttrs};
 use crate::markdown::{
     dsl::{CodeBlockMeta, parse_code_info},
     highlighting::{CodeBlockMode, CodeHighlighter, ColorMode, ThemePair},
+    language_grammar::LanguageGrammar,
     output::code_block::{render_html_code_block, render_terminal_code_block},
     output::html::HtmlOptions,
     output::terminal::{
@@ -251,6 +252,7 @@ impl CodeRenderer for TerminalCodeRenderer {
         );
         let code_meta = build_code_meta(lang.unwrap_or(""), meta);
         let language = lang.unwrap_or("");
+        let grammar = LanguageGrammar::from_token_or_plain_text(language);
         let options = TerminalOptions {
             code_theme,
             prose_theme: code_theme,
@@ -282,7 +284,7 @@ impl CodeRenderer for TerminalCodeRenderer {
         // / `highlight` directive so the body honors them.
         let body = render_terminal_code_block(
             value,
-            language,
+            &grammar,
             &highlighter,
             &options,
             &code_meta,
@@ -362,13 +364,13 @@ impl CodeRenderer for TerminalCodeRenderer {
         );
         let highlighter = CodeHighlighter::from_theme(resolved.theme, resolved.color_mode);
         let code_meta = build_code_meta(lang.unwrap_or(""), meta);
-        let language = lang.unwrap_or("");
+        let grammar = LanguageGrammar::from_token_or_plain_text(lang.unwrap_or(""));
 
         // `code_meta` carries any `title` / `line-numbering` / `highlight`
         // directive so the HTML reproduces the legacy renderer's title block,
         // line-number table, and highlighted-line markup.
         let html =
-            render_html_code_block(value, language, &code_meta, &highlighter, &options).ok()?;
+            render_html_code_block(value, &grammar, &code_meta, &highlighter, &options).ok()?;
         Some(BrowserFragment::new().define_as_raw_html(html).finalize())
     }
 
@@ -421,9 +423,8 @@ mod tests {
 
     fn one_half_yaml_color(mode: ColorMode, line: &str, token: &str) -> Color {
         let highlighter = CodeHighlighter::new(ThemePair::OneHalf, mode);
-        let syntax = highlighter
-            .syntax_set()
-            .find_syntax_by_extension("yaml")
+        let syntax = LanguageGrammar::yaml()
+            .resolve(highlighter.syntax_set())
             .expect("yaml syntax");
         let mut hl = HighlightLines::new(syntax, highlighter.theme());
         let token_start = line
@@ -747,9 +748,10 @@ mod tests {
             Some(opts.code_theme),
             crate::markdown::highlighting::CodeBlockMode::default(),
         );
+        let rust_grammar = LanguageGrammar::rust();
         let inverted = render_html_code_block(
             code,
-            "rust",
+            &rust_grammar,
             &meta,
             &CodeHighlighter::from_theme(inverted_resolved.theme, inverted_resolved.color_mode),
             &opts,
@@ -757,7 +759,7 @@ mod tests {
         .expect("inverted highlight");
         let non_inverted = render_html_code_block(
             code,
-            "rust",
+            &rust_grammar,
             &meta,
             &CodeHighlighter::new(opts.code_theme, opts.color_mode),
             &opts,

@@ -362,6 +362,22 @@ fn code_block_highlight_inverted_range_errors() {
         .stderr(predicate::str::contains("--highlight"));
 }
 
+#[test]
+fn code_block_highlight_non_numeric_errors() {
+    md_cmd()
+        .args([
+            "code-block",
+            "fn a() {}\nfn b() {}",
+            "--language",
+            "rust",
+            "--highlight",
+            "abc",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--highlight"));
+}
+
 // =============================================================================
 //                                OUTPUT MODES
 // =============================================================================
