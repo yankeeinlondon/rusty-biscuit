@@ -620,6 +620,44 @@ mod tests {
     }
 
     #[test]
+    fn primary_layer_selects_shallowest_nested_layer_when_none_at_repo_root() {
+        // No layer is rooted at the repo root, so selection rule 2 (shallowest
+        // root) applies. `/repo/apps` (2 components) is shallower than
+        // `/repo/tools/nested` (3 components) and must win — even though the
+        // deeper layer's authority (Cargo) has higher enum priority than pnpm.
+        let repo = RepoInfo {
+            root: PathBuf::from("/repo"),
+            monorepo_layers: vec![
+                layer_at("/repo/tools/nested", MonorepoStandard::CargoWorkspace),
+                layer_at("/repo/apps", MonorepoStandard::PnpmWorkspaces),
+            ],
+            ..RepoInfo::default()
+        };
+        let layer = repo.primary_layer().unwrap();
+        assert_eq!(layer.authority, MonorepoStandard::PnpmWorkspaces);
+        assert_eq!(layer.root, PathBuf::from("/repo/apps"));
+    }
+
+    #[test]
+    fn primary_layer_breaks_nested_ties_by_enum_order() {
+        // Two nested layers at the same depth (2 components each), neither at
+        // the repo root. Listed opposite the expected enum order (pnpm before
+        // cargo) so the tie-break by `MonorepoStandard` declaration order — not
+        // iteration/push order — is what selects Cargo.
+        let repo = RepoInfo {
+            root: PathBuf::from("/repo"),
+            monorepo_layers: vec![
+                layer_at("/repo/apps", MonorepoStandard::PnpmWorkspaces),
+                layer_at("/repo/tools", MonorepoStandard::CargoWorkspace),
+            ],
+            ..RepoInfo::default()
+        };
+        let layer = repo.primary_layer().unwrap();
+        assert_eq!(layer.authority, MonorepoStandard::CargoWorkspace);
+        assert_eq!(layer.root, PathBuf::from("/repo/tools"));
+    }
+
+    #[test]
     fn primary_layer_reproduces_first_on_rusty_biscuit_repo() {
         // Regression: on the rusty-biscuit repo, `primary_layer()` must agree
         // with the first layer — and select Cargo over the pnpm workspace that
