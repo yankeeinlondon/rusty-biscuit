@@ -396,18 +396,13 @@ If `--dry-run`: prints what would be executed and exits with code 0.
 
 2. Detects harness from effective frontmatter via `has_harness_properties()`
 3. Builds lifecycle context and creates `LifecycleRunGuard`
-4. **If harness enabled**: parses harness plan, prepends inline writability pre-check (if inline), resolves shell approvals for harness commands
-5. **If not harness and not inline**: no additional checks
+4. Parses the harness plan from the effective frontmatter; for bare documents (no harness properties) this yields the empty/bare plan. Prepend the inline writability pre-check if the mode is inline.
+5. Resolves shell approvals for harness commands (and any system-owned inline writability check) via `resolve_shell_approvals`
 6. Emits preflight-complete status
 
 ##### 6k. Execution
 
-**If harness enabled**: runs through `run_harness_loop()` with `HarnessPromptMode::Compose`. The harness loop manages retries, pre/post checks, timeout enforcement, and lifecycle signals.
-
-**If no harness**: calls `execute_without_harness()` with `CompositionExecutionMode::Direct`:
-
-- **Structured stream path** (most providers): runs child with semantic streaming via `run_structured_composition()`, renders assistant text through section stream, emits summary immediately
-- **Legacy path** (Goose): calls `exec::run_child()` directly, emits minimal summary
+All non-dry-run composition runs flow through `run_harness_loop()` with `HarnessPromptMode::Compose` or `HarnessPromptMode::Inline`. The loop re-parses the plan each attempt, runs pre-checks (including the system-owned inline writability rule), spawns the provider, streams the response, runs post-checks, and invokes handler-driven recovery on failure.
 
 ##### 6l. Post-Execution
 
@@ -493,7 +488,7 @@ Runs the same pipeline as compose Step 6, with these differences:
 
 - Header shows `ComposeDisplay::InlineCompose` instead of `Compose`
 - Inline + interactive check: rejects providers that don't support interactive inline closure recovery
-- When no harness, calls `execute_without_harness()` with `CompositionExecutionMode::Inline` instead of `Direct`
+- All non-dry-run runs call `run_harness_loop()` with `HarnessPromptMode::Inline`
 
 **Affected by:**
 

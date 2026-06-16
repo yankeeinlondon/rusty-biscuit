@@ -244,7 +244,7 @@ Spans `composition_preflight`. Last-mile checks before spawn.
 | D6.harness | **Parse `HarnessPlan`** [O-fm, harness-enabled] | `harness::parse_harness_plan` validates the harness frontmatter. |
 | D6.inline-harness | **Prepend writability pre-check** [O-mode, inline + harness-enabled] | Allows handler-driven recovery on permission failure. |
 | D6.preflight | **Harness shell preflight** [O-fm] | `resolve_shell_approvals` for harness commands. |
-| D6.inline-bare | **Bare-inline writability check** [O-mode, inline + no-harness] | Hard-fail because no handler exists to recover. |
+| D6.inline | **Inline writability pre-check** [O-mode, inline] | Injected as the first `pre_check` by `finalize_effective_plan`; enforced inside the harness loop. Hard-fail because no handler exists to recover. |
 | D7 | **Preflight-complete status** [M, unless `--silent`/`--quiet`/`--sequence`] | "Preflight: shell commands approved …" |
 | D8 | **`compose_prep.environment` (re-detect or reuse)** [M] | Reuses cached `EnvironmentContext` from B2.3.a when `env_detect_root` matches; otherwise calls `detect_environment_fast`. |
 | D9 | **Render env details** [O-flag] | `--quiet` suppresses; otherwise shown when interactive or `-v`. |
@@ -257,17 +257,16 @@ Spans `composition_preflight`. Last-mile checks before spawn.
 
 Spans `composition_execute`. The long pole.
 
-### E1. Harness vs no-harness branch
+### E1. Composition execution path
 
 | # | Step | Notes |
 |---|------|-------|
 | E1.0 | **Build `dispatch_context`** [M] | `composition_dispatch_context`. |
-| E1.harness | **`run_harness_loop`** [O-fm] | Per-attempt: re-parse plan, run pre-checks, spawn child, stream, run post-checks, on failure invoke handler recovery, possibly retry. Each attempt repeats E2-E5 below. |
-| E1.no-harness | **`execute_without_harness`** [M] | Single spawn + stream. |
+| E1.1 | **`run_harness_loop`** [M] | Per-attempt: re-parse plan, run pre-checks, spawn child, stream, run post-checks, on failure invoke handler recovery, possibly retry. Bare documents yield the empty plan and still execute through the loop. |
 
 ### E2. Sink / parser construction
 
-(Per attempt for harness; once for no-harness.)
+(Per attempt inside the harness loop.)
 
 | # | Step | Notes |
 |---|------|-------|
@@ -332,7 +331,7 @@ Spans `composition_postprocess`.
 |---|------|-------|
 | F2.1 | **Render assistant markdown to stdout** [M, when no live streaming] | Section-stream-aware so the trailer matches. Markdown rendering only when `stdout` is a TTY. |
 | F2.2 | **`emit_composition_summary`** [M, structured] | Trailer block (model, duration, tokens, cost). |
-| F2.3 | **`emit_minimal_composition_summary`** [M, legacy/Goose] | Bare-bones equivalent for non-structured providers. |
+| F2.3 | **`emit_stream_summary`** [M] | Trailer block (model, duration, tokens, cost) emitted by the harness loop for both structured and captured/non-structured attempts. |
 
 ### F3. Inline-compose post-process
 
@@ -427,7 +426,7 @@ combos:
 - No `lifecycle:` frontmatter: skips D4 (`load_claudine_config` for runtime config).
 - No `--mcp` / `--use`: skips C3.6-C3.11.
 - No `--repo` and no MCP: skips shadow-HOME setup in C3.3.
-- No harness frontmatter: skips D6.harness/preflight, E1.harness, takes E1.no-harness branch.
+- No harness frontmatter: skips D6.harness/preflight shell-approval differences; still runs through E1.1 with the bare plan.
 - TTY + explicit `--<provider>`: skips picker in B3.2.tty.
 - `--<provider>` flag: skips all picker UI.
 - Catalog refresh skipped (B3.4) when `model:` absent or model came from CLI/env.

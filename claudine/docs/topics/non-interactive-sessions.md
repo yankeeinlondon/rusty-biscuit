@@ -375,7 +375,7 @@ Gemini replays the operator's own prompt back into the stream as a `message` eve
 
 **Inline compose** (`claudine inline-compose <file-ref>`) — extracts the `prompt` frontmatter property, composes it, sends to the provider, then atomically replaces the document body with the provider's response. The original frontmatter is preserved and `last_updated` is set.
 
-Both commands flow through the same unified pipeline ([`execute_without_harness`](../../cli/src/commands/wrap/composition.rs) parameterized by `CompositionExecutionMode::{Direct, Inline}`), share one structured-stream helper (`run_structured_composition`), and share one summary emitter (`emit_composition_summary`) with a `defer_section_separator` flag that selects between immediate emission (compose) and post-closure deferred emission (inline-compose).
+Both commands flow through the same unified pipeline: `execute_composition_request` builds a `HarnessPromptState` and calls `run_harness_loop()` with `HarnessPromptMode::Compose` for direct compose or `HarnessPromptMode::Inline` for inline compose. The loop re-parses the harness plan each attempt; bare documents (no harness frontmatter) yield the empty plan. The loop handles structured streaming, captured/non-structured fallback, summary emission, and inline closure through a single code path.
 
 ## Harness System
 

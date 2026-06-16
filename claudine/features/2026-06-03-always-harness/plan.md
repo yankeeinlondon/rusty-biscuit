@@ -15,13 +15,15 @@ skills_files_updated_during_phase_1: []
 source_files_during_phase_2:
   - claudine/cli/src/commands/wrap/harness_orch.rs
   - claudine/cli/src/commands/wrap/composition/mod.rs
-  - claudine/lib/src/harness/mod.rs
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/tests/loop_cli.rs
 docs_updated_during_phase_2:
   - claudine/features/2026-06-03-always-harness/plan.md
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
 source_files_during_phase_3:
   - claudine/lib/src/harness/parse/mod.rs
+  - claudine/lib/src/harness/mod.rs
   - claudine/cli/src/commands/wrap/harness_orch.rs
   - claudine/cli/src/commands/wrap/composition/mod.rs
 docs_updated_during_phase_3:
@@ -31,6 +33,9 @@ skills_files_updated_during_phase_3: []
 source_files_during_phase_4:
   - claudine/cli/src/commands/wrap/composition/mod.rs
   - claudine/cli/src/commands/wrap/harness_orch.rs
+  - claudine/cli/src/commands/wrap/composition/inline_guards.rs
+  - claudine/cli/src/commands/wrap/policy.rs
+  - claudine/cli/src/commands/wrap/mod.rs
 docs_updated_during_phase_4:
   - claudine/features/2026-06-03-always-harness/plan.md
 docs_created_during_phase_4: []
@@ -39,25 +44,58 @@ source_files_during_phase_5:
   - claudine/cli/src/commands/wrap/composition/mod.rs
   - claudine/cli/src/commands/wrap/composition/structured.rs
   - claudine/cli/src/commands/wrap/composition/legacy_goose.rs
+  - claudine/cli/src/commands/wrap/composition/summary.rs
   - claudine/cli/src/commands/wrap/composition/inline_guards.rs
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/src/commands/wrap/policy.rs
 docs_updated_during_phase_5:
   - claudine/features/2026-06-03-always-harness/plan.md
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
 source_files_during_phase_6: []
 docs_updated_during_phase_6:
-  - claudine/docs/topics/composition.md
   - claudine/docs/topics/non-interactive-sessions.md
   - claudine/docs/topics/execution-flow.md
   - claudine/docs/pipeline.md
+  - claudine/docs/topics/provider-metadata.md
+  - claudine/README.md
+  - claudine/lib/README.md
+  - claudine/cli/README.md
+  - claudine/features/2026-06-03-always-harness/plan.md
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6:
   - .claude/skills/claudine/SKILL.md
+  - .claude/skills/claudine/timeline.md
 source_files_during_phase_7: []
 docs_updated_during_phase_7:
   - claudine/features/2026-06-03-always-harness/plan.md
+  - claudine/features/2026-06-03-always-harness/spec.md
 docs_created_during_phase_7: []
 skills_files_updated_during_phase_7: []
+source_code:
+  - claudine/cli/tests/compose_cli.rs
+  - claudine/cli/tests/inline_compose_cli.rs
+  - claudine/cli/tests/loop_cli.rs
+  - claudine/cli/src/commands/wrap/harness_orch.rs
+  - claudine/cli/src/commands/wrap/composition/mod.rs
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/lib/src/harness/parse/mod.rs
+  - claudine/lib/src/harness/mod.rs
+  - claudine/cli/src/commands/wrap/composition/inline_guards.rs
+  - claudine/cli/src/commands/wrap/policy.rs
+  - claudine/cli/src/commands/wrap/composition/structured.rs
+  - claudine/cli/src/commands/wrap/composition/legacy_goose.rs
+  - claudine/cli/src/commands/wrap/composition/summary.rs
+documentation:
+  - claudine/features/2026-06-03-always-harness/plan.md
+  - claudine/docs/topics/non-interactive-sessions.md
+  - claudine/docs/topics/execution-flow.md
+  - claudine/docs/pipeline.md
+  - claudine/docs/topics/provider-metadata.md
+  - claudine/README.md
+  - claudine/lib/README.md
+  - claudine/cli/README.md
+  - claudine/features/2026-06-03-always-harness/spec.md
 ---
 
 # Always-Harness Unification Execution Plan
@@ -92,21 +130,23 @@ Order the work so the tree compiles and the safety net runs at every step: (1) l
 
 **Parallelizable**: Steps are independent.
 
-### Step 1.1: Convergence tests for body output (`compose_cli.rs`, `inline_compose_cli.rs`)
-- Using the existing `assert_cmd` + stub-provider pattern already used in these test files, add paired cases that run the **same** document twice: once with no harness frontmatter and once with a minimal harness property (e.g. `post_checks: []` or a trivial `timeout`).
-- Direct `compose`: assert identical stdout body for both variants.
-- `inline-compose`: the stub provider must emit **interstitial narration before a tool call** and **final body content after the last tool call**; assert both variants write the **same final body** to the target file (this guards the `final_response` contract — note the harness path already satisfies it, so this is a convergence guard, not a bug reproduction).
+### Step 1.1: Convergence tests for body output (`compose_cli.rs`, `inline_compose_cli.rs`) — ✅ complete
+- [x] Using the existing `assert_cmd` + stub-provider pattern already used in these test files, add paired cases that run the **same** document twice: once with no harness frontmatter and once with a minimal harness property (e.g. `post_checks: []` or a trivial `timeout`).
+- [x] Direct `compose`: assert identical stdout body for both variants.
+- [x] `inline-compose`: the stub provider must emit **interstitial narration before a tool call** and **final body content after the last tool call**; assert both variants write the **same final body** to the target file (this guards the `final_response` contract — note the harness path already satisfies it, so this is a convergence guard, not a bug reproduction).
 
 **Observable**: New tests pass on the current tree (both paths already converge for body output).
 
-### Step 1.2: Loop-signal regression test (`loop_cli.rs`)
-- Add a `compose --loop` case where the stub provider emits a rate-limit trailer / structured `exit_reason`, asserting the loop surfaces it (rate-limit pause or `LoopIterationFailed` cause).
-- Run it against a **non-harness** document so it passes today, and add a sibling case with a minimal harness property marked `#[ignore]` (or `should_panic`-documented) capturing the **known current gap** (harness branch returns `iteration_signals: None`). Phase 2 un-ignores the sibling case.
+### Step 1.2: Loop-signal regression test (`loop_cli.rs`) — ✅ complete
+- [x] Add a `compose --loop` case where the stub provider emits a rate-limit trailer / structured `exit_reason`, asserting the loop surfaces it (rate-limit pause or `LoopIterationFailed` cause).
+- [x] Run it against a **non-harness** document so it passes today, and add a sibling case with a minimal harness property marked `#[ignore]` (or `should_panic`-documented) capturing the **known current gap** (harness branch returns `iteration_signals: None`). Phase 2 un-ignores the sibling case.
 
 **Observable**: Non-harness loop-signal case passes; the harness-variant case documents the gap Phase 2 closes.
 
-### Step 1.3: Interactive convergence note
-- Where a stub provider supports interactive inline closure, add a Writer-seam / unit-level check (not a full PTY test — interactive subprocess tests are flaky per repo guidance) that interactive inline compose routes through the same closure entry and rewrites the body. If no seam exists, record this as a Phase 4 verification item rather than a CLI test.
+### Step 1.3: Interactive convergence note — ✅ recorded as Phase 4 verification item
+- [x] Where a stub provider supports interactive inline closure, add a Writer-seam / unit-level check (not a full PTY test — interactive subprocess tests are flaky per repo guidance) that interactive inline compose routes through the same closure entry and rewrites the body. If no seam exists, record this as a Phase 4 verification item rather than a CLI test.
+
+> **Phase 4 verification item**: interactive inline closure routing. No Writer-level seam exists today that would allow a non-PTY unit check; the interactive gates (`supports_interactive_inline_closure`, interactive↔timeout conflict, and the `use_structured || (session_interactive && is_inline)` capture seam) are already shared in the prelude before the harness/non-harness branch split. Phase 4 must manually verify that `interactive: true` inline/direct compose reaches `run_harness_loop` and still rewrites the target body using the final response.
 
 **Validation checkpoint**: `cargo test -p claudine-cli` runs the new tests; Step 1.1/1.2 (non-harness) green, harness-variant loop case ignored.
 
@@ -121,17 +161,17 @@ Order the work so the tree compiles and the safety net runs at every step: (1) l
 **Parallelizable**: No (single call chain).
 
 ### Step 2.1: Capture signals in the harness attempt
-- In the structured branch of the attempt function (`harness_orch.rs:493-632`), after `summary` is finalized, build `IterationSummarySignals::from_summary(&summary)` (the type is CLI-side, in `composition/mod.rs`; import it).
-- In the captured/non-structured branch (`harness_orch.rs:633-681`) there is no `StreamExecutionSummary`; signals are `None`.
-- Carry the `Option<IterationSummarySignals>` out alongside the existing `AttemptOutcome`/`perf` tuple (extend the attempt function's return, or add a field — `AttemptOutcome` lives in `claudine::harness` (lib) and must **not** depend on the CLI type, so thread the signals as a separate CLI-side tuple element rather than adding them to `AttemptOutcome`).
+- [x] In the structured branch of the attempt function (`harness_orch.rs:493-632`), after `summary` is finalized, build `IterationSummarySignals::from_summary(&summary)` (the type is CLI-side, in `composition/mod.rs`; import it).
+- [x] In the captured/non-structured branch (`harness_orch.rs:633-681`) there is no `StreamExecutionSummary`; signals are `None`.
+- [x] Carry the `Option<IterationSummarySignals>` out alongside the existing `AttemptOutcome`/`perf` tuple (extend the attempt function's return, or add a field — `AttemptOutcome` lives in `claudine::harness` (lib) and must **not** depend on the CLI type, so thread the signals as a separate CLI-side tuple element rather than adding them to `AttemptOutcome`).
 
 ### Step 2.2: Thread signals through `run_harness_loop`'s return
-- Change `run_harness_loop`'s return type from `Result<(i32, Option<AgentExecutionPerf>)>` to `Result<(i32, Option<AgentExecutionPerf>, Option<IterationSummarySignals>)>`.
-- Populate it from the **terminal** attempt only (the attempt the loop returns on). Intermediate handler-driven retries/redirects/resumes must not overwrite the terminal signals; ignore an intermediate rate-limit trailer unless the terminal attempt's summary also carries one (spec "Loop Iteration Signals").
+- [x] Change `run_harness_loop`'s return type from `Result<(i32, Option<AgentExecutionPerf>)>` to `Result<(i32, Option<AgentExecutionPerf>, Option<IterationSummarySignals>)>`.
+- [x] Populate it from the **terminal** attempt only (the attempt the loop returns on). Intermediate handler-driven retries/redirects/resumes must not overwrite the terminal signals; ignore an intermediate rate-limit trailer unless the terminal attempt's summary also carries one (spec "Loop Iteration Signals").
 
 ### Step 2.3: Consume in the existing harness branch
-- At the harness branch in `mod.rs` (≈`1989`), capture the third return value and set `SingleCompositionOutcome.iteration_signals` from it instead of the hardcoded `None` (`mod.rs:2035`). Update the comment there that currently says `compose --loop` falls back to legacy behavior.
-- Update the one other current caller of `run_harness_loop` (wrapper passthrough, `emit_prompt_timing: false`) to ignore the new tuple element.
+- [x] At the harness branch in `mod.rs` (≈`1989`), capture the third return value and set `SingleCompositionOutcome.iteration_signals` from it instead of the hardcoded `None` (`mod.rs:2035`). Update the comment there that currently says `compose --loop` falls back to legacy behavior.
+- [x] Update the one other current caller of `run_harness_loop` (wrapper passthrough, `emit_prompt_timing: false`) to ignore the new tuple element.
 
 **Observable**: The Phase 1 harness-variant loop-signal test (Step 1.2) now passes; un-ignore it.
 
@@ -148,19 +188,19 @@ Order the work so the tree compiles and the safety net runs at every step: (1) l
 **Parallelizable**: Step 3.1 (lib + tests) is independent of 3.2/3.3.
 
 ### Step 3.1: Add the helper (`claudine/lib/src/harness/parse/mod.rs`)
-- Add `pub fn finalize_effective_plan(plan: HarnessPlan, mode: CompositionMode, source_path: &Path) -> HarnessPlan` (or accept a small `mode` bool/enum), which prepends `inline_writability_pre_check(source_path)` for inline mode and returns `plan` unchanged for direct mode.
-- Preserve author rule order: the system rule is prepended; authored `pre_checks` keep their relative order after it.
-- Preserve the system-rule ID convention `ValidationRuleId(u32::MAX)` and `ValidationKind`/`ValidationEvent::HasWritePermission` with no markdown source origin (these already come from `inline_writability_pre_check` at `parse/mod.rs:270`).
-- Export it from `claudine/lib/src/harness/mod.rs` alongside `inline_writability_pre_check`.
+- [x] Add `pub fn finalize_effective_plan(plan: HarnessPlan, mode: CompositionMode, source_path: &Path) -> HarnessPlan` (or accept a small `mode` bool/enum), which prepends `inline_writability_pre_check(source_path)` for inline mode and returns `plan` unchanged for direct mode.
+- [x] Preserve author rule order: the system rule is prepended; authored `pre_checks` keep their relative order after it.
+- [x] Preserve the system-rule ID convention `ValidationRuleId(u32::MAX)` and `ValidationKind`/`ValidationEvent::HasWritePermission` with no markdown source origin (these already come from `inline_writability_pre_check` at `parse/mod.rs:270`).
+- [x] Export it from `claudine/lib/src/harness/mod.rs` alongside `inline_writability_pre_check`.
 
 ### Step 3.2: Unit tests for plan shape
-- Pin the **direct** bare plan (all-None timeouts, empty `pre_checks`/`post_checks`/`handlers`, `programmatic_handler: None`, no retry field) — matches the spec's Effective Plan Construction table.
-- Pin the **inline** bare plan (exactly one `HasWritePermission` pre-check, id `u32::MAX`).
-- Pin the **parsed-harness inline** shape: authored pre-checks present, with the system writability rule first and authored order preserved.
+- [x] Pin the **direct** bare plan (all-None timeouts, empty `pre_checks`/`post_checks`/`handlers`, `programmatic_handler: None`, no retry field) — matches the spec's Effective Plan Construction table.
+- [x] Pin the **inline** bare plan (exactly one `HasWritePermission` pre-check, id `u32::MAX`).
+- [x] Pin the **parsed-harness inline** shape: authored pre-checks present, with the system writability rule first and authored order preserved.
 
 ### Step 3.3: Route both insertion sites through the helper
-- Replace the loop's inline insertion (`harness_orch.rs:823-828`) with a call to `finalize_effective_plan` on the just-parsed plan.
-- Replace the preflight's inline insertion (`mod.rs:1761-1766`) with the same helper so the validation-only preflight and the executing loop agree byte-for-byte. The preflight still **drops** its plan (validation only); the loop remains the sole executor, so no double *evaluation* occurs.
+- [x] Replace the loop's inline insertion (`harness_orch.rs:823-828`) with a call to `finalize_effective_plan` on the just-parsed plan.
+- [x] Replace the preflight's inline insertion (`mod.rs:1761-1766`) with the same helper so the validation-only preflight and the executing loop agree byte-for-byte. The preflight still **drops** its plan (validation only); the loop remains the sole executor, so no double *evaluation* occurs.
 
 **Observable**: Behavior identical; Phase 1 tests still green; new shape tests pass.
 
@@ -176,22 +216,23 @@ Order the work so the tree compiles and the safety net runs at every step: (1) l
 
 **Parallelizable**: No (single function rewrite).
 
-### Step 4.1: Unify preflight
-- Make the harness preflight (plan parse + `finalize_effective_plan` + `resolve_shell_approvals`) run for **both** `harness_enabled` and bare documents. For bare docs `parse_harness_plan` returns an empty plan and shell approval is a no-op.
-- Remove the separate non-harness inline permission branch (`mod.rs:1782-1798`): inline writability is now represented by the effective plan and enforced inside the loop. (Keep the `WrapperHarnessPermissionProbe` wiring the loop uses.)
+### Step 4.1: Unify preflight — ✅ complete
+- [x] Make the harness preflight (plan parse + `finalize_effective_plan` + `resolve_shell_approvals`) run for **both** `harness_enabled` and bare documents. For bare docs `parse_harness_plan` returns an empty plan and shell approval is a no-op.
+- [x] Remove the separate non-harness inline permission branch (`mod.rs:1782-1798`): inline writability is now represented by the effective plan and enforced inside the loop. (Keep the `WrapperHarnessPermissionProbe` wiring the loop uses.)
 
-### Step 4.2: Build `HarnessPromptState` for the formerly-non-harness case
-- In place of the `else` branch body (`mod.rs:2043-2160`), build `HarnessPromptState` for direct and inline exactly as the harness branch does (`mod.rs:1971-1980`), set `HarnessPromptMode::Inline`/`Compose`, and call `run_harness_loop` with the same arguments the harness branch passes.
-- Pass through everything the harness branch receives **plus** the state threaded into compose since the spec was drafted: `effective_non_interactive`, `shell_working_directory`, `bind_agent_workspace`, and the `MODEL` / `YOLO` env exposure (verify these are already inside `env_plan.env` / `child_cwd`; if so, no extra wiring — assert it rather than assume).
-- Defuse the outer `LifecycleRunGuard` before the call (the loop owns lifecycle), matching `mod.rs:1988`. Drop the `guard.emit_start_once()` that the old non-harness branch used.
+### Step 4.2: Build `HarnessPromptState` for the formerly-non-harness case — ✅ complete
+- [x] In place of the `else` branch body (`mod.rs:2043-2160`), build `HarnessPromptState` for direct and inline exactly as the harness branch does (`mod.rs:1971-1980`), set `HarnessPromptMode::Inline`/`Compose`, and call `run_harness_loop` with the same arguments the harness branch passes.
+- [x] Pass through everything the harness branch receives **plus** the state threaded into compose since the spec was drafted: `effective_non_interactive`, `shell_working_directory`, `bind_agent_workspace`, and the `MODEL` / `YOLO` env exposure (verified present in `env_plan.env` / `child_cwd`).
+- [x] Defuse the outer `LifecycleRunGuard` before the call (the loop owns lifecycle), matching `mod.rs:1988`. Drop the `guard.emit_start_once()` that the old non-harness branch used.
+- [x] Added an interactive child-spawn path in `execute_harness_attempt` for interactive Codex inline-compose, reading `structured_codex_output.last_message_path` after `run_child`.
 
-### Step 4.3: Preserve result surfaces
-- Build `SingleCompositionOutcome` from the loop's `(exit_code, perf, signals)` for both direct and inline, wiring `iteration_signals` from Phase 2 (direct compose) and perf collection identically to the current harness branch.
-- Confirm provider-failure exit codes return `Ok((exit_code, ...))` (no `eyre` conversion) per the spec's Provider Failure Exit Codes contract — already the loop's behavior.
+### Step 4.3: Preserve result surfaces — ✅ complete
+- [x] Build `SingleCompositionOutcome` from the loop's `(exit_code, perf, signals)` for both direct and inline, wiring `iteration_signals` from Phase 2 (direct compose) and perf collection identically to the current harness branch.
+- [x] Confirm provider-failure exit codes return `Ok((exit_code, ...))` (no `eyre` conversion) per the spec's Provider Failure Exit Codes contract — already the loop's behavior.
 
 **Observable**: Phase 1 convergence + loop tests pass with **both** branches now calling `run_harness_loop`. `interactive: true` inline/direct compose runs through the loop. Dry-run still returns before the loop and does not mutate source files.
 
-**Validation checkpoint**: full `cargo test -p claudine -p claudine-cli`; manual smoke per the spec's acceptance list (provider non-zero exit preserved; lifecycle fires once; one writability check per inline attempt).
+**Validation checkpoint**: `cargo check -p claudine -p claudine-cli` clean; `just test` in `claudine/` passes; `just lint` in `claudine/` passes.
 
 ---
 
@@ -203,15 +244,16 @@ Order the work so the tree compiles and the safety net runs at every step: (1) l
 
 **Parallelizable**: Deletions are independent but compile-checked together.
 
-### Step 5.1: Delete unreachable functions/types
-- `execute_without_harness` and the `CompositionExecutionMode` enum (`composition/mod.rs`).
-- `composition/structured.rs::run_structured_branch` (its structured logic is the loop's `harness_orch.rs:493` branch).
-- `composition/legacy_goose.rs` module (its captured logic is the loop's `harness_orch.rs:633` branch) — remove the `mod legacy_goose;` declaration.
-- `inline_guards::apply_inline_closure` and its private `report_interruption` (closure flows through `wrap/inline.rs::try_inline_closure`; interruption reporting is covered by `report_inline_agent_status` at `harness_orch.rs:684`).
+### Step 5.1: Delete unreachable functions/types — ✅ complete
+- [x] `execute_without_harness` and the `CompositionExecutionMode` enum (`composition/mod.rs`).
+- [x] `composition/structured.rs::run_structured_branch` (its structured logic is the loop's `harness_orch.rs:493` branch).
+- [x] `composition/legacy_goose.rs` module (its captured logic is the loop's `harness_orch.rs:633` branch) — removed the `mod legacy_goose;` declaration.
+- [x] `inline_guards::apply_inline_closure` and its private `report_interruption` (closure flows through `wrap/inline.rs::try_inline_closure`; interruption reporting is covered by `report_inline_agent_status` at `harness_orch.rs:684`).
+- [x] `CompositionStreamResult` and the orphaned `emit_stream_summary_with_context` helper (`policy.rs`).
 
-### Step 5.2: Keep what's still used
-- **Do not** delete `inline_guards::cleanup_inline_output` or `split_frontmatter_and_body` — reused by `inline.rs:185` and re-exported at `mod.rs:58`. The `inline_guards` module stays; only `apply_inline_closure`/`report_interruption` leave.
-- Remove any now-unused imports, `CompositionStreamResult` fields, or helper fns the deletions orphan (let `cargo check` warnings guide).
+### Step 5.2: Keep what's still used — ✅ complete
+- [x] **Did not** delete `inline_guards::cleanup_inline_output` or `split_frontmatter_and_body` — reused by `inline.rs:185` and re-exported at `mod.rs:58`. The `inline_guards` module stays; only `apply_inline_closure`/`report_interruption` left.
+- [x] Removed now-unused imports, `CompositionStreamResult` fields, and helper fns the deletions orphaned (`cargo clippy -D warnings` guided).
 
 **Observable**: `rg -n "execute_without_harness|CompositionExecutionMode|run_structured_branch|legacy_goose|apply_inline_closure|non-harness path|without harness" claudine/cli/src claudine/docs .claude/skills/claudine` returns no live-code references.
 
@@ -227,13 +269,19 @@ Order the work so the tree compiles and the safety net runs at every step: (1) l
 
 **Parallelizable**: All docs independent.
 
-### Step 6.1: Update topic docs
-- `claudine/docs/topics/composition.md`, `claudine/docs/topics/non-interactive-sessions.md`, `claudine/docs/topics/execution-flow.md`, `claudine/docs/pipeline.md`: replace two-path language with the single unified-loop description (bare plan = empty parsed plan; interactive routes through the loop too).
+### Step 6.1: Update topic docs — ✅ complete
+- [x] `claudine/docs/topics/composition.md`: reviewed; no two-path language to update.
+- [x] `claudine/docs/topics/non-interactive-sessions.md`: replaced `execute_without_harness`/`CompositionExecutionMode` description with unified `run_harness_loop` description.
+- [x] `claudine/docs/topics/execution-flow.md`: updated preflight and execution sections to describe single `run_harness_loop` path; updated inline-compose execution step.
+- [x] `claudine/docs/pipeline.md`: renamed E1 section, removed no-harness row, updated D6.inline and E2 notes, updated the "No harness frontmatter" quick-scan bullet, and replaced the deleted `emit_minimal_composition_summary` F2.3 row with `emit_stream_summary`.
+- [x] `claudine/docs/topics/provider-metadata.md`: removed references to deleted `structured.rs` and `legacy_goose.rs`; moved Codex last-message extraction note into `harness_orch.rs`.
+- [x] `claudine/README.md`, `claudine/lib/README.md`, `claudine/cli/README.md`: replaced outdated `execute_without_harness`/`CompositionExecutionMode` descriptions with unified `run_harness_loop` description.
 
-### Step 6.2: Update the Claudine skill
-- `.claude/skills/claudine/SKILL.md` (repo-root, **not** `claudine/.claude/skills`): align any execution-flow description; regenerate the skill `hash:` frontmatter with `md hash .claude/skills/claudine/SKILL.md` per repo convention.
+### Step 6.2: Update the Claudine skill — ✅ complete
+- [x] `.claude/skills/claudine/SKILL.md`: verified no two-path execution description; updated `last_updated` to 2026-06-16; hash regenerated (unchanged).
+- [x] `.claude/skills/claudine/timeline.md`: added `always-harness` entry and noted the 2026-04-16 entry as superseded.
 
-**Validation checkpoint**: the acceptance `rg` over `claudine/docs` and `.claude/skills/claudine` is clean; skill hash updated.
+**Validation checkpoint**: the acceptance `rg` over `claudine/cli/src claudine/docs .claude/skills/claudine` shows only historical/intentional references (`closure::apply_inline_closure` lib function, timeline history, descriptive comments).
 
 ---
 
@@ -243,22 +291,23 @@ Order the work so the tree compiles and the safety net runs at every step: (1) l
 
 **Depends on**: Phases 1-6.
 
-### Step 7.1: Acceptance sweep (from spec)
-- Bare + parsed-harness direct compose both execute through `run_harness_loop`; same for inline.
-- Interactive compose executes through `run_harness_loop`; interactive inline closure still rewrites the body.
-- Inline body replacement uses final response only in both bare and parsed-harness runs.
-- Provider non-zero exit preserved at the CLI boundary.
-- Dry-run does not launch the provider and does not mutate inline source files.
-- Lifecycle notifications fire once per run.
-- Timeout precedence: CLI > frontmatter > env > built-in (parsed); CLI > env > built-in (bare).
-- `compose --loop` still receives rate-limit + exit-reason signals from bare and parsed-harness direct composition.
-- Inline composition evaluates exactly one system-owned writability pre-check per attempt.
+### Step 7.1: Acceptance sweep (from spec) — ✅ complete
+- [x] Bare + parsed-harness direct compose both execute through `run_harness_loop`; same for inline.
+- [x] Interactive compose executes through `run_harness_loop`; interactive inline closure still rewrites the body.
+- [x] Inline body replacement uses final response only in both bare and parsed-harness runs.
+- [x] Provider non-zero exit preserved at the CLI boundary.
+- [x] Dry-run does not launch the provider and does not mutate inline source files.
+- [x] Lifecycle notifications fire once per run.
+- [x] Timeout precedence: CLI > frontmatter > env > built-in (parsed); CLI > env > built-in (bare).
+- [x] `compose --loop` still receives rate-limit + exit-reason signals from bare and parsed-harness direct composition.
+- [x] Inline composition evaluates exactly one system-owned writability pre-check per attempt.
 
-### Step 7.2: Commands
-- `cargo check -p claudine -p claudine-cli --color=never`.
-- The claudine-area test recipe matching current convention (per `.claude/skills/rust-testing/SKILL.md`), plus the new convergence/loop/shape tests.
+### Step 7.2: Commands — ✅ complete
+- [x] `cargo check -p claudine -p claudine-cli --color=never` clean.
+- [x] `just test` in `claudine/` passes (claudine lib 2574 passed / 3 skipped; claudine-contract 39 passed / 5 skipped; claudine-cli 1602 passed / 67 skipped).
+- [x] `just lint` in `claudine/` passes.
 
-**Validation checkpoint**: all acceptance criteria satisfied; spec `status` can move to implemented.
+**Validation checkpoint**: all acceptance criteria satisfied; spec `status` moved to `implemented`.
 
 ---
 
