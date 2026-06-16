@@ -56,6 +56,7 @@ pub(crate) use filesystem::{
     render_repo_section, render_staged_package_areas, render_staged_packages,
     render_unstaged_package_areas, render_unstaged_packages,
 };
+pub(crate) use filesystem::format_monorepo_label;
 pub(crate) use hardware::{
     render_audio_devices_section, render_cpu_section, render_gpu_section, render_hardware_section,
     render_memory_section, render_storage_section,

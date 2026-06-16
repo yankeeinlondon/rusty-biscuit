@@ -596,7 +596,7 @@ fn repo_name_json_is_still_leaf_only() {
 // ============================================================================
 
 #[test]
-fn repo_is_monorepo_json_is_single_key_bool() {
+fn repo_is_monorepo_json_emits_object() {
     let output = cargo_bin_cmd!("sniff")
         .args(["repo", "is-monorepo", "--json"])
         .output()
@@ -611,19 +611,24 @@ fn repo_is_monorepo_json_is_single_key_bool() {
     let json: Value =
         serde_json::from_str(std::str::from_utf8(&output.stdout).expect("utf8")).expect("json");
     let obj = json.as_object().expect("object");
-    assert_eq!(
-        obj.len(),
-        1,
-        "is-monorepo --json must be a single key: {json}"
+    assert!(
+        obj["is_monorepo"].as_bool().unwrap_or(false),
+        "is-monorepo --json must report a monorepo: {json}"
     );
     assert!(
-        obj["is-monorepo"].is_boolean(),
-        "is-monorepo value must be a bool (kebab-case key): {json}"
+        obj["authority"].as_str().is_some(),
+        "is-monorepo --json must include authority: {json}"
     );
+    if obj.contains_key("orchestrators") {
+        assert!(
+            obj["orchestrators"].is_array(),
+            "orchestrators must be an array when present: {json}"
+        );
+    }
 }
 
 #[test]
-fn repo_is_monorepo_text_is_yes_or_no() {
+fn repo_is_monorepo_text_prints_label() {
     let output = cargo_bin_cmd!("sniff")
         .args(["repo", "is-monorepo"])
         .env("NO_COLOR", "1")
@@ -633,8 +638,164 @@ fn repo_is_monorepo_text_is_yes_or_no() {
     assert!(output.status.success());
     let stdout = std::str::from_utf8(&output.stdout).expect("utf8").trim();
     assert!(
-        stdout == "yes" || stdout == "no",
-        "repo is-monorepo text must be `yes` or `no`: {stdout:?}"
+        stdout != "yes" && stdout != "no",
+        "repo is-monorepo text must no longer be `yes`/`no`: {stdout:?}"
+    );
+    assert!(
+        !stdout.is_empty(),
+        "repo is-monorepo text must print the monorepo label: {stdout:?}"
+    );
+}
+
+#[test]
+fn repo_is_monorepo_no_error_exits_zero_when_false() {
+    let dir = tempfile::tempdir().unwrap();
+    let git_init = std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(dir.path())
+        .output()
+        .expect("git init");
+    assert!(git_init.status.success(), "git init failed");
+
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "is-monorepo", "--no-error"])
+        .current_dir(dir.path())
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run sniff repo is-monorepo --no-error in non-monorepo");
+
+    assert!(
+        output.status.success(),
+        "repo is-monorepo --no-error in a non-monorepo must exit 0: stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = std::str::from_utf8(&output.stdout).expect("utf8").trim();
+    assert_eq!(stdout, "false", "--no-error in a non-monorepo must print false");
+}
+
+#[test]
+fn repo_is_monorepo_text_in_monorepo_exits_zero_with_label() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "is-monorepo"])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run sniff repo is-monorepo");
+
+    assert!(
+        output.status.success(),
+        "repo is-monorepo in a monorepo must exit 0: stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = std::str::from_utf8(&output.stdout).expect("utf8").trim();
+    assert_eq!(
+        stdout, "cargo",
+        "repo is-monorepo text must print the unified label `cargo`: {stdout:?}"
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "repo is-monorepo in a monorepo must not emit stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn repo_is_monorepo_text_in_non_monorepo_exits_nonzero_with_false() {
+    let dir = tempfile::tempdir().unwrap();
+    let git_init = std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(dir.path())
+        .output()
+        .expect("git init");
+    assert!(git_init.status.success(), "git init failed");
+
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "is-monorepo"])
+        .current_dir(dir.path())
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run sniff repo is-monorepo in non-monorepo");
+
+    assert!(
+        !output.status.success(),
+        "repo is-monorepo in a non-monorepo must exit non-zero"
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "repo is-monorepo in a non-monorepo must exit 1"
+    );
+    let stdout = std::str::from_utf8(&output.stdout).expect("utf8").trim();
+    assert_eq!(stdout, "false");
+    assert!(
+        output.stderr.is_empty(),
+        "predicate failure must not emit stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn repo_is_monorepo_json_in_non_monorepo_exits_nonzero_with_valid_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let git_init = std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(dir.path())
+        .output()
+        .expect("git init");
+    assert!(git_init.status.success(), "git init failed");
+
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "is-monorepo", "--json"])
+        .current_dir(dir.path())
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run sniff repo is-monorepo --json in non-monorepo");
+
+    assert!(
+        !output.status.success(),
+        "repo is-monorepo --json in a non-monorepo must exit non-zero"
+    );
+    assert_eq!(output.status.code(), Some(1));
+
+    let json: Value =
+        serde_json::from_str(std::str::from_utf8(&output.stdout).expect("utf8")).expect("json");
+    assert_eq!(json, serde_json::json!({ "is_monorepo": false }));
+    assert!(
+        output.stderr.is_empty(),
+        "predicate failure must not emit stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn repo_is_monorepo_genuine_failure_exits_nonzero_with_stderr_even_with_no_error() {
+    let dir = tempfile::tempdir().unwrap();
+    // Not a git repository — genuine failure path.
+
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "is-monorepo", "--no-error"])
+        .current_dir(dir.path())
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run sniff repo is-monorepo --no-error outside a repo");
+
+    assert!(
+        !output.status.success(),
+        "genuine failure must exit non-zero even with --no-error"
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "genuine failure must exit 1 even with --no-error"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "genuine failure must not emit stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Not a git repository"),
+        "genuine failure must report to stderr: {stderr}"
     );
 }
 

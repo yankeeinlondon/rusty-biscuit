@@ -943,7 +943,9 @@ impl Commands {
                     verbose: false,
                 },
                 Some(RepoSubcommand::Name) => RepoAction::Name,
-                Some(RepoSubcommand::IsMonorepo) => RepoAction::IsMonorepo,
+                Some(RepoSubcommand::IsMonorepo { no_error }) => RepoAction::IsMonorepo {
+                    no_error: *no_error,
+                },
                 Some(RepoSubcommand::PackageCount) => RepoAction::PackageCount,
                 Some(RepoSubcommand::Version { no_error, on_error }) => RepoAction::Version {
                     no_error: *no_error,
@@ -2337,9 +2339,20 @@ mod tests {
         #[test]
         fn to_repo_action_is_monorepo() {
             let cmd = Commands::Repo {
-                repo_subcommand: Some(RepoSubcommand::IsMonorepo),
+                repo_subcommand: Some(RepoSubcommand::IsMonorepo { no_error: true }),
             };
-            assert!(matches!(cmd.to_repo_action(), Some(RepoAction::IsMonorepo)));
+            match cmd.to_repo_action() {
+                Some(RepoAction::IsMonorepo { no_error }) => assert!(no_error),
+                _ => panic!("Expected IsMonorepo action with no_error"),
+            }
+
+            let cmd = Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::IsMonorepo { no_error: false }),
+            };
+            match cmd.to_repo_action() {
+                Some(RepoAction::IsMonorepo { no_error }) => assert!(!no_error),
+                _ => panic!("Expected IsMonorepo action without no_error"),
+            }
         }
 
         #[test]

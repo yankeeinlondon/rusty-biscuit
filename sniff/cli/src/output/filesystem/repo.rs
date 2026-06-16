@@ -139,55 +139,43 @@ fn append_area_section(
         output.push(RenderableTerminalContent::Component(Rc::new(inner_list)));
     }
 }
-/// Format a single `MonorepoStandard` for display.
-fn format_monorepo_standard(standard: MonorepoStandard) -> &'static str {
-    standard.spec().display_name
+/// Compose the unified CLI label for a monorepo layer.
+///
+/// Returns `{orchestrator_label} (using {authority_label})` when an orchestrator
+/// is present, otherwise just `{authority_label}`. Reads each standard's
+/// `spec().label`.
+pub(crate) fn format_monorepo_label(
+    authority: MonorepoStandard,
+    orchestrators: &[MonorepoStandard],
+) -> String {
+    let authority_label = authority.spec().label;
+    if let Some(&orchestrator) = orchestrators.first() {
+        format!("{} (using {})", orchestrator.spec().label, authority_label)
+    } else {
+        authority_label.to_string()
+    }
 }
 
 /// Format the monorepo authority/orchestrator summary for display.
 ///
-/// Derives the one-liner from the first topology layer's authority and any
-/// orchestrators riding on top. When no layer exists, falls back to "Unknown".
+/// Derives the one-liner from the primary topology layer's authority and any
+/// orchestrators riding on top.
 fn format_monorepo_summary(repo: &RepoInfo) -> String {
-    let Some(layer) = repo.monorepo_layers.first() else {
-        return "Unknown".to_string();
-    };
-    let mut s = format_monorepo_standard(layer.authority).to_string();
-    for orch in &layer.orchestrators {
-        s.push_str(&format!(
-            " <dim>+ {}</dim>",
-            format_monorepo_standard(*orch)
-        ));
-    }
-    s
+    repo.primary_layer()
+        .map(|layer| format_monorepo_label(layer.authority, &layer.orchestrators))
+        .unwrap_or_default()
 }
 
 /// Build a one-line summary of a single `MonorepoLayer`.
 fn format_monorepo_layer(layer: &sniff::filesystem::repo::MonorepoLayer) -> String {
-    let authority = format_monorepo_standard(layer.authority);
-    let orch = layer
-        .orchestrators
-        .iter()
-        .map(|&o| format_monorepo_standard(o))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let label = format_monorepo_label(layer.authority, &layer.orchestrators);
     let count = layer.packages.len();
-    if orch.is_empty() {
-        format!(
-            "{} — {} {}",
-            authority,
-            format_number(count),
-            package_word(count)
-        )
-    } else {
-        format!(
-            "{} <dim>+ {}</dim> — {} {}",
-            authority,
-            orch,
-            format_number(count),
-            package_word(count)
-        )
-    }
+    format!(
+        "{} — {} {}",
+        label,
+        format_number(count),
+        package_word(count)
+    )
 }
 
 #[derive(Debug, Clone, Default)]

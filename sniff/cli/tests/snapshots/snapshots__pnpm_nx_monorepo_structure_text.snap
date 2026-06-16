@@ -3,7 +3,7 @@ source: sniff/cli/tests/snapshots.rs
 expression: "normalize_snapshot_paths(&stdout, &path)"
 ---
 
-Repository (pnpm Workspaces + Nx / 2 packages)
+Repository (Nx (using pnpm workspaces) / 2 packages)
 
 - apps
     - api v0.1.0 (apps/api)

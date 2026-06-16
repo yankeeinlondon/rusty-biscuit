@@ -1,4 +1,6 @@
 use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::terminal::Terminal;
 use clap::{CommandFactory, Parser};
 use clap_complete::{CompleteEnv, Shell};
 use sniff::filesystem::blast_radius::{ChangeScope, ChangedPathKind, find_blast_radius_documents};
@@ -715,19 +717,64 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     return Ok(());
                 }
             }
-            crate::args::RepoAction::IsMonorepo => {
+            crate::args::RepoAction::IsMonorepo { no_error } => {
                 let dir = base_dir
                     .as_deref()
                     .unwrap_or_else(|| std::path::Path::new("."));
-                let identity = sniff::filesystem::repo::detect_repo_identity(dir)?;
+                let root = match sniff::filesystem::repo_root(dir)? {
+                    Some(root) => root,
+                    None => {
+                        output::emit_stderr(
+                            &format!("Not a git repository: {}\n", dir.display()),
+                            cli.plain,
+                        );
+                        std::process::exit(1);
+                    }
+                };
+                let info = match sniff::filesystem::repo::detect_repo_structure(&root) {
+                    Ok(info) => info,
+                    Err(e) => {
+                        output::emit_stderr(
+                            &format!(
+                                "Failed to detect repository structure at {}: {e}\n",
+                                root.display()
+                            ),
+                            cli.plain,
+                        );
+                        std::process::exit(1);
+                    }
+                };
                 if cli.json {
-                    let outcome = output::repo_json::is_monorepo_outcome(identity.is_monorepo);
+                    let outcome =
+                        output::repo_json::is_monorepo_outcome(info.as_ref(), *no_error);
                     output::print_json_value(outcome.value, perf.build_report().as_ref());
+                    if let Some(code) = outcome.exit_code {
+                        std::process::exit(code);
+                    }
                     return Ok(());
                 }
-                println!("{}", if identity.is_monorepo { "yes" } else { "no" });
-                perf.emit_stderr(None);
-                return Ok(());
+                match info {
+                    Some(ref repo) if repo.is_monorepo => {
+                        let layer = repo
+                            .primary_layer()
+                            .expect("is_monorepo implies a membership layer");
+                        let label =
+                            output::format_monorepo_label(layer.authority, &layer.orchestrators);
+                        let rendered = Prose::new(label).render(&Terminal::default());
+                        output::emit_text(&rendered, cli.plain);
+                        println!();
+                        perf.emit_stderr(None);
+                        return Ok(());
+                    }
+                    _ => {
+                        println!("false");
+                        perf.emit_stderr(None);
+                        if !*no_error {
+                            std::process::exit(1);
+                        }
+                        return Ok(());
+                    }
+                }
             }
             crate::args::RepoAction::PackageCount => {
                 let dir = base_dir

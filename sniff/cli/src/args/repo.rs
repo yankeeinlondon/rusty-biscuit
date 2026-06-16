@@ -193,7 +193,9 @@ pub enum RepoAction {
         verbose: bool,
     },
     Name,
-    IsMonorepo,
+    IsMonorepo {
+        no_error: bool,
+    },
     PackageCount,
     Version {
         no_error: bool,
@@ -627,9 +629,21 @@ pub enum RepoSubcommand {
     },
     /// Output the repository name (plain text); the rich version + language/monorepo one-liner lives on the parent `repo -v`
     Name,
-    /// Output whether the repository is a monorepo
+    /// Output whether the repository is a monorepo.
+    ///
+    /// Prints the unified monorepo label when inside a monorepo, otherwise
+    /// prints `false`. Exits non-zero outside a monorepo unless `--no-error`
+    /// is given. Genuine failures (not a git repository, unreadable path, …)
+    /// still exit non-zero even with `--no-error`.
     #[command(name = "is-monorepo")]
-    IsMonorepo,
+    IsMonorepo {
+        /// Exit 0 with `false` output when not inside a monorepo.
+        ///
+        /// This only suppresses the predicate failure for non-monorepos;
+        /// genuine repository errors still exit non-zero.
+        #[arg(long)]
+        no_error: bool,
+    },
     /// Output the number of packages discovered in the repository
     #[command(name = "package-count")]
     PackageCount,

@@ -370,9 +370,36 @@ pub(crate) fn worktree_outcome(name: Option<&str>, no_error: bool) -> BuildOutco
 
 /// Build the JSON outcome for `repo is-monorepo --json`.
 ///
-/// Returns `{ "is-monorepo": bool }` with exit code `0`.
-pub(crate) fn is_monorepo_outcome(value: bool) -> BuildOutcome {
-    BuildOutcome::pure(json!({ "is-monorepo": value }))
+/// Inside a monorepo this returns the object
+/// `{ "is_monorepo": true, "authority": "<kebab-id>", "orchestrators": [...] }`,
+/// omitting `orchestrators` when empty. Outside a monorepo it returns
+/// `{ "is_monorepo": false }` with an exit code of `1` (or `0` when
+/// `no_error` is `true`).
+pub(crate) fn is_monorepo_outcome(info: Option<&RepoInfo>, no_error: bool) -> BuildOutcome {
+    match info {
+        Some(repo) if repo.is_monorepo => {
+            let layer = repo
+                .primary_layer()
+                .expect("is_monorepo implies at least one membership layer");
+            let mut value = json!({
+                "is_monorepo": true,
+            });
+            value["authority"] = json!(layer.authority.spec().id);
+            if !layer.orchestrators.is_empty() {
+                let orchestrators: Vec<&str> = layer
+                    .orchestrators
+                    .iter()
+                    .map(|s| s.spec().id)
+                    .collect();
+                value["orchestrators"] = json!(orchestrators);
+            }
+            BuildOutcome::pure(value)
+        }
+        _ => {
+            let exit_code = if no_error { 0 } else { 1 };
+            BuildOutcome::with_exit(json!({ "is_monorepo": false }), exit_code)
+        }
+    }
 }
 
 /// Build the JSON outcome for `repo package-count --json`.
@@ -560,8 +587,8 @@ fn git_status_value(result: &SniffResult) -> Value {
 /// When no filter is provided the output mirrors [`fallback_repo_value`]
 /// exactly. With a filter, `repo.packages` is replaced with the matching
 /// subset; all other `RepoInfo` fields are preserved so downstream JSON
-/// consumers continue to see workspace tools, monorepo flags, root path,
-/// and aggregated dependency rollups.
+/// consumers continue to see monorepo flags, `root`, `monorepo_layers`,
+/// `monorepo_standards`, and aggregated dependency rollups.
 ///
 /// `--latest-versions` enrichment is applied in `commands.rs` before this
 /// builder runs, so per-package `latest_version` / `is_updatable` /
@@ -632,6 +659,10 @@ pub(crate) fn build_aggregate_value(
             .map(Value::String)
             .unwrap_or(Value::Null),
     );
+    // Intentionally keep the bare aggregate key as the legacy unwrapped bool.
+    // The focused `repo is-monorepo --json` leaf (built elsewhere) uses the
+    // snake_case object shape; this aggregate remains unchanged for backward
+    // compatibility.
     map.insert("is-monorepo".into(), Value::Bool(identity.is_monorepo));
     map.insert(
         "package-count".into(),
@@ -856,6 +887,7 @@ mod tests {
     use sniff::filesystem::FilesystemInfo;
     use sniff::filesystem::git::{GitConfig, GitInfo, RepoStatus};
     use sniff::filesystem::repo::types::RepoInfo;
+    use sniff::filesystem::repo::{MonorepoLayer, MonorepoStandard};
     use std::collections::HashMap;
     use std::path::PathBuf;
 
@@ -1506,9 +1538,104 @@ mod tests {
         }
 
         #[test]
-        fn is_monorepo_outcome_wraps_bool() {
-            let outcome = is_monorepo_outcome(true);
-            assert_eq!(outcome.value, json!({ "is-monorepo": true }));
+        fn is_monorepo_outcome_monorepo_shape() {
+            let repo = RepoInfo {
+                is_monorepo: true,
+                root: PathBuf::from("/repo"),
+                monorepo_layers: vec![MonorepoLayer {
+                    authority: MonorepoStandard::CargoWorkspace,
+                    orchestrators: vec![MonorepoStandard::Nx],
+                    provenance: sniff::filesystem::repo::PackageProvenance::Explicit,
+                    root: PathBuf::from("/repo"),
+                    lockfile_match: None,
+                    root_is_package: true,
+                    packages: vec!["pkg-a".to_string()],
+                }],
+                ..RepoInfo::default()
+            };
+            let outcome = is_monorepo_outcome(Some(&repo), false);
+            assert_eq!(
+                outcome.value,
+                json!({
+                    "is_monorepo": true,
+                    "authority": "cargo-workspace",
+                    "orchestrators": ["nx"],
+                })
+            );
+            assert!(outcome.exit_code.is_none());
+        }
+
+        #[test]
+        fn is_monorepo_outcome_false_sets_exit_code() {
+            let outcome = is_monorepo_outcome(None, false);
+            assert_eq!(outcome.value, json!({ "is_monorepo": false }));
+            assert_eq!(outcome.exit_code, Some(1));
+        }
+
+        #[test]
+        fn is_monorepo_outcome_false_with_no_error_sets_exit_code_zero() {
+            let outcome = is_monorepo_outcome(None, true);
+            assert_eq!(outcome.value, json!({ "is_monorepo": false }));
+            assert_eq!(outcome.exit_code, Some(0));
+        }
+
+        #[test]
+        fn is_monorepo_outcome_monorepo_omits_empty_orchestrators() {
+            let repo = RepoInfo {
+                is_monorepo: true,
+                root: PathBuf::from("/repo"),
+                monorepo_layers: vec![MonorepoLayer {
+                    authority: MonorepoStandard::CargoWorkspace,
+                    orchestrators: vec![],
+                    provenance: sniff::filesystem::repo::PackageProvenance::Explicit,
+                    root: PathBuf::from("/repo"),
+                    lockfile_match: None,
+                    root_is_package: true,
+                    packages: vec!["pkg-a".to_string()],
+                }],
+                ..RepoInfo::default()
+            };
+            let outcome = is_monorepo_outcome(Some(&repo), false);
+            assert_eq!(
+                outcome.value,
+                json!({
+                    "is_monorepo": true,
+                    "authority": "cargo-workspace",
+                })
+            );
+            assert!(
+                outcome.value.get("orchestrators").is_none(),
+                "empty orchestrators must be omitted: {}",
+                outcome.value
+            );
+            assert!(outcome.exit_code.is_none());
+        }
+
+        #[test]
+        fn is_monorepo_outcome_monorepo_no_error_still_exits_zero() {
+            let repo = RepoInfo {
+                is_monorepo: true,
+                root: PathBuf::from("/repo"),
+                monorepo_layers: vec![MonorepoLayer {
+                    authority: MonorepoStandard::CargoWorkspace,
+                    orchestrators: vec![MonorepoStandard::Nx],
+                    provenance: sniff::filesystem::repo::PackageProvenance::Explicit,
+                    root: PathBuf::from("/repo"),
+                    lockfile_match: None,
+                    root_is_package: true,
+                    packages: vec!["pkg-a".to_string()],
+                }],
+                ..RepoInfo::default()
+            };
+            let outcome = is_monorepo_outcome(Some(&repo), true);
+            assert_eq!(
+                outcome.value,
+                json!({
+                    "is_monorepo": true,
+                    "authority": "cargo-workspace",
+                    "orchestrators": ["nx"],
+                })
+            );
             assert!(outcome.exit_code.is_none());
         }
 
@@ -2395,8 +2522,8 @@ mod tests {
 
         use super::*;
         use sniff::filesystem::repo::standard::{
-            BinarySource, DetectedStandard, DetectionConfidence, MonorepoLayer,
-            MonorepoStandard, PackageProvenance, ResolvedBinary,
+            BinarySource, DetectedStandard, DetectionConfidence, MonorepoLayer, MonorepoStandard,
+            PackageProvenance, ResolvedBinary,
         };
         use sniff::filesystem::repo::types::RepoInfo;
         use std::path::PathBuf;
@@ -2429,10 +2556,7 @@ mod tests {
                     provenance: PackageProvenance::Globbed,
                     lockfile_match: None,
                     root_is_package: false,
-                    packages: vec![
-                        PathBuf::from("pkg-a"),
-                        PathBuf::from("pkg-b"),
-                    ],
+                    packages: vec!["pkg-a".to_string(), "pkg-b".to_string()],
                 }],
                 packages: None,
             }
@@ -2482,7 +2606,11 @@ mod tests {
             assert_eq!(layers[0]["orchestrators"], json!(["nx"]));
             assert_eq!(layers[0]["provenance"], "globbed");
             assert!(
-                layers[0]["packages"].as_array().unwrap().iter().all(|p| p.is_string()),
+                layers[0]["packages"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|p| p.is_string()),
                 "layer packages must be path strings: {value}"
             );
         }
