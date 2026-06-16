@@ -1,4 +1,5 @@
 use crate::Result;
+use biscuit_file::serde_yaml_ng;
 use biscuit_file::toml_crate;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -13,26 +14,38 @@ use super::cargo::{
     cargo_dependencies_from_value, cargo_features_from_value, cargo_package_name,
     cargo_package_version, detect_cargo_workspace,
 };
-use super::go::{go_mod_dependencies_from_content, go_module_name_from_content};
+use super::dotnet::{detect_dotnet_solution, root_has_solution_file};
+use super::go::{
+    detect_go_workspace, go_mod_dependencies_from_content, go_module_name_from_content,
+};
+use super::gradle::detect_gradle_workspace;
 use super::manifest_index::{
     CargoLockVersions, ManifestIndex, discover_packages_from_index,
     discover_packages_with_optional_index as mi_discover_packages_with_optional_index,
 };
+use super::maven::detect_maven_workspace;
 use super::npm::{
-    detect_npm_workspace, detect_pnpm_workspace, detect_yarn_workspace, npm_package_name,
-    npm_package_version, package_json_dependencies_from_value,
-    parse_package_json_workspace_patterns, parse_pnpm_workspace_patterns,
-    resolve_js_package_manager,
+    detect_bun_workspace, detect_npm_workspace, detect_pnpm_workspace, detect_rush_workspace,
+    detect_yarn_workspace, npm_package_name, npm_package_version,
+    package_json_dependencies_from_value, parse_package_json_workspace_patterns,
+    parse_pnpm_workspace_patterns, resolve_js_package_manager,
 };
 use super::nx_turbo::{detect_lerna, detect_nx, detect_turborepo, parse_lerna_workspace_patterns};
+use super::polyglot::{detect_bazel_workspace, detect_buck2_workspace, detect_pants_workspace};
 use super::python::{
     parse_requirements_txt_dependencies, pyproject_dependencies_from_value, pyproject_package_name,
     pyproject_package_version,
+};
+use super::standard::{MonorepoLayer, MonorepoStandard, PackageProvenance, resolve_acting_binary};
+use super::topology::{
+    DetectorOutcome, build_detected_standards, build_monorepo_layers, layers_imply_monorepo,
+    standard_for_tool,
 };
 use super::types::{
     MonorepoTool, Package, PackageDiscoverySource, PackageEcosystem, PackageFiles,
     PackageScanResult, RepoInfo,
 };
+use super::uv::detect_uv_workspace;
 
 pub(crate) fn detect_repo_inner(
     root: &Path,
@@ -119,16 +132,32 @@ impl<'a> PackageBuildContext<'a> {
 /// names up front lets us avoid building the manifest index (a full recursive
 /// walk) for directories that cannot possibly be a workspace root.
 fn has_workspace_marker(root: &Path) -> bool {
-    const MARKERS: [&str; 7] = [
+    const MARKERS: [&str; 18] = [
         "Cargo.toml",          // cargo workspace
         "nx.json",             // nx
         "turbo.json",          // turborepo
         "pnpm-workspace.yaml", // pnpm workspaces
-        "package.json",        // npm / yarn workspaces
+        "package.json",        // npm / yarn / bun workspaces
         "yarn.lock",           // yarn workspaces
         "lerna.json",          // lerna
+        "pyproject.toml",      // uv workspace
+        "go.work",             // go workspace
+        "settings.gradle",     // gradle multi-project
+        "settings.gradle.kts", // gradle multi-project (kotlin dsl)
+        "pom.xml",             // maven multi-module
+        "rush.json",           // rush stack
+        "WORKSPACE",           // bazel
+        "WORKSPACE.bazel",     // bazel
+        "MODULE.bazel",        // bazel (bzlmod)
+        "pants.toml",          // pants
+        ".buckconfig",         // buck2
     ];
-    MARKERS.iter().any(|name| root.join(name).exists())
+    if MARKERS.iter().any(|name| root.join(name).exists()) {
+        return true;
+    }
+    // .NET solution files have arbitrary names, so they are matched by extension
+    // rather than by a fixed marker name.
+    root_has_solution_file(root)
 }
 
 pub(crate) fn detect_repo_inner_with_shared(
@@ -153,45 +182,128 @@ pub(crate) fn detect_repo_inner_with_shared(
 
     let mut workspace_tools = Vec::new();
     let mut packages = Vec::new();
+    let mut outcomes: Vec<DetectorOutcome> = Vec::new();
 
     collect_repo_info(
         detect_cargo_workspace(root)?,
         &mut workspace_tools,
         &mut packages,
+        &mut outcomes,
     );
     collect_repo_info(
         detect_nx(root, manifest_index)?,
         &mut workspace_tools,
         &mut packages,
+        &mut outcomes,
     );
     collect_repo_info(
         detect_turborepo(root, manifest_index)?,
         &mut workspace_tools,
         &mut packages,
+        &mut outcomes,
     );
     collect_repo_info(
         detect_pnpm_workspace(root)?,
         &mut workspace_tools,
         &mut packages,
+        &mut outcomes,
     );
     collect_repo_info(
         detect_yarn_workspace(root)?,
         &mut workspace_tools,
         &mut packages,
+        &mut outcomes,
     );
     collect_repo_info(
         detect_npm_workspace(root)?,
         &mut workspace_tools,
         &mut packages,
+        &mut outcomes,
     );
     collect_repo_info(
         detect_lerna(root, manifest_index)?,
         &mut workspace_tools,
         &mut packages,
+        &mut outcomes,
     );
 
-    if workspace_tools.is_empty() {
+    // New membership authorities (Bun, uv, Go) have no legacy `MonorepoTool`
+    // counterpart, so they contribute only to the new topology collections via an
+    // explicit standard rather than through `workspace_tools`.
+    collect_standard_outcome(
+        detect_bun_workspace(root)?,
+        MonorepoStandard::BunWorkspaces,
+        &mut packages,
+        &mut outcomes,
+    );
+    collect_standard_outcome(
+        detect_uv_workspace(root)?,
+        MonorepoStandard::UvWorkspace,
+        &mut packages,
+        &mut outcomes,
+    );
+    collect_standard_outcome(
+        detect_go_workspace(root)?,
+        MonorepoStandard::GoWorkspace,
+        &mut packages,
+        &mut outcomes,
+    );
+    collect_standard_outcome(
+        detect_gradle_workspace(root)?,
+        MonorepoStandard::GradleMultiProject,
+        &mut packages,
+        &mut outcomes,
+    );
+    collect_standard_outcome(
+        detect_maven_workspace(root)?,
+        MonorepoStandard::MavenMultiModule,
+        &mut packages,
+        &mut outcomes,
+    );
+    collect_standard_outcome(
+        detect_dotnet_solution(root)?,
+        MonorepoStandard::DotNetSolution,
+        &mut packages,
+        &mut outcomes,
+    );
+    collect_standard_outcome(
+        detect_rush_workspace(root)?,
+        MonorepoStandard::RushStack,
+        &mut packages,
+        &mut outcomes,
+    );
+
+    // Polyglot leaf-marker build systems contribute one outcome per workspace
+    // root (Bazel segments nested `WORKSPACE` subtrees into their own layer).
+    collect_outcomes(detect_bazel_workspace(root)?, &mut packages, &mut outcomes);
+    collect_outcomes(detect_pants_workspace(root)?, &mut packages, &mut outcomes);
+    collect_outcomes(detect_buck2_workspace(root)?, &mut packages, &mut outcomes);
+
+    if workspace_tools.is_empty() && outcomes.is_empty() {
         return Ok((None, None));
+    }
+
+    // Build the topology from membership-declaring detectors. `is_monorepo` is
+    // now the honest predicate: at least one layer must resolve non-degenerately.
+    // The legacy `monorepo_tool` / `workspace_tools` fields below stay populated
+    // exactly as before so existing JSON consumers see no change.
+    let mut monorepo_layers = build_monorepo_layers(&outcomes);
+    let is_monorepo = layers_imply_monorepo(&monorepo_layers);
+    let mut monorepo_standards =
+        build_detected_standards(root, &outcomes, &monorepo_layers, is_monorepo);
+
+    // Resolve the acting binary for every detected standard. A PATH-only index
+    // is sufficient: wrapper scripts are checked directly against `root`.
+    let executable_index = crate::executable_index::ExecutableIndex::build_path_only();
+    for standard in &mut monorepo_standards {
+        standard.binary =
+            resolve_acting_binary(standard.standard, &standard.root, &executable_index);
+    }
+
+    // Upgrade provenance to `Lockfile` for ecosystems where the committed
+    // lockfile is a high-fidelity membership source.
+    for layer in &mut monorepo_layers {
+        upgrade_provenance_with_lockfile(layer);
     }
 
     if !structure_only {
@@ -226,7 +338,7 @@ pub(crate) fn detect_repo_inner_with_shared(
 
     Ok((
         Some(RepoInfo {
-            is_monorepo: true,
+            is_monorepo,
             monorepo_tool: workspace_tools.first().copied(),
             workspace_tools,
             root: root.to_path_buf(),
@@ -234,6 +346,8 @@ pub(crate) fn detect_repo_inner_with_shared(
             dev_dependencies: None,
             peer_dependencies: None,
             optional_dependencies: None,
+            monorepo_standards,
+            monorepo_layers,
             packages: Some(packages),
         }),
         repo_inventory,
@@ -244,6 +358,7 @@ fn collect_repo_info(
     info: Option<RepoInfo>,
     workspace_tools: &mut Vec<MonorepoTool>,
     packages: &mut Vec<Package>,
+    outcomes: &mut Vec<DetectorOutcome>,
 ) {
     let Some(info) = info else {
         return;
@@ -263,9 +378,186 @@ fn collect_repo_info(
         }
     }
 
-    if let Some(mut detected_packages) = info.packages {
-        packages.append(&mut detected_packages);
+    let detected_packages = info.packages.unwrap_or_default();
+    // Record this detector's membership outcome for the topology builder before
+    // the packages are folded into the legacy flat list. Each detector reports a
+    // single tool, so one outcome is produced per matched standard.
+    if let Some(tool) = info.monorepo_tool {
+        outcomes.push(DetectorOutcome {
+            standard: standard_for_tool(tool),
+            root: info.root.clone(),
+            packages: detected_packages.clone(),
+        });
     }
+    packages.extend(detected_packages);
+}
+
+/// Fold a new-standard detector's result into the topology collections.
+///
+/// Unlike [`collect_repo_info`], this does not touch the legacy
+/// `workspace_tools` list: Bun, uv, and Go have no [`MonorepoTool`] counterpart,
+/// so they are reported purely through `monorepo_standards` / `monorepo_layers`.
+/// The detected packages still join the flat `packages` list so `RepoInfo`
+/// continues to surface them.
+fn collect_standard_outcome(
+    info: Option<RepoInfo>,
+    standard: MonorepoStandard,
+    packages: &mut Vec<Package>,
+    outcomes: &mut Vec<DetectorOutcome>,
+) {
+    let Some(info) = info else {
+        return;
+    };
+
+    let detected_packages = info.packages.unwrap_or_default();
+    outcomes.push(DetectorOutcome {
+        standard,
+        root: info.root.clone(),
+        packages: detected_packages.clone(),
+    });
+    packages.extend(detected_packages);
+}
+
+/// Fold a multi-root detector's outcomes into the topology collections.
+///
+/// Leaf-marker detectors (Bazel/Pants/Buck2) may report more than one workspace
+/// root, so they hand back a list of [`DetectorOutcome`]s rather than a single
+/// [`RepoInfo`]. Each outcome's packages also join the flat `packages` list so
+/// `RepoInfo` continues to surface them.
+fn collect_outcomes(
+    detected: Vec<DetectorOutcome>,
+    packages: &mut Vec<Package>,
+    outcomes: &mut Vec<DetectorOutcome>,
+) {
+    for outcome in detected {
+        packages.extend(outcome.packages.clone());
+        outcomes.push(outcome);
+    }
+}
+
+/// Upgrade a layer's provenance to `Lockfile` when the committed lockfile
+/// corroborates the manifest-derived package set.
+///
+/// The manifest remains the authority when lockfile and manifest disagree; the
+/// mismatch is recorded in `lockfile_match` so consumers can spot stale lockfiles.
+fn upgrade_provenance_with_lockfile(layer: &mut MonorepoLayer) {
+    let authority = layer.authority;
+    let lockfile_result = match authority {
+        MonorepoStandard::PnpmWorkspaces => pnpm_lockfile_matches(layer),
+        MonorepoStandard::UvWorkspace => uv_lockfile_matches(layer),
+        MonorepoStandard::CargoWorkspace => cargo_lockfile_matches(layer),
+        _ => return,
+    };
+
+    let Some(matches) = lockfile_result else {
+        return;
+    };
+
+    layer.lockfile_match = Some(matches);
+    if matches {
+        layer.provenance = PackageProvenance::Lockfile;
+        for pkg in &mut layer.packages {
+            pkg.provenance = PackageProvenance::Lockfile;
+        }
+    }
+}
+
+/// Parse `pnpm-lock.yaml` and compare its `importers:` keys to the layer's
+/// package set. Returns `Some(true)` when every manifest package has a matching
+/// importer, `Some(false)` when they disagree, and `None` when the lockfile is
+/// absent or unparseable.
+fn pnpm_lockfile_matches(layer: &MonorepoLayer) -> Option<bool> {
+    let lock_path = layer.root.join("pnpm-lock.yaml");
+    let content = std::fs::read_to_string(&lock_path).ok()?;
+    let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).ok()?;
+
+    let importers = parsed.get("importers")?.as_mapping()?;
+    let lock_members: std::collections::HashSet<String> = importers
+        .keys()
+        .filter_map(|k| k.as_str())
+        .map(|s| {
+            s.trim_start_matches('.')
+                .trim_start_matches('/')
+                .to_string()
+        })
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if lock_members.is_empty() {
+        return Some(false);
+    }
+
+    let manifest_members: std::collections::HashSet<String> = layer
+        .packages
+        .iter()
+        .map(|p| p.relative.to_string_lossy().into_owned().replace('\\', "/"))
+        .collect();
+
+    Some(manifest_members.iter().all(|m| lock_members.contains(m)))
+}
+
+/// Parse `uv.lock` and compare its `workspace.members` entries to the layer's
+/// package set.
+fn uv_lockfile_matches(layer: &MonorepoLayer) -> Option<bool> {
+    let lock_path = layer.root.join("uv.lock");
+    let content = std::fs::read_to_string(&lock_path).ok()?;
+    let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
+
+    let members = parsed.get("workspace")?.get("members")?.as_array()?;
+
+    let lock_members: std::collections::HashSet<String> = members
+        .iter()
+        .filter_map(|v| {
+            if let Some(s) = v.as_str() {
+                return Some(s.trim_end_matches('/').to_string());
+            }
+            v.get("root")
+                .and_then(|r| r.as_str())
+                .map(|s| s.trim_end_matches('/').to_string())
+        })
+        .collect();
+
+    if lock_members.is_empty() {
+        return Some(false);
+    }
+
+    let manifest_members: std::collections::HashSet<String> = layer
+        .packages
+        .iter()
+        .map(|p| p.relative.to_string_lossy().into_owned().replace('\\', "/"))
+        .collect();
+
+    Some(manifest_members.iter().all(|m| lock_members.contains(m)))
+}
+
+/// Check that every globbed Cargo member has a `[package].name` present in the
+/// root `Cargo.lock` `[[package]]` table.
+fn cargo_lockfile_matches(layer: &MonorepoLayer) -> Option<bool> {
+    let lock_path = layer.root.join("Cargo.lock");
+    let lock_versions = CargoLockVersions::parse(&lock_path)?;
+
+    for pkg in &layer.packages {
+        let cargo_toml = layer.root.join(&pkg.relative).join("Cargo.toml");
+        let name = std::fs::read_to_string(&cargo_toml)
+            .ok()
+            .and_then(|content| toml_crate::from_str::<toml_crate::Value>(&content).ok())
+            .and_then(|parsed| {
+                parsed
+                    .get("package")?
+                    .get("name")?
+                    .as_str()
+                    .map(String::from)
+            });
+
+        let Some(name) = name else {
+            return Some(false);
+        };
+        if lock_versions.resolve(&name).is_none() {
+            return Some(false);
+        }
+    }
+
+    Some(true)
 }
 
 pub(crate) fn collect_default_workspace_patterns(root: &Path) -> Vec<String> {
@@ -965,53 +1257,6 @@ pub(crate) fn discover_packages_with_optional_index(
     index: Option<&ManifestIndex>,
 ) -> Vec<Package> {
     mi_discover_packages_with_optional_index(root, tool, lock_versions, discovery_source, index)
-}
-
-#[allow(dead_code)]
-/// Expand glob patterns and parse dependencies for Cargo workspaces.
-pub(crate) fn expand_glob_patterns_with_deps(
-    root: &Path,
-    patterns: &[String],
-    tool: MonorepoTool,
-    lock_versions: &Option<CargoLockVersions>,
-) -> Vec<Package> {
-    let mut packages = Vec::new();
-
-    for pattern in patterns {
-        if pattern.contains('*') {
-            let parts: Vec<&str> = pattern.split('*').collect();
-            if let Some(prefix) = parts.first() {
-                let search_dir = root.join(prefix.trim_end_matches('/'));
-                if let Ok(entries) = std::fs::read_dir(&search_dir) {
-                    for entry in entries.filter_map(|e| e.ok()) {
-                        if entry.path().is_dir() {
-                            let path = entry.path();
-                            packages.push(create_package(
-                                &path,
-                                root,
-                                tool,
-                                lock_versions,
-                                discovery_source_for_tool(tool),
-                            ));
-                        }
-                    }
-                }
-            }
-        } else {
-            let path = root.join(pattern);
-            if path.exists() {
-                packages.push(create_package(
-                    &path,
-                    root,
-                    tool,
-                    lock_versions,
-                    discovery_source_for_tool(tool),
-                ));
-            }
-        }
-    }
-
-    packages
 }
 
 /// Creates a Package with all metadata and parsed dependencies.

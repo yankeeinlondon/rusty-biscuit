@@ -7,10 +7,12 @@ use biscuit_file::toml_crate;
 use crate::package::{DependencyEntry, DependencyKind};
 use crate::{Result, SniffError};
 
+use super::glob::expand_membership_globs;
 use super::manifest_index::CargoLockVersions;
+use super::standard::{GlobDialect, MonorepoStandard};
 use super::types::{MonorepoTool, RepoInfo};
 
-use super::detection::{expand_glob_patterns_with_deps, resolve_internal_deps};
+use super::detection::resolve_internal_deps;
 
 pub(super) fn detect_cargo_workspace(root: &Path) -> Result<Option<RepoInfo>> {
     let cargo_toml = root.join("Cargo.toml");
@@ -57,18 +59,24 @@ pub(super) fn detect_cargo_workspace(root: &Path) -> Result<Option<RepoInfo>> {
         })
         .unwrap_or_default();
 
+    let dialect = MonorepoStandard::CargoWorkspace
+        .glob_dialect()
+        .unwrap_or(GlobDialect::Cargo);
+
     // Expand globs and collect packages with dependencies
-    let mut packages = expand_glob_patterns_with_deps(
+    let mut packages = expand_membership_globs(
         root,
         &members,
+        dialect,
         MonorepoTool::CargoWorkspace,
         &lock_versions,
     );
 
     // Expand excluded patterns and mark them
-    let mut excluded_packages = expand_glob_patterns_with_deps(
+    let mut excluded_packages = expand_membership_globs(
         root,
         &excludes,
+        dialect,
         MonorepoTool::CargoWorkspace,
         &lock_versions,
     );
@@ -89,6 +97,8 @@ pub(super) fn detect_cargo_workspace(root: &Path) -> Result<Option<RepoInfo>> {
         dev_dependencies: None,
         peer_dependencies: None,
         optional_dependencies: None,
+        monorepo_standards: Vec::new(),
+        monorepo_layers: Vec::new(),
         packages: Some(packages),
     }))
 }

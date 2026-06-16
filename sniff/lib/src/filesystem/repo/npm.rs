@@ -7,8 +7,10 @@ use biscuit_file::serde_yaml_ng;
 use crate::package::{DependencyEntry, DependencyKind};
 use crate::{Result, SniffError};
 
-use super::detection::{dedupe_packages, expand_glob_patterns_with_deps, resolve_internal_deps};
-use super::types::{MonorepoTool, RepoInfo};
+use super::detection::{create_package, dedupe_packages, resolve_internal_deps};
+use super::glob::expand_membership_globs;
+use super::standard::{GlobDialect, MonorepoStandard};
+use super::types::{MonorepoTool, PackageDiscoverySource, RepoInfo};
 
 /// Parses a single dependency section from package.json.
 pub(super) fn parse_package_json_dep_section(
@@ -124,9 +126,13 @@ pub(super) fn detect_pnpm_workspace(root: &Path) -> Result<Option<RepoInfo>> {
     }
 
     let lock_versions = None;
-    let mut package_locations = expand_glob_patterns_with_deps(
+    let dialect = MonorepoStandard::PnpmWorkspaces
+        .glob_dialect()
+        .unwrap_or(GlobDialect::Minimatch);
+    let mut package_locations = expand_membership_globs(
         root,
         &packages,
+        dialect,
         MonorepoTool::PnpmWorkspaces,
         &lock_versions,
     );
@@ -142,11 +148,25 @@ pub(super) fn detect_pnpm_workspace(root: &Path) -> Result<Option<RepoInfo>> {
         dev_dependencies: None,
         peer_dependencies: None,
         optional_dependencies: None,
+        monorepo_standards: Vec::new(),
+        monorepo_layers: Vec::new(),
         packages: Some(package_locations),
     }))
 }
 
-pub(super) fn detect_npm_workspace(root: &Path) -> Result<Option<RepoInfo>> {
+/// Whether a Bun lockfile (`bun.lock` or `bun.lockb`) is present at `root`.
+///
+/// Bun and npm/yarn all declare members via `package.json#workspaces`; the
+/// lockfile is what disambiguates Bun so it wins the membership authority.
+fn has_bun_lockfile(root: &Path) -> bool {
+    root.join("bun.lock").exists() || root.join("bun.lockb").exists()
+}
+
+pub(super) fn detect_bun_workspace(root: &Path) -> Result<Option<RepoInfo>> {
+    if !has_bun_lockfile(root) {
+        return Ok(None);
+    }
+
     let package_json = root.join("package.json");
     if !package_json.exists() {
         return Ok(None);
@@ -159,9 +179,60 @@ pub(super) fn detect_npm_workspace(root: &Path) -> Result<Option<RepoInfo>> {
     }
 
     let lock_versions = None;
-    let mut packages = expand_glob_patterns_with_deps(
+    let dialect = MonorepoStandard::BunWorkspaces
+        .glob_dialect()
+        .unwrap_or(GlobDialect::Minimatch);
+    let mut packages = expand_membership_globs(
         root,
         &workspaces,
+        dialect,
+        MonorepoTool::Unknown,
+        &lock_versions,
+    );
+    packages = dedupe_packages(packages);
+    resolve_internal_deps(&mut packages);
+
+    Ok(Some(RepoInfo {
+        is_monorepo: true,
+        monorepo_tool: None,
+        workspace_tools: Vec::new(),
+        root: root.to_path_buf(),
+        dependencies: None,
+        dev_dependencies: None,
+        peer_dependencies: None,
+        optional_dependencies: None,
+        monorepo_standards: Vec::new(),
+        monorepo_layers: Vec::new(),
+        packages: Some(packages),
+    }))
+}
+
+pub(super) fn detect_npm_workspace(root: &Path) -> Result<Option<RepoInfo>> {
+    let package_json = root.join("package.json");
+    if !package_json.exists() {
+        return Ok(None);
+    }
+
+    // Bun reuses `package.json#workspaces`; when a Bun lockfile is present, the
+    // Bun detector owns membership and npm must not also claim this root.
+    if has_bun_lockfile(root) {
+        return Ok(None);
+    }
+
+    let workspaces = parse_package_json_workspace_patterns(&package_json)?.unwrap_or_default();
+
+    if workspaces.is_empty() {
+        return Ok(None);
+    }
+
+    let lock_versions = None;
+    let dialect = MonorepoStandard::NpmWorkspaces
+        .glob_dialect()
+        .unwrap_or(GlobDialect::Minimatch);
+    let mut packages = expand_membership_globs(
+        root,
+        &workspaces,
+        dialect,
         MonorepoTool::NpmWorkspaces,
         &lock_versions,
     );
@@ -177,6 +248,8 @@ pub(super) fn detect_npm_workspace(root: &Path) -> Result<Option<RepoInfo>> {
         dev_dependencies: None,
         peer_dependencies: None,
         optional_dependencies: None,
+        monorepo_standards: Vec::new(),
+        monorepo_layers: Vec::new(),
         packages: Some(packages),
     }))
 }
@@ -198,9 +271,13 @@ pub(super) fn detect_yarn_workspace(root: &Path) -> Result<Option<RepoInfo>> {
     }
 
     let lock_versions = None;
-    let mut packages = expand_glob_patterns_with_deps(
+    let dialect = MonorepoStandard::YarnWorkspaces
+        .glob_dialect()
+        .unwrap_or(GlobDialect::Minimatch);
+    let mut packages = expand_membership_globs(
         root,
         &workspaces,
+        dialect,
         MonorepoTool::YarnWorkspaces,
         &lock_versions,
     );
@@ -216,8 +293,86 @@ pub(super) fn detect_yarn_workspace(root: &Path) -> Result<Option<RepoInfo>> {
         dev_dependencies: None,
         peer_dependencies: None,
         optional_dependencies: None,
+        monorepo_standards: Vec::new(),
+        monorepo_layers: Vec::new(),
         packages: Some(packages),
     }))
+}
+
+pub(super) fn detect_rush_workspace(root: &Path) -> Result<Option<RepoInfo>> {
+    let rush_json = root.join("rush.json");
+    if !rush_json.exists() {
+        return Ok(None);
+    }
+
+    let content = std::fs::read_to_string(&rush_json)?;
+    let folders = parse_rush_project_folders(&content);
+    if folders.is_empty() {
+        return Ok(None);
+    }
+
+    let lock_versions = None;
+    let mut packages = Vec::new();
+    for folder in folders {
+        let member_path = root.join(&folder);
+        if !member_path.exists() {
+            continue;
+        }
+        packages.push(create_package(
+            &member_path,
+            root,
+            MonorepoTool::Unknown,
+            &lock_versions,
+            PackageDiscoverySource::ManifestScan,
+        ));
+    }
+
+    if packages.is_empty() {
+        return Ok(None);
+    }
+
+    packages = dedupe_packages(packages);
+    resolve_internal_deps(&mut packages);
+
+    Ok(Some(RepoInfo {
+        is_monorepo: true,
+        monorepo_tool: None,
+        workspace_tools: Vec::new(),
+        root: root.to_path_buf(),
+        dependencies: None,
+        dev_dependencies: None,
+        peer_dependencies: None,
+        optional_dependencies: None,
+        monorepo_standards: Vec::new(),
+        monorepo_layers: Vec::new(),
+        packages: Some(packages),
+    }))
+}
+
+/// Parse the `projectFolder` of each entry in `rush.json#projects`.
+///
+/// Rush's `projects` array lists `{ projectFolder, packageName }` objects whose
+/// `projectFolder` is a repo-relative directory. Entries without a string
+/// `projectFolder` are skipped.
+fn parse_rush_project_folders(content: &str) -> Vec<String> {
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(content) else {
+        return Vec::new();
+    };
+    parsed
+        .get("projects")
+        .and_then(|v| v.as_array())
+        .map(|projects| {
+            projects
+                .iter()
+                .filter_map(|project| {
+                    project
+                        .get("projectFolder")
+                        .and_then(|v| v.as_str())
+                        .map(String::from)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub(super) fn parse_pnpm_workspace_patterns(pnpm_workspace_path: &Path) -> Result<Vec<String>> {
@@ -300,4 +455,28 @@ pub(super) fn resolve_js_package_manager(
     }
 
     "npm"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_rush_projects_reads_project_folders() {
+        let content = r#"{
+            "projects": [
+                { "packageName": "@scope/app", "projectFolder": "apps/app" },
+                { "packageName": "@scope/lib", "projectFolder": "libraries/lib" }
+            ]
+        }"#;
+        assert_eq!(
+            parse_rush_project_folders(content),
+            vec!["apps/app".to_string(), "libraries/lib".to_string()]
+        );
+    }
+
+    #[test]
+    fn parse_rush_projects_empty_when_absent() {
+        assert!(parse_rush_project_folders(r#"{"rushVersion": "5.0.0"}"#).is_empty());
+    }
 }

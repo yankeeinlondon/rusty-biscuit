@@ -8,9 +8,11 @@ use crate::Result;
 
 use super::detection::{
     collect_default_workspace_patterns, dedupe_packages, dedupe_patterns,
-    discover_packages_with_optional_index, expand_glob_patterns_with_deps, resolve_internal_deps,
+    discover_packages_with_optional_index, resolve_internal_deps,
 };
+use super::glob::expand_membership_globs;
 use super::manifest_index::ManifestIndex;
+use super::standard::{GlobDialect, MonorepoStandard};
 use super::types::{MonorepoTool, PackageDiscoverySource, RepoInfo};
 
 pub(super) fn detect_nx(root: &Path, index: Option<&ManifestIndex>) -> Result<Option<RepoInfo>> {
@@ -33,7 +35,10 @@ pub(super) fn detect_nx(root: &Path, index: Option<&ManifestIndex>) -> Result<Op
             index,
         )
     } else {
-        expand_glob_patterns_with_deps(root, &patterns, MonorepoTool::Nx, &lock_versions)
+        let dialect = MonorepoStandard::Nx
+            .glob_dialect()
+            .unwrap_or(GlobDialect::Minimatch);
+        expand_membership_globs(root, &patterns, dialect, MonorepoTool::Nx, &lock_versions)
     };
     if packages.is_empty() {
         packages = discover_packages_with_optional_index(
@@ -56,6 +61,8 @@ pub(super) fn detect_nx(root: &Path, index: Option<&ManifestIndex>) -> Result<Op
         dev_dependencies: None,
         peer_dependencies: None,
         optional_dependencies: None,
+        monorepo_standards: Vec::new(),
+        monorepo_layers: Vec::new(),
         packages: Some(packages),
     }))
 }
@@ -80,7 +87,16 @@ pub(super) fn detect_turborepo(
             index,
         )
     } else {
-        expand_glob_patterns_with_deps(root, &patterns, MonorepoTool::Turborepo, &lock_versions)
+        let dialect = MonorepoStandard::Turborepo
+            .glob_dialect()
+            .unwrap_or(GlobDialect::Minimatch);
+        expand_membership_globs(
+            root,
+            &patterns,
+            dialect,
+            MonorepoTool::Turborepo,
+            &lock_versions,
+        )
     };
     if packages.is_empty() {
         packages = discover_packages_with_optional_index(
@@ -103,6 +119,8 @@ pub(super) fn detect_turborepo(
         dev_dependencies: None,
         peer_dependencies: None,
         optional_dependencies: None,
+        monorepo_standards: Vec::new(),
+        monorepo_layers: Vec::new(),
         packages: Some(packages),
     }))
 }
@@ -127,7 +145,16 @@ pub(super) fn detect_lerna(root: &Path, index: Option<&ManifestIndex>) -> Result
             index,
         )
     } else {
-        expand_glob_patterns_with_deps(root, &patterns, MonorepoTool::Lerna, &lock_versions)
+        let dialect = MonorepoStandard::Lerna
+            .glob_dialect()
+            .unwrap_or(GlobDialect::Minimatch);
+        expand_membership_globs(
+            root,
+            &patterns,
+            dialect,
+            MonorepoTool::Lerna,
+            &lock_versions,
+        )
     };
     if packages.is_empty() {
         packages = discover_packages_with_optional_index(
@@ -150,6 +177,8 @@ pub(super) fn detect_lerna(root: &Path, index: Option<&ManifestIndex>) -> Result
         dev_dependencies: None,
         peer_dependencies: None,
         optional_dependencies: None,
+        monorepo_standards: Vec::new(),
+        monorepo_layers: Vec::new(),
         packages: Some(packages),
     }))
 }
