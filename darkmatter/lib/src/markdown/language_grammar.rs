@@ -563,8 +563,11 @@ fn is_plain_text_token(token: &str) -> bool {
 /// 3. Extension lookup.
 /// 4. Exact name lookup.
 /// 5. Case-insensitive name lookup.
-/// 6. Return `OtherByToken` only if the syntax set can resolve it.
+/// 6. Extensionless alias map (`make` → Makefile, `dockerfile` → Dockerfile).
 /// 7. Otherwise `UnknownGrammar`.
+///
+/// Steps 3-6 return [`OtherByToken`](LanguageGrammar::OtherByToken) preserving
+/// the caller's spelling so downstream `Display` echoes the original token.
 fn resolve_token(
     token: &str,
 ) -> Result<LanguageGrammar, LanguageGrammarError> {
@@ -578,12 +581,23 @@ fn resolve_token(
         return Ok(LanguageGrammar::OtherByToken(token.to_string()));
     }
 
-    if load_syntax_set().find_syntax_by_extension(token).is_some()
-        || load_syntax_set().find_syntax_by_name(token).is_some()
-        || load_syntax_set()
+    let syntax_set = load_syntax_set();
+    if syntax_set.find_syntax_by_extension(token).is_some()
+        || syntax_set.find_syntax_by_name(token).is_some()
+        || syntax_set
             .syntaxes()
             .iter()
             .any(|s| s.name.to_ascii_lowercase() == lower)
+    {
+        return Ok(LanguageGrammar::OtherByToken(token.to_string()));
+    }
+
+    // Well-known extensionless tokens (`make`, `dockerfile`, `c++`) are neither
+    // syntect extensions nor names; consult the shared alias table before
+    // giving up. Mirrors the path in `from_filename` / `find_via_token`.
+    if let Some(alias) = extensionless_alias(&lower)
+        && (syntax_set.find_syntax_by_extension(alias).is_some()
+            || syntax_set.find_syntax_by_name(alias).is_some())
     {
         return Ok(LanguageGrammar::OtherByToken(token.to_string()));
     }
@@ -728,6 +742,10 @@ mod tests {
         ));
         assert!(matches!(
             LanguageGrammar::from_token("makefile").unwrap(),
+            LanguageGrammar::OtherByToken(_)
+        ));
+        assert!(matches!(
+            LanguageGrammar::from_token("make").unwrap(),
             LanguageGrammar::OtherByToken(_)
         ));
         assert!(matches!(
@@ -1070,6 +1088,39 @@ mod tests {
         let grammar = LanguageGrammar::from_filename("make").expect("make alias resolves");
         assert!(matches!(grammar, LanguageGrammar::OtherByToken(_)));
         assert!(grammar.resolve_default().is_ok());
+    }
+
+    #[test]
+    fn make_alias_resolves_across_token_paths() {
+        // Spec contract: `make` resolves to the Makefile grammar on every
+        // public token path, preserving the caller's spelling.
+        for grammar in [
+            LanguageGrammar::from_token("make").expect("from_token(make)"),
+            LanguageGrammar::try_from("make").expect("try_from(make)"),
+            LanguageGrammar::from_str("make").expect("from_str(make)"),
+        ] {
+            assert!(
+                matches!(grammar, LanguageGrammar::OtherByToken(ref s) if s == "make"),
+                "make should preserve its spelling as OtherByToken, got {grammar:?}"
+            );
+            let syntax = grammar.resolve_default().expect("make resolves to a syntax");
+            assert_eq!(syntax.name, "Makefile", "make should resolve to Makefile, got {}", syntax.name);
+            assert_eq!(format!("{grammar}"), "make", "Display should echo the token");
+        }
+
+        // Lossy paths never fail: unknown becomes PlainText, but `make` resolves.
+        let lossy = LanguageGrammar::from_lossy("make");
+        assert!(
+            matches!(lossy, LanguageGrammar::OtherByToken(ref s) if s == "make"),
+            "from_lossy(make) should resolve, got {lossy:?}"
+        );
+        assert!(lossy.resolve_default().is_ok());
+
+        let token_or_plain = LanguageGrammar::from_token_or_plain_text("make");
+        assert!(
+            matches!(token_or_plain, LanguageGrammar::OtherByToken(ref s) if s == "make"),
+            "from_token_or_plain_text(make) should resolve, got {token_or_plain:?}"
+        );
     }
 
     #[test]
