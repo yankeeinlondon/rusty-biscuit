@@ -192,6 +192,8 @@ properties are computed.
 | `ctx.cpu_cores` | Number of logical CPU cores |
 | `ctx.cpu_arch` | CPU architecture (e.g., aarch64, x86_64) |
 | `ctx.gpu` | GPU device name(s), comma-separated; null if none |
+| `ctx.agent` | Executing agentic CLI name (from `AGENT` env var); defaults to `"unknown"` |
+| `ctx.model` | Active model identifier (from `MODEL` env var); defaults to `"default"` |
 
 All date/time variables have `_utc` variants (e.g., `today_utc`, `day_utc`,
 `year_utc`). Week boundary variables are also available:

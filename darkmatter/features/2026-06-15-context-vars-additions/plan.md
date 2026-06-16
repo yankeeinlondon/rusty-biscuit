@@ -4,6 +4,20 @@ phases: 7
 created: "2026-06-15"
 start_phase: 1
 yolo: "true"
+source_files_during_phase_1:
+  - darkmatter/lib/src/markdown/compose/expression/functions.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/compose/context/capture.rs
+  - darkmatter/lib/src/markdown/compose/context/catalog.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/darkmatter/compose.md
+packages:
+  - darkmatter
 ---
 
 # Execution Plan: Context Variables and Expression Function Additions
@@ -74,19 +88,19 @@ Build the reusable helpers that multiple later phases depend on. No public
 expression surface changes in this phase; these are internal utilities with
 their own unit tests.
 
-- [ ] **1.1** Add indexed-filename grammar parser
+- [x] **1.1** Add indexed-filename grammar parser
   - Add a private helper (e.g. `parse_indexed_stem(stem: &str) -> Option<IndexedName>`) in `functions.rs` implementing the spec's `(?P<base>.+)-(?P<digits>[0-9]+)` rule.
   - `IndexedName` carries `base: String` and `index: u64` (parsed, unpadded).
   - Reject `review1.md`, `review_1.md`, `review-.md`, `review--1.md`; accept `review-1.md`, `review-100.md`, `review-001.md`.
   - Add an extension-splitter helper: extension is everything after the final `.` in the basename; empty when no `.`.
   - Unit-test accept/reject cases from the spec's grammar examples.
 
-- [ ] **1.2** Generalize the path display policy into a reusable helper
+- [x] **1.2** Generalize the path display policy into a reusable helper
   - The existing `make_relative(abs, base_dir)` produces the display path; extract/extend so path-component functions (`basename`, `dir`, `parent_dir`, `file_trailing`, `dir_leading`) can split the *resolved absolute path* with `std::path` and then render the relevant component using `/` separators.
   - Add a helper `display_path_with_forward_slashes(path: &Path) -> String` that joins components with `/` for stable Markdown output (per spec: "Use platform path semantics from `std::path` for splitting, but return `/` as the separator in composed strings").
   - Ensure `make_relative` continues to honor repo-root relative → base_dir relative → `~`-aliased → absolute, unchanged.
 
-- [ ] **1.3** Add skill-root discovery abstraction (injectable for tests)
+- [x] **1.3** Add skill-root discovery abstraction (injectable for tests)
   - Create a small struct/trait (e.g. `SkillRoots`) that resolves user-scoped and local-scoped skill roots.
   - User-scoped roots derived from an injectable home dir:
     - Claude: `~/.claude/skills`
@@ -99,13 +113,13 @@ their own unit tests.
   - Must NOT depend on the developer's real home directory — accept an injected home path so tests are hermetic.
   - Unit-test alias normalization and root selection with a temp-dir home.
 
-- [ ] **1.4** Add strict calendar-date substring matcher (for `without_date`)
+- [x] **1.4** Add strict calendar-date substring matcher (for `without_date`)
   - A helper that scans a string for `YYYY-MM-DD` substrings and removes only those that parse as real `NaiveDate` values (reuse `parse_iso_date` already in `functions.rs`).
   - `2026-02-30` is NOT removed (not a real date). Full datetimes keep only their valid date substring removed.
   - Do not collapse leftover whitespace/punctuation (spec: callers compose further cleanup).
   - Unit-test real vs. invalid dates and datetime substring cases.
 
-- [ ] **Checkpoint 1** — `just check darkmatter` compiles; new helper unit tests pass (`cargo nextest run -p darkmatter` filtered to the new test module).
+- [x] **Checkpoint 1** — `just check darkmatter` compiles; new helper unit tests pass (`cargo nextest run -p darkmatter` filtered to the new test module).
 
 ---
 
@@ -114,24 +128,24 @@ their own unit tests.
 Add the demand-driven `Agent` capture group with `ctx.agent` and `ctx.model`.
 This phase is independent of Phases 3-5 and may proceed in parallel.
 
-- [ ] **2.1** Add `ContextGroup::Agent` variant
+- [x] **2.1** Add `ContextGroup::Agent` variant
   - In `capture.rs`: add the variant to the `ContextGroup` enum.
   - Update `ContextGroup::all()` to return 9 groups (add `Self::Agent`).
   - Update `ContextGroup::for_key()` to map `"agent" | "model" => Some(Self::Agent)`.
   - No new I/O: this group reads `std::env` with trimming + defaults.
 
-- [ ] **2.2** Implement `populate_agent(values: &mut Map)`
+- [x] **2.2** Implement `populate_agent(values: &mut Map)`
   - Read `AGENT` env var: trim ASCII whitespace; missing/empty → `"unknown"`.
   - Read `MODEL` env var: trim ASCII whitespace; missing/empty → `"default"`.
   - No model allowlist (spec Non-Goal).
   - Both keys always inserted as `Value::String`.
   - Wire into `capture_runtime_context_for_groups` under the `ContextGroup::Agent` branch.
 
-- [ ] **2.3** Add context variable descriptors
+- [x] **2.3** Add context variable descriptors
   - In `catalog.rs` `CONTEXT_VARIABLE_DESCRIPTORS`: add a new `// ── Agent ──` section with two descriptors (`agent`, `model`), `ContextValueType::String`, category `"Agent"`.
   - This satisfies the `descriptor_name_set_equals_captured_runtime_key_set` parity test.
 
-- [ ] **2.4** Context capture tests
+- [x] **2.4** Context capture tests
   - `AGENT` set → captured value matches (after trim).
   - `MODEL` set → captured value matches (after trim).
   - `AGENT` unset/empty → `"unknown"`.
@@ -140,7 +154,7 @@ This phase is independent of Phases 3-5 and may proceed in parallel.
   - Descriptor parity test stays green (it captures against the real environment, so assert presence not specific values where the env var is unset).
   - Use `serial_test` if mutating env vars to avoid cross-test interference.
 
-- [ ] **Checkpoint 2** — `just check darkmatter`; `cargo nextest run -p darkmatter` context module tests green; descriptor parity test green.
+- [x] **Checkpoint 2** — `just check darkmatter`; `cargo nextest run -p darkmatter` context module tests green; descriptor parity test green.
 
 ---
 
