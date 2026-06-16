@@ -1,3 +1,8 @@
+// `MonorepoTool` is deprecated but these integration tests still assert the
+// legacy `monorepo_tool` / `workspace_tools` fields are populated for backward
+// compatibility. Silence the expected deprecation noise during the migration.
+#![allow(deprecated)]
+
 use sniff::filesystem::ProgrammingLanguage;
 use sniff::os::NtpStatus;
 use sniff::request::DetectionPlan;
@@ -187,6 +192,36 @@ fn test_detect_pnpm_workspace() {
 }
 
 #[test]
+fn test_membership_glob_discovers_deep_nested_packages() {
+    // `members/**` resolves package boundaries at depth two. Structure-mode
+    // detection skips the manifest-index nested walk, so the packages reported
+    // here come solely from the dialect-aware membership glob expander. The
+    // former prefix-only expander reported the intermediate `members/group-*`
+    // directories and missed these named packages.
+    let (_dir, path) = fixtures::create_nested_glob_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("nested glob workspace should be detected as a monorepo");
+
+    let names: Vec<&str> = repo
+        .packages
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|pkg| pkg.name.as_str())
+        .collect();
+
+    assert!(
+        names.contains(&"pkg-one"),
+        "expected deep package pkg-one, got {names:?}"
+    );
+    assert!(
+        names.contains(&"pkg-two"),
+        "expected deep package pkg-two, got {names:?}"
+    );
+}
+
+#[test]
 fn test_detect_language_uses_package_boundary_from_nested_workspace() {
     let (_dir, path) = fixtures::create_mixed_nested_workspace();
     let result = sniff::detect_with_plan(
@@ -214,6 +249,635 @@ fn test_detect_language_uses_package_boundary_from_nested_workspace() {
             .iter()
             .any(|lang| lang.language == ProgrammingLanguage::TypeScript)
     );
+}
+
+// ============================================================================
+// Monorepo topology (MonorepoLayer / monorepo_standards) integration tests
+// ============================================================================
+
+#[test]
+fn test_cargo_workspace_topology_layer_and_legacy_fields() {
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_cargo_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("cargo workspace should be detected");
+
+    assert!(repo.is_monorepo);
+    // One membership authority at one root.
+    assert_eq!(repo.monorepo_layers.len(), 1);
+    let layer = &repo.monorepo_layers[0];
+    assert_eq!(layer.authority, MonorepoStandard::CargoWorkspace);
+    assert!(layer.orchestrators.is_empty());
+    assert_eq!(layer.packages.len(), 2);
+
+    // Legacy contract is unchanged.
+    assert_eq!(
+        repo.monorepo_tool,
+        Some(sniff::filesystem::MonorepoTool::CargoWorkspace)
+    );
+    assert_eq!(
+        repo.workspace_tools,
+        vec![sniff::filesystem::MonorepoTool::CargoWorkspace]
+    );
+}
+
+#[test]
+fn test_pnpm_workspace_topology_layer_and_legacy_fields() {
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_pnpm_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("pnpm workspace should be detected");
+
+    assert!(repo.is_monorepo);
+    assert_eq!(repo.monorepo_layers.len(), 1);
+    assert_eq!(
+        repo.monorepo_layers[0].authority,
+        MonorepoStandard::PnpmWorkspaces
+    );
+
+    // Legacy contract is unchanged.
+    assert_eq!(
+        repo.monorepo_tool,
+        Some(sniff::filesystem::MonorepoTool::PnpmWorkspaces)
+    );
+}
+
+#[test]
+fn test_pnpm_lockfile_parity_upgrades_provenance() {
+    use sniff::filesystem::{MonorepoStandard, PackageProvenance};
+
+    let (_dir, path) = fixtures::create_pnpm_workspace_with_lockfile();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("pnpm workspace should be detected");
+
+    assert_eq!(repo.monorepo_layers.len(), 1);
+    let layer = &repo.monorepo_layers[0];
+    assert_eq!(layer.authority, MonorepoStandard::PnpmWorkspaces);
+    assert_eq!(layer.provenance, PackageProvenance::Lockfile);
+    assert_eq!(layer.lockfile_match, Some(true));
+    assert!(
+        layer
+            .packages
+            .iter()
+            .all(|p| p.provenance == PackageProvenance::Lockfile)
+    );
+}
+
+#[test]
+fn test_pnpm_lockfile_drift_records_mismatch() {
+    use sniff::filesystem::{MonorepoStandard, PackageProvenance};
+
+    let (_dir, path) = fixtures::create_pnpm_workspace_with_drifted_lockfile();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("pnpm workspace should be detected");
+
+    assert_eq!(repo.monorepo_layers.len(), 1);
+    let layer = &repo.monorepo_layers[0];
+    assert_eq!(layer.authority, MonorepoStandard::PnpmWorkspaces);
+    // Manifest remains the authority; lockfile mismatch is recorded.
+    assert_eq!(layer.provenance, PackageProvenance::Globbed);
+    assert_eq!(layer.lockfile_match, Some(false));
+}
+
+#[test]
+fn test_mixed_nested_workspace_has_layer_per_authority() {
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_mixed_nested_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("mixed nested workspace should be detected");
+
+    assert!(repo.is_monorepo);
+    // Cargo and pnpm both declare membership at the same root → one layer each.
+    let authorities: Vec<MonorepoStandard> =
+        repo.monorepo_layers.iter().map(|l| l.authority).collect();
+    assert!(authorities.contains(&MonorepoStandard::CargoWorkspace));
+    assert!(authorities.contains(&MonorepoStandard::PnpmWorkspaces));
+
+    // Legacy fields: cargo is detected first, so it remains the primary tool.
+    assert_eq!(
+        repo.monorepo_tool,
+        Some(sniff::filesystem::MonorepoTool::CargoWorkspace)
+    );
+    assert!(
+        repo.workspace_tools
+            .contains(&sniff::filesystem::MonorepoTool::PnpmWorkspaces)
+    );
+}
+
+#[test]
+fn test_nx_pnpm_layer_has_pnpm_authority_and_nx_orchestrator() {
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_nx_pnpm_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("nx + pnpm workspace should be detected");
+
+    assert!(repo.is_monorepo);
+    // pnpm is the membership authority; Nx only orchestrates.
+    let pnpm_layer = repo
+        .monorepo_layers
+        .iter()
+        .find(|l| l.authority == MonorepoStandard::PnpmWorkspaces)
+        .expect("pnpm should be the membership authority");
+    assert_eq!(pnpm_layer.orchestrators, vec![MonorepoStandard::Nx]);
+    // Nx must never be reported as an authority.
+    assert!(
+        !repo
+            .monorepo_layers
+            .iter()
+            .any(|l| l.authority == MonorepoStandard::Nx)
+    );
+}
+
+#[test]
+fn test_nx_only_repo_is_not_a_monorepo() {
+    use sniff::filesystem::{DetectionConfidence, MonorepoStandard};
+
+    // `nx.json` alone has no membership authority. Detection finds no pnpm/npm
+    // workspace patterns, so the repo is honestly *not* a monorepo even though
+    // the legacy `workspace_tools` still lists Nx.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("nx.json"), "{}").unwrap();
+    std::fs::write(dir.path().join("package.json"), "{}").unwrap();
+
+    let repo = sniff::filesystem::detect_repo_structure(dir.path())
+        .unwrap()
+        .expect("nx.json should still yield a RepoInfo via legacy workspace_tools");
+
+    assert!(!repo.is_monorepo, "nx-only repo must not be a monorepo");
+    assert!(repo.monorepo_layers.is_empty());
+    // The downgrade is observable: an inferred Unknown standard is recorded.
+    assert!(
+        repo.monorepo_standards
+            .iter()
+            .any(|s| s.standard == MonorepoStandard::Unknown
+                && s.confidence == DetectionConfidence::Inferred),
+        "nx-only downgrade should record an inferred Unknown standard, got {:?}",
+        repo.monorepo_standards
+    );
+}
+
+#[test]
+fn test_degenerate_workspaces_are_not_monorepos() {
+    // Empty membership arrays must never count as a monorepo.
+    for (label, (_dir, path)) in [
+        ("cargo", fixtures::create_degenerate_cargo_workspace()),
+        ("npm", fixtures::create_degenerate_npm_workspace()),
+        ("pnpm", fixtures::create_degenerate_pnpm_workspace()),
+    ] {
+        let repo = sniff::filesystem::detect_repo_structure(&path).unwrap();
+        match repo {
+            None => {} // No membership authority at all — the strongest signal.
+            Some(repo) => {
+                assert!(
+                    !repo.is_monorepo,
+                    "{label}: degenerate workspace must not be a monorepo"
+                );
+                assert!(
+                    repo.monorepo_layers.is_empty(),
+                    "{label}: degenerate workspace must have no layers"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_monorepo_standards_serialize_with_kebab_case_ids() {
+    let (_dir, path) = fixtures::create_pnpm_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("pnpm workspace should be detected");
+
+    let value = serde_json::to_value(&repo).unwrap();
+    let obj = value.as_object().unwrap();
+
+    // Legacy keys still present.
+    assert!(
+        obj.contains_key("monorepo_tool"),
+        "legacy monorepo_tool key"
+    );
+    assert!(
+        obj.contains_key("workspace_tools"),
+        "legacy workspace_tools key"
+    );
+
+    // New keys present when non-empty, with kebab-case standard ids.
+    let standards = obj
+        .get("monorepo_standards")
+        .and_then(|v| v.as_array())
+        .expect("monorepo_standards should be a non-empty array");
+    assert!(
+        standards
+            .iter()
+            .any(|s| s.get("standard") == Some(&serde_json::json!("pnpm-workspaces"))),
+        "expected kebab-case pnpm-workspaces id, got {standards:?}"
+    );
+
+    let layers = obj
+        .get("monorepo_layers")
+        .and_then(|v| v.as_array())
+        .expect("monorepo_layers should be a non-empty array");
+    assert_eq!(
+        layers[0].get("authority"),
+        Some(&serde_json::json!("pnpm-workspaces"))
+    );
+}
+
+// ============================================================================
+// Phase 4: new membership authorities — Bun, uv, Go workspace
+// ============================================================================
+
+#[test]
+fn test_bun_workspace_authority_is_bun() {
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_bun_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("bun workspace should be detected");
+
+    assert!(repo.is_monorepo);
+    assert_eq!(repo.monorepo_layers.len(), 1);
+    assert_eq!(
+        repo.monorepo_layers[0].authority,
+        MonorepoStandard::BunWorkspaces
+    );
+    assert_eq!(repo.monorepo_layers[0].packages.len(), 2);
+    // Bun has no legacy `MonorepoTool`, so the legacy field stays empty.
+    assert_eq!(repo.monorepo_tool, None);
+}
+
+#[test]
+fn test_degenerate_bun_workspace_is_not_a_monorepo() {
+    let (_dir, path) = fixtures::create_degenerate_bun_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path).unwrap();
+    match repo {
+        None => {}
+        Some(repo) => {
+            assert!(!repo.is_monorepo);
+            assert!(repo.monorepo_layers.is_empty());
+        }
+    }
+}
+
+#[test]
+fn test_uv_workspace_counts_root_as_member() {
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_uv_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("uv workspace should be detected");
+
+    assert!(repo.is_monorepo);
+    assert_eq!(repo.monorepo_layers.len(), 1);
+    assert_eq!(
+        repo.monorepo_layers[0].authority,
+        MonorepoStandard::UvWorkspace
+    );
+    // uv's `RootMembership::Always`: root + two children = three packages.
+    assert_eq!(repo.monorepo_layers[0].packages.len(), 3);
+    assert_eq!(repo.packages.as_ref().map(Vec::len), Some(3));
+}
+
+#[test]
+fn test_degenerate_uv_workspace_is_not_a_monorepo() {
+    let (_dir, path) = fixtures::create_degenerate_uv_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path).unwrap();
+    match repo {
+        None => {}
+        Some(repo) => {
+            assert!(!repo.is_monorepo);
+            assert!(repo.monorepo_layers.is_empty());
+        }
+    }
+}
+
+#[test]
+fn test_go_workspace_resolves_explicit_use_paths() {
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_go_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("go workspace should be detected");
+
+    assert!(repo.is_monorepo);
+    assert_eq!(repo.monorepo_layers.len(), 1);
+    let layer = &repo.monorepo_layers[0];
+    assert_eq!(layer.authority, MonorepoStandard::GoWorkspace);
+
+    let mut relatives: Vec<String> = layer
+        .packages
+        .iter()
+        .map(|p| p.relative.to_string_lossy().into_owned())
+        .collect();
+    relatives.sort();
+    assert_eq!(relatives, vec!["svc-a".to_string(), "svc-b".to_string()]);
+}
+
+#[test]
+fn test_degenerate_go_workspace_is_not_a_monorepo() {
+    let (_dir, path) = fixtures::create_degenerate_go_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path).unwrap();
+    match repo {
+        None => {}
+        Some(repo) => {
+            assert!(!repo.is_monorepo);
+            assert!(repo.monorepo_layers.is_empty());
+        }
+    }
+}
+
+// ============================================================================
+// Phase 5: new membership authorities — Gradle, Maven, .NET Solution
+// ============================================================================
+
+#[test]
+fn test_gradle_workspace_authority_is_gradle() {
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_gradle_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("gradle workspace should be detected");
+
+    assert!(repo.is_monorepo);
+    assert_eq!(repo.monorepo_layers.len(), 1);
+    let layer = &repo.monorepo_layers[0];
+    assert_eq!(layer.authority, MonorepoStandard::GradleMultiProject);
+
+    let mut relatives: Vec<String> = layer
+        .packages
+        .iter()
+        .map(|p| p.relative.to_string_lossy().into_owned())
+        .collect();
+    relatives.sort();
+    assert_eq!(relatives, vec!["app".to_string(), "core".to_string()]);
+    // The repo-local `gradlew` wrapper presence is recorded for Phase 7 to act on.
+    assert!(path.join("gradlew").exists());
+    // Gradle has no legacy `MonorepoTool`, so the legacy field stays empty.
+    assert_eq!(repo.monorepo_tool, None);
+}
+
+#[test]
+fn test_degenerate_gradle_workspace_is_not_a_monorepo() {
+    let (_dir, path) = fixtures::create_degenerate_gradle_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path).unwrap();
+    match repo {
+        None => {}
+        Some(repo) => {
+            assert!(!repo.is_monorepo);
+            assert!(repo.monorepo_layers.is_empty());
+        }
+    }
+}
+
+#[test]
+fn test_maven_workspace_authority_is_maven() {
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_maven_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("maven workspace should be detected");
+
+    assert!(repo.is_monorepo);
+    assert_eq!(repo.monorepo_layers.len(), 1);
+    let layer = &repo.monorepo_layers[0];
+    assert_eq!(layer.authority, MonorepoStandard::MavenMultiModule);
+
+    let mut relatives: Vec<String> = layer
+        .packages
+        .iter()
+        .map(|p| p.relative.to_string_lossy().into_owned())
+        .collect();
+    relatives.sort();
+    assert_eq!(relatives, vec!["core".to_string(), "web".to_string()]);
+    assert_eq!(repo.monorepo_tool, None);
+}
+
+#[test]
+fn test_degenerate_maven_workspace_is_not_a_monorepo() {
+    let (_dir, path) = fixtures::create_degenerate_maven_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path).unwrap();
+    match repo {
+        None => {}
+        Some(repo) => {
+            assert!(!repo.is_monorepo);
+            assert!(repo.monorepo_layers.is_empty());
+        }
+    }
+}
+
+#[test]
+fn test_dotnet_solution_authority_is_dotnet() {
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_dotnet_solution();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect(".NET solution should be detected");
+
+    assert!(repo.is_monorepo);
+    assert_eq!(repo.monorepo_layers.len(), 1);
+    let layer = &repo.monorepo_layers[0];
+    assert_eq!(layer.authority, MonorepoStandard::DotNetSolution);
+
+    let mut relatives: Vec<String> = layer
+        .packages
+        .iter()
+        .map(|p| p.relative.to_string_lossy().into_owned())
+        .collect();
+    relatives.sort();
+    // Each project's directory (the `.csproj` parent) becomes a package.
+    assert_eq!(
+        relatives,
+        vec!["src/App".to_string(), "src/Lib".to_string()]
+    );
+    assert_eq!(repo.monorepo_tool, None);
+}
+
+#[test]
+fn test_degenerate_dotnet_solution_is_not_a_monorepo() {
+    let (_dir, path) = fixtures::create_degenerate_dotnet_solution();
+    let repo = sniff::filesystem::detect_repo_structure(&path).unwrap();
+    match repo {
+        None => {}
+        Some(repo) => {
+            assert!(!repo.is_monorepo);
+            assert!(repo.monorepo_layers.is_empty());
+        }
+    }
+}
+
+// ============================================================================
+// Phase 6: polyglot build systems — Bazel, Pants, Buck2, Rush Stack
+// ============================================================================
+
+#[test]
+fn test_bazel_workspace_segments_nested_workspace_into_its_own_layer() {
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_bazel_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("bazel workspace should be detected");
+
+    assert!(repo.is_monorepo);
+    // Parent workspace + nested workspace => two layers, both Bazel.
+    assert_eq!(repo.monorepo_layers.len(), 2);
+    for layer in &repo.monorepo_layers {
+        assert_eq!(layer.authority, MonorepoStandard::Bazel);
+    }
+
+    let parent = repo
+        .monorepo_layers
+        .iter()
+        .find(|l| l.root == path)
+        .expect("parent layer rooted at repo root");
+    let mut parent_rels: Vec<String> = parent
+        .packages
+        .iter()
+        .map(|p| p.relative.to_string_lossy().into_owned())
+        .collect();
+    parent_rels.sort();
+    // The nested subtree must be excluded from the parent's package list.
+    assert_eq!(parent_rels, vec!["a".to_string(), "b".to_string()]);
+
+    let nested = repo
+        .monorepo_layers
+        .iter()
+        .find(|l| l.root == path.join("nested"))
+        .expect("nested layer rooted at nested/");
+    let nested_rels: Vec<String> = nested
+        .packages
+        .iter()
+        .map(|p| p.relative.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(nested_rels, vec!["nested".to_string()]);
+}
+
+#[test]
+fn test_degenerate_bazel_workspace_is_not_a_monorepo() {
+    let (_dir, path) = fixtures::create_degenerate_bazel_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path).unwrap();
+    match repo {
+        None => {}
+        Some(repo) => {
+            assert!(!repo.is_monorepo);
+            assert!(repo.monorepo_layers.is_empty());
+        }
+    }
+}
+
+#[test]
+fn test_pants_workspace_discovers_leaf_packages() {
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_pants_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("pants workspace should be detected");
+
+    assert!(repo.is_monorepo);
+    assert_eq!(repo.monorepo_layers.len(), 1);
+    let layer = &repo.monorepo_layers[0];
+    assert_eq!(layer.authority, MonorepoStandard::Pants);
+    // Leaf walk finds both `BUILD.pants` directories without a root manifest list.
+    assert_eq!(layer.packages.len(), 2);
+}
+
+#[test]
+fn test_degenerate_pants_workspace_is_not_a_monorepo() {
+    let (_dir, path) = fixtures::create_degenerate_pants_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path).unwrap();
+    match repo {
+        None => {}
+        Some(repo) => {
+            assert!(!repo.is_monorepo);
+            assert!(repo.monorepo_layers.is_empty());
+        }
+    }
+}
+
+#[test]
+fn test_buck2_workspace_discovers_leaf_packages() {
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_buck2_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("buck2 workspace should be detected");
+
+    assert!(repo.is_monorepo);
+    assert_eq!(repo.monorepo_layers.len(), 1);
+    let layer = &repo.monorepo_layers[0];
+    assert_eq!(layer.authority, MonorepoStandard::Buck2);
+    assert_eq!(layer.packages.len(), 2);
+}
+
+#[test]
+fn test_degenerate_buck2_workspace_is_not_a_monorepo() {
+    let (_dir, path) = fixtures::create_degenerate_buck2_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path).unwrap();
+    match repo {
+        None => {}
+        Some(repo) => {
+            assert!(!repo.is_monorepo);
+            assert!(repo.monorepo_layers.is_empty());
+        }
+    }
+}
+
+#[test]
+fn test_rush_workspace_authority_is_rush() {
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_rush_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("rush workspace should be detected");
+
+    assert!(repo.is_monorepo);
+    assert_eq!(repo.monorepo_layers.len(), 1);
+    let layer = &repo.monorepo_layers[0];
+    assert_eq!(layer.authority, MonorepoStandard::RushStack);
+
+    let mut relatives: Vec<String> = layer
+        .packages
+        .iter()
+        .map(|p| p.relative.to_string_lossy().into_owned())
+        .collect();
+    relatives.sort();
+    assert_eq!(
+        relatives,
+        vec!["apps/app".to_string(), "libraries/lib".to_string()]
+    );
+    assert_eq!(repo.monorepo_tool, None);
+}
+
+#[test]
+fn test_degenerate_rush_workspace_is_not_a_monorepo() {
+    let (_dir, path) = fixtures::create_degenerate_rush_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path).unwrap();
+    match repo {
+        None => {}
+        Some(repo) => {
+            assert!(!repo.is_monorepo);
+            assert!(repo.monorepo_layers.is_empty());
+        }
+    }
 }
 
 // === Regression tests for JSON serialization of partial results ===
