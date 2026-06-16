@@ -284,6 +284,292 @@ fn test_cargo_workspace_topology_layer_and_legacy_fields() {
 }
 
 #[test]
+fn test_virtual_cargo_single_member_is_not_a_monorepo() {
+    // Regression: a virtual Cargo workspace with one member used to be
+    // reported as a monorepo because the predicate treated
+    // `WhenManifestDeclaresPackage` the same as `Always`. The honest
+    // predicate now reads `root_is_package`, so a virtual root with one
+    // member is degenerate.
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_virtual_cargo_single_member_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("cargo detector still reports a RepoInfo for a single-member workspace");
+
+    assert!(
+        !repo.is_monorepo,
+        "virtual Cargo workspace with one member must not be a monorepo"
+    );
+    // A layer still exists — it carries the single resolved package — but its
+    // membership is degenerate, so `is_monorepo` stays false.
+    assert_eq!(repo.monorepo_layers.len(), 1);
+    let layer = &repo.monorepo_layers[0];
+    assert_eq!(layer.authority, MonorepoStandard::CargoWorkspace);
+    assert_eq!(layer.packages.len(), 1);
+    assert!(
+        !layer.root_is_package,
+        "virtual Cargo workspace root must not declare [package]"
+    );
+}
+
+#[test]
+fn test_cargo_root_package_plus_one_member_is_a_monorepo() {
+    // Counterpart to the virtual-single-member regression: when the root
+    // `Cargo.toml` also declares a `[package]`, the root counts and one member
+    // is enough to be a monorepo.
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_cargo_root_package_plus_one_member();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("cargo root-package-plus-one workspace should be detected");
+
+    assert!(repo.is_monorepo);
+    assert_eq!(repo.monorepo_layers.len(), 1);
+    let layer = &repo.monorepo_layers[0];
+    assert_eq!(layer.authority, MonorepoStandard::CargoWorkspace);
+    assert!(
+        layer.root_is_package,
+        "root_is_package must be true when the root Cargo.toml declares [package]"
+    );
+}
+
+#[test]
+fn test_nested_pnpm_under_cargo_is_discovered_as_its_own_layer() {
+    // Regression for the topology-forest gap: a Cargo workspace at the root
+    // and a pnpm workspace at `web/` used to be collapsed into the Cargo
+    // layer alone, silently dropping the nested pnpm standard. The marker
+    // walk now dispatches the pnpm detector at `web/` so both layers appear.
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_cargo_root_with_nested_pnpm();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("mixed cargo+pnpm forest should be detected");
+
+    assert!(repo.is_monorepo);
+
+    let cargo_layer = repo
+        .monorepo_layers
+        .iter()
+        .find(|l| l.authority == MonorepoStandard::CargoWorkspace)
+        .expect("root Cargo workspace must produce a layer");
+    assert_eq!(cargo_layer.root, path);
+
+    let pnpm_layer = repo
+        .monorepo_layers
+        .iter()
+        .find(|l| l.authority == MonorepoStandard::PnpmWorkspaces)
+        .expect("nested pnpm workspace must produce its own layer");
+    assert_eq!(pnpm_layer.root, path.join("web"));
+    assert_eq!(pnpm_layer.packages.len(), 2);
+}
+
+#[test]
+fn test_nested_uv_under_pnpm_is_discovered_as_its_own_layer() {
+    // uv's `ForbidsNested` policy is about uv's own nested instances; a uv
+    // workspace nested under a *different* standard (pnpm) must still be
+    // discovered as its own layer.
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_pnpm_root_with_nested_uv();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("mixed pnpm+uv forest should be detected");
+
+    assert!(repo.is_monorepo);
+
+    let pnpm_layer = repo
+        .monorepo_layers
+        .iter()
+        .find(|l| l.authority == MonorepoStandard::PnpmWorkspaces)
+        .expect("root pnpm workspace must produce a layer");
+    assert_eq!(pnpm_layer.root, path);
+
+    let uv_layer = repo
+        .monorepo_layers
+        .iter()
+        .find(|l| l.authority == MonorepoStandard::UvWorkspace)
+        .expect("nested uv workspace must produce its own layer");
+    assert_eq!(uv_layer.root, path.join("python"));
+    // uv counts the root + each globbed child.
+    assert_eq!(uv_layer.packages.len(), 2);
+}
+
+#[test]
+fn test_nested_cargo_under_pnpm_is_discovered_as_its_own_layer() {
+    // Counterpart to `test_nested_pnpm_under_cargo_is_discovered_as_its_own_layer`
+    // with the standards flipped: `Cargo.toml` must be a nested marker candidate
+    // so a Cargo workspace nested under a pnpm root is reported as its own
+    // layer. Cargo's `ForbidsNested` policy only blocks nested Cargo under an
+    // ancestor Cargo workspace; under a different standard it is valid.
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_pnpm_root_with_nested_cargo();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("mixed pnpm+cargo forest should be detected");
+
+    assert!(repo.is_monorepo);
+
+    let pnpm_layer = repo
+        .monorepo_layers
+        .iter()
+        .find(|l| l.authority == MonorepoStandard::PnpmWorkspaces)
+        .expect("root pnpm workspace must produce a layer");
+    assert_eq!(pnpm_layer.root, path);
+
+    let cargo_layer = repo
+        .monorepo_layers
+        .iter()
+        .find(|l| l.authority == MonorepoStandard::CargoWorkspace)
+        .expect("nested Cargo workspace must produce its own layer");
+    assert_eq!(cargo_layer.root, path.join("crates"));
+    assert_eq!(
+        cargo_layer.packages.len(),
+        2,
+        "nested Cargo workspace must resolve both members"
+    );
+}
+
+#[test]
+fn test_nested_only_cargo_workspace_is_discovered_under_bare_root() {
+    // Before `Cargo.toml` was a nested marker, a bare root (no workspace
+    // marker of its own) with only a nested Cargo workspace was missed
+    // entirely. The marker walk now surfaces the nested Cargo layer.
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_nested_only_cargo_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("nested-only Cargo topology should be detected");
+
+    assert!(repo.is_monorepo);
+
+    let cargo_layer = repo
+        .monorepo_layers
+        .iter()
+        .find(|l| l.authority == MonorepoStandard::CargoWorkspace)
+        .expect("nested Cargo workspace must produce its own layer under a bare root");
+    assert_eq!(cargo_layer.root, path.join("crates"));
+    assert_eq!(cargo_layer.packages.len(), 2);
+}
+
+#[test]
+fn test_nested_cargo_under_cargo_is_forbidden() {
+    // Cargo's `ForbidsNested` policy: a nested Cargo workspace is invalid
+    // Cargo, so sniff must not produce a second Cargo layer for it. The root
+    // workspace still resolves normally.
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_cargo_root_with_nested_forbidden_cargo();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("root Cargo workspace should be detected");
+
+    assert!(repo.is_monorepo);
+
+    let cargo_layers: Vec<_> = repo
+        .monorepo_layers
+        .iter()
+        .filter(|l| l.authority == MonorepoStandard::CargoWorkspace)
+        .collect();
+    assert_eq!(
+        cargo_layers.len(),
+        1,
+        "nested Cargo workspace must not produce a second layer"
+    );
+    assert_eq!(cargo_layers[0].root, path);
+}
+
+#[test]
+fn test_nested_only_workspace_full_detection_does_not_panic() {
+    // Regression: a root with no workspace marker but with a nested workspace
+    // below (e.g. `web/pnpm-workspace.yaml`) used to panic in full
+    // `detect_repo` because the manifest index was skipped eagerly and then
+    // `expect`ed downstream. Full detection must build the index lazily once
+    // nested outcomes exist.
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_nested_only_pnpm_workspace();
+    // Use full `detect_repo`, not `detect_repo_structure`, to exercise the
+    // nested package enrichment path that previously panicked.
+    let repo = sniff::filesystem::detect_repo(&path)
+        .unwrap()
+        .expect("nested-only topology should still be detected");
+
+    assert!(repo.is_monorepo);
+    let pnpm_layer = repo
+        .monorepo_layers
+        .iter()
+        .find(|l| l.authority == MonorepoStandard::PnpmWorkspaces)
+        .expect("nested pnpm workspace must produce its own layer");
+    assert_eq!(pnpm_layer.root, path.join("web"));
+    assert_eq!(pnpm_layer.packages.len(), 2);
+}
+
+#[test]
+fn test_per_root_confidence_in_same_standard_forest() {
+    // Confidence is defined per detected standard/root pair: a degenerate
+    // sibling must stay `Inferred` even when a non-degenerate twin of the
+    // same standard exists elsewhere in the forest.
+    use sniff::filesystem::{DetectionConfidence, MonorepoStandard};
+
+    let (_dir, path) = fixtures::create_pnpm_forest_with_degenerate_sibling();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("pnpm forest should be detected");
+
+    assert!(repo.is_monorepo);
+
+    // Two pnpm layers, one at each root.
+    let pnpm_layers: Vec<_> = repo
+        .monorepo_layers
+        .iter()
+        .filter(|l| l.authority == MonorepoStandard::PnpmWorkspaces)
+        .collect();
+    assert_eq!(
+        pnpm_layers.len(),
+        2,
+        "expected one pnpm layer per root, got {:?}",
+        pnpm_layers
+    );
+
+    let nested_root = path.join("nested");
+    let (root_confidence, nested_confidence) = repo
+        .monorepo_standards
+        .iter()
+        .filter(|s| s.standard == MonorepoStandard::PnpmWorkspaces)
+        .fold(
+            (None, None),
+            |(root_c, nested_c), s| {
+                if s.root == path {
+                    (Some(s.confidence), nested_c)
+                } else if s.root == nested_root {
+                    (root_c, Some(s.confidence))
+                } else {
+                    (root_c, nested_c)
+                }
+            },
+        );
+
+    // Root pnpm workspace is non-degenerate (two members).
+    assert_eq!(
+        root_confidence,
+        Some(DetectionConfidence::MarkerConfirmed),
+        "non-degenerate root pnpm must be marker-confirmed"
+    );
+    // Nested pnpm workspace is degenerate (one member, Never root membership).
+    assert_eq!(
+        nested_confidence,
+        Some(DetectionConfidence::Inferred),
+        "degenerate nested pnpm must stay inferred, got {:?}",
+        repo.monorepo_standards
+    );
+}
+
+#[test]
 fn test_pnpm_workspace_topology_layer_and_legacy_fields() {
     use sniff::filesystem::MonorepoStandard;
 
@@ -341,6 +627,65 @@ fn test_pnpm_lockfile_drift_records_mismatch() {
     let layer = &repo.monorepo_layers[0];
     assert_eq!(layer.authority, MonorepoStandard::PnpmWorkspaces);
     // Manifest remains the authority; lockfile mismatch is recorded.
+    assert_eq!(layer.provenance, PackageProvenance::Globbed);
+    assert_eq!(layer.lockfile_match, Some(false));
+}
+
+#[test]
+fn test_pnpm_lockfile_superset_is_recorded_as_mismatch() {
+    // Regression: a stale lockfile with extra importers used to silently
+    // upgrade provenance to `Lockfile` because every manifest member still
+    // appeared in the lockfile. Set equality flags this as drift instead.
+    use sniff::filesystem::{MonorepoStandard, PackageProvenance};
+
+    let (_dir, path) = fixtures::create_pnpm_workspace_with_stale_lockfile();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("pnpm workspace should be detected");
+
+    assert_eq!(repo.monorepo_layers.len(), 1);
+    let layer = &repo.monorepo_layers[0];
+    assert_eq!(layer.authority, MonorepoStandard::PnpmWorkspaces);
+    assert_eq!(
+        layer.provenance,
+        PackageProvenance::Globbed,
+        "a stale lockfile must not upgrade provenance to Lockfile"
+    );
+    assert_eq!(
+        layer.lockfile_match,
+        Some(false),
+        "stale extra importer must be reported as drift"
+    );
+}
+
+#[test]
+fn test_uv_lockfile_parity_upgrades_provenance() {
+    use sniff::filesystem::{MonorepoStandard, PackageProvenance};
+
+    let (_dir, path) = fixtures::create_uv_workspace_with_lockfile();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("uv workspace should be detected");
+
+    assert_eq!(repo.monorepo_layers.len(), 1);
+    let layer = &repo.monorepo_layers[0];
+    assert_eq!(layer.authority, MonorepoStandard::UvWorkspace);
+    assert_eq!(layer.provenance, PackageProvenance::Lockfile);
+    assert_eq!(layer.lockfile_match, Some(true));
+}
+
+#[test]
+fn test_uv_lockfile_superset_is_recorded_as_mismatch() {
+    use sniff::filesystem::{MonorepoStandard, PackageProvenance};
+
+    let (_dir, path) = fixtures::create_uv_workspace_with_stale_lockfile();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("uv workspace should be detected");
+
+    assert_eq!(repo.monorepo_layers.len(), 1);
+    let layer = &repo.monorepo_layers[0];
+    assert_eq!(layer.authority, MonorepoStandard::UvWorkspace);
     assert_eq!(layer.provenance, PackageProvenance::Globbed);
     assert_eq!(layer.lockfile_match, Some(false));
 }
