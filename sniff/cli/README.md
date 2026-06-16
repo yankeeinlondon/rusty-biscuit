@@ -456,7 +456,7 @@ table summarises the contract; see the per-subcommand docs under
 | Subcommand | JSON shape |
 |---|---|
 | `repo` (bare, `--json`) | Scope-complete aggregate of participating child subcommands, keyed by subcommand name; see [`sniff/docs/topics/json-output.md`](../../docs/topics/json-output.md) |
-| `repo structure` | Full `RepoInfo` blob (`is_monorepo`, `packages`, `dependencies`, ...). Includes `monorepo_standards` and `monorepo_layers` when the repo is a monorepo. The legacy `monorepo_tool` / `workspace_tools` keys are still present but deprecated. |
+| `repo structure` | Full `RepoInfo` blob (`is_monorepo`, `packages`, `dependencies`, ...). Includes `monorepo_standards` and `monorepo_layers` when the repo is a monorepo. |
 | `repo name` | `{ "name": "..." }` |
 | `repo language` | `{ "language": "..." \| null }` (or full language breakdown with `--breakdown`) |
 | `repo is-monorepo` | `{ "is-monorepo": true \| false }` |

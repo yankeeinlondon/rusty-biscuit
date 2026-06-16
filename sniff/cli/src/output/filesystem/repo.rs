@@ -144,42 +144,22 @@ fn format_monorepo_standard(standard: MonorepoStandard) -> &'static str {
     standard.spec().display_name
 }
 
-/// Format the legacy `MonorepoTool` enum for display.
-#[allow(deprecated)]
-fn format_legacy_monorepo_tool(tool: &sniff::filesystem::repo::MonorepoTool) -> &'static str {
-    use sniff::filesystem::repo::MonorepoTool;
-    match tool {
-        MonorepoTool::CargoWorkspace => "Cargo Workspace",
-        MonorepoTool::NpmWorkspaces => "npm Workspaces",
-        MonorepoTool::PnpmWorkspaces => "pnpm Workspaces",
-        MonorepoTool::YarnWorkspaces => "Yarn Workspaces",
-        MonorepoTool::Nx => "Nx",
-        MonorepoTool::Turborepo => "Turborepo",
-        MonorepoTool::Lerna => "Lerna",
-        MonorepoTool::Unknown => "Unknown",
-        _ => "Unknown",
-    }
-}
-
-/// Format the monorepo tool/layer summary for display.
+/// Format the monorepo authority/orchestrator summary for display.
 ///
-/// Delegates to [`format_monorepo_standard`] when the new topology fields are
-/// populated, preserving the legacy `MonorepoTool` text only as a fallback.
-fn format_monorepo_tool(repo: &RepoInfo) -> String {
-    if let Some(layer) = repo.monorepo_layers.first() {
-        let mut s = format_monorepo_standard(layer.authority).to_string();
-        for orch in &layer.orchestrators {
-            s.push_str(&format!(
-                " <dim>+ {}</dim>",
-                format_monorepo_standard(*orch)
-            ));
-        }
-        s
-    } else if let Some(tool) = repo.monorepo_tool.as_ref() {
-        format_legacy_monorepo_tool(tool).to_string()
-    } else {
-        "Unknown".to_string()
+/// Derives the one-liner from the first topology layer's authority and any
+/// orchestrators riding on top. When no layer exists, falls back to "Unknown".
+fn format_monorepo_summary(repo: &RepoInfo) -> String {
+    let Some(layer) = repo.monorepo_layers.first() else {
+        return "Unknown".to_string();
+    };
+    let mut s = format_monorepo_standard(layer.authority).to_string();
+    for orch in &layer.orchestrators {
+        s.push_str(&format!(
+            " <dim>+ {}</dim>",
+            format_monorepo_standard(*orch)
+        ));
     }
+    s
 }
 
 /// Build a one-line summary of a single `MonorepoLayer`.
@@ -533,18 +513,18 @@ pub fn render_repo_section(
         let title_suffix = if layer_count > 1 {
             format!(" <dim>({} layers)</dim>", layer_count)
         } else {
-            let tool_name = format_monorepo_tool(repo);
+            let summary = format_monorepo_summary(repo);
             if any_scope && showing_count != total_count {
                 format!(
                     " <dim>({} / showing {} of {} packages)</dim>",
-                    tool_name,
+                    summary,
                     format_number(showing_count),
                     format_number(total_count),
                 )
             } else {
                 format!(
                     " <dim>({} / {} packages)</dim>",
-                    tool_name,
+                    summary,
                     format_number(total_count),
                 )
             }
@@ -631,10 +611,10 @@ pub fn render_repo_section(
             writeln!(out, "{}", Prose::new(&legend).render(&terminal)).unwrap();
         }
     } else {
-        let tool_name = format_monorepo_tool(repo);
+        let summary = format_monorepo_summary(repo);
         let title = Prose::new(format!(
             "<b><u>Repository</u></b> <dim>({} / {} packages)</dim>",
-            tool_name,
+            summary,
             format_number(total_count),
         ));
         writeln!(out, "\n{}\n", title.render(&terminal)).unwrap();
@@ -943,7 +923,7 @@ pub fn render_filesystem_section(
             return out;
         }
 
-        let tool_name = format_monorepo_tool(repo);
+        let summary = format_monorepo_summary(repo);
         let pkg_count = repo.packages.as_ref().map(|p| p.len()).unwrap_or(0);
         let layer_count = repo.monorepo_layers.len();
 
@@ -955,7 +935,7 @@ pub fn render_filesystem_section(
         } else {
             Prose::new(format!(
                 "<b>Packages:</b> <dim>({} / {} packages)</dim>",
-                tool_name,
+                summary,
                 format_number(pkg_count),
             ))
         };

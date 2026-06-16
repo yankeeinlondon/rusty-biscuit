@@ -11,16 +11,8 @@ expression: stable_topology_json(&json)
         "nx"
       ],
       "packages": [
-        {
-          "name": "api",
-          "provenance": "globbed",
-          "standard": "pnpm-workspaces"
-        },
-        {
-          "name": "web",
-          "provenance": "globbed",
-          "standard": "pnpm-workspaces"
-        }
+        "apps/api",
+        "apps/web"
       ],
       "provenance": "globbed"
     }
@@ -35,10 +27,5 @@ expression: stable_topology_json(&json)
       "standard": "pnpm-workspaces"
     }
   ],
-  "monorepo_tool": "Nx",
-  "package_count": 2,
-  "workspace_tools": [
-    "Nx",
-    "PnpmWorkspaces"
-  ]
+  "package_count": 2
 }

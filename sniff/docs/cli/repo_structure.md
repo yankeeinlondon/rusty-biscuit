@@ -33,13 +33,14 @@ Repository
 
 ### Monorepo
 
-For monorepos, the heading shows tool and package count:
+For monorepos, the heading shows the primary authority (plus any orchestrators) and package count:
 
-- Prose::new(`<b><u>Repository</u></b> <dim>({tool_name} / {total_count} packages)</dim>`)
+- Prose::new(`<b><u>Repository</u></b> <dim>({authority} / {total_count} packages)</dim>`)
+- Prose::new(`<b><u>Repository</u></b> <dim>({authority} + {orchestrator} / {total_count} packages)</dim>`)
 
 When filtering reduces the set:
 
-- Prose::new(`<b><u>Repository</u></b> <dim>({tool_name} / showing {shown} of {total} packages)</dim>`)
+- Prose::new(`<b><u>Repository</u></b> <dim>({authority} / showing {shown} of {total} packages)</dim>`)
 
 ### Package Listing
 
@@ -149,15 +150,39 @@ Returns a `RepoInfo` object:
 ```json
 {
   "is_monorepo": true,
-  "monorepo_tool": "Cargo",
-  "workspace_tools": ["Cargo"],
   "root": "/absolute/path/to/repo",
+  "monorepo_standards": [
+    {
+      "standard": "cargo-workspace",
+      "root": "/absolute/path/to/repo",
+      "matched_markers": ["Cargo.toml"],
+      "binary": {
+        "name": "cargo",
+        "path": "/usr/bin/cargo",
+        "version": "1.80.0",
+        "source": "path"
+      },
+      "confidence": "marker-confirmed"
+    }
+  ],
+  "monorepo_layers": [
+    {
+      "root": "/absolute/path/to/repo",
+      "authority": "cargo-workspace",
+      "orchestrators": [],
+      "provenance": "globbed",
+      "packages": ["sniff/lib", "sniff/cli"]
+    }
+  ],
   "packages": [
     {
       "path": "/absolute/path/to/sniff/cli",
       "relative": "sniff/cli",
       "package_area": "sniff",
       "name": "sniff-cli",
+      "ecosystem": "cargo",
+      "standard": "cargo-workspace",
+      "provenance": "globbed",
       "primary_language": "Rust",
       "version": "0.1.0",
       "depends_on": ["sniff"],
@@ -178,6 +203,8 @@ Returns a `RepoInfo` object:
   ]
 }
 ```
+
+The legacy keys `monorepo_tool`, `workspace_tools`, and `discovery_sources` are no longer emitted.
 
 ## Plain Output (`--plain`)
 

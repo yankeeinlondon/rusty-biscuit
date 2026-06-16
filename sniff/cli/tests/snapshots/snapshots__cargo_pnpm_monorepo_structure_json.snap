@@ -9,16 +9,8 @@ expression: stable_topology_json(&json)
       "authority": "cargo-workspace",
       "orchestrators": [],
       "packages": [
-        {
-          "name": "rust-a",
-          "provenance": "globbed",
-          "standard": "cargo-workspace"
-        },
-        {
-          "name": "rust-b",
-          "provenance": "globbed",
-          "standard": "cargo-workspace"
-        }
+        "rust-a",
+        "rust-b"
       ],
       "provenance": "globbed"
     },
@@ -26,16 +18,8 @@ expression: stable_topology_json(&json)
       "authority": "pnpm-workspaces",
       "orchestrators": [],
       "packages": [
-        {
-          "name": "js-a",
-          "provenance": "globbed",
-          "standard": "pnpm-workspaces"
-        },
-        {
-          "name": "js-b",
-          "provenance": "globbed",
-          "standard": "pnpm-workspaces"
-        }
+        "js-a",
+        "js-b"
       ],
       "provenance": "globbed"
     }
@@ -50,10 +34,5 @@ expression: stable_topology_json(&json)
       "standard": "pnpm-workspaces"
     }
   ],
-  "monorepo_tool": "CargoWorkspace",
-  "package_count": 4,
-  "workspace_tools": [
-    "CargoWorkspace",
-    "PnpmWorkspaces"
-  ]
+  "package_count": 4
 }

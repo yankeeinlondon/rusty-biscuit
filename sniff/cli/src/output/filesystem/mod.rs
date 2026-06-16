@@ -1357,7 +1357,8 @@ mod tests {
             package_area: area.to_string(),
             name: name.to_string(),
             ecosystem: sniff::filesystem::repo::PackageEcosystem::Unknown,
-            discovery_sources: vec![],
+            standard: sniff::filesystem::repo::MonorepoStandard::Unknown,
+            provenance: sniff::filesystem::repo::PackageProvenance::ManifestScan,
             nested_packages: vec![],
             primary_language: None,
             secondary_languages: vec![],
@@ -2343,8 +2344,6 @@ mod tests {
         fn make_repo(packages: Vec<Package>, is_monorepo: bool) -> RepoInfo {
             RepoInfo {
                 is_monorepo,
-                monorepo_tool: None,
-                workspace_tools: Vec::new(),
                 root: PathBuf::from("/repo"),
                 dependencies: None,
                 dev_dependencies: None,
@@ -2533,8 +2532,6 @@ mod tests {
         fn make_repo(packages: Vec<Package>) -> RepoInfo {
             RepoInfo {
                 is_monorepo: true,
-                monorepo_tool: None,
-                workspace_tools: Vec::new(),
                 root: PathBuf::from("/repo"),
                 dependencies: None,
                 dev_dependencies: None,

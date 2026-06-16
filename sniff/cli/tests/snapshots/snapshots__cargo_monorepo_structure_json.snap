@@ -9,16 +9,8 @@ expression: stable_topology_json(&json)
       "authority": "cargo-workspace",
       "orchestrators": [],
       "packages": [
-        {
-          "name": "pkg-a",
-          "provenance": "globbed",
-          "standard": "cargo-workspace"
-        },
-        {
-          "name": "pkg-b",
-          "provenance": "globbed",
-          "standard": "cargo-workspace"
-        }
+        "pkg-a",
+        "pkg-b"
       ],
       "provenance": "globbed"
     }
@@ -29,9 +21,5 @@ expression: stable_topology_json(&json)
       "standard": "cargo-workspace"
     }
   ],
-  "monorepo_tool": "CargoWorkspace",
-  "package_count": 2,
-  "workspace_tools": [
-    "CargoWorkspace"
-  ]
+  "package_count": 2
 }

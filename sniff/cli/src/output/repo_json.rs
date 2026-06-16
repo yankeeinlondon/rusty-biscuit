@@ -883,8 +883,6 @@ mod tests {
     fn fixture_with_git_and_repo() -> SniffResult {
         let repo = RepoInfo {
             is_monorepo: true,
-            monorepo_tool: None,
-            workspace_tools: Vec::new(),
             root: PathBuf::from("/tmp/repo"),
             dependencies: None,
             dev_dependencies: None,
@@ -923,8 +921,6 @@ mod tests {
     fn fixture_with_repo() -> SniffResult {
         let repo = RepoInfo {
             is_monorepo: true,
-            monorepo_tool: None,
-            workspace_tools: Vec::new(),
             root: PathBuf::from("/tmp/repo"),
             dependencies: None,
             dev_dependencies: None,
@@ -1079,7 +1075,8 @@ mod tests {
                 package_area: area.to_string(),
                 name: name.to_string(),
                 ecosystem: sniff::filesystem::repo::PackageEcosystem::Unknown,
-                discovery_sources: vec![],
+                standard: sniff::filesystem::repo::MonorepoStandard::Unknown,
+                provenance: sniff::filesystem::repo::PackageProvenance::ManifestScan,
                 nested_packages: vec![],
                 primary_language: None,
                 secondary_languages: vec![],
@@ -1112,8 +1109,6 @@ mod tests {
             ];
             let repo = RepoInfo {
                 is_monorepo: monorepo,
-                monorepo_tool: None,
-                workspace_tools: Vec::new(),
                 root: PathBuf::from("/tmp/repo"),
                 dependencies: None,
                 dev_dependencies: None,
@@ -1311,7 +1306,8 @@ mod tests {
                 package_area: area.to_string(),
                 name: name.to_string(),
                 ecosystem: sniff::filesystem::repo::PackageEcosystem::Unknown,
-                discovery_sources: vec![],
+                standard: sniff::filesystem::repo::MonorepoStandard::Unknown,
+                provenance: sniff::filesystem::repo::PackageProvenance::ManifestScan,
                 nested_packages: vec![],
                 primary_language: None,
                 secondary_languages: vec![],
@@ -1340,8 +1336,6 @@ mod tests {
         fn fixture_with_packages(dirty_paths: &[&str]) -> SniffResult {
             let repo = RepoInfo {
                 is_monorepo: true,
-                monorepo_tool: None,
-                workspace_tools: Vec::new(),
                 root: PathBuf::from("/tmp/repo"),
                 dependencies: None,
                 dev_dependencies: None,
@@ -1634,7 +1628,8 @@ mod tests {
                 package_area: area.to_string(),
                 name: name.to_string(),
                 ecosystem: sniff::filesystem::repo::PackageEcosystem::Unknown,
-                discovery_sources: vec![],
+                standard: sniff::filesystem::repo::MonorepoStandard::Unknown,
+                provenance: sniff::filesystem::repo::PackageProvenance::ManifestScan,
                 nested_packages: vec![],
                 primary_language: None,
                 secondary_languages: vec![],
@@ -1681,8 +1676,6 @@ mod tests {
 
             RepoInfo {
                 is_monorepo: true,
-                monorepo_tool: None,
-                workspace_tools: Vec::new(),
                 root: PathBuf::from("/tmp/repo"),
                 dependencies: None,
                 dev_dependencies: None,
@@ -1949,7 +1942,8 @@ mod tests {
                 package_area: area.to_string(),
                 name: name.to_string(),
                 ecosystem: sniff::filesystem::repo::PackageEcosystem::Unknown,
-                discovery_sources: vec![],
+                standard: sniff::filesystem::repo::MonorepoStandard::Unknown,
+                provenance: sniff::filesystem::repo::PackageProvenance::ManifestScan,
                 nested_packages: vec![],
                 primary_language: None,
                 secondary_languages: vec![],
@@ -1978,8 +1972,6 @@ mod tests {
         fn fixture_with_two_packages() -> SniffResult {
             let repo = RepoInfo {
                 is_monorepo: true,
-                monorepo_tool: None,
-                workspace_tools: Vec::new(),
                 root: PathBuf::from("/tmp/repo"),
                 dependencies: None,
                 dev_dependencies: None,
@@ -2029,9 +2021,9 @@ mod tests {
         #[test]
         fn structure_with_filter_preserves_other_repo_fields() {
             // Filtering must NOT drop top-level RepoInfo metadata —
-            // is_monorepo / root must still be present. (`workspace_tools`
-            // and other Vec fields are `skip_serializing_if = "is_empty"`,
-            // so we don't assert on them in this fixture.)
+            // is_monorepo / root must still be present. (Empty Vec fields are
+            // `skip_serializing_if = "is_empty"`, so we don't assert on them
+            // in this fixture.)
             let result = fixture_with_two_packages();
             let value = structure_value(&result, &["alpha".to_string()], None, None);
             assert!(value.is_object(), "must be object: {value}");
@@ -2124,8 +2116,6 @@ mod tests {
         fn result_fixture(repo_root: &Path) -> SniffResult {
             let repo = RepoInfo {
                 is_monorepo: false,
-                monorepo_tool: None,
-                workspace_tools: Vec::new(),
                 root: repo_root.to_path_buf(),
                 dependencies: None,
                 dev_dependencies: None,
@@ -2405,7 +2395,7 @@ mod tests {
 
         use super::*;
         use sniff::filesystem::repo::standard::{
-            BinarySource, DetectedStandard, DetectionConfidence, LayerPackage, MonorepoLayer,
+            BinarySource, DetectedStandard, DetectionConfidence, MonorepoLayer,
             MonorepoStandard, PackageProvenance, ResolvedBinary,
         };
         use sniff::filesystem::repo::types::RepoInfo;
@@ -2414,8 +2404,6 @@ mod tests {
         fn repo_with_layers() -> RepoInfo {
             RepoInfo {
                 is_monorepo: true,
-                monorepo_tool: None,
-                workspace_tools: Vec::new(),
                 root: PathBuf::from("/tmp/repo"),
                 dependencies: None,
                 dev_dependencies: None,
@@ -2442,18 +2430,8 @@ mod tests {
                     lockfile_match: None,
                     root_is_package: false,
                     packages: vec![
-                        LayerPackage {
-                            name: "pkg-a".to_string(),
-                            relative: PathBuf::from("pkg-a"),
-                            standard: MonorepoStandard::CargoWorkspace,
-                            provenance: PackageProvenance::Globbed,
-                        },
-                        LayerPackage {
-                            name: "pkg-b".to_string(),
-                            relative: PathBuf::from("pkg-b"),
-                            standard: MonorepoStandard::CargoWorkspace,
-                            provenance: PackageProvenance::Globbed,
-                        },
+                        PathBuf::from("pkg-a"),
+                        PathBuf::from("pkg-b"),
                     ],
                 }],
                 packages: None,
@@ -2503,14 +2481,16 @@ mod tests {
             assert_eq!(layers[0]["authority"], "cargo-workspace");
             assert_eq!(layers[0]["orchestrators"], json!(["nx"]));
             assert_eq!(layers[0]["provenance"], "globbed");
+            assert!(
+                layers[0]["packages"].as_array().unwrap().iter().all(|p| p.is_string()),
+                "layer packages must be path strings: {value}"
+            );
         }
 
         #[test]
         fn structure_value_omits_empty_monorepo_topology() {
             let repo = RepoInfo {
                 is_monorepo: false,
-                monorepo_tool: None,
-                workspace_tools: Vec::new(),
                 root: PathBuf::from("/tmp/repo"),
                 dependencies: None,
                 dev_dependencies: None,
@@ -2569,6 +2549,42 @@ mod tests {
                 value["structure"]["monorepo_layers"][0]["authority"],
                 "cargo-workspace"
             );
+        }
+
+        #[test]
+        fn structure_value_package_carries_standard_and_provenance() {
+            let mut repo = repo_with_layers();
+            repo.packages = Some(vec![Package {
+                path: PathBuf::from("/tmp/repo/pkg-a"),
+                relative: "pkg-a".to_string(),
+                package_area: "root".to_string(),
+                name: "pkg-a".to_string(),
+                ecosystem: sniff::filesystem::repo::PackageEcosystem::default(),
+                standard: MonorepoStandard::CargoWorkspace,
+                provenance: PackageProvenance::Globbed,
+                ..Package::default()
+            }]);
+            let result = result_with_repo(repo);
+            let action = RepoAction::Structure {
+                filter: Vec::new(),
+                latest_versions: false,
+                package: None,
+                package_area: None,
+            };
+
+            let value = build(&result, Some(&action), None);
+            let packages = value["packages"].as_array().expect("packages array");
+            assert_eq!(packages.len(), 1);
+            assert_eq!(packages[0]["standard"], "cargo-workspace");
+            assert_eq!(packages[0]["provenance"], "globbed");
+            assert!(
+                packages[0].get("discovery_sources").is_none(),
+                "legacy discovery_sources must be absent: {value}"
+            );
+
+            let layers = value["monorepo_layers"].as_array().unwrap();
+            let layer_packages = layers[0]["packages"].as_array().unwrap();
+            assert!(layer_packages.iter().all(|p| p.is_string()));
         }
     }
 }

@@ -389,11 +389,9 @@ fn stable_topology_json(json: &serde_json::Value) -> serde_json::Value {
                         .map(|pkgs| {
                             pkgs.iter()
                                 .map(|p| {
-                                    json!({
-                                        "name": p.get("name").cloned().unwrap_or(Value::Null),
-                                        "standard": p.get("standard").cloned().unwrap_or(Value::Null),
-                                        "provenance": p.get("provenance").cloned().unwrap_or(Value::Null),
-                                    })
+                                    p.as_str()
+                                        .map(|s| Value::String(s.to_string()))
+                                        .unwrap_or_else(|| p.clone())
                                 })
                                 .collect::<Vec<_>>()
                         })
@@ -412,8 +410,6 @@ fn stable_topology_json(json: &serde_json::Value) -> serde_json::Value {
 
     json!({
         "is_monorepo": json.get("is_monorepo").cloned().unwrap_or(Value::Null),
-        "monorepo_tool": json.get("monorepo_tool").cloned().unwrap_or(Value::Null),
-        "workspace_tools": json.get("workspace_tools").cloned().unwrap_or_else(|| json!([])),
         "monorepo_standards": standards.unwrap_or_else(|| json!([])),
         "monorepo_layers": layers.unwrap_or_else(|| json!([])),
         "package_count": json["packages"].as_array().map(|a| a.len()),

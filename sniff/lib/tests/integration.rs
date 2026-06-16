@@ -1,12 +1,8 @@
-// `MonorepoTool` is deprecated but these integration tests still assert the
-// legacy `monorepo_tool` / `workspace_tools` fields are populated for backward
-// compatibility. Silence the expected deprecation noise during the migration.
-#![allow(deprecated)]
-
 use sniff::filesystem::ProgrammingLanguage;
 use sniff::os::NtpStatus;
 use sniff::request::DetectionPlan;
 use sniff::{SniffConfig, detect, detect_with_config};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -185,9 +181,10 @@ fn test_detect_pnpm_workspace() {
     assert!(fs.repo.is_some());
     let repo = fs.repo.unwrap();
     assert!(repo.is_monorepo);
+    assert_eq!(repo.monorepo_layers.len(), 1);
     assert_eq!(
-        repo.monorepo_tool,
-        Some(sniff::filesystem::MonorepoTool::PnpmWorkspaces)
+        repo.monorepo_layers[0].authority,
+        sniff::filesystem::MonorepoStandard::PnpmWorkspaces
     );
 }
 
@@ -256,7 +253,7 @@ fn test_detect_language_uses_package_boundary_from_nested_workspace() {
 // ============================================================================
 
 #[test]
-fn test_cargo_workspace_topology_layer_and_legacy_fields() {
+fn test_cargo_workspace_topology_layer() {
     use sniff::filesystem::MonorepoStandard;
 
     let (_dir, path) = fixtures::create_cargo_workspace();
@@ -271,16 +268,6 @@ fn test_cargo_workspace_topology_layer_and_legacy_fields() {
     assert_eq!(layer.authority, MonorepoStandard::CargoWorkspace);
     assert!(layer.orchestrators.is_empty());
     assert_eq!(layer.packages.len(), 2);
-
-    // Legacy contract is unchanged.
-    assert_eq!(
-        repo.monorepo_tool,
-        Some(sniff::filesystem::MonorepoTool::CargoWorkspace)
-    );
-    assert_eq!(
-        repo.workspace_tools,
-        vec![sniff::filesystem::MonorepoTool::CargoWorkspace]
-    );
 }
 
 #[test]
@@ -365,22 +352,21 @@ fn test_nested_pnpm_under_cargo_is_discovered_as_its_own_layer() {
     assert_eq!(pnpm_layer.root, path.join("web"));
     assert_eq!(pnpm_layer.packages.len(), 2);
 
-    // Layer packages are relative to the nested workspace root (`web/`), not
-    // the repo root — so `packages/app`, not `web/packages/app`.
+    // Layer packages use the same repo-root-relative framing as the canonical
+    // `RepoInfo.packages` catalog, so nested packages carry their `web/`
+    // prefix.
     let layer_rels: Vec<String> = pnpm_layer
         .packages
         .iter()
-        .map(|p| p.relative.to_string_lossy().into_owned())
+        .map(|p| p.to_string_lossy().into_owned())
         .collect();
-    assert!(layer_rels.contains(&"packages/app".to_string()));
+    assert!(layer_rels.contains(&"web/packages/app".to_string()));
     assert!(
-        !layer_rels.contains(&"web/packages/app".to_string()),
-        "layer packages must stay layer-root-relative, got: {layer_rels:?}"
+        !layer_rels.contains(&"packages/app".to_string()),
+        "layer packages must be repo-root-relative, got: {layer_rels:?}"
     );
 
-    // The flat `RepoInfo.packages` list is repo-root-relative: the nested pnpm
-    // packages appear under their `web/` prefix so dirty/staged matching and
-    // `--package-area` filtering see the real on-disk paths.
+    // The flat `RepoInfo.packages` list uses the same repo-root-relative paths.
     let flat_rels: Vec<String> = repo
         .packages
         .iter()
@@ -390,10 +376,6 @@ fn test_nested_pnpm_under_cargo_is_discovered_as_its_own_layer() {
     assert!(
         flat_rels.contains(&"web/packages/app".to_string()),
         "flat package list must be repo-root-relative, got: {flat_rels:?}"
-    );
-    assert!(
-        !flat_rels.contains(&"packages/app".to_string()),
-        "layer-relative paths must not leak into the flat list: {flat_rels:?}"
     );
 }
 
@@ -463,21 +445,21 @@ fn test_nested_cargo_under_pnpm_is_discovered_as_its_own_layer() {
         "nested Cargo workspace must resolve both members"
     );
 
-    // Layer packages are relative to the nested Cargo root (`crates/`), not the
-    // repo root — so `alpha` / `beta`, not `crates/alpha` / `crates/beta`.
+    // Layer packages use the same repo-root-relative framing as the canonical
+    // `RepoInfo.packages` catalog, so nested packages carry their `crates/`
+    // prefix.
     let layer_rels: Vec<String> = cargo_layer
         .packages
         .iter()
-        .map(|p| p.relative.to_string_lossy().into_owned())
+        .map(|p| p.to_string_lossy().into_owned())
         .collect();
-    assert!(layer_rels.contains(&"alpha".to_string()));
+    assert!(layer_rels.contains(&"crates/alpha".to_string()));
     assert!(
-        !layer_rels.contains(&"crates/alpha".to_string()),
-        "layer packages must stay layer-root-relative, got: {layer_rels:?}"
+        !layer_rels.contains(&"alpha".to_string()),
+        "layer packages must be repo-root-relative, got: {layer_rels:?}"
     );
 
-    // The flat list stays repo-root-relative so dirty/staged matching sees the
-    // real `crates/alpha` paths.
+    // The flat list uses the same repo-root-relative paths.
     let flat_rels: Vec<String> = repo
         .packages
         .iter()
@@ -627,7 +609,7 @@ fn test_per_root_confidence_in_same_standard_forest() {
 }
 
 #[test]
-fn test_pnpm_workspace_topology_layer_and_legacy_fields() {
+fn test_pnpm_workspace_topology_layer() {
     use sniff::filesystem::MonorepoStandard;
 
     let (_dir, path) = fixtures::create_pnpm_workspace();
@@ -640,12 +622,6 @@ fn test_pnpm_workspace_topology_layer_and_legacy_fields() {
     assert_eq!(
         repo.monorepo_layers[0].authority,
         MonorepoStandard::PnpmWorkspaces
-    );
-
-    // Legacy contract is unchanged.
-    assert_eq!(
-        repo.monorepo_tool,
-        Some(sniff::filesystem::MonorepoTool::PnpmWorkspaces)
     );
 }
 
@@ -663,12 +639,21 @@ fn test_pnpm_lockfile_parity_upgrades_provenance() {
     assert_eq!(layer.authority, MonorepoStandard::PnpmWorkspaces);
     assert_eq!(layer.provenance, PackageProvenance::Lockfile);
     assert_eq!(layer.lockfile_match, Some(true));
-    assert!(
-        layer
-            .packages
+
+    // Per-package provenance lives on the canonical `RepoInfo.packages` entries.
+    let packages = repo.packages.as_ref().expect("packages should be present");
+    for rel in &layer.packages {
+        let key = rel.to_string_lossy().replace('\\', "/");
+        let pkg = packages
             .iter()
-            .all(|p| p.provenance == PackageProvenance::Lockfile)
-    );
+            .find(|p| p.relative == key)
+            .expect("layer package must resolve to a catalog entry");
+        assert_eq!(
+            pkg.provenance,
+            PackageProvenance::Lockfile,
+            "package {key:?} should inherit Lockfile provenance"
+        );
+    }
 }
 
 #[test]
@@ -762,16 +747,6 @@ fn test_mixed_nested_workspace_has_layer_per_authority() {
         repo.monorepo_layers.iter().map(|l| l.authority).collect();
     assert!(authorities.contains(&MonorepoStandard::CargoWorkspace));
     assert!(authorities.contains(&MonorepoStandard::PnpmWorkspaces));
-
-    // Legacy fields: cargo is detected first, so it remains the primary tool.
-    assert_eq!(
-        repo.monorepo_tool,
-        Some(sniff::filesystem::MonorepoTool::CargoWorkspace)
-    );
-    assert!(
-        repo.workspace_tools
-            .contains(&sniff::filesystem::MonorepoTool::PnpmWorkspaces)
-    );
 }
 
 #[test]
@@ -805,15 +780,14 @@ fn test_nx_only_repo_is_not_a_monorepo() {
     use sniff::filesystem::{DetectionConfidence, MonorepoStandard};
 
     // `nx.json` alone has no membership authority. Detection finds no pnpm/npm
-    // workspace patterns, so the repo is honestly *not* a monorepo even though
-    // the legacy `workspace_tools` still lists Nx.
+    // workspace patterns, so the repo is honestly *not* a monorepo.
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::write(dir.path().join("nx.json"), "{}").unwrap();
     std::fs::write(dir.path().join("package.json"), "{}").unwrap();
 
     let repo = sniff::filesystem::detect_repo_structure(dir.path())
         .unwrap()
-        .expect("nx.json should still yield a RepoInfo via legacy workspace_tools");
+        .expect("nx.json should still yield a RepoInfo");
 
     assert!(!repo.is_monorepo, "nx-only repo must not be a monorepo");
     assert!(repo.monorepo_layers.is_empty());
@@ -863,14 +837,14 @@ fn test_monorepo_standards_serialize_with_kebab_case_ids() {
     let value = serde_json::to_value(&repo).unwrap();
     let obj = value.as_object().unwrap();
 
-    // Legacy keys still present.
+    // Legacy keys removed.
     assert!(
-        obj.contains_key("monorepo_tool"),
-        "legacy monorepo_tool key"
+        !obj.contains_key("monorepo_tool"),
+        "legacy monorepo_tool key should be absent"
     );
     assert!(
-        obj.contains_key("workspace_tools"),
-        "legacy workspace_tools key"
+        !obj.contains_key("workspace_tools"),
+        "legacy workspace_tools key should be absent"
     );
 
     // New keys present when non-empty, with kebab-case standard ids.
@@ -896,6 +870,181 @@ fn test_monorepo_standards_serialize_with_kebab_case_ids() {
 }
 
 // ============================================================================
+// Phase 8: acceptance — parity, catalog assertability, authority delegation
+// ============================================================================
+
+/// Walk up from `CARGO_MANIFEST_DIR` looking for the rusty-biscuit workspace
+/// root. Returns `None` when the test is run outside this repo.
+fn rusty_biscuit_repo_root() -> Option<PathBuf> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut current = manifest_dir.as_path();
+    while let Some(parent) = current.parent() {
+        current = parent;
+        let cargo_toml = current.join("Cargo.toml");
+        let git_dir = current.join(".git");
+        if cargo_toml.exists() && git_dir.exists() {
+            let Ok(content) = std::fs::read_to_string(&cargo_toml) else {
+                continue;
+            };
+            if content.contains("[workspace]") && content.contains("sniff/lib") {
+                return Some(current.to_path_buf());
+            }
+        }
+    }
+    None
+}
+
+#[test]
+fn test_rusty_biscuit_repo_topology_parity() {
+    use sniff::filesystem::{MonorepoStandard, PackageProvenance};
+
+    let Some(repo_root) = rusty_biscuit_repo_root() else {
+        // Not running inside the rusty-biscuit repo; skip parity check.
+        return;
+    };
+
+    let repo = sniff::filesystem::detect_repo_structure(&repo_root)
+        .unwrap()
+        .expect("rusty-biscuit should be detected as a monorepo");
+
+    assert!(repo.is_monorepo);
+    assert!(
+        !repo.monorepo_layers.is_empty(),
+        "rusty-biscuit should have membership layers"
+    );
+
+    let authorities: HashSet<MonorepoStandard> =
+        repo.monorepo_layers.iter().map(|l| l.authority).collect();
+    assert!(
+        authorities.contains(&MonorepoStandard::CargoWorkspace),
+        "cargo-workspace authority missing: {authorities:?}"
+    );
+    assert!(
+        authorities.contains(&MonorepoStandard::PnpmWorkspaces),
+        "pnpm-workspaces authority missing: {authorities:?}"
+    );
+
+    let packages = repo.packages.as_deref().expect("packages should be present");
+    assert!(!packages.is_empty());
+
+    // The pnpm workspace package must be owned by pnpm.
+    let pnpm_pkg = packages
+        .iter()
+        .find(|p| p.relative == "homelab/server/frontend")
+        .expect("homelab/server/frontend should be detected");
+    assert_eq!(
+        pnpm_pkg.standard,
+        MonorepoStandard::PnpmWorkspaces,
+        "pnpm package must be owned by pnpm-workspaces"
+    );
+    assert_eq!(
+        pnpm_pkg.provenance,
+        PackageProvenance::Lockfile,
+        "pnpm package should be lockfile-derived"
+    );
+
+    // Every package is either cargo, pnpm, or a manifest-scan fallback.
+    // No orchestrator-only standard may own a package.
+    for pkg in packages {
+        assert!(
+            matches!(
+                pkg.standard,
+                MonorepoStandard::CargoWorkspace
+                    | MonorepoStandard::PnpmWorkspaces
+                    | MonorepoStandard::Unknown
+            ),
+            "package {} has unexpected standard {:?}",
+            pkg.relative,
+            pkg.standard
+        );
+        assert_ne!(
+            pkg.standard,
+            MonorepoStandard::Nx,
+            "package {} must not be owned by Nx",
+            pkg.relative
+        );
+    }
+
+    // Every layer package path resolves to exactly one catalog entry.
+    let catalog: HashSet<&str> = packages.iter().map(|p| p.relative.as_str()).collect();
+    for layer in &repo.monorepo_layers {
+        for layer_pkg in &layer.packages {
+            let rel = layer_pkg.to_string_lossy();
+            assert!(
+                catalog.contains(rel.as_ref()),
+                "layer package {rel:?} not found in canonical catalog"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_nx_delegates_package_ownership_to_pnpm() {
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_nx_pnpm_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("nx + pnpm workspace should be detected");
+
+    let pnpm_layer = repo
+        .monorepo_layers
+        .iter()
+        .find(|l| l.authority == MonorepoStandard::PnpmWorkspaces)
+        .expect("pnpm should be the membership authority");
+    assert_eq!(pnpm_layer.orchestrators, vec![MonorepoStandard::Nx]);
+
+    let packages = repo.packages.as_deref().expect("packages should be present");
+    assert!(!packages.is_empty());
+
+    // Every package is owned by the membership authority, never by Nx.
+    for pkg in packages {
+        assert_eq!(
+            pkg.standard,
+            MonorepoStandard::PnpmWorkspaces,
+            "package {} must be owned by pnpm-workspaces, not {:?}",
+            pkg.relative,
+            pkg.standard
+        );
+    }
+}
+
+#[test]
+fn test_monorepo_layer_packages_resolve_to_canonical_catalog() {
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_nx_pnpm_workspace();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("nx + pnpm workspace should be detected");
+
+    let packages = repo.packages.as_deref().expect("packages should be present");
+    assert!(!packages.is_empty());
+
+    // Each package carries its owning standard and provenance directly.
+    for pkg in packages {
+        assert_ne!(
+            pkg.standard,
+            MonorepoStandard::Unknown,
+            "package {} should have a concrete standard",
+            pkg.relative
+        );
+    }
+
+    // Every layer package path resolves to exactly one catalog entry.
+    let catalog: HashSet<&str> = packages.iter().map(|p| p.relative.as_str()).collect();
+    for layer in &repo.monorepo_layers {
+        for layer_pkg in &layer.packages {
+            let rel = layer_pkg.to_string_lossy();
+            assert!(
+                catalog.contains(rel.as_ref()),
+                "layer package {rel:?} not found in canonical catalog"
+            );
+        }
+    }
+}
+
+// ============================================================================
 // Phase 4: new membership authorities — Bun, uv, Go workspace
 // ============================================================================
 
@@ -915,8 +1064,6 @@ fn test_bun_workspace_authority_is_bun() {
         MonorepoStandard::BunWorkspaces
     );
     assert_eq!(repo.monorepo_layers[0].packages.len(), 2);
-    // Bun has no legacy `MonorepoTool`, so the legacy field stays empty.
-    assert_eq!(repo.monorepo_tool, None);
 }
 
 #[test]
@@ -982,7 +1129,7 @@ fn test_go_workspace_resolves_explicit_use_paths() {
     let mut relatives: Vec<String> = layer
         .packages
         .iter()
-        .map(|p| p.relative.to_string_lossy().into_owned())
+        .map(|p| p.to_string_lossy().into_owned())
         .collect();
     relatives.sort();
     assert_eq!(relatives, vec!["svc-a".to_string(), "svc-b".to_string()]);
@@ -1022,14 +1169,12 @@ fn test_gradle_workspace_authority_is_gradle() {
     let mut relatives: Vec<String> = layer
         .packages
         .iter()
-        .map(|p| p.relative.to_string_lossy().into_owned())
+        .map(|p| p.to_string_lossy().into_owned())
         .collect();
     relatives.sort();
     assert_eq!(relatives, vec!["app".to_string(), "core".to_string()]);
     // The repo-local `gradlew` wrapper presence is recorded for Phase 7 to act on.
     assert!(path.join("gradlew").exists());
-    // Gradle has no legacy `MonorepoTool`, so the legacy field stays empty.
-    assert_eq!(repo.monorepo_tool, None);
 }
 
 #[test]
@@ -1062,11 +1207,10 @@ fn test_maven_workspace_authority_is_maven() {
     let mut relatives: Vec<String> = layer
         .packages
         .iter()
-        .map(|p| p.relative.to_string_lossy().into_owned())
+        .map(|p| p.to_string_lossy().into_owned())
         .collect();
     relatives.sort();
     assert_eq!(relatives, vec!["core".to_string(), "web".to_string()]);
-    assert_eq!(repo.monorepo_tool, None);
 }
 
 #[test]
@@ -1099,7 +1243,7 @@ fn test_dotnet_solution_authority_is_dotnet() {
     let mut relatives: Vec<String> = layer
         .packages
         .iter()
-        .map(|p| p.relative.to_string_lossy().into_owned())
+        .map(|p| p.to_string_lossy().into_owned())
         .collect();
     relatives.sort();
     // Each project's directory (the `.csproj` parent) becomes a package.
@@ -1107,7 +1251,6 @@ fn test_dotnet_solution_authority_is_dotnet() {
         relatives,
         vec!["src/App".to_string(), "src/Lib".to_string()]
     );
-    assert_eq!(repo.monorepo_tool, None);
 }
 
 #[test]
@@ -1151,7 +1294,7 @@ fn test_bazel_workspace_segments_nested_workspace_into_its_own_layer() {
     let mut parent_rels: Vec<String> = parent
         .packages
         .iter()
-        .map(|p| p.relative.to_string_lossy().into_owned())
+        .map(|p| p.to_string_lossy().into_owned())
         .collect();
     parent_rels.sort();
     // The nested subtree must be excluded from the parent's package list.
@@ -1165,14 +1308,13 @@ fn test_bazel_workspace_segments_nested_workspace_into_its_own_layer() {
     let nested_rels: Vec<String> = nested
         .packages
         .iter()
-        .map(|p| p.relative.to_string_lossy().into_owned())
+        .map(|p| p.to_string_lossy().into_owned())
         .collect();
-    // Layer paths are relative to the nested workspace root, so the package at
-    // `nested/BUILD` has an empty relative path.
-    assert_eq!(nested_rels, vec!["".to_string()]);
+    // Layer packages are repo-root-relative, so the nested workspace root is
+    // represented as `nested`.
+    assert_eq!(nested_rels, vec!["nested".to_string()]);
 
-    // The flat `RepoInfo.packages` list stays repo-root-relative: the nested
-    // package appears under its repo-root prefix `nested`.
+    // The flat `RepoInfo.packages` list uses the same repo-root-relative paths.
     let flat_rels: Vec<String> = repo
         .packages
         .iter()
@@ -1274,14 +1416,13 @@ fn test_rush_workspace_authority_is_rush() {
     let mut relatives: Vec<String> = layer
         .packages
         .iter()
-        .map(|p| p.relative.to_string_lossy().into_owned())
+        .map(|p| p.to_string_lossy().into_owned())
         .collect();
     relatives.sort();
     assert_eq!(
         relatives,
         vec!["apps/app".to_string(), "libraries/lib".to_string()]
     );
-    assert_eq!(repo.monorepo_tool, None);
 }
 
 #[test]

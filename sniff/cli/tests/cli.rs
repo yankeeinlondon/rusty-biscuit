@@ -464,6 +464,54 @@ fn repo_aggregate_json_single_key_leaves_unwrapped() {
 }
 
 #[test]
+fn repo_json_output_is_valid_json_on_stdout_with_clean_stderr() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "--json"])
+        .output()
+        .expect("run sniff repo --json");
+
+    assert!(
+        output.status.success(),
+        "sniff repo --json must succeed: stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    let _: serde_json::Value =
+        serde_json::from_str(stdout).expect("repo --json stdout must be valid JSON");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.trim().is_empty(),
+        "repo --json must not emit diagnostics on stderr: {stderr}"
+    );
+}
+
+#[test]
+fn repo_structure_json_output_is_valid_json_on_stdout_with_clean_stderr() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "structure", "--json"])
+        .output()
+        .expect("run sniff repo structure --json");
+
+    assert!(
+        output.status.success(),
+        "sniff repo structure --json must succeed: stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    let _: serde_json::Value =
+        serde_json::from_str(stdout).expect("repo structure --json stdout must be valid JSON");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.trim().is_empty(),
+        "repo structure --json must not emit diagnostics on stderr: {stderr}"
+    );
+}
+
+#[test]
 fn repo_aggregate_json_file_list_leaves_have_stable_shape() {
     let output = cargo_bin_cmd!("sniff")
         .args(["repo", "--json"])
