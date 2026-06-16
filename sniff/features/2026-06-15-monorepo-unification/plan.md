@@ -4,6 +4,13 @@ phases: 8
 created: 2026-06-15
 start_phase: 1
 yolo: "true"
+source_files_during_phase_1: []
+docs_updated_during_phase_1:
+  - sniff/features/2026-06-15-monorepo-unification/plan.md
+docs_created_during_phase_1:
+  - sniff/features/2026-06-15-monorepo-unification/phase-1-audit.md
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # Monorepo Type Unification — Execution Plan
@@ -64,19 +71,19 @@ library-provided facts. Package detection never executes a subprocess.
 
 ## Precondition (hard gate — read before starting)
 
-This feature **must not start implementation phases (2+)** until
-improved-monorepo-capture is fully landed. The spec defines three blocking
-conditions; Phase 1 verifies each. Current evidence (as of plan creation):
+This feature **may proceed to implementation phases (2+)** because the three
+blocking conditions below have been verified as MET. The parent
+`improved-monorepo-capture` feature has landed (its artifacts are now in
+`sniff/features/_completed/2026-06-15-improved-monorepo-capture/`).
 
 | Condition | Status | Evidence |
 |-----------|--------|----------|
-| Every `sniff repo` subcommand / JSON snapshot exercises `monorepo_layers` / `monorepo_standards` | **NOT MET** | `render_repo_section` still reads `repo.monorepo_tool` via `format_monorepo_tool`; no `format_monorepo_layer` helper exists (parent Phase 8 pending). |
-| `MonorepoTool` carries `#[deprecated(note = "Use MonorepoStandard via RepoInfo::monorepo_layers instead")]` | **NOT MET** | `types.rs:16` has no `#[deprecated]` attribute (parent Phase 8 pending). |
-| `Lockfile` / `Globbed` / `Explicit` / `LeafMarkers` provenance tiers populated on real layers | **PARTIAL** | `Globbed` + `Explicit` exercised (parent Phases 4–5 done); `LeafMarkers` + `Lockfile` unpopulated (parent Phases 6–7 pending). |
+| Every `sniff repo` subcommand / JSON snapshot exercises `monorepo_layers` / `monorepo_standards` | **MET** | `format_monorepo_layer` exists at `sniff/cli/src/output/filesystem/repo.rs:186`; `render_repo_section` uses it for multi-layer repos (`repo.rs:559-564`, `repo.rs:965-971`); `repo_json.rs` tests assert `monorepo_standards` and `monorepo_layers` are present (`repo_json.rs:2489-2494`, `repo_json.rs:2561-2569`). |
+| `MonorepoTool` carries `#[deprecated(note = "Use MonorepoStandard via RepoInfo::monorepo_layers instead")]` | **MET** | `sniff/lib/src/filesystem/repo/types.rs:18` has the required `#[deprecated]` attribute. |
+| `Lockfile` / `Globbed` / `Explicit` / `LeafMarkers` provenance tiers populated on real layers | **MET** | `Globbed` and `Lockfile` are asserted on real Cargo/pnpm/uv layers in `sniff/lib/tests/integration.rs:664-746`; `Explicit` is produced by Go/Maven/Gradle/DotNet `RootExplicit` membership models and exercised in `tests/integration.rs:980`; `LeafMarkers` is produced by the Bazel/Pants/Buck2 detectors and exercised in `tests/integration.rs:1127-1248`. |
 
-**Consequence:** execution of Phases 2–8 is blocked until the parent feature's
-remaining phases (6, 7, 8) land. Coordinate with that feature's owner. The
-parity audit and decision tasks in Phase 1 may proceed immediately regardless.
+**Consequence:** execution of Phases 2–8 is unblocked. The parity audit and
+decision tasks in Phase 1 have been completed and are recorded below.
 
 ## Key Files
 
@@ -110,14 +117,14 @@ against; the decisions are the contract the deletions honor.
 
 ### 1A — Precondition verification (hard gate)
 
-- [ ] Confirm `MonorepoTool` in `sniff/lib/src/filesystem/repo/types.rs` carries
+- [x] Confirm `MonorepoTool` in `sniff/lib/src/filesystem/repo/types.rs` carries
   `#[deprecated(note = "Use MonorepoStandard via RepoInfo::monorepo_layers instead")]`.
   If absent, parent Phase 8 has not landed — **stop and coordinate**.
-- [ ] Confirm the CLI renders `monorepo_layers` / `monorepo_standards` in every
+- [x] Confirm the CLI renders `monorepo_layers` / `monorepo_standards` in every
   `sniff repo` subcommand and JSON snapshot (a `format_monorepo_layer` helper or
   equivalent exists). If absent, parent Phase 8 has not landed — **stop and
   coordinate**.
-- [ ] Confirm `PackageProvenance::{Globbed, Explicit, LeafMarkers, Lockfile}` are
+- [x] Confirm `PackageProvenance::{Globbed, Explicit, LeafMarkers, Lockfile}` are
   each populated on at least one real layer across the test fixtures. If
   `LeafMarkers` or `Lockfile` are unpopulated, record which are missing;
   coordinate with the parent feature. Note: no current `PackageDiscoverySource`
@@ -127,18 +134,18 @@ against; the decisions are the contract the deletions honor.
 
 ### 1B — Parity audit (the reference list)
 
-- [ ] Run `git grep -n "MonorepoTool" -- sniff/lib sniff/cli` and record every
+- [x] Run `git grep -n "MonorepoTool" -- sniff/lib sniff/cli` and record every
   hit (definitions, constructors, match arms, doc examples, test literals).
   This is the deletion checklist for Phases 5–6.
-- [ ] Run `git grep -n "PackageDiscoverySource\|discovery_sources\|discovery_source_for_tool" -- sniff/lib sniff/cli`
+- [x] Run `git grep -n "PackageDiscoverySource\|discovery_sources\|discovery_source_for_tool" -- sniff/lib sniff/cli`
   and record every hit. This is the deletion checklist for Phase 5.
-- [ ] Run `git grep -n "monorepo_tool\|workspace_tools" -- sniff claudine` across
+- [x] Run `git grep -n "monorepo_tool\|workspace_tools" -- sniff claudine` across
   `.rs` and `.md` files. Record each consumer (in-process field reads vs.
   documented JSON keys vs. template variables).
-- [ ] Run `git grep -n "LayerPackage" -- sniff` and record every construction
+- [x] Run `git grep -n "LayerPackage" -- sniff` and record every construction
   site (topology builder, test helpers, re-exports). This is the checklist for
   Phase 4.
-- [ ] Identify every `Package { ... }` struct literal that sets
+- [x] Identify every `Package { ... }` struct literal that sets
   `discovery_sources` (found in: `detection.rs` tests, `types.rs` tests,
   `recent_commits.rs`, `darkmatter/.../capture.rs`, `sniff/cli` test modules,
   `claudine/cli/.../env.rs`). These are the mechanical update sites when the
@@ -146,7 +153,7 @@ against; the decisions are the contract the deletions honor.
 
 ### 1C — Lock open design questions
 
-- [ ] **Manifest-scan provenance.** Packages discovered by
+- [x] **Manifest-scan provenance.** Packages discovered by
   `discover_packages_from_index` (nested packages not declared in any workspace
   member list) currently carry `PackageDiscoverySource::ManifestScan`. Decide
   their `PackageProvenance`: **recommendation — add a new
@@ -157,7 +164,7 @@ against; the decisions are the contract the deletions honor.
   it. If the audit shows `LeafMarkers` is unambiguously equivalent in this repo,
   reuse it instead — but only if a doc comment can keep the two call sites
   distinguishable.
-- [ ] **D2 information-loss confirmation.** Audit the rusty-biscuit repo's
+- [x] **D2 information-loss confirmation.** Audit the rusty-biscuit repo's
   pre-unification `discovery_sources` values. Confirm that every multi-element
   `Vec` is the `[authority, ManifestScan]` duplicate pattern the spec predicts,
   not a genuine multi-authority case the single-scalar model would flatten. If a
@@ -170,6 +177,26 @@ against; the decisions are the contract the deletions honor.
 - The parity audit list is committed alongside this plan (or in a scratch doc the
   implementation team references).
 - Both open questions have a recorded decision with rationale.
+
+## Phase 1 Audit Results
+
+All three hard-gate preconditions are **MET**. The complete parity audit and the
+locked design decisions are recorded in
+[`phase-1-audit.md`](./phase-1-audit.md). Summary:
+
+- **Manifest-scan provenance decision:** Add `PackageProvenance::ManifestScan`
+  (serde `"manifest-scan"`) to `sniff/lib/src/filesystem/repo/standard.rs` for
+  packages discovered by `discover_packages_from_index` without a membership
+  authority. It is semantically distinct from `LeafMarkers`.
+- **D2 confirmation:** Every multi-element `discovery_sources` array in the
+  rusty-biscuit repo is `[authority, manifest_scan]`; no genuine multi-authority
+  case exists.
+- **Parity hit counts:** `MonorepoTool` 123 hits; `PackageDiscoverySource` /
+  `discovery_sources` / `discovery_source_for_tool` 61 hits;
+  `monorepo_tool` / `workspace_tools` 234 hits; `LayerPackage` 35 hits;
+  `Package { ... discovery_sources: ... }` literals 18 hits.
+- **Validation:** `just test` in `sniff/` passed (690 passed, 2 skipped);
+  `just lint` in `sniff/` was clean.
 
 ## Phase 2: Promote `standard` + `provenance` onto `Package` (additive)
 
