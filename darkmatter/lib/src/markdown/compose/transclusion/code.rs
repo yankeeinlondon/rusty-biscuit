@@ -77,8 +77,17 @@ mod tests {
     }
 
     #[test]
-    fn fallback_language_when_no_extension() {
-        assert_eq!(infer_language(Path::new("Makefile"), "txt"), "txt");
+    fn recognizes_extensionless_well_known_filename() {
+        // `Makefile` has no extension but is a supported source filename; the
+        // returned fence token is the lowercase basename so composed Markdown
+        // surfaces the language hint instead of falling back to plain text.
+        assert_eq!(infer_language(Path::new("Makefile"), "txt"), "makefile");
+        assert_eq!(infer_language(Path::new("Dockerfile"), "txt"), "dockerfile");
+    }
+
+    #[test]
+    fn fallback_language_when_no_extension_and_unknown_basename() {
+        assert_eq!(infer_language(Path::new("not-a-known-name"), "txt"), "txt");
     }
 
     #[test]

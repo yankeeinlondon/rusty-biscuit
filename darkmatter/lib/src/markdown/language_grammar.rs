@@ -187,8 +187,8 @@ impl LanguageGrammar {
     /// Resolves a file extension to a Darkmatter grammar.
     ///
     /// The input may include or omit a leading dot. Lookup is case-insensitive
-    /// for user ergonomics, but the returned grammar keeps Darkmatter's
-    /// canonical spelling.
+    /// for user ergonomics, and the returned grammar stores the canonical
+    /// lowercase spelling so downstream `Display` emits a stable fence token.
     pub fn from_extension(input: impl AsRef<str>) -> Result<Self, LanguageGrammarError> {
         let ext = input.as_ref().trim();
         if ext.is_empty() {
@@ -201,11 +201,14 @@ impl LanguageGrammar {
             return Ok(grammar);
         }
 
-        if load_syntax_set().find_syntax_by_extension(ext).is_some() {
-            return Ok(LanguageGrammar::OtherByExtension(ext.to_string()));
+        // syntect's `find_syntax_by_extension` happens to be case-insensitive
+        // in practice, but Darkmatter's contract is to store the canonical
+        // lowercase spelling regardless of input case.
+        if load_syntax_set().find_syntax_by_extension(&lower).is_some() {
+            return Ok(LanguageGrammar::OtherByExtension(lower));
         }
 
-        Err(LanguageGrammarError::UnknownGrammar(ext.to_string()))
+        Err(LanguageGrammarError::UnknownGrammar(lower))
     }
 
     /// Resolves a syntect display name to a Darkmatter grammar.
@@ -263,10 +266,21 @@ impl LanguageGrammar {
             }
         }
 
-        // Extensionless well-known filenames resolve through the alias table.
+        // Extensionless well-known filenames resolve through the shared alias
+        // tables used by token resolution. Named aliases win first; remaining
+        // well-known source filenames (Dockerfile, Makefile, ...) resolve
+        // through the extension/name alias map.
         let lower = basename.to_ascii_lowercase();
         if let Some(grammar) = grammar_from_alias(&lower) {
             return Ok(grammar);
+        }
+
+        let syntax_set = load_syntax_set();
+        if let Some(alias) = extensionless_alias(&lower)
+            && (syntax_set.find_syntax_by_extension(alias).is_some()
+                || syntax_set.find_syntax_by_name(alias).is_some())
+        {
+            return Ok(LanguageGrammar::OtherByToken(basename.to_string()));
         }
 
         Err(LanguageGrammarError::UnknownGrammar(raw.to_string()))
@@ -513,6 +527,27 @@ fn grammar_from_alias(token: &str) -> Option<LanguageGrammar> {
     }
 }
 
+/// Returns the canonical syntect extension or display name that an
+/// extensionless filename or token alias resolves to.
+///
+/// Shared between [`LanguageGrammar::from_filename`] and `find_via_token` so
+/// extensionless well-known source filenames (`Dockerfile`, `Makefile`) and
+/// their token aliases (`dockerfile`, `make`, `c++`) resolve identically.
+fn extensionless_alias(token: &str) -> Option<&'static str> {
+    match token {
+        "shell" | "zsh" | "sh" => Some("bash"),
+        "c++" | "cpp" => Some("cpp"),
+        "dockerfile" => Some("Dockerfile"),
+        "makefile" | "make" => Some("Makefile"),
+        "javascript" => Some("js"),
+        "typescript" => Some("ts"),
+        "python" | "python3" => Some("py"),
+        "tsx" => Some("TypeScript"),
+        "yml" => Some("yaml"),
+        _ => None,
+    }
+}
+
 /// Returns `true` for tokens that explicitly request plain text and should
 /// preserve the original token as a dynamic variant.
 fn is_plain_text_token(token: &str) -> bool {
@@ -613,18 +648,9 @@ fn find_via_token<'a>(
             return Ok(syntax);
         }
     }
-    let alias = match lower.as_str() {
-        "shell" | "zsh" | "sh" => "bash",
-        "c++" => "cpp",
-        "dockerfile" => "Dockerfile",
-        "makefile" | "make" => "Makefile",
-        "javascript" => "js",
-        "typescript" => "ts",
-        "python" | "python3" => "py",
-        "tsx" => "TypeScript",
-        "yml" => "yaml",
-        _ => return Err(LanguageGrammarError::UnknownGrammar(token.to_string())),
-    };
+    let alias = extensionless_alias(&lower).ok_or_else(|| {
+        LanguageGrammarError::UnknownGrammar(token.to_string())
+    })?;
     syntax_set
         .find_syntax_by_extension(alias)
         .or_else(|| syntax_set.find_syntax_by_name(alias))
@@ -1020,6 +1046,65 @@ mod tests {
     fn from_filename_rejects_whitespace() {
         let err = LanguageGrammar::from_filename("rust title=\"hi\"").unwrap_err();
         assert!(matches!(err, LanguageGrammarError::UnknownGrammar(_)));
+    }
+
+    #[test]
+    fn from_filename_resolves_extensionless_well_known_basenames() {
+        // Spec contract: extensionless well-known source filenames resolve
+        // through the same alias table used by token lookup. The stored token
+        // preserves the caller's spelling; resolution still succeeds.
+        for name in ["Dockerfile", "Makefile", "dockerfile", "makefile"] {
+            let grammar = LanguageGrammar::from_filename(name)
+                .unwrap_or_else(|_| panic!("{name} should resolve"));
+            assert!(
+                matches!(grammar, LanguageGrammar::OtherByToken(_)),
+                "{name} should resolve to OtherByToken, got {grammar:?}"
+            );
+            assert!(grammar.resolve_default().is_ok(), "{name} should resolve");
+        }
+    }
+
+    #[test]
+    fn from_filename_extensionless_resolves_make_alias() {
+        // The shared extensionless alias table maps `make` -> Makefile.
+        let grammar = LanguageGrammar::from_filename("make").expect("make alias resolves");
+        assert!(matches!(grammar, LanguageGrammar::OtherByToken(_)));
+        assert!(grammar.resolve_default().is_ok());
+    }
+
+    #[test]
+    fn from_filename_extensionless_unknown_returns_error() {
+        let err = LanguageGrammar::from_filename("not-a-known-basename")
+            .expect_err("unknown basename should not resolve");
+        assert!(matches!(err, LanguageGrammarError::UnknownGrammar(_)));
+    }
+
+    #[test]
+    fn from_extension_case_insensitive_for_dynamic_extension() {
+        // `cs` is a non-aliased two-face extension (C#) that does not appear
+        // in `grammar_from_alias`. Mixed-case and uppercase inputs must still
+        // resolve, and the stored spelling must canonicalize to lowercase so
+        // downstream `Display` emits a stable fence token instead of echoing
+        // the caller's casing.
+        for input in ["cs", "CS", "Cs", "cS"] {
+            let grammar = LanguageGrammar::from_extension(input)
+                .unwrap_or_else(|_| panic!("{input} should resolve"));
+            assert!(
+                matches!(grammar, LanguageGrammar::OtherByExtension(ref s) if s == "cs"),
+                "{input} should canonicalize to OtherByExtension(\"cs\"), got {grammar:?}"
+            );
+            assert!(
+                grammar.resolve_default().is_ok(),
+                "{input} should resolve to a syntax"
+            );
+        }
+
+        // Unknown extensions still canonicalize the error spelling.
+        let err = LanguageGrammar::from_extension("NOPE").unwrap_err();
+        assert!(
+            matches!(err, LanguageGrammarError::UnknownGrammar(ref s) if s == "nope"),
+            "unknown extension error should canonicalize to lowercase, got {err:?}"
+        );
     }
 
     #[test]
