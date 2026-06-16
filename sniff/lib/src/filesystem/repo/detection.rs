@@ -24,6 +24,7 @@ use super::manifest_index::{
     discover_packages_with_optional_index as mi_discover_packages_with_optional_index,
 };
 use super::maven::detect_maven_workspace;
+use super::nested::discover_nested_workspace_outcomes;
 use super::npm::{
     detect_bun_workspace, detect_npm_workspace, detect_pnpm_workspace, detect_rush_workspace,
     detect_yarn_workspace, npm_package_name, npm_package_version,
@@ -169,9 +170,16 @@ pub(crate) fn detect_repo_inner_with_shared(
     // Build manifest index once for the entire tree unless the caller already
     // provided the shared view from a higher-level walk. Skip the (potentially
     // very expensive) tree walk entirely when `root` has no workspace marker
-    // file: without one, every detector below returns `None`, so the index
-    // would never be consumed. This keeps `detect_repo` on a non-repo directory
-    // -- e.g. a large system temp dir -- from walking unrelated subtrees.
+    // file: without one, every *root-level* detector below returns `None`, so
+    // the index would never be consumed at this stage. This keeps `detect_repo`
+    // on a non-repo directory -- e.g. a large system temp dir -- from walking
+    // unrelated subtrees.
+    //
+    // The skip is eager only: nested workspace discovery below may still
+    // produce outcomes from markers deeper in the tree (e.g.
+    // `web/pnpm-workspace.yaml` under an otherwise bare root). When that
+    // happens and full package enrichment is requested, the index is built
+    // lazily after the early-return check so full detection does not panic.
     let manifest_index =
         if structure_only || shared_manifest_index.is_some() || !has_workspace_marker(root) {
             None
@@ -279,9 +287,51 @@ pub(crate) fn detect_repo_inner_with_shared(
     collect_outcomes(detect_pants_workspace(root)?, &mut packages, &mut outcomes);
     collect_outcomes(detect_buck2_workspace(root)?, &mut packages, &mut outcomes);
 
+    // Root-manifest standards (pnpm, npm, Go, Gradle, Maven, ...) only fired
+    // at the supplied root above. Walk the tree once for their marker files
+    // and dispatch the matching detectors at each non-root candidate so the
+    // topology is a real forest — e.g. a Cargo workspace at the root with a
+    // pnpm workspace several directories down produces two layers, not one.
+    //
+    // `forbids_nested_roots` is computed up front because a `ForbidsNested`
+    // standard (Cargo, uv) only blocks nested instances of itself — the
+    // walker needs read access to the root outcomes while mutating the
+    // shared outcomes list.
+    let forbids_nested_roots: Vec<(PathBuf, MonorepoStandard)> = outcomes
+        .iter()
+        .filter(|o| {
+            matches!(
+                o.standard.spec().nesting_policy,
+                super::standard::NestingPolicy::ForbidsNested
+            )
+        })
+        .map(|o| (o.root.clone(), o.standard))
+        .collect();
+    discover_nested_workspace_outcomes(
+        root,
+        manifest_index,
+        &forbids_nested_roots,
+        &mut workspace_tools,
+        &mut packages,
+        &mut outcomes,
+    )?;
+
     if workspace_tools.is_empty() && outcomes.is_empty() {
         return Ok((None, None));
     }
+
+    // Full-mode nested package enrichment requires the manifest index. The
+    // eager build above is skipped when `root` has no workspace marker, but
+    // nested discovery may still have produced outcomes (e.g.
+    // `web/pnpm-workspace.yaml` under an otherwise bare root). Build the index
+    // lazily here so full `detect_repo` does not panic on a nested-only
+    // topology. Structure-only mode never consults the index, so it stays `None`.
+    let lazy_manifest_index = if !structure_only && manifest_index.is_none() {
+        Some(ManifestIndex::build(root))
+    } else {
+        None
+    };
+    let manifest_index = manifest_index.or(lazy_manifest_index.as_ref());
 
     // Build the topology from membership-declaring detectors. `is_monorepo` is
     // now the honest predicate: at least one layer must resolve non-degenerately.
@@ -463,9 +513,14 @@ fn upgrade_provenance_with_lockfile(layer: &mut MonorepoLayer) {
 }
 
 /// Parse `pnpm-lock.yaml` and compare its `importers:` keys to the layer's
-/// package set. Returns `Some(true)` when every manifest package has a matching
-/// importer, `Some(false)` when they disagree, and `None` when the lockfile is
-/// absent or unparseable.
+/// package set. Returns `Some(true)` only when the two sets are equal, so a
+/// stale lockfile with extra importers is reported as a mismatch rather than
+/// silently upgrading provenance to `Lockfile`. Returns `None` when the
+/// lockfile is absent or unparseable.
+///
+/// The pnpm root importer key `"."` is normalized away because the manifest
+/// globs never list the root — both sides are compared as member sets without
+/// the workspace root.
 fn pnpm_lockfile_matches(layer: &MonorepoLayer) -> Option<bool> {
     let lock_path = layer.root.join("pnpm-lock.yaml");
     let content = std::fs::read_to_string(&lock_path).ok()?;
@@ -493,11 +548,17 @@ fn pnpm_lockfile_matches(layer: &MonorepoLayer) -> Option<bool> {
         .map(|p| p.relative.to_string_lossy().into_owned().replace('\\', "/"))
         .collect();
 
-    Some(manifest_members.iter().all(|m| lock_members.contains(m)))
+    Some(manifest_members == lock_members)
 }
 
 /// Parse `uv.lock` and compare its `workspace.members` entries to the layer's
-/// package set.
+/// package set. Returns `Some(true)` only on set equality, so a stale lockfile
+/// with extra or missing members is reported as a mismatch. Returns `None`
+/// when the lockfile is absent or unparseable.
+///
+/// The uv root member (`"."`) is kept on both sides because uv's
+/// `RootMembership::Always` adds the root to `layer.packages`, so both sets
+/// include the root.
 fn uv_lockfile_matches(layer: &MonorepoLayer) -> Option<bool> {
     let lock_path = layer.root.join("uv.lock");
     let content = std::fs::read_to_string(&lock_path).ok()?;
@@ -524,10 +585,15 @@ fn uv_lockfile_matches(layer: &MonorepoLayer) -> Option<bool> {
     let manifest_members: std::collections::HashSet<String> = layer
         .packages
         .iter()
-        .map(|p| p.relative.to_string_lossy().into_owned().replace('\\', "/"))
+        .map(|p| {
+            let s = p.relative.to_string_lossy().into_owned().replace('\\', "/");
+            // uv counts the workspace root (`.`) as a member; represent the
+            // empty relative path the same way the lockfile does.
+            if s.is_empty() { ".".to_string() } else { s }
+        })
         .collect();
 
-    Some(manifest_members.iter().all(|m| lock_members.contains(m)))
+    Some(manifest_members == lock_members)
 }
 
 /// Check that every globbed Cargo member has a `[package].name` present in the

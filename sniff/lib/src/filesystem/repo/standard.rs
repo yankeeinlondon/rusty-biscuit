@@ -20,12 +20,9 @@ use std::collections::HashMap;
 #[cfg(test)]
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
 
 use crate::executable_index::ExecutableIndex;
 use crate::filesystem::file_types::ProgrammingLanguage;
-use crate::programs::contract::ExecutableSource;
 
 // TODO(swift): see spec § "How should SwiftPM be represented?". The
 // `SwiftPackage` variant is intentionally absent until option 2
@@ -377,6 +374,16 @@ pub struct MonorepoLayer {
     /// set, if a lockfile was consulted. `None` when no lockfile was parsed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lockfile_match: Option<bool>,
+    /// Whether the layer's root manifest also declares a package, when the
+    /// standard's [`RootMembership`] is [`RootMembership::WhenManifestDeclaresPackage`].
+    ///
+    /// For [`RootMembership::Always`] this is always `true`; for
+    /// [`RootMembership::Never`] it is always `false`. It is consulted by
+    /// [`MonorepoStandard::membership_resolves_non_degenerately`] so a single
+    /// member plus a non-package root (e.g. a virtual Cargo workspace with one
+    /// member) is correctly treated as degenerate.
+    #[serde(default)]
+    pub root_is_package: bool,
     /// Packages resolved for this layer, with paths relative to the layer root.
     pub packages: Vec<LayerPackage>,
 }
@@ -443,16 +450,20 @@ impl MonorepoStandard {
     ///
     /// A `MemberCount` standard needs at least two resolved packages, or a
     /// single non-root member when its [`RootMembership`] also lets the root
-    /// count. A `PackageBoundaryOnly` standard never resolves non-degenerately
-    /// on its own — targets and products are not packages.
+    /// count. `WhenManifestDeclaresPackage` consults
+    /// [`MonorepoLayer::root_is_package`] so a virtual Cargo workspace with a
+    /// single member (no `[package]` at the root) is honestly degenerate. A
+    /// `PackageBoundaryOnly` standard never resolves non-degenerately on its
+    /// own — targets and products are not packages.
     pub fn membership_resolves_non_degenerately(self, layer: &MonorepoLayer) -> bool {
         match self.spec().multiplicity {
             WorkspaceMultiplicity::MemberCount => match layer.packages.len() {
                 0 => false,
-                1 => matches!(
-                    self.spec().root_membership,
-                    RootMembership::Always | RootMembership::WhenManifestDeclaresPackage
-                ),
+                1 => match self.spec().root_membership {
+                    RootMembership::Always => true,
+                    RootMembership::WhenManifestDeclaresPackage => layer.root_is_package,
+                    RootMembership::Never => false,
+                },
                 _ => true,
             },
             WorkspaceMultiplicity::PackageBoundaryOnly => false,
@@ -484,16 +495,21 @@ impl MonorepoStandard {
     }
 }
 
-/// Timeout for the advisory version probe used to satisfy `min_version` checks.
-const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
-
 /// Resolve the acting binary for `standard` at `root` using the repo-local
 /// wrapper script (when declared) or the shared `ExecutableIndex`.
 ///
-/// When a binary is found and `BinarySpec.min_version` is set, the binary is
-/// probed with `version_arg` to populate `ResolvedBinary.version` and
-/// `satisfies_min_version`. A missing or unparseable version yields `None` for
-/// the comparison, never `Some(false)`.
+/// This function never executes a binary: it only checks the wrapper script's
+/// existence on disk and asks the index whether the PATH binary is present.
+/// `version` and `satisfies_min_version` are left as `None` because populating
+/// them would require spawning `--version`, which violates sniff's
+/// filesystem-only detection boundary (spec §8). A consumer that wants the
+/// version is expected to run the advisory `version_arg` itself.
+///
+/// ## Returns
+///
+/// - `Some(ResolvedBinary)` — when a wrapper script or PATH binary is found.
+/// - `None` — when neither is present. The repo is still recognized as using
+///   the standard; only its acting binary is unavailable on this host.
 pub fn resolve_acting_binary(
     standard: MonorepoStandard,
     root: &Path,
@@ -502,7 +518,8 @@ pub fn resolve_acting_binary(
     let spec = standard.spec();
     let binary = spec.binaries.first()?;
 
-    // Wrapper scripts take precedence over system binaries.
+    // Wrapper scripts take precedence over system binaries. Only the file's
+    // existence is checked — never executed.
     if let Some(wrapper) = binary.wrapper {
         let wrapper_path = if cfg!(windows) {
             root.join(wrapper.windows)
@@ -510,31 +527,26 @@ pub fn resolve_acting_binary(
             root.join(wrapper.posix)
         };
         if wrapper_path.exists() {
-            let version = probe_version(&wrapper_path, binary.version_arg);
-            let satisfies = min_version_satisfies(&version, binary.min_version);
             return Some(ResolvedBinary {
                 name: binary.name.to_string(),
                 path: Some(wrapper_path),
-                version,
-                satisfies_min_version: satisfies,
+                version: None,
+                satisfies_min_version: None,
                 source: BinarySource::Wrapper,
             });
         }
     }
 
-    // Fall back to PATH / bundle / Windows fallback indexes.
-    let (path, source) = index.find_with_source(binary.name)?;
-    let version = probe_version(&path, binary.version_arg);
-    let satisfies = min_version_satisfies(&version, binary.min_version);
+    // Fall back to PATH / bundle / Windows fallback indexes. The index's
+    // `find_with_source` answers from cache or a `which` lookup; it does not
+    // spawn the binary.
+    let (path, _source) = index.find_with_source(binary.name)?;
     Some(ResolvedBinary {
         name: binary.name.to_string(),
         path: Some(path),
-        version,
-        satisfies_min_version: satisfies,
-        source: match source {
-            ExecutableSource::Path => BinarySource::Path,
-            _ => BinarySource::Path,
-        },
+        version: None,
+        satisfies_min_version: None,
+        source: BinarySource::Path,
     })
 }
 
@@ -581,51 +593,12 @@ pub fn resolve_acting_binary_with_version(
     })
 }
 
-/// Probe the binary at `path` for its version string.
-///
-/// Reads the first line of output from `path version_arg` with a short
-/// timeout. Falls back to stderr when stdout is empty. Returns `None` when
-/// the binary cannot be run or the output cannot be parsed.
-fn probe_version(path: &Path, version_arg: &str) -> Option<String> {
-    let mut child = Command::new(path)
-        .arg(version_arg)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .ok()?;
-
-    let start = Instant::now();
-    loop {
-        if let Some(status) = child.try_wait().ok()? {
-            let mut stdout = Vec::new();
-            let mut stderr = Vec::new();
-            if let Some(mut out) = child.stdout.take() {
-                let _ = std::io::Read::read_to_end(&mut out, &mut stdout);
-            }
-            if let Some(mut err) = child.stderr.take() {
-                let _ = std::io::Read::read_to_end(&mut err, &mut stderr);
-            }
-            if !status.success() {
-                return None;
-            }
-            let text = if stdout.is_empty() {
-                String::from_utf8_lossy(&stderr)
-            } else {
-                String::from_utf8_lossy(&stdout)
-            };
-            return extract_version(&text);
-        }
-        if start.elapsed() >= VERSION_PROBE_TIMEOUT {
-            let _ = child.kill();
-            let _ = child.wait();
-            return None;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-}
-
 /// Extract the first version-like token from a `--version` output block.
+///
+/// Used by the hermetic test helper [`resolve_acting_binary_with_version`]
+/// which never spawns a real binary; the production path leaves `version` as
+/// `None` to honor the no-subprocess detection boundary.
+#[cfg(test)]
 fn extract_version(text: &str) -> Option<String> {
     let first_line = text.lines().next().unwrap_or(text);
     let re = regex::Regex::new(r"v?(\d+(?:\.\d+)*)").expect("static version regex is valid");
@@ -638,6 +611,7 @@ fn extract_version(text: &str) -> Option<String> {
 ///
 /// Missing components are padded with zeros; trailing components beyond patch
 /// are ignored. Returns `None` for empty or non-numeric input.
+#[cfg(test)]
 fn parse_version_tuple(version: &str) -> Option<(u64, u64, u64)> {
     let mut parts = version.split('.');
     let major = parts.next()?.parse().ok()?;
@@ -650,6 +624,7 @@ fn parse_version_tuple(version: &str) -> Option<(u64, u64, u64)> {
 ///
 /// Returns `None` when either side is missing or unparseable, never
 /// `Some(false)` unless both sides parsed conclusively.
+#[cfg(test)]
 fn min_version_satisfies(version: &Option<String>, min_version: Option<&str>) -> Option<bool> {
     let version = version.as_ref()?;
     let min = min_version?;
@@ -1952,6 +1927,77 @@ mod tests {
         assert_eq!(unparseable.unwrap().satisfies_min_version, None);
     }
 
+    /// Regression test for the no-subprocess detection boundary (spec §8).
+    ///
+    /// Both a wrapper script and a PATH binary are rigged to write a marker
+    /// file if ever executed. `resolve_acting_binary` must report them without
+    /// spawning either, so neither marker may appear on disk afterwards, and
+    /// `version` / `satisfies_min_version` must be `None`.
+    #[cfg(unix)]
+    #[test]
+    fn resolve_acting_binary_never_spawns_wrapper_or_path_binary() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        // Sentinel wrapper that touches a marker file if executed. The Gradle
+        // descriptor declares `gradlew` as its wrapper name.
+        let wrapper = root.join("gradlew");
+        let wrapper_marker = root.join("WRAPPER_RAN");
+        fs::write(
+            &wrapper,
+            format!("#!/bin/sh\ntouch {}\necho 8.0\n", wrapper_marker.display()),
+        )
+        .unwrap();
+        fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).unwrap();
+
+        // Sentinel PATH binary that touches a different marker if executed.
+        // We point the synthetic index at a fake `gradle` in a temp bin dir.
+        let bin_dir = dir.path().join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        let path_binary = bin_dir.join("gradle");
+        let path_marker = root.join("PATH_RAN");
+        fs::write(
+            &path_binary,
+            format!("#!/bin/sh\ntouch {}\necho 8.0\n", path_marker.display()),
+        )
+        .unwrap();
+        fs::set_permissions(&path_binary, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let mut entries = HashMap::new();
+        entries.insert(OsString::from("gradle"), path_binary.clone());
+        let index = ExecutableIndex::for_test(entries);
+
+        // Wrapper script is present, so it wins over the PATH binary.
+        let resolved = resolve_acting_binary(MonorepoStandard::GradleMultiProject, root, &index)
+            .expect("wrapper script exists; resolve_acting_binary must report it without spawning");
+        assert_eq!(resolved.source, BinarySource::Wrapper);
+        assert_eq!(resolved.version, None);
+        assert_eq!(resolved.satisfies_min_version, None);
+
+        // The PATH binary must also be reachable without spawning when no
+        // wrapper is present.
+        fs::remove_file(&wrapper).unwrap();
+        let resolved_path =
+            resolve_acting_binary(MonorepoStandard::GradleMultiProject, root, &index)
+                .expect("PATH binary is in the index; resolve_acting_binary must report it");
+        assert_eq!(resolved_path.source, BinarySource::Path);
+        assert_eq!(resolved_path.version, None);
+        assert_eq!(resolved_path.satisfies_min_version, None);
+
+        // The defining assertion: neither sentinel was touched.
+        assert!(
+            !wrapper_marker.exists(),
+            "resolve_acting_binary must not execute the wrapper script"
+        );
+        assert!(
+            !path_marker.exists(),
+            "resolve_acting_binary must not execute the PATH binary"
+        );
+    }
+
     fn layer_with(authority: MonorepoStandard, package_count: usize) -> MonorepoLayer {
         let packages = (0..package_count)
             .map(|i| LayerPackage {
@@ -1961,12 +2007,17 @@ mod tests {
                 provenance: PackageProvenance::Globbed,
             })
             .collect();
+        // The helper mirrors the typical "single member plus non-package root"
+        // Cargo virtual layout only when explicitly asked. By default the test
+        // helper reports a non-package root, which exercises the new
+        // `root_is_package: false` degenerate path.
         MonorepoLayer {
             root: PathBuf::from("/repo"),
             authority,
             orchestrators: Vec::new(),
             provenance: PackageProvenance::Globbed,
             lockfile_match: None,
+            root_is_package: false,
             packages,
         }
     }
@@ -2002,10 +2053,24 @@ mod tests {
         // pnpm never counts the root, so a lone member is degenerate.
         let pnpm = layer_with(MonorepoStandard::PnpmWorkspaces, 1);
         assert!(!MonorepoStandard::PnpmWorkspaces.membership_resolves_non_degenerately(&pnpm));
-        // Cargo counts the root when its manifest declares a package, so a lone
-        // member is enough.
-        let cargo = layer_with(MonorepoStandard::CargoWorkspace, 1);
-        assert!(MonorepoStandard::CargoWorkspace.membership_resolves_non_degenerately(&cargo));
+        // A virtual Cargo workspace (root_is_package = false) with one member
+        // is degenerate — the previous predicate treated it as a monorepo,
+        // contrary to the spec's "honest" rule.
+        let cargo_virtual = layer_with(MonorepoStandard::CargoWorkspace, 1);
+        assert!(
+            !MonorepoStandard::CargoWorkspace.membership_resolves_non_degenerately(&cargo_virtual),
+            "virtual Cargo workspace with one member must be degenerate"
+        );
+        // A Cargo workspace whose root also declares a [package] is a real
+        // monorepo with one member plus the root.
+        let mut cargo_root_pkg = layer_with(MonorepoStandard::CargoWorkspace, 1);
+        cargo_root_pkg.root_is_package = true;
+        assert!(
+            MonorepoStandard::CargoWorkspace.membership_resolves_non_degenerately(&cargo_root_pkg)
+        );
+        // uv counts the root unconditionally.
+        let uv = layer_with(MonorepoStandard::UvWorkspace, 1);
+        assert!(MonorepoStandard::UvWorkspace.membership_resolves_non_degenerately(&uv));
     }
 
     #[test]

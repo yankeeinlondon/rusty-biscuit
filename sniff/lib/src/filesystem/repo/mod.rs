@@ -8,6 +8,7 @@ pub mod gradle;
 pub mod identity;
 pub(crate) mod manifest_index;
 pub mod maven;
+pub(crate) mod nested;
 pub mod npm;
 pub mod nx_turbo;
 pub mod polyglot;

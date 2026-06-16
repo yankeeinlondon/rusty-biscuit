@@ -12,8 +12,11 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use biscuit_file::toml_crate;
+
 use super::standard::{
     DetectedStandard, DetectionConfidence, LayerPackage, MonorepoLayer, MonorepoStandard,
+    RootMembership,
 };
 use super::types::{MonorepoTool, Package};
 
@@ -65,6 +68,7 @@ pub(crate) fn build_monorepo_layers(outcomes: &[DetectorOutcome]) -> Vec<Monorep
 
         for outcome in group.iter().filter(|o| o.standard.defines_membership()) {
             let provenance = outcome.standard.membership_provenance();
+            let root_is_package = root_declares_package(outcome.standard, root);
             let packages = outcome
                 .packages
                 .iter()
@@ -81,11 +85,42 @@ pub(crate) fn build_monorepo_layers(outcomes: &[DetectorOutcome]) -> Vec<Monorep
                 orchestrators: orchestrators.clone(),
                 provenance,
                 lockfile_match: None,
+                root_is_package,
                 packages,
             });
         }
     }
     layers
+}
+
+/// Whether the root manifest of `standard` at `root` also declares a package,
+/// per the standard's [`RootMembership`] policy.
+///
+/// `Always` standards (uv) always count the root. `Never` standards (pnpm,
+/// npm, Maven, ...) never do. `WhenManifestDeclaresPackage` standards (Cargo)
+/// inspect the root manifest: a `[workspace]` plus `[package]` in the same
+/// `Cargo.toml` makes the root a package; a virtual `[workspace]`-only
+/// manifest does not.
+fn root_declares_package(standard: MonorepoStandard, root: &Path) -> bool {
+    match standard.spec().root_membership {
+        RootMembership::Always => true,
+        RootMembership::Never => false,
+        RootMembership::WhenManifestDeclaresPackage => {
+            // Today only Cargo uses this policy. The check reads the root
+            // manifest's `[package]` table without spawning — purely a TOML
+            // parse — so the no-subprocess detection boundary is preserved.
+            if standard != MonorepoStandard::CargoWorkspace {
+                return false;
+            }
+            let Ok(content) = std::fs::read_to_string(root.join("Cargo.toml")) else {
+                return false;
+            };
+            let Ok(parsed) = toml_crate::from_str::<toml_crate::Value>(&content) else {
+                return false;
+            };
+            parsed.get("package").is_some()
+        }
+    }
 }
 
 /// Whether any layer's membership resolves non-degenerately — the honest
@@ -115,7 +150,7 @@ pub(crate) fn build_detected_standards(
             root: outcome.root.clone(),
             matched_markers: matched_markers(outcome.standard, &outcome.root),
             binary: None,
-            confidence: standard_confidence(outcome.standard, layers),
+            confidence: standard_confidence(outcome.standard, &outcome.root, layers),
         })
         .collect();
 
@@ -136,15 +171,25 @@ pub(crate) fn build_detected_standards(
     standards
 }
 
-/// A standard is marker-confirmed when it owns a layer whose membership
-/// resolves non-degenerately; otherwise the detection is merely inferred.
+/// A detected standard is marker-confirmed when, at its own root, it owns a
+/// layer whose membership resolves non-degenerately; otherwise the detection
+/// is merely inferred.
+///
+/// Matching both `authority` and `root` keeps confidence per detected
+/// instance: in a forest that hosts the same standard at two roots — one
+/// non-degenerate and one degenerate — only the non-degenerate root is
+/// reported as confirmed. Without the root tie-breaker a degenerate sibling
+/// would inherit `MarkerConfirmed` from its non-degenerate twin.
 fn standard_confidence(
     standard: MonorepoStandard,
+    root: &Path,
     layers: &[MonorepoLayer],
 ) -> DetectionConfidence {
     let confirmed = standard.defines_membership()
         && layers.iter().any(|layer| {
-            layer.authority == standard && standard.membership_resolves_non_degenerately(layer)
+            layer.authority == standard
+                && layer.root.as_path() == root
+                && standard.membership_resolves_non_degenerately(layer)
         });
     if confirmed {
         DetectionConfidence::MarkerConfirmed
@@ -181,6 +226,18 @@ mod tests {
         DetectorOutcome {
             standard,
             root: PathBuf::from("/repo"),
+            packages,
+        }
+    }
+
+    fn outcome_at(
+        standard: MonorepoStandard,
+        root: &str,
+        packages: Vec<Package>,
+    ) -> DetectorOutcome {
+        DetectorOutcome {
+            standard,
+            root: PathBuf::from(root),
             packages,
         }
     }
@@ -259,5 +316,51 @@ mod tests {
             .find(|s| s.standard == MonorepoStandard::PnpmWorkspaces)
             .unwrap();
         assert_eq!(pnpm.confidence, DetectionConfidence::MarkerConfirmed);
+    }
+
+    #[test]
+    fn per_root_confidence_keeps_degenerate_sibling_inferred() {
+        // Same standard at two roots: the non-degenerate root must be
+        // `MarkerConfirmed`, the degenerate sibling must stay `Inferred`.
+        // pnpm uses `RootMembership::Never`, so a single package is degenerate.
+        let outcomes = vec![
+            outcome_at(
+                MonorepoStandard::PnpmWorkspaces,
+                "/repo",
+                vec![pkg("a"), pkg("b")],
+            ),
+            outcome_at(
+                MonorepoStandard::PnpmWorkspaces,
+                "/repo/nested",
+                vec![pkg("solo")],
+            ),
+        ];
+        let layers = build_monorepo_layers(&outcomes);
+        assert!(layers_imply_monorepo(&layers));
+        let standards =
+            build_detected_standards(Path::new("/repo"), &outcomes, &layers, true);
+
+        let root_pnpm = standards
+            .iter()
+            .find(|s| s.standard == MonorepoStandard::PnpmWorkspaces && s.root == Path::new("/repo"))
+            .expect("root pnpm standard must be present");
+        assert_eq!(
+            root_pnpm.confidence,
+            DetectionConfidence::MarkerConfirmed,
+            "non-degenerate root must be confirmed"
+        );
+
+        let nested_pnpm = standards
+            .iter()
+            .find(|s| {
+                s.standard == MonorepoStandard::PnpmWorkspaces
+                    && s.root == Path::new("/repo/nested")
+            })
+            .expect("nested pnpm standard must be present");
+        assert_eq!(
+            nested_pnpm.confidence,
+            DetectionConfidence::Inferred,
+            "degenerate sibling must stay inferred"
+        );
     }
 }
