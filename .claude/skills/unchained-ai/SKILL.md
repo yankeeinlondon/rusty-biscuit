@@ -26,8 +26,10 @@ unchained-ai/
 │       │   └── services/ # Agent status detection, PTY runner, parsers
 │       ├── rigging/      # Provider registry, model enums, rig tools
 │       ├── models/       # ModelCapability, ProviderModelMetadata, ModelPricing, ModelDefaultParameters
+│       ├── execution/    # CompletionBackend seam + complete()/complete_blocking()
 │       ├── api/          # OpenAI-compatible model discovery
 │       └── utils/        # Epoch datetime helper
+├── contract/     # unchained-ai-contract: InferenceAdapter over the execution surface
 ├── gen/          # Binary: gen-models (provider enum generator)
 ├── cli/          # Binary: unchained (agent status monitoring CLI)
 │   └── src/
@@ -51,7 +53,12 @@ unchained-ai/
 | `ProviderModelMetadata` | `models::model_metadata` | Rich metadata (pricing, params, modalities, etc.) |
 | `ModelPricing` | `models::model_pricing` | Per-token/request pricing (USD) |
 | `ModelDefaultParameters` | `models::model_default_parameters` | Provider-recommended generation defaults |
+| `CompletionBackend` | `execution` | Injectable seam for text completions |
+| `CompletionRequest` / `CompletionOutput` | `execution` | Single-turn execution surface |
+| `ResolvedParameters` | `execution` | Metadata defaults + caller overrides |
+| `EnvView` / `HashMapEnvView` / `StdEnvView` | `models::selection` | Environment view for resolver tests |
 | `Provider` | `rigging::providers::provider` | Provider enum with config |
+| `UnchainedInferenceAdapter` | `unchained-ai-contract` | `InferenceAdapter` implementation for `biscuit-contract` |
 | `OpenCodeDelegation` | `primitives::atomic` | Agent CLI delegation |
 | `AgentStatus` | `primitives::services::agent_status` | Platform detection and cap limit queries |
 | `AgenticStatusPlatform` | `primitives::services::agent_status` | Platform enum (ClaudeCode, Codex) |
@@ -60,7 +67,7 @@ unchained-ai/
 
 ## Dependencies
 
-- **rig-core** v0.29.0 (features: rayon, image, derive, audio, rmcp, pdf)
+- **rig-core** v0.31.0 (features: rayon, image, derive, audio, rmcp, pdf)
 - **model_id** (workspace crate at `../../model_id`) - derive macro for model enums
 - **sniff** (workspace crate) - platform detection for `InstalledAiClients`
 - **portable-pty** v0.9 - PTY spawning for agent status commands
@@ -91,9 +98,9 @@ cargo run -p unchained-ai-gen -- --dry-run
 
 ## Implementation Status
 
-**Implemented**: Pipeline state/execution, Prompt building (multi-modal), OpenCode delegation, provider registry (13 providers), model enums (auto-generated), model metadata (Parsera + provider-native merge), rich OpenRouter metadata (pricing, architecture, default parameters), rig tools (BraveSearch, ScreenScrape), client adaptors (Z.ai, ZenMux), ModelCapability serialization, agent status detection (ClaudeCode, Codex), PTY-based status command execution, cap limit parsing, CLI binary with `limits` subcommand (terminal + JSON output)
+**Implemented**: Pipeline state/execution, Prompt building (multi-modal), `Prompt::execute()` via `complete_blocking()` + capability resolver, execution surface (`CompletionBackend`, `complete()`, `complete_blocking()`), capability-based model resolver (`models::selection`), OpenCode delegation, provider registry (13 providers), model enums (auto-generated), model metadata (Parsera + provider-native merge), rich OpenRouter metadata (pricing, architecture, default parameters), rig tools (BraveSearch, ScreenScrape), client adaptors (Z.ai, ZenMux), ModelCapability serialization, `UnchainedInferenceAdapter` in `unchained-ai-contract`, agent status detection (ClaudeCode, Codex), PTY-based status command execution, cap limit parsing, CLI binary with `limits` subcommand (terminal + JSON output)
 
-**Not implemented**: `Prompt::execute()` (returns fatal "LLM execution not yet implemented"), `UserContent`/`Transcribe` (placeholder structs), `ForeignAgent` trait (incomplete skeleton, not publicly exported), `SmartConcat` (scaffold), HuggingFace API module (empty)
+**Not implemented**: `UserContent`/`Transcribe` (placeholder structs), `ForeignAgent` trait (incomplete skeleton, not publicly exported), `SmartConcat` (scaffold), HuggingFace API module (empty)
 
 ## Detailed References
 
