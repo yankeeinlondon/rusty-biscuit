@@ -3075,4 +3075,37 @@ mod tests {
             );
         }
     }
+
+    mod monorepo_label {
+        use super::*;
+        use sniff::filesystem::repo::MonorepoStandard;
+
+        #[test]
+        fn label_is_authority_alone_with_no_orchestrators() {
+            let label = format_monorepo_label(MonorepoStandard::PnpmWorkspaces, &[]);
+            assert_eq!(label, "pnpm workspaces");
+        }
+
+        #[test]
+        fn label_wraps_single_orchestrator_with_authority() {
+            let label = format_monorepo_label(
+                MonorepoStandard::PnpmWorkspaces,
+                &[MonorepoStandard::Nx],
+            );
+            assert_eq!(label, "Nx (using pnpm workspaces)");
+        }
+
+        #[test]
+        fn label_joins_every_orchestrator_in_layer_order() {
+            // A layer may carry multiple orchestrators (e.g. Nx + Lerna over a
+            // pnpm workspace). Every orchestrator must surface in the text,
+            // joined deterministically in the order the topology layer carries
+            // them (the same order the JSON `orchestrators` array emits).
+            let label = format_monorepo_label(
+                MonorepoStandard::PnpmWorkspaces,
+                &[MonorepoStandard::Nx, MonorepoStandard::Lerna],
+            );
+            assert_eq!(label, "Nx + Lerna (using pnpm workspaces)");
+        }
+    }
 }

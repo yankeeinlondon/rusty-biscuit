@@ -141,19 +141,27 @@ fn append_area_section(
 }
 /// Compose the unified CLI label for a monorepo layer.
 ///
-/// Returns `{orchestrator_label} (using {authority_label})` when an orchestrator
-/// is present, otherwise just `{authority_label}`. Reads each standard's
-/// `spec().label`.
+/// Returns `{orchestrator_label} (using {authority_label})` when one or more
+/// orchestrators are present, otherwise just `{authority_label}`. When several
+/// orchestrators ride on the layer they are joined as
+/// `{a} + {b} (using {authority_label})`, preserving the deterministic order
+/// the topology layer already carries (the same order the JSON `orchestrators`
+/// array emits). Reads each standard's `spec().label`.
 pub(crate) fn format_monorepo_label(
     authority: MonorepoStandard,
     orchestrators: &[MonorepoStandard],
 ) -> String {
     let authority_label = authority.spec().label;
-    if let Some(&orchestrator) = orchestrators.first() {
-        format!("{} (using {})", orchestrator.spec().label, authority_label)
-    } else {
-        authority_label.to_string()
+    if orchestrators.is_empty() {
+        return authority_label.to_string();
     }
+    let orchestrator_labels: Vec<&str> =
+        orchestrators.iter().map(|o| o.spec().label).collect();
+    format!(
+        "{} (using {})",
+        orchestrator_labels.join(" + "),
+        authority_label
+    )
 }
 
 /// Format the monorepo authority/orchestrator summary for display.
