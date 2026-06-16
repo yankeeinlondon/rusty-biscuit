@@ -28,6 +28,11 @@ impl PerfCollector {
         eprint!("{}", self.render());
     }
 
+    #[cfg(test)]
+    pub(crate) fn recorded_stages(&self) -> &[(&'static str, Duration)] {
+        &self.stages
+    }
+
     fn render(&self) -> String {
         let tree = self.build_perf_tree();
         let wall = tree.total;

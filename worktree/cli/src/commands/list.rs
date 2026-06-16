@@ -24,51 +24,76 @@ pub fn run(
     perf: bool,
     process_start: Instant,
 ) -> Result<(), WorktreeError> {
-    let mut collector = if perf {
-        Some(perf::PerfCollector::new(process_start))
-    } else {
-        None
-    };
-    perf::record(&mut collector, "pre-dispatch", process_start.elapsed());
-
-    let t0 = Instant::now();
-    let list = list_worktrees()?;
-    perf::record(&mut collector, "list gather", t0.elapsed());
-    let statuses = &list.statuses;
-    let terminal = Terminal::default();
-
-    let t0 = Instant::now();
-    let table = build_status_table(statuses, &terminal);
-    eprintln!("\n{}", table.render(&terminal));
-    perf::record(&mut collector, "table render", t0.elapsed());
-
-    // Detect image support from the real stderr TTY + env. Width and verbose
-    // gating live inside `gather_extras` so the same decision is exercised by
-    // tests with a forced terminal width.
     let stderr_is_tty = std::io::stderr().is_terminal();
     let image_support = if stderr_is_tty {
         detect_image_support_from_env()
     } else {
         ImageSupport::None
     };
+    let terminal = Terminal::default();
+    let collector = run_pipeline(
+        width_spec,
+        verbose,
+        perf,
+        process_start,
+        image_support,
+        &terminal,
+    )?;
+    if let Some(c) = collector {
+        c.emit();
+    }
+    Ok(())
+}
+
+fn run_pipeline(
+    width_spec: Option<&str>,
+    verbose: bool,
+    perf: bool,
+    process_start: Instant,
+    image_support: ImageSupport,
+    terminal: &Terminal,
+) -> Result<Option<perf::PerfCollector>, WorktreeError> {
+    let mut collector = if perf {
+        Some(perf::PerfCollector::new(process_start))
+    } else {
+        None
+    };
+
+    if perf {
+        perf::record(&mut collector, "pre-dispatch", process_start.elapsed());
+    }
+
+    let t0 = if perf { Some(Instant::now()) } else { None };
+    let list = list_worktrees()?;
+    if let Some(start) = t0 {
+        perf::record(&mut collector, "list gather", start.elapsed());
+    }
+    let statuses = &list.statuses;
+
+    let t0 = if perf { Some(Instant::now()) } else { None };
+    let table = build_status_table(statuses, terminal);
+    eprintln!("\n{}", table.render(terminal));
+    if let Some(start) = t0 {
+        perf::record(&mut collector, "table render", start.elapsed());
+    }
+
     let parsed_width = width_spec.and_then(|s| parse_width_spec(s).ok());
 
-    let graph_eligible = image_support != ImageSupport::None;
-
-    let t0 = Instant::now();
+    let t0 = if perf { Some(Instant::now()) } else { None };
     let (needs_graph, needs_verbose, current_branch_data, base_graph_data) = gather_extras(
         &list.default_branch,
         statuses,
-        &terminal,
+        terminal,
         image_support,
         &parsed_width,
         verbose,
     );
-    if graph_eligible {
-        perf::record(&mut collector, "graph gather", t0.elapsed());
+    if needs_graph
+        && let Some(start) = t0
+    {
+        perf::record(&mut collector, "graph gather", start.elapsed());
     }
 
-    // Generate graph instructions and render when image support is present.
     if needs_graph {
         let instructions = graph_instructions(
             statuses,
@@ -91,30 +116,30 @@ pub fn run(
             };
 
             if fits {
-                let t0 = Instant::now();
-                let img_term = image_terminal(&terminal);
+                let t0 = if perf { Some(Instant::now()) } else { None };
+                let img_term = image_terminal(terminal);
                 let diagram = MermaidDiagram::new(instructions).with_width(graph_width);
                 eprint!("{}", diagram.render(&img_term));
-                perf::record(
-                    &mut collector,
-                    "graph image render (biscuit-terminal)",
-                    t0.elapsed(),
-                );
+                if let Some(start) = t0 {
+                    perf::record(
+                        &mut collector,
+                        "graph image render (biscuit-terminal)",
+                        start.elapsed(),
+                    );
+                }
             }
         }
     }
 
     if needs_verbose {
-        let t0 = Instant::now();
-        render_verbose(statuses, &list.default_branch, current_branch_data.as_ref(), &terminal);
-        perf::record(&mut collector, "verbose render", t0.elapsed());
+        let t0 = if perf { Some(Instant::now()) } else { None };
+        render_verbose(statuses, &list.default_branch, current_branch_data.as_ref(), terminal);
+        if let Some(start) = t0 {
+            perf::record(&mut collector, "verbose render", start.elapsed());
+        }
     }
 
-    if let Some(c) = collector {
-        c.emit();
-    }
-
-    Ok(())
+    Ok(collector)
 }
 
 /// Decide whether graph/verbose data is needed for this run and gather it.
@@ -668,6 +693,77 @@ mod tests {
         assert_eq!(
             graph_calls, 0,
             "expected zero graph-path git calls on a narrow image terminal, got {calls:?}"
+        );
+    }
+
+    /// When `perf` is false, `run_pipeline` must not create a collector and
+    /// therefore must not capture any stage timings. The only unconditional
+    /// perf-related cost is the top-of-main `Instant::now()` in `main()`.
+    #[test]
+    #[serial_test::serial]
+    fn run_pipeline_without_perf_produces_no_collector() {
+        let repo = temp_repo();
+        let _dir = DirGuard::enter(repo.path());
+        let terminal = Terminal::default();
+
+        let collector = super::run_pipeline(
+            None,
+            false,
+            false,
+            std::time::Instant::now(),
+            ImageSupport::None,
+            &terminal,
+        )
+        .expect("run_pipeline should succeed");
+
+        assert!(
+            collector.is_none(),
+            "no collector should be produced when perf is false"
+        );
+    }
+
+    /// Regression for the `graph gather` label on a narrow image-capable
+    /// terminal. When `needs_graph` is false (image support present but the
+    /// width gate fails), `graph gather` must not appear in the perf report —
+    /// reporting it would claim a stage ran when graph data gathering was
+    /// skipped.
+    #[test]
+    #[serial_test::serial]
+    fn run_pipeline_narrow_image_omits_graph_gather_stage() {
+        let repo = temp_repo();
+        let _dir = DirGuard::enter(repo.path());
+        let narrow = Terminal::builder().width(40).build();
+
+        let collector = super::run_pipeline(
+            None,
+            false,
+            true,
+            std::time::Instant::now(),
+            ImageSupport::Kitty,
+            &narrow,
+        )
+        .expect("run_pipeline should succeed");
+
+        let stages = collector
+            .as_ref()
+            .expect("collector should be present when perf is true")
+            .recorded_stages();
+        let names: Vec<_> = stages.iter().map(|(name, _)| *name).collect();
+        assert!(
+            !names.contains(&"graph gather"),
+            "graph gather should not be recorded when needs_graph is false, got: {names:?}"
+        );
+        assert!(
+            names.contains(&"pre-dispatch"),
+            "pre-dispatch should always be recorded when perf is true, got: {names:?}"
+        );
+        assert!(
+            names.contains(&"list gather"),
+            "list gather should be recorded, got: {names:?}"
+        );
+        assert!(
+            names.contains(&"table render"),
+            "table render should be recorded, got: {names:?}"
         );
     }
 

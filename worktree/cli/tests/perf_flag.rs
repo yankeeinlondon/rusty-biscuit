@@ -48,6 +48,21 @@ fn list_perf_emits_report_on_stderr_and_empty_stdout() {
 }
 
 #[test]
+fn list_without_perf_emits_no_report() {
+    let repo = temp_repo();
+
+    cargo_bin_cmd!("wt")
+        .current_dir(repo.path())
+        .args(["list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("Performance").not())
+        .stderr(predicate::str::contains("pre-dispatch").not())
+        .stderr(predicate::str::contains("list gather").not());
+}
+
+#[test]
 fn list_perf_non_image_terminal_omits_graph_stages() {
     let repo = temp_repo();
 
