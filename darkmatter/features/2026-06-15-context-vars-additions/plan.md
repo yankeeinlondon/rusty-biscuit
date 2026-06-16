@@ -16,8 +16,63 @@ docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
   - .claude/skills/darkmatter/compose.md
+source_files_during_phase_3:
+  - darkmatter/lib/src/markdown/compose/expression/functions.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - darkmatter/lib/src/markdown/compose/expression/functions.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+  - darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - darkmatter/lib/src/markdown/compose/expression/functions.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog.rs
+  - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+  - darkmatter/lib/src/markdown/compose/types.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .opencode/skill/darkmatter/compose.md
+  - .claude/skills/darkmatter/compose.md
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+  - darkmatter/docs/topics/context-variables.md
+  - darkmatter/docs/topics/darkmatter-expressions.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/darkmatter/SKILL.md
+  - .claude/skills/darkmatter/compose.md
+  - .opencode/skill/darkmatter/SKILL.md
+  - .opencode/skill/darkmatter/compose.md
+source_files_during_phase_7:
+  - darkmatter/lib/tests/expression_regression.rs
+  - darkmatter/lib/src/markdown/compose/expression/ctx.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog.rs
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
 packages:
   - darkmatter
+source_code:
+  - darkmatter/lib/src/markdown/compose/expression/functions.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog.rs
+  - darkmatter/lib/src/markdown/compose/context/capture.rs
+  - darkmatter/lib/src/markdown/compose/context/catalog.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+  - darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+  - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+  - darkmatter/lib/src/markdown/compose/types.rs
+  - darkmatter/lib/tests/expression_regression.rs
+  - darkmatter/lib/src/markdown/compose/expression/ctx.rs
+documentation:
+  - darkmatter/docs/topics/context-variables.md
+  - darkmatter/docs/topics/darkmatter-expressions.md
 ---
 
 # Execution Plan: Context Variables and Expression Function Additions
@@ -164,7 +219,7 @@ Register new pure functions in `PURE_FUNCTIONS` and their descriptors in
 `EXPRESSION_FUNCTION_DESCRIPTORS`. Each function ships with success, null,
 type-mismatch, and arity tests.
 
-- [ ] **3.1** `is_positive(val)` and `is_negative(val)`
+- [x] **3.1** `is_positive(val)` and `is_negative(val)`
   - Use `to_number()` coercion (the same one `number()` accepts).
   - `is_positive`: `true` only when coerced value `> 0`; error when coercion fails; `0` is neither.
   - `is_negative`: `true` only when coerced value `< 0`; error when coercion fails.
@@ -172,20 +227,20 @@ type-mismatch, and arity tests.
   - Add descriptors in a new/extended "Numeric Predicates" category.
   - Tests: positive/negative/zero numbers, numeric strings, booleans (`true`→1 positive), `null` (error per coercion rule), non-numeric string (error), arity.
 
-- [ ] **3.2** `is_integer(val)`
+- [x] **3.2** `is_integer(val)`
   - Inspecting predicate: never errors, does NOT null-propagate.
   - `true` only for JSON numbers whose value has no fractional component.
   - `false` for numberlike strings, booleans, arrays, objects, `null`.
   - Add descriptor.
   - Tests: integers, floats (`1.5`→false, `1.0`→true if represented as integer-valued number), numeric strings (false), booleans (false), null (false), arity.
 
-- [ ] **3.3** `without_date(string)`
+- [x] **3.3** `without_date(string)`
   - Requires JSON string; uses the Phase 1.4 date-substring matcher.
   - Null-propagates; type mismatch (non-string) errors.
   - Add descriptor in "String Mutations" category.
   - Tests: removes valid dates, leaves invalid dates (`2026-02-30`), datetime substring only removes the date part, no whitespace collapse, null propagation, type mismatch, arity.
 
-- [ ] **3.4** `ensure_leading(var, prefix)` and `ensure_trailing(var, postfix)`
+- [x] **3.4** `ensure_leading(var, prefix)` and `ensure_trailing(var, postfix)`
   - `var`/`prefix`/`postfix` may be JSON strings or JSON numbers.
   - `null` argument propagates to `null`.
   - Arrays, objects, booleans → error.
@@ -195,7 +250,7 @@ type-mismatch, and arity tests.
   - Add descriptors.
   - Tests: the four examples, already-prefixed preservation (number stays number), null propagation, boolean/array/object error, arity.
 
-- [ ] **3.5** `terminal(string)`
+- [x] **3.5** `terminal(string)`
   - Requires JSON string; render through `biscuit_terminal::components::prose::Prose`.
   - Use `Prose::new(content).render_optimistic(None)` — deterministic, non-interactive, no live terminal probe (spec: "do not probe or mutate the user's live terminal").
   - Return the rendered string including ANSI SGR sequences.
@@ -204,7 +259,7 @@ type-mismatch, and arity tests.
   - Add descriptor (new "Rendering" category or under "String Mutations").
   - Tests: `<bold>x</bold>` renders with SGR codes, literal text passes through, null propagation, type mismatch, arity. Assert the output contains the expected ANSI sequence (`\x1b[1m`) rather than exact full bytes to stay robust to Prose internals.
 
-- [ ] **Checkpoint 3** — `just check darkmatter`; `cargo nextest run -p darkmatter` new pure-function tests green; descriptor signature parity test green (every new signature has a descriptor and vice versa).
+- [x] **Checkpoint 3** — `just check darkmatter`; `cargo nextest run -p darkmatter` new pure-function tests green; descriptor signature parity test green (every new signature has a descriptor and vice versa).
 
 ---
 
@@ -216,11 +271,11 @@ rules": resolve through `FileReference` + magic paths + `resolve_from`,
 display via the `relative(file)` policy, no `Path::exists()`, HTTP(S) → error,
 `/` separators in output.
 
-- [ ] **4.1** Shared FS-path validator helper
+- [x] **4.1** Shared FS-path validator helper
   - Add a helper that takes the `file` argument + `ResolutionContext`, rejects HTTP(S) URLs with an error, calls `resolve_arg`, and returns the resolved absolute `PathBuf` (error on `Ok(None)` or parse/resolution failure).
   - Reuse for every function in this phase so the shared rules are encoded once.
 
-- [ ] **4.2** Indexed-file functions
+- [x] **4.2** Indexed-file functions
   - `is_indexed_file(file) -> boolean` — true when basename stem matches the indexed grammar.
   - `file_index(file) -> number` — parsed index; `-1` when non-indexed.
   - `increment_file_index(file) -> string` — `review-1.md`→`review-2.md`; `review-001.md`→`review-002.md`; non-indexed starts at index `2` (`review.md`→`review-2.md`); added indexes use no zero padding.
@@ -229,7 +284,7 @@ display via the `relative(file)` policy, no `Path::exists()`, HTTP(S) → error,
   - Add 4 descriptors ("Filesystem" category).
   - Tests: indexed/non-indexed detection, zero-padded increment preserves width, non-indexed increment/decrement starts, clamp at 0, null propagation, HTTP(S) rejection, missing files do NOT error (existence not checked), arity.
 
-- [ ] **4.3** Path-component functions
+- [x] **4.3** Path-component functions
   - `basename(file)` — final component including extension.
   - `basename_without_index(file)` — remove indexed suffix from stem: `foo/review-1.md`→`review.md`; non-indexed unchanged.
   - `dir(file)` — directory portion of the display path.
@@ -240,7 +295,7 @@ display via the `relative(file)` policy, no `Path::exists()`, HTTP(S) → error,
   - Add 7 descriptors.
   - Tests: the three spec example paths (`foo/bar/baz/test.md`, `foo/review-1.md`, extensionless names), display-path rendering (repo-relative vs `~`-aliased), magic-path resolution, null propagation, HTTP(S) rejection, invalid-ref error, arity.
 
-- [ ] **4.4** `join(left, right)`
+- [x] **4.4** `join(left, right)`
   - `left`/`right` must be JSON strings; `left` may be relative/absolute/magic path.
   - Strip leading separators from `right` before joining; collapse duplicate separators; emit `/`.
   - Validate the joined result through the shared FS-path rules (Phase 4.1) — i.e. resolve through `FileReference`.
@@ -249,7 +304,7 @@ display via the `relative(file)` policy, no `Path::exists()`, HTTP(S) → error,
   - Add descriptor.
   - Tests: spec example, leading/trailing separator stripping, duplicate-separator collapse, absolute `left`, magic-path `left`, HTTP(S) rejection on either arg, null propagation, arity, type mismatch.
 
-- [ ] **Checkpoint 4** — `just check darkmatter`; full FS-function test module green; descriptor parity green.
+- [x] **Checkpoint 4** — `just check darkmatter`; full FS-function test module green; descriptor parity green.
 
 ---
 
@@ -260,7 +315,7 @@ Two remaining function families. `link` is context-aware `FS_FUNCTIONS`;
 filesystem and need `base_dir`. Depends on Phase 1.2 (path helpers) for `link`
 and Phase 1.3 (skill-root discovery) for the skill functions.
 
-- [ ] **5.1** `link(file)` (one-argument, file-only)
+- [x] **5.1** `link(file)` (one-argument, file-only)
   - Resolve file through shared FS-path rules (Phase 4.1).
   - Description = `relative(file)` style output (reuse existing `relative_fn` / `make_relative`).
   - Destination = resolved absolute path.
@@ -268,7 +323,7 @@ and Phase 1.3 (skill-root discovery) for the skill functions.
   - Use the same destination escaping as the two-argument form.
   - Add descriptor.
 
-- [ ] **5.2** `link(target, desc)` (two-argument)
+- [x] **5.2** `link(target, desc)` (two-argument)
   - `desc` must be a JSON string.
   - Accept HTTP(S) URL string OR local file reference (shared FS-path rules for local).
   - HTTP(S) destinations emitted exactly as supplied after `url::Url::parse` confirms valid HTTP(S).
@@ -278,7 +333,7 @@ and Phase 1.3 (skill-root discovery) for the skill functions.
   - Add descriptor.
   - Tests for both link forms: one-arg file link, two-arg file link, two-arg HTTP(S) link, link-text escaping (`[`/`]`), destination escaping (spaces/parentheses), null propagation, HTTP(S) one-arg rejection, arity, type mismatch.
 
-- [ ] **5.3** `has_skill(name)` and `has_local_skill(name)`
+- [x] **5.3** `has_skill(name)` and `has_local_skill(name)`
   - `name` must be a JSON string; reject names with path separators or `..` (basename-only lookup).
   - `has_skill`: checks direct child directory with that basename in any known user-scoped OR local-scoped skill root for the executing agent.
   - `has_local_skill`: local-scoped roots only.
@@ -289,33 +344,33 @@ and Phase 1.3 (skill-root discovery) for the skill functions.
   - Add 2 descriptors ("Context" or "Skills" category).
   - Tests using temporary directory roots (inject home dir from Phase 1.3); never depend on the developer's real home. Cover: known agent aliases, user-scoped hit, local-scoped hit, `has_local_skill` excludes user roots, path-separator/`..` rejection, missing root → false, nested directory does not count, null propagation, arity.
 
-- [ ] **Checkpoint 5** — `just check darkmatter`; `cargo nextest run -p darkmatter` link + skill tests green; descriptor parity green.
+- [x] **Checkpoint 5** — `just check darkmatter`; `cargo nextest run -p darkmatter` link + skill tests green; descriptor parity green.
 
 ---
 
 ## Phase 6 — Documentation Updates
 
-Author-facing docs must reflect the finished surface. Do this after the
+Author-facing docs must reflect the finished surface. Do this after
 function surface is stable so docs do not describe behavior that then changes.
 
-- [ ] **6.1** Update `darkmatter/docs/topics/context-variables.md`
+- [x] **6.1** Update `darkmatter/docs/topics/context-variables.md`
   - Add the **Agent** capture group to the "Capture Groups" table (I/O = env var read; properties = `agent`, `model`).
   - Add an "Agent" section with the two variables, their defaults (`"unknown"` / `"default"`), trimming, and the no-allowlist rule.
 
-- [ ] **6.2** Update `darkmatter/docs/topics/darkmatter-expressions.md`
+- [x] **6.2** Update `darkmatter/docs/topics/darkmatter-expressions.md`
   - Add the new functions to the appropriate existing sections (Type Predicates, String Mutations, Read-Side Functions / Filesystem) and add new subsections as needed (Numeric Predicates, Path Helpers, Link, Skills, Rendering).
   - Document the shared path rules briefly (resolve through `FileReference`, no existence check, HTTP(S) rejected by path helpers, `/` separators).
   - Document the indexed-filename grammar.
   - Document `terminal()` Prose-markup semantics (not literal text; escape angle brackets).
   - Update the "Authoring a New Expression Function" count references if it names a specific function count.
 
-- [ ] **6.3** Update `.claude/skills/darkmatter/compose.md`
+- [x] **6.3** Update `.claude/skills/darkmatter/compose.md`
   - Add `ctx.agent` and `ctx.model` rows to the context-values table.
 
-- [ ] **6.4** Update the descriptor catalogs (context + expression)
+- [x] **6.4** Update the descriptor catalogs (context + expression)
   - These were populated per-task in Phases 2-5; this task is a final review pass to confirm ordering, categories, and descriptions are consistent and the static catalogs read cleanly. No parity-test impact beyond confirming green.
 
-- [ ] **Checkpoint 6** — docs render cleanly (`md compose` if applicable, or visual review); no broken cross-links.
+- [x] **Checkpoint 6** — docs render cleanly (`md compose` if applicable, or visual review); no broken cross-links.
 
 ---
 
@@ -324,29 +379,29 @@ function surface is stable so docs do not describe behavior that then changes.
 Prove the new surface works end-to-end and that the whole package still builds
 and passes every gate.
 
-- [ ] **7.1** End-to-end compose tests
+- [x] **7.1** End-to-end compose tests
   - Representative functions work in `{{ ... }}` interpolation (e.g. `{{ basename(doc.path) }}`, `{{ terminal("<bold>x</bold>") }}`, `{{ ctx.agent }}`).
   - Representative functions work in `when="..."` conditions (e.g. `when="is_indexed_file(doc.path)"`, `when="has_skill('foo')"`).
   - `ctx.agent` / `ctx.model` resolve through the lazy `CtxLookup` (Phase 2 wiring).
   - Demand-driven capture: referencing `ctx.agent` captures only the Agent group (assert via the existing capture-group test pattern).
 
-- [ ] **7.2** Claudine anti-drift regression test
+- [x] **7.2** Claudine anti-drift regression test
   - Add/extend the test in the catalog test module that proves the new descriptor entries appear in the exported expression catalog consumed by Claudine (`claudine context --expressions`).
   - Must not add a Claudine-only hardcoded list — assert against the shared `EXPRESSION_FUNCTION_DESCRIPTORS`.
 
-- [ ] **7.3** Full local gate (run from `darkmatter/`)
-  - [ ] `just sanity` (fast confidence subset, lib + cli)
-  - [ ] `just lint` (both crates)
-  - [ ] `just doctest` (both crates)
-  - [ ] `just test` (Level-1, both crates)
-  - [ ] `just check` (clean compile, both crates)
+- [x] **7.3** Full local gate (run from `darkmatter/`)
+  - [x] `just sanity` (fast confidence subset, lib + cli)
+  - [x] `just lint` (both crates)
+  - [x] `just doctest` (both crates)
+  - [x] `just test` (Level-1, both crates)
+  - [x] `just check` (clean compile, both crates)
 
-- [ ] **7.4** Final parity confirmation
+- [x] **7.4** Final parity confirmation
   - `descriptor_signature_set_equals_dispatchable_signature_set` green (every new overload matched).
   - `descriptor_name_set_equals_captured_runtime_key_set` green (agent + model descriptors present).
   - `every_descriptor_overload_is_dispatchable_at_its_declared_arity` green (every new overload dispatchable).
 
-- [ ] **Checkpoint 7 — FEATURE COMPLETE** — all gates green; spec acceptance criteria met:
+- [x] **Checkpoint 7 — FEATURE COMPLETE** — all gates green; spec acceptance criteria met:
   - Context capture tests for `AGENT`, `MODEL`, missing values, descriptor parity ✔
   - Unit tests for every new function's success, null, type-mismatch, arity ✔
   - File helper tests (relative paths, magic paths, missing files, invalid refs, extensionless, zero-padded, non-indexed, join separators, display-path, remote URL rejection) ✔

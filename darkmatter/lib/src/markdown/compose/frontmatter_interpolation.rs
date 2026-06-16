@@ -757,19 +757,19 @@ mod tests {
 
         #[test]
         fn unknown_function_errors_instead_of_leaking_raw_template() {
-            // Regression: an unknown function (`dir`) used to be demoted to a
-            // warning in non-fail-fast mode, leaving the raw `{{ … }}` text in
+            // Regression: an unknown function used to be demoted to a warning
+            // in non-fail-fast mode, leaving the raw `{{ … }}` text in
             // `review` to poison the downstream `review_path` file reference.
             let mut fm = fm_from_json(json!({
                 "spec": "features/x/spec.md",
-                "review": "{{ dir(spec) + '/review.md' }}",
+                "review": "{{ unknown_fn(spec) + '/review.md' }}",
                 "review_path": "@area/{{review}}"
             }));
             let result = interpolate_frontmatter(&mut fm, &test_context(), false, false, None);
             let Err(err) = result else {
                 panic!("unknown function must abort interpolation");
             };
-            assert!(err.to_string().contains("Unknown function: dir"));
+            assert!(err.to_string().contains("Unknown function: unknown_fn"));
         }
 
         #[test]

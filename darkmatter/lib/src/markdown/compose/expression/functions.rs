@@ -13,6 +13,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 
 use super::{json_number, scalar_string, to_number, to_number_coerce};
 use super::resolve_ctx::{ResolutionContext, is_remote_url, normalize_path_arg};
@@ -172,6 +173,12 @@ impl SkillRoots {
         }
         roots.extend(self.local_roots(canonical));
         roots
+    }
+
+    /// Returns only the local-scoped roots for the given agent.
+    #[allow(dead_code)]
+    pub(crate) fn local_roots_for_agent(&self, name: &str) -> Vec<PathBuf> {
+        self.local_roots(Self::normalize_agent(name))
     }
 }
 
@@ -544,7 +551,7 @@ pub fn without_date(args: &[Value]) -> Result<Value, String> {
 fn ensure_operand(value: &Value) -> Result<String, String> {
     match value {
         Value::String(s) => Ok(s.clone()),
-        Value::Number(n) => Ok(scalar_string(value)),
+        Value::Number(_) => Ok(scalar_string(value)),
         Value::Bool(_) => Err("ensure_leading() does not accept boolean arguments".to_string()),
         Value::Array(_) | Value::Object(_) => {
             Err("ensure_leading() does not accept array or object arguments".to_string())
@@ -561,10 +568,10 @@ fn is_numberlike_string(s: &str) -> bool {
 /// Builds a numeric result from concatenated decimal string forms, falling
 /// back to a string when the value is not representable as JSON number.
 fn ensure_numeric_concat(concatenated: &str) -> Result<Value, String> {
-    if let Some(n) = concatenated.parse::<f64>().ok().filter(|f| f.is_finite()) {
-        if let Ok(v) = json_number(n) {
-            return Ok(v);
-        }
+    if let Some(n) = concatenated.parse::<f64>().ok().filter(|f| f.is_finite())
+        && let Ok(v) = json_number(n)
+    {
+        return Ok(v);
     }
     Ok(Value::String(concatenated.to_string()))
 }
@@ -1008,6 +1015,456 @@ pub fn relative_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Str
     Ok(Value::String(make_relative(&abs, &ctx.base_dir)))
 }
 
+/// Resolves a filepath argument through the shared FS-path rules.
+///
+/// Rejects HTTP(S) URLs. First tries the standard `FileReference` resolution
+/// (which requires the file to exist so magic paths and git-root fallbacks
+/// work); if that yields no match, falls back to a path shape computed from
+/// the reference kind and the base directory. This lets path-component
+/// functions operate on missing files and directories without checking
+/// `Path::exists()`.
+fn resolve_path_arg(name: &str, value: &Value, ctx: &ResolutionContext) -> Result<PathBuf, String> {
+    let raw = require_string(name, value)?;
+    resolve_path_shape(name, raw, ctx)
+}
+
+/// Resolves a raw path string to an absolute path shape.
+///
+/// See [`resolve_path_arg`]. Exposed separately so `join()` can validate its
+/// computed result without constructing a temporary [`Value`].
+fn resolve_path_shape(name: &str, raw: &str, ctx: &ResolutionContext) -> Result<PathBuf, String> {
+    if is_remote_url(raw) {
+        return Err(format!("{name}() does not accept HTTP(S) URLs"));
+    }
+    // Existing `FileReference` resolution handles existing files, magic paths,
+    // package paths, git-root fallbacks, and absolute references.
+    if let Ok(Some(p)) = resolve_arg(raw, ctx) {
+        return Ok(p);
+    }
+    // No existing match: build a deterministic path shape without touching
+    // `Path::exists()`.
+    let normalized = normalize_path_arg(raw);
+    let path = PathBuf::from(&normalized);
+    if path.is_absolute() {
+        return Ok(path);
+    }
+    if normalized.starts_with("./")
+        || normalized.starts_with("../")
+        || normalized == "."
+        || normalized == ".."
+    {
+        return Ok(ctx.base_dir.join(path));
+    }
+    if let Some(rest) = normalized.strip_prefix('@') {
+        for (magic, _position) in &ctx.magic_paths {
+            let candidate = magic.join(rest);
+            if candidate.exists() {
+                return Ok(candidate);
+            }
+        }
+        return Ok(ctx.base_dir.join(rest));
+    }
+    if let Some(rest) = normalized.strip_prefix('!') {
+        return Ok(ctx.base_dir.join(rest));
+    }
+    if normalized.starts_with("vault:") {
+        return Err(format!("{name}() vault references require an existing file"));
+    }
+    Ok(ctx.base_dir.join(path))
+}
+
+/// Parses a stem against the indexed grammar, returning the base name, parsed
+/// index, and the original zero-padding width of the index.
+fn indexed_stem_info(stem: &str) -> Option<(String, u64, usize)> {
+    let last_hyphen = stem.rfind('-')?;
+    if last_hyphen == 0 {
+        return None;
+    }
+    if stem.as_bytes().get(last_hyphen - 1) == Some(&b'-') {
+        return None;
+    }
+    let base = &stem[..last_hyphen];
+    let digits = &stem[last_hyphen + 1..];
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let width = digits.len();
+    let index = digits.parse::<u64>().ok()?;
+    Some((base.to_string(), index, width))
+}
+
+/// Formats an indexed stem, preserving the original zero-padding width.
+fn format_indexed_stem(base: &str, index: u64, width: usize) -> String {
+    format!("{base}-{index:0>width$}")
+}
+
+/// Splits a resolved path into its display directory components and basename.
+///
+/// The display shape follows the same `relative(file)` policy used elsewhere:
+/// repo-root relative, base-dir relative, `~`-aliased, or absolute. Components
+/// are returned with `/` separators in mind.
+fn path_display_components(path: &Path, base_dir: &Path) -> (Vec<String>, String) {
+    let rel = make_relative(path, base_dir).replace('\\', "/");
+    let trimmed = rel.strip_prefix('/').unwrap_or(&rel).to_string();
+    match trimmed.rfind('/') {
+        Some(pos) => {
+            let dir_part = &trimmed[..pos];
+            let dirs = if dir_part.is_empty() {
+                Vec::new()
+            } else {
+                dir_part.split('/').map(|s| s.to_string()).collect()
+            };
+            (dirs, trimmed[pos + 1..].to_string())
+        }
+        None => (Vec::new(), trimmed),
+    }
+}
+
+/// `is_indexed_file(file) -> bool` — true when the filename stem matches the
+/// indexed grammar (`base-NNN`).
+pub fn is_indexed_file_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    require_args("is_indexed_file", args, 1)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let path = resolve_path_arg("is_indexed_file", &args[0], ctx)?;
+    let (_, base) = path_display_components(&path, &ctx.base_dir);
+    let stem = file_stem(&base);
+    Ok(Value::Bool(parse_indexed_stem(&stem).is_some()))
+}
+
+/// `file_index(file) -> number` — the parsed index, or `-1` when non-indexed.
+pub fn file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    require_args("file_index", args, 1)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let path = resolve_path_arg("file_index", &args[0], ctx)?;
+    let (_, base) = path_display_components(&path, &ctx.base_dir);
+    let stem = file_stem(&base);
+    let index = parse_indexed_stem(&stem)
+        .map(|i| i.index as i64)
+        .unwrap_or(-1);
+    Ok(Value::Number(index.into()))
+}
+
+/// `increment_file_index(file) -> string` — bumps the numeric suffix, starting
+/// at `2` for non-indexed files. Preserves zero-padding width for indexed stems.
+pub fn increment_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    require_args("increment_file_index", args, 1)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let path = resolve_path_arg("increment_file_index", &args[0], ctx)?;
+    let (_, base) = path_display_components(&path, &ctx.base_dir);
+    let ext = file_extension(&base);
+    let stem = file_stem(&base);
+    let new_stem = if let Some((base_name, index, width)) = indexed_stem_info(&stem) {
+        let next = index.saturating_add(1);
+        format_indexed_stem(&base_name, next, width)
+    } else {
+        format!("{stem}-2")
+    };
+    let new_base = if ext.is_empty() {
+        new_stem
+    } else {
+        format!("{new_stem}.{ext}")
+    };
+    let out = path
+        .parent()
+        .map(|p| p.join(&new_base))
+        .unwrap_or_else(|| PathBuf::from(&new_base));
+    Ok(Value::String(make_relative(&out, &ctx.base_dir).replace('\\', "/")))
+}
+
+/// `decrement_file_index(file) -> string` — decrements the numeric suffix,
+/// clamped at `0`. Non-indexed files start at `0` and preserve no padding.
+pub fn decrement_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    require_args("decrement_file_index", args, 1)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let path = resolve_path_arg("decrement_file_index", &args[0], ctx)?;
+    let (_, base) = path_display_components(&path, &ctx.base_dir);
+    let ext = file_extension(&base);
+    let stem = file_stem(&base);
+    let new_stem = if let Some((base_name, index, width)) = indexed_stem_info(&stem) {
+        let next = index.saturating_sub(1);
+        format_indexed_stem(&base_name, next, width)
+    } else {
+        format!("{stem}-0")
+    };
+    let new_base = if ext.is_empty() {
+        new_stem
+    } else {
+        format!("{new_stem}.{ext}")
+    };
+    let out = path
+        .parent()
+        .map(|p| p.join(&new_base))
+        .unwrap_or_else(|| PathBuf::from(&new_base));
+    Ok(Value::String(make_relative(&out, &ctx.base_dir).replace('\\', "/")))
+}
+
+/// `basename(file) -> string` — the final path component including extension.
+pub fn basename_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    require_args("basename", args, 1)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let path = resolve_path_arg("basename", &args[0], ctx)?;
+    let (_, base) = path_display_components(&path, &ctx.base_dir);
+    Ok(Value::String(base))
+}
+
+/// `basename_without_index(file) -> string` — removes an indexed suffix from
+/// the stem. Non-indexed basenames pass through unchanged.
+pub fn basename_without_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    require_args("basename_without_index", args, 1)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let path = resolve_path_arg("basename_without_index", &args[0], ctx)?;
+    let (_, base) = path_display_components(&path, &ctx.base_dir);
+    let stem = file_stem(&base);
+    let ext = file_extension(&base);
+    let unindexed = match indexed_stem_info(&stem) {
+        Some((base_name, _, _)) => base_name,
+        None => stem,
+    };
+    let out = if ext.is_empty() {
+        unindexed
+    } else {
+        format!("{unindexed}.{ext}")
+    };
+    Ok(Value::String(out))
+}
+
+/// `dir(file) -> string` — the directory portion of the display path.
+pub fn dir_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    require_args("dir", args, 1)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let path = resolve_path_arg("dir", &args[0], ctx)?;
+    let (dirs, _) = path_display_components(&path, &ctx.base_dir);
+    Ok(Value::String(if dirs.is_empty() {
+        String::new()
+    } else {
+        dirs.join("/")
+    }))
+}
+
+/// `ext(file) -> string` — the final extension without the leading dot, or an
+/// empty string when there is none.
+pub fn ext_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    require_args("ext", args, 1)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let path = resolve_path_arg("ext", &args[0], ctx)?;
+    let (_, base) = path_display_components(&path, &ctx.base_dir);
+    Ok(Value::String(file_extension(&base)))
+}
+
+/// `parent_dir(file) -> string` — the directory segment immediately above the
+/// basename, or an empty string when there is none.
+pub fn parent_dir_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    require_args("parent_dir", args, 1)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let path = resolve_path_arg("parent_dir", &args[0], ctx)?;
+    let (dirs, _) = path_display_components(&path, &ctx.base_dir);
+    Ok(Value::String(dirs.last().cloned().unwrap_or_default()))
+}
+
+/// `file_trailing(file) -> string` — the last directory segment plus the
+/// basename, or just the basename when there is no directory.
+pub fn file_trailing_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    require_args("file_trailing", args, 1)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let path = resolve_path_arg("file_trailing", &args[0], ctx)?;
+    let (dirs, base) = path_display_components(&path, &ctx.base_dir);
+    Ok(Value::String(match dirs.last() {
+        Some(d) => format!("{d}/{base}"),
+        None => base,
+    }))
+}
+
+/// `dir_leading(file) -> string` — the directory path before the last segment,
+/// or an empty string when there is no leading directory.
+pub fn dir_leading_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    require_args("dir_leading", args, 1)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let path = resolve_path_arg("dir_leading", &args[0], ctx)?;
+    let (dirs, _) = path_display_components(&path, &ctx.base_dir);
+    Ok(Value::String(if dirs.len() <= 1 {
+        String::new()
+    } else {
+        dirs[..dirs.len() - 1].join("/")
+    }))
+}
+
+/// `join(left, right) -> string` — joins two path strings, normalizing leading
+/// and duplicate separators. Validates the result through the shared FS-path
+/// rules and rejects HTTP(S) arguments.
+pub fn join_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    require_args("join", args, 2)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let left_raw = require_string("join", &args[0])?;
+    let right_raw = require_string("join", &args[1])?;
+    if is_remote_url(left_raw) || is_remote_url(right_raw) {
+        return Err("join() does not accept HTTP(S) URLs".to_string());
+    }
+    let left = resolve_path_arg("join", &args[0], ctx)?;
+    let right = right_raw.trim_start_matches(['/', '\\']);
+    let joined = left.join(right);
+    let joined_str = joined.to_string_lossy().to_string();
+    let validated = resolve_path_shape("join", &joined_str, ctx)?;
+    Ok(Value::String(
+        make_relative(&validated, &ctx.base_dir).replace('\\', "/"),
+    ))
+}
+
+/// Escapes `[` and `]` in Markdown link text with backslashes.
+fn escape_link_text(text: &str) -> String {
+    text.replace('[', "\\[").replace(']', "\\]")
+}
+
+/// Returns `true` when a link destination needs angle-bracket wrapping to stay
+/// CommonMark-safe.
+fn destination_needs_wrapping(dest: &str) -> bool {
+    dest.chars().any(|c| {
+        c.is_ascii_control()
+            || c == ' '
+            || c == '\t'
+            || c == '('
+            || c == ')'
+            || c == '<'
+            || c == '>'
+    })
+}
+
+/// Formats a Markdown inline link `[text](destination)` with text and
+/// destination escaping.
+fn format_markdown_link(text: &str, destination: &str) -> String {
+    let escaped_text = escape_link_text(text);
+    let safe_dest = if destination_needs_wrapping(destination) {
+        let inner = destination.replace('<', "\\<").replace('>', "\\>");
+        format!("<{inner}>")
+    } else {
+        destination.to_string()
+    };
+    format!("[{escaped_text}]({safe_dest})")
+}
+
+/// `link(file)` / `link(target, desc)` — emits a Markdown inline link.
+///
+/// - One argument: resolves a local file and uses `relative(file)` as the link
+///   text and the resolved absolute path as the destination. HTTP(S) URLs are
+///   rejected because a description is required.
+/// - Two arguments: `target` may be a local file reference or an HTTP(S) URL;
+///   `desc` must be a string and is used as the link text.
+pub fn link_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    match args.len() {
+        1 => {
+            if args[0].is_null() {
+                return Ok(Value::Null);
+            }
+            let raw = require_string("link", &args[0])?;
+            if is_remote_url(raw) {
+                return Err(
+                    "link() one-argument form does not accept HTTP(S) URLs; use link(target, desc)"
+                        .to_string(),
+                );
+            }
+            let path = resolve_path_arg("link", &args[0], ctx)?;
+            let desc = make_relative(&path, &ctx.base_dir).replace('\\', "/");
+            let dest = path.to_string_lossy().replace('\\', "/");
+            Ok(Value::String(format_markdown_link(&desc, &dest)))
+        }
+        2 => {
+            if any_null(args) {
+                return Ok(Value::Null);
+            }
+            let target_raw = require_string("link", &args[0])?;
+            let desc = require_string("link", &args[1])?;
+            let dest = if is_remote_url(target_raw) {
+                url::Url::parse(target_raw)
+                    .map_err(|e| format!("link() invalid URL {target_raw:?}: {e}"))?;
+                target_raw.to_string()
+            } else {
+                let path = resolve_path_arg("link", &args[0], ctx)?;
+                path.to_string_lossy().replace('\\', "/")
+            };
+            Ok(Value::String(format_markdown_link(desc, &dest)))
+        }
+        _ => Err("link() requires 1 or 2 arguments".to_string()),
+    }
+}
+
+/// Validates that a skill name is a single basename component.
+fn validate_skill_name(name: &str) -> bool {
+    let path = Path::new(name);
+    let mut components = path.components();
+    matches!(components.next(), Some(std::path::Component::Normal(_)))
+        && components.next().is_none()
+}
+
+/// Checks whether a direct child directory named `name` exists under any root.
+fn skill_exists_in_roots(roots: &[PathBuf], name: &str) -> bool {
+    roots.iter().any(|root| root.join(name).is_dir())
+}
+
+/// `has_skill(name)` — `true` when a direct child directory named `name` exists
+/// in any user-scoped or local-scoped skill root for the executing agent.
+pub fn has_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    require_args("has_skill", args, 1)?;
+    if args[0].is_null() {
+        return Ok(Value::Null);
+    }
+    let name = require_string("has_skill", &args[0])?;
+    if !validate_skill_name(name) {
+        return Err(
+            "has_skill() skill name must be a basename without path separators".to_string(),
+        );
+    }
+    let agent = ctx.agent();
+    let home_dir = ctx.home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let local_root = crate::markdown::compose::find_git_root_from(&ctx.base_dir)
+        .unwrap_or_else(|| ctx.base_dir.clone());
+    let roots = SkillRoots::new(home_dir, local_root).roots_for_agent(&agent);
+    Ok(Value::Bool(skill_exists_in_roots(&roots, name)))
+}
+
+/// `has_local_skill(name)` — `true` when a direct child directory named `name`
+/// exists in any local-scoped skill root for the executing agent.
+pub fn has_local_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    require_args("has_local_skill", args, 1)?;
+    if args[0].is_null() {
+        return Ok(Value::Null);
+    }
+    let name = require_string("has_local_skill", &args[0])?;
+    if !validate_skill_name(name) {
+        return Err(
+            "has_local_skill() skill name must be a basename without path separators"
+                .to_string(),
+        );
+    }
+    let agent = ctx.agent();
+    let local_root = crate::markdown::compose::find_git_root_from(&ctx.base_dir)
+        .unwrap_or_else(|| ctx.base_dir.clone());
+    let roots = SkillRoots::new(PathBuf::from("."), local_root).local_roots_for_agent(&agent);
+    Ok(Value::Bool(skill_exists_in_roots(&roots, name)))
+}
+
 /// Loads a Markdown file via the resolution context. `Err` if the path is
 /// invalid or unreadable.
 fn load_markdown(raw: &str, ctx: &ResolutionContext, fname: &str) -> Result<Markdown, String> {
@@ -1334,6 +1791,21 @@ pub const FS_FUNCTIONS: &[FsFunction] = &[
     FsFunction { canonical: "absolute", aliases: &[], signatures: &["absolute(file)"], handler: absolute_fn },
     FsFunction { canonical: "relative", aliases: &[], signatures: &["relative(file)"], handler: relative_fn },
     FsFunction { canonical: "file_exists", aliases: &["fileexists"], signatures: &["file_exists(file)"], handler: file_exists_fn },
+    FsFunction { canonical: "is_indexed_file", aliases: &["isindexedfile"], signatures: &["is_indexed_file(file)"], handler: is_indexed_file_fn },
+    FsFunction { canonical: "file_index", aliases: &["fileindex"], signatures: &["file_index(file)"], handler: file_index_fn },
+    FsFunction { canonical: "increment_file_index", aliases: &["incrementfileindex"], signatures: &["increment_file_index(file)"], handler: increment_file_index_fn },
+    FsFunction { canonical: "decrement_file_index", aliases: &["decrementfileindex"], signatures: &["decrement_file_index(file)"], handler: decrement_file_index_fn },
+    FsFunction { canonical: "basename", aliases: &[], signatures: &["basename(file)"], handler: basename_fn },
+    FsFunction { canonical: "basename_without_index", aliases: &["basenamewithoutindex"], signatures: &["basename_without_index(file)"], handler: basename_without_index_fn },
+    FsFunction { canonical: "dir", aliases: &[], signatures: &["dir(file)"], handler: dir_fn },
+    FsFunction { canonical: "ext", aliases: &[], signatures: &["ext(file)"], handler: ext_fn },
+    FsFunction { canonical: "parent_dir", aliases: &["parentdir"], signatures: &["parent_dir(file)"], handler: parent_dir_fn },
+    FsFunction { canonical: "file_trailing", aliases: &["filetrailing"], signatures: &["file_trailing(file)"], handler: file_trailing_fn },
+    FsFunction { canonical: "dir_leading", aliases: &["dirleading"], signatures: &["dir_leading(file)"], handler: dir_leading_fn },
+    FsFunction { canonical: "join", aliases: &[], signatures: &["join(left, right)"], handler: join_fn },
+    FsFunction { canonical: "link", aliases: &[], signatures: &["link(file)", "link(target, desc)"], handler: link_fn },
+    FsFunction { canonical: "has_skill", aliases: &["hasskill"], signatures: &["has_skill(name)"], handler: has_skill_fn },
+    FsFunction { canonical: "has_local_skill", aliases: &["haslocalskill"], signatures: &["has_local_skill(name)"], handler: has_local_skill_fn },
     FsFunction {
         canonical: "frontmatter",
         aliases: &[],
@@ -2036,6 +2508,725 @@ mod tests {
                 TODAY,
                 true
             ));
+        }
+    }
+
+    mod fn_phase3 {
+        use super::*;
+
+        #[test]
+        fn is_positive_true_for_positive_numbers_and_strings() {
+            assert_eq!(is_positive(&v(json!(1))).unwrap(), json!(true));
+            assert_eq!(is_positive(&v(json!(1.5))).unwrap(), json!(true));
+            assert_eq!(is_positive(&v(json!("0.5"))).unwrap(), json!(true));
+            assert_eq!(is_positive(&v(json!(true))).unwrap(), json!(true));
+        }
+
+        #[test]
+        fn is_positive_false_for_zero_and_negative() {
+            assert_eq!(is_positive(&v(json!(0))).unwrap(), json!(false));
+            assert_eq!(is_positive(&v(json!(0.0))).unwrap(), json!(false));
+            assert_eq!(is_positive(&v(json!(-1))).unwrap(), json!(false));
+            assert_eq!(is_positive(&v(json!("-0.5"))).unwrap(), json!(false));
+            assert_eq!(is_positive(&v(json!(false))).unwrap(), json!(false));
+        }
+
+        #[test]
+        fn is_positive_errors_for_null_and_non_numeric() {
+            assert!(is_positive(&v(json!(null))).is_err());
+            assert!(is_positive(&v(json!("nope"))).is_err());
+            assert!(is_positive(&v(json!([1, 2]))).is_err());
+        }
+
+        #[test]
+        fn is_negative_true_for_negative_numbers_and_strings() {
+            assert_eq!(is_negative(&v(json!(-1))).unwrap(), json!(true));
+            assert_eq!(is_negative(&v(json!(-1.5))).unwrap(), json!(true));
+            assert_eq!(is_negative(&v(json!("-0.5"))).unwrap(), json!(true));
+        }
+
+        #[test]
+        fn is_negative_false_for_zero_and_positive() {
+            assert_eq!(is_negative(&v(json!(0))).unwrap(), json!(false));
+            assert_eq!(is_negative(&v(json!(0.0))).unwrap(), json!(false));
+            assert_eq!(is_negative(&v(json!(1))).unwrap(), json!(false));
+            assert_eq!(is_negative(&v(json!(true))).unwrap(), json!(false));
+        }
+
+        #[test]
+        fn is_negative_errors_for_null_and_non_numeric() {
+            assert!(is_negative(&v(json!(null))).is_err());
+            assert!(is_negative(&v(json!("nope"))).is_err());
+            assert!(is_negative(&v(json!({"a": 1}))).is_err());
+        }
+
+        #[test]
+        fn is_integer_never_errors_or_null_propagates() {
+            assert_eq!(is_integer(&v(json!(null))).unwrap(), json!(false));
+            assert_eq!(is_integer(&v(json!("123"))).unwrap(), json!(false));
+            assert_eq!(is_integer(&v(json!(true))).unwrap(), json!(false));
+            assert_eq!(is_integer(&v(json!([1]))).unwrap(), json!(false));
+            assert_eq!(is_integer(&v(json!({"a": 1}))).unwrap(), json!(false));
+        }
+
+        #[test]
+        fn is_integer_true_for_whole_numbers() {
+            assert_eq!(is_integer(&v(json!(1))).unwrap(), json!(true));
+            assert_eq!(is_integer(&v(json!(1.0))).unwrap(), json!(true));
+            assert_eq!(is_integer(&v(json!(0))).unwrap(), json!(true));
+            assert_eq!(is_integer(&v(json!(-42))).unwrap(), json!(true));
+        }
+
+        #[test]
+        fn is_integer_false_for_fractional_numbers() {
+            assert_eq!(is_integer(&v(json!(1.5))).unwrap(), json!(false));
+            assert_eq!(is_integer(&v(json!(0.1))).unwrap(), json!(false));
+        }
+
+        #[test]
+        fn without_date_removes_valid_dates_and_preserves_invalid() {
+            assert_eq!(
+                without_date(&v(json!("plan 2026-06-15 review"))).unwrap(),
+                json!("plan  review")
+            );
+            assert_eq!(
+                without_date(&v(json!("invalid 2026-02-30 stays"))).unwrap(),
+                json!("invalid 2026-02-30 stays")
+            );
+            assert_eq!(
+                without_date(&v(json!("meeting 2026-06-15T10:30:00 here"))).unwrap(),
+                json!("meeting T10:30:00 here")
+            );
+            assert_eq!(
+                without_date(&v(json!("x 2026-06-15, y"))).unwrap(),
+                json!("x , y")
+            );
+        }
+
+        #[test]
+        fn without_date_null_propagates_and_type_mismatch_errors() {
+            assert_eq!(without_date(&v(json!(null))).unwrap(), json!(null));
+            assert!(without_date(&v(json!(123))).is_err());
+            assert!(without_date(&v(json!([1, 2]))).is_err());
+        }
+
+        #[test]
+        fn ensure_leading_examples() {
+            assert_eq!(
+                ensure_leading(&vv(json!("foobar"), json!("foo"))).unwrap(),
+                json!("foobar")
+            );
+            assert_eq!(
+                ensure_leading(&vv(json!("bar"), json!("foo"))).unwrap(),
+                json!("foobar")
+            );
+            assert_eq!(
+                ensure_leading(&vv(json!(123), json!(4))).unwrap(),
+                json!(4123)
+            );
+            assert_eq!(
+                ensure_leading(&vv(json!("123"), json!(4))).unwrap(),
+                json!("4123")
+            );
+        }
+
+        #[test]
+        fn ensure_leading_preserves_number_type_when_already_prefixed() {
+            assert_eq!(
+                ensure_leading(&vv(json!(123), json!("12"))).unwrap(),
+                json!(123)
+            );
+            assert_eq!(
+                ensure_leading(&vv(json!(123), json!(12))).unwrap(),
+                json!(123)
+            );
+        }
+
+        #[test]
+        fn ensure_leading_null_propagates() {
+            assert_eq!(
+                ensure_leading(&vv(json!(null), json!("foo"))).unwrap(),
+                json!(null)
+            );
+            assert_eq!(
+                ensure_leading(&vv(json!("bar"), json!(null))).unwrap(),
+                json!(null)
+            );
+        }
+
+        #[test]
+        fn ensure_leading_rejects_booleans_arrays_objects() {
+            assert!(ensure_leading(&vv(json!(true), json!("foo"))).is_err());
+            assert!(ensure_leading(&vv(json!("bar"), json!(true))).is_err());
+            assert!(ensure_leading(&vv(json!([1]), json!("foo"))).is_err());
+            assert!(ensure_leading(&vv(json!("bar"), json!({"a": 1}))).is_err());
+        }
+
+        #[test]
+        fn ensure_trailing_examples() {
+            assert_eq!(
+                ensure_trailing(&vv(json!("foobar"), json!("bar"))).unwrap(),
+                json!("foobar")
+            );
+            assert_eq!(
+                ensure_trailing(&vv(json!("foo"), json!("bar"))).unwrap(),
+                json!("foobar")
+            );
+            assert_eq!(
+                ensure_trailing(&vv(json!(123), json!(4))).unwrap(),
+                json!(1234)
+            );
+            assert_eq!(
+                ensure_trailing(&vv(json!("123"), json!(4))).unwrap(),
+                json!("1234")
+            );
+        }
+
+        #[test]
+        fn ensure_trailing_null_propagates_and_type_mismatch() {
+            assert_eq!(
+                ensure_trailing(&vv(json!(null), json!("bar"))).unwrap(),
+                json!(null)
+            );
+            assert!(ensure_trailing(&vv(json!("foo"), json!(false))).is_err());
+            assert!(ensure_trailing(&vv(json!([]), json!("bar"))).is_err());
+        }
+
+        #[test]
+        fn terminal_renders_bold_markup() {
+            let out = terminal(&v(json!("<bold>x</bold>"))).unwrap();
+            let s = out.as_str().unwrap();
+            assert!(s.contains("\x1b[1m"), "expected bold SGR sequence in {s:?}");
+            assert!(s.contains('x'), "expected literal x in {s:?}");
+        }
+
+        #[test]
+        fn terminal_literal_text_passes_through() {
+            let out = terminal(&v(json!("hello world"))).unwrap();
+            assert_eq!(out, json!("hello world"));
+        }
+
+        #[test]
+        fn terminal_null_propagates_and_type_mismatch_errors() {
+            assert_eq!(terminal(&v(json!(null))).unwrap(), json!(null));
+            assert!(terminal(&v(json!(123))).is_err());
+            assert!(terminal(&v(json!([1, 2]))).is_err());
+        }
+
+        #[test]
+        fn phase3_functions_dispatch_by_name() {
+            assert_eq!(dispatch("is_positive", &[json!(5)]).unwrap().unwrap(), json!(true));
+            assert_eq!(dispatch("isnegative", &[json!(-1)]).unwrap().unwrap(), json!(true));
+            assert_eq!(dispatch("isinteger", &[json!(42)]).unwrap().unwrap(), json!(true));
+            assert_eq!(
+                dispatch("without_date", &[json!("2026-06-15x")]).unwrap().unwrap(),
+                json!("x")
+            );
+            assert_eq!(
+                dispatch("ensure_leading", &[json!("bar"), json!("foo")])
+                    .unwrap()
+                    .unwrap(),
+                json!("foobar")
+            );
+            assert_eq!(
+                dispatch("ensuretrailing", &[json!("foo"), json!("bar")])
+                    .unwrap()
+                    .unwrap(),
+                json!("foobar")
+            );
+            assert!(dispatch("terminal", &[json!("<bold>x</bold>")]).unwrap().is_ok());
+        }
+
+        #[test]
+        fn phase3_functions_require_correct_arity() {
+            assert!(is_positive(&[]).is_err());
+            assert!(is_positive(&[json!(1), json!(2)]).is_err());
+            assert!(without_date(&[]).is_err());
+            assert!(without_date(&[json!("a"), json!("b")]).is_err());
+            assert!(ensure_leading(&[json!("a")]).is_err());
+            assert!(ensure_leading(&[json!("a"), json!("b"), json!("c")]).is_err());
+            assert!(terminal(&[]).is_err());
+        }
+    }
+
+    mod fn_phase4 {
+        use super::*;
+
+        fn ctx_with_temp_dir() -> (tempfile::TempDir, ResolutionContext) {
+            let dir = tempfile::TempDir::new().unwrap();
+            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+            (dir, ctx)
+        }
+
+        #[test]
+        fn is_indexed_file_detects_indexed_stems() {
+            let (dir, ctx) = ctx_with_temp_dir();
+            std::fs::write(dir.path().join("review-1.md"), "x").unwrap();
+            std::fs::write(dir.path().join("review.md"), "x").unwrap();
+            std::fs::write(dir.path().join("review_1.md"), "x").unwrap();
+
+            assert_eq!(is_indexed_file_fn(&[json!("review-1.md")], &ctx).unwrap(), json!(true));
+            assert_eq!(is_indexed_file_fn(&[json!("review-100.md")], &ctx).unwrap(), json!(true));
+            assert_eq!(is_indexed_file_fn(&[json!("review-001.md")], &ctx).unwrap(), json!(true));
+            assert_eq!(is_indexed_file_fn(&[json!("review.md")], &ctx).unwrap(), json!(false));
+            assert_eq!(is_indexed_file_fn(&[json!("review_1.md")], &ctx).unwrap(), json!(false));
+            assert_eq!(is_indexed_file_fn(&[json!("review1.md")], &ctx).unwrap(), json!(false));
+        }
+
+        #[test]
+        fn file_index_parses_or_negative_one() {
+            let (dir, ctx) = ctx_with_temp_dir();
+            std::fs::write(dir.path().join("review-42.md"), "x").unwrap();
+            std::fs::write(dir.path().join("review.md"), "x").unwrap();
+
+            assert_eq!(file_index_fn(&[json!("review-42.md")], &ctx).unwrap(), json!(42));
+            assert_eq!(file_index_fn(&[json!("review.md")], &ctx).unwrap(), json!(-1));
+        }
+
+        #[test]
+        fn increment_file_index_preserves_zero_padding() {
+            let (dir, ctx) = ctx_with_temp_dir();
+            std::fs::write(dir.path().join("review-1.md"), "x").unwrap();
+            std::fs::write(dir.path().join("review-001.md"), "x").unwrap();
+            std::fs::write(dir.path().join("review.md"), "x").unwrap();
+
+            assert_eq!(
+                increment_file_index_fn(&[json!("review-1.md")], &ctx).unwrap(),
+                json!("review-2.md")
+            );
+            assert_eq!(
+                increment_file_index_fn(&[json!("review-001.md")], &ctx).unwrap(),
+                json!("review-002.md")
+            );
+            assert_eq!(
+                increment_file_index_fn(&[json!("review.md")], &ctx).unwrap(),
+                json!("review-2.md")
+            );
+        }
+
+        #[test]
+        fn decrement_file_index_clamps_at_zero() {
+            let (dir, ctx) = ctx_with_temp_dir();
+            std::fs::write(dir.path().join("review-001.md"), "x").unwrap();
+            std::fs::write(dir.path().join("review-0.md"), "x").unwrap();
+            std::fs::write(dir.path().join("review.md"), "x").unwrap();
+
+            assert_eq!(
+                decrement_file_index_fn(&[json!("review-001.md")], &ctx).unwrap(),
+                json!("review-000.md")
+            );
+            assert_eq!(
+                decrement_file_index_fn(&[json!("review-0.md")], &ctx).unwrap(),
+                json!("review-0.md")
+            );
+            assert_eq!(
+                decrement_file_index_fn(&[json!("review.md")], &ctx).unwrap(),
+                json!("review-0.md")
+            );
+        }
+
+        #[test]
+        fn indexed_functions_null_propagate_and_reject_remote() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+
+            assert_eq!(is_indexed_file_fn(&[json!(null)], &ctx).unwrap(), json!(null));
+            assert_eq!(file_index_fn(&[json!(null)], &ctx).unwrap(), json!(null));
+            assert_eq!(
+                increment_file_index_fn(&[json!(null)], &ctx).unwrap(),
+                json!(null)
+            );
+
+            let err = is_indexed_file_fn(&[json!("https://example.com/doc.md")], &ctx)
+                .unwrap_err();
+            assert!(err.contains("HTTP(S)"), "got: {err}");
+        }
+
+        #[test]
+        fn indexed_functions_require_arity() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+            assert!(is_indexed_file_fn(&[], &ctx).is_err());
+            assert!(is_indexed_file_fn(&[json!("a"), json!("b")], &ctx).is_err());
+            assert!(file_index_fn(&[], &ctx).is_err());
+            assert!(increment_file_index_fn(&[json!("a"), json!("b")], &ctx).is_err());
+        }
+
+        #[test]
+        fn path_components_split_display_path() {
+            let (dir, ctx) = ctx_with_temp_dir();
+            std::fs::create_dir_all(dir.path().join("foo/bar/baz")).unwrap();
+            std::fs::write(dir.path().join("foo/bar/baz/test.md"), "x").unwrap();
+            std::fs::write(dir.path().join("foo/review-1.md"), "x").unwrap();
+            std::fs::write(dir.path().join("no-ext"), "x").unwrap();
+
+            assert_eq!(basename_fn(&[json!("foo/bar/baz/test.md")], &ctx).unwrap(), json!("test.md"));
+            assert_eq!(
+                basename_without_index_fn(&[json!("foo/review-1.md")], &ctx).unwrap(),
+                json!("review.md")
+            );
+            assert_eq!(dir_fn(&[json!("foo/bar/baz/test.md")], &ctx).unwrap(), json!("foo/bar/baz"));
+            assert_eq!(ext_fn(&[json!("foo/bar/baz/test.md")], &ctx).unwrap(), json!("md"));
+            assert_eq!(ext_fn(&[json!("no-ext")], &ctx).unwrap(), json!(""));
+            assert_eq!(
+                parent_dir_fn(&[json!("foo/bar/baz/test.md")], &ctx).unwrap(),
+                json!("baz")
+            );
+            assert_eq!(
+                file_trailing_fn(&[json!("foo/bar/baz/test.md")], &ctx).unwrap(),
+                json!("baz/test.md")
+            );
+            assert_eq!(
+                dir_leading_fn(&[json!("foo/bar/baz/test.md")], &ctx).unwrap(),
+                json!("foo/bar")
+            );
+        }
+
+        #[test]
+        fn path_components_handle_bare_basename() {
+            let (dir, ctx) = ctx_with_temp_dir();
+            std::fs::write(dir.path().join("test.md"), "x").unwrap();
+
+            assert_eq!(basename_fn(&[json!("test.md")], &ctx).unwrap(), json!("test.md"));
+            assert_eq!(dir_fn(&[json!("test.md")], &ctx).unwrap(), json!(""));
+            assert_eq!(parent_dir_fn(&[json!("test.md")], &ctx).unwrap(), json!(""));
+            assert_eq!(file_trailing_fn(&[json!("test.md")], &ctx).unwrap(), json!("test.md"));
+            assert_eq!(dir_leading_fn(&[json!("test.md")], &ctx).unwrap(), json!(""));
+        }
+
+        #[test]
+        fn join_normalizes_separators_and_resolves() {
+            let (dir, ctx) = ctx_with_temp_dir();
+            std::fs::create_dir_all(dir.path().join("foo/bar")).unwrap();
+            std::fs::write(dir.path().join("foo/bar/baz.md"), "x").unwrap();
+
+            assert_eq!(
+                join_fn(&[json!("foo/bar/"), json!("/baz.md")], &ctx).unwrap(),
+                json!("foo/bar/baz.md")
+            );
+            assert_eq!(
+                join_fn(&[json!("foo/bar"), json!("baz/bax.md")], &ctx).unwrap(),
+                json!("foo/bar/baz/bax.md")
+            );
+            assert_eq!(
+                join_fn(&[json!("foo//bar//"), json!("//baz.md")], &ctx).unwrap(),
+                json!("foo/bar/baz.md")
+            );
+        }
+
+        #[test]
+        fn join_rejects_http_and_null_propagates() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+
+            assert_eq!(join_fn(&[json!(null), json!("b")], &ctx).unwrap(), json!(null));
+            let err = join_fn(&[json!("https://example.com"), json!("b")], &ctx).unwrap_err();
+            assert!(err.contains("HTTP(S)"), "got: {err}");
+            let err = join_fn(&[json!("a"), json!("https://example.com/b")], &ctx).unwrap_err();
+            assert!(err.contains("HTTP(S)"), "got: {err}");
+        }
+
+        #[test]
+        fn join_requires_strings_and_correct_arity() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+            assert!(join_fn(&[], &ctx).is_err());
+            assert!(join_fn(&[json!("a")], &ctx).is_err());
+            assert!(join_fn(&[json!(123), json!("b")], &ctx).is_err());
+            assert!(join_fn(&[json!("a"), json!([])], &ctx).is_err());
+        }
+
+        #[test]
+        fn path_functions_do_not_require_existence() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+
+            assert_eq!(basename_fn(&[json!("foo/bar/missing.md")], &ctx).unwrap(), json!("missing.md"));
+            assert_eq!(dir_fn(&[json!("foo/bar/missing.md")], &ctx).unwrap(), json!("foo/bar"));
+            assert_eq!(
+                increment_file_index_fn(&[json!("foo/bar/missing.md")], &ctx).unwrap(),
+                json!("foo/bar/missing-2.md")
+            );
+        }
+
+        #[test]
+        fn path_functions_dispatch_by_name() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+            assert_eq!(
+                dispatch_fs("is_indexed_file", &[json!("foo-1.md")], &ctx)
+                    .unwrap()
+                    .unwrap(),
+                json!(true)
+            );
+            assert_eq!(
+                dispatch_fs("file_index", &[json!("foo-7.md")], &ctx).unwrap().unwrap(),
+                json!(7)
+            );
+            assert_eq!(
+                dispatch_fs("basename", &[json!("foo/bar.md")], &ctx).unwrap().unwrap(),
+                json!("bar.md")
+            );
+            assert_eq!(
+                dispatch_fs("join", &[json!("foo"), json!("bar.md")], &ctx)
+                    .unwrap()
+                    .unwrap(),
+                json!("foo/bar.md")
+            );
+        }
+    }
+
+    mod fn_phase5 {
+        use super::*;
+
+        fn ctx_with_temp_dir() -> (tempfile::TempDir, ResolutionContext) {
+            let dir = tempfile::TempDir::new().unwrap();
+            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+            (dir, ctx)
+        }
+
+        #[test]
+        fn link_one_arg_uses_relative_text_and_absolute_destination() {
+            let (dir, ctx) = ctx_with_temp_dir();
+            std::fs::create_dir_all(dir.path().join("foo/bar")).unwrap();
+            std::fs::write(dir.path().join("foo/bar/baz.md"), "x").unwrap();
+
+            let result = link_fn(&[json!("foo/bar/baz.md")], &ctx)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_string();
+            assert!(result.starts_with("[foo/bar/baz.md]("));
+            assert!(result.contains("/foo/bar/baz.md)"));
+        }
+
+        #[test]
+        fn link_two_arg_file_uses_provided_description() {
+            let (dir, ctx) = ctx_with_temp_dir();
+            std::fs::write(dir.path().join("doc.md"), "x").unwrap();
+
+            let result = link_fn(&[json!("doc.md"), json!("My Doc")], &ctx)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_string();
+            assert_eq!(result, "[My Doc](".to_string() + &dir.path().join("doc.md").to_string_lossy() + ")");
+        }
+
+        #[test]
+        fn link_two_arg_https_emits_url_destination() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let result = link_fn(
+                &[
+                    json!("https://example.com/page"),
+                    json!("Example"),
+                ],
+                &ctx,
+            )
+            .unwrap();
+            assert_eq!(result, json!("[Example](https://example.com/page)"));
+        }
+
+        #[test]
+        fn link_escapes_brackets_in_text() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let result = link_fn(
+                &[
+                    json!("https://example.com"),
+                    json!("click [here]"),
+                ],
+                &ctx,
+            )
+            .unwrap();
+            assert_eq!(
+                result,
+                json!("[click \\[here\\]](https://example.com)")
+            );
+        }
+
+        #[test]
+        fn link_wraps_destination_with_spaces_and_parens() {
+            let (dir, ctx) = ctx_with_temp_dir();
+            std::fs::write(dir.path().join("my doc (v1).md"), "x").unwrap();
+
+            let result = link_fn(
+                &[
+                    json!("my doc (v1).md"),
+                    json!("spaces"),
+                ],
+                &ctx,
+            )
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_string();
+            assert!(
+                result.starts_with("[spaces](<"),
+                "expected angle-bracket wrapping for destination with spaces, got {result:?}"
+            );
+            assert!(result.ends_with(">)"));
+        }
+
+        #[test]
+        fn link_one_arg_rejects_remote_url() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let err = link_fn(
+                &[json!("https://example.com/doc.md")],
+                &ctx,
+            )
+            .unwrap_err();
+            assert!(err.contains("HTTP(S)"), "got: {err}");
+        }
+
+        #[test]
+        fn link_null_propagates_and_arity_errors() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+            assert_eq!(
+                link_fn(&[json!(null), json!("desc")], &ctx).unwrap(),
+                json!(null)
+            );
+            assert_eq!(
+                link_fn(&[json!("https://example.com"), json!(null)], &ctx).unwrap(),
+                json!(null)
+            );
+            assert!(link_fn(&[], &ctx).is_err());
+            assert!(link_fn(&[json!("a"), json!("b"), json!("c")], &ctx).is_err());
+        }
+
+        #[test]
+        fn link_type_mismatch_errors() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+            assert!(link_fn(&[json!(123)], &ctx).is_err());
+            assert!(link_fn(&[json!("a"), json!(123)], &ctx).is_err());
+        }
+
+        #[test]
+        fn has_skill_finds_user_and_local_roots() {
+            let home = tempfile::TempDir::new().unwrap();
+            let local = tempfile::TempDir::new().unwrap();
+            let ctx = ResolutionContext::new(local.path().to_path_buf())
+                .with_home_dir(home.path().to_path_buf())
+                .with_ctx_value("agent", json!("claude"));
+
+            std::fs::create_dir_all(home.path().join(".claude/skills/user-skill")).unwrap();
+            std::fs::create_dir_all(local.path().join(".claude/skills/local-skill")).unwrap();
+
+            assert_eq!(
+                has_skill_fn(&[json!("user-skill")], &ctx).unwrap(),
+                json!(true)
+            );
+            assert_eq!(
+                has_skill_fn(&[json!("local-skill")], &ctx).unwrap(),
+                json!(true)
+            );
+        }
+
+        #[test]
+        fn has_local_skill_excludes_user_roots() {
+            let home = tempfile::TempDir::new().unwrap();
+            let local = tempfile::TempDir::new().unwrap();
+            let ctx = ResolutionContext::new(local.path().to_path_buf())
+                .with_home_dir(home.path().to_path_buf())
+                .with_ctx_value("agent", json!("claude"));
+
+            std::fs::create_dir_all(home.path().join(".claude/skills/user-only")).unwrap();
+            std::fs::create_dir_all(local.path().join(".claude/skills/local-only")).unwrap();
+
+            assert_eq!(
+                has_local_skill_fn(&[json!("user-only")], &ctx).unwrap(),
+                json!(false)
+            );
+            assert_eq!(
+                has_local_skill_fn(&[json!("local-only")], &ctx).unwrap(),
+                json!(true)
+            );
+        }
+
+        #[test]
+        fn has_skill_uses_env_agent_when_ctx_not_set() {
+            let local = tempfile::TempDir::new().unwrap();
+            let ctx = ResolutionContext::new(local.path().to_path_buf())
+                .with_home_dir(local.path().to_path_buf());
+
+            // Unknown agent: only .agents/skills and .codex/skills are searched.
+            std::fs::create_dir_all(local.path().join(".agents/skills/env-skill")).unwrap();
+
+            assert_eq!(
+                has_skill_fn(&[json!("env-skill")], &ctx).unwrap(),
+                json!(true)
+            );
+        }
+
+        #[test]
+        fn has_skill_rejects_path_separators_and_dotdot() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+            assert!(has_skill_fn(&[json!("foo/bar")], &ctx).is_err());
+            assert!(has_skill_fn(&[json!("..")], &ctx).is_err());
+            assert!(has_skill_fn(&[json!(".")], &ctx).is_err());
+        }
+
+        #[test]
+        fn has_skill_nested_directory_does_not_count() {
+            let local = tempfile::TempDir::new().unwrap();
+            let ctx = ResolutionContext::new(local.path().to_path_buf())
+                .with_home_dir(local.path().to_path_buf())
+                .with_ctx_value("agent", json!("claude"));
+
+            std::fs::create_dir_all(local.path().join(".claude/skills/parent/nested")).unwrap();
+
+            assert_eq!(
+                has_skill_fn(&[json!("parent")], &ctx).unwrap(),
+                json!(true)
+            );
+            assert_eq!(
+                has_skill_fn(&[json!("nested")], &ctx).unwrap(),
+                json!(false)
+            );
+        }
+
+        #[test]
+        fn has_skill_missing_root_returns_false() {
+            let local = tempfile::TempDir::new().unwrap();
+            let ctx = ResolutionContext::new(local.path().to_path_buf())
+                .with_home_dir(local.path().to_path_buf())
+                .with_ctx_value("agent", json!("claude"));
+
+            assert_eq!(
+                has_skill_fn(&[json!("missing")], &ctx).unwrap(),
+                json!(false)
+            );
+        }
+
+        #[test]
+        fn has_skill_null_propagates_and_arity_errors() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+            assert_eq!(
+                has_skill_fn(&[json!(null)], &ctx).unwrap(),
+                json!(null)
+            );
+            assert_eq!(
+                has_local_skill_fn(&[json!(null)], &ctx).unwrap(),
+                json!(null)
+            );
+            assert!(has_skill_fn(&[], &ctx).is_err());
+            assert!(has_skill_fn(&[json!("a"), json!("b")], &ctx).is_err());
+        }
+
+        #[test]
+        fn phase5_functions_dispatch_by_name() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+            assert_eq!(
+                dispatch_fs("link", &[json!("https://example.com"), json!("x")], &ctx)
+                    .unwrap()
+                    .unwrap(),
+                json!("[x](https://example.com)")
+            );
+            assert_eq!(
+                dispatch_fs("hasskill", &[json!("missing")], &ctx)
+                    .unwrap()
+                    .unwrap(),
+                json!(false)
+            );
+            assert_eq!(
+                dispatch_fs("haslocalskill", &[json!("missing")], &ctx)
+                    .unwrap()
+                    .unwrap(),
+                json!(false)
+            );
         }
     }
 }

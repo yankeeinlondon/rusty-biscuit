@@ -1223,6 +1223,8 @@ impl ComposeOptions {
             base_dir: self.resolution_base_dir(),
             magic_paths: self.magic_paths.clone(),
             remote_fetch: self.remote_reads_enabled().then(|| remote_fetch.clone()),
+            ctx_values: capture_agent_values(&self.resolution_base_dir()),
+            home_dir: dirs::home_dir(),
         }
     }
 
@@ -1243,6 +1245,8 @@ impl ComposeOptions {
             base_dir: self.resolution_base_dir(),
             magic_paths: self.magic_paths.clone(),
             remote_fetch: None,
+            ctx_values: capture_agent_values(&self.resolution_base_dir()),
+            home_dir: dirs::home_dir(),
         }
     }
 
@@ -1433,6 +1437,15 @@ impl ComposeSource {
             Self::Unknown => std::borrow::Cow::Borrowed("<stdin>"),
         }
     }
+}
+
+fn capture_agent_values(base_dir: &std::path::Path) -> serde_json::Map<String, serde_json::Value> {
+    let (values, _diagnostics, _timings) =
+        super::context::capture::capture_runtime_context_for_groups(
+            base_dir,
+            &[super::context::capture::ContextGroup::Agent],
+        );
+    values
 }
 
 /// Transclusion-specific options (internal convenience type).
