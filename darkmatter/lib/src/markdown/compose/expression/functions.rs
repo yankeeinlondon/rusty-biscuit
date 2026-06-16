@@ -135,22 +135,18 @@ impl SkillRoots {
 
     #[allow(dead_code)]
     fn local_roots(&self, canonical: Option<&str>) -> Vec<PathBuf> {
+        // The local-scoped root set is shared across all recognized agents so a
+        // skill placed under any agent's local directory is discoverable by any
+        // other recognized agent. Unknown agents (canonical == None) are
+        // restricted to the two generic roots.
         match canonical {
-            Some("claude") => vec![
+            Some(_) => vec![
                 self.local_root.join(".claude").join("skills"),
-                self.local_root.join(".agents").join("skills"),
-                self.local_root.join(".codex").join("skills"),
-            ],
-            Some("opencode") => vec![
                 self.local_root.join(".opencode").join("skill"),
-                self.local_root.join(".agents").join("skills"),
-                self.local_root.join(".codex").join("skills"),
-            ],
-            Some("codex") => vec![
                 self.local_root.join(".codex").join("skills"),
                 self.local_root.join(".agents").join("skills"),
             ],
-            _ => vec![
+            None => vec![
                 self.local_root.join(".agents").join("skills"),
                 self.local_root.join(".codex").join("skills"),
             ],
@@ -159,9 +155,10 @@ impl SkillRoots {
 
     /// Returns every root that should be searched for the given agent.
     ///
-    /// For recognized agents this includes the user-scoped root plus the
-    /// relevant local-scoped roots. Unknown agents search only the generic
-    /// `.agents/skills` and `.codex/skills` local roots.
+    /// For recognized agents this includes the agent's user-scoped root plus all
+    /// four local-scoped roots (`.claude/skills`, `.opencode/skill`,
+    /// `.codex/skills`, `.agents/skills`). Unknown agents search only the
+    /// generic `.agents/skills` and `.codex/skills` local roots.
     #[allow(dead_code)]
     pub(crate) fn roots_for_agent(&self, name: &str) -> Vec<PathBuf> {
         let canonical = Self::normalize_agent(name);
@@ -3073,6 +3070,55 @@ mod tests {
         }
 
         #[test]
+        fn basename_rejects_uppercase_scheme_urls() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+
+            let err = basename_fn(&[json!("HTTPS://example.com/doc.md")], &ctx)
+                .unwrap_err();
+            assert!(err.contains("HTTP(S)"), "got: {err}");
+            let err = basename_fn(&[json!("hTtPs://example.com/doc.md")], &ctx)
+                .unwrap_err();
+            assert!(err.contains("HTTP(S)"), "got: {err}");
+        }
+
+        #[test]
+        fn join_rejects_uppercase_scheme_urls() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+
+            let err = join_fn(&[json!("HTTPS://example.com"), json!("b")], &ctx)
+                .unwrap_err();
+            assert!(err.contains("HTTP(S)"), "got: {err}");
+            let err = join_fn(&[json!("a"), json!("HTTP://example.com/b")], &ctx)
+                .unwrap_err();
+            assert!(err.contains("HTTP(S)"), "got: {err}");
+        }
+
+        #[test]
+        fn link_one_arg_rejects_uppercase_scheme_urls() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let err = link_fn(&[json!("HTTPS://example.com/doc.md")], &ctx).unwrap_err();
+            assert!(err.contains("HTTP(S)"), "got: {err}");
+        }
+
+        #[test]
+        fn link_two_arg_accepts_uppercase_scheme_urls() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+
+            let result = link_fn(
+                &[json!("HTTPS://example.com/page"), json!("Example")],
+                &ctx,
+            )
+            .unwrap();
+            assert_eq!(result, json!("[Example](HTTPS://example.com/page)"));
+            let result = link_fn(
+                &[json!("hTtP://example.com/page"), json!("Example")],
+                &ctx,
+            )
+            .unwrap();
+            assert_eq!(result, json!("[Example](hTtP://example.com/page)"));
+        }
+
+        #[test]
         fn link_null_propagates_and_arity_errors() {
             let ctx = ResolutionContext::new(std::env::temp_dir());
             assert_eq!(
@@ -3111,6 +3157,42 @@ mod tests {
             );
             assert_eq!(
                 has_skill_fn(&[json!("local-skill")], &ctx).unwrap(),
+                json!(true)
+            );
+        }
+
+        #[test]
+        fn has_skill_finds_cross_agent_local_roots() {
+            // Local-scoped roots are shared across all recognized agents: a skill
+            // placed in any agent's local directory is discoverable by any other
+            // recognized agent via both `has_skill` and `has_local_skill`.
+            let home = tempfile::TempDir::new().unwrap();
+            let local = tempfile::TempDir::new().unwrap();
+
+            std::fs::create_dir_all(local.path().join(".opencode/skill/cross-skill")).unwrap();
+            std::fs::create_dir_all(local.path().join(".claude/skills/cross-skill")).unwrap();
+
+            let claude_ctx = ResolutionContext::new(local.path().to_path_buf())
+                .with_home_dir(home.path().to_path_buf())
+                .with_ctx_value("agent", json!("claude"));
+            assert_eq!(
+                has_skill_fn(&[json!("cross-skill")], &claude_ctx).unwrap(),
+                json!(true)
+            );
+            assert_eq!(
+                has_local_skill_fn(&[json!("cross-skill")], &claude_ctx).unwrap(),
+                json!(true)
+            );
+
+            let opencode_ctx = ResolutionContext::new(local.path().to_path_buf())
+                .with_home_dir(home.path().to_path_buf())
+                .with_ctx_value("agent", json!("opencode"));
+            assert_eq!(
+                has_skill_fn(&[json!("cross-skill")], &opencode_ctx).unwrap(),
+                json!(true)
+            );
+            assert_eq!(
+                has_local_skill_fn(&[json!("cross-skill")], &opencode_ctx).unwrap(),
                 json!(true)
             );
         }
@@ -3410,10 +3492,53 @@ mod phase1_helpers {
         let expected: Vec<PathBuf> = vec![
             home.path().join(".claude").join("skills"),
             local.path().join(".claude").join("skills"),
-            local.path().join(".agents").join("skills"),
+            local.path().join(".opencode").join("skill"),
             local.path().join(".codex").join("skills"),
+            local.path().join(".agents").join("skills"),
         ];
         assert_eq!(roots.roots_for_agent("claude-code"), expected);
+    }
+
+    #[test]
+    fn skill_roots_all_recognized_agents_search_all_four_local_roots() {
+        let home = tempfile::TempDir::new().unwrap();
+        let local = tempfile::TempDir::new().unwrap();
+        let roots = SkillRoots::new(home.path().to_path_buf(), local.path().to_path_buf());
+
+        let expected_local: Vec<PathBuf> = vec![
+            local.path().join(".claude").join("skills"),
+            local.path().join(".opencode").join("skill"),
+            local.path().join(".codex").join("skills"),
+            local.path().join(".agents").join("skills"),
+        ];
+
+        for agent in ["claude", "opencode", "codex"] {
+            assert_eq!(
+                roots.local_roots_for_agent(agent),
+                expected_local,
+                "local roots differed for agent {agent}",
+            );
+        }
+
+        // User-scoped roots remain agent-specific.
+        assert_eq!(
+            roots.roots_for_agent("claude"),
+            vec![
+                home.path().join(".claude").join("skills"),
+                local.path().join(".claude").join("skills"),
+                local.path().join(".opencode").join("skill"),
+                local.path().join(".codex").join("skills"),
+                local.path().join(".agents").join("skills"),
+            ]
+        );
+        assert_eq!(
+            roots.roots_for_agent("opencode").first(),
+            Some(&home.path().join(".config").join("opencode").join("skill"))
+        );
+        assert_eq!(
+            roots.roots_for_agent("codex").first(),
+            Some(&home.path().join(".codex").join("skills"))
+        );
     }
 
     #[test]

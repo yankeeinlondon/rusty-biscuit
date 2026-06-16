@@ -121,8 +121,17 @@ impl ResolutionContext {
 
 /// Returns `true` when the argument is an HTTP(S) URL (handled remotely rather
 /// than as a filesystem path).
+///
+/// Scheme detection is case-insensitive per RFC 3986, so values like
+/// `HTTPS://example.com/doc.md` are recognized as remote URLs.
 pub(crate) fn is_remote_url(raw: &str) -> bool {
-    raw.starts_with("http://") || raw.starts_with("https://")
+    url::Url::parse(raw)
+        .ok()
+        .filter(|u| {
+            let scheme = u.scheme();
+            scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https")
+        })
+        .is_some()
 }
 
 /// Normalizes a filepath argument: strips a leading `file://` scheme and
@@ -157,6 +166,22 @@ mod tests {
         assert_eq!(normalize_path_arg("file://foo/bar"), "foo/bar");
         assert_eq!(normalize_path_arg("foo//bar"), "foo/bar");
         assert_eq!(normalize_path_arg("./a//b"), "./a/b");
+    }
+
+    #[test]
+    fn is_remote_url_is_case_insensitive() {
+        assert!(is_remote_url("http://example.com"));
+        assert!(is_remote_url("https://example.com"));
+        assert!(is_remote_url("HTTP://example.com"));
+        assert!(is_remote_url("HTTPS://example.com"));
+        assert!(is_remote_url("Http://example.com"));
+        assert!(is_remote_url("hTtPs://example.com/doc.md"));
+        assert!(is_remote_url("HTTPS://example.com/doc.md"));
+
+        assert!(!is_remote_url("ftp://example.com"));
+        assert!(!is_remote_url("C:/foo/bar"));
+        assert!(!is_remote_url("foo/bar.md"));
+        assert!(!is_remote_url("file://foo/bar"));
     }
 
     #[test]
