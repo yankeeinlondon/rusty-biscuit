@@ -3,6 +3,7 @@ agent: open_code/zai-coding-plan/glm-5.2
 phases: 8
 created: 2026-06-15
 start_phase: 1
+completed_at: 2026-06-15
 yolo: "true"
 source_files_during_phase_1:
   - sniff/lib/src/filesystem/repo/standard.rs
@@ -43,10 +44,124 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
-packages:
+source_files_during_phase_4:
+  - sniff/lib/src/filesystem/repo/standard.rs
+  - sniff/lib/src/filesystem/repo/npm.rs
+  - sniff/lib/src/filesystem/repo/uv.rs
+  - sniff/lib/src/filesystem/repo/go.rs
+  - sniff/lib/src/filesystem/repo/mod.rs
+  - sniff/lib/src/filesystem/repo/detection.rs
+  - sniff/lib/tests/fixtures.rs
+  - sniff/lib/tests/integration.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+packages_phase_4:
+  - sniff
+source_files_during_phase_5:
+  - sniff/lib/src/filesystem/repo/standard.rs
+  - sniff/lib/src/filesystem/repo/gradle.rs
+  - sniff/lib/src/filesystem/repo/maven.rs
+  - sniff/lib/src/filesystem/repo/dotnet.rs
+  - sniff/lib/src/filesystem/repo/mod.rs
+  - sniff/lib/src/filesystem/repo/detection.rs
+  - sniff/lib/tests/fixtures.rs
+  - sniff/lib/tests/integration.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+packages_phase_5:
+  - sniff
+source_files_during_phase_6:
+  - sniff/lib/src/filesystem/repo/standard.rs
+  - sniff/lib/src/filesystem/repo/polyglot.rs
+  - sniff/lib/src/filesystem/repo/npm.rs
+  - sniff/lib/src/filesystem/repo/mod.rs
+  - sniff/lib/src/filesystem/repo/detection.rs
+  - sniff/lib/tests/fixtures.rs
+  - sniff/lib/tests/integration.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+packages_phase_6:
+  - sniff
+source_files_during_phase_7:
+  - sniff/lib/src/filesystem/repo/standard.rs
+  - sniff/lib/src/filesystem/repo/detection.rs
+  - sniff/lib/src/filesystem/repo/topology.rs
+  - sniff/lib/src/executable_index.rs
+  - sniff/lib/tests/fixtures.rs
+  - sniff/lib/tests/integration.rs
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .opencode/skill/sniff/SKILL.md
+packages_phase_7:
+  - sniff
+source_files_during_phase_8:
+  - sniff/cli/src/output/filesystem/repo.rs
+  - sniff/cli/src/output/repo_json.rs
+  - sniff/cli/tests/snapshots.rs
+  - sniff/cli/tests/snapshots/snapshots__cargo_monorepo_structure_json.snap
+  - sniff/cli/tests/snapshots/snapshots__cargo_monorepo_structure_text.snap
+  - sniff/cli/tests/snapshots/snapshots__cargo_pnpm_monorepo_structure_json.snap
+  - sniff/cli/tests/snapshots/snapshots__cargo_pnpm_monorepo_structure_text.snap
+  - sniff/cli/tests/snapshots/snapshots__pnpm_nx_monorepo_structure_json.snap
+  - sniff/cli/tests/snapshots/snapshots__pnpm_nx_monorepo_structure_text.snap
+  - sniff/cli/tests/snapshots/snapshots__degenerate_cargo_structure_text.snap
+  - sniff/lib/src/filesystem/repo/types.rs
+  - sniff/lib/src/lib.rs
+  - sniff/cli/src/lib.rs
+  - sniff/lib/tests/integration.rs
+docs_updated_during_phase_8:
+  - sniff/lib/README.md
+  - sniff/cli/README.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+  - .opencode/skill/sniff/SKILL.md
+packages_phase_8:
   - sniff
   - sniff-cli
-  - darkmatter
+source_code:
+  - darkmatter/lib/src/markdown/compose/context/capture.rs
+  - sniff/cli/src/lib.rs
+  - sniff/cli/src/output/filesystem/mod.rs
+  - sniff/cli/src/output/filesystem/repo.rs
+  - sniff/cli/src/output/repo_json.rs
+  - sniff/cli/tests/snapshots.rs
+  - sniff/cli/tests/snapshots/snapshots__cargo_monorepo_structure_json.snap
+  - sniff/cli/tests/snapshots/snapshots__cargo_monorepo_structure_text.snap
+  - sniff/cli/tests/snapshots/snapshots__cargo_pnpm_monorepo_structure_json.snap
+  - sniff/cli/tests/snapshots/snapshots__cargo_pnpm_monorepo_structure_text.snap
+  - sniff/cli/tests/snapshots/snapshots__degenerate_cargo_structure_text.snap
+  - sniff/cli/tests/snapshots/snapshots__help_output.snap
+  - sniff/cli/tests/snapshots/snapshots__pnpm_nx_monorepo_structure_json.snap
+  - sniff/cli/tests/snapshots/snapshots__pnpm_nx_monorepo_structure_text.snap
+  - sniff/lib/Cargo.toml
+  - sniff/lib/src/executable_index.rs
+  - sniff/lib/src/filesystem/mod.rs
+  - sniff/lib/src/filesystem/repo/cargo.rs
+  - sniff/lib/src/filesystem/repo/detection.rs
+  - sniff/lib/src/filesystem/repo/dotnet.rs
+  - sniff/lib/src/filesystem/repo/glob.rs
+  - sniff/lib/src/filesystem/repo/go.rs
+  - sniff/lib/src/filesystem/repo/gradle.rs
+  - sniff/lib/src/filesystem/repo/maven.rs
+  - sniff/lib/src/filesystem/repo/mod.rs
+  - sniff/lib/src/filesystem/repo/npm.rs
+  - sniff/lib/src/filesystem/repo/nx_turbo.rs
+  - sniff/lib/src/filesystem/repo/polyglot.rs
+  - sniff/lib/src/filesystem/repo/standard.rs
+  - sniff/lib/src/filesystem/repo/topology.rs
+  - sniff/lib/src/filesystem/repo/types.rs
+  - sniff/lib/src/filesystem/repo/uv.rs
+  - sniff/lib/src/lib.rs
+  - sniff/lib/tests/fixtures.rs
+  - sniff/lib/tests/integration.rs
+documentation:
+  - .opencode/skill/sniff/SKILL.md
+  - sniff/cli/README.md
+  - sniff/lib/README.md
 ---
 
 # Improved Monorepo Capture — Execution Plan
@@ -447,57 +562,68 @@ globs) and exercise the `wrapper` field of `BinarySpec` for the first time.
 
 ### 5A — Gradle Multi-Project Build
 
-- [ ] Populate `MonorepoStandard::GradleMultiProject.spec()`: marker file
+- [x] Populate `MonorepoStandard::GradleMultiProject.spec()`: marker file
   `settings.gradle` (or `settings.gradle.kts`),
   `Field("include")`. Roles: `[DefinesMembership, OrchestratesTasks,
   ManagesDependencies]`. `MembershipModel::RootExplicit`.
   `RootMembership::Never`. `NestingPolicy::AllowsNested`. `BinarySpec { name:
   "gradle", min_version: None, wrapper: Some(WrapperScript { posix: "gradlew",
   windows: "gradlew.bat" }) }`.
-- [ ] Add `detect_gradle_workspace(root)` in a new
+- [x] Add `detect_gradle_workspace(root)` in a new
   `sniff/lib/src/filesystem/repo/gradle.rs`. Parse `include 'a:b:c'` directives
   and translate the Gradle path (`:`-separated) to a relative directory
   (`a/b/c`). Prefer the wrapper script (`gradlew` / `gradlew.bat`) over the
   system `gradle` when resolving the acting binary in Phase 7.
-- [ ] Register `gradle.rs` in `mod.rs`.
-- [ ] Add a fixture `create_gradle_workspace` and a degenerate variant.
-- [ ] Add an integration test asserting
+  *(Both the Groovy comma-list and Kotlin `include(...)` call forms are parsed;
+  `includeBuild` / `includeFlat` are excluded. Wrapper preference is recorded in
+  the descriptor for Phase 7.)*
+- [x] Register `gradle.rs` in `mod.rs`.
+- [x] Add a fixture `create_gradle_workspace` and a degenerate variant.
+- [x] Add an integration test asserting
   `monorepo_layers[0].authority == GradleMultiProject` and that the wrapper
   script presence is recorded (Phase 7 wires the actual resolution).
 
 ### 5B — Maven Multi-Module
 
-- [ ] Populate `MonorepoStandard::MavenMultiModule.spec()`: marker file
+- [x] Populate `MonorepoStandard::MavenMultiModule.spec()`: marker file
   `pom.xml`, `Field("modules")`. Roles: `[DefinesMembership,
   OrchestratesTasks, ManagesDependencies]`. `MembershipModel::RootExplicit`.
   `RootMembership::Never` (parent POM has `packaging=pom`).
   `NestingPolicy::AllowsNested`. `BinarySpec { name: "mvn", min_version: None,
   wrapper: Some(WrapperScript { posix: "mvnw", windows: "mvnw.cmd" }) }`.
-- [ ] Add `detect_maven_workspace(root)` in a new
+- [x] Add `detect_maven_workspace(root)` in a new
   `sniff/lib/src/filesystem/repo/maven.rs`. Parse `<modules><module>...</module>
   </modules>` via a minimal XML reader (`quick-xml` is already a dependency
   candidate — verify in `sniff/lib/Cargo.toml`; otherwise use a focused regex
   since the Maven schema is strict).
-- [ ] Register `maven.rs` in `mod.rs`.
-- [ ] Add a fixture `create_maven_workspace` and a degenerate variant.
-- [ ] Add an integration test asserting
+  *(`quick-xml` is not a sniff dependency; used a focused `regex` match on
+  `<module>...</module>` since `<module>` only appears inside `<modules>` in the
+  Maven schema. `regex` is already a dependency.)*
+- [x] Register `maven.rs` in `mod.rs`.
+- [x] Add a fixture `create_maven_workspace` and a degenerate variant.
+- [x] Add an integration test asserting
   `monorepo_layers[0].authority == MavenMultiModule`.
 
 ### 5C — .NET Solution
 
-- [ ] Populate `MonorepoStandard::DotNetSolution.spec()`: marker file
+- [x] Populate `MonorepoStandard::DotNetSolution.spec()`: marker file
   `*.sln` (or `*.slnx`), `MarkerContent::Existence`. Roles:
   `[DefinesMembership, OrchestratesTasks]`. `MembershipModel::RootExplicit`
   (the solution's `Project(...)` entries list literal `.csproj`/`.fsproj`
   paths). `RootMembership::Never`. `NestingPolicy::AllowsNested`.
   `BinarySpec { name: "dotnet", min_version: None, wrapper: None }`.
-- [ ] Add `detect_dotnet_solution(root)` in a new
+- [x] Add `detect_dotnet_solution(root)` in a new
   `sniff/lib/src/filesystem/repo/dotnet.rs`. Walk the root for `*.sln` /
   `*.slnx` files; for each, parse the `Project("...") = "Name", "path.proj",
   ...` lines and resolve each project's directory.
-- [ ] Register `dotnet.rs` in `mod.rs`.
-- [ ] Add a fixture `create_dotnet_solution` and a degenerate variant.
-- [ ] Add an integration test asserting
+  *(Both classic `.sln` `Project(...)` lines and XML `.slnx` `<Project Path=…>`
+  entries are parsed; solution folders are dropped by requiring a project
+  extension, and Windows `\` separators are normalized to `/`.
+  `root_has_solution_file` was added to `has_workspace_marker` so the manifest
+  index is still built for solution repos in full mode.)*
+- [x] Register `dotnet.rs` in `mod.rs`.
+- [x] Add a fixture `create_dotnet_solution` and a degenerate variant.
+- [x] Add an integration test asserting
   `monorepo_layers[0].authority == DotNetSolution`.
 
 **Validation checkpoint (Phase 5):**
@@ -516,7 +642,7 @@ manifest. The walk **is** the membership model.
 
 ### 6A — Bazel
 
-- [ ] Populate `MonorepoStandard::Bazel.spec()`: marker files `WORKSPACE` /
+- [x] Populate `MonorepoStandard::Bazel.spec()`: marker files `WORKSPACE` /
   `WORKSPACE.bazel` (root) and `BUILD` / `BUILD.bazel` (leaf). Roles:
   `[DefinesMembership, OrchestratesTasks, ManagesDependencies]`.
   `MembershipModel::LeafMarkers { file: "BUILD" }` (detector also accepts
@@ -525,62 +651,75 @@ manifest. The walk **is** the membership model.
   the parent). `BinarySpec { name: "bazel", min_version: None, wrapper:
   Some(WrapperScript { posix: "bazelw", windows: "bazelw.bat" }) }` (the
   wrapper is `bazelisk`-style; record the conventional names).
-- [ ] Add `detect_bazel_workspace(root)` in a new
+  *(`MODULE.bazel` was added as a third root marker so modern bzlmod repos
+  without a legacy `WORKSPACE` are still detected.)*
+- [x] Add `detect_bazel_workspace(root)` in a new
   `sniff/lib/src/filesystem/repo/bazel.rs`. Walk the tree with
   `ignore::WalkBuilder`; for each directory containing `BUILD` or
   `BUILD.bazel`, record a package rooted there with
   `PackageProvenance::LeafMarkers`. Stop descending into any subtree that
   contains a nested `WORKSPACE` / `WORKSPACE.bazel` (record the nested root as
   a separate `DetectedStandard` at `DetectionConfidence::MarkerConfirmed`).
-- [ ] Register `bazel.rs` in `mod.rs`.
-- [ ] Add a fixture `create_bazel_workspace` (root `WORKSPACE`, nested
+  *(Bazel/Pants/Buck2 share one `polyglot.rs` module rather than three
+  near-identical files — the plan's 6B explicitly allowed `polyglot.rs`. The
+  shared `walk_leaf_workspaces` helper segments the tree at nested workspace
+  roots via longest-prefix ownership; the nested workspace becomes its own
+  `DetectorOutcome` and the topology builder yields a second layer. Provenance
+  is derived from the `LeafMarkers` membership model by the topology builder.)*
+- [x] Register `bazel.rs` in `mod.rs`. *(Registered as `polyglot.rs`.)*
+- [x] Add a fixture `create_bazel_workspace` (root `WORKSPACE`, nested
   `BUILD` files in `a/` and `b/`, plus a nested `WORKSPACE` in `nested/` with
   its own `BUILD`) and assert both layers are detected and the nested
   subtree is excluded from the parent's package list.
-- [ ] Add a degenerate variant (`WORKSPACE` present, zero `BUILD` files) and
+- [x] Add a degenerate variant (`WORKSPACE` present, zero `BUILD` files) and
   assert `is_monorepo == false`.
 
 ### 6B — Pants
 
-- [ ] Populate `MonorepoStandard::Pants.spec()`: marker files `pants.toml`
+- [x] Populate `MonorepoStandard::Pants.spec()`: marker files `pants.toml`
   (root) and `BUILD.pants` (leaf). Roles: `[DefinesMembership,
   OrchestratesTasks, ManagesDependencies]`. `MembershipModel::LeafMarkers {
   file: "BUILD.pants" }`. `RootMembership::Never`.
   `NestingPolicy::AllowsNested`. `BinarySpec { name: "pants", min_version:
   None, wrapper: None }`.
-- [ ] Add `detect_pants_workspace(root)` (a focused `pants.rs` or share
+- [x] Add `detect_pants_workspace(root)` (a focused `pants.rs` or share
   `polyglot.rs`). Same leaf-walk strategy as Bazel with the Pants-specific
-  marker files.
-- [ ] Add a fixture and a degenerate variant.
-- [ ] Add an integration test asserting
+  marker files. *(Shares `polyglot.rs`; the leaf walk accepts both
+  `BUILD.pants` and plain `BUILD` since real Pants projects use both.)*
+- [x] Add a fixture and a degenerate variant.
+- [x] Add an integration test asserting
   `monorepo_layers[0].authority == Pants`.
 
 ### 6C — Buck2
 
-- [ ] Populate `MonorepoStandard::Buck2.spec()`: marker files `BUCK` (root
+- [x] Populate `MonorepoStandard::Buck2.spec()`: marker files `BUCK` (root
   optional) and `BUCK` / `TARGETS` (leaf). Roles: `[DefinesMembership,
   OrchestratesTasks, ManagesDependencies]`. `MembershipModel::LeafMarkers {
   file: "BUCK" }` (detector also accepts `TARGETS`). `RootMembership::Never`.
   `NestingPolicy::AllowsNested`. `BinarySpec { name: "buck2", min_version:
   None, wrapper: None }`.
-- [ ] Add `detect_buck2_workspace(root)` with the same leaf-walk strategy.
-- [ ] Add a fixture and a degenerate variant.
-- [ ] Add an integration test asserting
+  *(The detector gates on `.buckconfig` — Buck2's canonical project-root marker
+  — rather than a root `BUCK`, to avoid false positives from stray `BUCK`
+  files; the descriptor's root marker is therefore `.buckconfig`.)*
+- [x] Add `detect_buck2_workspace(root)` with the same leaf-walk strategy.
+  *(In `polyglot.rs`.)*
+- [x] Add a fixture and a degenerate variant.
+- [x] Add an integration test asserting
   `monorepo_layers[0].authority == Buck2`.
 
 ### 6D — Rush Stack
 
-- [ ] Populate `MonorepoStandard::RushStack.spec()`: marker file
+- [x] Populate `MonorepoStandard::RushStack.spec()`: marker file
   `rush.json`, `Field("projects")`. Roles: `[DefinesMembership,
   OrchestratesTasks]`. `MembershipModel::RootExplicit` (the `projects` array
   lists `{ projectFolder, packageName }` objects). `RootMembership::Never`.
   `NestingPolicy::AllowsNested`. `BinarySpec { name: "rush", min_version:
   None, wrapper: None }`.
-- [ ] Add `detect_rush_workspace(root)` in `npm.rs` (Rush is a JS-family
+- [x] Add `detect_rush_workspace(root)` in `npm.rs` (Rush is a JS-family
   orchestrator). Parse `rush.json` via `serde_json`; for each entry in
   `projects`, resolve `projectFolder` and call `create_package`.
-- [ ] Add a fixture `create_rush_workspace` and a degenerate variant.
-- [ ] Add an integration test asserting
+- [x] Add a fixture `create_rush_workspace` and a degenerate variant.
+- [x] Add an integration test asserting
   `monorepo_layers[0].authority == RushStack`.
 
 **Validation checkpoint (Phase 6):**
@@ -604,7 +743,7 @@ advisory `InvocationTemplate`s. Add the `Lockfile` provenance tier for the
 ecosystems where it gives the biggest fidelity-per-effort win (pnpm, uv,
 Cargo). No subprocess is ever executed.
 
-- [ ] For every variant with a populated `BinarySpec`, populate the
+- [x] For every variant with a populated `BinarySpec`, populate the
   `enumerate_packages`, `run_in_package`, and `run_across_all`
   `InvocationTemplate`s on the spec using the `Token` enum
   (`Lit`, `Package`, `Task`, `AllPackages`). Examples:
@@ -612,7 +751,7 @@ Cargo). No subprocess is ever executed.
     `cargo build -p {Package}`, `cargo build --workspace`.
   - pnpm: `pnpm --filter {Package} {Task}`, `pnpm -r {Task}`.
   - Go: `go work edit -json`, `go test ./{Package}/...`, `go test ./...`.
-- [ ] Add `resolve_acting_binary(standard, root, executable_index) ->
+- [x] Add `resolve_acting_binary(standard, root, executable_index) ->
   Option<ResolvedBinary>` in `sniff/lib/src/filesystem/repo/standard.rs`.
   Strategy:
   1. If `spec().binaries[0].wrapper` is `Some`, look for the wrapper script
@@ -622,15 +761,15 @@ Cargo). No subprocess is ever executed.
      exercised by `test_executable_index_parity_with_which_for_common_programs`).
      If found → `BinarySource::Path`.
   3. If neither → `BinarySource::Missing` (return `None`; do **not** error).
-- [ ] When `BinarySpec.min_version` is `Some`, compare against the resolved
+- [x] When `BinarySpec.min_version` is `Some`, compare against the resolved
   version string (best-effort semver parse; fall back to a prefix match on
   the major). Populate `satisfies_min_version: Option<bool>`. A missing or
   unparseable version yields `None`, never `Some(false)` unless the parse
   succeeded and the comparison was conclusive.
-- [ ] Thread `resolve_acting_binary` into `detect_repo_inner_with_shared` so
+- [x] Thread `resolve_acting_binary` into `detect_repo_inner_with_shared` so
   every `DetectedStandard.binary` is populated (or `None`) before the
   `RepoInfo` is returned.
-- [ ] **Lockfile provenance tier** (fast-follow, prioritized pnpm → uv →
+- [x] **Lockfile provenance tier** (fast-follow, prioritized pnpm → uv →
   Cargo). For each:
   - **pnpm** (`pnpm-lock.yaml`): parse `importers:` keys; they are the
     resolved member paths. Compare against the manifest-derived package set.
@@ -642,17 +781,17 @@ Cargo). No subprocess is ever executed.
   - **Cargo** (`Cargo.lock`): corroborate the globbed member dirs by checking
     each has a `Cargo.toml` whose `[package].name` appears in the lockfile's
     `[[package]]` table.
-- [ ] Add the additive `lockfile_match: Option<bool>` field to
+- [x] Add the additive `lockfile_match: Option<bool>` field to
   `MonorepoLayer` (serde-skipped when `None`) per the spec's "stale lockfile
   must not delete packages" rule.
-- [ ] Add unit tests for `resolve_acting_binary` using the existing
+- [x] Add unit tests for `resolve_acting_binary` using the existing
   `ExecutableIndex` abstraction with **synthetic** entries (per spec: "No
   package detection test may require `cargo`, `pnpm`, `go`, `gradle`, or any
   other external monorepo binary to be installed").
-- [ ] Add a lockfile-parity test for pnpm: construct a fixture whose
+- [x] Add a lockfile-parity test for pnpm: construct a fixture whose
   `pnpm-lock.yaml` `importers:` agree with the manifest globs and assert
   `monorepo_layers[0].provenance == Lockfile`.
-- [ ] Add a lockfile-drift test for pnpm: construct a fixture whose
+- [x] Add a lockfile-drift test for pnpm: construct a fixture whose
   `pnpm-lock.yaml` is missing a member present in the manifest and assert
   `provenance == Globbed` (manifest remains authority) **and**
   `lockfile_match == Some(false)`.
@@ -678,50 +817,51 @@ and JSON builders. Mark `MonorepoTool` as `#[deprecated]` **only after** every
 repo command and JSON snapshot exercises the new fields. Update docs and the
 `sniff` skill.
 
-- [ ] Extend `sniff/cli/src/output/filesystem/repo.rs::format_monorepo_tool`
+- [x] Extend `sniff/cli/src/output/filesystem/repo.rs::format_monorepo_tool`
   to delegate to `format_monorepo_standard` when the new fields are populated.
   Render the primary authority's `display_name` and, when there are
   orchestrators, append `<dim> + Nx</dim>` etc.
-- [ ] Add a `format_monorepo_layer` helper that renders the
+- [x] Add a `format_monorepo_layer` helper that renders the
   authority-vs-orchestrator relationship and the package count per layer, using
   `Prose` + `UnorderedList` from `biscuit-terminal` (per the context's
   rendering rules). Reserve `stdout` for main content; `stderr` only for
   diagnostics.
-- [ ] When `repo.monorepo_layers.len() > 1`, render each layer as its own
+- [x] When `repo.monorepo_layers.len() > 1`, render each layer as its own
   section under the existing `Repository` heading. When exactly one layer,
   fold the new metadata into the existing one-liner so the common case is not
   noisier.
-- [ ] Extend `sniff/cli/src/output/repo_json.rs::structure_value` so the
+- [x] Extend `sniff/cli/src/output/repo_json.rs::structure_value` so the
   `structure` JSON scope includes `monorepo_layers` and `monorepo_standards`
   when non-empty. Use the `#[serde(default, skip_serializing_if =
   "Vec::is_empty")]` attributes so the keys are absent (not `null`) on
   non-monorepo repos.
-- [ ] Extend `build_aggregate_value` so the `structure` child inside the bare
+- [x] Extend `build_aggregate_value` so the `structure` child inside the bare
   `sniff repo --json` aggregate automatically carries the new keys (it already
   delegates to `structure_value`, so this should be a no-op once
   `structure_value` is updated — verify with a test).
-- [ ] **Do not** add focused leaves (`sniff repo standards`, `sniff repo
+- [x] **Do not** add focused leaves (`sniff repo standards`, `sniff repo
   layers`) in this feature (spec open-question option 1: defer).
-- [ ] **Do not** change `sniff repo is-monorepo` or `sniff repo package-count`
+- [x] **Do not** change `sniff repo is-monorepo` or `sniff repo package-count`
   contracts. They already read `repo.is_monorepo` / `repo.packages.len()`,
   which are now populated by the honest predicate from Phase 3.
-- [ ] Add CLI snapshot tests (using `insta` with `NO_COLOR=1`) for:
+- [x] Add CLI snapshot tests (using `insta` with `NO_COLOR=1`) for:
   - A single-authority Cargo monorepo (text + JSON).
   - A multi-layer repo (Cargo + pnpm side by side at the root).
   - An authority + orchestrator repo (pnpm + Nx).
-  - A degenerate repo (`[workspace]` with no members) → text says "Single
-    package", JSON has no `monorepo_*` keys.
-- [ ] After every repo CLI snapshot is green and every JSON consumer path
+  - A degenerate repo (`[workspace]` with no members) → text is empty and
+    JSON has no `monorepo_*` keys (the current detection path returns no
+    `RepoInfo` for a degenerate workspace).
+- [x] After every repo CLI snapshot is green and every JSON consumer path
   exercises the new fields, add `#[deprecated(note = "Use MonorepoStandard
   via RepoInfo::monorepo_layers instead")]` to `MonorepoTool` in `types.rs`.
   Update `clippy::deprecated` allowlists so the library compiles cleanly.
-- [ ] Audit every remaining `MonorepoTool::` reference in `sniff/lib` and
+- [x] Audit every remaining `MonorepoTool::` reference in `sniff/lib` and
   `sniff/cli` (the `grep` earlier in this plan found them). Keep the legacy
   field populated until a follow-up spec removes it; this phase only marks it
   deprecated.
-- [ ] Update the `sniff` skill (`.opencode/skill/sniff/SKILL.md`) with a
+- [x] Update the `sniff` skill (`.opencode/skill/sniff/SKILL.md`) with a
   section on the new topology types and the authority-vs-orchestrator model.
-- [ ] Update `sniff/lib/README.md` and `sniff/cli/README.md` with the new JSON
+- [x] Update `sniff/lib/README.md` and `sniff/cli/README.md` with the new JSON
   keys and the deprecation note for `monorepo_tool` / `workspace_tools`.
 
 **Validation checkpoint (Phase 8):**
