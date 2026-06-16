@@ -1,7 +1,7 @@
 ---
-status: draft
-reviewed: false
-depends_on: 2026-06-15-improved-monorepo-capture
+status: ready for planning and implementation
+reviewed: true
+depends-on: 2026-06-15-improved-monorepo-capture
 ---
 
 # Monorepo Type Unification
@@ -60,11 +60,11 @@ If any of these is not true, this spec is blocked.
    owns it (`LayerPackage.standard`) and how its boundary was derived
    (`LayerPackage.provenance`). The enum and the `discovery_sources: Vec<…>`
    field are both deleted once that data is canonical.
-3. **Reconcile `Package` and `LayerPackage`** — decide whether the rich
-   `Package` absorbs `standard` + `provenance` (and `LayerPackage` becomes a
-   thin reference), or whether `MonorepoLayer.packages` becomes the canonical
-   list. Today there are two package representations describing overlapping
-   facts.
+3. **Reconcile `Package` and `LayerPackage`** — make the rich `Package`
+   catalog canonical, move `standard` + `provenance` onto `Package`, and make
+   `MonorepoLayer.packages` a thin reference list. Today there are two package
+   representations describing overlapping facts; this feature removes that
+   duplication rather than expanding it.
 4. **Resolve the `PackageEcosystem` vs `ProgrammingLanguage` overlap** — either
    keep `PackageEcosystem` with a documented, narrow reason, or fold it into
    per-package language inference. The improved-monorepo-capture note leans
@@ -141,10 +141,11 @@ new model fixes.
 `MonorepoStandard::Unknown` + `PackageProvenance` (most naturally `LeafMarkers`
 or a new manifest-scan provenance), never to a real standard.
 
-## Proposed decisions (to confirm during planning)
+## Reviewed decisions
 
-> These are the author's recommendations for a draft. Each is a decision the
-> spec review must ratify before the plan is written.
+These decisions are part of the reviewed spec. Planning should produce concrete
+tasks for them rather than reopening the design unless implementation uncovers
+new evidence.
 
 ### D1 — Delete `MonorepoTool`; no replacement field on `RepoInfo`
 
@@ -177,20 +178,43 @@ logic are deleted.
   the new layer model represents as one authority with a provenance tier.
   Confirm with a parity audit over the rusty-biscuit repo.
 
-### D3 — `Package` is canonical; `LayerPackage` references it
+### D3 — `Package` is canonical; layers carry relative package references
 
-`MonorepoLayer.packages` should not duplicate the rich `Package` data. Pick one
-of:
+`MonorepoLayer.packages` must not duplicate the rich `Package` data. The
+selected design is:
 
-- **D3a (recommended):** `MonorepoLayer.packages: Vec<PathBuf>` (relative
-  paths) that index into the canonical `RepoInfo.packages`, OR a borrowed/id
-  reference. Layer carries topology; `Package` carries detail.
-- **D3b:** Promote `LayerPackage` to the canonical representation and have
-  `RepoInfo.packages` hold `LayerPackage`. Rejected on first read — it would
-  lose the rich language/dependency fields `Package` carries.
+```rust
+pub struct MonorepoLayer {
+    pub root: PathBuf,
+    pub authority: MonorepoStandard,
+    pub orchestrators: Vec<MonorepoStandard>,
+    pub provenance: PackageProvenance,
+    pub packages: Vec<PathBuf>, // paths relative to the repository root
+}
+```
 
-This decision is the one most likely to need real output examples; flag it for
-review.
+`RepoInfo.packages` is the canonical package catalog. Each `Package` owns the
+package's `standard` and `provenance`, plus the existing language, dependency,
+documentation, package-area, and change-scope fields. `MonorepoLayer.packages`
+is a topology index into that catalog using repo-relative paths, not layer-root
+relative paths. Repo-relative paths are already stable in `Package.relative`,
+avoid ambiguity when a repo has multiple layers with the same package basename,
+and let JSON consumers join layers to package details without normalizing
+different path bases.
+
+Reader note: the parent spec landed `LayerPackage { name, relative, standard,
+provenance }` additively to keep parity visible. That shape was useful during
+the migration, but keeping it after `Package.standard` / `Package.provenance`
+would create two mutable sources of truth. This spec intentionally collapses
+the duplicated data into `Package`.
+
+Rejected alternatives:
+
+| Alternative | Pros | Cons |
+|-------------|------|------|
+| Keep `LayerPackage` as-is | Minimal code churn from the additive model; layer JSON is self-contained. | Duplicates `standard`, `provenance`, name, and path; risks drift between `RepoInfo.packages` and `monorepo_layers[].packages`; larger JSON for bare `sniff repo --json`. |
+| Promote `LayerPackage` to canonical and have `RepoInfo.packages` hold it | One package representation in topology-heavy code. | Loses or awkwardly grafts the rich `Package` fields used by package-area, dependency, docs, language, and change-scope commands. |
+| Use numeric package ids in `MonorepoLayer.packages` | Compact and unambiguous. | Adds a new identity system to a path-oriented API and makes JSON less ergonomic for scripts. |
 
 ### D4 — Keep `PackageEcosystem`, document the reason
 
@@ -220,6 +244,7 @@ close the question. Do not fold it.
 | `structure.monorepo_tool` | `"CargoWorkspace"` \| absent | **removed** |
 | `structure.workspace_tools` | `["CargoWorkspace"]` | **removed** |
 | `structure.monorepo_layers[].authority` | `"cargo-workspace"` | unchanged (now sole source) |
+| `structure.monorepo_layers[].packages[]` | `{ name, relative, standard, provenance }` | repo-relative path string |
 | `package.discovery_sources` | `["cargo_workspace", …]` | **removed** |
 | `package.standard` | — | `"cargo-workspace"` (new) |
 | `package.provenance` | — | `"globbed"` \| `"lockfile"` \| … (new) |
@@ -233,25 +258,38 @@ package-change families, and bare `sniff repo --json` — all of which embed the
 full `RepoInfo` / `Package` shape.
 
 Because this is the deliberate breaking step, the README JSON docs
-(`sniff/lib/README.md`, `sniff/cli/README.md`) and the `sniff` skill must be
-updated in the same change, and any downstream consumer (claudine commit
-prompt, package-area logic) audited for `monorepo_tool` / `discovery_sources`
-reads before deletion.
+(`sniff/lib/README.md`, `sniff/cli/README.md`), focused CLI docs under
+`sniff/docs/`, and the `sniff` skill must be updated in the same change.
+Downstream claudine code currently reads `meta.env.repo.monorepo_tool` and
+documents `{{project.monorepo_tool}}`; the implementation must migrate that
+surface before deleting the legacy field from `sniff`. The compatible
+replacement is `project.monorepo_standard`, sourced from the first
+membership-authority layer when present, with `project.monorepo_orchestrators`
+available for Nx/Turbo/Lerna-style task runners. If claudine intentionally
+keeps the old template variable for one release, it must be derived from the
+new fields and documented as deprecated rather than parsed from removed JSON.
 
 ## Implementation scope (provisional)
 
 1. Audit every read of `MonorepoTool`, `discovery_sources`, and the removed
-   JSON keys across `sniff/lib`, `sniff/cli`, and known downstream consumers
-   (claudine). Produce the parity list before deleting anything.
+   JSON keys across `sniff/lib`, `sniff/cli`, `sniff/docs`, and known
+   downstream consumers (claudine). Produce the parity list before deleting
+   anything.
 2. Add `standard` + `provenance` to `Package`; populate from the layer builder.
    Remove `discovery_sources`, `PackageDiscoverySource`, and
    `discovery_source_for_tool()`.
-3. Reconcile `Package` / `LayerPackage` per D3.
+3. Replace `LayerPackage` with repo-relative package path references on
+   `MonorepoLayer.packages`; ensure every reference resolves to exactly one
+   `RepoInfo.packages[].relative` entry.
 4. Remove `MonorepoTool`, the `RepoInfo` fields, `format_monorepo_tool`, and
    the JSON keys. Re-derive the CLI one-liner from `monorepo_layers`.
-5. Apply the D4 decision (doc `PackageEcosystem` or fold it).
-6. Update CLI text/JSON output, READMEs, and the `sniff` skill.
-7. Update all fixtures and snapshot tests to the new shapes.
+5. Apply the D4 decision by documenting `PackageEcosystem` as a cheap
+   package-manifest classification distinct from `ProgrammingLanguage` and
+   `MonorepoStandard::spec().primary_language`.
+6. Migrate claudine's repo environment/template surface from `monorepo_tool` to
+   the new standard/orchestrator fields, including docs and tests.
+7. Update CLI text/JSON output, READMEs, focused docs, and the `sniff` skill.
+8. Update all fixtures and snapshot tests to the new shapes.
 
 ## Testing and acceptance criteria
 
@@ -261,6 +299,9 @@ reads before deletion.
   absent (not `null`).
 - A package's owning standard and provenance are assertable directly off
   `RepoInfo.packages` without consulting `monorepo_layers`.
+- Every `monorepo_layers[].packages[]` entry is a repo-relative path that
+  resolves to exactly one `RepoInfo.packages[].relative` entry; no package name
+  joins are required.
 - Parity test: the package set and per-package authority on the rusty-biscuit
   repo match the pre-unification `discovery_sources`-derived view (no package
   silently changes owner).
@@ -271,6 +312,9 @@ reads before deletion.
   constraint).
 - Terminal output uses `biscuit-terminal` renderables; `stdout` for main
   content, `stderr` for diagnostics only.
+- claudine no longer parses `monorepo_tool` from `sniff` JSON. Any retained
+  `{{project.monorepo_tool}}` compatibility alias is derived from
+  `monorepo_layers`, marked deprecated in claudine docs, and covered by tests.
 
 ## Open questions
 
@@ -288,13 +332,6 @@ Recommendation: hard-break (option 1), since the additive coexistence period
 *was* improved-monorepo-capture. Confirm no external consumer still reads the
 PascalCase values.
 
-### D3 — does `MonorepoLayer.packages` reference or own?
-
-Needs real `sniff repo --json` output examples for a multi-layer repo to judge
-whether a reference (D3a) is ergonomic for consumers or whether owning
-(D3b) is worth the duplication. Defer the final call to planning with sample
-output in hand.
-
 ### Is there a downstream consumer of `discovery_sources` we are missing?
 
 `PackageDiscoverySource` is `#[non_exhaustive]` and serialized. Before deleting
@@ -309,5 +346,3 @@ it, confirm no claudine / commit-prompt path parses `discovery_sources` from
 - Focused CLI leaves (`sniff repo standards`, `sniff repo layers`) — still
   deferred (parent spec open-question option 1).
 - Executing monorepo binaries — sniff package detection remains parse-only.
-</content>
-</invoke>
