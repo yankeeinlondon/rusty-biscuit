@@ -86,6 +86,12 @@ independent second-pass verification on the items most prone to drift
 The independent verification agreed with the subagent: every suggestion and
 every spec-required doc touch the user asked about is already in the tree.
 
+**Follow-up correction (2026-06-16):** `review-2.md` found that this statement
+was too broad for suggestion 5. `.claude/skills/darkmatter/compose.md`,
+`.claude/skills/darkmatter/structure.md`, and `darkmatter/docs/lsp/features.md`
+still had stale three-phase wording or omitted Finalization. Those references
+were updated to name Inline Pre, Transclusion, Inline Post, and Finalization.
+
 ## Phase 2 — Update `review.md`
 
 The orchestrator appended a **Post-Spec Validation (2026-06-15)** section to
@@ -144,7 +150,7 @@ Written by the orchestrator at
 | 2 | Replace debug-only frontmatter repro | Done (pre-existing) |
 | 3 | Split CLI commands into modules | Done (pre-existing) |
 | 4 | Reduce `ComposeOperation` metadata drift | Done (pre-existing) |
-| 5 | Fix compose phase docs (three → four) | Done (pre-existing) |
+| 5 | Fix compose phase docs (three → four) | Done after 2026-06-16 follow-up correction |
 | 6 | DRY `md code-block --output markdown` serialization | Done (pre-existing) |
 | 7 | Avoid highlight parser drift | Done (pre-existing) |
 | 8 | Delay theme resolution | Done (pre-existing) |
@@ -154,3 +160,7 @@ Written by the orchestrator at
 (`review.md` post-spec validation section) and one new file (this log). No
 production code, tests, or skill files were modified, because none needed to
 be.
+
+**Follow-up note (2026-06-16):** A later review corrected the remaining
+suggestion 5 documentation drift in skill/topic docs and updated this log's
+final disposition accordingly.
