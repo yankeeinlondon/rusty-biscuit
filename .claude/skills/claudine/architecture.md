@@ -333,7 +333,7 @@ Atomic file writes (`config::atomic`) prevent corruption during concurrent acces
 | `os.*` | `{{os.name}}`, `{{os.type}}`, `{{os.version}}`, `{{os.hostname}}` |
 | `hardware.*` | `{{hardware.arch}}`, `{{hardware.cpu}}`, `{{hardware.cores}}` |
 | `git.*` | `{{git.branch}}`, `{{git.is_dirty}}`, `{{git.head_sha}}`, `{{git.head_message}}`, `{{git.remote}}`, `{{git.hosting}}`, `{{git.repo_name}}`, `{{git.repo_org}}` |
-| `project.*` | `{{project.language}}`, `{{project.is_monorepo}}`, `{{project.monorepo_tool}}` |
+| `project.*` | `{{project.language}}`, `{{project.is_monorepo}}`, `{{project.monorepo_standard}}`, `{{project.monorepo_orchestrators}}`, `{{project.monorepo_tool}}` (deprecated alias) |
 
 Shell environment variables are also supported via `{{env.VAR_NAME}}` with optional defaults: `{{env.MY_VAR || "fallback"}}`. The legacy single-pipe `|` form is no longer supported.
 

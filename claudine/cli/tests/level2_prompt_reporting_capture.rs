@@ -138,8 +138,7 @@ impl Fixture {
 /// `# Wrap Test` document whose single body paragraph is `WRAP_TOKEN` repeated
 /// 40 times — long enough to wrap onto several lines at a narrow `COLUMNS`.
 fn system_prompt_long_paragraph() -> String {
-    let words = std::iter::repeat(WRAP_TOKEN)
-        .take(40)
+    let words = std::iter::repeat_n(WRAP_TOKEN, 40)
         .collect::<Vec<_>>()
         .join(" ");
     format!("# Wrap Test\n\n{words}\n")

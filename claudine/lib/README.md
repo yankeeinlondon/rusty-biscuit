@@ -120,7 +120,7 @@ The core event processing pipeline runs in 6 steps:
 
 Sub-modules:
 - `loader` — Config file discovery, loading, merge logic, runtime compilation (matchers + mappers), and config save/validation
-- `template` — `{{placeholder}}` Handlebars-style interpolation engine with 28 variables across 5 categories (legacy `{placeholder}` single-brace syntax is deprecated with warnings)
+- `template` — `{{placeholder}}` Handlebars-style interpolation engine with 30 variables across 5 categories (legacy `{placeholder}` single-brace syntax is deprecated with warnings)
 - `matcher` — Regex-based event filtering against tool name, notification type, or error
 - `runner` — Executes actions (TTS via biscuit-speaks, logging, shell commands, sound effects via playa, report formatting)
 
@@ -136,7 +136,7 @@ Sub-modules:
 | OS | `{{os.name}}`, `{{os.type}}`, `{{os.version}}`, `{{os.hostname}}` |
 | Hardware | `{{hardware.arch}}`, `{{hardware.cpu}}`, `{{hardware.cores}}` |
 | Git | `{{git.branch}}`, `{{git.is_dirty}}`, `{{git.head_sha}}`, `{{git.head_message}}`, `{{git.remote}}`, `{{git.hosting}}`, `{{git.repo_name}}`, `{{git.repo_org}}` |
-| Project | `{{project.language}}`, `{{project.is_monorepo}}`, `{{project.monorepo_tool}}` |
+| Project | `{{project.language}}`, `{{project.is_monorepo}}`, `{{project.monorepo_standard}}`, `{{project.monorepo_orchestrators}}`, `{{project.monorepo_tool}}` (deprecated alias) |
 
 Shell environment variables are also supported via `{{env.VAR_NAME}}` with optional defaults: `{{env.MY_VAR || "fallback"}}`. The legacy single-pipe `|` form is no longer supported.
 
