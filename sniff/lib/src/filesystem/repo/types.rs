@@ -45,6 +45,75 @@ pub enum PackageEcosystem {
     Unknown,
 }
 
+/// External dependency entry annotated with the package that declared it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ExternalDependency {
+    /// Package name that declares this dependency.
+    pub package: String,
+    /// Dependency family from the manifest.
+    pub family: ExternalDependencyFamily,
+    /// Dependency details parsed from the package manifest.
+    #[serde(flatten)]
+    pub dependency: DependencyEntry,
+}
+
+/// Dependency families exposed by `sniff repo dependencies`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ExternalDependencyFamily {
+    /// Runtime dependencies.
+    Dependencies,
+    /// Development dependencies.
+    DevDependencies,
+    /// Peer dependencies.
+    PeerDependencies,
+    /// Optional dependencies.
+    OptionalDependencies,
+}
+
+/// Filters selecting which dependency families to include.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExternalDependencyFilter {
+    pub dependencies: bool,
+    pub dev_dependencies: bool,
+    pub peer_dependencies: bool,
+    pub optional_dependencies: bool,
+}
+
+impl ExternalDependencyFilter {
+    /// All dependency families.
+    pub const fn all() -> Self {
+        Self {
+            dependencies: true,
+            dev_dependencies: true,
+            peer_dependencies: true,
+            optional_dependencies: true,
+        }
+    }
+
+    /// Use all families when no explicit family flag was selected.
+    pub const fn normalize(self) -> Self {
+        if self.dependencies
+            || self.dev_dependencies
+            || self.peer_dependencies
+            || self.optional_dependencies
+        {
+            self
+        } else {
+            Self::all()
+        }
+    }
+
+    pub const fn includes(self, family: ExternalDependencyFamily) -> bool {
+        match family {
+            ExternalDependencyFamily::Dependencies => self.dependencies,
+            ExternalDependencyFamily::DevDependencies => self.dev_dependencies,
+            ExternalDependencyFamily::PeerDependencies => self.peer_dependencies,
+            ExternalDependencyFamily::OptionalDependencies => self.optional_dependencies,
+        }
+    }
+}
+
 /// Information about a detected repository
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RepoInfo {
@@ -129,6 +198,11 @@ pub struct Package {
     pub command_runner: Vec<PathBuf>,
     /// Detected package managers (e.g., "cargo", "npm", "pnpm")
     pub package_managers: Vec<String>,
+    /// Test runners declared by this package, with the evidence source for
+    /// each detection. Populated by
+    /// [`detect_test_runners`](super::test_runner_usage::detect_test_runners).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub test_runners: Vec<crate::filesystem::repo::test_runner_usage::TestRunnerUsage>,
     /// Package version from manifest (Cargo.toml `[package]`.version or package.json version)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,

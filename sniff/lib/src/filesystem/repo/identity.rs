@@ -300,6 +300,58 @@ mod tests {
     }
 
     #[test]
+    fn resolves_version_from_cargo_workspace_package() {
+        let tmp = tempfile::tempdir().unwrap();
+        git2::Repository::init(tmp.path()).unwrap();
+        std::fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[workspace]\nmembers = [\"crates/*\"]\n\n[workspace.package]\nversion = \"2.3.4\"\n",
+        )
+        .unwrap();
+
+        let identity = detect_repo_identity(tmp.path()).unwrap();
+        assert_eq!(identity.version.as_deref(), Some("2.3.4"));
+    }
+
+    #[test]
+    fn resolves_version_from_node_manifest() {
+        let tmp = tempfile::tempdir().unwrap();
+        git2::Repository::init(tmp.path()).unwrap();
+        std::fs::write(
+            tmp.path().join("package.json"),
+            r#"{"name":"app","version":"5.6.7"}"#,
+        )
+        .unwrap();
+
+        let identity = detect_repo_identity(tmp.path()).unwrap();
+        assert_eq!(identity.version.as_deref(), Some("5.6.7"));
+    }
+
+    #[test]
+    fn resolves_version_from_pyproject_project_table() {
+        let tmp = tempfile::tempdir().unwrap();
+        git2::Repository::init(tmp.path()).unwrap();
+        std::fs::write(
+            tmp.path().join("pyproject.toml"),
+            "[project]\nname = \"app\"\nversion = \"8.9.10\"\n",
+        )
+        .unwrap();
+
+        let identity = detect_repo_identity(tmp.path()).unwrap();
+        assert_eq!(identity.version.as_deref(), Some("8.9.10"));
+    }
+
+    #[test]
+    fn missing_manifest_version_is_null() {
+        let tmp = tempfile::tempdir().unwrap();
+        git2::Repository::init(tmp.path()).unwrap();
+        std::fs::write(tmp.path().join("go.mod"), "module example.com/app\n").unwrap();
+
+        let identity = detect_repo_identity(tmp.path()).unwrap();
+        assert_eq!(identity.version, None);
+    }
+
+    #[test]
     fn resolves_typescript_from_devdeps() {
         let tmp = tempfile::tempdir().unwrap();
         git2::Repository::init(tmp.path()).unwrap();

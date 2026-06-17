@@ -61,6 +61,7 @@ pub(crate) struct ManifestCache {
     npm: HashMap<PathBuf, Option<serde_json::Value>>,
     pyproject: HashMap<PathBuf, Option<toml_crate::Value>>,
     go_mod: HashMap<PathBuf, Option<String>>,
+    raw_text: HashMap<PathBuf, Option<String>>,
 }
 
 impl ManifestCache {
@@ -94,6 +95,19 @@ impl ManifestCache {
     pub(crate) fn go_mod(&mut self, path: &Path) -> Option<&str> {
         let entry = self
             .go_mod
+            .entry(path.to_path_buf())
+            .or_insert_with(|| std::fs::read_to_string(path).ok());
+        entry.as_deref()
+    }
+
+    /// Generic raw-text cache for manifests that do not warrant a typed parser
+    /// in the cache yet (composer.json, Gemfile, pom.xml, build.gradle,
+    /// mix.exs, *.csproj, *.gemspec, requirements.txt). Used by test-runner
+    /// repo detection to do substring searches over the declared dependency
+    /// keys without re-reading the file per runner.
+    pub(crate) fn raw_text(&mut self, path: &Path) -> Option<&str> {
+        let entry = self
+            .raw_text
             .entry(path.to_path_buf())
             .or_insert_with(|| std::fs::read_to_string(path).ok());
         entry.as_deref()
@@ -1280,6 +1294,8 @@ pub(crate) fn create_package(
     let package_area = make_package_area(&relative);
     let ecosystem = detect_package_ecosystem(path);
     let package_managers = detect_package_managers(path);
+    let test_runners =
+        crate::filesystem::repo::test_runner_usage::detect_test_runners(path, &mut ctx.manifests);
     let name = resolve_package_name(&mut ctx, path, root);
     let version = resolve_package_version(&mut ctx, path, root);
 
@@ -1395,6 +1411,7 @@ pub(crate) fn create_package(
         editor_config: None,
         command_runner: Vec::new(),
         package_managers,
+        test_runners,
         version,
         features,
         depends_on: Vec::new(),
@@ -1434,6 +1451,7 @@ mod tests {
             editor_config: None,
             command_runner: Vec::new(),
             package_managers: Vec::new(),
+            test_runners: Vec::new(),
             version: None,
             features: Vec::new(),
             depends_on: Vec::new(),
