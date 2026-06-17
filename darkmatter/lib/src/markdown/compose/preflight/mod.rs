@@ -27,8 +27,69 @@ pub use collect::collect_shell_commands;
 
 use crate::markdown::Markdown;
 use crate::markdown::compose::{ComposeOptions, ComposeWarning};
-use crate::markdown::compose::shell_expansion::types::ShellCommandEntry;
+use crate::markdown::compose::shell_expansion::types::{ShellCommandEntry, ShellExpansionError};
 use crate::markdown::types::MarkdownResult;
+use std::path::PathBuf;
+
+/// Reusable graph metadata for one document visited during pre-flight
+/// collection.
+///
+/// The v2 design ([`tech-design.md`](../../../../features/2026-06-16-compose-pipe-2/tech-design.md)
+/// §"Reusing the collection walk") calls for the pre-flight walk to cache the
+/// graph shape it discovered — the resolved child paths/URLs, the discovered
+/// shell entries attributed to each child, and the children themselves — so
+/// the final transclusion stage does not have to re-parse directives and
+/// re-resolve targets a second time. This struct is that cached shape for a
+/// single document; the root's [`ComposePreflightReport::preflight_graph`]
+/// is the full tree.
+///
+/// The body itself is **not** cached: the design deliberately keeps rendering
+/// condition-aware at the normal pipeline point. The cached artifact is
+/// *metadata about the graph*, not the rendered Markdown.
+#[derive(Debug, Clone, Default)]
+pub struct PreflightGraphNode {
+    /// The resolved source of this document — a canonicalized local path or a
+    /// remote URL. `None` when the document was constructed from in-memory
+    /// content with no source (the typical CLI test case).
+    pub source: Option<PathBuf>,
+    /// Shell entries first discovered *in this document*, in discovery order.
+    /// Entries from nested children are not duplicated here — they live in
+    /// the child's [`Self::children`].
+    pub entries: Vec<ShellCommandEntry>,
+    /// Nested transclusion children, in the order they were discovered.
+    pub children: Vec<PreflightGraphNode>,
+}
+
+impl PreflightGraphNode {
+    /// Returns `true` when this node has no entries and no children.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty() && self.children.is_empty()
+    }
+
+    /// Walks this node and every descendant, yielding one entry per unique
+    /// normalized command in discovery order.
+    pub fn flattened_entries(&self) -> Vec<&ShellCommandEntry> {
+        let mut out = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        self.collect_unique(&mut out, &mut seen);
+        out
+    }
+
+    fn collect_unique<'a>(
+        &'a self,
+        out: &mut Vec<&'a ShellCommandEntry>,
+        seen: &mut std::collections::HashSet<String>,
+    ) {
+        for entry in &self.entries {
+            if seen.insert(entry.normalized.clone()) {
+                out.push(entry);
+            }
+        }
+        for child in &self.children {
+            child.collect_unique(out, seen);
+        }
+    }
+}
 
 /// The result of the document-side pre-flight collection.
 ///
@@ -37,6 +98,12 @@ use crate::markdown::types::MarkdownResult;
 /// (e.g. Claudine) merges its own harness commands, authorizes the union, and
 /// hands the approved set back to the pipeline through
 /// [`ComposeOptions::with_pre_approved_commands`].
+///
+/// The [`preflight_graph`](Self::preflight_graph) field carries the hierarchical
+/// transclusion shape the collector walked (resolved child sources, per-child
+/// shell entries, and the nested child tree). It is the reusable artifact
+/// that lets a future integration skip re-discovering the graph during
+/// transclusion — see the v2 design § "Reusing the collection walk".
 #[derive(Debug, Clone, Default)]
 pub struct ComposePreflightReport {
     /// Deduped source entries, one per unique normalized command, in the order
@@ -44,6 +111,11 @@ pub struct ComposePreflightReport {
     pub entries: Vec<ShellCommandEntry>,
     /// Non-fatal warnings raised during collection.
     pub warnings: Vec<ComposeWarning>,
+    /// Hierarchical graph metadata for the walked document tree. The root node
+    /// represents the source document passed to
+    /// [`Markdown::compose_preflight`](crate::markdown::Markdown::compose_preflight);
+    /// its `children` are the documents it directly transcludes, and so on.
+    pub preflight_graph: PreflightGraphNode,
 }
 
 impl ComposePreflightReport {
@@ -56,6 +128,40 @@ impl ComposePreflightReport {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+}
+
+/// Validates that every condition-blindly collected command is a member of the
+/// caller-supplied pre-approved set, before any shell execution begins.
+///
+/// This is the up-front membership gate the v2 design places between schema
+/// validation and frontmatter shell expansion (design step 4). It runs only
+/// when the caller supplies [`ComposeOptions::with_pre_approved_commands`];
+/// without it the legacy per-directive approval path is unchanged. Failing
+/// here — before the first frontmatter `$(...)` executes — removes the
+/// "execute an earlier command before discovering a later one needs approval"
+/// failure mode.
+pub(crate) fn validate_pre_approved(
+    markdown: &Markdown,
+    options: &ComposeOptions,
+) -> MarkdownResult<()> {
+    let Some(ref approved) = options.pre_approved_commands else {
+        return Ok(());
+    };
+
+    let ctx = markdown.source_context_for_errors();
+    let entries = collect::collect_shell_commands(markdown, options)?;
+    for entry in &entries {
+        if !approved.contains(&entry.normalized) {
+            return Err(ShellExpansionError::NotPreApproved {
+                ctx: Box::new(ctx),
+                command: entry.raw_command.clone(),
+                origin: entry.origin.clone(),
+                source_desc: format!(" (in {})", entry.source_file.display()),
+            }
+            .into());
+        }
+    }
+    Ok(())
 }
 
 impl Markdown {
@@ -85,10 +191,11 @@ impl Markdown {
         &self,
         options: &ComposeOptions,
     ) -> MarkdownResult<ComposePreflightReport> {
-        let entries = collect::collect_shell_commands(self, options)?;
+        let (entries, preflight_graph) = collect::collect_shell_commands_with_graph(self, options)?;
         Ok(ComposePreflightReport {
             entries,
             warnings: Vec::new(),
+            preflight_graph,
         })
     }
 }
@@ -228,6 +335,170 @@ flag: a
                 report.shell_approvals_used, 0,
                 "iteration flag={flag} prompted unexpectedly"
             );
+        }
+    }
+
+    /// Pre-flight validation runs before any shell execution: when a body
+    /// command is missing from the pre-approved set, the compose fails before
+    /// the frontmatter `$(...)` command executes.
+    #[test]
+    fn preflight_blocks_frontmatter_shell_when_body_unapproved() {
+        let temp = TempDir::new().unwrap();
+        let sentinel = temp.path().join("sentinel");
+        let sentinel_str = sentinel.display().to_string();
+
+        let content = format!(
+            "---\nsentinel: \"$(touch {sentinel_str})\"\n---\n::shell echo body-cmd\n"
+        );
+        let md: Markdown = content.into();
+
+        // Approve only the frontmatter command; the body command is unapproved.
+        let approved: HashSet<String> = [format!("touch {sentinel_str}")]
+            .into_iter()
+            .collect();
+
+        let options = ComposeOptions::new()
+            .only(&[
+                ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::FrontmatterShellExpansion,
+                ComposeOperation::ShellExpansion,
+            ])
+            .with_shell_policy_root(temp.path())
+            .with_pre_approved_commands(approved);
+
+        let result = md.compose_with(options);
+        assert!(
+            result.is_err(),
+            "compose should fail because the body command is unapproved"
+        );
+
+        // The frontmatter `touch` must NOT have executed — pre-flight caught
+        // the unapproved body command before any shell execution began.
+        assert!(
+            !sentinel.exists(),
+            "frontmatter command executed before pre-flight caught the unapproved body command"
+        );
+    }
+
+    /// When the pre-approved set covers every collected command, the frontmatter
+    /// shell command executes normally and the compose succeeds.
+    #[test]
+    fn preflight_allows_frontmatter_shell_when_all_approved() {
+        let temp = TempDir::new().unwrap();
+        let sentinel = temp.path().join("sentinel");
+        let sentinel_str = sentinel.display().to_string();
+
+        let content = format!(
+            "---\nsentinel: \"$(touch {sentinel_str})\"\n---\n::shell echo body-cmd\n"
+        );
+        let md: Markdown = content.into();
+
+        // Approve both the frontmatter and body commands.
+        let approved: HashSet<String> = [
+            format!("touch {sentinel_str}"),
+            "echo body-cmd".to_string(),
+        ]
+        .into_iter()
+        .collect();
+
+        let options = ComposeOptions::new()
+            .only(&[
+                ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::FrontmatterShellExpansion,
+                ComposeOperation::ShellExpansion,
+            ])
+            .with_shell_policy_root(temp.path())
+            .with_pre_approved_commands(approved);
+
+        let (composed, report) = md.compose_with(options).unwrap();
+        assert!(sentinel.exists(), "frontmatter command should have executed");
+        assert!(composed.content().contains("body-cmd"));
+        assert_eq!(report.shell_approvals_used, 0);
+    }
+
+    /// T3 (property): for a doc with N independent flags, the
+    /// `execution_set ⊆ approval_set` invariant must hold across a battery of
+    /// randomized flag combinations — not just the two-state flip the
+    /// fixed-example T3 covers.
+    ///
+    /// The generated doc has N page blocks, each guarded by a unique
+    /// `flag_i` value. The approval set is computed once and reused for every
+    /// iteration. For each combination, the post-compose body is checked: any
+    /// "echo branch-i" line present must be a member of the approval set (it
+    /// always is, because approval is a superset), and the compose must
+    /// succeed (i.e. execution never reaches a `NotPreApproved` miss).
+    #[test]
+    fn execution_subset_of_approval_across_randomized_conditions() {
+        const BRANCH_COUNT: usize = 4;
+        const ITERATIONS: usize = 16;
+
+        let mut body = String::from("---\n");
+        for i in 0..BRANCH_COUNT {
+            body.push_str(&format!("flag_{i}: 0\n"));
+        }
+        body.push_str("---\n");
+        for i in 0..BRANCH_COUNT {
+            body.push_str(&format!("::block when=\"flag_{i} == 1\"\n"));
+            body.push_str(&format!("::shell echo branch-{i}\n"));
+            body.push_str("::end-block\n");
+        }
+
+        let md: Markdown = body.into();
+        let approval = approval_set(&md);
+        for i in 0..BRANCH_COUNT {
+            assert!(
+                approval.contains(&format!("echo branch-{i}")),
+                "approval missing branch-{i}: {approval:?}"
+            );
+        }
+
+        // Deterministic pseudo-random combination generator: a small LCG
+        // seeded from a constant gives a stable, reproducible sequence of
+        // flag combinations without pulling in the `rand` crate.
+        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            state
+        };
+
+        let temp = TempDir::new().unwrap();
+        for _ in 0..ITERATIONS {
+            let mut overrides = serde_json::Map::new();
+            for i in 0..BRANCH_COUNT {
+                let value = (next() % 2) as i64;
+                overrides.insert(format!("flag_{i}"), json!(value));
+            }
+            let options = execute_options(approval.clone(), temp.path())
+                .with_set_overrides(serde_json::Value::Object(overrides.clone()));
+            let (composed, _) = md
+                .compose_with(options)
+                .unwrap_or_else(|e| panic!("compose failed for {overrides:?}: {e}"));
+
+            // For every branch whose `flag_i == 1`, the branch's command must
+            // have executed and produced output.
+            for i in 0..BRANCH_COUNT {
+                let marker = format!("branch-{i}");
+                let expected_executed = overrides.get(&format!("flag_{i}"))
+                    .and_then(|v| v.as_i64())
+                    .map(|v| v == 1)
+                    .unwrap_or(false);
+                let appears = composed.content().contains(&marker);
+                assert_eq!(
+                    appears, expected_executed,
+                    "branch-{i} execution mismatch for {overrides:?}: appears={appears}"
+                );
+                // And in either case, the executed command (if any) is a
+                // member of the approval set — the invariant.
+                if appears {
+                    let cmd = format!("echo {marker}");
+                    assert!(
+                        approval.contains(&cmd),
+                        "executed command {cmd:?} not in approval set: {approval:?}"
+                    );
+                }
+            }
         }
     }
 }

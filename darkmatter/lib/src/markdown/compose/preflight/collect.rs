@@ -34,6 +34,7 @@ use crate::markdown::compose::shell_expansion::types::{
     ShellCommandEntry, ShellCommandOrigin, ShellDirective, ShellExpansionError,
 };
 use crate::markdown::compose::transclusion;
+use crate::markdown::compose::remote_fetch;
 use crate::markdown::types::MarkdownResult;
 
 use super::super::block_pairs;
@@ -131,36 +132,83 @@ pub fn collect_shell_commands(
     markdown: &Markdown,
     options: &ComposeOptions,
 ) -> MarkdownResult<Vec<ShellCommandEntry>> {
+    let (entries, _graph) = collect_shell_commands_with_graph(markdown, options)?;
+    Ok(entries)
+}
+
+/// Like [`collect_shell_commands`], but also returns the hierarchical graph
+/// metadata the walk discovered.
+///
+/// The graph is the reusable artifact the v2 design calls for (tech-design §
+/// "Reusing the collection walk"): the resolved child sources, the per-child
+/// shell entries, and the nested child tree. The flat `entries` vector is
+/// still returned for callers that only need the deduped approval set.
+pub fn collect_shell_commands_with_graph(
+    markdown: &Markdown,
+    options: &ComposeOptions,
+) -> MarkdownResult<(Vec<ShellCommandEntry>, super::PreflightGraphNode)> {
     let mut seen = HashSet::new();
     let mut entries = Vec::new();
     let mut visited = HashSet::new();
-    collect_recursive(markdown, options, &mut seen, &mut entries, &mut visited)?;
-    Ok(entries)
+    let remote_fetch = remote_fetch::RemoteFetchRuntime::with_store(
+        &options.remote_read_config,
+        None,
+    );
+    let graph = collect_recursive(
+        markdown,
+        options,
+        &mut seen,
+        &mut entries,
+        &mut visited,
+        &remote_fetch,
+    )?;
+    Ok((entries, graph))
 }
 
 /// Collects every command from one document and recurses into its referenced
 /// children, condition-blind.
+///
+/// Returns a [`super::PreflightGraphNode`] describing this document's resolved
+/// source, its locally-discovered shell entries, and its nested children.
 fn collect_recursive(
     markdown: &Markdown,
     options: &ComposeOptions,
     seen: &mut HashSet<String>,
     entries: &mut Vec<ShellCommandEntry>,
-    visited: &mut HashSet<PathBuf>,
-) -> MarkdownResult<()> {
+    visited: &mut HashSet<String>,
+    remote_fetch: &remote_fetch::RemoteFetchRuntime,
+) -> MarkdownResult<super::PreflightGraphNode> {
     let source_file = match &options.source {
         ComposeSource::File(p) => p.clone(),
+        ComposeSource::Url(u) => PathBuf::from(u.as_str()),
         _ => PathBuf::from("<unknown>"),
     };
 
-    if let ComposeSource::File(path) = &options.source {
-        let key = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
-        if !visited.insert(key) {
-            return Ok(());
-        }
+    let source_key = match &options.source {
+        ComposeSource::File(path) => Some(
+            std::fs::canonicalize(path)
+                .unwrap_or_else(|_| path.clone())
+                .to_string_lossy()
+                .to_string(),
+        ),
+        ComposeSource::Url(url) => Some(url.to_string()),
+        ComposeSource::Unknown => None,
+    };
+    if let Some(key) = source_key
+        && !visited.insert(key)
+    {
+        return Ok(super::PreflightGraphNode::default());
     }
 
+    // Per-document accumulator: shell entries first discovered *here* (so the
+    // returned graph node can attribute them to this document). The global
+    // `entries` and `seen` are still updated so the flat list stays deduped
+    // across the whole graph.
+    let mut local_entries: Vec<ShellCommandEntry> = Vec::new();
+    let mut children: Vec<super::PreflightGraphNode> = Vec::new();
+
     // ── Frontmatter commands ───────────────────────────────────────
-    scan_one_frontmatter(markdown, options, &source_file, seen, entries)?;
+    scan_one_frontmatter(markdown, options, &source_file, seen, entries, &mut local_entries)?;
 
     // ── Resolve this document's inline state ───────────────────────
     // Interpolation + text replacement only: never page blocks (so
@@ -200,14 +248,16 @@ fn collect_recursive(
             let (executable, args) = resolve_executable(&exe_raw, &args_raw);
             let normalized = normalize_command(&executable, &args);
             if seen.insert(normalized.clone()) {
-                entries.push(ShellCommandEntry {
+                let entry = ShellCommandEntry {
                     raw_command: raw_action,
                     executable,
                     args,
                     normalized,
                     source_file: source_file.clone(),
                     origin: ShellCommandOrigin::Body { line },
-                });
+                };
+                local_entries.push(entry.clone());
+                entries.push(entry);
             }
         }
     }
@@ -232,7 +282,7 @@ fn collect_recursive(
                 if !seen.insert(normalized.clone()) {
                     continue;
                 }
-                entries.push(ShellCommandEntry {
+                let entry = ShellCommandEntry {
                     raw_command,
                     executable,
                     args,
@@ -242,7 +292,9 @@ fn collect_recursive(
                         start_line: pair.start_line,
                         command_line: command.start_line,
                     },
-                });
+                };
+                local_entries.push(entry.clone());
+                entries.push(entry);
             }
         }
     }
@@ -251,45 +303,64 @@ fn collect_recursive(
     let transclusion_opts = options.transclusion_options();
 
     for directive in transclusion::parse_directives(prepared.content(), prepared_ctx.clone())? {
-        if directive.kind != transclusion::DirectiveKind::File {
+        // `::file` and `::url` can both reference Markdown children that
+        // contain shell directives. `::code` inserts literal code (no shell
+        // directives), so it is excluded.
+        if !matches!(
+            directive.kind,
+            transclusion::DirectiveKind::File | transclusion::DirectiveKind::Url
+        ) {
             continue;
         }
 
         // No `when=` evaluation: a false-condition transclusion still
         // contributes its commands to the approval set.
         let target = transclusion::normalize_reference_token(&directive.raw_target);
-        let transclusion::ResolvedTarget::File { path, .. } = transclusion::resolve_target(
+        let resolved = match transclusion::resolve_target(
             directive.kind,
             &target,
             &transclusion_opts,
             &options.source,
             directive.line,
             prepared_ctx.clone(),
-        )?
-        else {
-            continue;
+        ) {
+            Ok(r) => r,
+            // Remote transclusion disabled: the child cannot appear in the
+            // composed output, so its commands can never execute.
+            Err(transclusion::TransclusionError::UrlExecutionDisabled { .. }) => continue,
+            Err(e) => return Err(e.into()),
         };
 
-        let mut child = Markdown::try_from(path.as_path())?;
-        if directive.options.set_object.is_some() || !directive.options.set_properties.is_empty() {
-            let base_indexmap = std::mem::take(child.frontmatter_mut().as_map_mut());
-            let base_map: serde_json::Map<String, serde_json::Value> =
-                base_indexmap.into_iter().collect();
-            let overlaid = state::apply_set_overrides(
-                &base_map,
-                directive.options.set_object.as_ref(),
-                &directive.options.set_properties,
-            );
-            *child.frontmatter_mut().as_map_mut() = overlaid.into_iter().collect();
-        }
-
-        collect_recursive(
-            &child,
-            &options.clone().with_source_file(path),
-            seen,
-            entries,
-            visited,
-        )?;
+        let child = match resolved {
+            transclusion::ResolvedTarget::File { path, .. } => {
+                let mut child = Markdown::try_from(path.as_path())?;
+                apply_child_overrides(&mut child, &directive.options);
+                collect_recursive(
+                    &child,
+                    &options.clone().with_source_file(path),
+                    seen,
+                    entries,
+                    visited,
+                    remote_fetch,
+                )?
+            }
+            transclusion::ResolvedTarget::Url { url, .. } => {
+                let Some(body) = fetch_remote_child_body(&url, remote_fetch)? else {
+                    continue;
+                };
+                let mut child = Markdown::from(body);
+                apply_child_overrides(&mut child, &directive.options);
+                collect_recursive(
+                    &child,
+                    &options.clone().with_source_url(url),
+                    seen,
+                    entries,
+                    visited,
+                    remote_fetch,
+                )?
+            }
+        };
+        children.push(child);
     }
 
     let refs =
@@ -305,29 +376,92 @@ fn collect_recursive(
             transclusion::DirectiveKind::File
         };
 
-        let transclusion::ResolvedTarget::File { path, .. } = transclusion::resolve_target(
+        let resolved = match transclusion::resolve_target(
             kind,
             reference,
             &transclusion_opts,
             &options.source,
             0,
             prepared_ctx.clone(),
-        )?
-        else {
-            continue;
+        ) {
+            Ok(r) => r,
+            Err(transclusion::TransclusionError::UrlExecutionDisabled { .. }) => continue,
+            Err(e) => return Err(e.into()),
         };
 
-        let child = Markdown::try_from(path.as_path())?;
-        collect_recursive(
-            &child,
-            &options.clone().with_source_file(path),
-            seen,
-            entries,
-            visited,
-        )?;
+        let child = match resolved {
+            transclusion::ResolvedTarget::File { path, .. } => {
+                let child = Markdown::try_from(path.as_path())?;
+                collect_recursive(
+                    &child,
+                    &options.clone().with_source_file(path),
+                    seen,
+                    entries,
+                    visited,
+                    remote_fetch,
+                )?
+            }
+            transclusion::ResolvedTarget::Url { url, .. } => {
+                let Some(body) = fetch_remote_child_body(&url, remote_fetch)? else {
+                    continue;
+                };
+                let child = Markdown::from(body);
+                collect_recursive(
+                    &child,
+                    &options.clone().with_source_url(url),
+                    seen,
+                    entries,
+                    visited,
+                    remote_fetch,
+                )?
+            }
+        };
+        children.push(child);
     }
 
-    Ok(())
+    let source = match &options.source {
+        ComposeSource::File(p) => Some(p.clone()),
+        ComposeSource::Url(u) => Some(PathBuf::from(u.to_string())),
+        ComposeSource::Unknown => None,
+    };
+
+    Ok(super::PreflightGraphNode {
+        source,
+        entries: local_entries,
+        children,
+    })
+}
+
+/// Applies `set_object`/`set_properties` overrides from a transclusion
+/// directive's options to a child document's frontmatter.
+fn apply_child_overrides(child: &mut Markdown, opts: &transclusion::BlockOptions) {
+    if opts.set_object.is_some() || !opts.set_properties.is_empty() {
+        let base_indexmap = std::mem::take(child.frontmatter_mut().as_map_mut());
+        let base_map: serde_json::Map<String, serde_json::Value> =
+            base_indexmap.into_iter().collect();
+        let overlaid =
+            state::apply_set_overrides(&base_map, opts.set_object.as_ref(), &opts.set_properties);
+        *child.frontmatter_mut().as_map_mut() = overlaid.into_iter().collect();
+    }
+}
+
+/// Fetches a remote Markdown child for pre-flight collection.
+///
+/// Registers the URL on demand (the eager pre-scan only covers the root) and
+/// blocks until the fetch completes. Returns `None` when the URL was not
+/// registered or produced no body.
+fn fetch_remote_child_body(
+    url: &url::Url,
+    remote_fetch: &remote_fetch::RemoteFetchRuntime,
+) -> MarkdownResult<Option<String>> {
+    remote_fetch.register_nested(url.clone());
+    match remote_fetch.get_content(url) {
+        Ok(body) => Ok(body),
+        Err(e) => Err(crate::markdown::types::MarkdownError::Transform(format!(
+            "pre-flight: failed to fetch remote transclusion '{}': {e}",
+            url
+        ))),
+    }
 }
 
 /// Collects the frontmatter `$(...)` commands for a single document.
@@ -337,6 +471,7 @@ fn scan_one_frontmatter(
     source_file: &std::path::Path,
     seen: &mut HashSet<String>,
     entries: &mut Vec<ShellCommandEntry>,
+    local_entries: &mut Vec<ShellCommandEntry>,
 ) -> MarkdownResult<()> {
     let mut fm_clone = markdown.clone();
     let pre_interpolation_snapshot = prepare_frontmatter_for_compose(&mut fm_clone, options, true);
@@ -415,7 +550,7 @@ fn scan_one_frontmatter(
                 let (executable, args) = resolve_executable(&exe_raw, &args_raw);
                 let normalized = normalize_command(&executable, &args);
                 if seen.insert(normalized.clone()) {
-                    entries.push(ShellCommandEntry {
+                    let entry = ShellCommandEntry {
                         raw_command: raw_action,
                         executable,
                         args,
@@ -424,7 +559,9 @@ fn scan_one_frontmatter(
                         origin: ShellCommandOrigin::Frontmatter {
                             key: candidate.key.clone(),
                         },
-                    });
+                    };
+                    local_entries.push(entry.clone());
+                    entries.push(entry);
                 }
             }
         }
@@ -1199,6 +1336,232 @@ out: \"$(flag ? {{cmd_name}} hi : '')\"
                 assert_eq!(*command_line, 3);
             }
             other => panic!("Expected ShellBlock origin, got: {other:?}"),
+        }
+    }
+
+    /// T1 (remote): a `::url` remote transclusion child contributes its commands
+    /// to the approval set. The directive is `::url`-prefixed, not `::file`, so
+    /// the collector must traverse both shapes.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn remote_url_transclusion_child_participates_in_preflight() {
+        use crate::markdown::compose::remote::RemoteReadConfig;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/child.md"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "# Remote child\n::shell echo remote-body\n::shell echo remote-body-2\n",
+            ))
+            .mount(&server)
+            .await;
+
+        let remote_url = format!("{}/child.md", server.uri());
+
+        let temp_dir = TempDir::new().unwrap();
+        let root_path = temp_dir.path().join("root.md");
+        std::fs::write(
+            &root_path,
+            format!("# Root\n::url {remote_url}\n"),
+        )
+        .unwrap();
+
+        let md = Markdown::try_from(root_path.as_path()).unwrap();
+        let config = RemoteReadConfig {
+            allowed_hosts: vec!["127.0.0.1".into()],
+            ..Default::default()
+        };
+        let options = ComposeOptions::new()
+            .with_source_file(&root_path)
+            .with_allow_remote_transclusion(true)
+            .with_remote_read_config(config);
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+        let raw: Vec<&str> = entries.iter().map(|e| e.raw_command.as_str()).collect();
+        assert!(
+            raw.contains(&"echo remote-body"),
+            "remote child body command missing from approval set: {raw:?}"
+        );
+        assert!(
+            raw.contains(&"echo remote-body-2"),
+            "remote child body command 2 missing from approval set: {raw:?}"
+        );
+    }
+
+    /// T1 (remote, false-`when`): the collector must ignore `when=` even on a
+    /// `::url` directive so a dead-branch remote child still appears in the
+    /// approval set. Without this, the v2 condition-blind invariant is broken
+    /// for remote transclusion.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn remote_url_transclusion_false_when_still_collected() {
+        use crate::markdown::compose::remote::RemoteReadConfig;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/hidden.md"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "# Remote child\n::shell echo hidden-remote\n",
+            ))
+            .mount(&server)
+            .await;
+
+        let remote_url = format!("{}/hidden.md", server.uri());
+
+        let temp_dir = TempDir::new().unwrap();
+        let root_path = temp_dir.path().join("root.md");
+        std::fs::write(
+            &root_path,
+            format!("---\ninclude_remote: false\n---\n# Root\n::url {remote_url} when=\"include_remote\"\n"),
+        )
+        .unwrap();
+
+        let md = Markdown::try_from(root_path.as_path()).unwrap();
+        let config = RemoteReadConfig {
+            allowed_hosts: vec!["127.0.0.1".into()],
+            ..Default::default()
+        };
+        let options = ComposeOptions::new()
+            .with_source_file(&root_path)
+            .with_allow_remote_transclusion(true)
+            .with_remote_read_config(config);
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+        let raw: Vec<&str> = entries.iter().map(|e| e.raw_command.as_str()).collect();
+        assert!(
+            raw.contains(&"echo hidden-remote"),
+            "false-when remote child command must still be in the approval set: {raw:?}"
+        );
+    }
+
+    /// T1 (remote, frontmatter `prologue`): a `prologue:` URL reference is
+    /// resolved by the collector the same way a body `::url` directive is —
+    /// the child document's commands are part of the approval set.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn remote_url_frontmatter_prologue_participates_in_preflight() {
+        use crate::markdown::compose::remote::RemoteReadConfig;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/prologue-child.md"))
+            .respond_with(ResponseTemplate::new(200)
+                .set_body_string("# Prologue child\n::shell echo prologue-cmd\n"))
+            .mount(&server)
+            .await;
+
+        let remote_url = format!("{}/prologue-child.md", server.uri());
+
+        let temp_dir = TempDir::new().unwrap();
+        let root_path = temp_dir.path().join("root.md");
+        std::fs::write(
+            &root_path,
+            format!("---\nprologue: \"{remote_url}\"\n---\n# Root\n"),
+        )
+        .unwrap();
+
+        let md = Markdown::try_from(root_path.as_path()).unwrap();
+        let config = RemoteReadConfig {
+            allowed_hosts: vec!["127.0.0.1".into()],
+            ..Default::default()
+        };
+        let options = ComposeOptions::new()
+            .with_source_file(&root_path)
+            .with_allow_remote_transclusion(true)
+            .with_remote_read_config(config);
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+        let raw: Vec<&str> = entries.iter().map(|e| e.raw_command.as_str()).collect();
+        assert!(
+            raw.contains(&"echo prologue-cmd"),
+            "remote prologue child command missing from approval set: {raw:?}"
+        );
+    }
+
+    /// The graph metadata captures the resolved child sources, per-child shell
+    /// entries, and the nested child tree. The flat `entries` list is
+    /// unchanged — this is additive metadata for downstream reuse.
+    #[test]
+    fn preflight_graph_attributes_entries_to_their_source_document() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let child_path = temp_dir.path().join("child.md");
+        std::fs::write(
+            &child_path,
+            "---\nchild_cmd: \"$(echo child-frontmatter)\"\n---\n# Child\n::shell echo child-body\n",
+        )
+        .unwrap();
+
+        let root_path = temp_dir.path().join("root.md");
+        std::fs::write(
+            &root_path,
+            "---\nroot_cmd: \"$(echo root-frontmatter)\"\n---\n::shell echo root-body\n::file ./child.md\n",
+        )
+        .unwrap();
+
+        let md = Markdown::try_from(root_path.as_path()).unwrap();
+        let options = ComposeOptions::new().with_source_file(&root_path);
+
+        let (entries, graph) = collect_shell_commands_with_graph(&md, &options).unwrap();
+
+        // The flat approval set is the union, deduped.
+        let raw: Vec<&str> = entries.iter().map(|e| e.raw_command.as_str()).collect();
+        assert!(raw.contains(&"echo child-frontmatter"));
+        assert!(raw.contains(&"echo child-body"));
+        assert!(raw.contains(&"echo root-frontmatter"));
+        assert!(raw.contains(&"echo root-body"));
+
+        // The graph node for the root documents its resolved source.
+        assert_eq!(
+            graph
+                .source
+                .as_ref()
+                .and_then(|p| std::fs::canonicalize(p).ok()),
+            std::fs::canonicalize(&root_path).ok(),
+            "root graph node must carry the root's resolved source"
+        );
+
+        // The root's own entries include only what the root document contains.
+        let root_raw: Vec<&str> = graph.entries.iter().map(|e| e.raw_command.as_str()).collect();
+        assert!(root_raw.contains(&"echo root-frontmatter"));
+        assert!(root_raw.contains(&"echo root-body"));
+        assert!(
+            !root_raw.contains(&"echo child-body"),
+            "child entries must not be attributed to the root"
+        );
+
+        // Exactly one nested child, and its entries are attributed to itself.
+        assert_eq!(graph.children.len(), 1, "children: {:?}", graph.children);
+        let child = &graph.children[0];
+        assert_eq!(
+            child
+                .source
+                .as_ref()
+                .and_then(|p| std::fs::canonicalize(p).ok()),
+            std::fs::canonicalize(&child_path).ok(),
+            "child graph node must carry the child's resolved source"
+        );
+        let child_raw: Vec<&str> = child.entries.iter().map(|e| e.raw_command.as_str()).collect();
+        assert!(child_raw.contains(&"echo child-frontmatter"));
+        assert!(child_raw.contains(&"echo child-body"));
+        assert!(
+            child.children.is_empty(),
+            "leaf transclusion should have no nested children"
+        );
+
+        // `flattened_entries` gives the union through the graph — the caller
+        // gets the same deduped set the flat `entries` carries, just from the
+        // hierarchical view.
+        let flattened_raw: Vec<&str> = graph
+            .flattened_entries()
+            .iter()
+            .map(|e| e.raw_command.as_str())
+            .collect();
+        for cmd in ["echo child-frontmatter", "echo child-body", "echo root-frontmatter", "echo root-body"] {
+            assert!(flattened_raw.contains(&cmd), "missing {cmd} in flattened: {flattened_raw:?}");
         }
     }
 }

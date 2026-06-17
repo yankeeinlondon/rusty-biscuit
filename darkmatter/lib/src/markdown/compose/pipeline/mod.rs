@@ -204,6 +204,23 @@ impl Markdown {
                 }
             }
 
+            // Pre-Flight validation (v2 design step 4): when the caller
+            // supplies a pre-approved command set, verify up-front that it
+            // covers every command the condition-blind collector discovers —
+            // before any frontmatter `$(...)` or body `::shell` executes. This
+            // removes the failure mode where an earlier frontmatter command
+            // runs before a later body command is found unapproved. Root-only
+            // (depth 1) because the collector already walks every child; gated
+            // on shell expansion being enabled so the collection's own internal
+            // inline compose (which disables shell expansion) cannot recurse.
+            if options.pre_approved_commands.is_some()
+                && runtime.transclusion.depth() <= 1
+                && (options.is_enabled(ComposeOperation::FrontmatterShellExpansion)
+                    || options.is_enabled(ComposeOperation::ShellExpansion))
+            {
+                super::preflight::validate_pre_approved(self, &options)?;
+            }
+
             // Frontmatter Shell Expansion: execute $(cmd) in frontmatter values
             // before EffectiveState is built, since the expanded values must be
             // visible to all later stages.
