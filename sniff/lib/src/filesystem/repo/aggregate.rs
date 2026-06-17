@@ -14,6 +14,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
+use crate::filesystem::repo::test_runner_usage::TestRunnerUsage;
 use crate::filesystem::repo::types::{
     ExternalDependency, ExternalDependencyFamily, ExternalDependencyFilter, Package, RepoInfo,
 };
@@ -176,6 +177,52 @@ where
     }
 }
 
+/// One distinct test-runner usage in a scope, with the packages that attribute
+/// it.
+///
+/// Entries are keyed by the full [`TestRunnerUsage`] (runner **and** evidence
+/// source), so a workspace-root config shared by many crates collapses to a
+/// single entry naming all of them, while per-package configs of the same
+/// runner remain distinct entries. `packages` preserves first-seen order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TestRunnerAttribution {
+    /// The detected runner and the evidence that attributed it.
+    pub usage: TestRunnerUsage,
+    /// Names of the in-scope packages contributing this exact usage.
+    pub packages: Vec<String>,
+}
+
+/// Collapse the per-package test runners across `scope` into distinct usages,
+/// each carrying the packages that attribute it.
+///
+/// Two packages that resolve to the same `(runner, source)` collapse to one
+/// entry (e.g. every crate governed by a single workspace-root `nextest.toml`);
+/// differing usages stay separate so a caller can list which package uses what.
+/// Per-package prioritization has already happened in `detect_test_runners`, so
+/// `Package::test_runners` holds each package's effective runner(s).
+#[must_use]
+pub fn aggregate_test_runners(
+    packages: &[Package],
+    scope: &AggregateScope,
+) -> Vec<TestRunnerAttribution> {
+    let mut out: Vec<TestRunnerAttribution> = Vec::new();
+    for pkg in packages.iter().filter(|p| in_scope(p, scope)) {
+        for usage in &pkg.test_runners {
+            if let Some(entry) = out.iter_mut().find(|e| &e.usage == usage) {
+                if !entry.packages.contains(&pkg.name) {
+                    entry.packages.push(pkg.name.clone());
+                }
+            } else {
+                out.push(TestRunnerAttribution {
+                    usage: usage.clone(),
+                    packages: vec![pkg.name.clone()],
+                });
+            }
+        }
+    }
+    out
+}
+
 /// Returns `true` when `pkg` belongs to `scope`.
 fn in_scope(pkg: &Package, scope: &AggregateScope) -> bool {
     match scope {
@@ -293,6 +340,7 @@ mod tests {
     use super::*;
     use crate::filesystem::repo::PackageProvenance;
     use crate::filesystem::repo::standard::MonorepoStandard;
+    use crate::filesystem::repo::test_runner_usage::TestRunnerSource;
     use crate::filesystem::repo::types::PackageEcosystem;
     use std::path::PathBuf;
 
@@ -312,6 +360,51 @@ mod tests {
 
     fn pms_of(result: &AggregateResult<String>) -> Vec<String> {
         result.clone().into_values()
+    }
+
+    fn runner_pkg(name: &str, area: &str, usages: Vec<TestRunnerUsage>) -> Package {
+        Package {
+            test_runners: usages,
+            ..pkg(name, area, &[])
+        }
+    }
+
+    fn config(runner: crate::programs::enums::TestRunner, path: &str) -> TestRunnerUsage {
+        TestRunnerUsage {
+            runner,
+            source: TestRunnerSource::Config {
+                filename: path.to_string(),
+                path: path.to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn test_runner_shared_root_config_collapses_to_one_entry_naming_all_packages() {
+        use crate::programs::enums::TestRunner;
+        // Two crates governed by the same workspace-root nextest config: one
+        // entry, both packages attributed.
+        let packages = vec![
+            runner_pkg("a", "x", vec![config(TestRunner::Nextest, ".config/nextest.toml")]),
+            runner_pkg("b", "x", vec![config(TestRunner::Nextest, ".config/nextest.toml")]),
+        ];
+        let entries = aggregate_test_runners(&packages, &AggregateScope::Repo);
+        assert_eq!(entries.len(), 1, "shared config should collapse, got {entries:?}");
+        assert_eq!(entries[0].usage.runner, TestRunner::Nextest);
+        assert_eq!(entries[0].packages, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn test_runner_distinct_usages_stay_separate_entries() {
+        use crate::programs::enums::TestRunner;
+        let packages = vec![
+            runner_pkg("a", "x", vec![config(TestRunner::Nextest, ".config/nextest.toml")]),
+            runner_pkg("b", "x", vec![config(TestRunner::Vitest, "b/vitest.config.ts")]),
+        ];
+        let entries = aggregate_test_runners(&packages, &AggregateScope::Repo);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[1].usage.runner, TestRunner::Vitest);
+        assert_eq!(entries[1].packages, vec!["b".to_string()]);
     }
 
     #[test]

@@ -31,10 +31,15 @@ use crate::programs::test_runner_spec::{TEST_RUNNER_SPEC, TestRunnerEcosystem};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TestRunnerSource {
-    /// A config file owned by the runner was found in the package directory.
+    /// A config file owned by the runner was found in the package directory
+    /// (or, for workspace-root-scoped runners, at the repo root).
     Config {
         /// The config filename or glob that matched (e.g. `vitest.config.ts`).
         filename: String,
+        /// Repo-root-relative path to the config file that actually matched
+        /// (e.g. `.config/nextest.toml`, `crates/app/vitest.config.ts`). For a
+        /// wildcard glob this is the concrete file, not the pattern.
+        path: String,
     },
     /// The runner appears as a dependency key in a package manifest.
     Manifest {
@@ -67,26 +72,28 @@ impl TestRunnerUsage {
     }
 }
 
-/// Detect declared test runner usage for the package rooted at `pkg_dir`.
+/// Detect the test runner(s) a package actually uses, rooted at `pkg_dir`.
 ///
-/// Follows the signal priority from `test-runner-strategy.md` §4:
+/// Signals are evaluated in priority order (`test-runner-strategy.md` §4):
 ///
 /// 1. **Config file present** in the package dir — strongest, disambiguates.
 /// 2. **Manifest dependency key** — strong.
-/// 3. **Ecosystem default** — fallback when no explicit runner is found but
-///    the ecosystem always ships one.
-/// 4. **Convention** — weakest; emitted for stdlib runners with no marker.
+/// 3. **Ecosystem default** — the implicit built-in (`cargo test`, `go test`, …).
+/// 4. **Convention** — weakest; naming only, for stdlib runners.
 ///
-/// A package is never empty for ecosystems with a built-in default: the
-/// default is reported with [`TestRunnerSource::EcosystemDefault`] so
-/// consumers can distinguish "explicitly configured" from "implicitly
-/// available".
+/// The return is collapsed to the **strongest tier present**: an explicitly
+/// configured or declared runner supersedes the ecosystem default, so a package
+/// that configures nextest reports `nextest` alone, not `nextest` *and* the
+/// `cargo test` fallback. The ecosystem default is returned only when it is the
+/// sole signal (a package with no explicit runner). This gives callers a single
+/// answer wherever one exists; see [`prioritize`].
 ///
 /// `repo_root` is the enclosing repository (or Cargo workspace) root. A few
 /// runners keep a single config at that root that governs every member rather
 /// than one config per package dir — see [`root_scoped_config`]. For those, the
 /// config search extends to `repo_root` so a workspace-root marker is not
-/// missed when scanning an individual member directory.
+/// missed when scanning an individual member directory. The recorded
+/// [`TestRunnerSource::Config::path`] is always repo-root-relative.
 pub(crate) fn detect_test_runners(
     pkg_dir: &Path,
     repo_root: &Path,
@@ -129,13 +136,14 @@ pub(crate) fn detect_test_runners(
         };
         'globs: for glob in spec.config_globs {
             for dir in search_dirs {
-                if config_glob_matches(dir, runner, glob, cache) {
+                if let Some(located) = locate_config(dir, runner, glob, cache) {
                     push_unique(
                         &mut found,
                         &mut seen,
                         runner,
                         TestRunnerSource::Config {
                             filename: (*glob).to_string(),
+                            path: repo_relative(&located, repo_root),
                         },
                     );
                     break 'globs;
@@ -201,6 +209,30 @@ pub(crate) fn detect_test_runners(
     }
 
     found.sort_by_key(|u| u.runner.variant_index());
+    prioritize(found)
+}
+
+/// Signal strength of a source; lower is stronger.
+fn source_rank(source: &TestRunnerSource) -> u8 {
+    match source {
+        TestRunnerSource::Config { .. } => 0,
+        TestRunnerSource::Manifest { .. } => 1,
+        TestRunnerSource::EcosystemDefault => 2,
+        TestRunnerSource::Convention => 3,
+    }
+}
+
+/// Keep only the runners attributed by the strongest signal tier present.
+///
+/// An explicitly configured (`Config`) or declared (`Manifest`) runner
+/// supersedes the ecosystem default and convention fallbacks, collapsing a
+/// package to the single runner it actually uses wherever the evidence allows.
+/// When the only evidence is the ecosystem default (no explicit runner), that
+/// default is what survives.
+fn prioritize(mut found: Vec<TestRunnerUsage>) -> Vec<TestRunnerUsage> {
+    if let Some(best) = found.iter().map(|u| source_rank(&u.source)).min() {
+        found.retain(|u| source_rank(&u.source) == best);
+    }
     found
 }
 
@@ -228,11 +260,11 @@ fn root_scoped_config(runner: TestRunner) -> bool {
     matches!(runner, TestRunner::Nextest)
 }
 
-/// Returns `true` when `glob` is present in `pkg_dir` and, for config files
-/// shared by more than one runner, the runner-specific INI section is present.
+/// Returns the absolute path of the config file matching `glob` under `pkg_dir`,
+/// or `None` when no qualifying file is present.
 ///
 /// Wildcard patterns (`*.suite.yml`, `features/*.feature`, `spec/**/*_spec.rb`)
-/// are resolved by [`glob_file_exists`]; literal patterns use a direct
+/// are resolved by [`locate_glob_file`]; literal patterns use a direct
 /// `exists()` check.
 ///
 /// `tox.ini` and `setup.cfg` are each claimed by several Python runners
@@ -243,25 +275,32 @@ fn root_scoped_config(runner: TestRunner) -> bool {
 /// other config glob is runner-exclusive and matches on existence alone.
 /// Wildcard patterns are always runner-exclusive, so they never need a section
 /// check.
-fn config_glob_matches(
+fn locate_config(
     pkg_dir: &Path,
     runner: TestRunner,
     glob: &str,
     cache: &mut ManifestCache,
-) -> bool {
+) -> Option<PathBuf> {
     if is_glob_pattern(glob) {
-        return glob_file_exists(pkg_dir, glob);
+        return locate_glob_file(pkg_dir, glob);
     }
     let path = pkg_dir.join(glob);
     if !path.exists() {
-        return false;
+        return None;
     }
     match required_config_section(runner, glob) {
         Some(section) => cache
             .raw_text(&path)
-            .is_some_and(|text| ini_has_section(text, section)),
-        None => true,
+            .is_some_and(|text| ini_has_section(text, section))
+            .then_some(path),
+        None => Some(path),
     }
+}
+
+/// Render `path` relative to `repo_root` with `/` separators. Falls back to the
+/// original path when it is not under `repo_root`.
+fn repo_relative(path: &Path, repo_root: &Path) -> String {
+    relative_slashes(path.strip_prefix(repo_root).unwrap_or(path))
 }
 
 /// Maximum directory depth descended when resolving a recursive (`**`) config
@@ -273,20 +312,19 @@ fn is_glob_pattern(glob: &str) -> bool {
     glob.bytes().any(|b| matches!(b, b'*' | b'?' | b'['))
 }
 
-/// Returns `true` when a file under `pkg_dir` matches the glob `pattern`.
+/// Returns the absolute path of the first file under `pkg_dir` matching the glob
+/// `pattern`, or `None`.
 ///
 /// The walk is rooted at the pattern's literal directory prefix and bounded in
 /// depth (non-recursive patterns descend only as far as their segment count
 /// requires; `**` patterns are capped at [`GLOB_MAX_DEPTH`]), so a glob never
 /// triggers an unbounded scan of the package tree.
-fn glob_file_exists(pkg_dir: &Path, pattern: &str) -> bool {
-    let matcher = match globset::GlobBuilder::new(pattern)
+fn locate_glob_file(pkg_dir: &Path, pattern: &str) -> Option<PathBuf> {
+    let matcher = globset::GlobBuilder::new(pattern)
         .literal_separator(true)
         .build()
-    {
-        Ok(glob) => glob.compile_matcher(),
-        Err(_) => return false,
-    };
+        .ok()?
+        .compile_matcher();
 
     let segments: Vec<&str> = pattern.split('/').collect();
     let mut root = pkg_dir.to_path_buf();
@@ -299,7 +337,7 @@ fn glob_file_exists(pkg_dir: &Path, pattern: &str) -> bool {
         literal_segments += 1;
     }
     if !root.exists() {
-        return false;
+        return None;
     }
 
     let descent = if pattern.contains("**") {
@@ -313,11 +351,15 @@ fn glob_file_exists(pkg_dir: &Path, pattern: &str) -> bool {
 }
 
 /// Depth-bounded search for a file whose `base`-relative path matches
-/// `matcher`. Descends at most `max_descent` directory levels below `dir`.
-fn glob_walk(dir: &Path, base: &Path, matcher: &globset::GlobMatcher, max_descent: usize) -> bool {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return false;
-    };
+/// `matcher`, returning its absolute path. Descends at most `max_descent`
+/// directory levels below `dir`.
+fn glob_walk(
+    dir: &Path,
+    base: &Path,
+    matcher: &globset::GlobMatcher,
+    max_descent: usize,
+) -> Option<PathBuf> {
+    let entries = std::fs::read_dir(dir).ok()?;
     for entry in entries.flatten() {
         let Ok(file_type) = entry.file_type() else {
             continue;
@@ -327,16 +369,16 @@ fn glob_walk(dir: &Path, base: &Path, matcher: &globset::GlobMatcher, max_descen
             if let Ok(relative) = path.strip_prefix(base)
                 && matcher.is_match(relative_slashes(relative))
             {
-                return true;
+                return Some(path);
             }
         } else if file_type.is_dir()
             && max_descent > 0
-            && glob_walk(&path, base, matcher, max_descent - 1)
+            && let Some(found) = glob_walk(&path, base, matcher, max_descent - 1)
         {
-            return true;
+            return Some(found);
         }
     }
-    false
+    None
 }
 
 /// Render a relative path with `/` separators so glob matching behaves the same
@@ -927,8 +969,11 @@ mod tests {
         let usage = detect(dir.path());
         assert!(usage.iter().any(|u| u.runner == TestRunner::Nextest
             && matches!(u.source, TestRunnerSource::Config { .. })));
-        // The default cargo test is still reported alongside nextest.
-        assert!(usage.iter().any(|u| u.runner == TestRunner::CargoTest));
+        // The configured runner supersedes the cargo test ecosystem default.
+        assert!(
+            !usage.iter().any(|u| u.runner == TestRunner::CargoTest),
+            "cargo test default must be superseded by configured nextest, got {usage:?}"
+        );
     }
 
     #[test]
@@ -949,8 +994,21 @@ mod tests {
                 && matches!(u.source, TestRunnerSource::Config { .. })),
             "nextest config at the workspace root should attribute to the member crate, got {usage:?}"
         );
-        // The cargo test ecosystem default is still reported alongside nextest.
-        assert!(usage.iter().any(|u| u.runner == TestRunner::CargoTest));
+        // The configured runner supersedes the cargo test ecosystem default,
+        // and its recorded path is repo-root-relative.
+        assert!(
+            !usage.iter().any(|u| u.runner == TestRunner::CargoTest),
+            "cargo test default must be superseded by workspace-root nextest, got {usage:?}"
+        );
+        let nextest = usage
+            .iter()
+            .find(|u| u.runner == TestRunner::Nextest)
+            .expect("nextest detected");
+        assert!(
+            matches!(&nextest.source, TestRunnerSource::Config { path, .. } if path == ".config/nextest.toml"),
+            "nextest config path should be repo-root-relative, got {:?}",
+            nextest.source
+        );
     }
 
     #[test]
@@ -1060,8 +1118,11 @@ mod tests {
         let usage = detect(dir.path());
         assert!(usage.iter().any(|u| u.runner == TestRunner::Pytest
             && matches!(u.source, TestRunnerSource::Config { .. })));
-        // unittest is the ecosystem default and must still appear.
-        assert!(usage.iter().any(|u| u.runner == TestRunner::Unittest));
+        // pytest (config) supersedes the unittest ecosystem default.
+        assert!(
+            !usage.iter().any(|u| u.runner == TestRunner::Unittest),
+            "unittest default must be superseded by configured pytest, got {usage:?}"
+        );
     }
 
     #[test]
@@ -1230,8 +1291,11 @@ mod tests {
         let usage = detect(dir.path());
         assert!(usage.iter().any(|u| u.runner == TestRunner::RSpec
             && matches!(u.source, TestRunnerSource::Manifest { .. })));
-        // Minitest is the ecosystem default for Ruby.
-        assert!(usage.iter().any(|u| u.runner == TestRunner::Minitest));
+        // rspec (manifest) supersedes the Minitest ecosystem default.
+        assert!(
+            !usage.iter().any(|u| u.runner == TestRunner::Minitest),
+            "Minitest default must be superseded by declared rspec, got {usage:?}"
+        );
     }
 
     // ------------------------------------------------------------------------

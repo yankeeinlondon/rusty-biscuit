@@ -164,7 +164,7 @@ For the package's ecosystem, evaluate signals in priority order:
 3. **Ecosystem default** (`is_ecosystem_default`) → fallback when no explicit runner found but the ecosystem always ships one (`cargo test`, `go test`, `mix test`, `unittest`, `node --test`).
 4. **Convention only** (`tests/` + `*_test.*` naming, no config/dep) → weakest; emit for stdlib runners (unittest, Minitest) that have no dedicated marker.
 
-A package is therefore **never empty** for ecosystems with a built-in default — report the default with `source: EcosystemDefault` so consumers can tell "explicitly configured" from "implicitly available."
+**Prioritization (single answer).** The result is collapsed to the *strongest tier present*: a configured (`Config`) or declared (`Manifest`) runner **supersedes** the ecosystem default and convention fallbacks, so a package that configures nextest reports `nextest` alone — not `nextest` *and* `cargo test`. The ecosystem default survives only when it is the sole signal (a package with no explicit runner). This gives callers a single answer wherever one exists; a package still yields more than one runner only when two markers of the same top tier coexist (e.g. pytest + tox). See `prioritize` in `test_runner_usage.rs`. *(Supersedes the earlier "never empty — always report the default tagged" rule in D2 below.)*
 
 ### Manifest parsing reuse
 
