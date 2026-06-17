@@ -1062,6 +1062,19 @@ pub enum ComposeSource {
     Url(Url),
 }
 
+impl serde::Serialize for ComposeSource {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Unknown => serializer.serialize_none(),
+            Self::File(path) => serializer.serialize_str(&path.display().to_string()),
+            Self::Url(url) => serializer.serialize_str(url.as_str()),
+        }
+    }
+}
+
 impl ComposeSource {
     /// Creates a file source from a path reference.
     pub fn infer_from_path(path: impl AsRef<Path>) -> Self {
