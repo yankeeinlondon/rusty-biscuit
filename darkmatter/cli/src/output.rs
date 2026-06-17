@@ -5,7 +5,7 @@ use darkmatter::layout::{DarkmatterPage, PageComponent};
 use darkmatter::markdown::highlighting::{ColorMode, ThemePair, detect_code_theme, detect_prose_theme};
 use darkmatter::markdown::output::MermaidMode;
 use darkmatter::markdown::output::terminal::TerminalImageMode;
-use darkmatter::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode};
+use darkmatter::markdown::{Markdown, MarkdownDelta};
 use darkmatter::markdown::block::scan_inline_hr_warnings;
 use darkmatter::style::{
     BespokeStyleOverrides, ComponentStyleOverrides, DisclosureStyleOverrides, HrStyleOverrides,
@@ -649,118 +649,6 @@ pub fn parse_bool_env(raw: &str) -> Option<bool> {
         "1" | "true" | "yes" | "on" | "y" => Some(true),
         "0" | "false" | "no" | "off" | "n" => Some(false),
         _ => None,
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TOC Tree Output
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Prints the table of contents as a text-based tree.
-///
-/// If `filename` is provided, it will be displayed in bold after the document icon.
-pub fn print_toc_tree(toc: &MarkdownToc, verbose: bool, filename: Option<&str>) {
-    // ANSI escape codes
-    const BOLD: &str = "\x1b[1m";
-    const RESET: &str = "\x1b[0m";
-
-    let stdout = io::stdout();
-    let stderr = io::stderr();
-    let mut out = stdout.lock();
-    let mut err = stderr.lock();
-
-    // Breathing room: blank line to stderr before TOC
-    writeln!(err).ok();
-
-    // Print document icon, optionally with filename in bold
-    if toc.title.is_some() {
-        if let Some(name) = filename {
-            writeln!(out, "📄 {BOLD}{name}{RESET}").ok();
-        } else {
-            writeln!(out, "📄").ok();
-        }
-        if verbose {
-            writeln!(
-                err,
-                "   Page hash: {:016x} (trimmed: {:016x})",
-                toc.page_hash, toc.page_hash_trimmed
-            )
-            .ok();
-        }
-    }
-
-    // Print the tree structure
-    for (i, node) in toc.structure.iter().enumerate() {
-        let is_last = i == toc.structure.len() - 1;
-        print_toc_node(&mut out, node, "", is_last, verbose);
-    }
-
-    // Breathing room: blank line to stderr after TOC
-    writeln!(err).ok();
-
-    // Print summary only in verbose mode, to stderr
-    if verbose {
-        writeln!(
-            err,
-            "Total: {} heading{}",
-            toc.heading_count(),
-            if toc.heading_count() == 1 { "" } else { "s" }
-        )
-        .ok();
-
-        if !toc.code_blocks.is_empty() {
-            writeln!(err, "Code blocks: {}", toc.code_blocks.len()).ok();
-        }
-
-        if !toc.internal_links.is_empty() {
-            let broken_count = toc.broken_links().len();
-            if broken_count > 0 {
-                writeln!(
-                    err,
-                    "Internal links: {} ({} broken)",
-                    toc.internal_links.len(),
-                    broken_count
-                )
-                .ok();
-            } else {
-                writeln!(err, "Internal links: {}", toc.internal_links.len()).ok();
-            }
-        }
-    }
-}
-
-/// Recursively prints a TOC node with tree characters.
-fn print_toc_node<W: Write>(
-    out: &mut W,
-    node: &MarkdownTocNode,
-    prefix: &str,
-    is_last: bool,
-    verbose: bool,
-) {
-    // Tree connector characters
-    let connector = if is_last { "└── " } else { "├── " };
-    let child_prefix = if is_last { "    " } else { "│   " };
-
-    if verbose {
-        // Show semantic content hash (used for whitespace-insensitive comparison)
-        writeln!(
-            out,
-            "{}{}{} ({:016x})",
-            prefix,
-            connector,
-            node.title,
-            node.prelude_hash_normalized()
-        )
-        .ok();
-    } else {
-        writeln!(out, "{}{}{}", prefix, connector, node.title).ok();
-    }
-
-    // Print children
-    let new_prefix = format!("{}{}", prefix, child_prefix);
-    for (i, child) in node.children.iter().enumerate() {
-        let child_is_last = i == node.children.len() - 1;
-        print_toc_node(out, child, &new_prefix, child_is_last, verbose);
     }
 }
 
