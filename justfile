@@ -15,7 +15,7 @@ import "./just/spec.just"
 
 # List of areas in this monorepo
 
-areas := "biscuit-hash biscuit-location biscuit-speaks biscuit-terminal biscuit-tui schematic biscuit-file unchained-ai playa tree-hugger darkmatter sniff model-citizen claudine research queue homelab"
+areas := "biscuit-hash biscuit-location biscuit-speaks biscuit-terminal biscuit-tui schematic biscuit-file unchained-ai playa tree-hugger darkmatter sniff model-citizen claudine research queue homelab biscuit-contract"
 BOLD := '\033[1m'
 DIM := '\033[2m'
 ITALIC := '\033[3m'
@@ -40,82 +40,31 @@ default:
 modules:
     @cargo modules structure
 
-# run tests (all areas, or specific areas: just test claudine darkmatter)
+# Run Level-1 tests for all Cargo workspace packages. Optional selectors may
+# name packages or package-area paths: `just test claudine darkmatter`.
 test *args="":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    failed_areas=()
-    passed_areas=()
+    @just _test_workspace {{ args }}
 
-    if [[ -z "{{ args }}" ]]; then
-        echo ""
-        echo "Running tests for all areas..."
-        echo "------------------------------------------------"
-        echo ""
-        for area in {{ areas }}; do
-            if [ -f "$area/justfile" ]; then
-                if (cd "./$area" && just --summary 2>/dev/null) | grep -qw "test"; then
-                    echo
-                    echo "Testing $area..."
-                    if (cd "./$area" && just test); then
-                        passed_areas+=("$area")
-                    else
-                        failed_areas+=("$area")
-                        just _message "Tests failed in $area"
-                    fi
-                else
-                    echo "- no test command for the area **$area**" >&2
-                fi
-            else
-                echo "- no justfile for the area **$area**" >&2
-            fi
-        done
-    else
-        IFS=', ' read -ra areas <<< "{{ args }}"
-        echo ""
-        echo "Running tests for: ${areas[*]}"
-        echo "------------------------------------------------"
-        echo ""
-        for area in "${areas[@]}"; do
-            if [ -d "$area" ] && [ -f "$area/justfile" ]; then
-                if (cd "./$area" && just --summary 2>/dev/null) | grep -qw "test"; then
-                    echo
-                    echo "Testing $area..."
-                    if (cd "./$area" && just test); then
-                        passed_areas+=("$area")
-                    else
-                        failed_areas+=("$area")
-                        just _message "Tests failed in $area"
-                    fi
-                else
-                    echo "Error: area '$area' has no test recipe" >&2
-                    failed_areas+=("$area (no test recipe)")
-                fi
-            else
-                echo "Error: area '$area' not found or has no justfile" >&2
-                failed_areas+=("$area (not found / no justfile)")
-            fi
-        done
-    fi
+# Verify that every package-area test recipe preserves Ctrl+C as exit 130.
+check-test-interrupts:
+    @just _check_test_interrupts
 
-    echo ""
-    echo "================================================"
-    echo "Test Summary"
-    echo "================================================"
-    echo -e "{{ GREEN }}Passed{{ RESET }} (${#passed_areas[@]}): ${passed_areas[*]:-(none)}"
-    if [[ ${#failed_areas[@]} -gt 0 ]]; then
-        echo -e "{{ RED }}Failed{{ RESET }} (${#failed_areas[@]}): ${failed_areas[*]}"
-    else
-        echo -e "{{ RED }}Failed{{ RESET }} (${#failed_areas[@]}): (none)"
-    fi
-    echo "================================================"
-    echo ""
-
-    if [[ ${#failed_areas[@]} -gt 0 ]]; then
-        exit 1
-    fi
+# run the test suite, then sweep for child processes that outlived it
+#
+# Wraps `just test` in the cross-platform `leak-sweep` detector (tools/test-toolkit).
+# nextest's per-test LEAK status only catches children still holding a test's
+# stdout/stderr; this also catches detached orphans (exit code 99 if any survive,
+# rooted at the repo). Pass `--warn-only` semantics by running leak-sweep directly.
+test-leaks *args="":
+    @cargo run -q -p test-toolkit --features leak-sweep --bin leak-sweep -- just test {{ args }}
 
 # detect which monorepo areas have changed files compared to the upstream branch
+#
+# `[no-cd]` lets callers (and Level 1 tests) invoke this recipe inside a
+# different git working tree without `just` resetting the shell cwd back
+# to the justfile's directory. In production the pre-push hook already
+# runs at the repo root, so the attribute is a no-op there.
+[no-cd]
 changed-areas:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -137,6 +86,17 @@ changed-areas:
 # pre-push hook entry point (default areas: claudine darkmatter)
 pre-push *areas="claudine darkmatter":
     @just test {{ areas }}
+
+# run Level 1 tests for the .githooks/pre-push shell hook itself
+test-pre-push-hook:
+    @./.githooks/tests/test-pre-push.sh
+
+# run Level 1 tests for the `changed-areas` recipe heuristic itself
+test-changed-areas:
+    @./.githooks/tests/test-changed-areas.sh
+
+# run Level 1 tests for both the pre-push hook and the changed-areas recipe
+test-githooks: test-pre-push-hook test-changed-areas
 
 # run doctests (all workspace crates, or specific areas: just doctest claudine playa)
 doctest *args="":
@@ -384,11 +344,11 @@ check-canonical *args="":
 commit:
     @echo ""
     @echo -e "Committing staged changes in the {{ BOLD }}Rusty Biscuit{{ RESET }} monorepo to git"
-    @echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{ DIM }}model{{ RESET }}"
+    @echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M3}} {{ DIM }}model{{ RESET }}"
     @echo ""
     @echo -e "{{ BOLD }}{{ BLUE }}Staged Files:{{ RESET }}"
     @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose "@prompts/commit.md" --opencode --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}" -y
+    @claudine compose "@prompts/commit.md" --opencode --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M3}}" -y
     @just _speak "git commits completed in rusty-biscuit monorepo"
     @sniff repo git-status 2>/dev/null || exit 0
     @echo
@@ -463,6 +423,14 @@ _ensure-build-deps:
 # sync a just recipe from one justfile to all others that have it
 sync-recipe recipe source:
     @./scripts/sync-recipe.sh "{{ recipe }}" "{{ source }}"
+
+# heuristic check for comment quality anti-patterns (warn-only)
+check-comments *args="":
+    @./scripts/check-comments.sh {{ args }}
+
+# run fixture tests for the comment-quality heuristic checker
+check-comments-test:
+    @./scripts/check-comments-tests.sh
 
 # Internal helper: run a named recipe across all curated areas (or specific areas).
 _orchestrate recipe *args="":

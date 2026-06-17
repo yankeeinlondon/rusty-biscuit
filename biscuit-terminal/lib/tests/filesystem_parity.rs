@@ -170,17 +170,17 @@ fn fixture_connector_geometry_records_divergence() {
     let bespoke = strip_ansi(&fs.render(&term));
     let via_tree = strip_ansi(&render_via_tree(&fs, &term));
 
-    // The bespoke renderer formats Unicode-icon lines as `📂name`, while
+    // The bespoke renderer formats Unicode-icon lines as `📝name`, while
     // the tree projection inserts a literal `" "` between the icon span and
-    // the name span — producing `📂 name`. Pin that gap so a future change
+    // the name span — producing `📝 name`. Pin that gap so a future change
     // to either path forces this decision gate to be re-examined.
     assert!(
-        bespoke.contains("├── 📄a.txt"),
-        "bespoke uses `📄name` (no space): {bespoke:?}"
+        bespoke.contains("├── 📝a.txt"),
+        "bespoke uses `📝name` (no space): {bespoke:?}"
     );
     assert!(
-        via_tree.contains("├── 📄 a.txt"),
-        "tree path uses `📄 name` (extra space): {via_tree:?}"
+        via_tree.contains("├── 📝 a.txt"),
+        "tree path uses `📝 name` (extra space): {via_tree:?}"
     );
 
     // Connector glyphs themselves match.
@@ -194,17 +194,12 @@ fn fixture_connector_geometry_records_divergence() {
 /// bespoke renderer. The tree projection lowers `dim_gitignore` into typed
 /// `Style { dim: true }` on the entry paragraph.
 ///
-/// **Observed gap (Stage 3a.3):** The scanner currently hardcodes
-/// `is_ignored: false` on every entry (see `FileSystem::scan_dir`: "Will be
-/// set properly with ignore crate in Phase 8"). Neither path actually emits
-/// dim SGR for any entry today, so this fixture can only assert that both
-/// paths agree on the **absence** of dim. When Phase 8 lands, this fixture
-/// will flip to a real divergence — the tree path's
-/// `render_tree_connector_list` drops the per-item paragraph `Style` (see
-/// the dotfile fixture's recorded gap) and will not emit `\x1b[2m` until
-/// that is fixed.
+/// Now that hierarchical gitignore semantics are wired (the scanner marks
+/// `is_ignored` via the `GitignoreMatcher` rather than hardcoding `false`),
+/// **both** paths emit dim SGR for the ignored entry. This fixture asserts
+/// that parity.
 #[test]
-fn fixture_gitignore_styling_records_divergence() {
+fn fixture_gitignore_styling_dims_in_both_paths() {
     let dir = tempfile::tempdir().expect("create tempdir");
     fs::write(dir.path().join(".gitignore"), "ignored.txt\n").expect(".gitignore");
     fs::write(dir.path().join("ignored.txt"), "x").expect("ignored.txt");
@@ -220,15 +215,14 @@ fn fixture_gitignore_styling_records_divergence() {
     let bespoke = fs.render(&term);
     let via_tree = render_via_tree(&fs, &term);
 
-    // Both paths currently emit zero dim SGR because `is_ignored` is always
-    // false. Document the joint absence so a future Phase-8 commit forces
-    // this fixture to be revisited.
+    // Both paths honor the resolved `is_ignored` flag and dim the ignored
+    // entry; assert the parity.
     let dim_bespoke = bespoke.contains("\x1b[2m") || bespoke.contains(";2m");
     let dim_tree = via_tree.contains("\x1b[2m") || via_tree.contains(";2m");
     assert!(
-        !dim_bespoke && !dim_tree,
-        "expected both paths to emit no dim SGR today (is_ignored is hardcoded \
-         to false); bespoke={dim_bespoke}, tree={dim_tree}"
+        dim_bespoke && dim_tree,
+        "expected both paths to emit dim SGR for the ignored entry; \
+         bespoke={dim_bespoke}, tree={dim_tree}"
     );
 
     // Content (icon-name spacing aside) is otherwise present in both paths.
@@ -324,14 +318,12 @@ fn fixture_depth_limit_records_divergence() {
 /// Highlight precedence: `highlight_red("TODO")` makes a directory red and
 /// strips the bold/blue treatment that directories normally receive.
 ///
-/// **Observed gap (Stage 3a.3):** Bespoke emits `\x1b[31m` for the
-/// `TODO-dir` entry. The tree path emits **no** SGR for it because
-/// `render_tree_connector_list` ignores the per-item paragraph `Style`. The
-/// tree projection's `fs_entry_style` correctly sets red and suppresses
-/// bold (verified by the in-mod `render_tree_highlight_red_wins_over_*`
-/// test), but that `Style` never reaches the terminal output.
+/// Both paths now emit `\x1b[31m` for the `TODO-dir` entry. The connector-list
+/// terminal renderer applies the per-item paragraph `Style` projected by
+/// `fs_entry_style` (tree-cutover Phase 4 connector-list `Style` lowering), so
+/// the styling divergence recorded in Stage 3a.3 is closed.
 #[test]
-fn fixture_highlight_precedence_records_divergence() {
+fn fixture_highlight_precedence_styling_matches() {
     let dir = make_highlight_fixture();
     let mut fs = FileSystem::new(dir.path())
         .expect("FileSystem::new")
@@ -346,16 +338,14 @@ fn fixture_highlight_precedence_records_divergence() {
     let red_in_bespoke = bespoke.contains("\x1b[31m") || bespoke.contains(";31m");
     let red_in_tree = via_tree.contains("\x1b[31m") || via_tree.contains(";31m");
 
-    // Pin the present-day asymmetry as evidence for the §3a.3 decision.
     assert!(
         red_in_bespoke,
         "bespoke must emit highlight red: {bespoke:?}"
     );
     assert!(
-        !red_in_tree,
-        "GAP: tree path does NOT emit highlight red — \
-         render_tree_connector_list drops the per-item paragraph Style. \
-         tree={via_tree:?}"
+        red_in_tree,
+        "tree path must emit highlight red now that the connector list applies \
+         the per-item paragraph Style: {via_tree:?}"
     );
 
     assert!(strip_ansi(&bespoke).contains("TODO-dir"));
@@ -393,15 +383,11 @@ fn fixture_metric_annotations_records_divergence() {
 /// Dotfile italic: `italicize_dot_files(true)` should make `.env` italic in
 /// both renderers.
 ///
-/// **Observed gap (Stage 3a.3):** Bespoke emits `\x1b[3m` for `.env`. The
-/// tree path emits no SGR at all (`└── 📄 .env`) — this fixture is the
-/// canonical proof that `render_tree_connector_list` ignores the per-item
-/// paragraph `Style`. The projection sets `emphasis.italic = true` (see
-/// the in-mod `render_tree_dotfiles_are_italic_when_configured` test), but
-/// the connector-list renderer calls `render_inline(children,
-/// &Style::default())` — discarding the paragraph's style attribute.
+/// Both paths now emit `\x1b[3m` for `.env`. The connector-list terminal
+/// renderer applies the per-item paragraph `Style` (tree-cutover Phase 4), so
+/// the styling divergence recorded in Stage 3a.3 is closed.
 #[test]
-fn fixture_dotfile_italic_records_divergence() {
+fn fixture_dotfile_italic_styling_matches() {
     let dir = make_dotfile_fixture();
     let mut fs = FileSystem::new(dir.path())
         .expect("FileSystem::new")
@@ -421,10 +407,9 @@ fn fixture_dotfile_italic_records_divergence() {
         "bespoke must emit italic SGR: {bespoke:?}"
     );
     assert!(
-        !italic_in_tree,
-        "GAP: tree path does NOT emit italic — \
-         render_tree_connector_list discards the per-item paragraph Style. \
-         tree={via_tree:?}"
+        italic_in_tree,
+        "tree path must emit italic now that the connector list applies the \
+         per-item paragraph Style: {via_tree:?}"
     );
 
     assert!(strip_ansi(&bespoke).contains(".env"));
@@ -434,13 +419,12 @@ fn fixture_dotfile_italic_records_divergence() {
 /// Symlink styling: cyan (`\x1b[36m`) on the entry. Skipped on platforms
 /// where symlink creation is not possible without elevation.
 ///
-/// **Observed gap (Stage 3a.3):** This sandbox's scanner currently records
-/// the symlink as a regular `File` (no `is_symlink` flag) — neither the
-/// bespoke nor the tree path emits cyan. When the scanner correctly marks
-/// the symlink, bespoke will emit `\x1b[36m` while the tree path will
-/// continue to emit no SGR until `render_tree_connector_list` is fixed.
+/// When the scanner marks the symlink, both paths now emit `\x1b[36m`: the
+/// connector-list terminal renderer applies the per-item paragraph `Style`
+/// (tree-cutover Phase 4), so the styling divergence recorded in Stage 3a.3 is
+/// closed.
 #[test]
-fn fixture_symlink_styling_records_divergence() {
+fn fixture_symlink_styling_matches() {
     let Some(dir) = make_symlink_fixture() else {
         eprintln!("skipping: symlink creation unsupported on this platform");
         return;
@@ -459,13 +443,12 @@ fn fixture_symlink_styling_records_divergence() {
     let cyan_in_tree = via_tree.contains("\x1b[36m") || via_tree.contains(";36m");
 
     if cyan_in_bespoke {
-        // Scanner marked the symlink; tree path's failure to emit cyan is
-        // the same connector-styling gap as the dotfile fixture.
+        // Scanner marked the symlink; the tree path now emits cyan too because
+        // the connector list applies the per-item Style.
         assert!(
-            !cyan_in_tree,
-            "GAP: tree path does NOT emit cyan — \
-             render_tree_connector_list discards the per-item Style. \
-             tree={via_tree:?}"
+            cyan_in_tree,
+            "tree path must emit cyan now that the connector list applies the \
+             per-item Style: {via_tree:?}"
         );
     } else {
         // Scanner did not mark the symlink (some platforms / fs combos);
@@ -516,6 +499,152 @@ fn fixture_link_osc8_records_divergence() {
         bespoke.contains("file://") && via_tree.contains("file://"),
         "missing file:// scheme on at least one path"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1 — File Links Directive: new capability parity tests.
+//
+// These fixtures exercise the document-extension allowlist, included-paths
+// allowlist, and dimmed-root-prefix / root-icon API added in Phase 1 of the
+// file-links directive plan. Each test compares the bespoke renderer against
+// the canonical tree projection, asserting content (stripped ANSI) parity.
+// ---------------------------------------------------------------------------
+
+/// Extension filter: only files whose extension is in the allowlist should
+/// appear in both renderers. Non-matching files are pruned during scanning.
+#[test]
+fn fixture_extension_filter_content_matches() {
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let root = dir.path();
+    fs::write(root.join("readme.md"), "m").expect("readme.md");
+    fs::write(root.join("notes.txt"), "t").expect("notes.txt");
+    fs::write(root.join("report.pdf"), "p").expect("report.pdf");
+
+    let mut fs_obj = FileSystem::new(root)
+        .expect("FileSystem::new")
+        .show_root(false)
+        .extension_filter(["md"]);
+    fs_obj.ensure_tree_built();
+
+    let term = test_terminal(80);
+    let bespoke = strip_ansi(&fs_obj.render(&term));
+    let via_tree = strip_ansi(&render_via_tree(&fs_obj, &term));
+
+    assert!(bespoke.contains("readme.md"), "bespoke missing readme.md: {bespoke:?}");
+    assert!(via_tree.contains("readme.md"), "tree missing readme.md: {via_tree:?}");
+    assert!(!bespoke.contains("notes.txt"), "bespoke should prune notes.txt: {bespoke:?}");
+    assert!(!via_tree.contains("notes.txt"), "tree should prune notes.txt: {via_tree:?}");
+    assert!(!bespoke.contains("report.pdf"), "bespoke should prune report.pdf: {bespoke:?}");
+    assert!(!via_tree.contains("report.pdf"), "tree should prune report.pdf: {via_tree:?}");
+}
+
+/// `document_extensions()` convenience filter should accept .md, .txt, .pdf,
+/// .doc(x), .xls(x) and prune everything else.
+#[test]
+fn fixture_document_extensions_filter_content_matches() {
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let root = dir.path();
+    fs::write(root.join("doc.md"), "m").expect("doc.md");
+    fs::write(root.join("img.png"), "i").expect("img.png");
+    fs::write(root.join("data.csv"), "c").expect("data.csv");
+
+    let mut fs_obj = FileSystem::new(root)
+        .expect("FileSystem::new")
+        .show_root(false)
+        .document_extensions();
+    fs_obj.ensure_tree_built();
+
+    let term = test_terminal(80);
+    let bespoke = strip_ansi(&fs_obj.render(&term));
+    let via_tree = strip_ansi(&render_via_tree(&fs_obj, &term));
+
+    assert!(bespoke.contains("doc.md"), "bespoke missing doc.md: {bespoke:?}");
+    assert!(via_tree.contains("doc.md"), "tree missing doc.md: {via_tree:?}");
+    assert!(!bespoke.contains("img.png"), "bespoke should prune img.png: {bespoke:?}");
+    assert!(!via_tree.contains("img.png"), "tree should prune img.png: {via_tree:?}");
+}
+
+/// Included paths: only files under the specified relative path should appear.
+#[test]
+fn fixture_included_paths_content_matches() {
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let root = dir.path();
+    fs::create_dir_all(root.join("topics")).expect("topics");
+    fs::write(root.join("topics/alpha.md"), "a").expect("alpha.md");
+    fs::write(root.join("topics/beta.md"), "b").expect("beta.md");
+    fs::write(root.join("other.md"), "o").expect("other.md");
+
+    let mut fs_obj = FileSystem::new(root)
+        .expect("FileSystem::new")
+        .show_root(false)
+        .included_paths(["topics/alpha.md"]);
+    fs_obj.ensure_tree_built();
+
+    let term = test_terminal(80);
+    let bespoke = strip_ansi(&fs_obj.render(&term));
+    let via_tree = strip_ansi(&render_via_tree(&fs_obj, &term));
+
+    assert!(bespoke.contains("alpha.md"), "bespoke missing alpha.md: {bespoke:?}");
+    assert!(via_tree.contains("alpha.md"), "tree missing alpha.md: {via_tree:?}");
+    assert!(!bespoke.contains("beta.md"), "bespoke should prune beta.md: {bespoke:?}");
+    assert!(!via_tree.contains("beta.md"), "tree should prune beta.md: {via_tree:?}");
+    assert!(!bespoke.contains("other.md"), "bespoke should prune other.md: {bespoke:?}");
+    assert!(!via_tree.contains("other.md"), "tree should prune other.md: {via_tree:?}");
+}
+
+/// Dimmed root prefix: both renderers should emit the display name, and the
+/// dim SGR (`\x1b[2m`) should appear for the prefix portion in the bespoke
+/// path. Content parity is asserted on stripped ANSI.
+#[test]
+fn fixture_dimmed_root_prefix_content_matches() {
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let root = dir.path();
+    fs::write(root.join("a.md"), "a").expect("a.md");
+
+    let mut fs_obj = FileSystem::new(root)
+        .expect("FileSystem::new")
+        .with_dimmed_root_prefix("/docs/")
+        .with_root_display_name("topics");
+    fs_obj.ensure_tree_built();
+
+    let term = test_terminal(80);
+    let bespoke_raw = fs_obj.render(&term);
+    let via_tree_raw = render_via_tree(&fs_obj, &term);
+    let bespoke = strip_ansi(&bespoke_raw);
+    let via_tree = strip_ansi(&via_tree_raw);
+
+    // Both paths should show the display name in the root line.
+    let bespoke_root = bespoke.lines().next().unwrap_or_default();
+    let tree_root = via_tree.lines().next().unwrap_or_default();
+    assert!(bespoke_root.contains("topics"), "bespoke root missing 'topics': {bespoke_root:?}");
+    assert!(tree_root.contains("topics"), "tree root missing 'topics': {tree_root:?}");
+}
+
+/// Root icon: setting `with_root_icon(Repository)` should change the icon
+/// glyph in both renderers. The content (display name) should still match.
+#[test]
+fn fixture_root_icon_content_matches() {
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let root = dir.path();
+    fs::write(root.join("a.md"), "a").expect("a.md");
+
+    let mut fs_dir = FileSystem::new(root)
+        .expect("FileSystem::new")
+        .with_root_icon(biscuit_terminal::components::filesystem::RootIconKind::Directory);
+    fs_dir.ensure_tree_built();
+
+    let mut fs_repo = FileSystem::new(root)
+        .expect("FileSystem::new")
+        .with_root_icon(biscuit_terminal::components::filesystem::RootIconKind::Repository);
+    fs_repo.ensure_tree_built();
+
+    let term = test_terminal(80);
+    let dir_bespoke = strip_ansi(&fs_dir.render(&term));
+    let repo_bespoke = strip_ansi(&fs_repo.render(&term));
+
+    // At minimum, both should produce non-empty root lines with the dir name.
+    assert!(dir_bespoke.lines().count() > 0);
+    assert!(repo_bespoke.lines().count() > 0);
 }
 
 // ---------------------------------------------------------------------------

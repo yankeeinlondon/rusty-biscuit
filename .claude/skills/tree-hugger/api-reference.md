@@ -48,14 +48,23 @@ fn reexported_symbols(&self) -> Result<Vec<ImportSymbol>, TreeHuggerError>
 #### Diagnostics
 
 ```rust
-// Pattern-based lint rules (unwrap-call, dbg-macro, etc.)
+// Pattern + semantic lint rules. Infallible, best-effort: a failing analysis
+// stage contributes nothing rather than aborting the others.
 fn lint_diagnostics(&self) -> Vec<LintDiagnostic>
+
+// Fallible variant: surfaces query-compile/extraction failures instead of
+// hiding them behind an empty list. Use when "clean file" must be
+// distinguished from "analyzer could not run".
+fn try_lint_diagnostics(&self) -> Result<Vec<LintDiagnostic>, TreeHuggerError>
 
 // Syntax/parse errors
 fn syntax_diagnostics(&self) -> Vec<SyntaxDiagnostic>
 
 // Unified diagnostic format (lint + syntax)
 fn diagnostics(&self) -> Vec<Diagnostic>
+
+// Fallible unified diagnostics (used by the v2 analysis pipeline and CLI)
+fn try_diagnostics(&self) -> Result<Vec<Diagnostic>, TreeHuggerError>
 
 // Unreachable code blocks after terminal statements
 fn dead_code(&self) -> Vec<CodeBlock>

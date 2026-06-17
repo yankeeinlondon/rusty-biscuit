@@ -1,5 +1,6 @@
 //! Type definitions for the markdown module.
 
+use std::ops::Range;
 use std::path::PathBuf;
 
 use biscuit_file::YamlParseError;
@@ -71,6 +72,10 @@ pub enum MarkdownError {
     #[error("TOC linking error: {0}")]
     TocLinking(#[from] crate::markdown::compose::TocLinkingError),
 
+    /// File-links directive pipeline error.
+    #[error("File-links error: {0}")]
+    FileLinks(#[from] crate::markdown::compose::FileLinksError),
+
     /// Shell expansion pipeline error.
     #[error("Shell expansion failed: {0}")]
     ShellExpansion(#[from] Box<crate::markdown::compose::ShellExpansionError>),
@@ -91,6 +96,39 @@ pub enum MarkdownError {
     #[error("Context error: {0}")]
     CtxMerge(#[from] crate::markdown::compose::context::merge::CtxMergeError),
 
+    /// A document's stored `hash` property could not be parsed.
+    #[error("Malformed stored hash in '{property}': {reason}")]
+    MalformedStoredHash {
+        /// The frontmatter property the malformed hash was read from.
+        property: String,
+        /// Why parsing failed, phrased for a CLI user to act on.
+        reason: String,
+    },
+
+    /// A disclosure block was malformed at render time.
+    ///
+    /// Raised by the block-extension processor when a `::disclosure` region
+    /// violates the summary/body rules or is missing a required delimiter.
+    #[error("Malformed disclosure block: {reason}")]
+    MalformedDisclosure {
+        /// Human-readable reason the block was rejected.
+        reason: String,
+        /// Byte range of the disclosure region in the source document.
+        range: Range<usize>,
+    },
+
+    /// The render-tree document renderer rejected the document.
+    ///
+    /// Raised when [`Markdown::as_html`](crate::markdown::Markdown::as_html) or
+    /// [`Markdown::as_terminal`](crate::markdown::Markdown::as_terminal) routes
+    /// through the render tree and the shared renderer returns a fatal
+    /// [`RenderError`](renderable::tree::RenderError) (structural validation
+    /// failure, or a strict-mode rejection). Non-fatal fold/render diagnostics
+    /// are not surfaced here — they stay on the tree pipeline's diagnostic
+    /// channel.
+    #[error("Render-tree error: {0}")]
+    RenderTree(#[from] renderable::tree::RenderError),
+
     /// Schema validation failed during compose.
     #[error("Schema validation failed for {path:?}: {summary}")]
     SchemaValidationFailed {
@@ -102,6 +140,20 @@ pub enum MarkdownError {
         summary: String,
         /// Document description from frontmatter, when present.
         description: Option<String>,
+        /// Underlying schema-preparation error, when the failure originated
+        /// in schema parsing, resolution, conversion, baseline merge, or
+        /// validator construction. `None` when the schema was prepared
+        /// successfully but the frontmatter did not satisfy it (in which case
+        /// the failure detail lives in `problems`).
+        ///
+        /// Boxed as `dyn Error` rather than `Box<SchemaError>` so that
+        /// [`std::error::Error::source`] yields the inner
+        /// [`SchemaError`](crate::markdown::schemas::SchemaError) directly:
+        /// `err.source().and_then(|e| e.downcast_ref::<SchemaError>())`
+        /// recovers the original. A `Box<SchemaError>` field would surface the
+        /// `Box` itself as the trait object, so that downcast would miss.
+        #[source]
+        source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
     },
 }
 
@@ -147,6 +199,7 @@ impl BlockError for MarkdownError {
             MarkdownError::PageBlock(inner) => inner.status_block(term),
             MarkdownError::ShellBlock(inner) => inner.status_block(term),
             MarkdownError::TocLinking(inner) => inner.status_block(term),
+            MarkdownError::FileLinks(inner) => inner.status_block(term),
             MarkdownError::Reference(inner) => inner.status_block(term),
             MarkdownError::CtxMerge(inner) => inner.status_block(term),
 
@@ -162,11 +215,22 @@ impl BlockError for MarkdownError {
             MarkdownError::InvalidLineRange(message) => blocks::invalid_line_range_block(message),
             MarkdownError::Serialization(source) => blocks::serialization_block(source),
             MarkdownError::Transform(message) => blocks::transform_block(message),
+            MarkdownError::RenderTree(source) => blocks::render_tree_block(&source.to_string()),
+            MarkdownError::MalformedStoredHash { property, reason } => {
+                blocks::malformed_stored_hash_block(property, reason)
+            }
+            MarkdownError::MalformedDisclosure { reason, range } => {
+                blocks::malformed_disclosure_block(reason, range)
+            }
             MarkdownError::SchemaValidationFailed {
                 path,
                 problems,
                 summary,
                 description,
+                // The preparation source is preserved for `Error::source()`
+                // programmatic recovery; the styled block renders `summary`
+                // and `problems` only.
+                source: _,
             } => blocks::schema_validation_failed_block(path, problems, summary, description),
         }
     }

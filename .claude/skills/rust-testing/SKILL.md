@@ -1,19 +1,19 @@
 ---
 name: rust-testing
-description: |
+description: |-
   Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
   `require_level!` gating, nextest filtersets, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: ccc3b799a5c1d6af-9720a912f567666e
+hash: 1acc7c1c76b11142-9d61f99b8c9672e3
+last_updated: 2026-06-06
 ---
-
 # Rust Testing — Rusty Biscuit Monorepo
 
 ## Decision Tree: "What tier should my test live in?"
 
 Start at the **requirement**, not the code:
 
-```
+```text
 Does the test need a real terminal, browser, or device to verify behaviour?
 ├── NO  → Is it slow (>5 s) or does it hammer an external API?
 │   ├── NO  → L1 (default). Name it normally.
@@ -31,14 +31,14 @@ document the exception in `docs/testing-strategy.md`; do not force it into
 
 ## Test Levels
 
-| Level | Prefix | Resource | Skip when absent | Hard-fail env |
-|-------|--------|----------|------------------|---------------|
-| L1 | (none) | In-process only | Never | — |
-| L2 | `level2_` | Real terminal / PTY | Harness missing | `BISCUIT_TEST_LEVEL_REQUIRED=2` |
-| L3 | `level3_` | OS keyboard/mouse | `RUN_LEVEL3` unset | `BISCUIT_TEST_LEVEL_REQUIRED=3` |
-| Browser | `browser_` | Chrome/Chromium | Browser missing | `BISCUIT_BROWSER_REQUIRED=1` |
-| Real | `real_` | External device/API | Resource missing | Per-package env vars |
-| Slow | `slow_` | None (slow L1) | Excluded from sanity | — |
+| Level   | Prefix     | Resource            | Skip when absent     | Hard-fail env                   |
+|---------|------------|---------------------|----------------------|---------------------------------|
+| L1      | (none)     | In-process only     | Never                | —                               |
+| L2      | `level2_`  | Real terminal / PTY | Harness missing      | `BISCUIT_TEST_LEVEL_REQUIRED=2` |
+| L3      | `level3_`  | OS keyboard/mouse   | `RUN_LEVEL3` unset   | `BISCUIT_TEST_LEVEL_REQUIRED=3` |
+| Browser | `browser_` | Chrome/Chromium     | Browser missing      | `BISCUIT_BROWSER_REQUIRED=1`    |
+| Real    | `real_`    | External device/API | Resource missing     | Per-package env vars            |
+| Slow    | `slow_`    | None (slow L1)      | Excluded from sanity | —                               |
 
 ## Gating Tests
 
@@ -70,22 +70,49 @@ async fn browser_computed_style_matches() {
 
 Every curated package area defines these 12 recipes:
 
-| Recipe | Meaning |
-|--------|---------|
-| `sanity` | Fast confidence (≤15 s). `cargo nextest run --lib --bins -E '!set:slow'`. |
-| `test` | Full L1 suite. |
-| `test-l2` | Real-terminal tests. |
-| `test-l3` | OS keyboard/mouse tests. |
-| `test-browser` | Headless browser tests. |
-| `test-real` | External resource tests. |
-| `lint` | Clippy + fmt check. |
-| `bench` | Criterion benchmarks (no-op if opted out). |
-| `coverage` | Per-package LCOV. |
-| `doctest` | `cargo test --doc`. |
-| `fuzz` | `cargo +nightly fuzz run` (no-op if no targets). |
-| `all` | `sanity → lint → doctest → test → test-l2 → test-browser`. |
+| Recipe         | Meaning                                                                                                                                                                                                                                                                                                                                      |
+|----------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `sanity`       | Fast confidence (≤15 s). `cargo nextest run --lib --bins -E '!set:slow'`.                                                                                                                                                                                                                                                                    |
+| `test`         | Full L1 suite.                                                                                                                                                                                                                                                                                                                               |
+| `test-l2`      | Real-terminal tests. Pre-spawns one shared pane per backend via `biscuit-harness-broker`, exports `BISCUIT_SHARED_*_ID` env vars, runs nextest with `-j 1`, tears panes down in a trap. Tests use `<Backend>Harness::shared_or_spawn()` to attach to the pre-spawned pane and fall back to per-process spawning when the env var is missing. |
+| `test-l3`      | OS keyboard/mouse tests.                                                                                                                                                                                                                                                                                                                     |
+| `test-browser` | Headless browser tests. Runs `-j 1` (one Chrome at a time); the tier gets a 5s `leak-timeout` override for Chrome teardown.                                                                                                                                                                                                                                                                                                                      |
+| `test-real`    | External resource tests.                                                                                                                                                                                                                                                                                                                     |
+| `lint`         | Clippy + fmt check.                                                                                                                                                                                                                                                                                                                          |
+| `bench`        | Criterion benchmarks (no-op if opted out).                                                                                                                                                                                                                                                                                                   |
+| `coverage`     | Per-package LCOV.                                                                                                                                                                                                                                                                                                                            |
+| `doctest`      | `cargo test --doc`.                                                                                                                                                                                                                                                                                                                          |
+| `fuzz`         | `cargo +nightly fuzz run` (no-op if no targets).                                                                                                                                                                                                                                                                                             |
+| `all`          | `sanity → lint → doctest → test → test-l2 → test-browser`.                                                                                                                                                                                                                                                                                   |
 
 Delegate to shared recipes in `just/devops.just` (e.g. `@just _test my-crate`).
+
+At the repository root, `just test` delegates to `_test_workspace`. It uses
+Cargo metadata as the package source of truth, runs every workspace package,
+continues after ordinary failures, and reports failed packages at the end.
+Ctrl+C aborts the remaining packages and preserves exit code `130`. Optional
+selectors may be exact package names or package-area paths.
+
+Run `just check-test-interrupts` to verify that every package-area `test`
+recipe also preserves Ctrl+C as exit `130`.
+
+## Running L2 Tests (read before you run)
+
+`level2_*` tests spawn **real terminal windows / panes**. Run them **only** via
+`just test-l2`, never `cargo test` / `cargo nextest run -E 'test(/level2_/)'`
+directly. The recipe pre-spawns **one shared pane per backend** and runs nextest
+**`-j 1`**; bypassing it spawns windows in parallel, races on global GUI state,
+leaks windows on timeout/panic, and produces ambiguous `osascript`/PTY failures
+that look like — but are not — code regressions.
+
+- A wall of single-backend failures (e.g. every `*_in_wezterm`) usually means
+  that emulator is **absent/unscriptable here**, not that the renderer broke —
+  confirm the same test on an available backend (`_in_kitty`, `_apple_terminal`).
+- The Apple Terminal backend is GUI-automated and especially fragile (focus,
+  `do script` window reuse, orphan leaks). Before touching it or debugging an
+  `level2_apple_terminal_*` failure, read **`apple-terminal-harness-pitfalls.md`**.
+- Spawning must **never steal foreground focus** and must **never close a window
+  it did not create** — these are hard harness invariants.
 
 ## Nextest Filtersets
 
@@ -99,14 +126,40 @@ filter expression directly:
 - `test-browser`: `-E 'test(/browser_/)'`
 - `test-real`: `-E 'test(/real_/)'`
 
+## Leaked Process Detection
+
+Two complementary layers catch tests that spawn child processes and fail to
+reap them:
+
+1. **nextest `LEAK` (per test, all platforms).** `.config/nextest.toml` sets
+   `leak-timeout = { period = "100ms", result = "fail" }` on both profiles, so a
+   test that exits while a child still holds its stdout/stderr **fails the run**.
+   Clean tests are not slowed — only a leak waits the window out. Drop
+   `result = "fail"` to downgrade leaks to a non-fatal warning.
+   - **Browser-tier override.** `test(/browser_/)` raises `leak-timeout` to
+     `5s`. Headless Chrome's helper/crashpad processes inherit the test's
+     stdout and need longer than 100ms to reap; without the grace they trip
+     spurious `LEAK-FAIL`s even though the test exits cleanly. `result = "fail"`
+     is kept so a genuinely runaway browser still fails. The tier also runs
+     `-j 1` (see below) so only one Chrome tears down at a time —
+     `#[serial(browser)]` cannot serialize them under nextest's
+     process-per-test model.
+2. **`just test-leaks` (post-run sweep, all platforms).** Wraps `just test` in
+   `leak-sweep` (`tools/test-toolkit`, `--features leak-sweep`). It diffs the
+   process list before/after the whole run and reports survivors whose
+   executable or command line is under the repo (exit code `99`). Catches
+   detached orphans that closed the test's pipes — which `LEAK` cannot see.
+   Attribution is by workspace path, not parent PID (orphan reparenting is
+   OS-specific).
+
 ## Environment Contract
 
-| Variable | Purpose |
-|----------|---------|
-| `BISCUIT_TEST_LEVEL=1\|2\|3` | Max level to run; higher tiers skip cleanly. |
-| `BISCUIT_TEST_LEVEL_REQUIRED=2\|3` | Missing harness panics instead of skipping. |
-| `BISCUIT_BROWSER_REQUIRED=1` | Missing Chrome panics instead of skipping. |
-| `RUN_LEVEL3=1` | Opt-in for OS-keyboard-injection tests. |
+| Variable                          | Purpose                                      |
+|-----------------------------------|----------------------------------------------|
+| `BISCUIT_TEST_LEVEL=1\|2\|3`        | Max level to run; higher tiers skip cleanly. |
+| `BISCUIT_TEST_LEVEL_REQUIRED=2\|3` | Missing harness panics instead of skipping.  |
+| `BISCUIT_BROWSER_REQUIRED=1`      | Missing Chrome panics instead of skipping.   |
+| `RUN_LEVEL3=1`                    | Opt-in for OS-keyboard-injection tests.      |
 
 ## Fixtures and Env Guards
 
@@ -155,16 +208,38 @@ Fuzz is **not** part of `sanity`, `test`, or PR gates. It runs nightly in CI.
 
 ## Key Crates
 
-| Crate | Purpose |
-|-------|---------|
-| `test_toolkit` | `require_level!`, `EnvGuard`, `trace_phase!` |
-| `biscuit_test_harness` | Terminal harnesses (WezTerm, Kitty, tmux, Apple Terminal) |
-| `biscuit_browser_harness` | Headless Chrome harness (`ChromeHarness`, `require_browser`) |
-| `criterion` | Benchmarking |
-| `rstest` | Fixtures and parameterization |
-| `serial_test` | Serialize env/stateful tests |
-| `pretty_assertions` | Better diffs |
-| `insta` | Snapshot testing |
+| Crate                     | Purpose                                                                                                                                                         |
+|---------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `test_toolkit`            | `require_level!`, `EnvGuard`, `trace_phase!`                                                                                                                    |
+| `biscuit_test_harness`    | Terminal harnesses (WezTerm, Kitty, tmux, Apple Terminal); `SharedHarness` + per-backend `shared_or_spawn()`; `biscuit-harness-broker` binary used by `test-l2`. For backend selection and API, load the `biscuit-test-harness` skill via the Skill tool. |
+| `biscuit_browser_harness` | Headless Chrome harness (`ChromeHarness`, `require_browser`)                                                                                                    |
+| `criterion`               | Benchmarking                                                                                                                                                    |
+| `rstest`                  | Fixtures and parameterization                                                                                                                                   |
+| `serial_test`             | Serialize env/stateful tests                                                                                                                                    |
+| `pretty_assertions`       | Better diffs                                                                                                                                                    |
+| `insta`                   | Snapshot testing                                                                                                                                                |
+
+## Topic Pages
+
+Open the topic file when the task matches:
+
+| Topic                                                                | File                                    |
+|----------------------------------------------------------------------|-----------------------------------------|
+| L2 WezTerm capture gotchas (SGR collapsing, semicolon vs colon form). For backend selection / harness API, load the `biscuit-test-harness` skill via the Skill tool. | `wezterm-harness-pitfalls.md`           |
+| L2 Apple Terminal pitfalls (`do script` reuse, focus-steal, **resolved:** orphan leaks, plain-text capture) | `apple-terminal-harness-pitfalls.md`    |
+| CLI output (channels, color modes, completions, snapshots)           | `cli-output-testing.md`                 |
+| TUI rendering and event/reducer tests                                | `tui-testing.md`                        |
+| Browser tests (computed-style assertions)                            | `browser-testing.md`                    |
+| Integration tests                                                    | `integration-tests.md`                  |
+| Unit tests                                                           | `unit-tests.md`                         |
+| Snapshots and redaction                                              | `snapshots.md`, `snapshot-redaction.md` |
+| Doc tests                                                            | `doc-tests.md`                          |
+| Mocking                                                              | `mocking.md`                            |
+| Property testing                                                     | `property-testing.md`                   |
+| Fuzzing                                                              | `fuzzing.md`                            |
+| Performance testing tool choice (Criterion vs Divan)                 | `performance-testing.md`                |
+| Criterion benchmarking (getting started → deep dive → Bencher)       | `criterion.md`                          |
+| Nextest details                                                      | `nextest.md`                            |
 
 ## Resources
 

@@ -29,6 +29,7 @@
 
 pub mod block;
 pub mod cleanup;
+pub mod code_block;
 pub mod compose;
 pub mod delta;
 pub mod dsl;
@@ -39,6 +40,7 @@ pub mod hash;
 pub mod highlighting;
 pub mod inline;
 mod inline_html;
+pub mod language_grammar;
 pub mod normalize;
 pub mod output;
 pub mod reference;
@@ -52,7 +54,13 @@ pub use delta::{
     BrokenLink, ChangeAction, CodeBlockChange, ContentChange, DeltaStatistics, DocumentChange,
     FrontmatterChange, MarkdownDelta, MovedSection, SectionId, SectionPath,
 };
+pub use code_block::{CodeBlock, CodeBlockError};
 pub use frontmatter::{Frontmatter, MergeStrategy};
+pub use hash::{
+    ComputedHash, DetailedValue, FmHashPair, MdHashKind, MdHashOptions, ParseMdHashKindError,
+    SectionTuple,
+};
+pub use language_grammar::{LanguageGrammar, LanguageGrammarError};
 pub use normalize::{
     HeadingAdjustment, HeadingLevel, NormalizationError, NormalizationReport, StructureIssue,
     StructureIssueKind, StructureValidation, ViolationCorrection,
@@ -62,9 +70,11 @@ pub use reference::{
     ReferenceError, ReferenceGraph, ReferenceGraphOptions, ReferenceKind, ReferenceRecord,
     ReferenceSet, TransclusionRef,
 };
+#[allow(deprecated)]
 pub use render_tree::TerminalCodeRenderer;
 pub use toc::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode};
 pub use types::{FrontmatterMap, MarkdownError, MarkdownResult};
+#[allow(deprecated)]
 pub use yaml_block::{YamlBlock, YamlBlockError};
 
 use std::path::Path;
@@ -569,10 +579,49 @@ impl Markdown {
         output::as_ast(self)
     }
 
+    /// Folds the markdown document into the canonical renderable [`Document`].
+    ///
+    /// This is the target-agnostic intermediate representation used by the
+    /// terminal, HTML, and Markdown renderers. Serializing the returned
+    /// document to JSON produces a lossless tree that includes darkmatter
+    /// extensions such as disclosure blocks as native [`NodeKind::Disclosure`].
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::Markdown;
+    ///
+    /// let md = Markdown::new("# Hello\n\nWorld".to_string());
+    /// let document = md.as_document().unwrap();
+    ///
+    /// let json = serde_json::to_string_pretty(&document).unwrap();
+    /// assert!(json.contains("heading"));
+    /// ```
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`MarkdownError::RenderTree`](crate::markdown::MarkdownError::RenderTree)
+    /// when the render tree fold fails (for example, a malformed disclosure
+    /// block).
+    pub fn as_document(&self) -> MarkdownResult<renderable::tree::Document> {
+        Ok(render_tree::entrypoints::to_render_document(self)?.0)
+    }
+
     /// Converts the markdown document to HTML with syntax highlighting.
     ///
-    /// This method renders the markdown content as HTML, applying syntax highlighting
-    /// to code blocks and prose elements based on the provided options.
+    /// Routes through the render-tree browser pipeline
+    /// ([`render_tree_html`](crate::markdown::render_tree::render_tree_html)):
+    /// the markdown folds to a [`Document`](renderable::tree::Document) and the
+    /// browser renderer streams the final HTML string. `style:` frontmatter
+    /// hyperlink / image color injection is reproduced by the entry point's
+    /// inline-style decoration, and fenced code blocks are syntax-highlighted
+    /// through the wired [`TerminalCodeRenderer`] hook. This is the only HTML
+    /// render path; the legacy event-stream serializer has been deleted.
+    ///
+    /// When `options.hr_defaults` is unset, a document's deprecated top-level
+    /// `hr:` frontmatter still seeds bare-rule defaults — restoring the bespoke
+    /// serializer's direct-API fallback so `as_html(HtmlOptions::default())`
+    /// honors it without routing through a [`DarkmatterPage`](crate::layout::DarkmatterPage).
     ///
     /// ## Examples
     ///
@@ -582,14 +631,16 @@ impl Markdown {
     ///
     /// let md = Markdown::new("# Hello\n\nWorld".to_string());
     /// let html = md.as_html(HtmlOptions::default()).unwrap();
-    /// assert!(html.contains("<h1>"));
+    /// assert!(html.contains("<h1"));
     /// ```
     ///
     /// ## Errors
     ///
-    /// Returns an error if theme loading fails or highlighting encounters issues.
+    /// Returns [`MarkdownError::RenderTree`](crate::markdown::MarkdownError::RenderTree)
+    /// when the render tree fails structural validation or a strict-mode
+    /// rejection occurs.
     pub fn as_html(&self, options: output::HtmlOptions) -> MarkdownResult<String> {
-        output::as_html(self, options)
+        Ok(render_tree::render_tree_html(self, &options)?.output)
     }
 
     /// Renders the markdown document as ANSI-styled terminal output.
@@ -597,6 +648,10 @@ impl Markdown {
     /// Returns a string containing ANSI escape codes for syntax highlighting,
     /// styled headings, and formatted block elements including inline images
     /// (via Kitty/iTerm2 protocols through biscuit-terminal).
+    ///
+    /// When `options.hr_defaults` is unset, a document's deprecated top-level
+    /// `hr:` frontmatter still seeds bare-rule defaults — the direct-API
+    /// counterpart to the [`as_html`](Self::as_html) fallback.
     ///
     /// ## Examples
     ///
@@ -612,19 +667,11 @@ impl Markdown {
     ///
     /// ## Errors
     ///
-    /// Returns an error if terminal rendering fails (e.g. theme loading issues).
+    /// Returns [`MarkdownError::RenderTree`](crate::markdown::MarkdownError::RenderTree)
+    /// when the render tree fails structural validation or a strict-mode
+    /// rejection occurs.
     pub fn as_terminal(&self, options: output::TerminalOptions) -> MarkdownResult<String> {
-        output::for_terminal(self, options)
-    }
-
-    /// Internal entry point that passes an optional page layout context through
-    /// to the terminal renderer so per-component alignment and fill are honoured.
-    pub(crate) fn as_terminal_with_layout(
-        &self,
-        options: output::TerminalOptions,
-        layout_ctx: Option<&crate::layout::LayoutContext>,
-    ) -> MarkdownResult<String> {
-        output::terminal::for_terminal_with_layout(self, options, layout_ctx)
+        Ok(render_tree::render_tree_terminal(self, &options)?.output)
     }
 
     /// Extracts a Table of Contents from the markdown document.
@@ -852,7 +899,18 @@ impl TryFrom<&Path> for Markdown {
 
     fn try_from(path: &Path) -> Result<Self, Self::Error> {
         let content = std::fs::read_to_string(path)?;
-        let md = Markdown::try_from_content(content)?;
+        // Parse with a path-aware context so a frontmatter error names the
+        // offending file. `try_from_content` would build an "unknown" context,
+        // and `with_source` only runs on success — so without this the path is
+        // lost on exactly the error that needs it.
+        let absolute = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            absolute,
+            path.to_path_buf(),
+            content.as_str(),
+        );
+        let (frontmatter, remaining) = frontmatter::parse_frontmatter(&content, ctx)?;
+        let md = Self::with_frontmatter(frontmatter, remaining);
         Ok(md.with_source(ComposeSource::infer_from_path(path)))
     }
 }
@@ -965,6 +1023,75 @@ title: Test
         let md: Markdown = content.into();
         assert!(md.frontmatter().is_empty());
         assert_eq!(md.content(), "# Plain content");
+    }
+
+    /// `as_html` must surface a malformed code-block directive (an invalid
+    /// highlight range) as a fatal `MarkdownError::InvalidLineRange`, matching
+    /// the fatal-directive browser contract the tree cutover restored via the
+    /// `validate_code_directives` preflight (review-2 finding 3). A well-formed
+    /// directive must still render cleanly.
+    #[test]
+    fn as_html_errors_on_malformed_code_directive() {
+        let bad: Markdown = "```rust highlight=1-2-3\nfn main() {}\n```\n".into();
+        let err = bad
+            .as_html(output::HtmlOptions::default())
+            .expect_err("malformed highlight range must fail as_html");
+        assert!(
+            matches!(err, MarkdownError::InvalidLineRange(_)),
+            "expected MarkdownError::InvalidLineRange, got {err:?}"
+        );
+
+        let good: Markdown = "```rust highlight=2\nfn main() {}\n```\n".into();
+        let html = good
+            .as_html(output::HtmlOptions::default())
+            .expect("well-formed directive must render");
+        assert!(html.contains("main"));
+    }
+
+    /// A structured link directive must lower to real HTML attributes through
+    /// the tree-backed `as_html` (review-2 finding 2): `class`, `target`,
+    /// `data-prompt`, and `data-*` must survive, and the raw directive must not
+    /// leak as a `title="…"` attribute. No frontmatter hyperlink style is
+    /// configured, proving the lowering is unconditional.
+    #[test]
+    fn as_html_preserves_structured_link_metadata() {
+        let md: Markdown = r#"[Read docs](https://example.com "class='btn' target='_blank' prompt='Read docs' data-id='42'")"#.into();
+        let html = md
+            .as_html(output::HtmlOptions::default())
+            .expect("structured link must render");
+
+        assert!(html.contains(r#"href="https://example.com""#), "html={html}");
+        assert!(html.contains(r#"class="btn""#), "class lost; html={html}");
+        assert!(html.contains(r#"target="_blank""#), "target lost; html={html}");
+        assert!(
+            html.contains(r#"data-prompt="Read docs""#),
+            "prompt lost; html={html}"
+        );
+        assert!(html.contains(r#"data-id="42""#), "data-* lost; html={html}");
+        assert!(
+            !html.contains("title="),
+            "raw structured directive leaked as title; html={html}"
+        );
+        assert!(html.contains("Read docs"), "link text lost; html={html}");
+    }
+
+    /// A structured link carrying only a `style='…'` directive must lower to a
+    /// `style="…"` attribute even with no frontmatter hyperlink style — the
+    /// per-link inline CSS the tree path previously dropped when no frontmatter
+    /// style was set (review-2 finding 2).
+    #[test]
+    fn as_html_preserves_structured_link_inline_style() {
+        let md: Markdown =
+            r#"[Click here](https://example.com "class='btn' style='color:red'")"#.into();
+        let html = md
+            .as_html(output::HtmlOptions::default())
+            .expect("structured link must render");
+
+        assert!(html.contains(r#"class="btn""#), "class lost; html={html}");
+        assert!(
+            html.contains("style=") && html.contains("red"),
+            "inline style lost; html={html}"
+        );
     }
 
     #[test]
@@ -1390,9 +1517,7 @@ title: Test
     #[test]
     fn test_dim_full_pipeline_terminal() {
         use crate::markdown::highlighting::{ColorMode, ThemePair};
-        use crate::markdown::output::terminal::{
-            ColorDepth, DimMode, TerminalOptions, for_terminal,
-        };
+        use crate::markdown::output::terminal::{ColorDepth, DimMode, TerminalOptions};
 
         let md: Markdown = "This is ⌄dimmed⌄ text.".into();
         let options = TerminalOptions {
@@ -1409,8 +1534,9 @@ title: Test
             mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
             hyperlink_mode: crate::markdown::output::terminal::HyperlinkMode::Always,
             hr_defaults: None,
+            code_block_mode: crate::markdown::highlighting::CodeBlockMode::default(),
         };
-        let output = for_terminal(&md, options).unwrap();
+        let output = md.as_terminal(options).unwrap();
 
         assert!(
             output.contains("\x1b[2m"),
@@ -1425,22 +1551,30 @@ title: Test
         );
     }
 
-    /// Full pipeline: Markdown source `⌄dim⌄` → HTML output contains literal `⌄dim⌄`.
+    /// Full pipeline: Markdown source `⌄dim⌄` → HTML lowers the dim span to a
+    /// styled `<span>` carrying the dimmed text (the `⌄` delimiters are
+    /// consumed, not echoed). This is the tree path's deliberate fidelity
+    /// improvement over the legacy literal-delimiter passthrough.
     #[test]
     fn test_dim_full_pipeline_html() {
-        use crate::markdown::output::{HtmlOptions, as_html};
+        use crate::markdown::output::HtmlOptions;
 
         let md: Markdown = "This is ⌄dimmed⌄ text.".into();
-        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        let html = md.as_html(HtmlOptions::default()).unwrap();
 
         assert!(
-            html.contains("⌄dimmed⌄"),
-            "HTML output should preserve ⌄ delimiters as literal, got: {}",
+            html.contains("dimmed"),
+            "HTML output should preserve the dimmed text, got: {}",
+            html
+        );
+        assert!(
+            !html.contains('⌄'),
+            "HTML output should consume the ⌄ delimiters, got: {}",
             html
         );
         assert!(
             !html.contains("<dim>"),
-            "HTML output should not contain <dim> tag"
+            "HTML output should not contain a <dim> tag"
         );
     }
 
@@ -1449,10 +1583,8 @@ title: Test
     #[test]
     fn test_dim_cross_format_consistency() {
         use crate::markdown::highlighting::{ColorMode, ThemePair};
-        use crate::markdown::output::terminal::{
-            ColorDepth, DimMode, TerminalOptions, for_terminal,
-        };
-        use crate::markdown::output::{HtmlOptions, as_html};
+        use crate::markdown::output::terminal::{ColorDepth, DimMode, TerminalOptions};
+        use crate::markdown::output::HtmlOptions;
         use crate::testing::strip_ansi_codes;
 
         let md: Markdown = "The ⌄dimmed text⌄ here.".into();
@@ -1472,12 +1604,13 @@ title: Test
             mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
             hyperlink_mode: crate::markdown::output::terminal::HyperlinkMode::Always,
             hr_defaults: None,
+            code_block_mode: crate::markdown::highlighting::CodeBlockMode::default(),
         };
-        let terminal_output = for_terminal(&md, terminal_options).unwrap();
+        let terminal_output = md.as_terminal(terminal_options).unwrap();
         let terminal_plain = strip_ansi_codes(&terminal_output);
 
         // HTML output
-        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        let html = md.as_html(HtmlOptions::default()).unwrap();
 
         // Both should contain the visible text "dimmed text"
         assert!(

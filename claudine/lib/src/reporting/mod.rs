@@ -50,12 +50,10 @@ impl ReportingStore {
         })
     }
 
-    /// Return the directory containing source JSONL logs.
     pub fn logs_dir(&self) -> &Path {
         &self.logs_dir
     }
 
-    /// Return the SQLite database path.
     pub fn db_path(&self) -> &Path {
         &self.db_path
     }
@@ -156,10 +154,12 @@ mod tests {
             agent_type: None,
             notification_type: None,
             notification_message: None,
+            agent_pid: Some(12_345),
             extra: Default::default(),
             env: EnvironmentContext {
                 package_area: Some("claudine".to_string()),
                 package: Some("claudine-cli".to_string()),
+                claudine_pid: Some(54_321),
                 ..EnvironmentContext::default()
             },
         };
@@ -178,10 +178,12 @@ mod tests {
             agent_type: None,
             notification_type: None,
             notification_message: None,
+            agent_pid: None,
             extra: Default::default(),
             env: EnvironmentContext {
                 package_area: Some("sniff".to_string()),
                 package: Some("sniff-cli".to_string()),
+                claudine_pid: None,
                 ..EnvironmentContext::default()
             },
         };
@@ -217,5 +219,93 @@ mod tests {
             report.sessions[0].session_id.as_deref(),
             Some("claudine-session")
         );
+        assert_eq!(report.sessions[0].claudine_pid, Some(54_321));
+        assert_eq!(report.sessions[0].agent_pid, Some(12_345));
+    }
+
+    /// Review-1 Finding 3 — event-row queries (errors, session-detail events)
+    /// project the `events` table PID columns into their DTOs.
+    #[test]
+    fn errors_and_session_detail_project_pid_columns() {
+        let workspace = tempdir().unwrap();
+        let logs_dir = workspace.path().join("logs");
+        let db_path = workspace.path().join("metrics.db");
+        fs::create_dir_all(&logs_dir).unwrap();
+
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 3, 8).unwrap();
+        let log_path = logs_dir.join("2026-03-08.jsonl");
+
+        let env = EnvironmentContext {
+            claudine_pid: Some(54_321),
+            ..EnvironmentContext::default()
+        };
+
+        let start = EventMeta {
+            provider: Provider::Claude,
+            event: AgenticEvent::SessionStart,
+            timestamp: Utc.with_ymd_and_hms(2026, 3, 8, 18, 0, 0).unwrap(),
+            session_id: Some("pid-session".to_string()),
+            cwd: Some("/repo".to_string()),
+            tool_name: None,
+            tool_input: None,
+            tool_response: None,
+            error: None,
+            prompt: None,
+            agent_type: None,
+            notification_type: None,
+            notification_message: None,
+            agent_pid: Some(12_345),
+            extra: Default::default(),
+            env: env.clone(),
+        };
+
+        let tool_error = EventMeta {
+            provider: Provider::Claude,
+            event: AgenticEvent::ToolError,
+            timestamp: Utc.with_ymd_and_hms(2026, 3, 8, 18, 0, 5).unwrap(),
+            session_id: Some("pid-session".to_string()),
+            cwd: Some("/repo".to_string()),
+            tool_name: Some("Bash".to_string()),
+            tool_input: None,
+            tool_response: None,
+            error: Some("boom".to_string()),
+            prompt: None,
+            agent_type: None,
+            notification_type: None,
+            notification_message: None,
+            agent_pid: Some(12_345),
+            extra: Default::default(),
+            env,
+        };
+
+        fs::write(
+            &log_path,
+            format!(
+                "{}\n{}\n",
+                serde_json::to_string(&start).unwrap(),
+                serde_json::to_string(&tool_error).unwrap()
+            ),
+        )
+        .unwrap();
+
+        let mut store = ReportingStore::open(&logs_dir, &db_path).unwrap();
+        store.sync(SyncRequest::All).unwrap();
+
+        let errors = store
+            .errors(DateRange::single(date), &ReportingFilters::default(), 10)
+            .unwrap();
+        assert_eq!(errors.errors.len(), 1);
+        assert_eq!(errors.errors[0].claudine_pid, Some(54_321));
+        assert_eq!(errors.errors[0].agent_pid, Some(12_345));
+
+        let detail = store.session_detail("pid-session").unwrap();
+        let error_event = detail
+            .events
+            .iter()
+            .find(|e| e.event == AgenticEvent::ToolError)
+            .expect("tool_error event must be present");
+        assert_eq!(error_event.claudine_pid, Some(54_321));
+        assert_eq!(error_event.agent_pid, Some(12_345));
+        assert_eq!(detail.errors[0].agent_pid, Some(12_345));
     }
 }

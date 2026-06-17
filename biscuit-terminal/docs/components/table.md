@@ -1,6 +1,6 @@
 # Table
 
-Columnar data display component with support for typed cell content, automatic column width calculation, alignment, word wrapping, and ANSI-aware rendering. Handles text, integers (with thousands separators), floats, and currency values.
+Columnar data display component with support for typed cell content, automatic column width calculation, alignment, word wrapping, and ANSI-aware rendering. Handles text, integers (with thousands separators), floats, currency values, and inline [Prose](./prose.md) content.
 
 ## Programmatic Use
 
@@ -19,6 +19,14 @@ let table = Table::new()
         vec!["Gadget".into(), 42i64.into(), TableCellContent::Currency(Currency::USD, 149.50)],
     ]);
 
+// A styled cell with capability-aware inline content
+let styled = Table::new()
+    .with_columns(vec![TableColumn::new("Feature"), TableColumn::new("Status")])
+    .with_data(vec![vec![
+        Prose::new("**Bold** feature").into(),
+        Prose::new("[docs](https://example.com) — _ready_").into(),
+    ]]);
+
 let term = Terminal::default();
 println!("{}", table.display(&term));
 ```
@@ -31,8 +39,9 @@ println!("{}", table.display(&term));
 | `Integer(i64)` | `1234567` | `1,234,567` |
 | `Float(f64)` | `12345.678` | `12,345.68` |
 | `Currency(Currency, f64)` | `(USD, 1234.56)` | `$1,234.56` |
+| `StyledProse(Box<Prose>)` | `Prose::new("<b>Bold</b>")` | `Bold` (styled) |
 
-Convenience `From` implementations allow using `&str`, `String`, `i64`, and `f64` directly.
+Convenience `From` implementations allow using `&str`, `String`, `i64`, `f64`, and `Prose` directly. A `StyledProse` cell embeds capability-aware inline Prose; the cell hint records `kind == "styled_prose"` with a null `raw_value`. The tree path projects Prose's semantic inline nodes (Terminal/Browser/Markdown); the terminal bespoke path resolves every styled cell to `Text(prose.render(term))` exactly once before width planning. Prose's own `Layout` is intentionally not applied — the table owns cell geometry. See [Prose in table cells](./prose.md#prose-in-table-cells) for details.
 
 ### Key API
 

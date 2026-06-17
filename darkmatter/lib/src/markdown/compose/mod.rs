@@ -1,16 +1,17 @@
 //! Compose pipeline for markdown document preparation and transclusion.
 //!
 //! This module provides the `compose()` family of methods on `Markdown`
-//! for running operations in three phases:
+//! for running operations in four phases:
 //!
 //! **Inline Pre** (serial):
-//! 0. **Schema Validation** - Validate frontmatter against `$schema` or
-//!    `ComposeOptions::baseline_schema`. Runs after `--set` / `--state`
-//!    overrides are applied but before interpolation or shell expansion.
-//! 1. **Frontmatter Interpolation** - Resolve `{{variable}}` in frontmatter values.
+//! 0. **Frontmatter Interpolation** - Resolve `{{variable}}` in frontmatter values.
 //!    When shell expansion is enabled, templated keys that reference
 //!    shell-pending values (top-level `$(...)`) are deferred for a second
 //!    interpolation pass after step 2 completes.
+//! 1. **Schema Validation** (pre-operation stage) - Validate frontmatter against `$schema` or
+//!    `ComposeOptions::baseline_schema`. Runs after `--set` / `--state`
+//!    overrides and frontmatter interpolation are applied, but before
+//!    frontmatter shell expansion.
 //! 2. **Frontmatter Shell Expansion** - Execute shell commands in frontmatter
 //!    values, then re-run interpolation to resolve any keys deferred above.
 //! 3. **Text Replacement** - Replace literal strings from frontmatter `replace` map
@@ -25,13 +26,14 @@
 //! 10. **Frontmatter Transclusion** - Prepend/append `prologue`/`epilogue` documents
 //! 11. **Code Transclusion** - Include `::code` file content as fenced blocks
 //! 12. **TOC Linking** - Expand `::toc-linking` directives into heading link lists
+//! 13. **File Links** - Expand `::file-links` directives into a linked file tree
 //!
 //! **Inline Post** (serial):
-//! 13. **Cleanup** - Normalize markdown formatting
-//! 14. **Normalization** - Adjust heading levels
+//! 14. **Cleanup** - Normalize markdown formatting
+//! 15. **Normalization** - Adjust heading levels
 //!
 //! **Finalization** (root-only serial):
-//! 15. **Link Normalization** - Convert absolute paths back to portable forms
+//! 16. **Link Normalization** - Convert absolute paths back to portable forms
 //!
 //! ## Examples
 //!
@@ -51,12 +53,27 @@
 //!     .disable(ComposeOperation::Normalization);
 //! let report = md.compose_with(options).unwrap();
 //! ```
+//!
+//! ## Maintenance
+//!
+//! Keep this module from becoming a "god file":
+//!
+//! - New user-toggleable compose stages must add a [`ComposeOperationDescriptor`]
+//!   entry in `types.rs` and a dedicated stage module under `markdown/compose/`.
+//! - Non-toggleable pipeline sub-stages (schema validation, effective-state build,
+//!   transclusion parse/prepare/resolve/apply) stay in `perf.rs` and are not added
+//!   to the operation descriptor table.
+//! - New render-tree block extensions extend a dedicated `markdown/render_tree/`
+//!   module rather than inline code in the fold.
+//! - Large in-file test suites move to a sibling `tests` module when production
+//!   code around them changes.
 
 pub(crate) mod cache;
 pub mod conditions;
 pub mod context;
 mod frontmatter_interpolation;
 pub(crate) mod frontmatter_shell_expansion;
+pub(crate) mod indent;
 pub(crate) mod parse_utils;
 pub(crate) mod perf;
 mod schema_validation;
@@ -65,10 +82,13 @@ mod types;
 
 pub mod block_pairs;
 pub mod expression;
+pub mod file_links;
 pub mod interpolation;
 pub(crate) mod link_normalization;
 pub(crate) mod link_resolve;
 pub mod page_blocks;
+pub(crate) mod remote_fetch;
+pub mod remote;
 pub mod replacement;
 pub mod shell_blocks;
 pub mod shell_expansion;
@@ -78,17 +98,26 @@ pub mod transclusion;
 pub use biscuit_file::PathPosition;
 pub use cache::{CacheAccessMode, CacheFreshnessMode, CacheStats};
 pub use context::ContextMergeDiagnostic;
+pub use file_links::FileLinksError;
+pub use remote::{
+    DEFAULT_REMOTE_CONCURRENCY, DiscoveredRemoteUrl, REMOTE_CONCURRENCY_ENV, RemoteFreshnessMode,
+    RemoteReadConfig, RemoteReadError, RemoteUrlCatalog, RemoteUrlConsumer,
+    resolve_remote_concurrency,
+};
+pub use remote_fetch::RemoteFetchStats;
 pub use shell_blocks::ShellBlockError;
 pub use shell_expansion::ShellCommandOrigin;
 pub use shell_expansion::ShellExpansionError;
 pub use shell_expansion::ShellTimeoutBehavior;
 pub use state::{EffectiveState, EffectiveStateBuilder};
+pub(crate) use state::ResolvingLookup;
 pub use toc_linking::TocLinkingError;
 pub use transclusion::TransclusionError;
 pub use types::{
-    ComposeContext, ComposeOperation, ComposeOperationSet, ComposeOptions, ComposePerfMetric,
-    ComposePerfReport, ComposePhase, ComposeReport, ComposeSource, ComposeStage, ComposeWarning,
-    SourceRange,
+    ComposeContext, ComposeOperation, ComposeOperationDescriptor, ComposeOperationPerfMetric,
+    ComposeOperationSet, ComposeOptions, ComposePerfMetric, ComposePerfReport, ComposePhase,
+    ComposeReport, ComposeSource, ComposeStage, ComposeWarning, ShellCommandSpan, SourceRange,
+    redact_shell_command,
 };
 
 // Internal re-exports for crate modules that still use TransclusionOptions
@@ -338,10 +367,33 @@ enum PreparedTransclusion {
         directive_options: transclusion::BlockOptions,
         line: usize,
     },
+    RemoteFile {
+        order: usize,
+        target: ApplyTarget,
+        url: url::Url,
+        directive_options: transclusion::BlockOptions,
+        insertion_context: Option<(usize, usize)>,
+    },
+    RemoteCode {
+        order: usize,
+        span: std::ops::Range<usize>,
+        url: url::Url,
+        directive_options: transclusion::BlockOptions,
+        language: String,
+    },
     Toc {
         order: usize,
         span: std::ops::Range<usize>,
         directive: toc_linking::TocLinkingDirective,
+    },
+    FileLinks {
+        order: usize,
+        span: std::ops::Range<usize>,
+        /// The parsed directive. Discovery is deferred to the concurrent
+        /// resolve stage so multiple directives' filesystem walks run in
+        /// parallel, and each directive's tree is built from its discovered
+        /// entries rather than walked a second time for rendering.
+        directive: file_links::FileLinksDirective,
     },
 }
 
@@ -443,23 +495,85 @@ impl Markdown {
             cache::FileStore::resolve_cache_root(Some(root), options.cache_namespace.as_deref())
         });
 
-        let mut runtime = shell_expansion::types::PipelineRuntime::new(
+        // Share a persistent store with the remote-fetch runtime so remote
+        // artifacts are cached across runs alongside local compose artifacts.
+        let remote_store = persistent_root.as_ref().and_then(|root| {
+            cache::FileStore::new(root.clone())
+                .map(std::sync::Arc::new)
+                .ok()
+        });
+        let remote_fetch = remote_fetch::RemoteFetchRuntime::with_store(
+            &options.remote_read_config,
+            remote_store,
+        );
+
+        let mut runtime = shell_expansion::types::PipelineRuntime::with_remote_fetch(
             options.max_transclusion_depth,
             options.cache_access_mode,
             persistent_root,
+            remote_fetch,
         );
+
+        // Eagerly register discovered remote URLs and start fetching. The two
+        // discovery paths gate independently: directive (`::file`/`::code`)
+        // discovery requires the explicit remote-transclusion opt-in, while
+        // URL-typed expression-function arguments (`frontmatter(url)`, …) are a
+        // read-side capability enabled whenever remote reads are configured —
+        // so a caller that allows a host but never enables transclusion can
+        // still prefetch and read its expression URLs.
+        if options.remote_reads_enabled() {
+            let mut catalog = remote::RemoteUrlCatalog::new();
+
+            if options.allow_remote_transclusion
+                && options.is_enabled(ComposeOperation::BlockTransclusion)
+            {
+                let directives = transclusion::parse_directives(
+                    &self.content,
+                    self.source_context_for_errors(),
+                )
+                .unwrap_or_default();
+                for entry in
+                    remote::discover_remote_urls_from_directives(&directives, &options.source)
+                {
+                    catalog.add(entry);
+                }
+            }
+
+            if options.is_enabled(ComposeOperation::Interpolation) {
+                for entry in
+                    remote::discover_remote_urls_from_expressions(&self.content, &options.source)
+                {
+                    catalog.add(entry);
+                }
+            }
+
+            for url in catalog.urls() {
+                runtime.remote_fetch.register_and_fetch(url);
+            }
+        }
+
         let mut report = self.run_compose_pipeline_internal(options, &mut runtime)?;
         report.cache_stats = Some(runtime.cache.stats());
+        report.remote_fetch_stats = Some(runtime.remote_fetch.stats());
         Ok(report)
     }
 
     /// Internal recursive pipeline runner shared by root and child documents.
     ///
-    /// Executes operations in three phases:
+    /// Frontmatter is resolved in a fixed order before the body stages run:
+    /// **Interp pass 1 → Schema Validation → Shell Expansion → Interp pass 2**.
+    /// Pass 1 resolves `{{ }}` against seed values; schema validation and
+    /// coercion run next; `$(...)` frontmatter values then expand; pass 2
+    /// resolves any keys that were deferred because they referenced
+    /// shell-pending values. Read-side functions and `doc.*` are available in
+    /// both passes.
+    ///
+    /// Executes operations in four phases:
     /// 1. **Inline Pre** (serial): TextReplacement, PageBlocks, Interpolation, ShellExpansion, ShellBlocks
     /// 2. **Transclusion** (prepared serially, resolved concurrently): BlockTransclusion,
-    ///    FrontmatterTransclusion, CodeTransclusion, TocLinking
+    ///    FrontmatterTransclusion, CodeTransclusion, TocLinking, FileLinks
     /// 3. **Inline Post** (serial): Cleanup, Normalization
+    /// 4. **Finalization** (root-only serial): LinkNormalization
     #[instrument(skip_all, fields(source = ?options.source))]
     pub(crate) fn run_compose_pipeline_internal(
         &mut self,
@@ -496,14 +610,6 @@ impl Markdown {
                 options.is_enabled(ComposeOperation::FrontmatterShellExpansion),
             );
 
-            // Schema Validation: check frontmatter against $schema or baseline
-            // after overrides are applied but before interpolation/shell expansion.
-            let sv_start = perf.is_enabled().then(std::time::Instant::now);
-            schema_validation::run(self, &options)?;
-            if let Some(start) = sv_start {
-                perf.record(perf::PerfMetricKind::SchemaValidation, start.elapsed());
-            }
-
             let shell_expansion_enabled =
                 options.is_enabled(ComposeOperation::FrontmatterShellExpansion);
 
@@ -522,6 +628,7 @@ impl Markdown {
                     options.context(),
                     options.fail_fast,
                     shell_expansion_enabled,
+                    Some(options.frontmatter_resolution_context()),
                 )?;
                 report.frontmatter_interpolations_applied = fm_report.replacements;
                 report.warnings.extend(fm_report.warnings);
@@ -530,6 +637,33 @@ impl Markdown {
                         perf::PerfMetricKind::FrontmatterInterpolation,
                         start.elapsed(),
                     );
+                }
+            }
+
+            // Schema Validation: check frontmatter against $schema or baseline
+            // AFTER frontmatter interpolation so template values like
+            // `runtime_agent: '{{ env.AGENT }}'` are evaluated to their
+            // resolved form before being checked. Runs BEFORE shell
+            // expansion so the validator can fail-fast without triggering
+            // (potentially expensive or side-effectful) shell commands when
+            // the resolved frontmatter is invalid. This stage also coerces
+            // schema-recognized scalars (e.g. the string "true" against a
+            // boolean field) and writes the real types back into frontmatter,
+            // so later stages and the composed output see coerced values.
+            //
+            // For frontmatter values that depend on shell-expanded inputs,
+            // the second interpolation pass below will re-resolve them and
+            // the prepare-time consumer (e.g. claudine's `prepare_*_with_schema`)
+            // can re-validate the post-shell effective frontmatter.
+            // Skipped by internal non-terminal passes (shell-command
+            // discovery) that strip FrontmatterShellExpansion: validating a
+            // still-literal `$(...)` value there would wrongly report it as a
+            // final violation. See `ComposeOptions::skip_schema_validation`.
+            if !options.skip_schema_validation {
+                let sv_start = perf.is_enabled().then(std::time::Instant::now);
+                schema_validation::run(self, &options)?;
+                if let Some(start) = sv_start {
+                    perf.record(perf::PerfMetricKind::SchemaValidation, start.elapsed());
                 }
             }
 
@@ -568,6 +702,7 @@ impl Markdown {
                         options.context(),
                         options.fail_fast,
                         false,
+                        Some(options.frontmatter_resolution_context()),
                     )?;
                     report.frontmatter_interpolations_applied += fm_report.replacements;
                     report.warnings.extend(fm_report.warnings);
@@ -659,38 +794,12 @@ impl Markdown {
                             &options,
                             runtime,
                             &mut report,
+                            &mut perf,
                         )?;
-                        if let Some(start) = op_start {
-                            let kind = match operation {
-                                ComposeOperation::FrontmatterInterpolation => {
-                                    Some(perf::PerfMetricKind::FrontmatterInterpolation)
-                                }
-                                ComposeOperation::FrontmatterShellExpansion => {
-                                    Some(perf::PerfMetricKind::FrontmatterShellExpansion)
-                                }
-                                ComposeOperation::TextReplacement => {
-                                    Some(perf::PerfMetricKind::TextReplacement)
-                                }
-                                ComposeOperation::PageBlocks => {
-                                    Some(perf::PerfMetricKind::PageBlocks)
-                                }
-                                ComposeOperation::Interpolation => {
-                                    Some(perf::PerfMetricKind::Interpolation)
-                                }
-                                ComposeOperation::ShellExpansion => {
-                                    Some(perf::PerfMetricKind::ShellExpansion)
-                                }
-                                ComposeOperation::ShellBlocks => {
-                                    Some(perf::PerfMetricKind::ShellBlocks)
-                                }
-                                ComposeOperation::LinkResolve => {
-                                    Some(perf::PerfMetricKind::LinkResolve)
-                                }
-                                _ => unreachable!(),
-                            };
-                            if let Some(kind) = kind {
-                                perf.record(kind, start.elapsed());
-                            }
+                        if let Some(start) = op_start
+                            && let Some(kind) = operation.perf_metric()
+                        {
+                            perf.record(kind.to_perf_metric_kind(), start.elapsed());
                         }
                     }
                     ComposePhase::Transclusion => {
@@ -719,29 +828,20 @@ impl Markdown {
                     ComposePhase::InlinePost => {
                         let op_start = perf.is_enabled().then(std::time::Instant::now);
                         self.run_inline_post_operation(*operation, &options, &mut report)?;
-                        if let Some(start) = op_start {
-                            let kind = match operation {
-                                ComposeOperation::Cleanup => perf::PerfMetricKind::Cleanup,
-                                ComposeOperation::Normalization => {
-                                    perf::PerfMetricKind::Normalization
-                                }
-                                _ => unreachable!(),
-                            };
-                            perf.record(kind, start.elapsed());
+                        if let Some(start) = op_start
+                            && let Some(kind) = operation.perf_metric()
+                        {
+                            perf.record(kind.to_perf_metric_kind(), start.elapsed());
                         }
                     }
                     ComposePhase::Finalization => {
                         if runtime.transclusion.depth() <= 1 {
                             let op_start = perf.is_enabled().then(std::time::Instant::now);
                             self.run_finalization_operation(*operation, &options, &mut report)?;
-                            if let Some(start) = op_start {
-                                let kind = match operation {
-                                    ComposeOperation::LinkNormalization => {
-                                        perf::PerfMetricKind::LinkNormalization
-                                    }
-                                    _ => unreachable!(),
-                                };
-                                perf.record(kind, start.elapsed());
+                            if let Some(start) = op_start
+                                && let Some(kind) = operation.perf_metric()
+                            {
+                                perf.record(kind.to_perf_metric_kind(), start.elapsed());
                             }
                         }
                     }
@@ -749,6 +849,9 @@ impl Markdown {
             }
 
             report.max_transclusion_depth = runtime.transclusion.deepest_seen;
+            if perf.is_enabled() {
+                perf.set_capture_timings(options.context().capture_timings().to_vec());
+            }
             report.perf = perf.finish();
             Ok(report)
         })();
@@ -767,6 +870,7 @@ impl Markdown {
         options: &ComposeOptions,
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
+        perf: &mut perf::PerfCollector,
     ) -> MarkdownResult<()> {
         match operation {
             // FrontmatterInterpolation is handled before EffectiveState build,
@@ -779,14 +883,16 @@ impl Markdown {
                 report.replacements_applied = self.run_replacement_stage(state, options);
                 Ok(())
             }
-            ComposeOperation::PageBlocks => self.run_page_blocks_stage(state, report),
+            ComposeOperation::PageBlocks => {
+                self.run_page_blocks_stage(state, options, runtime, report)
+            }
             ComposeOperation::Interpolation => {
                 report.interpolations_applied =
-                    self.run_interpolation_stage(state, options, report)?;
+                    self.run_interpolation_stage(state, options, runtime, report)?;
                 Ok(())
             }
             ComposeOperation::ShellExpansion => {
-                self.run_shell_expansion_stage(options, runtime, report)
+                self.run_shell_expansion_stage(options, runtime, report, perf)
             }
             ComposeOperation::ShellBlocks => {
                 let sb_ctx = self.source_context_for_errors();
@@ -914,6 +1020,12 @@ impl Markdown {
             None
         };
 
+        let file_links_directives = if operations.contains(&ComposeOperation::FileLinks) {
+            Some(file_links::parse_file_links_directives(&self.content)?)
+        } else {
+            None
+        };
+
         if let Some(start) = parse_start {
             perf_collector.record(perf::PerfMetricKind::TransclusionParse, start.elapsed());
         }
@@ -932,6 +1044,7 @@ impl Markdown {
                             transclusion::DirectiveKind::File,
                             state,
                             options,
+                            &runtime.remote_fetch,
                             report,
                             &mut prepared,
                             &mut next_order,
@@ -944,6 +1057,7 @@ impl Markdown {
                             refs,
                             state,
                             options,
+                            &runtime.remote_fetch,
                             report,
                             &mut prepared,
                             &mut next_order,
@@ -957,6 +1071,7 @@ impl Markdown {
                             transclusion::DirectiveKind::Code,
                             state,
                             options,
+                            &runtime.remote_fetch,
                             report,
                             &mut prepared,
                             &mut next_order,
@@ -968,6 +1083,15 @@ impl Markdown {
                         self.prepare_toc_transclusions(
                             directives,
                             report,
+                            &mut prepared,
+                            &mut next_order,
+                        );
+                    }
+                }
+                ComposeOperation::FileLinks => {
+                    if let Some(directives) = file_links_directives.as_ref() {
+                        self.prepare_file_links_transclusions(
+                            directives,
                             &mut prepared,
                             &mut next_order,
                         );
@@ -1024,6 +1148,7 @@ impl Markdown {
                                 inner.as_ref(),
                                 transclusion::TransclusionError::CycleDetected { .. }
                                     | transclusion::TransclusionError::MaxDepthExceeded { .. }
+                                    | transclusion::TransclusionError::RemoteFetchFailed { .. }
                             )
                     );
                     if is_structural || options.fail_fast {
@@ -1157,6 +1282,7 @@ impl Markdown {
         &mut self,
         state: &EffectiveState,
         options: &ComposeOptions,
+        runtime: &shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
     ) -> MarkdownResult<usize> {
         use interpolation::{Evaluator, ScanMode, interpolate_text};
@@ -1167,7 +1293,15 @@ impl Markdown {
             ScanMode::MarkdownAware
         };
 
-        let evaluator = Evaluator::new(state);
+        // Wrap the effective state with a resolution context so read-side
+        // expression functions (`frontmatter`, `file_exists`, `markdown_title`,
+        // …) resolve filesystem paths and — when remote reads are enabled —
+        // HTTP(S) URL arguments through the run's remote-fetch runtime.
+        let lookup = state::ResolvingLookup::new(
+            state,
+            options.expression_resolution_context(&runtime.remote_fetch),
+        );
+        let evaluator = Evaluator::new(&lookup);
         let result = interpolate_text(
             &self.content,
             &evaluator,
@@ -1206,6 +1340,7 @@ impl Markdown {
         options: &ComposeOptions,
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
+        perf: &mut perf::PerfCollector,
     ) -> MarkdownResult<()> {
         let directives =
             shell_expansion::parse_directives(&self.content, self.source_context_for_errors())?;
@@ -1224,9 +1359,23 @@ impl Markdown {
         let mut replacements = Vec::new();
 
         for directive in directives {
+            let span_start = perf.is_enabled().then(std::time::Instant::now);
             let execution =
                 execute_directive_detailed(&directive, options, &policy_paths, &mut runtime.shell)?;
-            replacements.push((directive.span.clone(), execution.combined_output()));
+            if let Some(start) = span_start {
+                perf.record_shell_span(ShellCommandSpan {
+                    command_display: redact_shell_command(&directive.raw_command),
+                    command_hash: format!(
+                        "{:016x}",
+                        biscuit_hash::xx_hash(&directive.raw_command)
+                    ),
+                    elapsed: start.elapsed(),
+                });
+            }
+            // Re-indent multi-line output to the directive's column so generated
+            // lines stay nested under the surrounding list or block quote.
+            let output = indent::indent_text(&execution.combined_output(), &directive.indent, None);
+            replacements.push((directive.span.clone(), output));
             report.warnings.extend(execution.warnings);
             report.shell_expansions_applied += 1;
         }
@@ -1240,6 +1389,8 @@ impl Markdown {
     fn run_page_blocks_stage(
         &mut self,
         state: &EffectiveState,
+        options: &ComposeOptions,
+        runtime: &shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
         debug!("compose: running page blocks");
@@ -1268,10 +1419,14 @@ impl Markdown {
             warn_unknown_options(region, report);
         }
 
+        let lookup = state::ResolvingLookup::new(
+            state,
+            options.expression_resolution_context(&runtime.remote_fetch),
+        );
         self.content = page_blocks::engine::render_page_blocks(
             &self.content,
             &regions,
-            state,
+            &lookup,
             report,
             source,
         )?;
@@ -1285,6 +1440,7 @@ impl Markdown {
         kind: transclusion::DirectiveKind,
         state: &EffectiveState,
         options: &ComposeOptions,
+        remote_fetch: &remote_fetch::RemoteFetchRuntime,
         report: &mut ComposeReport,
         prepared: &mut Vec<PreparedTransclusion>,
         next_order: &mut usize,
@@ -1370,9 +1526,13 @@ impl Markdown {
             }
 
             if let Some(expr) = &directive.options.when_expr {
+                let lookup = state::ResolvingLookup::new(
+                    state,
+                    options.expression_resolution_context(remote_fetch),
+                );
                 let should_include = transclusion::evaluate_condition(
                     expr,
-                    state,
+                    &lookup,
                     directive.line,
                     self.source_context_for_errors(),
                 )?;
@@ -1441,6 +1601,38 @@ impl Markdown {
                     prepared.push(item);
                     *next_order += 1;
                 }
+                transclusion::ResolvedTarget::Url { url, .. }
+                    if options.allow_remote_transclusion =>
+                {
+                    // The eager pre-scan only sees URLs present in the original
+                    // content. A directive whose URL was produced by an earlier
+                    // compose phase (interpolation, replacement) reaches here
+                    // unregistered, so register it now to start its fetch and
+                    // keep point-of-use from failing with "not registered".
+                    remote_fetch.register_nested(url.clone());
+                    if directive.kind == transclusion::DirectiveKind::Code {
+                        let language = transclusion::infer_language(
+                            std::path::Path::new(url.path()),
+                            &options.code_fallback_language,
+                        );
+                        prepared.push(PreparedTransclusion::RemoteCode {
+                            order: *next_order,
+                            span: directive.span.clone(),
+                            url,
+                            directive_options: directive.options.clone(),
+                            language,
+                        });
+                    } else {
+                        prepared.push(PreparedTransclusion::RemoteFile {
+                            order: *next_order,
+                            target: ApplyTarget::Replace(directive.span.clone()),
+                            url,
+                            directive_options: directive.options.clone(),
+                            insertion_context: Some((directive.span.start, directive.line)),
+                        });
+                    }
+                    *next_order += 1;
+                }
                 transclusion::ResolvedTarget::Url { url, .. } if ignore_invalid => {
                     let mut fixed_report = ComposeReport::new();
                     fixed_report.transclusions_skipped = 1;
@@ -1474,11 +1666,13 @@ impl Markdown {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn prepare_frontmatter_transclusions(
         &self,
         refs: &transclusion::FrontmatterRefs,
         _state: &EffectiveState,
         options: &ComposeOptions,
+        remote_fetch: &remote_fetch::RemoteFetchRuntime,
         _report: &mut ComposeReport,
         prepared: &mut Vec<PreparedTransclusion>,
         next_order: &mut usize,
@@ -1488,6 +1682,7 @@ impl Markdown {
                 reference,
                 SectionSlot::Prologue(index),
                 options,
+                remote_fetch,
                 prepared,
                 next_order,
             )?;
@@ -1498,6 +1693,7 @@ impl Markdown {
                 reference,
                 SectionSlot::Epilogue(index),
                 options,
+                remote_fetch,
                 prepared,
                 next_order,
             )?;
@@ -1511,6 +1707,7 @@ impl Markdown {
         reference: &str,
         slot: SectionSlot,
         options: &ComposeOptions,
+        remote_fetch: &remote_fetch::RemoteFetchRuntime,
         prepared: &mut Vec<PreparedTransclusion>,
         next_order: &mut usize,
     ) -> MarkdownResult<()> {
@@ -1570,6 +1767,25 @@ impl Markdown {
                 });
                 *next_order += 1;
             }
+            transclusion::ResolvedTarget::Url { url, .. }
+                if options.allow_remote_transclusion =>
+            {
+                // Frontmatter `prologue`/`epilogue` URLs are not seen by the
+                // eager pre-scan (it only covers directives and expression
+                // arguments), so register the slot here. Without this,
+                // `PreparedTransclusion::RemoteFile` fails at point-of-use with
+                // "URL was not registered for fetching" — matching the
+                // directive path's register-on-discovery behavior.
+                remote_fetch.register_nested(url.clone());
+                prepared.push(PreparedTransclusion::RemoteFile {
+                    order: *next_order,
+                    target: ApplyTarget::Section(slot),
+                    url,
+                    directive_options: transclusion::BlockOptions::default(),
+                    insertion_context: None,
+                });
+                *next_order += 1;
+            }
             transclusion::ResolvedTarget::Url { url, .. } if ignore_invalid => {
                 let mut fixed_report = ComposeReport::new();
                 fixed_report.transclusions_skipped = 1;
@@ -1613,6 +1829,48 @@ impl Markdown {
                 directive: directive.clone(),
             });
             *next_order += 1;
+        }
+    }
+
+    fn prepare_file_links_transclusions(
+        &self,
+        directives: &[file_links::FileLinksDirective],
+        prepared: &mut Vec<PreparedTransclusion>,
+        next_order: &mut usize,
+    ) {
+        // Discovery is intentionally NOT performed here: it runs in the
+        // concurrent resolve stage (see `resolve_file_links_transclusion`) so
+        // multiple directives' expensive filesystem walks parallelize. This
+        // loop only enqueues the parsed directive.
+        for directive in directives {
+            prepared.push(PreparedTransclusion::FileLinks {
+                order: *next_order,
+                span: directive.span.clone(),
+                directive: directive.clone(),
+            });
+            *next_order += 1;
+        }
+    }
+
+    /// Records a fetched remote URL body as a closure-hash dependency.
+    ///
+    /// The dependency's `closure_hash` is the xxHash of the response body, so a
+    /// changed remote document invalidates any parent artifact transcluding it.
+    /// No-op when the URL's content hash is unavailable (unregistered or failed).
+    fn record_remote_dependency(
+        runtime_mutex: &std::sync::Mutex<&mut shell_expansion::types::PipelineRuntime>,
+        remote_fetch: &remote_fetch::RemoteFetchRuntime,
+        url: &url::Url,
+    ) {
+        if let Some(content_hash) = remote_fetch.content_hash(url) {
+            let sid = cache::hashing::source_id_hash(url.as_str());
+            let dependency = cache::types::DependencyRef {
+                artifact_class: cache::types::ArtifactClass::RemoteUrl,
+                entry_key: sid,
+                source_id_hash: sid,
+                closure_hash: content_hash,
+            };
+            runtime_mutex.lock().unwrap().record_dependency(dependency);
         }
     }
 
@@ -1714,6 +1972,160 @@ impl Markdown {
                     source_file: None,
                 })
             }
+            PreparedTransclusion::RemoteFile {
+                order,
+                target,
+                url,
+                directive_options,
+                insertion_context,
+            } => {
+                let remote_fetch = {
+                    let runtime = runtime_mutex.lock().unwrap();
+                    runtime.remote_fetch.clone()
+                };
+                let body_text = remote_fetch
+                    .get_content(&url)
+                    .map_err(|e| {
+                        transclusion::TransclusionError::RemoteFetchFailed {
+                            url: url.to_string(),
+                            reason: e,
+                        }
+                    })?
+                    .ok_or_else(|| transclusion::TransclusionError::RemoteFetchFailed {
+                        url: url.to_string(),
+                        reason: "URL was not registered for fetching".to_string(),
+                    })?;
+
+                Self::record_remote_dependency(runtime_mutex, &remote_fetch, &url);
+
+                // Parse the fetched body as Markdown and recursively compose it.
+                let mut child =
+                    crate::markdown::Markdown::try_from_content(body_text).map_err(|e| {
+                        crate::markdown::types::MarkdownError::Transform(format!(
+                            "failed to parse fetched Markdown from '{}': {e}",
+                            url
+                        ))
+                    })?;
+
+                let child_source = ComposeSource::Url(url.clone());
+
+                // Eagerly register any remote URLs the fetched document itself
+                // references, so the child pipeline's point-of-use waits land on
+                // an already-in-flight slot rather than an unregistered one.
+                // Mirror the root pipeline's op-scoping: directive URLs follow
+                // block transclusion, expression URLs follow interpolation.
+                if options.allow_remote_transclusion {
+                    let mut child_catalog = remote::RemoteUrlCatalog::new();
+
+                    if options.is_enabled(ComposeOperation::BlockTransclusion) {
+                        let child_directives = transclusion::parse_directives(
+                            child.content(),
+                            child.source_context_for_errors(),
+                        )
+                        .unwrap_or_default();
+                        for entry in remote::discover_remote_urls_from_directives(
+                            &child_directives,
+                            &child_source,
+                        ) {
+                            child_catalog.add(entry);
+                        }
+                    }
+
+                    if options.is_enabled(ComposeOperation::Interpolation) {
+                        for entry in remote::discover_remote_urls_from_expressions(
+                            child.content(),
+                            &child_source,
+                        ) {
+                            child_catalog.add(entry);
+                        }
+                    }
+
+                    for nested in child_catalog.urls() {
+                        remote_fetch.register_nested(nested);
+                    }
+                }
+
+                let mut child_runtime = {
+                    let runtime = runtime_mutex.lock().unwrap();
+                    runtime.clone_for_child()
+                };
+                let mut child_options = options.clone();
+                child_options.source = child_source;
+
+                let child_report = child
+                    .run_compose_pipeline_internal(child_options, &mut child_runtime)?;
+                {
+                    let mut runtime = runtime_mutex.lock().unwrap();
+                    runtime.merge_child(&child_runtime);
+                }
+
+                let mut content = child.content().to_string();
+                let mut merged_report = child_report;
+                merged_report.transclusions_applied += 1;
+
+                if let Some((offset, line)) = insertion_context
+                    && let Some(parent_level) =
+                        transclusion::find_preceding_heading_level(&self.content, offset)
+                {
+                    let target_level =
+                        super::normalize::HeadingLevel::new((parent_level.as_u8() + 1).min(6))
+                            .unwrap_or(super::normalize::HeadingLevel::H6);
+                    let (releveled, warnings) =
+                        transclusion::relevel_with_overflow(&content, target_level);
+                    content = releveled;
+                    for warning in warnings {
+                        merged_report.add_warning(warning.at_line(line));
+                    }
+                }
+
+                let result = self.apply_wrappers(content, &directive_options);
+                Ok(ResolvedTransclusion {
+                    order,
+                    target,
+                    content: Some(result),
+                    report: merged_report,
+                    source_file: None,
+                })
+            }
+            PreparedTransclusion::RemoteCode {
+                order,
+                span,
+                url,
+                directive_options,
+                language,
+            } => {
+                let remote_fetch = {
+                    let runtime = runtime_mutex.lock().unwrap();
+                    runtime.remote_fetch.clone()
+                };
+                let body_text = remote_fetch
+                    .get_content(&url)
+                    .map_err(|e| {
+                        transclusion::TransclusionError::RemoteFetchFailed {
+                            url: url.to_string(),
+                            reason: e,
+                        }
+                    })?
+                    .ok_or_else(|| transclusion::TransclusionError::RemoteFetchFailed {
+                        url: url.to_string(),
+                        reason: "URL was not registered for fetching".to_string(),
+                    })?;
+
+                Self::record_remote_dependency(runtime_mutex, &remote_fetch, &url);
+
+                let fenced = transclusion::wrap_in_code_block(&body_text, &language);
+                let spaced = transclusion::ensure_vertical_spacing(&fenced);
+                let result = self.apply_wrappers(spaced, &directive_options);
+                let mut code_report = ComposeReport::new();
+                code_report.transclusions_applied = 1;
+                Ok(ResolvedTransclusion {
+                    order,
+                    target: ApplyTarget::Replace(span),
+                    content: Some(result),
+                    report: code_report,
+                    source_file: None,
+                })
+            }
             PreparedTransclusion::Toc {
                 order,
                 span,
@@ -1764,13 +2176,16 @@ impl Markdown {
                                     .load_toc_headings(&path_clone)
                                     .map_err(toc_linking::TocLinkingError::Io)?
                             };
+                            // Render with no indentation so the cache entry is
+                            // indent-independent. Indentation is caller-local
+                            // and is applied below after cache lookup.
                             let content = toc_linking::render_resolved_directive(
                                 &display_clone,
                                 &headings,
                                 &options_clone,
                                 line,
-                                &directive.indent,
-                                directive.inferred_indent.as_deref(),
+                                "",
+                                None,
                             )
                             .map_err(crate::markdown::types::MarkdownError::TocLinking)?;
                             Ok(cache::OperationResult { content })
@@ -1783,9 +2198,18 @@ impl Markdown {
                         runtime.record_dependency(dependency);
                     }
 
-                    cached.content.clone()
+                    toc_linking::indent_text(
+                        &cached.content,
+                        &directive.indent,
+                        directive.inferred_indent.as_deref(),
+                    )
                 } else {
-                    directive.options.empty_text.clone().unwrap_or_default()
+                    let empty_text = directive.options.empty_text.clone().unwrap_or_default();
+                    toc_linking::indent_text(
+                        &empty_text,
+                        &directive.indent,
+                        directive.inferred_indent.as_deref(),
+                    )
                 };
 
                 let mut toc_report = ComposeReport::new();
@@ -1798,7 +2222,133 @@ impl Markdown {
                     source_file: None,
                 })
             }
+            PreparedTransclusion::FileLinks {
+                order,
+                span,
+                directive,
+            } => self.resolve_file_links_transclusion(order, span, directive, options),
         }
+    }
+
+    /// Resolves a single `::file-links` directive in the concurrent stage.
+    ///
+    /// Discovery runs here (not during preparation) so directives parallelize.
+    /// On a match the [`FileSystem`](biscuit_terminal::components::filesystem::FileSystem)
+    /// tree is built directly from the discovered entries — no second
+    /// filesystem walk — and its fully-styled render subtree is embedded
+    /// losslessly via [`renderable::tree::embed`]. Empty and invalid results
+    /// reproduce the strict/permissive behavior the preparation stage used to
+    /// apply.
+    fn resolve_file_links_transclusion(
+        &self,
+        order: usize,
+        span: std::ops::Range<usize>,
+        directive: file_links::FileLinksDirective,
+        options: &ComposeOptions,
+    ) -> MarkdownResult<ResolvedTransclusion> {
+        let skipped_replace = |replacement: String, report: ComposeReport| {
+            Ok(ResolvedTransclusion {
+                order,
+                target: ApplyTarget::Replace(span.clone()),
+                content: Some(replacement),
+                report,
+                source_file: None,
+            })
+        };
+
+        let render = match file_links::discover(&directive, &options.source) {
+            Ok(result) => match result.render {
+                Some(render) => render,
+                None => {
+                    // Empty result: strict mode inserts a subtle notice,
+                    // permissive mode removes the directive with a warning.
+                    let mut report = ComposeReport::new();
+                    report.transclusions_skipped = 1;
+                    if options.fail_fast {
+                        return skipped_replace("_No matching files_".to_string(), report);
+                    }
+                    report.add_warning(
+                        ComposeWarning::new(
+                            "file_links",
+                            format!(
+                                "No matching files for ::file-links directive at line {}",
+                                directive.line
+                            ),
+                        )
+                        .at_line(directive.line),
+                    );
+                    return skipped_replace(String::new(), report);
+                }
+            },
+            Err(err) => {
+                if self.resolve_ignore_invalid(options) {
+                    let mut report = ComposeReport::new();
+                    report.transclusions_skipped = 1;
+                    report.add_warning(
+                        ComposeWarning::new("file_links", err.to_string()).at_line(directive.line),
+                    );
+                    return skipped_replace(String::new(), report);
+                }
+                return Err(err.into());
+            }
+        };
+
+        // Build the FileSystem tree directly from the discovered entries and
+        // inject it, so the component renders without re-walking the directory.
+        let tree = file_links::build_included_tree(&render);
+        let mut fs =
+            biscuit_terminal::components::filesystem::FileSystem::new(&render.component_root)
+                .map_err(|e| {
+                    crate::markdown::types::MarkdownError::Transform(format!(
+                        "failed to create FileSystem for ::file-links at line {}: {e}",
+                        directive.line
+                    ))
+                })?;
+        fs = fs
+            .with_prebuilt_tree(tree)
+            .with_file_links()
+            .italicize_dot_files(true)
+            .dim_gitignore(true)
+            .show_root(true);
+        if !render.dimmed_prefix.is_empty() {
+            fs = fs.with_dimmed_root_prefix(&render.dimmed_prefix);
+        }
+        if !render.target_name.is_empty() {
+            fs = fs.with_root_display_name(&render.target_name);
+        }
+        if render.uses_repo_icon {
+            fs = fs.with_root_icon(
+                biscuit_terminal::components::filesystem::RootIconKind::Repository,
+            );
+        }
+
+        // Carry the fully-styled render subtree through the composed document
+        // losslessly: the fold splices it back so terminal and browser
+        // rendering reproduce the live component (color, dim, icons), while
+        // plain-Markdown consumers see the embedded portable fallback.
+        use renderable::tree::{TreeRenderable, encode_embedded_subtree};
+        let node = fs.render_tree();
+        let embedded = encode_embedded_subtree(&node).map_err(|e| {
+            crate::markdown::types::MarkdownError::Transform(format!(
+                "failed to embed ::file-links render tree at line {}: {e}",
+                directive.line
+            ))
+        })?;
+        let replacement = indent::indent_text(
+            &embedded,
+            &directive.indent,
+            directive.inferred_indent.as_deref(),
+        );
+
+        let mut report = ComposeReport::new();
+        report.transclusions_applied = 1;
+        Ok(ResolvedTransclusion {
+            order,
+            target: ApplyTarget::Replace(span),
+            content: Some(replacement),
+            report,
+            source_file: None,
+        })
     }
 
     // NOTE: `::file` and `::code` directives share the same indentation
@@ -2051,7 +2601,13 @@ impl Markdown {
         }
 
         if let Some(summary) = &directive_options.disclosure {
-            content = transclusion::wrap_disclosure(&content, summary);
+            let summary = if summary.is_empty() || summary.eq_ignore_ascii_case("true") {
+                "Details"
+            } else {
+                summary.as_str()
+            };
+            let body = content.trim_end_matches('\n');
+            content = format!("::disclosure\n{summary}\n::details\n{body}\n::end-disclosure");
         }
 
         content
@@ -3816,6 +4372,35 @@ Rounded: {{ round(pi) }}"#;
     }
 
     #[test]
+    fn page_block_condition_can_read_frontmatter_from_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let review = dir.path().join("review.md");
+        std::fs::write(&review, "---\nready: true\n---\n# Review\n").unwrap();
+
+        let content = concat!(
+            "---\nreview_path: review.md\n---\n\n",
+            "::block when=\"frontmatter(review_path, 'ready') == true\"\n\n",
+            "ready block\n\n",
+            "::end-block\n",
+        );
+        std::fs::write(&root, content).unwrap();
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::PageBlocks])
+            .with_source_file(&root);
+
+        let (composed, report) = md.compose_with(options).unwrap();
+        assert!(
+            composed.content().contains("ready block"),
+            "page block should evaluate filesystem expression functions, got:\n{}",
+            composed.content()
+        );
+        assert_eq!(report.page_blocks_rendered, 1);
+    }
+
+    #[test]
     fn page_block_coexists_with_interpolation() {
         let content =
             "---\nshow: true\n---\n\n::block when=\"show\"\n\nShown: {{show}}\n\n::end-block\n";
@@ -4430,6 +5015,130 @@ Rounded: {{ round(pi) }}"#;
                 Some(&serde_json::json!("fallback"))
             );
         }
+
+        #[test]
+        fn ternary_motivating_workflow_true_branch_through_full_pipeline() {
+            // Review finding 4: exercise the motivating spec_file workflow
+            // through the full compose pipeline so frontmatter interpolation,
+            // pre-interpolation snapshot capture, and frontmatter shell
+            // expansion are all wired together. With `has_spec: true` the
+            // then-branch wins and produces the basename of the spec path.
+            let temp_dir = TempDir::new().unwrap();
+            let content = concat!(
+                "---\n",
+                "has_spec: true\n",
+                "spec: /tmp/example-spec.md\n",
+                "spec_file: \"$({{has_spec}} ? basename {{spec}} : '')\"\n",
+                "---\n",
+                "Spec: {{spec_file}}\n",
+            );
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::FrontmatterShellExpansion,
+                    ComposeOperation::Interpolation,
+                ])
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let (composed, report) = md.compose_with(options).unwrap();
+            assert_eq!(report.frontmatter_shell_expansions_applied, 1);
+            assert_eq!(
+                composed.frontmatter().as_map().get("spec_file"),
+                Some(&serde_json::json!("example-spec.md"))
+            );
+            assert!(
+                composed.content().contains("Spec: example-spec.md"),
+                "Expected body to interpolate spec_file, got:\n{}",
+                composed.content()
+            );
+        }
+
+        #[test]
+        fn ternary_motivating_workflow_false_branch_through_full_pipeline() {
+            // Counterpart to the true-branch test: with `has_spec: false`
+            // the else-branch (`''`) wins, short-circuiting to an empty
+            // string without invoking the shell.
+            let temp_dir = TempDir::new().unwrap();
+            let content = concat!(
+                "---\n",
+                "has_spec: false\n",
+                "spec: /tmp/example-spec.md\n",
+                "spec_file: \"$({{has_spec}} ? basename {{spec}} : '')\"\n",
+                "---\n",
+                "Spec: {{spec_file}}\n",
+            );
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::FrontmatterShellExpansion,
+                    ComposeOperation::Interpolation,
+                ])
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let (composed, report) = md.compose_with(options).unwrap();
+            assert_eq!(report.frontmatter_shell_expansions_applied, 1);
+            assert_eq!(
+                composed.frontmatter().as_map().get("spec_file"),
+                Some(&serde_json::json!(""))
+            );
+            assert!(
+                composed.content().contains("Spec: "),
+                "Expected body to render with empty spec_file, got:\n{}",
+                composed.content()
+            );
+        }
+
+        #[test]
+        fn ternary_stringified_false_condition_selects_else_branch_in_pipeline() {
+            // Review finding 2 at compose level: when an earlier frontmatter
+            // interpolation rewrites `has_spec` from a boolean into the
+            // string `"false"`, the ternary condition must still resolve
+            // to the else-branch.
+            let temp_dir = TempDir::new().unwrap();
+            let content = concat!(
+                "---\n",
+                "raw_false: false\n",
+                "has_spec: \"{{raw_false}}\"\n",
+                "spec_file: \"$({{has_spec}} ? echo present : '')\"\n",
+                "---\n",
+            );
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::FrontmatterShellExpansion,
+                ])
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let (composed, _report) = md.compose_with(options).unwrap();
+            // has_spec is rendered to the string "false"; the ternary must
+            // see it as boolean-false and pick the empty branch.
+            assert_eq!(
+                composed.frontmatter().as_map().get("has_spec"),
+                Some(&serde_json::json!("false"))
+            );
+            assert_eq!(
+                composed.frontmatter().as_map().get("spec_file"),
+                Some(&serde_json::json!(""))
+            );
+        }
     }
 
     mod infix_logic_conditions {
@@ -4612,6 +5321,32 @@ Rounded: {{ round(pi) }}"#;
         }
 
         #[test]
+        fn schema_violation_on_shell_value_reported_when_shell_expansion_disabled() {
+            // A `$(...)` frontmatter value violates the schema, but
+            // FrontmatterShellExpansion is NOT in the enabled set. Because no
+            // later stage will expand or re-validate `spec`, the violation must
+            // surface here rather than being deferred and silently accepted.
+            let content =
+                "---\n$schema:\n  spec: 'number(required)'\nspec: \"$(echo 1)\"\n---\nBody\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+
+            let err = md.compose_with(options).unwrap_err();
+            match err {
+                MarkdownError::SchemaValidationFailed { problems, .. } => {
+                    assert!(
+                        problems
+                            .iter()
+                            .any(|p| p.property.as_deref() == Some("spec") || p.path == "/spec"),
+                        "Error should mention the spec property, got: {problems:?}"
+                    );
+                }
+                other => panic!("Expected SchemaValidationFailed, got {other:?}"),
+            }
+        }
+
+        #[test]
         fn schema_validation_reports_zero_shell_replacements() {
             let content = "---\n$schema:\n  spec: 'file(required)'\nspec: \"\"\ndir: \"$(dirname '{{ spec }}')\"\n---\nBody\n";
             let md: Markdown = content.into();
@@ -4630,6 +5365,95 @@ Rounded: {{ round(pi) }}"#;
                 MarkdownError::SchemaValidationFailed { .. } => {}
                 other => panic!("Expected SchemaValidationFailed, got {other:?}"),
             }
+        }
+
+        #[test]
+        fn coercion_write_back_flows_to_composed_frontmatter() {
+            // `has_spec` derives from a ternary, resolves to the string "true"
+            // during frontmatter interpolation, and is coerced to a real JSON
+            // bool by schema validation. The composed frontmatter must hold the
+            // bool, not the string.
+            let content = "---\n$schema:\n  spec: string(required)\n  has_spec: boolean\nspec: design.md\nhas_spec: \"{{spec ? true : false}}\"\n---\nBody\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new().only(&[
+                ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::Interpolation,
+            ]);
+
+            let (composed, _report) = md.compose_with(options).unwrap();
+            assert_eq!(
+                composed.frontmatter().as_map().get("has_spec"),
+                Some(&serde_json::json!(true))
+            );
+        }
+
+        #[test]
+        fn implement_md_three_arm_union_ternaries_coerce_and_defer_shell() {
+            // Faithful reproduction of the original failing `claudine compose
+            // prompts/implement.md spec=… --claude` invocation: a 3-arm root
+            // union where every arm types the `has_*` trio as strict `boolean`,
+            // computed `has_*` ternaries that render into quoted scalars
+            // ("true"/"false"), and a `$(...)`-bearing `dir`. A `spec=` value is
+            // supplied via --set, so arm 2 (`spec: string(required)`) validates
+            // post-coercion. Before this feature the strict `boolean` arms
+            // rejected the "false"/"true" strings; now they coerce.
+            //
+            // Frontmatter shell expansion is left disabled to keep the test
+            // hermetic (no real `dirname` invocation). `dir` is typed `string`,
+            // so its literal `$(...)` value is already a valid string: coercion
+            // skips it and validation raises no type problem, so it survives
+            // untouched into the composed output as a deferred shell expression.
+            let content = "---\n\
+                $schema:\n\
+                \x20 - review: string(required)\n\
+                \x20   spec: string\n\
+                \x20   iteration: number\n\
+                \x20   has_plan: boolean\n\
+                \x20   has_spec: boolean\n\
+                \x20   has_review: boolean\n\
+                \x20 - spec: string(required)\n\
+                \x20   has_plan: boolean\n\
+                \x20   has_spec: boolean\n\
+                \x20   has_review: boolean\n\
+                \x20 - plan: string(required)\n\
+                \x20   spec: string\n\
+                \x20   iteration: number\n\
+                \x20   has_plan: boolean\n\
+                \x20   has_spec: boolean\n\
+                \x20   has_review: boolean\n\
+                has_spec: \"{{spec ? true : false}}\"\n\
+                has_plan: \"{{plan ? true : false}}\"\n\
+                has_review: \"{{review ? true : false}}\"\n\
+                dir: \"$(dirname '{{spec || plan}}')\"\n\
+                ---\nBody\n";
+            let md: Markdown = content.into();
+
+            // `spec=` provided via --set; no `plan`/`review` → second arm wins.
+            let options = ComposeOptions::new()
+                .with_set_overrides(serde_json::json!({ "spec": "features/plan.md" }))
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::Interpolation,
+                ]);
+
+            let (composed, _report) = md
+                .compose_with(options)
+                .expect("compose should succeed once the has_* strings coerce");
+
+            let fm = composed.frontmatter();
+            let map = fm.as_map();
+            // The motivating fix: the ternary-derived strings become real bools.
+            assert_eq!(map.get("has_spec"), Some(&serde_json::json!(true)));
+            assert_eq!(map.get("has_plan"), Some(&serde_json::json!(false)));
+            assert_eq!(map.get("has_review"), Some(&serde_json::json!(false)));
+            // The `$(...)` `dir` value is deferred: coercion skips it pre-shell,
+            // and the unresolved interpolation/shell template never errored.
+            let dir = map.get("dir").and_then(serde_json::Value::as_str).unwrap();
+            assert!(
+                dir.contains("$(") && dir.contains("dirname"),
+                "dir should remain a deferred shell expression, got: {dir}"
+            );
         }
 
         #[test]
@@ -4715,7 +5539,7 @@ Rounded: {{ round(pi) }}"#;
             use crate::markdown::compose::CacheAccessMode;
             use crate::markdown::schemas::{
                 Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema,
-                SimplifiedType,
+                SimplifiedType, TypeExpr,
             };
             use indexmap::IndexMap;
 
@@ -4724,7 +5548,7 @@ Rounded: {{ round(pi) }}"#;
                 properties.insert(
                     prop.into(),
                     PropertyDef::Single(PropertyAtom {
-                        ty: SimplifiedType::String,
+                        ty: TypeExpr::Primitive(SimplifiedType::String),
                         is_array: false,
                         constraints: vec![Constraint::Required],
                         array_constraints: vec![],
@@ -4808,5 +5632,1288 @@ Rounded: {{ round(pi) }}"#;
                 "run 3 must compute and write a fresh entry under the new baseline, got {stats3:?}"
             );
         }
+    }
+
+    mod remote_transclusion_tests {
+        use super::*;
+        use crate::markdown::compose::remote::RemoteReadConfig;
+        use std::collections::HashSet;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        async fn compose_with_remote(
+            content: &str,
+            source_file: &std::path::Path,
+            _server: &MockServer,
+            allowed_hosts: Vec<String>,
+        ) -> MarkdownResult<(Markdown, ComposeReport)> {
+            let md: Markdown = content.into();
+            let config = RemoteReadConfig {
+                allowed_hosts,
+                ..Default::default()
+            };
+            let options = ComposeOptions::new()
+                .with_source_file(source_file)
+                .with_allow_remote_transclusion(true)
+                .with_remote_read_config(config)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            md.compose_with(options)
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_file_transclusion_inserts_fetched_body() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/remote.md"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("# Remote\n\nHello from remote"))
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/remote.md", server.uri());
+            let content = format!("# Local\n\n::file {remote_url}\n");
+            std::fs::write(&root, &content).unwrap();
+
+            let (composed, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("Hello from remote"), "content: {text}");
+            assert!(text.contains("# Local"), "content: {text}");
+            assert_eq!(report.transclusions_applied, 1);
+            let rf = report.remote_fetch_stats.unwrap();
+            assert_eq!(rf.fetched, 1);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_code_transclusion_inserts_fetched_code() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/snippet.rs"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("fn main() {}"))
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/snippet.rs", server.uri());
+            let content = format!("# Doc\n\n::code {remote_url}\n");
+            std::fs::write(&root, &content).unwrap();
+
+            let (composed, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("fn main()"), "content: {text}");
+            assert!(text.contains("```rs"), "content: {text}");
+            assert_eq!(report.transclusions_applied, 1);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_transclusion_denied_by_default() {
+            let server = MockServer::start().await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/blocked.md", server.uri());
+            let content = format!("# Doc\n\n::file {remote_url}\n");
+            std::fs::write(&root, &content).unwrap();
+
+            let md: Markdown = content.clone().into();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .with_allow_remote_transclusion(true)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let result = md.compose_with(options);
+            assert!(
+                result.is_err(),
+                "Expected error because no allowed hosts configured"
+            );
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_file_duplicate_consumers_one_fetch() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/shared.md"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("shared content"))
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/shared.md", server.uri());
+            // Two line-start directives referencing the same URL: directives
+            // are line-oriented, so each must begin its own line.
+            let content = format!(
+                "# Doc\n\n::file {remote_url}\n\n::file {remote_url}\n"
+            );
+            std::fs::write(&root, &content).unwrap();
+
+            let (composed, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            let text = composed.content();
+            let count = text.matches("shared content").count();
+            assert_eq!(count, 2, "Should appear twice (once per directive)");
+            assert_eq!(report.transclusions_applied, 2);
+            let rf = report.remote_fetch_stats.unwrap();
+            assert_eq!(rf.fetched, 1, "Only one actual network fetch should occur");
+        }
+
+        /// Mounts a single document and composes a body that reads it through
+        /// the given quoted URL expression, returning the composed text.
+        ///
+        /// The URL argument is quoted because the interpolation expression
+        /// parser only accepts a string literal there; the unquoted
+        /// `frontmatter(https://…)` form does not tokenize.
+        async fn compose_expr_against_doc(doc_body: &str, expr_template: &str) -> String {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/doc.md"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(doc_body.to_string()))
+                .mount(&server)
+                .await;
+            let url = format!("{}/doc.md", server.uri());
+            let body = expr_template.replace("{URL}", &url);
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, &body).unwrap();
+
+            let (composed, _) =
+                compose_with_remote(&body, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+            composed.content().to_string()
+        }
+
+        /// The `frontmatter()` read-side **function** is remote-capable when
+        /// called from the **body** surface: body interpolation carries the
+        /// run's remote-fetch runtime, so reading another document's frontmatter
+        /// property over HTTP(S) succeeds. (Decision B restricts only the
+        /// frontmatter *surface*, not this function — see the loud-failure test
+        /// `frontmatter_value_remote_url_fails_loudly` below.)
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_frontmatter_function_in_body_reads_url() {
+            let text = compose_expr_against_doc(
+                "---\ntitle: Remote Title\nstatus: draft\n---\n# H1\n\nBody\n",
+                "S: {{ frontmatter(\"{URL}\", \"status\") }}\n",
+            )
+            .await;
+            assert_eq!(text, "S: draft\n");
+        }
+
+        /// Decision B: the frontmatter *surface* is local-filesystem only. A
+        /// remote URL argument to a read-side function written in a frontmatter
+        /// value must fail loudly rather than performing a network read — even
+        /// when the run otherwise allows the host for body/transclusion fetches.
+        /// With the default (non-fail-fast) policy the loud failure surfaces as a
+        /// frontmatter-interpolation warning and the value is left unsubstituted.
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn frontmatter_value_remote_url_fails_loudly() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/doc.md"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_string("---\nstatus: draft\n---\n# H1\n"),
+                )
+                .mount(&server)
+                .await;
+            let url = format!("{}/doc.md", server.uri());
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            // The expression lives in a frontmatter value, not the body.
+            let content = format!(
+                "---\nstatus: '{{{{ frontmatter(\"{url}\", \"status\") }}}}'\n---\n# H1\n"
+            );
+            std::fs::write(&root, &content).unwrap();
+
+            let (_, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            // No network read occurred and a helpful diagnostic was emitted.
+            assert_eq!(report.remote_fetch_stats.unwrap().fetched, 0);
+            assert!(
+                report.warnings.iter().any(|w| {
+                    w.stage == "frontmatter-interpolation"
+                        && w.message.contains("remote reads are not enabled")
+                        && w.message.contains(&url)
+                }),
+                "expected a local-only frontmatter diagnostic, got: {:?}",
+                report.warnings
+            );
+        }
+
+        /// Decision B also applies to `file_exists()`: a remote URL argument in
+        /// a frontmatter value must fail loudly rather than silently reporting
+        /// the URL as absent.
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn frontmatter_file_exists_remote_url_fails_loudly() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/doc.md"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("# Present\n"))
+                .mount(&server)
+                .await;
+            let url = format!("{}/doc.md", server.uri());
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let content = format!(
+                "---\npresent: '{{{{ file_exists(\"{url}\") }}}}'\n---\n# H1\n"
+            );
+            std::fs::write(&root, &content).unwrap();
+
+            let (_, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            assert_eq!(report.remote_fetch_stats.unwrap().fetched, 0);
+            assert!(
+                report.warnings.iter().any(|w| {
+                    w.stage == "frontmatter-interpolation"
+                        && w.message.contains("local-only")
+                        && w.message.contains(&url)
+                }),
+                "expected a local-only frontmatter diagnostic for file_exists, got: {:?}",
+                report.warnings
+            );
+        }
+
+        /// Decision B covers the `$()` shell-ternary condition surface too: a
+        /// read-side function call in the condition is evaluated with the
+        /// local-only frontmatter context, so a remote URL argument errors
+        /// before any branch is selected or executed.
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn frontmatter_shell_ternary_remote_url_condition_fails_loudly() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/doc.md"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("# Present\n"))
+                .mount(&server)
+                .await;
+            let url = format!("{}/doc.md", server.uri());
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let content = format!(
+                "---\nresult: $(file_exists(\"{url}\") ? echo yes : echo no)\n---\n# H1\n"
+            );
+            std::fs::write(&root, &content).unwrap();
+
+            let mut approved = HashSet::new();
+            approved.insert("echo yes".to_string());
+            approved.insert("echo no".to_string());
+
+            let md: Markdown = content.into();
+            let config = RemoteReadConfig {
+                allowed_hosts: vec!["127.0.0.1".into()],
+                ..Default::default()
+            };
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .with_allow_remote_transclusion(true)
+                .with_remote_read_config(config)
+                .with_pre_approved_commands(approved)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let result = md.compose_with(options);
+
+            assert!(
+                result.is_err(),
+                "expected compose to fail because the ternary condition uses a remote URL in local-only frontmatter"
+            );
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains("local-only") && err.contains(&url),
+                "expected helpful local-only diagnostic, got: {err}"
+            );
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_markdown_title_expression_reads_url() {
+            let text = compose_expr_against_doc(
+                "---\ntitle: Remote Title\n---\n# H1\n\nBody\n",
+                "T: {{ markdown_title(\"{URL}\") }}\n",
+            )
+            .await;
+            assert_eq!(text, "T: Remote Title\n");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_markdown_body_empty_expression_reads_url() {
+            let text = compose_expr_against_doc(
+                "---\ntitle: Empty Body\n---\n",
+                "E: {{ markdown_body_empty(\"{URL}\") }}\n",
+            )
+            .await;
+            assert_eq!(text, "E: true\n");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_validate_schema_expression_reads_url() {
+            // A document without `$schema` always validates as `true`.
+            let text = compose_expr_against_doc(
+                "---\ntitle: No Schema\n---\n# H1\n",
+                "V: {{ validate_schema(\"{URL}\") }}\n",
+            )
+            .await;
+            assert_eq!(text, "V: true\n");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_file_exists_expression_reads_url() {
+            let text = compose_expr_against_doc(
+                "# Present\n",
+                "X: {{ file_exists(\"{URL}\") }}\n",
+            )
+            .await;
+            assert_eq!(text, "X: true\n");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn file_exists_false_for_unallowed_remote_host() {
+            // Remote reads enabled but no allowed hosts: the URL is denied and
+            // never fetched, so `file_exists` reads it as non-existent rather
+            // than erroring out of composition.
+            let server = MockServer::start().await;
+            let url = format!("{}/blocked.md", server.uri());
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let body = format!("X: {{{{ file_exists(\"{url}\") }}}}\n");
+            std::fs::write(&root, &body).unwrap();
+
+            let (composed, _) = compose_with_remote(&body, &root, &server, vec![])
+                .await
+                .unwrap();
+            assert_eq!(composed.content(), "X: false\n");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn interpolation_only_discovers_and_reads_remote_expression_url() {
+            // Review 7: a library caller following the documented API enables
+            // remote expression reads via `with_remote_read_config` alone — an
+            // allowed host is sufficient. No `with_allow_remote_transclusion`
+            // call is required, since expression URL reads are a read-side
+            // capability independent of block transclusion.
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/doc.md"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_string("---\ntitle: Interp Only\n---\n# H1\n"),
+                )
+                .mount(&server)
+                .await;
+            let url = format!("{}/doc.md", server.uri());
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let body = format!("T: {{{{ markdown_title(\"{url}\") }}}}\n");
+            std::fs::write(&root, &body).unwrap();
+
+            let config = RemoteReadConfig {
+                allowed_hosts: vec!["127.0.0.1".into()],
+                ..Default::default()
+            };
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .with_remote_read_config(config)
+                .only(&[ComposeOperation::Interpolation]);
+            let md: Markdown = body.clone().into();
+            let (composed, report) = md.compose_with(options).unwrap();
+
+            assert_eq!(composed.content(), "T: Interp Only\n");
+            let rf = report.remote_fetch_stats.unwrap();
+            assert_eq!(rf.fetched, 1, "URL must be fetched without BlockTransclusion");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn local_markdown_title_expression_reads_relative_file() {
+            // The same resolution-context wiring resolves local relative paths
+            // against the source document's directory.
+            let server = MockServer::start().await;
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(
+                dir.path().join("other.md"),
+                "---\ntitle: Local Title\n---\n# H1\n",
+            )
+            .unwrap();
+            let root = dir.path().join("root.md");
+            let body = "T: {{ markdown_title(\"./other.md\") }}\n";
+            std::fs::write(&root, body).unwrap();
+
+            let (composed, _) = compose_with_remote(body, &root, &server, vec![])
+                .await
+                .unwrap();
+            assert_eq!(composed.content(), "T: Local Title\n");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn nested_remote_reference_is_discovered_and_fetched() {
+            let server = MockServer::start().await;
+            // The parent document itself transcludes a further remote child.
+            let child_url = format!("{}/child.md", server.uri());
+            Mock::given(method("GET"))
+                .and(path("/parent.md"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+                    "# Parent\n\n::file {child_url}\n"
+                )))
+                .mount(&server)
+                .await;
+            Mock::given(method("GET"))
+                .and(path("/child.md"))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_string("nested child body"),
+                )
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let parent_url = format!("{}/parent.md", server.uri());
+            let content = format!("# Local\n\n::file {parent_url}\n");
+            std::fs::write(&root, &content).unwrap();
+
+            let (composed, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("nested child body"), "content: {text}");
+            let rf = report.remote_fetch_stats.unwrap();
+            assert_eq!(rf.fetched, 2, "Both parent and nested child fetched once");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn interpolated_directive_creates_fetchable_remote_file() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/late.md"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("late remote body"))
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/late.md", server.uri());
+            // The directive's URL only materializes after interpolation expands
+            // `{{ remote_ref }}`, so the eager pre-scan never sees it. It must be
+            // registered when prepared, or point-of-use fails "not registered".
+            let content = format!(
+                "---\nremote_ref: \"{remote_url}\"\n---\n# Local\n\n::file {{{{ remote_ref }}}}\n"
+            );
+            std::fs::write(&root, &content).unwrap();
+
+            let (composed, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("late remote body"), "content: {text}");
+            let rf = report.remote_fetch_stats.unwrap();
+            assert_eq!(rf.fetched, 1);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn interpolated_directive_creates_fetchable_remote_code() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/late.rs"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("fn main() {}"))
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/late.rs", server.uri());
+            let content = format!(
+                "---\nremote_ref: \"{remote_url}\"\n---\n# Doc\n\n::code {{{{ remote_ref }}}}\n"
+            );
+            std::fs::write(&root, &content).unwrap();
+
+            let (composed, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("fn main()"), "content: {text}");
+            assert!(text.contains("```rs"), "content: {text}");
+            let rf = report.remote_fetch_stats.unwrap();
+            assert_eq!(rf.fetched, 1);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn cached_local_child_revalidates_nested_remote_under_refresh() {
+            use std::sync::Arc;
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            use wiremock::{Request, Respond};
+
+            // Serves "remote v1" on the first request and "remote v2" on every
+            // later request, so a missed revalidation surfaces as stale output.
+            struct Versioned {
+                hits: Arc<AtomicUsize>,
+            }
+            impl Respond for Versioned {
+                fn respond(&self, _req: &Request) -> ResponseTemplate {
+                    let n = self.hits.fetch_add(1, Ordering::SeqCst);
+                    let body = if n == 0 { "remote v1" } else { "remote v2" };
+                    ResponseTemplate::new(200).set_body_string(body)
+                }
+            }
+
+            let server = MockServer::start().await;
+            let hits = Arc::new(AtomicUsize::new(0));
+            Mock::given(method("GET"))
+                .and(path("/remote.md"))
+                .respond_with(Versioned {
+                    hits: Arc::clone(&hits),
+                })
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let cache_root = dir.path().join("cache");
+            let root = dir.path().join("root.md");
+            let child = dir.path().join("child.md");
+            let remote_url = format!("{}/remote.md", server.uri());
+            std::fs::write(&root, "# Root\n\n::file ./child.md\n").unwrap();
+            std::fs::write(&child, format!("# Child\n\n::file {remote_url}\n")).unwrap();
+
+            let mk_options = |refresh: bool| {
+                let config = RemoteReadConfig {
+                    allowed_hosts: vec!["127.0.0.1".into()],
+                    refresh,
+                    ..Default::default()
+                };
+                ComposeOptions::new()
+                    .with_source_file(&root)
+                    .with_allow_remote_transclusion(true)
+                    .with_remote_read_config(config)
+                    .with_cache_root(&cache_root)
+                    .disable(ComposeOperation::Cleanup)
+                    .disable(ComposeOperation::Normalization)
+            };
+
+            // Run 1: populate the local-child and remote caches; remote → v1.
+            let md1 = Markdown::try_from(root.as_path()).unwrap();
+            let (c1, _) = md1.compose_with(mk_options(false)).unwrap();
+            assert!(
+                c1.content().contains("remote v1"),
+                "run 1 should embed the original remote body: {}",
+                c1.content()
+            );
+
+            // Run 2: the remote body has changed and `--remote-refresh` forces a
+            // revalidation. The cached local child must NOT be accepted against
+            // the stale remote manifest.
+            let md2 = Markdown::try_from(root.as_path()).unwrap();
+            let (c2, _) = md2.compose_with(mk_options(true)).unwrap();
+            assert!(
+                c2.content().contains("remote v2"),
+                "cached local child must revalidate its nested remote URL under \
+                 --remote-refresh; got: {}",
+                c2.content()
+            );
+            assert!(
+                !c2.content().contains("remote v1"),
+                "stale remote body served from cache: {}",
+                c2.content()
+            );
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_prologue_inserts_fetched_body() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/intro.md"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("# Intro\n\nFrom prologue"))
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/intro.md", server.uri());
+            let content = format!("---\nprologue: {remote_url}\n---\n# Local\n\nBody.\n");
+            std::fs::write(&root, &content).unwrap();
+
+            let (composed, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("From prologue"), "content: {text}");
+            assert!(text.contains("# Local"), "content: {text}");
+            assert_eq!(report.transclusions_applied, 1);
+            let rf = report.remote_fetch_stats.unwrap();
+            assert_eq!(rf.fetched, 1);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_epilogue_inserts_fetched_body() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/outro.md"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("# Outro\n\nFrom epilogue"))
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/outro.md", server.uri());
+            let content = format!("---\nepilogue: [\"{remote_url}\"]\n---\n# Local\n\nBody.\n");
+            std::fs::write(&root, &content).unwrap();
+
+            let (composed, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("From epilogue"), "content: {text}");
+            assert!(text.contains("# Local"), "content: {text}");
+            assert_eq!(report.transclusions_applied, 1);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_prologue_denied_by_policy() {
+            // Remote transclusion is enabled but the host is not allowlisted, so
+            // the registered fetch fails by policy and surfaces an error rather
+            // than a bogus "URL was not registered" message.
+            let server = MockServer::start().await;
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/intro.md", server.uri());
+            let content = format!("---\nprologue: {remote_url}\n---\n# Local\n\nBody.\n");
+            std::fs::write(&root, &content).unwrap();
+
+            let md: Markdown = content.clone().into();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .with_allow_remote_transclusion(true)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let result = md.compose_with(options);
+            assert!(
+                result.is_err(),
+                "Expected error because no allowed hosts configured"
+            );
+        }
+    }
+
+    mod file_links_compose {
+        use super::*;
+
+        #[test]
+        fn glob_mode_replaces_directive_with_linked_tree() {
+            let dir = tempfile::tempdir().unwrap();
+            // Fake repo so boundary resolves to temp dir, not CWD.
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            let docs = dir.path().join("docs");
+            std::fs::create_dir(&docs).unwrap();
+            std::fs::write(docs.join("a.md"), "# A\n").unwrap();
+            std::fs::write(docs.join("b.txt"), "B\n").unwrap();
+
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links docs/*\n\nFooter.\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("a.md"), "content: {text}");
+            assert!(text.contains("b.txt"), "content: {text}");
+            assert!(!text.contains("::file-links"), "directive should be replaced: {text}");
+            assert_eq!(report.transclusions_applied, 1);
+        }
+
+        /// End-to-end: composing a `::file-links` directive through the full
+        /// default pipeline embeds the FileSystem render subtree, and rendering
+        /// the composed document to a terminal reproduces the styled tree —
+        /// OSC8 hyperlinks and dim styling survive the round-trip, and the
+        /// embedding marker never leaks into rendered output.
+        #[test]
+        fn embedded_subtree_round_trips_through_compose_then_terminal_render() {
+            use crate::markdown::highlighting::{ColorMode, ThemePair};
+            use crate::markdown::output::terminal::{
+                ColorDepth, DimMode, HyperlinkMode, ItalicMode, MermaidMode, TerminalImageMode,
+                TerminalOptions,
+            };
+
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            let docs = dir.path().join("docs").join("topics");
+            std::fs::create_dir_all(&docs).unwrap();
+            std::fs::write(docs.join("alpha.md"), "# Alpha\n").unwrap();
+            std::fs::write(docs.join("beta.md"), "# Beta\n").unwrap();
+
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links docs/topics/*.md\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            // Full default pipeline (cleanup + normalization enabled) proves the
+            // embedded block survives end to end.
+            let (composed, _report) = md
+                .compose_with(ComposeOptions::new().with_source_file(&root))
+                .unwrap();
+            assert!(
+                composed.content().contains("bt:render-tree"),
+                "composed doc should carry the embedded subtree: {}",
+                composed.content()
+            );
+
+            let options = TerminalOptions {
+                code_theme: ThemePair::OneHalf,
+                prose_theme: ThemePair::OneHalf,
+                color_mode: ColorMode::Dark,
+                include_line_numbers: false,
+                color_depth: Some(ColorDepth::TrueColor),
+                image_mode: TerminalImageMode::Never,
+                base_path: None,
+                italic_mode: ItalicMode::Always,
+                dim_mode: DimMode::Always,
+                max_width: Some(100),
+                mermaid_mode: MermaidMode::Off,
+                hyperlink_mode: HyperlinkMode::Always,
+                hr_defaults: None,
+                code_block_mode: crate::markdown::highlighting::CodeBlockMode::default(),
+            };
+            let output = composed.as_terminal(options).unwrap();
+
+            assert!(
+                !output.contains("bt:render-tree"),
+                "embedding marker leaked into rendered output: {output:?}"
+            );
+            assert!(output.contains("alpha.md"), "missing file: {output:?}");
+            assert!(output.contains("beta.md"), "missing file: {output:?}");
+            assert!(
+                output.contains("\x1b]8;;"),
+                "OSC8 hyperlink did not survive: {output:?}"
+            );
+            assert!(
+                output.contains("file://"),
+                "file:// link target did not survive: {output:?}"
+            );
+            assert!(
+                output.contains("\x1b[2m"),
+                "dim styling (dimmed root prefix) did not survive: {output:?}"
+            );
+        }
+
+        /// In-process companion to the Level 2 presentation test: the full
+        /// `::file-links` contract (extension glyphs, repository icon, italic
+        /// dotfile, dimmed gitignored entry, bold target) is produced by
+        /// composing then rendering to a terminal string. This runs in the L1
+        /// suite, so the bytes the real-terminal test asserts on are verified
+        /// without a WezTerm pane.
+        #[test]
+        fn rich_fixture_renders_full_presentation_contract() {
+            use crate::markdown::output::terminal::{
+                ColorDepth, DimMode, HyperlinkMode, ItalicMode, MermaidMode, TerminalImageMode,
+                TerminalOptions,
+            };
+
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            let topics = dir.path().join("docs").join("topics");
+            std::fs::create_dir_all(&topics).unwrap();
+            std::fs::write(topics.join("alpha.md"), "# Alpha\n").unwrap();
+            std::fs::write(topics.join("notes.txt"), "notes\n").unwrap();
+            std::fs::write(topics.join("report.pdf"), "pdf\n").unwrap();
+            std::fs::write(topics.join("sheet.xlsx"), "xls\n").unwrap();
+            std::fs::write(topics.join("memo.docx"), "doc\n").unwrap();
+            std::fs::write(topics.join(".hidden.md"), "# Hidden\n").unwrap();
+            std::fs::write(topics.join(".gitignore"), "ignored.md\n").unwrap();
+            std::fs::write(topics.join("ignored.md"), "# Ignored\n").unwrap();
+
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links --dir docs/topics\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let (composed, _report) = md
+                .compose_with(ComposeOptions::new().with_source_file(&root))
+                .unwrap();
+
+            let options = TerminalOptions {
+                color_mode: crate::markdown::highlighting::ColorMode::Dark,
+                color_depth: Some(ColorDepth::TrueColor),
+                image_mode: TerminalImageMode::Never,
+                italic_mode: ItalicMode::Always,
+                dim_mode: DimMode::Always,
+                hyperlink_mode: HyperlinkMode::Always,
+                mermaid_mode: MermaidMode::Off,
+                max_width: Some(100),
+                ..TerminalOptions::default()
+            };
+            let output = composed.as_terminal(options).unwrap();
+
+            // Extension-specific Unicode glyphs.
+            for glyph in ["📝", "📕", "📗", "📘"] {
+                assert!(output.contains(glyph), "missing glyph {glyph:?}: {output:?}");
+            }
+            // Repository icon, never the ordinary folder icon (no subdirs).
+            assert!(output.contains("📦"), "missing repository icon: {output:?}");
+            assert!(!output.contains("📂"), "unexpected folder icon: {output:?}");
+            // Dotfile italic, gitignored dim, target bold.
+            assert!(output.contains("\x1b[3m"), "missing italic dotfile: {output:?}");
+            assert!(output.contains("\x1b[2m"), "missing dim entry: {output:?}");
+            assert!(output.contains("\x1b[1m"), "missing bold target: {output:?}");
+            // The gitignored document is present but dim, the dotfile present.
+            assert!(output.contains("ignored.md"), "missing ignored.md: {output:?}");
+            assert!(output.contains(".hidden.md"), "missing .hidden.md: {output:?}");
+            assert!(
+                !output.contains(".gitignore"),
+                ".gitignore should not be a tree entry: {output:?}"
+            );
+        }
+
+        #[test]
+        fn dir_mode_with_depth_zero_lists_top_level_only() {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            let docs = dir.path().join("docs");
+            std::fs::create_dir(&docs).unwrap();
+            std::fs::write(docs.join("top.md"), "# Top\n").unwrap();
+            let sub = docs.join("sub");
+            std::fs::create_dir(&sub).unwrap();
+            std::fs::write(sub.join("nested.md"), "# Nested\n").unwrap();
+
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links --dir docs\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("top.md"), "content: {text}");
+            assert!(
+                !text.contains("nested.md"),
+                "depth 0 should not recurse: {text}"
+            );
+            assert_eq!(report.transclusions_applied, 1);
+        }
+
+        #[test]
+        fn dir_mode_with_depth_recovers_nested_files() {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            let docs = dir.path().join("docs");
+            std::fs::create_dir(&docs).unwrap();
+            let sub = docs.join("sub");
+            std::fs::create_dir(&sub).unwrap();
+            std::fs::write(sub.join("nested.md"), "# Nested\n").unwrap();
+
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links --dir docs --depth 2\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("nested.md"), "content: {text}");
+            assert_eq!(report.transclusions_applied, 1);
+        }
+
+        #[test]
+        fn self_exclusion_skips_source_document() {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links *.md\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, _report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            assert!(
+                !text.contains("root.md"),
+                "source doc should be excluded: {text}"
+            );
+        }
+
+        #[test]
+        fn strict_empty_result_inserts_notice() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links *.nonexistent\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .with_fail_fast(true)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("No matching files"), "content: {text}");
+            assert_eq!(report.transclusions_skipped, 1);
+        }
+
+        #[test]
+        fn permissive_empty_result_removes_directive_with_warning() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links *.nonexistent\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .with_fail_fast(false)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            assert!(
+                !text.contains("::file-links"),
+                "directive should be removed: {text}"
+            );
+            assert!(!text.contains("No matching files"), "content: {text}");
+            assert_eq!(report.transclusions_skipped, 1);
+            assert!(
+                report.warnings.iter().any(|w| w.message.contains("No matching files")),
+                "expected warning: {:?}",
+                report.warnings
+            );
+        }
+
+        #[test]
+        fn dir_target_regular_file_errors_strict() {
+            // `--dir` pointed at a regular file is a syntax error, not an empty
+            // directory: strict mode fails the compose with a clear diagnostic.
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            std::fs::write(dir.path().join("report.pdf"), "pdf\n").unwrap();
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links --dir report.pdf\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .with_fail_fast(true)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let err = md.compose_with(options).unwrap_err();
+            assert!(
+                err.to_string().contains("not a directory"),
+                "expected a not-a-directory error, got: {err}"
+            );
+        }
+
+        #[test]
+        fn dir_target_regular_file_warns_permissive() {
+            // Permissive mode removes the directive and records the real
+            // not-a-directory diagnostic instead of an empty/misleading warning.
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            std::fs::write(dir.path().join("report.pdf"), "pdf\n").unwrap();
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links --dir report.pdf\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .with_ignore_invalid_references(Some(true))
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            assert!(
+                !text.contains("::file-links"),
+                "directive should be removed: {text}"
+            );
+            assert_eq!(report.transclusions_skipped, 1);
+            assert!(
+                report
+                    .warnings
+                    .iter()
+                    .any(|w| w.message.contains("not a directory")),
+                "expected not-a-directory warning: {:?}",
+                report.warnings
+            );
+        }
+
+        #[test]
+        fn operation_disabling_leaves_directive_intact() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links *.md\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .disable(ComposeOperation::FileLinks)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, _report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("::file-links"), "directive should remain: {text}");
+        }
+
+        #[test]
+        fn indented_directive_preserves_container_nesting() {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            let docs = dir.path().join("docs");
+            std::fs::create_dir(&docs).unwrap();
+            std::fs::write(docs.join("a.md"), "# A\n").unwrap();
+
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n- Item\n  ::file-links docs/*\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, _report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            // Each output line should be indented to match the list item
+            for line in text.lines().skip(3) {
+                if line.contains("a.md") {
+                    assert!(
+                        line.starts_with("  "),
+                        "expected indent, got: {line}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn malformed_directive_in_strict_mode_fails() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .with_fail_fast(true)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let result = md.compose_with(options);
+            assert!(result.is_err(), "expected parse error in strict mode");
+        }
+
+        #[test]
+        fn out_of_bound_path_is_ignored() {
+            let dir = tempfile::tempdir().unwrap();
+            let docs = dir.path().join("docs");
+            std::fs::create_dir(&docs).unwrap();
+            std::fs::write(docs.join("a.md"), "# A\n").unwrap();
+
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links ../*\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            assert!(
+                !text.contains(".."),
+                "out-of-bound paths should be excluded: {text}"
+            );
+            assert_eq!(report.transclusions_skipped, 1);
+        }
+
+        #[test]
+        fn mixed_case_extensions_are_included() {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            let docs = dir.path().join("docs");
+            std::fs::create_dir(&docs).unwrap();
+            std::fs::write(docs.join("lower.md"), "# L\n").unwrap();
+            std::fs::write(docs.join("UPPER.MD"), "# U\n").unwrap();
+            std::fs::write(docs.join("MiXeD.Txt"), "# M\n").unwrap();
+            std::fs::write(docs.join("binary.exe"), "binary\n").unwrap();
+
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links docs/*\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, _report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("lower.md"), "content: {text}");
+            assert!(text.contains("UPPER.MD"), "content: {text}");
+            assert!(text.contains("MiXeD.Txt"), "content: {text}");
+            assert!(
+                !text.contains("binary.exe"),
+                "unsupported extension should be excluded: {text}"
+            );
+        }
+
+        #[test]
+        fn multiple_directives_produce_deterministic_ordering() {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            let docs = dir.path().join("docs");
+            std::fs::create_dir(&docs).unwrap();
+            std::fs::write(docs.join("a.md"), "# A\n").unwrap();
+            let other = dir.path().join("other");
+            std::fs::create_dir(&other).unwrap();
+            std::fs::write(other.join("b.txt"), "B\n").unwrap();
+
+            let root = dir.path().join("root.md");
+            std::fs::write(
+                &root,
+                "# Root\n\n::file-links docs/*\n\n::file-links other/*\n\n",
+            )
+            .unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            // First directive's content should appear before second
+            let pos_a = text.find("a.md").expect("a.md present");
+            let pos_b = text.find("b.txt").expect("b.txt present");
+            assert!(pos_a < pos_b, "deterministic order violated: {text}");
+            assert_eq!(report.transclusions_applied, 2);
+        }
+    }
+
+    #[test]
+    fn disclosure_block_markers_survive_compose() {
+        let content = "::disclosure\nLicense\n::details\nBody\n::end-disclosure\n";
+        let md: Markdown = content.into();
+
+        let (composed, _report) = md.compose().unwrap();
+        let text = composed.content();
+
+        assert!(
+            text.contains("::disclosure"),
+            "compose must preserve ::disclosure marker: {text}"
+        );
+        assert!(
+            text.contains("::details"),
+            "compose must preserve ::details marker: {text}"
+        );
+        assert!(
+            text.contains("::end-disclosure"),
+            "compose must preserve ::end-disclosure marker: {text}"
+        );
+        assert!(text.contains("License"), "summary text must survive: {text}");
+        assert!(text.contains("Body"), "body text must survive: {text}");
+    }
+
+    #[test]
+    fn apply_wrappers_emits_disclosure_dsl() {
+        let md: Markdown = "# Test\n".into();
+        let options = transclusion::BlockOptions {
+            disclosure: Some("More".to_string()),
+            ..Default::default()
+        };
+
+        let wrapped = md.apply_wrappers("# Included\n\nBody.\n".to_string(), &options);
+
+        assert!(
+            wrapped.contains("::disclosure"),
+            "must emit ::disclosure opener: {wrapped}"
+        );
+        assert!(
+            wrapped.contains("::details"),
+            "must emit ::details separator: {wrapped}"
+        );
+        assert!(
+            wrapped.contains("::end-disclosure"),
+            "must emit ::end-disclosure closer: {wrapped}"
+        );
+        assert!(
+            wrapped.contains("More"),
+            "must include summary text: {wrapped}"
+        );
+        assert!(
+            !wrapped.contains("<details>"),
+            "must not emit HTML details: {wrapped}"
+        );
+        assert!(
+            !wrapped.contains("<summary>"),
+            "must not emit HTML summary: {wrapped}"
+        );
+    }
+
+    #[test]
+    fn apply_wrappers_normalizes_empty_disclosure_summary_to_details() {
+        let md: Markdown = "# Test\n".into();
+        let options = transclusion::BlockOptions {
+            disclosure: Some(String::new()),
+            ..Default::default()
+        };
+
+        let wrapped = md.apply_wrappers("Body.\n".to_string(), &options);
+
+        assert!(
+            wrapped.contains("::disclosure\nDetails\n::details"),
+            "empty summary must normalize to 'Details': {wrapped}"
+        );
+    }
+
+    #[test]
+    fn apply_wrappers_normalizes_true_disclosure_summary_to_details() {
+        let md: Markdown = "# Test\n".into();
+        let options = transclusion::BlockOptions {
+            disclosure: Some("true".to_string()),
+            ..Default::default()
+        };
+
+        let wrapped = md.apply_wrappers("Body.\n".to_string(), &options);
+
+        assert!(
+            wrapped.contains("::disclosure\nDetails\n::details"),
+            "'true' summary must normalize to 'Details': {wrapped}"
+        );
     }
 }

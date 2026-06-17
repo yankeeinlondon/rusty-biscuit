@@ -56,7 +56,8 @@ pub enum BrowserError {
 /// The contract is `async` because both `chromiumoxide` and the
 /// underlying CDP protocol are async. Implementations are responsible
 /// for launching the browser, navigating to a page, querying computed
-/// styles, and tearing the session down on drop.
+/// styles, and tearing the session down via [`shutdown`](BrowserHarness::shutdown)
+/// (with `Drop` as a best-effort fallback).
 #[async_trait]
 pub trait BrowserHarness: Send {
     /// Launch a headless browser instance.
@@ -98,6 +99,33 @@ pub trait BrowserHarness: Send {
     ///
     /// Returns [`BrowserError::Command`] on CDP failure.
     async fn screenshot(&mut self, selector: Option<&str>) -> Result<Vec<u8>, BrowserError>;
+
+    /// Evaluate `script` in a freshly-navigated page and return its result
+    /// as a `String`. The script must evaluate to a string value; wrap object
+    /// results in `JSON.stringify` (or join the fields yourself).
+    ///
+    /// Unlike [`computed_style`](BrowserHarness::computed_style) — which opens a
+    /// fresh page per call and so cannot observe state mutated by an earlier
+    /// call — `evaluate` performs all interaction (querying, clicking,
+    /// re-reading) inside a single page, so DOM toggles such as
+    /// `<summary>.click()` are observable in the same evaluation.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`BrowserError::Command`] on CDP failure or when the result is
+    /// not a string.
+    async fn evaluate(&mut self, script: &str) -> Result<String, BrowserError>;
+
+    /// Gracefully tear the browser session down, awaiting full process exit.
+    ///
+    /// [`Drop`] is best-effort and cannot `await`, so it leaves the spawned
+    /// browser (and the OS handles it inherited from the test process) alive
+    /// past the harness scope — which trips nextest's browser-leak timeout.
+    /// Every browser test must call this before its Tokio runtime exits so the
+    /// child process is closed, waited on, and its handler task reaped.
+    ///
+    /// Idempotent: a second call after teardown is a no-op.
+    async fn shutdown(&mut self);
 }
 
 /// Locate a usable Chrome/Chromium executable, or `None` to skip.
@@ -245,6 +273,15 @@ pub struct ChromeHarness {
     browser: Option<Browser>,
     handler_handle: Option<tokio::task::JoinHandle<()>>,
     workdir: Option<tempfile::TempDir>,
+    /// Per-harness Chrome profile (`--user-data-dir`). Each spawn gets its
+    /// own dir so concurrent test processes never collide on Chrome's
+    /// `SingletonLock`. chromiumoxide otherwise defaults every instance to a
+    /// single shared `$TMPDIR/chromiumoxide-runner`, which fails the second
+    /// concurrent launch — and `#[serial]` cannot prevent that under
+    /// nextest's process-per-test model. Held only so the dir is removed
+    /// when the harness drops.
+    #[allow(dead_code)]
+    profile_dir: Option<tempfile::TempDir>,
     extra_args: Vec<String>,
 }
 
@@ -258,6 +295,7 @@ impl ChromeHarness {
             browser: None,
             handler_handle: None,
             workdir: None,
+            profile_dir: None,
             extra_args: vec!["--no-sandbox".to_string()],
         }
     }
@@ -316,13 +354,20 @@ impl BrowserHarness for ChromeHarness {
             Some(p) => p,
             None => return Err(BrowserError::NoBrowser),
         };
-        let mut builder = BrowserConfig::builder().chrome_executable(chrome);
+        // A fresh per-harness profile dir keeps concurrent test processes off
+        // chromiumoxide's shared default profile, whose `SingletonLock` fails
+        // the second simultaneous launch.
+        let profile = tempfile::tempdir()?;
+        let mut builder = BrowserConfig::builder()
+            .chrome_executable(chrome)
+            .user_data_dir(profile.path());
         for arg in &self.extra_args {
             builder = builder.arg(arg);
         }
         let config = builder
             .build()
             .map_err(|e| BrowserError::Command(e.to_string()))?;
+        self.profile_dir = Some(profile);
         let (browser, mut handler) = Browser::launch(config)
             .await
             .map_err(|e| BrowserError::Command(e.to_string()))?;
@@ -362,6 +407,17 @@ impl BrowserHarness for ChromeHarness {
         Ok(value.trim().to_string())
     }
 
+    async fn evaluate(&mut self, script: &str) -> Result<String, BrowserError> {
+        let page = self.page().await?;
+        let value: String = page
+            .evaluate(script)
+            .await
+            .map_err(|e| BrowserError::Command(e.to_string()))?
+            .into_value()
+            .map_err(|e| BrowserError::Command(e.to_string()))?;
+        Ok(value)
+    }
+
     async fn screenshot(&mut self, selector: Option<&str>) -> Result<Vec<u8>, BrowserError> {
         use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat;
         use chromiumoxide::page::ScreenshotParams;
@@ -385,16 +441,36 @@ impl BrowserHarness for ChromeHarness {
         };
         Ok(bytes)
     }
+
+    async fn shutdown(&mut self) {
+        // Close the browser while its handler task is still draining CDP
+        // messages, then `wait` for the chromium process to exit completely so
+        // the OS handles it inherited from this test process are released. Drop
+        // can do neither (it cannot await), which is what leaks handles past
+        // the browser-leak timeout.
+        if let Some(mut browser) = self.browser.take() {
+            let _ = browser.close().await;
+            let _ = browser.wait().await;
+        }
+        // With the connection closed the handler loop ends on its own; `abort`
+        // guards a stuck stream, and awaiting reaps the task — and the handles
+        // it held — before the runtime exits.
+        if let Some(handle) = self.handler_handle.take() {
+            handle.abort();
+            let _ = handle.await;
+        }
+    }
 }
 
 impl Drop for ChromeHarness {
     fn drop(&mut self) {
+        // Tests should call [`shutdown`](BrowserHarness::shutdown) for a clean,
+        // awaited teardown; this is the best-effort fallback for the panic path
+        // (and any caller that forgot). Drop cannot await, so it can only abort
+        // the handler and fire-and-forget the close.
         if let Some(handle) = self.handler_handle.take() {
             handle.abort();
         }
-        // Browser cleanup is async — best-effort spawn the close if we
-        // happen to be inside a tokio runtime, otherwise the process
-        // will reap when the Browser struct drops.
         if let Some(mut browser) = self.browser.take()
             && let Ok(handle) = tokio::runtime::Handle::try_current()
         {

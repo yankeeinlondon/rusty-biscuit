@@ -1,7 +1,11 @@
 //! Frontmatter interpolation engine.
 //!
-//! Resolves `{{ variable }}` expressions inside frontmatter values using
-//! non-templated (seed) frontmatter values, `ctx.*`, and `env.*` as inputs.
+//! Resolves `{{ variable }}` expressions inside frontmatter values. Lookups
+//! read non-templated (seed) frontmatter values, the reserved `doc` / `doc.*`
+//! namespace (the incrementally-resolved frontmatter object), `ctx.*`, and
+//! `env.*`. When a [`ResolutionContext`] is attached, the read-side functions
+//! (`file_exists`, `frontmatter`, `absolute`, `relative`, …) resolve their path
+//! arguments here too — the same capability every other expression surface has.
 //!
 //! ## Incremental Seed Semantics
 //!
@@ -23,7 +27,7 @@
 //! caller can run frontmatter shell expansion and then call this function a
 //! second time to resolve those keys against the shell-expanded values.
 
-use super::expression::{EvaluationLookup, Expr, ExpressionFinder, parse};
+use super::expression::{EvaluationLookup, Expr, ExpressionFinder, ResolutionContext, doc_namespace, parse};
 use super::interpolation::{Evaluator, ScanMode, interpolate_text};
 use super::types::{ComposeContext, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
@@ -43,21 +47,48 @@ pub(crate) fn contains_interpolation(value: &Value) -> bool {
 
 /// Lookup state for frontmatter interpolation.
 ///
-/// Contains only non-templated (seed) top-level frontmatter values,
-/// plus `ctx.*` and `env.*` from the runtime context.
+/// Resolves the reserved `doc` namespace (the incrementally-resolved seed map),
+/// the non-templated (seed) top-level frontmatter values, and `ctx.*` / `env.*`
+/// from the runtime context. An optional [`ResolutionContext`] enables the
+/// read-side expression functions (`file_exists`, `frontmatter`, …) during
+/// frontmatter interpolation; it is `None` for context-free callers.
 pub(crate) struct FrontmatterSeedState {
     data: HashMap<String, Value>,
     context: ComposeContext,
+    resolution_context: Option<ResolutionContext>,
 }
 
 impl FrontmatterSeedState {
     pub(crate) fn new(data: HashMap<String, Value>, context: ComposeContext) -> Self {
-        Self { data, context }
+        Self {
+            data,
+            context,
+            resolution_context: None,
+        }
+    }
+
+    /// Attaches a [`ResolutionContext`] so the read-side expression functions
+    /// (`file_exists`, `frontmatter`, `absolute`, `relative`, …) can evaluate
+    /// during frontmatter interpolation. Passing `None` leaves the state
+    /// context-free (read-side functions remain disabled).
+    #[must_use]
+    pub(crate) fn with_resolution_context(
+        mut self,
+        resolution_context: Option<ResolutionContext>,
+    ) -> Self {
+        self.resolution_context = resolution_context;
+        self
     }
 }
 
 impl EvaluationLookup for FrontmatterSeedState {
     fn get(&self, path: &str) -> Option<Value> {
+        // Reserved `doc` namespace, intercepted before key/ctx/env lookup.
+        if doc_namespace::is_doc_namespace(path) {
+            let root = Value::Object(self.data.clone().into_iter().collect());
+            return doc_namespace::resolve_doc_namespace(path, &root);
+        }
+
         // ctx.* prefix
         if let Some(ctx_key) = path.strip_prefix("ctx.") {
             return self.context.get(ctx_key).cloned();
@@ -92,6 +123,10 @@ impl EvaluationLookup for FrontmatterSeedState {
             Some(Value::Bool(b)) => b.to_string(),
             Some(v) => v.to_string(),
         }
+    }
+
+    fn resolution_context(&self) -> Option<ResolutionContext> {
+        self.resolution_context.clone()
     }
 }
 
@@ -179,11 +214,16 @@ pub(crate) struct FrontmatterInterpolationReport {
 /// with `$(` are treated as shell-pending. Templated keys that reference any
 /// shell-pending key are left unresolved so a caller can run frontmatter
 /// shell expansion and invoke this function again to finish the work.
+///
+/// `resolution_context` enables the read-side expression functions
+/// (`file_exists`, `frontmatter`, `absolute`, `relative`, …) during both
+/// interpolation passes. Pass `None` for context-free callers (e.g. tests).
 pub(crate) fn interpolate_frontmatter(
     frontmatter: &mut Frontmatter,
     context: &ComposeContext,
     fail_fast: bool,
     defer_shell_pending: bool,
+    resolution_context: Option<ResolutionContext>,
 ) -> Result<FrontmatterInterpolationReport, MarkdownError> {
     let fm = frontmatter.as_map();
 
@@ -250,7 +290,8 @@ pub(crate) fn interpolate_frontmatter(
                 continue;
             }
 
-            let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone());
+            let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone())
+                .with_resolution_context(resolution_context.clone());
             let evaluator = Evaluator::new(&seed_state);
             let (new_value, count, mut warnings) = rewrite_value(original, &evaluator, fail_fast)?;
 
@@ -273,6 +314,14 @@ pub(crate) fn interpolate_frontmatter(
         }
     }
 
+    // Keys that transitively depend on a shell-pending value must survive the
+    // fallback pass untouched so the post-shell second pass can resolve them
+    // against expanded values. A direct-ref check is not enough: a key like
+    // `review_path: "@{{area}}/{{review}}"` reaches a shell-pending `dir` only
+    // through `review`, and finalizing it here would bake in an empty `review`.
+    let shell_blocked =
+        transitively_shell_blocked_keys(&templated_keys, &original_values, &shell_pending_keys);
+
     for key in &templated_keys {
         if resolved.contains(key) {
             continue;
@@ -283,17 +332,12 @@ pub(crate) fn interpolate_frontmatter(
             None => continue,
         };
 
-        // Leave keys with shell-pending refs alone; the caller will rerun
-        // interpolation after frontmatter shell expansion has produced
-        // concrete values for those refs.
-        if !shell_pending_keys.is_empty() {
-            let refs = extract_frontmatter_key_refs(original);
-            if refs.iter().any(|r| shell_pending_keys.contains(r)) {
-                continue;
-            }
+        if shell_blocked.contains(key) {
+            continue;
         }
 
-        let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone());
+        let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone())
+            .with_resolution_context(resolution_context.clone());
         let evaluator = Evaluator::new(&seed_state);
         let (new_value, count, mut warnings) = rewrite_value(original, &evaluator, fail_fast)?;
 
@@ -313,6 +357,49 @@ pub(crate) fn interpolate_frontmatter(
         replacements: total_replacements,
         warnings: all_warnings,
     })
+}
+
+/// Computes the templated keys that transitively depend on a shell-pending
+/// (`$(...)`) value.
+///
+/// A key is blocked when it references a shell-pending key directly, or
+/// references another templated key that is itself blocked; the result is the
+/// fixpoint of that relation. Returns an empty set when no keys are
+/// shell-pending (e.g. the post-shell second pass), so the fallback resolution
+/// pass behaves exactly as before for non-deferred runs.
+fn transitively_shell_blocked_keys(
+    templated_keys: &[String],
+    original_values: &HashMap<String, Value>,
+    shell_pending_keys: &HashSet<String>,
+) -> HashSet<String> {
+    let mut blocked: HashSet<String> = HashSet::new();
+    if shell_pending_keys.is_empty() {
+        return blocked;
+    }
+
+    loop {
+        let mut changed = false;
+        for key in templated_keys {
+            if blocked.contains(key) {
+                continue;
+            }
+            let Some(original) = original_values.get(key) else {
+                continue;
+            };
+            let is_blocked = extract_frontmatter_key_refs(original)
+                .iter()
+                .any(|r| shell_pending_keys.contains(r) || blocked.contains(r));
+            if is_blocked {
+                blocked.insert(key.clone());
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    blocked
 }
 
 /// Extracts frontmatter-key references from a JSON value tree.
@@ -357,13 +444,23 @@ fn collect_frontmatter_key_refs(value: &Value, refs: &mut Vec<String>) {
 /// Walks an `Expr` AST and pushes the root segment of every `Variable` node
 /// onto `refs`, skipping `ctx.*` and `env.*` since those resolve from the
 /// runtime context, not seed frontmatter.
+///
+/// The reserved `doc` namespace mirrors bare-name dependencies (Decision C):
+/// `doc.<root>` contributes the same dependency root as bare `<root>`, so
+/// `{{ doc.a }}` waits for templated key `a` and `doc.doc` waits for a literal
+/// key named `doc`. Bare `doc` is a snapshot of the currently-resolved values
+/// and contributes no dependency, avoiding all-key dependencies and self-cycles.
 fn collect_variable_roots(expr: &Expr, refs: &mut Vec<String>) {
     match expr {
         Expr::Variable(path) => {
             if path.starts_with("ctx.") || path.starts_with("env.") {
                 return;
             }
-            let root = path.split('.').next().unwrap_or(path);
+            if path == "doc" {
+                return;
+            }
+            let effective = path.strip_prefix("doc.").unwrap_or(path);
+            let root = effective.split('.').next().unwrap_or(effective);
             if !root.is_empty() {
                 refs.push(root.to_string());
             }
@@ -501,6 +598,35 @@ mod tests {
         }
 
         #[test]
+        fn doc_namespace_resolves_against_seed_only() {
+            let mut data = HashMap::new();
+            data.insert("build".to_string(), json!("seed-build"));
+            data.insert("doc".to_string(), json!({ "child": "literal-doc" }));
+            let state = FrontmatterSeedState::new(data, test_context());
+
+            // doc.<path> resolves a seed property.
+            assert_eq!(state.get("doc.build"), Some(json!("seed-build")));
+
+            // bare doc returns the whole seed object.
+            let obj = state.get("doc").expect("bare doc resolves");
+            assert!(obj.is_object());
+            assert_eq!(obj.get("build"), Some(&json!("seed-build")));
+
+            // a literal property named `doc` is reached as doc.doc.
+            assert_eq!(state.get("doc.doc.child"), Some(json!("literal-doc")));
+
+            // missing doc.* values do not fall back to ctx.*.
+            assert_eq!(state.get("ctx.today"), Some(json!("2024-06-15")));
+            assert_eq!(state.get("doc.today"), None);
+        }
+
+        #[test]
+        fn resolution_context_defaults_to_none() {
+            let state = FrontmatterSeedState::new(HashMap::new(), test_context());
+            assert!(state.resolution_context().is_none());
+        }
+
+        #[test]
         fn get_string_returns_empty_for_missing() {
             let state = FrontmatterSeedState::new(HashMap::new(), test_context());
             assert_eq!(state.get_string("nonexistent"), "");
@@ -539,7 +665,7 @@ mod tests {
                 "spec": "{{base}}/spec.md",
                 "plan": "{{base}}/plan.md"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
             assert_eq!(report.replacements, 2);
             assert_eq!(
                 fm.as_map().get("spec"),
@@ -559,7 +685,7 @@ mod tests {
                 "title": "Hello",
                 "count": 42
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
             assert_eq!(report.replacements, 0);
         }
 
@@ -572,7 +698,7 @@ mod tests {
                     "owner": "Alice"
                 }
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
             assert_eq!(report.replacements, 1);
             let meta = fm.as_map().get("metadata").unwrap();
             assert_eq!(meta.get("home"), Some(&json!("/docs/home")));
@@ -585,7 +711,7 @@ mod tests {
                 "base": "/root",
                 "paths": ["{{base}}/a", "{{base}}/b"]
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
             assert_eq!(report.replacements, 2);
             let paths = fm.as_map().get("paths").unwrap().as_array().unwrap();
             assert_eq!(paths[0], json!("/root/a"));
@@ -597,7 +723,7 @@ mod tests {
             let mut fm = fm_from_json(json!({
                 "spec": "{{missing}}/spec.md"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
             assert_eq!(report.replacements, 1);
             assert_eq!(fm.as_map().get("spec"), Some(&json!("/spec.md")));
         }
@@ -607,7 +733,7 @@ mod tests {
             let mut fm = fm_from_json(json!({
                 "date": "{{ctx.today}}"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
             assert_eq!(report.replacements, 1);
             assert_eq!(fm.as_map().get("date"), Some(&json!("2024-06-15")));
         }
@@ -620,7 +746,7 @@ mod tests {
                 "spec": "{{base}}/spec.md",
                 "plan": "{{spec}}.plan.md"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
             assert_eq!(fm.as_map().get("spec"), Some(&json!("/root/spec.md")));
             assert_eq!(
                 fm.as_map().get("plan"),
@@ -630,11 +756,28 @@ mod tests {
         }
 
         #[test]
+        fn unknown_function_errors_instead_of_leaking_raw_template() {
+            // Regression: an unknown function used to be demoted to a warning
+            // in non-fail-fast mode, leaving the raw `{{ … }}` text in
+            // `review` to poison the downstream `review_path` file reference.
+            let mut fm = fm_from_json(json!({
+                "spec": "features/x/spec.md",
+                "review": "{{ unknown_fn(spec) + '/review.md' }}",
+                "review_path": "@area/{{review}}"
+            }));
+            let result = interpolate_frontmatter(&mut fm, &test_context(), false, false, None);
+            let Err(err) = result else {
+                panic!("unknown function must abort interpolation");
+            };
+            assert!(err.to_string().contains("Unknown function: unknown_fn"));
+        }
+
+        #[test]
         fn fail_fast_returns_error() {
             let mut fm = fm_from_json(json!({
                 "bad": "{{ > invalid }}"
             }));
-            let result = interpolate_frontmatter(&mut fm, &test_context(), true, false);
+            let result = interpolate_frontmatter(&mut fm, &test_context(), true, false, None);
             assert!(result.is_err());
         }
 
@@ -643,7 +786,7 @@ mod tests {
             let mut fm = fm_from_json(json!({
                 "bad": "{{ > invalid }}"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
             assert!(!report.warnings.is_empty());
         }
 
@@ -655,7 +798,7 @@ mod tests {
                 "combined": "cwd is {{pwd}} and os is {{uname}}",
                 "plain": "literal"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, true).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, true, None).unwrap();
             // combined depends on shell-pending keys, so it stays templated.
             assert_eq!(
                 fm.as_map().get("combined"),
@@ -668,13 +811,55 @@ mod tests {
         }
 
         #[test]
+        fn defer_shell_pending_defers_transitive_dependents() {
+            // Regression: `review_path` reaches the shell-pending `dir` only
+            // through `review`. The fallback pass used to finalize `review_path`
+            // against an empty `review`, yielding "@area/" before shell
+            // expansion ever ran. Both `review` (direct) and `review_path`
+            // (transitive) must stay deferred in the first pass.
+            let mut fm = fm_from_json(json!({
+                "spec": "features/x/spec.md",
+                "iteration": 1,
+                "dir": "$(dirname '{{spec}}')",
+                "review": "{{ dir + '/review-' + iteration + '.md' }}",
+                "review_path": "@area/{{review}}"
+            }));
+
+            interpolate_frontmatter(&mut fm, &test_context(), false, true, None).unwrap();
+            assert_eq!(
+                fm.as_map().get("review"),
+                Some(&json!("{{ dir + '/review-' + iteration + '.md' }}"))
+            );
+            assert_eq!(
+                fm.as_map().get("review_path"),
+                Some(&json!("@area/{{review}}"))
+            );
+
+            // Simulate frontmatter shell expansion producing a concrete dir.
+            fm.as_map_mut()
+                .insert("dir".to_string(), json!("features/x"));
+
+            // Second pass resolves the whole chain against the expanded value.
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, true, None).unwrap();
+            assert_eq!(
+                fm.as_map().get("review"),
+                Some(&json!("features/x/review-1.md"))
+            );
+            assert_eq!(
+                fm.as_map().get("review_path"),
+                Some(&json!("@area/features/x/review-1.md"))
+            );
+            assert!(report.replacements >= 2);
+        }
+
+        #[test]
         fn defer_shell_pending_resolves_after_shell_values_become_concrete() {
             let mut fm = fm_from_json(json!({
                 "pwd": "$(pwd)",
                 "combined": "cwd is {{pwd}}"
             }));
             // First pass: defer because pwd is shell-pending.
-            interpolate_frontmatter(&mut fm, &test_context(), false, true).unwrap();
+            interpolate_frontmatter(&mut fm, &test_context(), false, true, None).unwrap();
             assert_eq!(fm.as_map().get("combined"), Some(&json!("cwd is {{pwd}}")));
 
             // Simulate frontmatter shell expansion completing.
@@ -682,12 +867,90 @@ mod tests {
                 .insert("pwd".to_string(), json!("/real/path"));
 
             // Second pass: pwd is now concrete (no longer starts with `$(`).
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, true).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, true, None).unwrap();
             assert_eq!(
                 fm.as_map().get("combined"),
                 Some(&json!("cwd is /real/path"))
             );
             assert_eq!(report.replacements, 1);
+        }
+
+        #[test]
+        fn read_side_functions_resolve_with_context_pre_shell_pass() {
+            // The pre-shell pass (`defer_shell_pending = true`) carries the
+            // resolution context, so read-side functions resolve in frontmatter.
+            let dir = tempfile::TempDir::new().unwrap();
+            std::fs::write(dir.path().join("spec.md"), "# Spec").unwrap();
+            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+
+            let mut fm = fm_from_json(json!({
+                "exists": "{{ file_exists('spec.md') }}",
+                "missing": "{{ file_exists('nope.md') }}",
+                "abs": "{{ absolute('spec.md') }}",
+                "rel": "{{ relative('spec.md') }}",
+            }));
+            interpolate_frontmatter(&mut fm, &test_context(), false, true, Some(ctx)).unwrap();
+
+            assert_eq!(fm.as_map().get("exists"), Some(&json!("true")));
+            assert_eq!(fm.as_map().get("missing"), Some(&json!("false")));
+            assert_eq!(
+                fm.as_map().get("abs"),
+                Some(&json!(
+                    dir.path().join("spec.md").to_string_lossy().to_string()
+                ))
+            );
+            assert_eq!(fm.as_map().get("rel"), Some(&json!("spec.md")));
+        }
+
+        #[test]
+        fn read_side_functions_resolve_with_context_post_shell_pass() {
+            // The post-shell pass (`defer_shell_pending = false`) carries the
+            // same resolution context.
+            let dir = tempfile::TempDir::new().unwrap();
+            std::fs::write(dir.path().join("spec.md"), "# Spec").unwrap();
+            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+
+            let mut fm = fm_from_json(json!({
+                "exists": "{{ file_exists('spec.md') }}",
+                "abs": "{{ absolute('spec.md') }}",
+                "rel": "{{ relative('spec.md') }}",
+            }));
+            interpolate_frontmatter(&mut fm, &test_context(), false, false, Some(ctx)).unwrap();
+
+            assert_eq!(fm.as_map().get("exists"), Some(&json!("true")));
+            assert_eq!(
+                fm.as_map().get("abs"),
+                Some(&json!(
+                    dir.path().join("spec.md").to_string_lossy().to_string()
+                ))
+            );
+            assert_eq!(fm.as_map().get("rel"), Some(&json!("spec.md")));
+        }
+
+        #[test]
+        fn read_side_functions_unavailable_without_context() {
+            // Without a resolution context, read-side functions fail to evaluate
+            // (the recoverable "requires a document resolution context" error),
+            // which aborts interpolation rather than silently leaking.
+            let mut fm = fm_from_json(json!({
+                "exists": "{{ file_exists('spec.md') }}",
+            }));
+            let result = interpolate_frontmatter(&mut fm, &test_context(), true, false, None);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn doc_root_dependency_orders_like_bare_name() {
+            // `{{ doc.a }}` must wait for the templated key `a` exactly as a bare
+            // `{{ a }}` reference would (Decision C).
+            let mut fm = fm_from_json(json!({
+                "base": "/root",
+                "a": "{{ base }}/spec.md",
+                "b": "{{ doc.a }}",
+            }));
+            interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
+            assert_eq!(fm.as_map().get("a"), Some(&json!("/root/spec.md")));
+            assert_eq!(fm.as_map().get("b"), Some(&json!("/root/spec.md")));
         }
 
         #[test]
@@ -697,7 +960,7 @@ mod tests {
                 "combined": "cwd is {{pwd}}"
             }));
             // With defer disabled, the literal `$(pwd)` flows through.
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
             assert_eq!(fm.as_map().get("combined"), Some(&json!("cwd is $(pwd)")));
             assert_eq!(report.replacements, 1);
         }

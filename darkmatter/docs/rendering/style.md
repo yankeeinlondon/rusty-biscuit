@@ -13,6 +13,7 @@ Darkmatter reserves the Frontmatter property `style` for defining stylistic pref
 1. `ol` - Ordered Lists
 1. `li` - List Item
 1. `block-quote` (canonical) / `block_quote` (snake-case alias, emits `Deprecated`)
+1. `disclosure` - Disclosure blocks
 
 When performing a composition argument the caller can send in a style object to modify the default style of the full page graph (`style` property is passed down to child properties).
 
@@ -27,8 +28,9 @@ When performing a composition argument the caller can send in a style object to 
 | #5       | `color` / `bg-color` application  | **Live**        |
 | #6       | `style.hr.*` HR migration          | **Live**        |
 | #7       | Bespoke knobs (stylesheet, meta, code-theme, hyperlinks, local-style) | **Live** |
+| #8       | `style.disclosure.*` disclosure blocks | **Live**    |
 
-The library exposes `ACTIVE_STYLE_WIRING_SUB_SPEC` (currently `7`) so `KnownButInactive` warnings only fire for keys whose wiring sub-spec has not yet landed. After sub-spec #7, every valid v1 schema key is either visually honored or rejected with a documented `StyleApplyError`. No valid v1 key emits `KnownButInactive`.
+The library exposes `ACTIVE_STYLE_WIRING_SUB_SPEC` (currently `8`) so `KnownButInactive` warnings only fire for keys whose wiring sub-spec has not yet landed. After sub-spec #8, every valid v1 schema key is either visually honored or rejected with a documented `StyleApplyError`. No valid v1 key emits `KnownButInactive`.
 
 ## Schema & Parser Architecture (Sub-Spec #1)
 
@@ -216,27 +218,35 @@ The `style.page.*` subset is fully wired through `DarkmatterPage` for both termi
 | `top-padding`        | non-negative integer                            |                                                             |
 | `bottom-padding`     | non-negative integer                            |                                                             |
 | `max-width`          | `Nch`, `N%`, or `0` (`0` rejected at apply-time) | Percent resolves against post-margin / post-padding content width |
-| `alignment`          | `left` \| `center` \| `right`                    | Broadcasts to every `PageComponent` via `use_alignment_for_all` (table/image/list/code/block-quote) |
+| `alignment`          | `left` \| `center` \| `right`                    | Broadcasts to every `PageComponent` via `ComponentPolicy` (table/image/list/code/block-quote) |
 | `background`         | `transparent` \| `subtle` \| `pronounced`        | Maps to `PageBackground` enum                               |
 | `stylesheet`, `meta`, `code` | See [Bespoke Knobs (Sub-Spec #7)](#bespoke-knobs-sub-spec-7) | `stylesheet` and `meta` are HTML-only; `code.theme` applies to both targets |
 
 `Length::Css(_)` (e.g. `10px`) is **not** valid for page-level terminal layout; it raises `StyleApplyError::InvalidCssLength`.
 
-### Length Lowering
+### Length Retention (per-target)
 
-`apply_page_style` converts `renderable::layout::Length` values to the concrete cell/row counts that `DarkmatterPage` expects:
+`apply_page_style` stores the authored `renderable::layout::Length` **directly**
+on the slim page frame (`Edges` / `TargetValue<Length>`); it does **not**
+pre-resolve percentages to cells. Each target then resolves the same `Length`:
 
-| Length variant | Page-level lowering |
-|---|---|
-| `Length::Zero` | `0` |
-| `Length::Ch(n)` | `u16::try_from(n).unwrap_or(u16::MAX)` |
-| `Length::Percent(p)` | Resolved at apply time with rounded cell counts. Validation (`0.0..=100.0`) is already enforced by the parser. |
-| `Length::Css(_)` | Returns `StyleApplyError::InvalidCssLength`. CSS units have no terminal equivalent. |
+| Length variant | Terminal | Browser wrapper |
+|---|---|---|
+| `Length::Zero` | `0` cells | `0ch` |
+| `Length::Ch(n)` | `n` cells | `{n}ch` |
+| `Length::Percent(p)` | `round(base * p / 100)` cells | `{p}%` (resolves against the viewport) |
+| `Length::Css(_)` | rejected at apply time (`InvalidCssLength`) | — |
 
-Percent resolution uses two different base widths depending on the field:
+So `style.page.left-margin: 10%` becomes `8` cells on an 80-col terminal but
+`margin-left: 10%` in the browser. The terminal percent base depends on the
+field:
 
-- **Horizontal margins and padding** resolve against the captured terminal width (`DarkmatterPage::new(&term)` captures it at construction time).
-- **`max-width`** resolves against the **content width** after final page margin and padding values are known — including any CLI overrides. This matches `LayoutContext` component-fill semantics and ensures page `max-width` composes predictably with margins. A resolved `max-width` of `0` cells is rejected because `DarkmatterPage` treats `max_width = 0` as invalid.
+- **Horizontal margins and padding** resolve against the captured terminal width
+  (`DarkmatterPage::new(&term)` captures it at construction time).
+- **`max-width`** resolves against the **content width** after final page margin
+  and padding values are known — including any CLI overrides. A `max-width` that
+  resolves to `0` cells is still rejected at apply time (`InvalidMaxWidth`), even
+  though the `Length` itself is retained for the browser.
 
 ### Example
 
@@ -350,7 +360,7 @@ Use it in CI to catch typos, snake-case aliases, and deprecated HR syntax (top-l
 
 ## Component-Level Style (Sub-Spec #3)
 
-`style.table.*`, `style.images.*`, and `style.block-quote.*` lower onto the same `DarkmatterPage` builder used by page-level style, via `apply_component_style`. Each bucket maps to a dedicated `PageComponent` variant:
+`style.table.*`, `style.images.*`, and `style.block-quote.*` lower directly into per-component [`ComponentPolicy`](crate::layout::ComponentPolicy) via `apply_component_style`. `ComponentPolicy` is the **single source of truth** for a component's `style:` layout and colors: a `renderable::layout::Layout` plus optional `color` / `bg_color` carried as alpha-bearing [`PaintColor`](renderable::style::PaintColor) (so opacity survives to HTML — see [Color & Background-Color](#color--background-color-sub-spec-5)). The parsed `StyleColor` is lowered to `PaintColor` at the parser/apply boundary; no `StyleColor` survives on `ComponentPolicy`. There is no parallel per-component color map. Each bucket maps to a dedicated `PageComponent` variant:
 
 | Bucket | `PageComponent` variant |
 |---|---|
@@ -360,26 +370,26 @@ Use it in CI to catch typos, snake-case aliases, and deprecated HR syntax (top-l
 
 Three knobs are live on each of the three buckets:
 
-- `width` — fixed width as `Nch`, `N%`, or `0`. Maps to `PageFill::Explicit(unit)` via `DarkmatterPage`'s `with_fill` builder.
-- `max-width` — upper bound as `Nch`, `N%`, or `0`. Maps to `PageFill::Max(unit)` via `DarkmatterPage`'s `with_fill` builder.
-- `alignment` — `left` \| `center` \| `right`. Maps to `use_alignment(component, alignment)` on the `DarkmatterPage` builder.
+- `width` — fixed width as `Nch`, `N%`, or `0`. Maps to `Layout.width = Width::Fixed`.
+- `max-width` — upper bound as `Nch`, `N%`, or `0`. Maps to `Layout.max_width`.
+- `alignment` — `left` \| `center` \| `right`. Maps to `Layout.alignment`.
 
 `Length::Css(_)` (e.g. `10px`) is **not** valid in component fill fields; `apply_component_style` returns `StyleApplyError::ComponentInvalidCssLength { bucket, field }`.
 
 ### Length Lowering
 
-`apply_component_style` converts `renderable::layout::Length` to `renderable::layout::WidthUnit` for component fill:
+`apply_component_style` lowers `renderable::layout::Length` directly into `Layout` fields, with no down-conversion:
 
-| Length variant | Component fill lowering |
+| Length variant | Component layout lowering |
 |---|---|
-| `Length::Zero` | `WidthUnit::Fixed(0)` |
-| `Length::Ch(n)` | `WidthUnit::Fixed(u16)` via saturating cast |
-| `Length::Percent(p)` | `WidthUnit::Percent(p)` |
+| `Length::Zero` | `Length::Zero` (cloned) |
+| `Length::Ch(n)` | `Length::Ch(n)` (cloned) |
+| `Length::Percent(p)` | `Length::Percent(p)` (cloned) |
 | `Length::Css(_)` | Returns `StyleApplyError::ComponentInvalidCssLength { bucket, field }`. CSS units have no terminal equivalent. |
 
 ### Width vs. Max-Width Exclusivity
 
-`width` and `max-width` are mutually exclusive **within the same bucket** because `DarkmatterPage` exposes a single `PageFill` slot per component. Setting both raises:
+`width` and `max-width` are mutually exclusive **within the same bucket** in the v1 schema to keep CLI precedence predictable. Setting both raises:
 
 ```text
 `style.{bucket}.width` and `style.{bucket}.max-width` are mutually exclusive
@@ -481,33 +491,17 @@ The `color` and `bg-color` knobs on `style.table`, `style.images`, and `style.bl
 
 ## List-Level Style (Sub-Spec #4)
 
-`style.ul.*`, `style.ol.*`, and `style.li.*` map onto three new `PageComponent` variants — `Ul`, `Ol`, `Li` — that replace the deprecated `PageComponent::Lists`. Each bucket supports `width`, `max-width`, and `alignment` via the same lowering pipeline as sub-spec #3, plus a bespoke `ul.left-margin` indent channel.
+`style.ul.*`, `style.ol.*`, and `style.li.*` map onto three `PageComponent` variants — `Ul`, `Ol`, `Li`. Each bucket supports `width`, `max-width`, and `alignment` via the same direct lowering as sub-spec #3, plus a bespoke `ul.left-margin` indent channel.
 
 ### PageComponent Split
 
-| Bucket | `PageComponent` variant | Deprecated predecessor |
-|---|---|---|
-| `style.ul.*` | `PageComponent::Ul` | `PageComponent::Lists` |
-| `style.ol.*` | `PageComponent::Ol` | `PageComponent::Lists` |
-| `style.li.*` | `PageComponent::Li` | `PageComponent::Lists` |
+| Bucket | `PageComponent` variant |
+|---|---|
+| `style.ul.*` | `PageComponent::Ul` |
+| `style.ol.*` | `PageComponent::Ol` |
+| `style.li.*` | `PageComponent::Li` |
 
-`PageComponent::Lists` is retained for one release cycle as a **broadcast/fallback** variant:
-
-```rust
-#[deprecated(note = "use PageComponent::{Ul, Ol, Li}")]
-Lists,
-```
-
-New renderer code must use `Ul`, `Ol`, or `Li`. When a concrete list variant has no value, the renderer falls back to the deprecated `Lists` entry. `PageComponent::ALL` includes only the concrete variants (`Images`, `BlockQuotes`, `Tables`, `CodeBlocks`, `Ul`, `Ol`, `Li`), not `Lists`.
-
-`PageComponent::LISTS` provides the three concrete list components in broadcast order:
-
-```rust
-impl PageComponent {
-    /// Concrete list components in broadcast order.
-    pub const LISTS: [PageComponent; 3] = [Self::Ul, Self::Ol, Self::Li];
-}
-```
+`PageComponent::ALL` includes all concrete variants (`Images`, `BlockQuotes`, `Tables`, `CodeBlocks`, `Ul`, `Ol`, `Li`, `Hyperlinks`, `Hr`, `Disclosure`).
 
 ### Tag-to-Component Mapping
 
@@ -521,11 +515,11 @@ The pulldown-cmark event stream distinguishes list kinds at render time:
 
 ### Live Knobs
 
-Three knobs are live on each of the three list buckets, using the same lowering as sub-spec #3:
+Three knobs are live on each of the three list buckets, using the same direct lowering as sub-spec #3:
 
-- `width` — fixed width as `Nch`, `N%`, or `0`. Maps to `PageFill::Explicit(unit)`.
-- `max-width` — upper bound as `Nch`, `N%`, or `0`. Maps to `PageFill::Max(unit)`.
-- `alignment` — `left` | `center` | `right`. Maps to `use_alignment(component, alignment)`.
+- `width` — fixed width as `Nch`, `N%`, or `0`. Maps to `Layout.width = Width::Fixed`.
+- `max-width` — upper bound as `Nch`, `N%`, or `0`. Maps to `Layout.max_width`.
+- `alignment` — `left` | `center` | `right`. Maps to `Layout.alignment`.
 
 Plus the bespoke `ul.left-margin` indent channel (see below).
 
@@ -537,12 +531,7 @@ Plus the bespoke `ul.left-margin` indent channel (see below).
 
 ### ul.left-margin: Independent Indent Channel
 
-`style.ul.left-margin` applies as a list-specific left indent that can coexist with `style.ul.width` or `style.ul.max-width`. It is **not** stored as `PageFill::Indent` — the single `PageFill` slot per component cannot represent both indent and width simultaneously. Instead, `DarkmatterPage`/`LayoutContext` expose a dedicated list-indent facility:
-
-- `with_list_left_margin(PageComponent::Ul, WidthUnit)` — builder method accepting only `PageComponent::Ul` in this sub-spec.
-- `LayoutContext::list_left_margin(PageComponent)` — retrieval at render time.
-
-Calling `with_list_left_margin` with `Ol`, `Li`, or a non-list component returns a clear apply error.
+`style.ul.left-margin` applies as a list-specific left indent that can coexist with `style.ul.width` or `style.ul.max-width`. It is stored as `ComponentPolicy.layout.margin.left` for `PageComponent::Ul` — an independent indent channel that does not conflict with width or max-width.
 
 ### Indent and Width Stacking Order
 
@@ -559,7 +548,7 @@ This means `left-margin: 4ch` plus `max-width: 40` produces a 4-cell offset and 
 | Field | Resolution base |
 |---|---|
 | `ul.left-margin: N%` | Page content width (after page margin/padding and page max-width are known) |
-| `ul`/`ol`/`li` `width`, `max-width` | Same helper as sub-spec #3: fixed `ch` values saturate to `u16`; percentages resolve against content width in `LayoutContext` |
+| `ul`/`ol`/`li` `width`, `max-width` | Same helper as sub-spec #3: `Length` values are cloned directly into `Layout.width` / `Layout.max_width`; the renderer fold resolves them at render time. |
 
 `Length::Css(_)` fails with `StyleApplyError` for all list length fields.
 
@@ -574,9 +563,8 @@ This means `left-margin: 4ch` plus `max-width: 40` produces a 4-cell offset and 
 | `Ul` | `ul` |
 | `Ol` | `ol` |
 | `Li` | `li` |
-| `Lists` (deprecated) | `ul, ol` |
 
-Generated CSS emits deprecated `Lists` selectors **before** concrete variant selectors so that granular list styles win by normal CSS cascade when both are present.
+Per-component browser CSS comes from the renderable browser fold lowering each node's `Layout`/`Style` attributes; no bespoke component CSS blocks are emitted.
 
 ### CLI Flags
 
@@ -676,23 +664,36 @@ The schema already reserved `style.hyperlinks.color` and `style.hyperlinks.bg-co
 
 | Routing | Detail |
 |---|---|
-| Color storage | `DarkmatterPage` component color maps (wired sub-spec #5) |
+| Color storage | `ComponentPolicy.color` / `bg_color` on `DarkmatterPage` (wired sub-spec #5) |
 | Browser selector | `a` (wired sub-spec #5) |
 | Terminal rendering | Wraps link label text with foreground/background SGR while preserving existing OSC8 hyperlink sequences (wired sub-spec #5) |
 | Full layout and `local-style` | Wired in sub-spec #7 (see [Bespoke Knobs](#bespoke-knobs-sub-spec-7)) |
 
 ### Color Storage and Inheritance
 
-`DarkmatterPage` is extended with four color maps:
+Page color lives in two `DarkmatterPage` fields; component color lives on each
+component's `ComponentPolicy` — the single source of truth, with no parallel
+color map:
 
 ```rust
-page_color: Option<StyleColor>,
-page_bg_color: Option<StyleColor>,
-component_colors: HashMap<PageComponent, StyleColor>,
-component_bg_colors: HashMap<PageComponent, StyleColor>,
+page_color: Option<renderable::style::PaintColor>,
+page_bg_color: Option<renderable::style::PaintColor>,
+// per component, inside `component_policies: HashMap<PageComponent, ComponentPolicy>`:
+struct ComponentPolicy {
+    layout: Layout,
+    color: Option<renderable::style::PaintColor>,
+    bg_color: Option<renderable::style::PaintColor>,
+}
 ```
 
-Page color is **inheritance**: `style.page.color` and `style.page.bg-color` fill component defaults in `LayoutContext`. A component-level value overrides the page-level value for that component. If neither exists, no color rule or SGR is emitted.
+The parsed `StyleColor` (which carries optional Tailwind/hex opacity) is lowered
+to alpha-bearing `renderable::style::PaintColor` at the parser/apply boundary
+(`style/apply.rs`), so opacity rides in the paint's alpha channel rather than a
+side channel. The terminal reads `PaintColor::color` and ignores the alpha; the
+browser fold lowers the pair straight to `rgb(...)` (opaque) / `rgba(...)`
+(alpha) — there is no `darkmatter.style` hint and no post-render HTML rewrite.
+
+Page **foreground** is **inheritance**: `style.page.color` is baked onto the document root node during the context-aware fold so it inherits to all descendants via `renderable`'s `InheritedStyle` (in the browser the styled root renders as a wrapping `<div>` whose `color` cascades). `style.page.bg-color` is **not** baked onto the root — background deliberately does not inherit — so it is painted by the page frame instead: the browser page wrapper and the terminal row decoration. A component-level value overrides the page-level value for that component (page color is never copied onto component nodes). If neither exists, no color rule or SGR is emitted.
 
 There is no explicit inheritance clearing in v1 — the parser does not accept `"reset"`, so a component cannot opt out of page-level color. This keeps the implementation aligned with the accepted schema. A future parser extension may add a dedicated clear/reset value if documents need it.
 
@@ -700,10 +701,10 @@ There is no explicit inheritance clearing in v1 — the parser does not accept `
 
 Terminal output uses RGB-only colors:
 
-- `StyleColor.color.to_rgb()` returns `Some((r, g, b))` for fixed RGB values, which lowers to truecolor SGR (`38;2;r;g;b` / `48;2;r;g;b`) when color depth allows it.
+- `PaintColor::color.to_rgb()` returns `Some((r, g, b))` for fixed RGB values, which lowers to truecolor SGR (`38;2;r;g;b` / `48;2;r;g;b`) when color depth allows it.
 - `None` means no terminal SGR for this slot. This covers `Tailwind::{Transparent, Current, Inherit}` and other non-fixed color values.
 - `ColorDepth::None` emits no color SGR.
-- Opacity is **dropped** by the terminal — it is an HTML-only concern.
+- The `PaintColor` alpha is **ignored** by the terminal — it is an HTML-only concern.
 
 Component color is scoped at render boundaries:
 
@@ -719,7 +720,7 @@ Browser output preserves CSS-special colors where possible:
 
 | Color value | CSS output |
 |---|---|
-| RGB-capable | `rgb(r, g, b)` or `rgba(r, g, b, opacity / 100.0)` when opacity is present |
+| RGB-capable | `rgb(r, g, b)` when opaque, or `rgba(r, g, b, alpha / 255.0)` when the `PaintColor` alpha is non-opaque |
 | `Color::Tailwind(Tailwind::Transparent)` | `transparent` |
 | `Color::Tailwind(Tailwind::Current)` | `currentColor` |
 | `Color::Tailwind(Tailwind::Inherit)` | `inherit` |
@@ -750,24 +751,26 @@ Code blocks have no component-specific frontmatter color in this sub-spec (`styl
 ```rust
 // darkmatter::layout::DarkmatterPage — extended
 
+use renderable::style::PaintColor;
+
 impl DarkmatterPage {
     /// Set the page-level inherited foreground color.
-    pub fn with_page_color(self, color: StyleColor) -> Self;
+    pub fn with_page_color(self, color: PaintColor) -> Self;
     /// Set the page-level inherited background color.
-    pub fn with_page_bg_color(self, color: StyleColor) -> Self;
+    pub fn with_page_bg_color(self, color: PaintColor) -> Self;
     /// Set a component-level foreground color (overrides page-level inheritance).
-    pub fn with_component_color(self, component: PageComponent, color: StyleColor) -> Self;
+    pub fn with_component_color(self, component: PageComponent, color: PaintColor) -> Self;
     /// Set a component-level background color (overrides page-level inheritance).
-    pub fn with_component_bg_color(self, component: PageComponent, color: StyleColor) -> Self;
+    pub fn with_component_bg_color(self, component: PageComponent, color: PaintColor) -> Self;
 
     /// Effective page-level foreground color.
-    pub fn page_color(&self) -> Option<&StyleColor>;
+    pub fn page_color(&self) -> Option<&PaintColor>;
     /// Effective page-level background color.
-    pub fn page_bg_color(&self) -> Option<&StyleColor>;
+    pub fn page_bg_color(&self) -> Option<&PaintColor>;
     /// Effective foreground color for a component (component-level overrides page-level).
-    pub fn color_for(&self, component: PageComponent) -> Option<&StyleColor>;
+    pub fn color_for(&self, component: PageComponent) -> Option<&PaintColor>;
     /// Effective background color for a component (component-level overrides page-level).
-    pub fn bg_color_for(&self, component: PageComponent) -> Option<&StyleColor>;
+    pub fn bg_color_for(&self, component: PageComponent) -> Option<&PaintColor>;
 }
 
 // darkmatter::style — extended
@@ -792,10 +795,11 @@ The integration order in `darkmatter-cli` extends sub-spec #4's pipeline:
 3. `darkmatter::style::apply_page_style(page, &style, page_overrides)`
 4. `darkmatter::style::apply_component_style(page, &style, component_overrides)` — table/image/block-quote frontmatter
 5. `darkmatter::style::apply_list_style(page, &style, list_overrides)` — ul/ol/li frontmatter
-6. `darkmatter::style::apply_color_style(page, &style)` — color and bg-color for all wired components
-7. `darkmatter::style::apply_hr_style(page, &style, hr_overrides)` — HR frontmatter
-8. `darkmatter::style::apply_bespoke_style(page, &style, bespoke_overrides, source_path)` — stylesheet, meta, code-theme, hyperlink/image local-style
-9. `render / render_to_browser`
+6. `darkmatter::style::apply_disclosure_style(page, &style, disclosure_overrides)` — disclosure frontmatter
+7. `darkmatter::style::apply_color_style(page, &style)` — color and bg-color for all wired components
+8. `darkmatter::style::apply_hr_style(page, &style, hr_overrides)` — HR frontmatter
+9. `darkmatter::style::apply_bespoke_style(page, &style, bespoke_overrides, source_path)` — stylesheet, meta, code-theme, hyperlink/image local-style
+10. `render / render_to_browser`
 
 Color has no CLI override in this sub-spec; frontmatter is the only color source.
 
@@ -897,7 +901,7 @@ pub enum HrAlignment {
 
 ### PageComponent::Hr
 
-Sub-spec #6 adds `PageComponent::Hr` to the `PageComponent` enum. This enables the sub-spec #5 color/bg-color mechanism to honor `style.hr.color` and `style.hr.bg-color` through `DarkmatterPage`'s existing component color maps.
+Sub-spec #6 adds `PageComponent::Hr` to the `PageComponent` enum. This enables the sub-spec #5 color/bg-color mechanism to honor `style.hr.color` and `style.hr.bg-color` through the `Hr` component's `ComponentPolicy.color` / `bg_color`.
 
 HR foreground color maps to the rule stroke/fill color. Background color applies to the HR component's bounding line/box through the same wrapper mechanism used for other `PageComponent` variants.
 
@@ -937,10 +941,11 @@ The integration order in `darkmatter-cli` extends sub-spec #5's pipeline:
 3. `darkmatter::style::apply_page_style(page, &style, page_overrides)`
 4. `darkmatter::style::apply_component_style(page, &style, component_overrides)` — table/image/block-quote frontmatter
 5. `darkmatter::style::apply_list_style(page, &style, list_overrides)` — ul/ol/li frontmatter
-6. `darkmatter::style::apply_color_style(page, &style)` — color and bg-color for all wired components
-7. `darkmatter::style::apply_hr_style(page, &style, hr_overrides)` — HR frontmatter
-8. `darkmatter::style::apply_bespoke_style(page, &style, bespoke_overrides, source_path)` — stylesheet, meta, code-theme, hyperlink/image local-style
-9. `render / render_to_browser`
+6. `darkmatter::style::apply_disclosure_style(page, &style, disclosure_overrides)` — disclosure frontmatter
+7. `darkmatter::style::apply_color_style(page, &style)` — color and bg-color for all wired components
+8. `darkmatter::style::apply_hr_style(page, &style, hr_overrides)` — HR frontmatter
+9. `darkmatter::style::apply_bespoke_style(page, &style, bespoke_overrides, source_path)` — stylesheet, meta, code-theme, hyperlink/image local-style
+10. `render / render_to_browser`
 
 ### `--strict-style` and HR
 
@@ -994,7 +999,7 @@ Every `---` horizontal rule in the document renders as a thick, centered, wave-p
 
 ## Bespoke Knobs (Sub-Spec #7)
 
-Sub-spec #7 wires the remaining v1 schema keys that do not simply lower a `CommonStyle` bucket onto the existing page/component layout and color maps. These are the "bespoke knobs": page stylesheet, page meta, code-block theme, hyperlink styling (including local-link overrides), and local image style overrides.
+Sub-spec #7 wires the remaining v1 schema keys that do not simply lower a `CommonStyle` bucket onto a component's `ComponentPolicy` (layout + colors). These are the "bespoke knobs": page stylesheet, page meta, code-block theme, hyperlink styling (including local-link overrides), and local image style overrides.
 
 After this sub-spec ships, `ACTIVE_STYLE_WIRING_SUB_SPEC` advances to `7` and no valid v1 schema key emits `KnownButInactive`.
 
@@ -1188,10 +1193,11 @@ The full integration order in `darkmatter-cli` is:
 3. `darkmatter::style::apply_page_style(page, &style, page_overrides)`
 4. `darkmatter::style::apply_component_style(page, &style, component_overrides)` — table/image/block-quote frontmatter
 5. `darkmatter::style::apply_list_style(page, &style, list_overrides)` — ul/ol/li frontmatter
-6. `darkmatter::style::apply_color_style(page, &style)` — color and bg-color for all wired components
-7. `darkmatter::style::apply_hr_style(page, &style, hr_overrides)` — HR frontmatter
-8. `darkmatter::style::apply_bespoke_style(page, &style, bespoke_overrides, source_path)` — stylesheet, meta, code-theme, hyperlink/image local-style
-9. `render / render_to_browser`
+6. `darkmatter::style::apply_disclosure_style(page, &style, disclosure_overrides)` — disclosure frontmatter
+7. `darkmatter::style::apply_color_style(page, &style)` — color and bg-color for all wired components
+8. `darkmatter::style::apply_hr_style(page, &style, hr_overrides)` — HR frontmatter
+9. `darkmatter::style::apply_bespoke_style(page, &style, bespoke_overrides, source_path)` — stylesheet, meta, code-theme, hyperlink/image local-style
+10. `render / render_to_browser`
 
 ### Errors
 
@@ -1233,6 +1239,70 @@ style:
 ```
 
 In this example, all hyperlinks render with cyan-400 text on a slate-900 background, except local links (anchors, relative file paths) which use blue-300 text. Local images receive green-400 fallback alt text at 80% width. The page includes an inlined CSS file, meta tags, and the Dracula code theme.
+
+## Disclosure Style (Sub-Spec #8)
+
+`style.disclosure.*` controls the layout and color of render-time [`::disclosure` blocks](./disclosure.md). The bucket uses `CommonStyle`, so it supports the same five knobs as `style.table.*` and `style.block-quote.*`.
+
+### Supported Keys
+
+| Key | Value Shape | Notes |
+|---|---|---|
+| `width` | `Nch` or `N%` | Fixed width; mutually exclusive with `max-width` |
+| `max-width` | `Nch` or `N%` | Upper bound; mutually exclusive with `width` |
+| `alignment` | `left` \| `center` \| `right` | |
+| `color` | Tailwind, hex, or web named | Foreground color for the disclosure summary |
+| `bg-color` | Tailwind, hex, or web named | Background color for the disclosure summary |
+
+Snake-case aliases (`max_width`, `bg_color`) parse but emit a `Deprecated` warning; `--strict-style` rejects them.
+
+### PageComponent
+
+`PageComponent::Disclosure` stores the resolved `ComponentPolicy` on `DarkmatterPage`. The block-extension processor emits `NodeKind::Disclosure` during the render-tree fold; the build context applies the `PageComponent::Disclosure` policy to each disclosure node before the target fold runs.
+
+### Inline Opener Overrides
+
+Individual disclosure blocks can override the frontmatter bucket with `key=value` tokens on the opener line:
+
+```md
+::disclosure max-width=60ch color=red-500 License Agreement
+::details
+Keep your hands off.
+::end-disclosure
+```
+
+Recognized keys are the same five style knobs. Tokens that are not recognized style pairs become part of the summary text. See [Disclosure Blocks](./disclosure.md) for the full syntax.
+
+### Precedence
+
+Disclosure style resolves from most specific to least specific:
+
+1. Inline `key=value` tokens on the `::disclosure` opener.
+2. `style.disclosure.*` frontmatter.
+3. Page-level `style.page.alignment` broadcast and any future disclosure-specific CLI flags.
+4. Built-in default.
+
+### Integration Order
+
+`apply_disclosure_style` runs immediately after `apply_component_style` in the darkmatter-cli pipeline:
+
+1. `DarkmatterPage::new(&terminal)`
+2. `apply_cli_layout_flags(page, &cli)`
+3. `apply_page_style(page, &style, page_overrides)`
+4. `apply_component_style(page, &style, component_overrides)` — table/image/block-quote frontmatter
+5. `apply_list_style(page, &style, list_overrides)` — ul/ol/li frontmatter
+6. `apply_disclosure_style(page, &style, disclosure_overrides)` — disclosure frontmatter
+7. `apply_color_style(page, &style)` — color and bg-color for all wired components
+8. `apply_hr_style(page, &style, hr_overrides)` — HR frontmatter
+9. `apply_bespoke_style(page, &style, bespoke_overrides, source_path)` — stylesheet, meta, code-theme, hyperlink/image local-style
+10. `render / render_to_browser`
+
+### Errors
+
+`apply_disclosure_style` returns the same errors as other component buckets:
+
+- `ComponentWidthConflict { bucket: "disclosure" }` — `style.disclosure.width` and `style.disclosure.max-width` set simultaneously.
+- `ComponentInvalidCssLength { bucket: "disclosure", field }` — `width` or `max-width` is a `Length::Css(_)` value.
 
 ## Style Mutation
 
@@ -1302,7 +1372,7 @@ The `page.code` theme (`--code-theme`, `code_theme`) is a mode-agnostic
 deliberately resolve against the *inverted* color mode so the panel contrasts
 against the page (light code on a dark page, and vice versa); prose, tables, and
 the page background follow the real mode. This holds for **both terminal and
-HTML** output, so the targets agree. Single-variant themes
-(`dracula`/`nord`/`monokai`/`vs-dark`) ignore the mode by design.
+HTML** output, so the targets agree. Every `ThemePair` is a (light theme, dark
+theme) couple, so this inversion applies to all of them.
 
 See [Code Highlighting](./code-highlighting.md) for the full model.

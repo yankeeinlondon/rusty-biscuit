@@ -606,9 +606,9 @@ cargo fmt   -p biscuit-terminal-cli -- --check
 ```bash
 cargo test  -p biscuit-test-harness
 cargo test  -p biscuit-terminal-cli --tests
-cargo test  -p tui-chrome-cli --tests
-cargo clippy -p biscuit-test-harness -p biscuit-terminal-cli -p tui-chrome-cli --tests -- -D warnings
-cargo fmt   -p biscuit-test-harness -p biscuit-terminal-cli -p tui-chrome-cli -- --check
+cargo test  -p biscuit-tui-cli --tests
+cargo clippy -p biscuit-test-harness -p biscuit-terminal-cli -p biscuit-tui-cli --tests -- -D warnings
+cargo fmt   -p biscuit-test-harness -p biscuit-terminal-cli -p biscuit-tui-cli -- --check
 ```
 
 ### Risks / open questions
@@ -660,7 +660,7 @@ test command set, and verify the spec's acceptance criteria.
    cargo test -p biscuit-test-harness
    cargo test -p biscuit-terminal --test level1_osc_queries --test level1_clipboard --test level1_mode_2027 --test level1_cursor --test level1_terminal_init
    cargo test -p biscuit-terminal-cli --test level2_prose_styling --test level2_image --test level2_diagrams --test level2_cursor_and_hygiene
-   cargo check -p tui-chrome-cli --tests
+   cargo check -p biscuit-tui-cli --tests
    ```
 4. **Verify spec §7 acceptance criteria** by inspection. Append a
    `## Acceptance` table to this plan as part of Phase 7's commit
@@ -712,7 +712,7 @@ just test 2>/dev/null || true   # only if root-justfile covers these areas
    (skips cleanly when terminals are unavailable; passes
    deterministically on the developer host with WezTerm + Kitty
    available).
-4. `cargo test -p tui-chrome-cli --tests` passes (no regression from
+4. `cargo test -p biscuit-tui-cli --tests` passes (no regression from
    Phase 6).
 5. `cargo clippy -p {biscuit-test-harness,biscuit-terminal,biscuit-terminal-cli} --tests -- -D warnings` passes.
 6. `cargo fmt -p {biscuit-test-harness,biscuit-terminal,biscuit-terminal-cli} -- --check` passes.

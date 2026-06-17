@@ -17,15 +17,25 @@ pub struct TreePackageConfig {
 }
 
 /// A `TreePackage` represents a collection of related source files.
+///
+/// Without a language override the package is polyglot: every supported source
+/// file is collected regardless of language, and [`language`] reports the
+/// dominant (most common) language as the package's primary language. With an
+/// override only that language's files are collected. Per-file languages are
+/// available via [`language_of`] and [`languages`].
+///
+/// [`language`]: Self::language
+/// [`language_of`]: Self::language_of
+/// [`languages`]: Self::languages
 #[derive(Debug, Clone)]
 pub struct TreePackage {
     /// The root directory for the package.
     pub root_dir: PathBuf,
-    /// The primary programming language detected for the package.
+    /// The primary (dominant) programming language detected for the package.
     pub language: ProgrammingLanguage,
     /// Cached module list for the package.
     modules: Option<Vec<String>>,
-    /// Source files matching the package language.
+    /// All supported source files discovered in the package.
     pub source_files: Vec<PathBuf>,
     /// Markdown documentation files in the package.
     pub doc_files: Vec<PathBuf>,
@@ -58,12 +68,24 @@ impl TreePackage {
         let git_root = find_git_root(&start_dir)?;
         let root_dir = find_package_root(&start_dir, &git_root);
 
-        let language = match config.language {
-            Some(language) => language,
-            None => detect_primary_language(&root_dir)?,
+        let (language, source_files) = match config.language {
+            // A forced language restricts collection to that language's files.
+            Some(language) => {
+                let files = collect_files(&root_dir, language.extensions(), &config.ignores)?;
+                (language, files)
+            }
+            // No override: collect every supported source file and report the
+            // dominant language as the package's primary language.
+            None => {
+                let files = collect_supported_files(&root_dir, &config.ignores)?;
+                let language =
+                    dominant_language(&files).ok_or_else(|| TreeHuggerError::NoSourceFiles {
+                        path: root_dir.clone(),
+                    })?;
+                (language, files)
+            }
         };
 
-        let source_files = collect_files(&root_dir, language.extensions(), &config.ignores)?;
         if source_files.is_empty() {
             return Err(TreeHuggerError::NoSourceFiles { path: root_dir });
         }
@@ -77,6 +99,30 @@ impl TreePackage {
             source_files,
             doc_files,
         })
+    }
+
+    /// Returns the language detected for a specific source file.
+    ///
+    /// ## Returns
+    /// Returns the file's detected language, falling back to the package's
+    /// primary language when the extension is unrecognized.
+    pub fn language_of(&self, file: &Path) -> ProgrammingLanguage {
+        ProgrammingLanguage::from_path(file).unwrap_or(self.language)
+    }
+
+    /// Returns the distinct languages present among the package's source files.
+    ///
+    /// ## Returns
+    /// Returns the languages found, ordered by name.
+    pub fn languages(&self) -> Vec<ProgrammingLanguage> {
+        let mut languages: Vec<ProgrammingLanguage> = self
+            .source_files
+            .iter()
+            .filter_map(|file| ProgrammingLanguage::from_path(file))
+            .collect();
+        languages.sort_by_key(ProgrammingLanguage::name);
+        languages.dedup();
+        languages
     }
 
     /// Returns the cached module list for the package.
@@ -155,7 +201,10 @@ const MANIFESTS: &[&str] = &[
 
 /// Returns `true` if `path` contains a manifest that represents a real package
 /// (not a workspace-only root).
-fn has_package_manifest(path: &Path) -> bool {
+///
+/// Cargo and Node manifests are parsed structurally so that comments, nested
+/// metadata, or unrelated strings cannot change package-root selection.
+pub fn has_package_manifest(path: &Path) -> bool {
     for manifest in MANIFESTS {
         let file = path.join(manifest);
         if !file.is_file() {
@@ -177,23 +226,55 @@ fn has_package_manifest(path: &Path) -> bool {
 /// A workspace-only `Cargo.toml` (only `[workspace]`, no `[package]`) is not
 /// a package root.
 fn is_cargo_package(path: &Path) -> bool {
-    std::fs::read_to_string(path)
-        .map(|contents| contents.contains("[package]"))
+    biscuit_file::Toml::new(path)
+        .map(|manifest| manifest.value().get("package").is_some())
         .unwrap_or(false)
 }
 
 /// A `package.json` is a package if it does NOT contain a top-level
 /// `"workspaces"` field (which signals a monorepo root).
 fn is_node_package(path: &Path) -> bool {
-    std::fs::read_to_string(path)
-        .map(|contents| !contents.contains("\"workspaces\""))
+    biscuit_file::Json5::new(path)
+        .map(|manifest| manifest.as_json_value().get("workspaces").is_none())
         .unwrap_or(false)
 }
 
-fn detect_primary_language(root: &Path) -> Result<ProgrammingLanguage, TreeHuggerError> {
+/// Returns the most common language among the given files.
+///
+/// Ties are broken by language name so the result is deterministic.
+fn dominant_language(files: &[PathBuf]) -> Option<ProgrammingLanguage> {
     let mut counts: HashMap<ProgrammingLanguage, usize> = HashMap::new();
+    for file in files {
+        if let Some(language) = ProgrammingLanguage::from_path(file) {
+            *counts.entry(language).or_insert(0) += 1;
+        }
+    }
 
-    for entry in WalkBuilder::new(root).standard_filters(true).build() {
+    counts
+        .into_iter()
+        .max_by_key(|(language, count)| (*count, std::cmp::Reverse(language.name())))
+        .map(|(language, _)| language)
+}
+
+/// Collects every supported source file under `root`, regardless of language.
+fn collect_supported_files(
+    root: &Path,
+    ignores: &[String],
+) -> Result<Vec<PathBuf>, TreeHuggerError> {
+    let mut overrides = OverrideBuilder::new(root);
+    for ignore in ignores {
+        overrides.add(&format!("!{}", ignore))?;
+    }
+    let overrides = overrides.build()?;
+
+    let mut files = Vec::new();
+    let walker = WalkBuilder::new(root)
+        .standard_filters(true)
+        .hidden(false)
+        .overrides(overrides)
+        .build();
+
+    for entry in walker {
         let entry = entry.map_err(TreeHuggerError::Ignore)?;
         if !entry
             .file_type()
@@ -203,18 +284,13 @@ fn detect_primary_language(root: &Path) -> Result<ProgrammingLanguage, TreeHugge
             continue;
         }
 
-        if let Some(language) = ProgrammingLanguage::from_path(entry.path()) {
-            *counts.entry(language).or_insert(0) += 1;
+        if ProgrammingLanguage::from_path(entry.path()).is_some() {
+            files.push(entry.into_path());
         }
     }
 
-    counts
-        .into_iter()
-        .max_by_key(|(_, count)| *count)
-        .map(|(language, _)| language)
-        .ok_or_else(|| TreeHuggerError::NoSourceFiles {
-            path: root.to_path_buf(),
-        })
+    files.sort();
+    Ok(files)
 }
 
 fn collect_files(
@@ -257,6 +333,11 @@ fn rust_modules(root: &Path, files: &[PathBuf]) -> Vec<String> {
     let mut modules = Vec::new();
 
     for file in files {
+        // The package may be polyglot; only Rust files contribute modules.
+        if file.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+            continue;
+        }
+
         let relative = match file.strip_prefix(root) {
             Ok(path) => path,
             Err(_) => file.as_path(),

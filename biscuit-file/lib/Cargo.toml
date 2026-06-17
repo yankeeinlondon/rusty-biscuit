@@ -25,11 +25,17 @@ lopdf = ["dep:lopdf"]
 pdfium = ["dep:pdfium-render"]
 
 # File reference resolution
-file-reference = ["dep:git2", "dep:cargo_metadata", "dep:walkdir"]
+file-reference = ["dep:gix", "dep:cargo_metadata", "dep:walkdir", "url"]
+
+# URL support (automatically enabled by file-reference)
+url = ["dep:url"]
+
+# Remote fetch (off-by-default; gates reqwest and HTTP dependencies)
+fetch = ["file-reference", "dep:reqwest", "dep:bytes", "dep:tokio"]
 
 # Optional features
 schema = ["dep:jsonschema"]
-full = ["toml", "yaml", "json5", "extract", "lopdf", "pdfium", "schema", "file-reference"]
+full = ["toml", "yaml", "json5", "extract", "lopdf", "pdfium", "schema", "file-reference", "fetch"]
 
 [dependencies]
 # Core serialization
@@ -58,9 +64,17 @@ lopdf = { version = "0.39", optional = true }
 pdfium-render = { version = "0.8", optional = true }
 
 # File reference resolution
-git2 = { version = "0.20", optional = true }
+gix = { version = "=0.84.0", optional = true, default-features = false, features = [
+    "sha1",
+] }
 cargo_metadata = { version = "0.19", optional = true }
 walkdir = { version = "2", optional = true }
+url = { version = "2.5", optional = true }
+
+# Remote fetch
+reqwest = { version = "0.13", optional = true, features = ["json"] }
+bytes = { version = "1", optional = true }
+tokio = { version = "1", optional = true, features = ["rt"] }
 
 # Schema validation
 jsonschema = { version = "0.42", optional = true }
@@ -70,10 +84,15 @@ serde_json = "1.0"
 toml = "1.0"
 serde_yaml_ng = "0.10"
 tempfile = "3"
-git2 = "0.20"
 serial_test = "3"
 criterion = { version = "0.5", features = ["html_reports"] }
+wiremock = "0.6"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 
 [[bench]]
 name = "parsers"
 harness = false
+
+[[test]]
+name = "fetch_integration"
+required-features = ["fetch"]

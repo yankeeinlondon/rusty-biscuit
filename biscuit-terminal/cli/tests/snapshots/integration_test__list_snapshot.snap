@@ -1,8 +1,7 @@
 ---
 source: biscuit-terminal/cli/tests/integration_test.rs
-assertion_line: 1429
 expression: stdout
 ---
 • First item
-• Second item with [1mbold[22m[0m
+• Second item with [1mbold[0m
 • Third item

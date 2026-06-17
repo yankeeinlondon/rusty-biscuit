@@ -123,13 +123,19 @@ For example, to enable strict mode in your shell:
 export RUSTY_BISCUIT_PRE_PUSH=strict
 ```
 
-The hook dynamically detects which monorepo areas have changed compared to the upstream branch and runs tests only for those areas. You can override the detected areas with `RUSTY_BISCUIT_PRE_PUSH_AREAS`:
+The hook resolves the area list with this priority order:
+
+1. **Explicit override** — `RUSTY_BISCUIT_PRE_PUSH_AREAS` (space-separated area names) is used verbatim if set.
+2. **Top-level-directory heuristic** — `just changed-areas` runs `git diff --name-only` against the configured upstream branch (`@{u}`), then matches the first path segment of each changed file against the curated area list in the root `justfile`. This is a coarse detector: it does not inspect `Cargo.toml` path dependencies, so a change to a workspace member outside one of the curated top-level directories will not be detected.
+3. **Fallback** — when there is no upstream branch (e.g. a first push of a new branch) or when no changed files map to a curated area, the hook falls back to testing `claudine` and `darkmatter`.
+
+Override with:
 
 ```sh
 export RUSTY_BISCUIT_PRE_PUSH_AREAS="claudine darkmatter"
 ```
 
-When there is no upstream branch or no changed files map to known areas, the hook falls back to testing `claudine` and `darkmatter`.
+Fully dependency-aware detection (mapping changed files to workspace members via `cargo metadata`) is a planned follow-up — see requirement R2 in [`features/2026-05-19-ci-cd/spec.md`](./features/2026-05-19-ci-cd/spec.md).
 
 ## License
 

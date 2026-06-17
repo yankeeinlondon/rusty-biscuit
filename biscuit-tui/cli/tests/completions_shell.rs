@@ -9,7 +9,7 @@
 //! availability.
 //!
 //! Run with:
-//!     RUN_SHELL_TESTS=1 cargo test -p tui-chrome-cli --test completions_shell
+//!     RUN_SHELL_TESTS=1 cargo test -p biscuit-tui-cli --test completions_shell
 
 use std::env;
 use std::io::Write;

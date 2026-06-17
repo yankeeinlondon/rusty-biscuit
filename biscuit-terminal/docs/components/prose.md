@@ -3,12 +3,12 @@ blast_radius: biscuit-terminal/lib/src/components/prose/
 ---
 # Prose
 
-Styled inline text component for rich cross-target output. Prose is the primary inline text styling component in biscuit-terminal and renders to the **Terminal**, **Browser**, and **Markdown** targets from one shared [`ProseDocument`](../../lib/src/components/prose/ir.rs) IR. It supports two input grammars:
+Styled inline text component for rich cross-target output. Prose is the primary inline text styling component in biscuit-terminal and renders to the **Terminal**, **Browser**, and **Markdown** targets through the shared [`renderable::tree`](../../../renderable/src/tree/mod.rs) render tree. It supports two input grammars:
 
 1. **Block tags** — `<bold>text</bold>` (auto-reset on close, nestable).
 2. **Markdown subset** — `[desc](url)`, `**bold**`, `_italics_` (per the [Prose+ spec](../../features/2026-05-05-prose-plus/spec.md)).
 
-The two grammars compose freely. Raw input is first lowered by the Markdown pre-processor (fenced code blocks → links → bold → italics), then parsed by the bracketed-tag parser into the target-neutral `ProseDocument` tree. Terminal, browser, and Markdown output all render from that IR; there is no remaining non-IR Prose render path.
+The two grammars compose freely. Raw input is first lowered by the Markdown pre-processor (fenced code blocks → links → bold → italics), then parsed by the bracketed-tag parser **directly into** the shared `renderable::tree::RenderNode` shape. Terminal, browser, and Markdown output all fold that one tree through the shared tree renderers; Prose carries no component-local rendering IR.
 
 > The atomic-token grammar (`{{bold}}…{{reset}}`) was removed in the
 > 2026-05-17 Prose cross-target work. A stray `{{…}}` now renders as
@@ -16,11 +16,11 @@ The two grammars compose freely. Raw input is first lowered by the Markdown pre-
 
 ## Rendering Model
 
-`Prose` is fully IR-rendered, but it does **not** use the shared
-`renderable::tree::RenderNode` path. Its IR is `ProseDocument`, a pure tree of
-text, spans, links, and fenced code blocks. This keeps inline styling precise
-while still sharing the cross-target primitives from `renderable` for colors
-and text emphasis.
+`Prose` parses its grammar **directly into** the shared
+`renderable::tree::RenderNode` tree and renders every target through the shared
+tree renderers — it carries no component-local rendering IR. It implements
+`TreeRenderable`, and containers embed its parsed inline nodes via
+`Prose::to_render_nodes()`.
 
 ```text
 raw Prose input
@@ -32,11 +32,11 @@ Markdown subset pre-processor
 bracketed-tag parser
       │
       ▼
-ProseDocument IR
+renderable::tree::RenderNode
       │
-      ├── TerminalRenderable  → ANSI / OSC8
-      ├── BrowserRenderable   → HTML fragment
-      └── MarkdownRenderable  → Markdown / MarkdownPlus
+      ├── shared terminal renderer  → ANSI / OSC8
+      ├── shared browser renderer   → HTML fragment
+      └── shared markdown renderer  → Markdown / MarkdownPlus
 ```
 
 ## Programmatic Use
@@ -76,7 +76,7 @@ println!("{}", prose.display(&term));
 
 ### Markdown Subset
 
-Three Markdown forms are recognized in addition to bracketed tags. They are pre-processed into an equivalent internal tag form before the `ProseDocument` IR is built.
+Three Markdown forms are recognized in addition to bracketed tags. They are pre-processed into an equivalent internal tag form before the render tree is built.
 
 | Markdown        | Equivalent tag                | Notes                                   |
 |-----------------|-------------------------------|-----------------------------------------|
@@ -117,7 +117,7 @@ In practice, dynamic content interpolated into a Prose format string usually doe
 
 ### Supported Tags
 
-**Text Styling**: `bold`, `dim`, `italic`, `underline`, `strikethrough`, `blink`
+**Text Styling**: `bold`, `dim`, `italic`, `underline`, `strikethrough`, `blink`, `inverse` (alias `reverse`)
 
 **Colors** (foreground): `red`, `green`, `blue`, `yellow`, `cyan`, `magenta`, `white`, `black`, plus bright variants (`bright-red`, etc.), Tailwind colors (`gray-800`, `blue-400`), and web colors (`coral`, `salmon`)
 
@@ -125,10 +125,12 @@ In practice, dynamic content interpolated into a Prose format string usually doe
 
 **Special**: `<a href="url">text</a>` for hyperlinks, fenced code blocks from the Markdown subset, and `<rgb #hex>text</rgb>` for arbitrary colors. Styles auto-reset when their tag closes — there is no standalone reset token.
 
+> **Removed:** the `<hidden>` tag (SGR 8) is no longer recognized. It had zero callers across the workspace and was dropped when Prose moved to the shared render tree; `<hidden>text</hidden>` now renders as inert literal text like any unknown tag. `<inverse>` / `<reverse>` (SGR 7 reverse video) is supported and lowers to `filter: invert(1)` in the browser.
+
 ### Cross-Target Rendering
 
-`Prose` parses its input into a target-neutral `ProseDocument` tree and renders
-that tree to three targets:
+`Prose` parses its input into a target-neutral `renderable::tree::RenderNode`
+tree and renders that tree to three targets:
 
 | Target | Trait | Notes |
 |--------|-------|-------|
@@ -136,11 +138,13 @@ that tree to three targets:
 | Browser | `BrowserRenderable` | Semantic HTML (`<strong>`, `<em>`, `<s>`, `<a>`, `<pre><code>`); presentational styles use `<span style="…">`. User text and attribute values are escaped. |
 | Markdown | `MarkdownRenderable` | Portable Markdown and MarkdownPlus. Portable Markdown keeps semantic styles and degrades color/underline variants to readable inner text; MarkdownPlus preserves more presentation with inline HTML. |
 
-`Prose` does not currently implement `TreeRenderable` or expose a
-`render_tree_node()` projection. In component inventories, this means
-`Tree = false` but `IR State = tree render only`: Prose is fully IR-backed,
-just through its dedicated inline IR rather than the shared block-level render
-tree.
+`Prose` implements `TreeRenderable`: its `render_tree()` wraps the parsed
+inline nodes into a document-shaped root (contiguous inline runs become
+`Paragraph` blocks; a fenced code block stays a block-level `Code` child),
+and `Prose::to_render_nodes()` exposes the parsed inline node sequence for
+containers that embed Prose. In component inventories this means both
+`Tree = ✅` and `IR State = tree render only` — Prose renders only through the
+shared tree renderers, with no remaining component-local IR.
 
 Unknown tags and former atomic-token syntax (`{{…}}`) render as escaped
 literal text on every target.
@@ -157,6 +161,44 @@ let status = Status::from_prose("this is a <b>test</b>")
     .state(StatusState::Success);
 ```
 
+### Prose in Table Cells
+
+`TableCellContent::StyledProse(Box<Prose>)` lets a [`Table`](../../lib/src/components/table/README.md)
+cell carry inline Prose without pre-rendering it to terminal bytes during
+construction. Build a cell with `Prose::new(...).into()`:
+
+```rust
+use biscuit_terminal::prelude::*;
+use biscuit_terminal::components::table::{Table, TableColumn};
+
+let table = Table::new()
+    .with_columns(vec![TableColumn::new("Feature"), TableColumn::new("Status")])
+    .with_data(vec![vec![
+        Prose::new("**Bold** feature").into(),
+        Prose::new("[docs](https://example.com) — _ready_").into(),
+    ]]);
+```
+
+Resolution is target-aware and follows the same render tree the standalone Prose
+component uses:
+
+- **Render tree** (Browser/Markdown, and the terminal tree path) — the cell
+  projects Prose's parsed inline `RenderNode` children directly via
+  `Prose::to_render_nodes()`, so semantic emphasis, links, and supported style
+  attributes survive into `<td>` and into the GFM/MarkdownPlus table cell. A
+  top-level fenced-code child degrades to escaped literal text so the projected
+  table still passes render-tree validation.
+- **Terminal bespoke path** — each `StyledProse` cell resolves to
+  `Text(prose.render(term))` exactly **once**, before width planning, so the
+  ANSI-aware table machinery measures by visible width and styles never bleed
+  into borders, padding, or adjacent rows.
+
+**Table-owned layout rule.** Prose's own outer `Layout` (margins, alignment,
+word-wrap) is intentionally *not* promoted to nested cell layout — the table
+owns all cell geometry. Only Prose's inline content participates in the cell;
+column width, alignment, and wrapping come from the `TableColumn`. The cell hint
+records `kind == "styled_prose"` with a null `raw_value`.
+
 ### Key API
 
 | Method | Description |
@@ -167,9 +209,10 @@ let status = Status::from_prose("this is a <b>test</b>")
 | `.with_left_margin(Margin)` | Set left margin |
 | `.with_right_margin(Margin)` | Set right margin |
 | `.with_layout(Layout)` | Set full layout configuration |
-| `.render_html_fragment()` | Render the `ProseDocument` IR as a browser fragment |
-| `.render_markdown()` | Render the `ProseDocument` IR as portable Markdown |
-| `.render_markdown_plus()` | Render the `ProseDocument` IR as MarkdownPlus with inline HTML for richer styling |
+| `.to_render_nodes()` | Get the parsed inline `RenderNode` sequence (for container embedding) |
+| `.render_html_fragment()` | Render the parsed render tree as a browser fragment |
+| `.render_markdown()` | Render the parsed render tree as portable Markdown |
+| `.render_markdown_plus()` | Render the parsed render tree as MarkdownPlus with inline HTML for richer styling |
 
 ## Graceful Degradation
 

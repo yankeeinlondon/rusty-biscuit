@@ -340,12 +340,37 @@ fn validate_node(node: &ComposableNode) -> bool {
 /// `base_class`) which is merged ahead of any explicit
 /// [`HtmlAttribute::Class`] values into a single `class="..."` attribute.
 /// Pass `None` for void tags, which have no `base_class`.
-fn render_attributes(attributes: &[HtmlAttribute], extra_class: Option<&str>) -> String {
+///
+/// `pub(crate)` so the direct render-tree document writer
+/// ([`render_browser_document_html`](crate::tree::render::render_browser_document_html))
+/// can stream byte-identical opening tags without building a fragment.
+pub(crate) fn render_attributes(attributes: &[HtmlAttribute], extra_class: Option<&str>) -> String {
+    let mut out = String::new();
+    write_attributes(&mut out, attributes, extra_class);
+    out
+}
+
+/// Streams the opening-tag attribute text for `attributes` into `out`, with a
+/// leading space before each emitted attribute. Byte-for-byte identical to
+/// [`render_attributes`], but writes straight into the destination buffer so
+/// the direct document writer avoids an intermediate `String` per element and
+/// the per-element class-parts vector.
+pub(crate) fn write_attributes(
+    out: &mut String,
+    attributes: &[HtmlAttribute],
+    extra_class: Option<&str>,
+) {
     use crate::browser::utils::escape_attribute;
 
-    /// Appends a leading-space `key="value"` pair with the value escaped.
+    /// Appends a leading-space `key="value"` pair with the value escaped,
+    /// writing each piece straight into `out` rather than through a `format!`
+    /// temporary.
     fn push_pair(out: &mut String, key: &str, value: &str) {
-        out.push_str(&format!(r#" {key}="{}""#, escape_attribute(value)));
+        out.push(' ');
+        out.push_str(key);
+        out.push_str("=\"");
+        out.push_str(&escape_attribute(value));
+        out.push('"');
     }
     /// Appends a leading-space bare boolean attribute when `present`.
     fn push_bool(out: &mut String, name: &str, present: bool) {
@@ -354,66 +379,79 @@ fn render_attributes(attributes: &[HtmlAttribute], extra_class: Option<&str>) ->
             out.push_str(name);
         }
     }
+    /// Appends one class token to the in-progress merged class string, applying
+    /// the same trim / skip-empty / single-space-join rule as
+    /// [`classes`](crate::browser::utils::classes).
+    fn push_class(merged: &mut String, part: &str) {
+        let trimmed = part.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        if !merged.is_empty() {
+            merged.push(' ');
+        }
+        merged.push_str(trimmed);
+    }
 
-    let mut out = String::new();
-
-    // Merge the component wrapper class with every explicit `Class`
-    // attribute into a single `class="..."` (base class first).
-    let mut class_parts: Vec<Option<&str>> = vec![extra_class];
+    // Merge the component wrapper class with every explicit `Class` attribute
+    // into a single `class="..."` (base class first). Built in place to avoid
+    // the per-element `Vec<Option<&str>>` the old parts list allocated.
+    let mut merged_class = String::new();
+    if let Some(extra) = extra_class {
+        push_class(&mut merged_class, extra);
+    }
     for attr in attributes {
         if let HtmlAttribute::Class(class) = attr {
-            class_parts.push(Some(class.as_str()));
+            push_class(&mut merged_class, class.as_str());
         }
     }
-    let merged_class = crate::browser::utils::classes(class_parts);
     if !merged_class.is_empty() {
-        push_pair(&mut out, "class", &merged_class);
+        push_pair(out, "class", &merged_class);
     }
 
     for attr in attributes {
         match attr {
             // Handled above as part of the merged class attribute.
             HtmlAttribute::Class(_) => {}
-            HtmlAttribute::Id(id) => push_pair(&mut out, "id", id.as_str()),
+            HtmlAttribute::Id(id) => push_pair(out, "id", id.as_str()),
             HtmlAttribute::Style(style) => {
                 let value = style.to_css().replace('\n', " ");
-                push_pair(&mut out, "style", &value);
+                push_pair(out, "style", &value);
             }
-            HtmlAttribute::Title(value) => push_pair(&mut out, "title", value),
+            HtmlAttribute::Title(value) => push_pair(out, "title", value),
             HtmlAttribute::Data(name, value) => {
-                push_pair(&mut out, &format!("data-{}", name.as_str()), value);
+                push_pair(out, &format!("data-{}", name.as_str()), value);
             }
-            HtmlAttribute::Hidden(present) => push_bool(&mut out, "hidden", *present),
-            HtmlAttribute::Role(role) => push_pair(&mut out, "role", role.as_str()),
+            HtmlAttribute::Hidden(present) => push_bool(out, "hidden", *present),
+            HtmlAttribute::Role(role) => push_pair(out, "role", role.as_str()),
             HtmlAttribute::Aria(aria) => out.push_str(&aria.render()),
-            HtmlAttribute::Href(url) => push_pair(&mut out, "href", url.as_str()),
-            HtmlAttribute::Src(url) => push_pair(&mut out, "src", url.as_str()),
-            HtmlAttribute::Alt(value) => push_pair(&mut out, "alt", value),
+            HtmlAttribute::Href(url) => push_pair(out, "href", url.as_str()),
+            HtmlAttribute::Src(url) => push_pair(out, "src", url.as_str()),
+            HtmlAttribute::Alt(value) => push_pair(out, "alt", value),
             HtmlAttribute::Type(html_type) => {
-                push_pair(&mut out, "type", &html_type.as_value());
+                push_pair(out, "type", &html_type.as_value());
             }
-            HtmlAttribute::Name(value) => push_pair(&mut out, "name", value),
-            HtmlAttribute::Value(value) => push_pair(&mut out, "value", value),
+            HtmlAttribute::Name(value) => push_pair(out, "name", value),
+            HtmlAttribute::Value(value) => push_pair(out, "value", value),
             HtmlAttribute::Placeholder(value) => {
-                push_pair(&mut out, "placeholder", value);
+                push_pair(out, "placeholder", value);
             }
             HtmlAttribute::Disabled(present) => {
-                push_bool(&mut out, "disabled", *present);
+                push_bool(out, "disabled", *present);
             }
             HtmlAttribute::Checked(present) => {
-                push_bool(&mut out, "checked", *present);
+                push_bool(out, "checked", *present);
             }
             HtmlAttribute::Selected(present) => {
-                push_bool(&mut out, "selected", *present);
+                push_bool(out, "selected", *present);
             }
-            HtmlAttribute::Target(value) => push_pair(&mut out, "target", value),
-            HtmlAttribute::Rel(rel) => push_pair(&mut out, "rel", rel.as_str()),
+            HtmlAttribute::Target(value) => push_pair(out, "target", value),
+            HtmlAttribute::Rel(rel) => push_pair(out, "rel", rel.as_str()),
             HtmlAttribute::Other(key, value) => {
-                push_pair(&mut out, &escape_attribute(key), value);
+                push_pair(out, &escape_attribute(key), value);
             }
         }
     }
-    out
 }
 
 impl BrowserFragment<Ready> {

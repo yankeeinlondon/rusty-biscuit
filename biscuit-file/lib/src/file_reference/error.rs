@@ -1,16 +1,5 @@
 use std::path::PathBuf;
 
-/// Errors that can occur when parsing or resolving a file reference.
-///
-/// ## Examples
-///
-/// ```rust
-/// use biscuit_file::FileReference;
-///
-/// // Invalid syntax produces an error
-/// let err = FileReference::new("{{}}").unwrap_err();
-/// assert!(err.to_string().contains("invalid"));
-/// ```
 #[derive(Debug, thiserror::Error)]
 pub enum FileReferenceError {
     #[error("file reference syntax is invalid: {0}")]
@@ -40,4 +29,39 @@ pub enum FileReferenceError {
         #[source]
         source: std::io::Error,
     },
+
+    #[error("remote URL reference cannot be resolved to a local path: {0}")]
+    RemoteNotLocal(String),
+
+    #[cfg(feature = "url")]
+    #[error("invalid URL: {0}")]
+    InvalidUrl(String),
+}
+
+#[cfg(feature = "fetch")]
+#[derive(Debug, thiserror::Error)]
+pub enum FetchError {
+    #[error("host `{host}` denied by fetch policy")]
+    PolicyDenied { host: String },
+
+    #[error("unsupported URL scheme: {0}")]
+    UnsupportedScheme(String),
+
+    #[error("failed to build fetch client: {0}")]
+    ClientBuild(#[source] reqwest::Error),
+
+    #[error("HTTP request failed: {0}")]
+    RequestFailed(#[source] reqwest::Error),
+
+    #[error("HTTP error status {status} from {url}")]
+    HttpError { status: u16, url: String },
+
+    #[error("redirect (HTTP {status}) to `{location}` blocked by fetch policy")]
+    RedirectBlocked { status: u16, location: String },
+
+    #[error("failed to read response body: {0}")]
+    BodyReadFailed(#[source] reqwest::Error),
+
+    #[error("invalid response header `{header}`: {value}")]
+    InvalidHeader { header: String, value: String },
 }

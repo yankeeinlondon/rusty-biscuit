@@ -1,19 +1,21 @@
 # Compose Pipeline
 
-The darkmatter compose pipeline provides document preparation through three phases.
+The darkmatter compose pipeline provides document preparation through four phases:
+Inline Pre, Transclusion, Inline Post, and Finalization.
 
 ## Pipeline Overview
 
 **Inline Pre** (serial):
 
-1. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides are applied but before interpolation or shell expansion
-2. **Frontmatter Interpolation** - `{{ variable }}` in frontmatter resolves before effective state is built
-3. **Frontmatter Shell Expansion** - top-level `$(cmd)` frontmatter values execute after interpolation and write trimmed `stdout` back into frontmatter
-4. **Text Replacement** - `replace:` frontmatter replaces literal strings
-5. **Page Blocks** - `::block`/`::end-block` conditional regions
-6. **Interpolation** - `{{ variable }}` expressions expand to values
-7. **Shell Expansion** - Execute `::shell` directives execute approved commands and inject combined `stdout` + `stderr`
-8. **Link Resolve** - Resolve all local link targets (Markdown hyperlinks/images and supported HTML embeds) to absolute paths
+1. **Frontmatter Interpolation (pass 1)** - `{{ variable }}` in frontmatter resolves before effective state is built; keys referencing a whole-value `$(...)` are deferred to pass 2
+2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Coerces** schema-recognized top-level scalars to their declared types (default-on, e.g. the string `"true"` → real boolean) and writes the coerced values back into frontmatter, skipping `$(...)`-pending values. Problems on fields still holding `$(...)` are deferred to downstream re-validation only when frontmatter shell expansion is enabled; when it is disabled they fail fast
+3. **Frontmatter Shell Expansion** - top-level `$(cmd)` frontmatter values execute after interpolation and write trimmed `stdout` back into frontmatter. Tokens in executed position follow the `$()` token-resolution ladder (literal → `name(...)` safe function → executable → frontmatter property → null); an all-expression `$()` is rejected with a `{{ }}` suggestion
+4. **Frontmatter Interpolation (pass 2)** - resolves the keys deferred in pass 1 against the now-concrete shell-expanded values
+5. **Text Replacement** - `replace:` frontmatter replaces literal strings
+6. **Page Blocks** - `::block`/`::end-block` conditional regions
+7. **Interpolation** - `{{ variable }}` expressions expand to values
+8. **Shell Expansion** - Execute `::shell` directives execute approved commands and inject combined `stdout` + `stderr`
+9. **Link Resolve** - Resolve all local link targets (Markdown hyperlinks/images and supported HTML embeds) to absolute paths
 
 **Transclusion** (prepared serially, resolved concurrently via Rayon):
 
@@ -21,6 +23,7 @@ The darkmatter compose pipeline provides document preparation through three phas
 - `::file ./doc.md` - Include markdown with recursive processing
 - `::code ./main.rs` - Include as fenced code block
 - `::toc-linking` - Generate heading link lists from external documents' raw source headings
+- `::file-links` - Discover document files and render as a linked file tree
 - `prologue` / `epilogue` - Frontmatter-driven file includes
 - `when="..."` conditions, cycle detection, depth limits
 - Heading re-leveling for included markdown (H6 overflow handled gracefully)
@@ -56,6 +59,11 @@ let (composed, report) = md.compose_with(options)?;
 let options = ComposeOptions::new()
     .disable(ComposeOperation::Cleanup)
     .disable(ComposeOperation::Normalization);
+
+// With a baseline schema (library-only; no CLI flag)
+let baseline: darkmatter::markdown::schemas::SimplifiedSchema = /* ... */;
+let options = ComposeOptions::new()
+    .with_baseline_schema(baseline);
 
 // In-place mutation (no clone)
 let report = md.compose_mut()?;
@@ -101,24 +109,99 @@ Expressions between `{{ }}` are evaluated and replaced with values.
 |---------|-------------|
 | `{{ foo }}` | Frontmatter value |
 | `{{ user.name }}` | Nested object path |
+| `{{ doc }}` | The whole frontmatter object |
+| `{{ doc.build }}` | A frontmatter property by the `doc.*` namespace (a property literally named `doc` is `doc.doc`); intercepted before any `ctx.*` fallback |
 | `{{ ctx.today }}` | Runtime context |
 | `{{ env.HOME }}` | Environment variable |
+| `{{ file_exists(path) }}` | Read-side function (also `frontmatter`, `markdown_title`, `markdown_body_empty`, `validate_schema`, `absolute`, `relative`); resolves on every surface, both interpolation passes included |
+
+Read-side functions and `doc.*` resolve identically on every surface
+(frontmatter both passes, body, `when=`, `$()` ternary condition/branches,
+claudine loop/hook). Every frontmatter surface (both interpolation passes and
+the `$()` ternary condition/branch) is local-only, so a remote URL argument
+fails loudly there; only body interpolation carries a remote runtime. See
+`darkmatter/docs/topics/darkmatter-expressions.md`.
 
 ### Context Values (`ctx.*`)
+
+Context is captured once per compose run and reused across the full document
+graph. Capture is **demand-driven**: only groups whose variables are actually
+referenced in the document are captured, and within a captured group all
+properties are computed.
 
 | Key | Description |
 |-----|-------------|
 | `ctx.now` | ISO 8601 local datetime |
-| `ctx.utc` | ISO 8601 UTC datetime |
+| `ctx.now_utc` | ISO 8601 UTC datetime |
+| `ctx.utc` | Alias for `now_utc` (backward compat) |
 | `ctx.today` | Local date (YYYY-MM-DD) |
 | `ctx.yesterday` | Yesterday's date |
 | `ctx.tomorrow` | Tomorrow's date |
-| `ctx.dow` | Day of week (Monday, etc.) |
-| `ctx.dow_abbr` | Abbreviated (Mon, etc.) |
+| `ctx.day` | Day of week (Monday, etc.) |
+| `ctx.dow` | Alias for `day` (backward compat) |
+| `ctx.day_abbr` | Abbreviated day (Mon, etc.) |
 | `ctx.year` | Current year |
 | `ctx.month` | Month number (01-12) |
 | `ctx.month_name` | Month name (January, etc.) |
 | `ctx.month_name_abbr` | Abbreviated (Jan, etc.) |
+| `ctx.day_of_month` | Numeric day of month |
+| `ctx.day_of_month_suffixed` | Day with ordinal suffix (1st, 2nd, etc.) |
+| `ctx.time` | Time in hh:mm AM/PM format |
+| `ctx.time_military` | 24-hour time |
+| `ctx.timezone` | Timezone abbreviation (e.g., PDT) |
+| `ctx.timezone_offset` | UTC offset (e.g., -0700) |
+| `ctx.timezone_iana` | IANA timezone (e.g., America/Los_Angeles) |
+| `ctx.season` | Meteorological season (Spring, Summer, Fall, Winter) |
+| `ctx.timestamp` | EPOCH timestamp in seconds |
+| `ctx.timestamp_ms` | EPOCH timestamp in milliseconds |
+| `ctx.repo` | Repository name; null if not in a git repo |
+| `ctx.repo_root` | Absolute path to repo root; null if not in a git repo |
+| `ctx.is_monorepo` | Whether the repo is a monorepo |
+| `ctx.package_root` | Absolute path to current package root; null if not in a package |
+| `ctx.current_package` | Current package name; null if not in a monorepo package |
+| `ctx.current_package_area` | Current package area; null if not in a monorepo area |
+| `ctx.area` | Scope name (package or area); empty string at root |
+| `ctx.area_description` | Human-readable scope description |
+| `ctx.current_packages` | Markdown bullet list of packages under CWD |
+| `ctx.depends_on` | Markdown list of internal dependencies |
+| `ctx.used_by` | Markdown list of internal dependents |
+| `ctx.packages` | Comma-separated package names |
+| `ctx.package_areas` | Comma-separated package area names |
+| `ctx.dirty_files` | Comma-separated dirty file paths |
+| `ctx.staged_files` | Comma-separated staged file paths |
+| `ctx.untracked_files` | Comma-separated untracked file paths |
+| `ctx.dirty_files_list` | Markdown bullet list of dirty files |
+| `ctx.staged_files_list` | Markdown bullet list of staged files |
+| `ctx.dirty_packages` | Comma-separated dirty package names |
+| `ctx.staged_packages` | Comma-separated staged package names |
+| `ctx.current_package_has_dirty_files` | Whether current package has dirty files |
+| `ctx.current_package_has_staged_files` | Whether current package has staged files |
+| `ctx.programming_languages_in_repo` | Comma-separated unique languages; null if not in a repo |
+| `ctx.programming_language` | Context-sensitive primary language |
+| `ctx.package_manager` | Context-sensitive package manager |
+| `ctx.docs_readme` | Comma-separated README paths, scope-filtered |
+| `ctx.docs_blast_radius` | Comma-separated docs with blast_radius frontmatter |
+| `ctx.docs_drift` | Comma-separated docs at risk of drift |
+| `ctx.docs_skill` | Repo-relative path to best matching SKILL.md; null if none |
+| `ctx.os` | "Windows", "macOS", or "Linux"; null for other |
+| `ctx.os_distro` | Linux distribution name; empty on macOS/Windows |
+| `ctx.os_package_manager` | Primary system package manager |
+| `ctx.os_version` | Operating system version |
+| `ctx.memory_total` | Total system memory in bytes |
+| `ctx.memory_used` | Percentage of memory currently used |
+| `ctx.memory_avail` | Available memory in bytes |
+| `ctx.cpu_cores` | Number of logical CPU cores |
+| `ctx.cpu_arch` | CPU architecture (e.g., aarch64, x86_64) |
+| `ctx.gpu` | GPU device name(s), comma-separated; null if none |
+| `ctx.agent` | Executing agentic CLI name (from `AGENT` env var); defaults to `"unknown"` |
+| `ctx.model` | Active model identifier (from `MODEL` env var); defaults to `"default"` |
+
+All date/time variables have `_utc` variants (e.g., `today_utc`, `day_utc`,
+`year_utc`). Week boundary variables are also available:
+`start_of_week_sun`, `end_of_week_sun`, `start_of_week_mon`, `end_of_week_mon`
+(plus UTC variants).
+
+Full specification lives in `darkmatter/docs/topics/context-variables.md`.
 
 ### Fallback Expressions
 
@@ -158,6 +241,11 @@ Numeric strings auto-convert for comparisons.
 
 {{ round(3.7) }}             // Round to integer (4)
 {{ round(value, 0) }}        // With default
+
+{{ link(doc.path) }}         // Markdown link using relative text and absolute destination
+{{ link("https://example.com", "Example") }}  // Link with explicit description
+{{ has_skill("rust") }}      // true when a skill directory exists in user or local roots
+{{ has_local_skill("rust") }} // true when a skill directory exists in local roots only
 ```
 
 ### Code Region Protection
@@ -232,6 +320,10 @@ The transclusion phase runs after Inline Pre when a source file path is provided
 <!-- Include as fenced code block -->
 ::code ./main.rs
 
+<!-- Discover document files and render as linked tree -->
+::file-links "docs/**/*.md"
+::file-links --dir reports --depth 1
+
 <!-- Conditional include -->
 ::file ./appendix.md when="include_appendix"
 ```
@@ -258,17 +350,43 @@ epilogue: ./footer.md
 ## Module Structure
 
 ```
-darkmatter/lib/src/markdown/compose/
-├── mod.rs           # Public API, pipeline orchestration
-├── types.rs         # ComposeOperation, ComposeOptions, ComposeReport, etc.
-├── state.rs         # EffectiveState, merge logic
-├── replacement.rs   # Text replacement engine
-├── link_resolve.rs  # Link resolution (absolute paths)
-├── link_normalization.rs # Link normalization (portable paths)
-└── interpolation/
-    ├── mod.rs       # Module exports
-    ├── lexer.rs     # Tokenizer, expression finder
-    ├── ast.rs       # AST types
-    ├── parser.rs    # Expression parser
-    └── evaluator.rs # AST evaluation
+darkmatter/lib/src/
+├── effects/              # Side-effect engine (EffectEngine, verbs)
+│   ├── mod.rs
+│   ├── error.rs
+│   └── verbs.rs
+└── markdown/compose/
+    ├── mod.rs           # Public API, pipeline orchestration
+    ├── types.rs         # ComposeOperation, ComposeOptions, ComposeReport, etc.
+    ├── schema_validation.rs # Always-on schema validation stage
+    ├── state.rs         # EffectiveState, merge logic
+    ├── replacement.rs   # Text replacement engine
+    ├── link_resolve.rs  # Link resolution (absolute paths)
+    ├── link_normalization.rs # Link normalization (portable paths)
+    ├── remote.rs        # Remote URL discovery, catalog, RemoteReadConfig
+    ├── conditions.rs    # Condition evaluation API
+    ├── cache/           # Compose result caching
+    │   └── hashing.rs   # Context-aware cache hashing
+    ├── context/         # Runtime context capture (demand-driven)
+    │   ├── mod.rs
+    │   ├── capture.rs   # Raw fact capture from sniff, chrono, std::env
+    │   ├── format.rs    # CSV, markdown list, byte, ordinal formatters
+    │   ├── merge.rs     # User ctx + runtime ctx merge policy
+    │   └── diagnostics.rs # ContextMergeDiagnostic types
+    ├── expression/       # Expression language (shared by interpolation & conditions)
+    │   ├── mod.rs       # EvaluationLookup trait, evaluate(), fs gate
+    │   ├── lexer.rs     # Tokenizer
+    │   ├── ast.rs       # AST types
+    │   ├── parser.rs    # Expression parser
+    │   ├── functions.rs # PURE_FUNCTIONS + FS_FUNCTIONS dispatch (read-side fns)
+    │   ├── catalog.rs   # Descriptor catalog (parity-tested against functions)
+    │   ├── ctx.rs       # CtxLookup (ctx.* runtime context)
+    │   ├── doc_namespace.rs # Reserved doc / doc.* namespace resolution
+    │   └── resolve_ctx.rs   # ResolutionContext (base_dir, magic paths, remote)
+    └── interpolation/
+        ├── mod.rs       # Module exports
+        ├── lexer.rs     # Expression finder
+        ├── ast.rs       # AST types
+        ├── parser.rs    # Expression parser
+        └── evaluator.rs # AST evaluation
 ```

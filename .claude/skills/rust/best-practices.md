@@ -179,7 +179,7 @@ fn read_safely(data: &[u32], index: usize) -> Option<u32> {
 
 ## 3. Idiomatic Error Handling
 
-Rust treats errors as data - no exceptions.
+Rust treats errors as data - not exceptions.
 
 ### Result and Option
 
@@ -215,17 +215,19 @@ pub enum DatabaseError {
 
 ### Application-Level Errors
 
-Use **`anyhow`** crate for binaries.
+Use **`color-eyre`** for binaries — rich, colorized error reports with context. (In the rusty-biscuit monorepo this is the standard for CLI error reporting; `anyhow` is a viable alternative in other projects.)
 
 ```rust
-use anyhow::{Context, Result};
+use color_eyre::eyre::{Result, WrapErr};
 
 fn main() -> Result<()> {
+    color_eyre::install()?;
+
     let config = read_config()
-        .context("Failed to read config file")?;
+        .wrap_err("Failed to read config file")?;
 
     let db = connect_db(&config.db_url)
-        .context("Failed to connect to database")?;
+        .wrap_err("Failed to connect to database")?;
 
     Ok(())
 }
@@ -274,6 +276,55 @@ for &x in &vec {
 }
 ```
 
+### Borrowing for Performance
+
+Allocation is often the real cost, not computation. Two tools let you skip it: `Cow<'_, str>` for borrow-or-owned returns, and lifetime-bearing structs that hold `&str` / `&[T]` instead of owned copies (zero-copy parsing).
+
+`Cow<'_, str>` allocates only when the value actually changes. Callers get a `&str` through `Deref`, so the borrow-vs-owned split is invisible to them.
+
+```rust
+use std::borrow::Cow;
+
+fn normalize(input: &str) -> Cow<'_, str> {
+    if input.contains(' ') {
+        Cow::Owned(input.replace(' ', "_")) // allocates
+    } else {
+        Cow::Borrowed(input)                // zero-copy
+    }
+}
+```
+
+A lifetime-bearing struct borrows from the source buffer instead of copying each field:
+
+```rust
+// Zero-copy: fields are slices of `line`, no String allocation.
+struct LogEntry<'a> {
+    level: &'a str,
+    message: &'a str,
+}
+
+fn parse(line: &str) -> Option<LogEntry<'_>> {
+    let (level, message) = line.split_once(": ")?;
+    Some(LogEntry { level, message })
+}
+```
+
+**When to use:**
+
+- Hot paths or large inputs where the borrow usually holds (most calls don't mutate).
+- Returns derived from caller-owned data that outlives the result.
+- Zero-copy parsing where fields are slices of the source buffer.
+
+**When *not* to:**
+
+- **Measure first.** Most string handling isn't hot — `String` is simpler and clippy-clean. Don't add lifetimes speculatively (Rule 2: simplicity first).
+- Lifetimes are infectious: a `'a` on a struct propagates to every holder, signature, and trait impl. The complexity cost compounds fast.
+- If you almost always end up `Owned`, just return `String`; if you almost always borrow, just return `&str`. `Cow` only pays off when the split is genuinely mixed.
+- Don't store borrows in long-lived or `'static`-ish structs (caches, spawned tasks). Self-referential structs (one borrowing from its own field) need `Pin`/unsafe/`ouroboros` — avoid them.
+- `async` + borrows held across `.await` often forces `'static` bounds; owned data is usually the pragmatic choice there.
+
+Prefer the simplest signature that compiles. Reach for `Cow` or lifetimes when a profiler — or an obvious large-input hot loop — says allocation is the cost. Zero-cost abstraction is real, but your code might not be.
+
 ### Static vs. Dynamic Dispatch
 
 | Type | Syntax | Performance | Binary Size | Use When |
@@ -319,7 +370,6 @@ cargo bench
 
 # Code quality
 cargo clippy        # Linter (700+ checks)
-cargo fmt          # Formatter
 
 # Security and performance
 cargo audit        # Vulnerability scanner
@@ -330,20 +380,7 @@ cargo bloat        # Binary size analysis
 cargo doc --open   # Generate and view docs
 ```
 
-### Clippy Configuration
-
-Add to `Cargo.toml`:
-
-```toml
-[lints.clippy]
-# Deny common mistakes
-unwrap_used = "deny"
-expect_used = "deny"
-panic = "deny"
-
-# Pedantic (opt-in)
-pedantic = "warn"
-```
+Formatting (`cargo fmt`) is best run as a periodic standalone pass rather than on every change, since it can produce large diffs that obscure behavior changes.
 
 ## 6. Project Structure
 

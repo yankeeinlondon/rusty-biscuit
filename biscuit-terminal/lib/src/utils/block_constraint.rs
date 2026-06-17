@@ -178,6 +178,38 @@ pub fn visible_width(content: &str) -> u32 {
     width
 }
 
+/// Splits `content` into its visible body and the run of trailing escape
+/// sequences that follow the last visible character.
+///
+/// The trailing run is exactly the closing envelope a styled inline node
+/// appends after its visible label — an SGR reset plus ancestor-style restore,
+/// and any OSC8 link close. Truncators ([`truncate`]) keep only the visible
+/// prefix and discard the cut tail, which would strip this run and leak the
+/// node's color into following content. Callers split it off, truncate the
+/// body, then re-append it. Returns `(body, trailing)` with
+/// `format!("{body}{trailing}") == content`.
+pub fn split_trailing_escapes(content: &str) -> (&str, &str) {
+    let bytes = content.as_bytes();
+    let mut idx = 0usize;
+    let mut last_visible_end = 0usize;
+
+    while idx < content.len() {
+        if bytes[idx] == 0x1b {
+            idx = escape_sequence_end(content, idx);
+            continue;
+        }
+
+        let ch = match content[idx..].chars().next() {
+            Some(ch) => ch,
+            None => break,
+        };
+        idx += ch.len_utf8();
+        last_visible_end = idx;
+    }
+
+    content.split_at(last_visible_end)
+}
+
 pub fn split_at_visible_width(content: &str, width: u32) -> (String, String) {
     if width == 0 {
         return (String::new(), content.to_string());
@@ -596,11 +628,141 @@ pub fn sanitize_wrapped_lines(lines: Vec<String>) -> Vec<String> {
     result
 }
 
-/// Scans content for active (unclosed) ANSI foreground color and OSC8 link state.
+/// The set of SGR attributes still open at a point in a string.
 ///
-/// Returns `(active_foreground_sequence, active_osc8_open_sequence)`.
+/// Tracking the **full** set — emphasis plus foreground and background — is what
+/// keeps a bold or background run (not just a foreground color) from bleeding
+/// past a wrapped/multiline split into padding, borders, or the next line.
+#[derive(Default)]
+struct SgrState {
+    bold: bool,
+    dim: bool,
+    italic: bool,
+    /// The active underline param token (`"4"`, `"21"`, or an ITU `"4:2"`), or
+    /// `None` when no underline is open. Stored verbatim so the subtype survives
+    /// a re-open.
+    underline: Option<String>,
+    blink: bool,
+    inverse: bool,
+    strikethrough: bool,
+    /// Active foreground color params, e.g. `["31"]` or `["38","2","255","0","0"]`.
+    fg: Vec<String>,
+    /// Active background color params.
+    bg: Vec<String>,
+}
+
+impl SgrState {
+    /// The single `\x1b[…m` run that re-applies every active attribute, or
+    /// `None` when nothing is open.
+    fn reopen_run(&self) -> Option<String> {
+        let mut codes: Vec<String> = Vec::new();
+        if self.bold {
+            codes.push("1".into());
+        }
+        if self.dim {
+            codes.push("2".into());
+        }
+        if self.italic {
+            codes.push("3".into());
+        }
+        if let Some(u) = &self.underline {
+            codes.push(u.clone());
+        }
+        if self.blink {
+            codes.push("5".into());
+        }
+        if self.inverse {
+            codes.push("7".into());
+        }
+        if self.strikethrough {
+            codes.push("9".into());
+        }
+        codes.extend(self.fg.iter().cloned());
+        codes.extend(self.bg.iter().cloned());
+        (!codes.is_empty()).then(|| format!("\x1b[{}m", codes.join(";")))
+    }
+}
+
+/// Number of `;`-separated tokens an extended-color introducer consumes,
+/// starting at its `38`/`48` token: `…;5;n` → 3, `…;2;r;g;b` → 5. Falls back to
+/// 1 for a malformed form so the parser always advances.
+fn extended_color_span(tokens: &[&str]) -> usize {
+    match tokens.get(1).copied() {
+        Some("5") => 3.min(tokens.len()),
+        Some("2") => 5.min(tokens.len()),
+        _ => 1,
+    }
+}
+
+/// Folds one CSI SGR parameter list into `state`.
+fn apply_sgr_params(params: &str, state: &mut SgrState) {
+    // `\x1b[m` (empty params) is shorthand for a full reset.
+    if params.is_empty() {
+        *state = SgrState::default();
+        return;
+    }
+    let tokens: Vec<&str> = params.split(';').collect();
+    let mut i = 0;
+    while i < tokens.len() {
+        let tok = tokens[i];
+        // ITU sub-parameter underline form (`4:0` off, `4:2` double, …).
+        if tok.starts_with("4:") {
+            state.underline = (tok != "4:0").then(|| tok.to_string());
+            i += 1;
+            continue;
+        }
+        let Ok(n) = tok.parse::<u32>() else {
+            i += 1;
+            continue;
+        };
+        match n {
+            0 => *state = SgrState::default(),
+            1 => state.bold = true,
+            2 => state.dim = true,
+            3 => state.italic = true,
+            4 => state.underline = Some("4".into()),
+            5 => state.blink = true,
+            7 => state.inverse = true,
+            9 => state.strikethrough = true,
+            21 => state.underline = Some("21".into()),
+            22 => {
+                state.bold = false;
+                state.dim = false;
+            }
+            23 => state.italic = false,
+            24 => state.underline = None,
+            25 => state.blink = false,
+            27 => state.inverse = false,
+            29 => state.strikethrough = false,
+            30..=37 | 90..=97 => state.fg = vec![tok.to_string()],
+            39 => state.fg.clear(),
+            40..=47 | 100..=107 => state.bg = vec![tok.to_string()],
+            49 => state.bg.clear(),
+            38 => {
+                let span = extended_color_span(&tokens[i..]);
+                state.fg = tokens[i..i + span].iter().map(ToString::to_string).collect();
+                i += span;
+                continue;
+            }
+            48 => {
+                let span = extended_color_span(&tokens[i..]);
+                state.bg = tokens[i..i + span].iter().map(ToString::to_string).collect();
+                i += span;
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+}
+
+/// Scans content for active (unclosed) ANSI SGR and OSC8 link state.
+///
+/// Returns `(active_sgr_reopen_run, active_osc8_open_sequence)`, where the first
+/// is a single `\x1b[…m` re-applying every still-open SGR attribute (emphasis,
+/// foreground, background) or `None` when no SGR attribute is open.
 fn active_ansi_state(content: &str) -> (Option<String>, Option<String>) {
-    let mut fg: Option<String> = None;
+    let mut state = SgrState::default();
     let mut osc8: Option<String> = None;
     let bytes = content.as_bytes();
     let mut idx = 0;
@@ -614,38 +776,19 @@ fn active_ansi_state(content: &str) -> (Option<String>, Option<String>) {
         let end = escape_sequence_end(content, idx);
         let seq = &content[idx..end];
 
-        // Full SGR reset or foreground reset — clears foreground
-        if seq == "\x1b[0m" || seq == "\x1b[39m" {
-            fg = None;
+        if seq.starts_with("\x1b[") && seq.ends_with('m') {
+            apply_sgr_params(&seq[2..seq.len() - 1], &mut state);
         }
-        // CSI SGR sequence — check if it sets foreground
-        else if seq.starts_with("\x1b[") && seq.ends_with('m') {
-            let params = &seq[2..seq.len() - 1];
-            if let Some(first) = params.split(';').next()
-                && let Ok(n) = first.parse::<u32>()
-            {
-                // 30-37: basic fg, 38: extended fg, 90-97: bright fg
-                if (30..=37).contains(&n) || n == 38 || (90..=97).contains(&n) {
-                    fg = Some(seq.to_string());
-                }
-            }
-        }
-        // OSC8 link
+        // OSC8 link: `\x1b]8;;url\x1b\\` — a non-empty URL opens, empty closes.
         else if let Some(inner) = seq.strip_prefix("\x1b]8;;") {
-            // Check if URL is non-empty (open) or empty (close)
-            // Format: \x1b]8;;url\x1b\\ — the URL is between ";;" and the ST
             let url_empty = inner == "\x1b\\" || inner == "\x07" || inner.is_empty();
-            if url_empty {
-                osc8 = None;
-            } else {
-                osc8 = Some(seq.to_string());
-            }
+            osc8 = (!url_empty).then(|| seq.to_string());
         }
 
         idx = end;
     }
 
-    (fg, osc8)
+    (state.reopen_run(), osc8)
 }
 
 #[cfg(test)]
@@ -684,6 +827,31 @@ mod tests {
         let ballot_x = "\u{2717}"; // ✗
         let width = visible_width(ballot_x);
         assert_eq!(width, 1, "Ballot X should have width 1, got {}", width);
+    }
+
+    #[test]
+    fn split_trailing_escapes_separates_closing_envelope() {
+        let content = "\x1b[31mred text\x1b[0m";
+        let (body, trailing) = split_trailing_escapes(content);
+        assert_eq!(body, "\x1b[31mred text");
+        assert_eq!(trailing, "\x1b[0m");
+        assert_eq!(format!("{body}{trailing}"), content);
+    }
+
+    #[test]
+    fn split_trailing_escapes_handles_osc8_and_sgr_close() {
+        let content = "\x1b]8;;url\x1b\\\x1b[31mlink\x1b[0m\x1b]8;;\x1b\\";
+        let (body, trailing) = split_trailing_escapes(content);
+        assert_eq!(body, "\x1b]8;;url\x1b\\\x1b[31mlink");
+        assert_eq!(trailing, "\x1b[0m\x1b]8;;\x1b\\");
+    }
+
+    #[test]
+    fn split_trailing_escapes_no_trailing_run() {
+        let content = "\x1b[31mred";
+        let (body, trailing) = split_trailing_escapes(content);
+        assert_eq!(body, content);
+        assert_eq!(trailing, "");
     }
 
     #[test]

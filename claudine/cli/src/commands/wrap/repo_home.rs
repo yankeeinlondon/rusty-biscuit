@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
@@ -62,6 +63,17 @@ impl RepoHomeManager {
             return Ok(());
         }
 
+        // Live SQLite databases must never be symlinked into the shadow home.
+        // Doing so points two independent provider processes (e.g. bare `codex`
+        // and `claudine codex`) at one physical WAL-mode DB through a symlink;
+        // their -wal/-shm sidecars desync and SQLite reports SQLITE_CANTOPEN
+        // ("database appears damaged"). Sweep the shadow unconditionally before
+        // linking so the provider rebuilds a self-consistent DB+WAL+SHM set on
+        // every launch — see `purge_volatile_state` for why the sweep must be
+        // shadow-driven rather than source-driven. Config files (auth.json,
+        // config.toml, …) are still shared via symlink.
+        purge_volatile_state(&self.shadow_home)?;
+
         for entry in fs::read_dir(original_home)? {
             let entry = entry?;
             let file_name = entry.file_name();
@@ -69,6 +81,11 @@ impl RepoHomeManager {
             let dest = self.shadow_home.join(&file_name);
 
             if self.should_exclude(&file_name, repo_only) {
+                continue;
+            }
+
+            // Never symlink a live DB into the shadow (purged above).
+            if is_volatile_state_file(&file_name) {
                 continue;
             }
 
@@ -142,23 +159,98 @@ impl RepoHomeManager {
     }
 }
 
-pub fn needs_shadow_home(provider: Provider, cwd: &Path, repo_only: bool) -> bool {
-    repo_only
-        || matches!(provider, Provider::Codex)
-            && codex_repo_prompts_source(&resolve_repo_root(cwd)).is_some()
+/// Sweep every live-SQLite file out of the shadow home before linking.
+///
+/// WAL/SHM sidecars are transient: a bare provider run can checkpoint and delete
+/// a `-wal`/`-shm` in the real HOME while a stale twin from a previous DB
+/// generation lingers in the shadow. A source-driven purge (deleting only shadow
+/// files whose name still exists in the real HOME) never visits that orphan, so
+/// SQLite later opens a freshly-rebuilt DB against a mismatched sidecar and
+/// reports code-14 ("database appears damaged"). Because the shadow home is
+/// global across worktrees, whether a launch hits the orphan is pure timing,
+/// surfacing as "fails in some worktrees but not others." Sweeping the shadow
+/// unconditionally — keyed on what is *present in the shadow*, not the source —
+/// guarantees a self-consistent rebuild on every launch.
+///
+/// A missing shadow directory is not an error: it simply means there is nothing
+/// to sweep.
+fn purge_volatile_state(shadow_home: &Path) -> Result<()> {
+    let Ok(entries) = fs::read_dir(shadow_home) else {
+        return Ok(());
+    };
+    for entry in entries {
+        let entry = entry?;
+        if is_volatile_state_file(&entry.file_name()) {
+            remove_existing_path(&entry.path())?;
+        }
+    }
+    Ok(())
 }
 
+/// Live SQLite state databases and their WAL/SHM/journal sidecars. These are
+/// per-environment runtime state, not shareable config — see the call site in
+/// `sync_shadow_home` for why sharing them via symlink corrupts the DB.
+fn is_volatile_state_file(file_name: &OsStr) -> bool {
+    let name = file_name.to_string_lossy();
+    name.ends_with(".sqlite")
+        || name.ends_with(".sqlite-wal")
+        || name.ends_with(".sqlite-shm")
+        || name.ends_with(".sqlite-journal")
+}
+
+pub fn needs_shadow_home(
+    provider: Provider,
+    cwd: &Path,
+    repo_only: bool,
+    effective_root: Option<&Path>,
+) -> bool {
+    repo_only
+        || matches!(provider, Provider::Codex)
+            && {
+                let repo_root = effective_root
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| resolve_repo_root(cwd));
+                codex_repo_prompts_source(&repo_root).is_some()
+            }
+}
+
+/// Measured breakdown of [`build_repo_home_env`], for `--perf`.
+///
+/// `total` is the whole shadow-HOME materialization; `repo_root_detect` is the
+/// time spent obtaining the repo root used for Codex prompt materialization.
+/// When the caller supplies an `effective_root` this is microsecond-scale
+/// local work (a clone); when no root is supplied it falls back to the
+/// `resolve_repo_root` sniff git walk that previously dominated the stage.
+/// Only produced when the caller passes `perf = true`.
+#[derive(Debug, Clone, Copy)]
+pub struct RepoHomeTimings {
+    pub total: std::time::Duration,
+    pub repo_root_detect: std::time::Duration,
+}
+
+#[allow(clippy::type_complexity)]
 pub fn build_repo_home_env(
     provider: Provider,
     cwd: &Path,
     repo_only: bool,
-) -> Result<(HashMap<OsString, OsString>, Option<PathBuf>)> {
+    perf: bool,
+    effective_root: Option<&Path>,
+) -> Result<(
+    HashMap<OsString, OsString>,
+    Option<PathBuf>,
+    Option<RepoHomeTimings>,
+)> {
+    let total_start = perf.then(std::time::Instant::now);
     let manager = RepoHomeManager::new(provider);
     let user_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
     let shadow_home = manager.ensure_shadow_home()?;
     manager.sync_shadow_home(repo_only)?;
 
-    let repo_root = resolve_repo_root(cwd);
+    let repo_root_start = perf.then(std::time::Instant::now);
+    let repo_root = effective_root
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| resolve_repo_root(cwd));
+    let repo_root_detect = repo_root_start.map(|t| t.elapsed());
     materialize_repo_scoped_resources(
         provider,
         &shadow_home,
@@ -177,7 +269,12 @@ pub fn build_repo_home_env(
     materialize_root_level_state(provider, &user_home, &shadow_home_root)?;
     env.insert(OsString::from("HOME"), OsString::from(shadow_home_root));
 
-    Ok((env, Some(shadow_home)))
+    let timings = total_start.map(|t| RepoHomeTimings {
+        total: t.elapsed(),
+        repo_root_detect: repo_root_detect.unwrap_or_default(),
+    });
+
+    Ok((env, Some(shadow_home), timings))
 }
 
 fn materialize_repo_scoped_resources(
@@ -329,8 +426,73 @@ fn remove_existing_path(path: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::process::Command;
+
     use super::*;
+    use serial_test::serial;
     use tempfile::TempDir;
+
+    fn init_git_repo(path: &Path) -> bool {
+        Command::new("git")
+            .arg("init")
+            .arg("-q")
+            .current_dir(path)
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+
+    #[test]
+    fn purge_volatile_state_removes_orphaned_sidecars() {
+        // Reproduces the code-14 corruption: a bare provider run checkpointed
+        // away the source `-shm`, but a stale twin from a previous DB generation
+        // still lingers in the shadow. A source-driven purge never visits this
+        // orphan (no matching source name), so the sweep must clear it anyway.
+        let tmp = TempDir::new().unwrap();
+        let shadow = tmp.path();
+
+        fs::write(shadow.join("goals_1.sqlite"), b"db").unwrap();
+        fs::write(shadow.join("goals_1.sqlite-wal"), b"wal").unwrap();
+        fs::write(shadow.join("goals_1.sqlite-shm"), b"stale-shm").unwrap();
+        // Shared config must survive the sweep untouched.
+        fs::write(shadow.join("config.toml"), b"cfg").unwrap();
+
+        purge_volatile_state(shadow).unwrap();
+
+        assert!(!shadow.join("goals_1.sqlite").exists());
+        assert!(!shadow.join("goals_1.sqlite-wal").exists());
+        assert!(
+            !shadow.join("goals_1.sqlite-shm").exists(),
+            "stale orphaned -shm must be swept even with no matching source file"
+        );
+        assert!(
+            shadow.join("config.toml").exists(),
+            "shared config must survive the volatile sweep"
+        );
+    }
+
+    #[test]
+    fn purge_volatile_state_tolerates_missing_shadow_dir() {
+        let tmp = TempDir::new().unwrap();
+        let missing = tmp.path().join("does-not-exist");
+        purge_volatile_state(&missing).unwrap();
+    }
+
+    #[test]
+    fn volatile_state_files_match_live_dbs_only() {
+        // Live DBs + sidecars must be detected (never shared via symlink).
+        assert!(is_volatile_state_file(OsStr::new("state_5.sqlite")));
+        assert!(is_volatile_state_file(OsStr::new("logs_2.sqlite-wal")));
+        assert!(is_volatile_state_file(OsStr::new("memories_1.sqlite-shm")));
+        assert!(is_volatile_state_file(OsStr::new("goals_1.sqlite-journal")));
+
+        // Shared config and codex's own repair backups must NOT match.
+        assert!(!is_volatile_state_file(OsStr::new("config.toml")));
+        assert!(!is_volatile_state_file(OsStr::new("auth.json")));
+        assert!(!is_volatile_state_file(OsStr::new(
+            "state_5.sqlite.codex-repair-1780436523.0.bak"
+        )));
+    }
 
     #[test]
     fn codex_repo_prompts_source_prefers_codex_dir_then_claude_commands() {
@@ -512,5 +674,147 @@ mod tests {
         materialize_root_level_state(Provider::Claude, &user_home, &shadow_home_root).unwrap();
 
         assert_eq!(fs::read_link(&dest).unwrap(), source);
+    }
+
+    #[test]
+    fn needs_shadow_home_supplied_effective_root_used_for_codex_detection() {
+        let tmp = TempDir::new().unwrap();
+        let with_prompts = tmp.path().join("with-prompts");
+        let without_prompts = tmp.path().join("without-prompts");
+        fs::create_dir_all(with_prompts.join(".codex/prompts")).unwrap();
+        fs::create_dir_all(&without_prompts).unwrap();
+
+        // When the supplied effective root contains prompts, Codex needs a
+        // shadow home even if cwd lives somewhere without prompts.
+        assert!(
+            needs_shadow_home(Provider::Codex, &without_prompts, false, Some(&with_prompts)),
+            "expected true when effective_root has codex prompts"
+        );
+
+        // When the supplied effective root lacks prompts, Codex does not need
+        // a shadow home (repo_only is false).
+        assert!(
+            !needs_shadow_home(Provider::Codex, &with_prompts, false, Some(&without_prompts)),
+            "expected false when effective_root has no codex prompts"
+        );
+
+        // Non-Codex providers are never affected by repo-local prompt detection.
+        assert!(
+            !needs_shadow_home(Provider::Claude, &with_prompts, false, Some(&with_prompts)),
+            "expected false for non-Codex regardless of effective_root"
+        );
+    }
+
+    #[test]
+    fn needs_shadow_home_repo_only_short_circuits_regardless_of_effective_root() {
+        let tmp = TempDir::new().unwrap();
+        let empty = tmp.path().join("empty");
+        fs::create_dir_all(&empty).unwrap();
+
+        // repo_only=true forces shadow home for every provider.
+        assert!(needs_shadow_home(Provider::Codex, &empty, true, Some(&empty)));
+        assert!(needs_shadow_home(Provider::Claude, &empty, true, Some(&empty)));
+        assert!(needs_shadow_home(Provider::OpenCode, &empty, true, None));
+    }
+
+    /// Proves that `build_repo_home_env` materializes Codex repo prompts from
+    /// the supplied `effective_root` even when `cwd` points to a different
+    /// directory (or repo). This is the core Phase 3/4 contract: the caller
+    /// threads a pre-resolved launch-child root through the shadow-HOME API
+    /// so the redundant `resolve_repo_root(cwd)` sniff walk is skipped.
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn build_repo_home_env_uses_supplied_effective_root_not_cwd() {
+        let tmp = TempDir::new().unwrap();
+        let fake_home = tmp.path().join("home");
+        let launch_repo = tmp.path().join("launch-repo");
+        let source_repo = tmp.path().join("source-repo");
+
+        fs::create_dir_all(fake_home.join(".codex")).unwrap();
+        fs::create_dir_all(launch_repo.join(".claude/commands")).unwrap();
+        fs::create_dir_all(source_repo.join(".claude/commands")).unwrap();
+        fs::write(launch_repo.join(".claude/commands/launch.md"), "launch").unwrap();
+        fs::write(source_repo.join(".claude/commands/source.md"), "source").unwrap();
+
+        let old_home = std::env::var_os("HOME");
+        unsafe { std::env::set_var("HOME", &fake_home) };
+
+        let (_env, shadow_path, _timings) = build_repo_home_env(
+            Provider::Codex,
+            &source_repo, // cwd points to source repo (simulates metadata root)
+            false,
+            false,
+            Some(&launch_repo), // effective_root is launch repo (simulates child_cwd)
+        )
+        .unwrap();
+
+        // Restore HOME so later tests see a clean environment.
+        match old_home {
+            Some(v) => unsafe { std::env::set_var("HOME", v) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+
+        let shadow_path = shadow_path.expect("shadow home path must be returned");
+        let prompts_dir = shadow_path.join("prompts");
+
+        // Prompt materialization must follow effective_root (launch repo),
+        // not cwd (source repo).
+        assert!(
+            fs::symlink_metadata(prompts_dir.join("launch.md")).is_ok(),
+            "expected launch.md from effective_root in shadow home"
+        );
+        assert!(
+            fs::symlink_metadata(prompts_dir.join("source.md")).is_err(),
+            "expected source.md from cwd NOT in shadow home"
+        );
+    }
+
+    /// Proves that `build_repo_home_env(..., None)` falls back to the legacy
+    /// `resolve_repo_root(cwd)` behavior, which walks up to the *git root* — not
+    /// the literal `cwd`. The repo-local prompt lives at the repository root,
+    /// while `cwd` is a nested subdirectory with no `.claude/commands` of its
+    /// own. The prompt only materializes if `resolve_repo_root` ascends to the
+    /// root, so this fails if the fallback degrades to `cwd.to_path_buf()`.
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn build_repo_home_env_fallback_resolves_repo_root_from_nested_cwd() {
+        let tmp = TempDir::new().unwrap();
+        let fake_home = tmp.path().join("home");
+        let repo = tmp.path().join("repo");
+        let nested_cwd = repo.join("crate/src/deep");
+
+        fs::create_dir_all(fake_home.join(".codex")).unwrap();
+        fs::create_dir_all(repo.join(".claude/commands")).unwrap();
+        fs::create_dir_all(&nested_cwd).unwrap();
+        fs::write(repo.join(".claude/commands/review.md"), "review").unwrap();
+
+        if !init_git_repo(&repo) {
+            // Skip when git is unavailable: without a detectable repo root the
+            // fallback cannot distinguish itself from direct cwd reuse.
+            return;
+        }
+
+        let old_home = std::env::var_os("HOME");
+        unsafe { std::env::set_var("HOME", &fake_home) };
+
+        // cwd is a nested subdir with no .claude/commands; only repo-root
+        // resolution can locate the root-level prompt.
+        let (_env, shadow_path, _timings) =
+            build_repo_home_env(Provider::Codex, &nested_cwd, false, false, None).unwrap();
+
+        match old_home {
+            Some(v) => unsafe { std::env::set_var("HOME", v) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+
+        let shadow_path = shadow_path.expect("shadow home path must be returned");
+        let prompts_dir = shadow_path.join("prompts");
+
+        assert!(
+            fs::symlink_metadata(prompts_dir.join("review.md")).is_ok(),
+            "expected root-level review.md to materialize via resolve_repo_root from nested cwd"
+        );
     }
 }

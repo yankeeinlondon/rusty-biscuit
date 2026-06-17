@@ -106,15 +106,22 @@ pub enum ColorMode {
 /// and passes it through.
 ///
 /// [`CodeRenderer`]: crate::tree::CodeRenderer
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalCodeContext {
     width: u32,
     color_depth: ColorDepth,
     color_mode: ColorMode,
+    code_theme_name: Option<String>,
+    line_numbers: bool,
+    page_text_color: Option<(u8, u8, u8)>,
+    page_background_color: Option<(u8, u8, u8)>,
 }
 
 impl TerminalCodeContext {
     /// Creates a new terminal code context.
+    ///
+    /// The optional code-theme name is left unset; use
+    /// [`with_code_theme_name`](Self::with_code_theme_name) to carry one.
     ///
     /// ## Arguments
     ///
@@ -128,7 +135,85 @@ impl TerminalCodeContext {
             width,
             color_depth,
             color_mode,
+            code_theme_name: None,
+            line_numbers: false,
+            page_text_color: None,
+            page_background_color: None,
         }
+    }
+
+    /// Sets whether the code block should render a line-number gutter.
+    ///
+    /// Off by default; a consumer (e.g. darkmatter's page line-number toggle)
+    /// turns it on so the [`CodeRenderer`] emits the gutter.
+    ///
+    /// [`CodeRenderer`]: crate::tree::CodeRenderer
+    #[inline]
+    #[must_use]
+    pub const fn with_line_numbers(mut self, line_numbers: bool) -> Self {
+        self.line_numbers = line_numbers;
+        self
+    }
+
+    /// Sets the terminal page surface colors carried to the code renderer.
+    ///
+    /// `page_text_color` is the detected foreground used by the surrounding
+    /// page and `page_background_color` is the detected page background. Code
+    /// renderers can use these when they need the concrete surrounding surface;
+    /// theme-based renderers should still resolve a complete theme variant
+    /// rather than mixing page colors with unrelated syntax token colors.
+    #[inline]
+    #[must_use]
+    pub const fn with_page_surface(
+        mut self,
+        page_text_color: Option<(u8, u8, u8)>,
+        page_background_color: Option<(u8, u8, u8)>,
+    ) -> Self {
+        self.page_text_color = page_text_color;
+        self.page_background_color = page_background_color;
+        self
+    }
+
+    /// Returns whether the code block should render a line-number gutter.
+    #[inline]
+    #[must_use]
+    pub const fn line_numbers(&self) -> bool {
+        self.line_numbers
+    }
+
+    /// Returns the detected surrounding page text color, when known.
+    #[inline]
+    #[must_use]
+    pub const fn page_text_color(&self) -> Option<(u8, u8, u8)> {
+        self.page_text_color
+    }
+
+    /// Returns the detected surrounding page background color, when known.
+    #[inline]
+    #[must_use]
+    pub const fn page_background_color(&self) -> Option<(u8, u8, u8)> {
+        self.page_background_color
+    }
+
+    /// Sets the optional code-theme name carried to the [`CodeRenderer`].
+    ///
+    /// This is a plain string (e.g. `"github"`, `"dracula"`) so `renderable`
+    /// stays free of any consumer-specific theme types. The consuming
+    /// [`CodeRenderer`] maps it back to its own theme representation.
+    ///
+    /// [`CodeRenderer`]: crate::tree::CodeRenderer
+    #[inline]
+    #[must_use]
+    pub fn with_code_theme_name(mut self, name: Option<String>) -> Self {
+        self.code_theme_name = name;
+        self
+    }
+
+    /// Returns the optional code-theme name, if a consumer set one.
+    #[inline]
+    #[must_use]
+    pub fn code_theme_name(&self) -> Option<&str> {
+        self.code_theme_name.as_deref()
     }
 
     /// Returns the available width in columns.
@@ -169,10 +254,13 @@ mod tests {
 
     #[test]
     fn terminal_code_context_accessors() {
-        let ctx = TerminalCodeContext::new(80, ColorDepth::Enhanced, ColorMode::Light);
+        let ctx = TerminalCodeContext::new(80, ColorDepth::Enhanced, ColorMode::Light)
+            .with_page_surface(Some((10, 20, 30)), Some((40, 50, 60)));
         assert_eq!(ctx.width(), 80);
         assert_eq!(ctx.color_depth(), ColorDepth::Enhanced);
         assert_eq!(ctx.color_mode(), ColorMode::Light);
+        assert_eq!(ctx.page_text_color(), Some((10, 20, 30)));
+        assert_eq!(ctx.page_background_color(), Some((40, 50, 60)));
     }
 
     #[test]

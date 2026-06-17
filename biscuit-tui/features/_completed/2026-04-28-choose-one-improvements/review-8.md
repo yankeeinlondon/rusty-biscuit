@@ -55,9 +55,9 @@ Recommendation: require exactly one character after `CTRL+`, `ALT+`, or `OPT+`. 
 Passed:
 
 ```text
-cargo test -p tui-chrome -p tui-chrome-cli
-RUN_PTY_TESTS=1 cargo test -p tui-chrome-cli --test keyboard_protocol -- --nocapture
-RUN_SHELL_TESTS=1 cargo test -p tui-chrome-cli --test completions_shell -- --nocapture
+cargo test -p biscuit-tui -p biscuit-tui-cli
+RUN_PTY_TESTS=1 cargo test -p biscuit-tui-cli --test keyboard_protocol -- --nocapture
+RUN_SHELL_TESTS=1 cargo test -p biscuit-tui-cli --test completions_shell -- --nocapture
 ```
 
 ## Production Readiness

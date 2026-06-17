@@ -35,6 +35,12 @@ pub struct LoopExecutionOptions {
     /// The engine itself never installs signal handlers — that remains the
     /// CLI's responsibility. When `None`, pause sleeps run to completion.
     pub interrupt_check: Option<fn() -> bool>,
+    /// Override for the safety margin added on top of a provider's `reset_at`
+    /// when pausing for a rate limit. `None` uses the built-in
+    /// `PAUSE_RESET_MARGIN`. The CLI populates this from
+    /// `CLAUDINE_PAUSE_RESET_MARGIN`; tests inject a near-zero value to keep
+    /// pause-policy coverage fast without weakening it.
+    pub pause_reset_margin: Option<std::time::Duration>,
 }
 
 /// How long the engine sleeps between interrupt-flag checks while pausing
@@ -266,6 +272,11 @@ pub fn execute_loop_with_config(
         .or(config.on_rate_limit)
         .unwrap_or_default();
 
+    // Read-side expression functions in loop conditions resolve against the
+    // prompt document's directory; the probe re-runs each iteration while this
+    // base stays fixed.
+    let base_dir = prompt_path.parent();
+
     let mut frontmatter = initial_frontmatter;
     let mut iteration_count = 0usize;
     let mut last_output = String::new();
@@ -288,7 +299,7 @@ pub fn execute_loop_with_config(
             last_output.clone(),
             last_exit_code,
         );
-        let lookup = LoopExpressionLookup::new(&frontmatter, &ambient);
+        let lookup = LoopExpressionLookup::new(&frontmatter, &ambient).with_base_dir(base_dir);
         if !evaluate_condition(&config.condition, &lookup)? {
             return Ok(LoopExecutionResult::success(
                 frontmatter,
@@ -355,6 +366,7 @@ pub fn execute_loop_with_config(
                 iteration_provider,
                 iteration_model,
                 options.interrupt_check,
+                options.pause_reset_margin.unwrap_or(PAUSE_RESET_MARGIN),
             ) {
                 RateLimitOutcome::Proceed => {}
                 RateLimitOutcome::Interrupted => {
@@ -386,7 +398,8 @@ pub fn execute_loop_with_config(
             last_output.clone(),
             last_exit_code,
         );
-        let post_lookup = LoopExpressionLookup::new(&frontmatter, &post_ambient);
+        let post_lookup =
+            LoopExpressionLookup::new(&frontmatter, &post_ambient).with_base_dir(base_dir);
         match apply_actions(config, &frontmatter, iteration, Some(&post_lookup)) {
             Ok(next_frontmatter) => frontmatter = next_frontmatter,
             Err(error) => {
@@ -409,6 +422,7 @@ pub fn execute_loop_with_config(
                 iteration + 1,
                 &last_output,
                 last_exit_code,
+                base_dir,
             )?
         {
             return Ok(LoopExecutionResult::failure(
@@ -455,6 +469,7 @@ fn decide_rate_limit_action(
     provider: Option<String>,
     model: Option<String>,
     interrupt_check: Option<fn() -> bool>,
+    reset_margin: std::time::Duration,
 ) -> RateLimitOutcome {
     let Some(rl) = rate_limit else {
         return RateLimitOutcome::Proceed;
@@ -470,7 +485,7 @@ fn decide_rate_limit_action(
             (reset_at - now)
                 .to_std()
                 .unwrap_or(std::time::Duration::ZERO)
-                + PAUSE_RESET_MARGIN,
+                + reset_margin,
         ),
         _ => None,
     };
@@ -549,6 +564,8 @@ fn compute_is_last(
         return Ok(true);
     }
 
+    let base_dir = prompt_path.parent();
+
     // Speculative is_last computation: render templates against the
     // pre-iteration state. `_loop_last_output` / `_loop_last_exit_code`
     // here reflect the prior iteration (or the seed values on iteration 1)
@@ -560,7 +577,8 @@ fn compute_is_last(
         last_output.to_string(),
         last_exit_code,
     );
-    let speculative_lookup = LoopExpressionLookup::new(frontmatter, &speculative_ambient);
+    let speculative_lookup =
+        LoopExpressionLookup::new(frontmatter, &speculative_ambient).with_base_dir(base_dir);
     let Ok(next_frontmatter) =
         apply_actions(config, frontmatter, iteration, Some(&speculative_lookup))
     else {
@@ -573,7 +591,7 @@ fn compute_is_last(
         last_output,
         last_exit_code,
     );
-    let lookup = LoopExpressionLookup::new(&next_frontmatter, &next_ambient);
+    let lookup = LoopExpressionLookup::new(&next_frontmatter, &next_ambient).with_base_dir(base_dir);
     evaluate_condition(&config.condition, &lookup)
         .map(|will_continue| !will_continue)
         .map_err(|error| match error {
@@ -591,9 +609,10 @@ fn should_continue_after_cap(
     next_iteration: usize,
     last_output: &str,
     last_exit_code: i32,
+    base_dir: Option<&Path>,
 ) -> Result<bool, CompositionError> {
     let ambient = LoopAmbient::new(next_iteration, false, true, last_output, last_exit_code);
-    let lookup = LoopExpressionLookup::new(frontmatter, &ambient);
+    let lookup = LoopExpressionLookup::new(frontmatter, &ambient).with_base_dir(base_dir);
     evaluate_condition(&config.condition, &lookup)
 }
 
@@ -730,6 +749,7 @@ mod tests {
                 fail_fast: None,
                 on_rate_limit: None,
                 interrupt_check: None,
+                pause_reset_margin: None,
             },
             |ctx| {
                 seen.borrow_mut().push(ctx.ambient.is_last);
@@ -1072,6 +1092,44 @@ mod tests {
         assert_eq!(&*seen, &[0, 0, 7]);
     }
 
+    #[test]
+    fn until_file_exists_resolves_against_prompt_parent() {
+        // `until="file_exists('artifact')"` continues while the artifact is
+        // absent and stops once the executor creates it under the prompt's
+        // parent directory — proving the loop condition's read-side function
+        // resolves against the prompt document root, re-probed each iteration.
+        let dir = tempfile::TempDir::new().unwrap();
+        let prompt_path = dir.path().join("loop.md");
+        let artifact = dir.path().join("artifact");
+
+        let config = LoopConfig {
+            condition: LoopCondition::Until("file_exists('artifact')".into()),
+            actions: vec![],
+            max_iterations: None,
+            fail_fast: None,
+            on_rate_limit: None,
+        };
+
+        let result = execute_loop_with_config(
+            &prompt_path,
+            &config,
+            Map::new(),
+            LoopExecutionOptions::default(),
+            |ctx| {
+                // Create the artifact on the third iteration; earlier passes
+                // see it absent and keep looping.
+                if ctx.iteration == 3 {
+                    std::fs::write(&artifact, "done").unwrap();
+                }
+                Ok(LoopIterationOutput::success("ok"))
+            },
+        )
+        .unwrap();
+
+        assert!(result.error.is_none(), "got: {result:?}");
+        assert_eq!(result.iteration_count, 3);
+    }
+
     // ── Rate-limit policy tests ──────────────────────────────────────────
 
     fn throttled(message: Option<&str>, reset_in_secs: Option<i64>) -> RateLimitInfo {
@@ -1264,10 +1322,10 @@ mod tests {
 
     #[test]
     fn rate_limit_pause_sleeps_until_reset_then_continues() {
-        // Set reset_at ~1s in the future. With Pause policy, the engine
-        // should sleep ~1s + 5s margin, then continue. To keep the test
-        // fast we cap the loop at 2 iterations and only stamp rate_limit
-        // on iteration 1.
+        // With Pause policy the engine must sleep until `reset_at` (plus the
+        // safety margin) before running the next iteration. We inject a zero
+        // margin and a 1s reset so the test verifies the wait-then-continue
+        // behaviour without burning the production 5s margin.
         let config = LoopConfig {
             condition: LoopCondition::While("counter < 2".into()),
             actions: vec![LoopAction::Increment("counter".into())],
@@ -1282,14 +1340,14 @@ mod tests {
             &config,
             object(json!({"counter": 0})),
             LoopExecutionOptions {
-                // Use 0s reset_at + 5s margin so the sleep is bounded.
+                pause_reset_margin: Some(std::time::Duration::ZERO),
                 ..LoopExecutionOptions::default()
             },
             |ctx| {
                 let rl = if ctx.iteration == 1 {
-                    // 2s reset so the test waits ~7s (2 + 5s margin) before
+                    // 1s reset + 0 margin → the engine pauses ~1s before
                     // proceeding to iteration 2.
-                    Some(throttled(Some("brief cap"), Some(2)))
+                    Some(throttled(Some("brief cap"), Some(1)))
                 } else {
                     None
                 };
@@ -1301,13 +1359,13 @@ mod tests {
 
         assert!(result.error.is_none(), "got: {result:?}");
         assert_eq!(result.iteration_count, 2);
-        // 2s reset + 5s margin = ~7s expected.
+        // 1s reset + 0 margin → it must have waited, but not unbounded.
         assert!(
-            elapsed >= std::time::Duration::from_secs(6),
-            "expected ~7s pause; elapsed = {elapsed:?}"
+            elapsed >= std::time::Duration::from_millis(500),
+            "expected ~1s pause; elapsed = {elapsed:?}"
         );
         assert!(
-            elapsed < std::time::Duration::from_secs(20),
+            elapsed < std::time::Duration::from_secs(10),
             "pause should not be unbounded; elapsed = {elapsed:?}"
         );
     }

@@ -57,10 +57,7 @@ fn capture_styled_quote<H: TerminalHarness>(harness: &mut H) -> CapturedFrame {
             &[("FORCE_COLOR", "1")],
         )
         .expect("send_command_with_env failed");
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-    // A short settle so the bt output is committed to cells before capture.
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    harness.capture().expect("capture failed")
+    biscuit_test_harness::capture_settled(harness).expect("capture failed")
 }
 
 /// Returns the raw (escape-bearing) capture line for the rendered block
@@ -124,11 +121,8 @@ fn level2_block_quote_style_border_in_wezterm() {
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -144,11 +138,8 @@ fn level2_block_quote_style_border_in_kitty() {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard = SHARED_KITTY.get_or_init(|| {
-        let mut h = KittyHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -160,11 +151,8 @@ fn level2_block_quote_style_border_in_kitty() {
 fn level2_block_quote_style_border_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard = SHARED_TMUX.get_or_init(|| {
-        let mut h = TmuxHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -268,11 +256,8 @@ fn level2_block_quote_styled_inline_content_in_wezterm() {
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -288,11 +273,8 @@ fn level2_block_quote_styled_inline_content_in_kitty() {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard = SHARED_KITTY.get_or_init(|| {
-        let mut h = KittyHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -315,9 +297,7 @@ fn capture_bt<H: TerminalHarness>(harness: &mut H, cmd: &str) -> CapturedFrame {
     harness
         .send_command_with_env(cmd, &[("FORCE_COLOR", "1")])
         .expect("send_command_with_env failed");
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    harness.capture().expect("capture failed")
+    biscuit_test_harness::capture_settled(harness).expect("capture failed")
 }
 
 /// Returns the raw (escape-bearing) capture line whose plain text contains
@@ -405,47 +385,6 @@ fn sgr_carries_bold(row: &str) -> bool {
         rest = &after[end + 1..];
     }
     false
-}
-
-/// Asserts a `bt block --fill subtle --fill-band indented` row carries a
-/// background fill SGR and the visible text is inset by leading spaces.
-fn assert_block_fill_indented<H: TerminalHarness>(harness: &mut H) {
-    let frame = capture_bt(
-        harness,
-        "bt block \"insetband content\" --fill subtle --fill-band indented",
-    );
-    let raw = output_row(&frame, "bt block", "insetband content")
-        .unwrap_or_else(|| panic!("could not locate `bt block` row.\nplain:\n{}", frame.plain));
-    assert!(
-        raw.contains("\x1b[48;2;") || raw.contains("\x1b[48:2:") || raw.contains("\x1b[48;5;"),
-        "expected a background fill SGR escape in the captured row: {raw:?}",
-    );
-    // The indented band insets the content; the plain row must carry leading
-    // spaces before the text.
-    let plain_row = frame
-        .plain
-        .lines()
-        .find(|p| !p.contains("bt block") && p.contains("insetband content"))
-        .unwrap_or_else(|| panic!("could not locate plain block row.\nplain:\n{}", frame.plain));
-    assert!(
-        plain_row.starts_with(' '),
-        "expected the indented fill band to inset the text: {plain_row:?}",
-    );
-}
-
-/// Asserts a `bt block --fill subtle --fill-band full` row carries a
-/// background fill SGR painted across the available width.
-fn assert_block_fill_full<H: TerminalHarness>(harness: &mut H) {
-    let frame = capture_bt(
-        harness,
-        "bt block \"fullband content\" --fill subtle --fill-band full",
-    );
-    let raw = output_row(&frame, "bt block", "fullband content")
-        .unwrap_or_else(|| panic!("could not locate `bt block` row.\nplain:\n{}", frame.plain));
-    assert!(
-        raw.contains("\x1b[48;2;") || raw.contains("\x1b[48:2:") || raw.contains("\x1b[48;5;"),
-        "expected a background fill SGR escape in the full-band row: {raw:?}",
-    );
 }
 
 /// Asserts a `bt block --border all` row carries box-drawing border glyphs.
@@ -588,6 +527,39 @@ fn assert_table_striped<H: TerminalHarness>(harness: &mut H) {
     );
 }
 
+/// Asserts `bt table --example` enables row striping without relying on
+/// FORCE_COLOR. This mirrors the public example path printed in the command
+/// trailer and exercises ordinary biscuit-terminal color detection.
+fn assert_table_example_striped_without_force_color<H: TerminalHarness>(harness: &mut H) {
+    harness
+        .send_command_with_env(
+            "env -u NO_COLOR -u FORCE_COLOR -u CLICOLOR_FORCE bt table --example",
+            &[],
+        )
+        .expect("send_command_with_env failed");
+    let frame = biscuit_test_harness::capture_settled(harness).expect("capture failed");
+
+    let raw_lines: Vec<&str> = frame.raw.lines().collect();
+    let row = frame
+        .plain
+        .lines()
+        .enumerate()
+        .find(|(_, plain)| plain.contains('│') && plain.contains("Renderer"))
+        .and_then(|(i, _)| raw_lines.get(i).map(|r| (*r).to_string()))
+        .unwrap_or_else(|| {
+            panic!(
+                "could not locate striped `bt table --example` row.\nplain:\n{}",
+                frame.plain
+            )
+        });
+    assert!(
+        row.contains("\x1b[48;2;") || row.contains("\x1b[48:2:") || row.contains("\x1b[48;5;"),
+        "expected `bt table --example` to paint the alternate row using detected terminal color support, without FORCE_COLOR. row: {row:?}\nplain:\n{}\nraw:\n{}",
+        frame.plain,
+        frame.raw,
+    );
+}
+
 /// Asserts a `bt table` with typed header / body slot styling renders those
 /// slots visibly in a real terminal: the header row carries a bold SGR
 /// attribute and a data row carries a foreground-color SGR.
@@ -647,6 +619,444 @@ fn assert_table_styled<H: TerminalHarness>(harness: &mut H) {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Render-tree box model: padding, width modes, alignment, border adjacency
+// ---------------------------------------------------------------------------
+//
+// `bt block` exposes the `Layout` box model (`--padding`, `--margin`, `--width`,
+// `--align`) so the renderer-folds box behavior is observable in a real
+// terminal. The cell geometry and SGR are pinned by Level-1 tests in
+// `render_tree::render`; these confirm the user-visible result on the screen.
+
+/// The first plain capture row carrying `needle` (skipping the command echo
+/// `echo_marker`), paired with its leading-space count.
+fn row_leading_spaces(frame: &CapturedFrame, echo_marker: &str, needle: &str) -> Option<usize> {
+    frame
+        .plain
+        .lines()
+        .find(|plain| !plain.contains(echo_marker) && plain.contains(needle))
+        .map(|line| line.len() - line.trim_start().len())
+}
+
+/// The leading-space count and trimmed visible width of the first plain
+/// capture row carrying `needle` (skipping the command echo `echo_marker`).
+///
+/// For a borderless, unpadded `FitContent` box the trimmed width *is* the drawn
+/// box width, so the pair pins both the box geometry and its placement.
+fn row_lead_and_width(
+    frame: &CapturedFrame,
+    echo_marker: &str,
+    needle: &str,
+) -> Option<(usize, usize)> {
+    frame
+        .plain
+        .lines()
+        .find(|plain| !plain.contains(echo_marker) && plain.contains(needle))
+        .map(|line| {
+            let lead = line.len() - line.trim_start().len();
+            let width = line.trim().chars().count();
+            (lead, width)
+        })
+}
+
+/// Whether a capture string carries a background SGR escape (basic blue,
+/// truecolor semicolon, or truecolor colon form).
+fn has_background(s: &str) -> bool {
+    s.contains("\x1b[44m") || s.contains("\x1b[48;2;") || s.contains("\x1b[48:2:")
+}
+
+/// The visible width of a fully-boxed content row: the cell span from the
+/// leftmost vertical border glyph to the rightmost, inclusive.
+///
+/// Trailing capture padding sits *outside* the right edge glyph, so the
+/// `first..=last` span is the drawn box width regardless of how a terminal pads
+/// the captured row. Box rows in these tests carry only ASCII content and box
+/// glyphs, so the char span equals the visible-cell width.
+fn boxed_row_width(line: &str) -> Option<usize> {
+    let chars: Vec<char> = line.chars().collect();
+    let first = chars.iter().position(|&c| c == '│')?;
+    let last = chars.iter().rposition(|&c| c == '│')?;
+    (last > first).then_some(last - first + 1)
+}
+
+/// The drawn box width of the bordered block whose content row carries
+/// `needle`, read from the displayed plain cells. Terminal-agnostic — the box
+/// glyphs relay even through tmux, which carries no styling protocol.
+fn box_width_for(frame: &CapturedFrame, needle: &str) -> usize {
+    frame
+        .plain
+        .lines()
+        .find(|l| !l.contains("bt block") && l.contains('│') && l.contains(needle))
+        .and_then(boxed_row_width)
+        .unwrap_or_else(|| {
+            panic!("no bordered content row for {needle:?}.\nplain:\n{}", frame.plain)
+        })
+}
+
+/// Parses a raw capture row into `(transparent_margin, left_padding,
+/// right_padding)`: the leading space cells *before* any background SGR opens,
+/// and the painted space cells on each side of the content inside the
+/// background run.
+///
+/// A `48;…` / basic background code opens the run, a `0`/`49` reset closes it.
+/// SGR forms vary by terminal (semicolon vs ITU colon), so the parameter list
+/// is parsed rather than matched byte-for-byte (per the L2 capture rule).
+///
+/// Both sides are measured because the caller draws a right border glyph after
+/// the padding (`--border all`): the right padding cells are no longer trailing,
+/// so the terminal's erase-to-end-of-line cannot collapse them. The painted run
+/// is collected as the visible cells emitted while the background is open; its
+/// leading and trailing space counts are the left and right padding.
+fn painted_box_padding(row: &str) -> (usize, usize, usize) {
+    let chars: Vec<char> = row.chars().collect();
+    let mut idx = 0;
+    let mut bg_open = false;
+    let mut seen_bg = false;
+    let mut margin = 0usize;
+    let mut margin_done = false;
+    let mut painted = String::new();
+    while idx < chars.len() {
+        if chars[idx] == '\x1b' && chars.get(idx + 1) == Some(&'[') {
+            let start = idx + 2;
+            let mut j = start;
+            while j < chars.len() && !chars[j].is_ascii_alphabetic() {
+                j += 1;
+            }
+            if chars.get(j) == Some(&'m') {
+                let params: String = chars[start..j].iter().collect();
+                if let Some(on) = sgr_opens_background(&params) {
+                    bg_open = on;
+                    if on {
+                        seen_bg = true;
+                    }
+                }
+            }
+            idx = j + 1;
+            continue;
+        }
+        let c = chars[idx];
+        if !seen_bg {
+            // Leading transparent margin: spaces before the background opens.
+            // A drawn left border glyph (non-space) ends the margin run.
+            if c == ' ' && !margin_done {
+                margin += 1;
+            } else {
+                margin_done = true;
+            }
+        } else if bg_open {
+            // Visible cells inside the painted background run.
+            painted.push(c);
+        }
+        idx += 1;
+    }
+    let left_pad = painted.len() - painted.trim_start().len();
+    let right_pad = painted.len() - painted.trim_end().len();
+    (margin, left_pad, right_pad)
+}
+
+/// Interprets an SGR parameter string: `Some(true)` if it opens a background,
+/// `Some(false)` if it resets one, `None` if it is irrelevant.
+fn sgr_opens_background(params: &str) -> Option<bool> {
+    let parts: Vec<&str> = params.split([';', ':']).collect();
+    if params.is_empty() || parts.first() == Some(&"0") {
+        return Some(false);
+    }
+    for part in &parts {
+        match *part {
+            "48" => return Some(true),
+            "49" => return Some(false),
+            _ => {
+                if let Ok(code) = part.parse::<u16>()
+                    && ((40..=47).contains(&code) || (100..=107).contains(&code))
+                {
+                    return Some(true);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Asserts `bt block --bg ... --padding 1` paints the padding cells: a
+/// background band reaches the terminal and the padding reserves a cell before
+/// the content. Needs a styling-capable terminal (WezTerm / Kitty). A per-row
+/// index check is avoided because a multi-row painted band desynchronizes the
+/// `plain`/`raw` line mapping in some terminals' capture.
+fn assert_block_painted_padding<H: TerminalHarness>(harness: &mut H) {
+    let frame = capture_bt(harness, "bt block \"padglyph\" --bg blue --padding 1");
+    // The painted band reached the terminal (the background SGR survives).
+    assert!(
+        has_background(&frame.raw),
+        "expected a painted background band in the capture.\nraw:\n{}",
+        frame.raw,
+    );
+    // Padding reserves a cell: the content row shows a space immediately before
+    // the text (the left padding column), widening the box beyond the content.
+    assert!(
+        frame.plain.lines().any(|l| l.contains(" padglyph")),
+        "expected the left padding column before the content.\nplain:\n{}",
+        frame.plain,
+    );
+}
+
+/// Asserts border interior spacing is owned by `padding`: a bordered block with
+/// no padding renders the content adjacent to the drawn edge (`│snug`), while
+/// adding `--padding 1` restores the one-cell gap (`│ roomy`).
+fn assert_block_border_adjacency<H: TerminalHarness>(harness: &mut H) {
+    let snug = capture_bt(harness, "bt block \"snug\" --border all");
+    assert!(
+        snug.plain.contains("│snug"),
+        "a no-padding border must sit adjacent to its content.\nplain:\n{}",
+        snug.plain,
+    );
+
+    let roomy = capture_bt(harness, "bt block \"roomy\" --border all --padding 1");
+    assert!(
+        roomy.plain.contains("│ roomy"),
+        "--padding 1 must restore the one-cell border gap.\nplain:\n{}",
+        roomy.plain,
+    );
+}
+
+/// Asserts a sub-available `Fixed(20)` box is placed at the exact column
+/// `--align` dictates within the pane. With no margins the box may use the full
+/// pane width as its alignment area, so the slack is `available − 20`: left sits
+/// flush, center leads by `slack / 2`, and right leads by the whole slack.
+///
+/// `available` is the live pane column count from the harness geometry — pinning
+/// the absolute lead, not just the `left < center < right` ordering (which a
+/// one-third / two-thirds placement bug would also satisfy).
+///
+/// Each alignment uses a distinct needle because the captures accumulate in the
+/// shared pane; a shared needle would always match the first (left) row.
+fn assert_block_alignment_placement<H: TerminalHarness>(harness: &mut H, available: u32) {
+    // box = content(20) + no padding + no border; no margins, so the alignment
+    // area is the full pane and the slack is `available − 20`.
+    let slack = (available - 20) as usize;
+    let left = capture_bt(harness, "bt block \"leftmark\" --width 20 --align left");
+    let left_lead = row_leading_spaces(&left, "bt block", "leftmark")
+        .unwrap_or_else(|| panic!("left-aligned row missing.\nplain:\n{}", left.plain));
+    let center = capture_bt(harness, "bt block \"centermark\" --width 20 --align center");
+    let center_lead = row_leading_spaces(&center, "bt block", "centermark")
+        .unwrap_or_else(|| panic!("center-aligned row missing.\nplain:\n{}", center.plain));
+    let right = capture_bt(harness, "bt block \"rightmark\" --width 20 --align right");
+    let right_lead = row_leading_spaces(&right, "bt block", "rightmark")
+        .unwrap_or_else(|| panic!("right-aligned row missing.\nplain:\n{}", right.plain));
+
+    assert!(
+        left_lead <= 1,
+        "left placement should be flush left, got {left_lead} lead"
+    );
+    assert_eq!(
+        center_lead,
+        slack / 2,
+        "center must lead by half the slack ({} of {available}-wide pane)",
+        slack / 2,
+    );
+    assert_eq!(
+        right_lead, slack,
+        "right must lead by the whole slack ({slack} of {available}-wide pane)",
+    );
+}
+
+/// Asserts the drawn box follows the resolved content box across width modes:
+/// a `Fixed(20)` box draws 22 cells (20 content + 2 edges), `FitContent` hugs
+/// its content (`fitmark` = 7 → 9), and `Auto` fills the whole pane. With no
+/// margin or padding the `Auto` content box is `available − 2` (the two border
+/// edges), so the drawn box is exactly `available`. This is the real-terminal
+/// analogue of the `bt block hi --width 20 --border all` reproduction the review
+/// flagged — the prior code drew the box at the text width, not the resolved
+/// width.
+///
+/// `available` is the live pane column count from the harness geometry, so the
+/// `Auto` fill is pinned exactly rather than merely "wider than the fixed box".
+fn assert_block_width_mode_box<H: TerminalHarness>(harness: &mut H, available: u32) {
+    let fixed = capture_bt(harness, "bt block \"fixmark\" --width 20 --border all");
+    assert_eq!(
+        box_width_for(&fixed, "fixmark"),
+        22,
+        "Fixed(20) must draw a 22-cell box (20 content + 2 edges).\nplain:\n{}",
+        fixed.plain,
+    );
+
+    let fit = capture_bt(harness, "bt block \"fitmark\" --width fit --border all");
+    assert_eq!(
+        box_width_for(&fit, "fitmark"),
+        9,
+        "FitContent must hug its 7-cell content (box 9).\nplain:\n{}",
+        fit.plain,
+    );
+
+    let auto = capture_bt(harness, "bt block \"automark\" --width auto --border all");
+    assert_eq!(
+        box_width_for(&auto, "automark"),
+        available as usize,
+        "Auto must fill the whole {available}-wide pane (box == pane width).\nplain:\n{}",
+        auto.plain,
+    );
+}
+
+/// Asserts `--max-width 20` caps the content box: a short-content block draws a
+/// 22-cell box (20 content + 2 edges), the same geometry as `Fixed(20)`.
+fn assert_block_max_width_box<H: TerminalHarness>(harness: &mut H) {
+    let frame = capture_bt(harness, "bt block \"mwmark\" --max-width 20 --border all");
+    assert_eq!(
+        box_width_for(&frame, "mwmark"),
+        22,
+        "max-width 20 must cap the content box to 20 (box 22).\nplain:\n{}",
+        frame.plain,
+    );
+}
+
+/// Asserts the CSS box-order clamp is terminal-observable: an oversized
+/// `Fixed(200)` box clamps to the available content area, and adding a 10-cell
+/// horizontal margin shrinks the drawn box by exactly `2 × 10` cells — margin
+/// participates in `margin + border + padding + content ≤ available`. The
+/// 2-cell padding shrinks the content but is repainted into the box, so it does
+/// not change the box width; the difference is the margins alone.
+fn assert_block_box_order_clamp<H: TerminalHarness>(harness: &mut H) {
+    let base = capture_bt(harness, "bt block \"clampbase\" --width 200 --border all");
+    let inset = capture_bt(
+        harness,
+        "bt block \"clampinset\" --width 200 --margin 10 --padding 2 --border all",
+    );
+    let base_w = box_width_for(&base, "clampbase");
+    let inset_w = box_width_for(&inset, "clampinset");
+    assert!(
+        base_w > inset_w,
+        "margin must shrink the clamped box ({base_w} vs {inset_w})",
+    );
+    assert_eq!(
+        base_w - inset_w,
+        20,
+        "the 10-cell margins reduce the clamped box by exactly 2×10 cells \
+         ({base_w} vs {inset_w})",
+    );
+}
+
+/// Asserts a `FitContent` box is placed at the exact `--align` column. A
+/// borderless, unpadded fit box hugs its content, so its drawn width is the
+/// measured content width and the alignment slack is `available − width`: left
+/// sits flush, center leads by `slack / 2`, and right leads by the whole slack.
+///
+/// The box width is measured from each capture (the content words differ in
+/// length per needle), and `available` is the live pane column count — together
+/// pinning the absolute lead, not just the `left < center < right` ordering.
+fn assert_block_fit_alignment<H: TerminalHarness>(harness: &mut H, available: u32) {
+    let left = capture_bt(harness, "bt block \"fitleftward\" --width fit --align left");
+    let (left_lead, _) = row_lead_and_width(&left, "bt block", "fitleftward")
+        .unwrap_or_else(|| panic!("fit left row missing.\nplain:\n{}", left.plain));
+    let center = capture_bt(harness, "bt block \"fitcenterward\" --width fit --align center");
+    let (center_lead, center_w) = row_lead_and_width(&center, "bt block", "fitcenterward")
+        .unwrap_or_else(|| panic!("fit center row missing.\nplain:\n{}", center.plain));
+    let right = capture_bt(harness, "bt block \"fitrightward\" --width fit --align right");
+    let (right_lead, right_w) = row_lead_and_width(&right, "bt block", "fitrightward")
+        .unwrap_or_else(|| panic!("fit right row missing.\nplain:\n{}", right.plain));
+
+    let center_slack = available as usize - center_w;
+    let right_slack = available as usize - right_w;
+    assert!(
+        left_lead <= 1,
+        "FitContent left placement should be flush left, got {left_lead}"
+    );
+    assert_eq!(
+        center_lead,
+        center_slack / 2,
+        "FitContent center must lead by half the slack ({} for a {center_w}-wide box)",
+        center_slack / 2,
+    );
+    assert_eq!(
+        right_lead, right_slack,
+        "FitContent right must lead by the whole slack ({right_slack} for a {right_w}-wide box)",
+    );
+}
+
+/// Asserts an `Auto` box capped by `--max-width 20` is placed at the exact
+/// `--align` column. The cap fixes the content box at 20 cells; with no margin
+/// or border the box is 20 wide and the alignment slack is `available − 20`:
+/// left sits flush, center leads by `slack / 2`, and right leads by the whole
+/// slack.
+///
+/// `available` is the live pane column count, pinning the absolute lead rather
+/// than only the `left < center < right` ordering.
+fn assert_block_capped_alignment<H: TerminalHarness>(harness: &mut H, available: u32) {
+    // Auto capped to `max-width 20`: box = 20 content + no padding + no border.
+    let slack = (available - 20) as usize;
+    let left = capture_bt(harness, "bt block \"capleftward\" --max-width 20 --align left");
+    let left_lead = row_leading_spaces(&left, "bt block", "capleftward")
+        .unwrap_or_else(|| panic!("capped left row missing.\nplain:\n{}", left.plain));
+    let center = capture_bt(harness, "bt block \"capcenterward\" --max-width 20 --align center");
+    let center_lead = row_leading_spaces(&center, "bt block", "capcenterward")
+        .unwrap_or_else(|| panic!("capped center row missing.\nplain:\n{}", center.plain));
+    let right = capture_bt(harness, "bt block \"caprightward\" --max-width 20 --align right");
+    let right_lead = row_leading_spaces(&right, "bt block", "caprightward")
+        .unwrap_or_else(|| panic!("capped right row missing.\nplain:\n{}", right.plain));
+    assert!(
+        left_lead <= 1,
+        "capped-Auto left placement should be flush left, got {left_lead}"
+    );
+    assert_eq!(
+        center_lead,
+        slack / 2,
+        "capped-Auto center must lead by half the slack ({} of {available}-wide pane)",
+        slack / 2,
+    );
+    assert_eq!(
+        right_lead, slack,
+        "capped-Auto right must lead by the whole slack ({slack} of {available}-wide pane)",
+    );
+}
+
+/// Asserts acceptance criterion 1 in a styling-capable terminal: a
+/// content-hugging block with `--width fit --padding 2 --margin 3 --bg blue
+/// --border all` keeps its three margin cells transparent (outside the
+/// background SGR run) and paints exactly two cells of padding on **each** side
+/// of the content.
+///
+/// `--width fit` is required: an `Auto` box fills the available width, so its
+/// background band correctly extends past the padding. FitContent hugs the
+/// content, so the painted band is exactly `2 + len(content) + 2`.
+///
+/// `--border all` draws a right edge glyph after the padding so the right
+/// padding cells are no longer trailing — a terminal's erase-to-end-of-line
+/// would otherwise collapse them and hide them from the capture. With the
+/// border in place both painted sides are byte-observable, and the transparent
+/// margin still sits outside the painted box.
+fn assert_block_painted_padding_and_transparent_margin<H: TerminalHarness>(harness: &mut H) {
+    let frame = capture_bt(
+        harness,
+        "bt block \"padword\" --width fit --bg blue --padding 2 --margin 3 --border all",
+    );
+    // The painted band reached the terminal at all.
+    assert!(
+        has_background(&frame.raw),
+        "expected a painted background band in the capture.\nraw:\n{}",
+        frame.raw,
+    );
+    // Locate the painted content row directly in the raw capture by its text, so
+    // the multi-row painted band (vertical padding) cannot desync a plain/raw
+    // index mapping.
+    let row = frame
+        .raw
+        .lines()
+        .find(|l| !l.contains("bt block") && l.contains("padword"))
+        .unwrap_or_else(|| panic!("no painted content row.\nraw:\n{}", frame.raw))
+        .to_string();
+    let (margin, left_pad, right_pad) = painted_box_padding(&row);
+    assert_eq!(
+        margin, 3,
+        "the 3 margin cells must stay transparent (outside the background run): {row:?}",
+    );
+    assert_eq!(
+        left_pad, 2,
+        "padding must paint exactly two cells before the content: {row:?}",
+    );
+    assert_eq!(
+        right_pad, 2,
+        "padding must paint exactly two cells after the content: {row:?}",
+    );
+}
+
 #[test]
 #[serial(level2_terminal)]
 fn level2_render_tree_style_in_wezterm() {
@@ -656,24 +1066,30 @@ fn level2_render_tree_style_in_wezterm() {
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
+    let available = harness.pane_size().expect("WezTerm pane size").cols;
     assert_block_fg(harness);
     assert_block_bg(harness);
     assert_block_bold(harness);
-    assert_block_fill_indented(harness);
-    assert_block_fill_full(harness);
     assert_block_border(harness);
     assert_block_rounded_border(harness);
     assert_progress_slot_colors(harness);
     assert_table_striped(harness);
+    assert_table_example_striped_without_force_color(harness);
     assert_table_styled(harness);
+    assert_block_painted_padding(harness);
+    assert_block_border_adjacency(harness);
+    assert_block_alignment_placement(harness, available);
+    assert_block_width_mode_box(harness, available);
+    assert_block_max_width_box(harness);
+    assert_block_box_order_clamp(harness);
+    assert_block_fit_alignment(harness, available);
+    assert_block_capped_alignment(harness, available);
+    assert_block_painted_padding_and_transparent_margin(harness);
 }
 
 #[test]
@@ -685,24 +1101,30 @@ fn level2_render_tree_style_in_kitty() {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard = SHARED_KITTY.get_or_init(|| {
-        let mut h = KittyHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
+    let available = harness.pane_cols().expect("kitty pane cols");
     assert_block_fg(harness);
     assert_block_bg(harness);
     assert_block_bold(harness);
-    assert_block_fill_indented(harness);
-    assert_block_fill_full(harness);
     assert_block_border(harness);
     assert_block_rounded_border(harness);
     assert_progress_slot_colors(harness);
     assert_table_striped(harness);
+    assert_table_example_striped_without_force_color(harness);
     assert_table_styled(harness);
+    assert_block_painted_padding(harness);
+    assert_block_border_adjacency(harness);
+    assert_block_alignment_placement(harness, available);
+    assert_block_width_mode_box(harness, available);
+    assert_block_max_width_box(harness);
+    assert_block_box_order_clamp(harness);
+    assert_block_fit_alignment(harness, available);
+    assert_block_capped_alignment(harness, available);
+    assert_block_painted_padding_and_transparent_margin(harness);
 }
 
 #[test]
@@ -710,14 +1132,12 @@ fn level2_render_tree_style_in_kitty() {
 fn level2_render_tree_style_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard = SHARED_TMUX.get_or_init(|| {
-        let mut h = TmuxHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
+    let available = harness.pane_cols().expect("tmux pane cols");
 
     // tmux carries no styling protocol of its own, but it faithfully relays
     // text glyphs. Assert the border glyphs and visible text survive and that
@@ -790,4 +1210,17 @@ fn level2_render_tree_style_in_tmux() {
         "expected no raw escape bytes in the tmux styled-table capture. plain:\n{}",
         frame.plain,
     );
+
+    // Box-model geometry relays faithfully through tmux: border interior gap is
+    // owned by padding, the drawn box follows the resolved width across modes,
+    // the box-order clamp holds, and `--align` places sub-available boxes. The
+    // painted background band is verified only on styling-capable terminals
+    // (WezTerm / Kitty) since tmux's plain capture carries no SGR.
+    assert_block_border_adjacency(harness);
+    assert_block_alignment_placement(harness, available);
+    assert_block_width_mode_box(harness, available);
+    assert_block_max_width_box(harness);
+    assert_block_box_order_clamp(harness);
+    assert_block_fit_alignment(harness, available);
+    assert_block_capped_alignment(harness, available);
 }

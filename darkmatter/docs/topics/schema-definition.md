@@ -1,8 +1,16 @@
+---
+related_specs:
+    - "@darkmatter/features/_completed/2026-05-11-schemas/spec.md"
+    - "@darkmatter/features/_completed/2026-05-23-compose-schema/spec.md"
+    - "@darkmatter/features/_completed/2026-05-28-schema-coercion/spec.md"
+    - "@darkmatter/features/2026-06-10-schema-improvement/spec.md"
+---
+
 # Schema Definition
 
 Darkmatter can **define**, **detect**, and **evaluate** schemas for Markdown frontmatter. Authors declare the shape of their frontmatter with **SimplifiedSchema** — a single-line YAML grammar that compiles deterministically to a Draft 2020-12 JSON Schema. Every validation runs through the `jsonschema` crate; SimplifiedSchema is a surface, not a parallel validator.
 
-This topic covers the practical usage. The full specification lives in [`features/2026-05-11-schemas/spec.md`](../../features/2026-05-11-schemas/spec.md).
+This topic covers the practical usage of schemas for standalone validation, schema detection, and validation within the compose pipeline. The original specification lives in [`features/_completed/2026-05-11-schemas/spec.md`](../../features/_completed/2026-05-11-schemas/spec.md); the compose integration is specified in [`features/2026-05-23-compose-schema/spec.md`](../../features/2026-05-23-compose-schema/spec.md).
 
 ## What You Get
 
@@ -10,7 +18,7 @@ This topic covers the practical usage. The full specification lives in [`feature
 - A **baseline schema** that every document inherits.
 - A `md schema validate` CLI subcommand with `pretty` and `json` output.
 - A `md schema detect` CLI subcommand that infers a SimplifiedSchema from existing documents.
-- A library API ([`DarkmatterSchemas`](#library-api)) for embedding the same behaviour.
+- A library API ([`DarkmatterSchemas`](#library-api)) for embedding the same behavior.
 - Schema-aware completion hints for downstream shell-completion tooling.
 
 ## The `$schema` Frontmatter Property
@@ -57,12 +65,15 @@ Every property value follows one of four shapes:
 | `{type}({constraints})`                    | `name: string(required)`                             |
 | `{type} -> {description}`                  | `name: string -> The author's full name`             |
 | `{type}({constraints}) -> {description}`   | `slug: string(not-empty;required) -> URL slug`       |
+| `{ prop: type-expr, ... }`                 | `config: "{ host: string(required), port: number }"` |
+| `{ prop: type-expr, ... }[]`               | `entries: "{ foo: string(required) }[]"`             |
 
-- **Whitespace** inside `(...)` is insignificant. Quote the whole scalar so YAML keeps it as a string when whitespace is present.
+- **Whitespace** inside `(...)` and inside `{ ... }` is insignificant. Quote the whole scalar so YAML keeps it as a string when whitespace is present.
 - **Multiple constraints** are separated by `;`.
 - **Optional by default** — properties are optional unless `required` appears in the constraint list.
-- **Arrays** are written by appending `[]` to the type. Item-level constraints sit inside the parens that precede the brackets; array-level constraints sit in a second parens after the brackets.
-- **Descriptions** (`-> ...`) populate the `description` annotation in the generated JSON Schema.
+- **Arrays** are written by appending `[]` to the type. Item constraints sit inside the parens that precede the brackets; constraints on the array itself sit in a second parens after the brackets.
+- **Descriptions** (`-> ...`) populate the `description` annotation in the generated JSON Schema. Inside an inline object, a description terminates at the next top-level comma or closing brace (see [Inline Object Literals](#inline-object-literals)).
+- **Inline object literals** are an extension of the type-expression grammar. The whole `{ ... }` body is a single string scalar that the string-layer parser recognizes. YAML mapping values at a property position are still errors — quote the mapping as a string to opt into inline object syntax.
 
 ```yaml
 $schema:
@@ -79,9 +90,9 @@ $schema:
 | `datetime`   | Any ISO-8601 datetime.                                                                                 | JSON Schema `format: date-time`.                                                                                   |
 | `time`       | `hh:mm`, `hh:mm:ss`, `hh:mm:ss.ms` with optional TZ (`Z` or `±HH:MM`).                                 | JSON Schema `format: time`.                                                                                        |
 | `number`     | Any JSON number.                                                                                       | Constraints: `min`, `max`, `integer`, `default`, `required`.                                                       |
-| `numberlike` | A JSON number **or** a numeric string (`"4"`, `"-13"`, `"3.14"`).                                      | Compiles to `anyOf: [number, regex-pattern string]`.                                                               |
+| `numberlike` | A JSON number **or** a numeric string (`"4"`, `"-13"`, `"3.14"`).                                      | Compiles to `anyOf: [number, regex-pattern string]`. A numeric-string value is **normalized** to a real number (see [Type Coercion](#type-coercion)). |
 | `boolean`    | Any JSON boolean.                                                                                      | Constraints: `default`, `required`.                                                                                |
-| `boolish`    | A JSON boolean **or** the strings `"true"` / `"false"` (any case).                                     | Compiles to `anyOf: [boolean, enum]`.                                                                              |
+| `boolish`    | A JSON boolean **or** the strings `"true"` / `"false"` (any case).                                     | Compiles to `anyOf: [boolean, enum]`. A `"true"` / `"false"` value is **normalized** to a real boolean (see [Type Coercion](#type-coercion)). |
 | `object`     | Any YAML/JSON object.                                                                                  | No nested-schema authoring in v1 — `object` accepts any shape. Reference an external file for deeper typing.       |
 | `file`       | A file reference resolved via `biscuit-file::FileReference`. Single or array form.                     | Constraints: `match(glob, ...)`, `required`. Resolved **from the CWD** at validation time. See [Files](#files).    |
 | `enum`       | A value from an explicit set.                                                                          | Constraints required — the members are the constraint. See [Enumerations](#enumerations).                          |
@@ -155,7 +166,7 @@ $schema:
     images:      "file(match('*.png', '*.jpg'))[](min(1))"
 ```
 
-The array form `file[]` adds the standard array-level constraints (`min`, `max`, `unique`).
+The array form `file[]` adds the standard constraints on the array itself (`min`, `max`, `unique`).
 
 ### URLs
 
@@ -177,7 +188,7 @@ $schema:
 
 ### Array Constraints
 
-Place item constraints inside the parens **before** `[]`; place array-level constraints in a second parens **after** `[]`.
+Place item constraints inside the parens **before** `[]`; place constraints on the array itself in a second parens **after** `[]`.
 
 ```yaml
 $schema:
@@ -192,6 +203,118 @@ $schema:
 | `unique`          | All items must be distinct.                  | `uniqueItems`    |
 | `required`        | Array property is required (not items).      | parent `required` |
 | `default([...])`  | Default array.                               | `default`        |
+
+## Inline Object Literals
+
+The type-expression grammar accepts an **inline object literal** — a single string scalar that declares the shape of a nested object. This is the way to type object-typed properties and arrays of objects without dropping down to an external JSON Schema file. The motivating case is the typed object array:
+
+```yaml
+$schema:
+    authors: "{ name: string(required), email: email }[]"
+```
+
+### Forms
+
+An inline object appears wherever a type expression is valid: as a single property, a property-level union arm, or the item type of an array.
+
+```yaml
+$schema:
+    # Array of typed objects — the motivating case
+    entries: "{ foo: string(required), bar: string }[]"
+
+    # Optional single typed object
+    config: "{ host: string(required), port: number(default(8080)) }"
+
+    # Required single typed object — the postfix constraint applies to config
+    config_required: "{ host: string }(required)"
+
+    # Multi-line for readability (whitespace inside braces is ignored)
+    endpoints: "{
+        url: url(scheme(https); required),
+        method: enum(GET, POST, PUT, DELETE; required),
+        timeout: number(default(30))
+    }[]"
+
+    # Nested objects
+    database: "{
+        primary: { host: string(required), port: number(default(5432)) },
+        replicas: { host: string, port: number }[]
+    }"
+
+    # Required non-empty array — postfix constraints after [] apply to replicas
+    replicas: "{ host: string }[](min(1); required)"
+
+    # Inline object as a union arm
+    payload:
+      - "{ type: enum(foo; required), foo_id: string(required) }"
+      - "{ type: enum(bar; required), bar_count: number(required) }"
+
+    # Mixed: inline object array or a plain string fallback
+    metadata:
+      - "{ key: string(required), value: string(required) }[]"
+      - "string"
+```
+
+The inline object body parses identically in single-line and multi-line form because the parser strips whitespace after `{`, around `,` and `:`, and before `}`. Braces are not allowed inside constraint argument lists, so there is no ambiguity with the existing constraint syntax.
+
+### Identifier Rules
+
+Inline object property names are always **unquoted string-layer identifiers** — unquoted ASCII alphanumeric characters plus `-` and `_`, including leading digits. The same scanner is used elsewhere in the grammar.
+
+Accepted: `name`, `foo_id`, `x-custom`, `api2_version`, `123abc`.
+
+Rejected: `display name`, `@type`, `x.custom`, `"x-custom"`. There is no quoted-property-name form in this feature; rename the property to a valid identifier or drop down to a JSON Schema file for richer naming needs.
+
+### Descriptions
+
+Each property inside `{ ... }` may carry a `-> description` suffix that follows the same four syntax forms as top-level properties. Inside an inline object, **descriptions terminate at the next top-level comma or closing brace** at the current nesting level. Commas inside an inline property description are not supported by this feature — keep descriptions comma-free inside `{ ... }`. Top-level descriptions (outside any inline object) still consume the rest of the scalar string after `->` exactly as before.
+
+### Postfix Constraints
+
+Inline objects support the same postfix constraints as primitive atoms.
+
+- A **single inline object** with a postfix constraint — `{ host: string }(required)` — applies the constraint to the containing property. `required` hoists to the parent `required` array; `default(...)` sets a default on the object property.
+- An **inline object array** with constraints after `[]` — `{ name: string }[](min(1); required)` — applies those constraints to the array property itself (`minItems`, parent `required`). Constraints on nested properties remain inside the inline object fragment and become JSON Schema constraints on each `items` object.
+- A trailing comma after the last property is allowed: `{ foo: string, }` is identical to `{ foo: string }`.
+
+### Nesting Depth
+
+The inline object parser enforces a hard maximum of **32 nesting levels** of inline objects. Exceeding that depth returns `SchemaError::Grammar`. The limit is the same for single inline objects, inline object arrays, and unions whose arms contain inline objects — depth is counted at every level of nested `{ ... }`.
+
+```yaml
+$schema:
+    # OK: 3 levels of nesting
+    a: "{ b: { c: { d: string } } }"
+
+    # Error at depth 33: SchemaError::Grammar
+    deep: "{ a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: string } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }"
+```
+
+If you need deeper typing, reference an external JSON Schema file with `$schema: ./path/to/schema.yaml` (or use a root-level union whose arm is a file reference).
+
+### `additionalProperties: false`
+
+Every inline object compiles to a JSON Schema fragment that sets `additionalProperties: false`. This is the intended default — declaring an inline object is a signal that the author wants shape restriction. It differs from the root schema default (`additionalProperties: true`) and from the opaque `object` type, which still compiles to `{ "type": "object" }` with no `additionalProperties: false`. Authors used to the root default may be surprised; this is documented behavior. A future `lenient` constraint on the inline object body may opt back to `true`.
+
+### YAML Mapping vs. Inline Object
+
+A YAML mapping at a property position is still a `SchemaError::Grammar`. Inline object syntax is recognized **only** when the property value is a **quoted string scalar** that the string-layer grammar parser recognizes as an inline object body. Authors who want typed nested objects must quote the object body as a string; YAML-native mapping schemas are a separate, future feature.
+
+```yaml
+$schema:
+    # OK: string scalar recognized as inline object
+    config: "{ host: string(required) }"
+
+    # Error: YAML mapping at a property position is still reserved
+    # config:
+    #     host: string
+```
+
+### JSON Schema Output
+
+An inline object compiles to the same Draft 2020-12 JSON Schema shape a hand-written `{ "type": "object", "properties": ..., "required": ..., "additionalProperties": false }` would produce, with `required` populated from per-property `required` constraints and the inline object's own `required` postfix hoisted to the parent `required` array.
+
+For an array of inline objects, the `items` sub-schema is the inline object fragment and `minItems` / `maxItems` / `uniqueItems` / `required` come from the postfix constraints after `[]`.
 
 ## Unions
 
@@ -304,12 +427,55 @@ Any other construct — `$ref`, `allOf`, `anyOf`, `if`/`then`/`else`, `patternPr
 
 - Object-level deep merge keyed by property name.
 - Where both sides declare a property, the **document side wins entirely** — its type and constraints replace the baseline's. There is no per-constraint interleaving.
-- `required` is a property-level concern, so replacing a property removes its inherited `required`. Re-state `required` in the document to preserve requiredness while changing the type.
+- `required` is a property-level concern, so replacing a property removes its inherited `required`. Re-state `required` in the document to preserve required constraint while changing the type.
 - Properties present only in the baseline remain in the effective schema.
 - Properties present only in the document are added.
 - For root unions, the baseline is merged into each arm independently.
 
 This semantics is chosen because per-constraint merging produces surprising results (e.g. a baseline `min(5)` silently shadowing a document `min(3)`).
+
+## Type Coercion
+
+When a frontmatter value is *trivially* the wrong JSON type but **unambiguously** convertible to the type its property declares, Darkmatter coerces the stored value to the declared type and accepts it, rather than failing validation. This is driven by the merged compiled JSON Schema, so it covers inline `$schema`, baseline-merged fields, raw JSON Schema, and root unions through one path.
+
+Coercion is **default-on**: there is no opt-in flag and no opt-out / strict-types flag. It is unambiguous by construction — it only *adds* acceptances for values with exactly one possible target, never changes the outcome of an already-valid value, and never masks a genuinely-wrong value. A value outside the matrix below is left untouched and fails with the same `Type` error it does today.
+
+### Coercion Matrix
+
+| Declared type | Incoming value | Coerced result |
+|---|---|---|
+| `boolean` | a string in the set `{true, false, True, False, TRUE, FALSE}` | real boolean (`"true"` → `true`) |
+| `boolish` | same boolish set | real boolean (**normalized** — previously left as a string) |
+| `number` / `integer` | a string matching `^-?\d+(\.\d+)?$` | real number (`"42"` → `42`, `"3.14"` → `3.14`) |
+| `numberlike` | a numeric string (same regex) | real number (**normalized** — previously left as a string) |
+| `string` (incl. `date` / `datetime` / `time` / `url` / `email` / `file`) | a `number` or `boolean` scalar | its canonical string (`42` → `"42"`, `true` → `"true"`) |
+| `array` of a coercible item type | an array | each element coerced by the item rule (recursively) |
+
+The string direction is reverse-direction and always unambiguous (every scalar has exactly one canonical string form). It targets `string` only — a number landing in a `date` field coerces to its string form and then fails the `date` format check normally, so coercion never produces a false accept.
+
+### Never Coerced (Ambiguous)
+
+These remain uncoerced and continue to fail strict validation on a type mismatch:
+
+- `"yes"` / `"no"` / `"on"` / `"off"` → boolean (not in the boolish set).
+- `"1"` / `"0"` → boolean (equally valid as numbers).
+- any string that does not match the numeric regex → number.
+- arrays, objects, or `null` → any scalar type.
+- a string → object, or an object → string.
+
+Nested object properties are not deeply coerced — coercion applies to top-level properties and to the elements of top-level typed arrays. Coercing an already-correctly-typed value is a no-op (idempotent).
+
+### Root Unions
+
+For a root-level union, coercion must make the instance satisfy *at least one* arm, and arms may type the same property differently. Each arm is tried **in index order**: a per-arm coerced candidate is built and strict-validated, and the **first arm that validates post-coercion wins**; its coerced candidate is committed. If no arm validates post-coercion, the instance is returned unchanged and the existing closest-matching-arm error reporting runs.
+
+### Inline Object and Union Coercion
+
+Coercion recurses into the nested structure of an inline object when the matching schema path is unambiguous. The same boolean / boolish / number / numberlike / string-shaped scalar matrix that applies to top-level fields also applies to fields inside an inline object body and to elements of an inline object array. A value at `/authors/0/active` is coerced from `"true"` to `true` when the schema is `authors: "{ active: boolean }[]"`.
+
+For property-level unions, coercion is attempted per arm. The compose stage builds a per-arm coerced candidate using that arm's schema path, validates each candidate against that arm, and commits the coerced value only when **exactly one** arm validates after coercion. If zero arms validate, or if multiple arms validate (ambiguous), the original value is left uncoerced and normal validation/reporting proceeds from the original. This avoids guessing across ambiguous inline object paths while still allowing unambiguous union arms to coerce nested scalars.
+
+The same conservative rules apply at every nested level — coercion never fires on array- or object-typed values, never crosses a property boundary, and never produces a false accept on a value that is genuinely the wrong type.
 
 ## CLI: `md schema validate`
 
@@ -425,7 +591,7 @@ Line/column positions are drawn from the **original frontmatter text** (with the
 
 Parse errors and schema-load failures emit JSON entries with an `error` key (`"frontmatter_parse"` or `"schema"`) and an empty `problems` array.
 
-### Behaviour Without `$schema`
+### Behavior Without `$schema`
 
 - With a baseline configured, the document is validated against the baseline alone.
 - Without a baseline and without `$schema`, validation succeeds vacuously and `pretty` mode prints `valid (no schema; vacuously valid)`.
@@ -503,6 +669,53 @@ $schema:
 | 2    | Conversion to JSON Schema failed (`--format json` only). |
 | 3    | At least one file's frontmatter could not be parsed. |
 
+## CLI: `md schema about`
+
+```
+md schema about
+```
+
+`md schema about` is the **implementation-bound reference** for the SimplifiedSchema authoring language. It prints a human-readable report covering schema shapes, the type vocabulary, the constraint vocabulary, inline object rules, validation behavior, and coercion rules.
+
+```
+SimplifiedSchema Language Reference
+  …
+  ## Schema Shapes
+    - Inline mapping
+    - Root-level union
+    - File reference
+    - Property-level union
+  ## Type Vocabulary
+    - string, date, datetime, time, number, numberlike, …
+  ## Constraint Vocabulary
+    - min, max, not-empty, pattern, default, required, …
+  ## Inline Object Rules
+    - …
+  ## Coercion Rules
+    - …
+  ## Validation Behavior
+    - …
+```
+
+The report is rendered from a typed descriptor catalog in
+`darkmatter::markdown::schemas` — the **same catalog** library callers consume via
+`schema_type_descriptors()`, `schema_constraint_descriptors()`,
+`schema_shape_descriptors()`, `inline_object_rule_descriptors()`,
+`coercion_rule_descriptors()`, and `validation_behavior_descriptors()`. This
+ensures the CLI report and the public descriptor surface cannot drift apart.
+
+The command is **documentation-only** and intentionally has no input files and
+no format flags. It performs no document parsing, no context capture, no
+`EffectEngine` construction, no file resolution, and no network access. The
+only observable side effect is printing to stdout. The descriptor catalog
+is a static compile-time constant.
+
+> Use `md schema about` as the implementation-bound CLI reference for the
+> schema language. The prose in this document complements it with worked
+> examples, motivation, and cross-references; the CLI report reflects the
+> exact type, constraint, and shape surface the parser, converter, and
+> compose-time coercion understand today.
+
 ## Library API
 
 The entry point is `darkmatter::markdown::schemas::DarkmatterSchemas`.
@@ -560,6 +773,19 @@ let detected = api.detect(&refs, DetectOptions { merge: true });
 - `detect_from_document(&Markdown)` — single-document detection (returns a `SchemaShape`).
 - `schema_to_yaml(&SimplifiedSchema)` — serialise a SimplifiedSchema back to YAML (used by `md schema detect --format yaml`).
 
+### Schema Descriptor Catalog
+
+The descriptor catalog that backs `md schema about` is exposed to library callers. Each function returns a `&'static [...]` slice in a deterministic, stable order:
+
+- `schema_shape_descriptors()` — supported schema shapes and grammar forms.
+- `schema_type_descriptors()` — supported type keywords and their display descriptions.
+- `schema_constraint_descriptors()` — supported constraints, their argument forms, their applicable target types, and their JSON Schema effect.
+- `inline_object_rule_descriptors()` — inline object grammar rules and limits (postfix constraints, arrays, nesting depth, identifier rules, description termination, `additionalProperties: false`).
+- `coercion_rule_descriptors()` — coercion rules and the matrix of declared-type / incoming-value pairs that fire.
+- `validation_behavior_descriptors()` — required/default hoisting, root-schema `additionalProperties: true`, opaque `object`, schema detection limits, and compose-time coercion.
+
+Caller tools (for example Claudine) can render their own schema-language reports from the same descriptors so they never need to scrape CLI output. Parity tests in the darkmatter suite keep the descriptor surface in lock-step with the implemented type and constraint vocabulary, so any grammar addition or removal is caught during development.
+
 ### Validator Cache
 
 `ValidatorCache` keys compiled validators by the SHA-256 of the canonicalised JSON Schema bytes and is bounded by an LRU policy. The default cache size is `DEFAULT_CACHE_SIZE` (64) and is configurable via the `DARKMATTER_SCHEMA_CACHE_SIZE` environment variable (`CACHE_SIZE_ENV`). Validating a large corpus reuses compiled validators across files with the same effective schema.
@@ -596,19 +822,98 @@ All failure modes are variants of `SchemaError`:
 
 Every variant implements `biscuit_terminal::errors::BlockError`, so failures render as rich status blocks in CLI output and integrate with the rest of darkmatter's error rendering.
 
+## Compose Pipeline Integration
+
+Darkmatter runs an **always-on Schema Validation stage** inside `md compose`. It validates the document's effective frontmatter against the resolved `$schema` (and optional baseline) after `--set` / `--state` overrides are applied and after frontmatter interpolation resolves `{{ }}` expressions, but **before** frontmatter shell expansion. This means schema violations fail fast with a clear error naming the offending property, rather than producing cryptic downstream failures (e.g. `dirname ''` from an empty interpolation). Validating after interpolation lets schema-constrained fields derive from templates (e.g. `runtime_agent: '{{ env.AGENT }}'`); validating before shell expansion avoids triggering side-effectful `$(...)` commands when the frontmatter is already invalid.
+
+### Pipeline Placement
+
+```
+Load markdown
+  └─ Apply --set / --state overrides
+      └─ Frontmatter Interpolation   ({{ var }})
+          └─ Schema Validation  ──► fails fast on violation
+              └─ Frontmatter Shell Expansion ($(cmd))
+                  └─ …remaining stages…
+```
+
+The stage is **not** part of the `ComposeOperation` enum — it cannot be excluded via `ComposeOptions::only(...)` or `disable(...)`.
+
+### Behavior
+
+- When the document declares `$schema` **and** validation fails, compose aborts with `MarkdownError::SchemaValidationFailed`.
+- When a baseline schema is set via `ComposeOptions::with_baseline_schema(...)` and the document lacks `$schema`, the baseline alone is validated.
+- When neither `$schema` nor a baseline is present, the stage is a **no-op** — compose proceeds unchanged.
+- `--set` and `--state` overrides are applied **before** validation, so they can fulfill required properties. A document with `spec: ""` plus `--set spec=design.md` validates successfully.
+- The stage **mutates** the document: it coerces schema-recognized top-level scalars to their declared types (see [Type Coercion](#type-coercion)) and **writes the coerced values back** into the frontmatter, so the real types flow to every later stage (shell expansion, page blocks, body interpolation, init-stack conditions) and into the composed output. For example, a `has_spec: "{{spec ? true : false}}"` ternary resolves to the string `"true"` during interpolation and is stored as a real JSON boolean `true` after this stage.
+- A top-level value still holding a `$(...)` shell expression is **skipped** by the write-back — its literal form must survive into shell expansion. Its real type is resolved later at the post-shell re-validation point, which coerces via the same helper, so compose and the downstream consumer agree.
+- Problems whose top-level field value still contains a frontmatter shell expression (`$(...)`) are **deferred** *only when frontmatter shell expansion is enabled* — that value has not been expanded at validation time, so the downstream consumer (e.g. claudine) re-validates the post-shell effective frontmatter. If every problem is deferred, compose proceeds; any composition-independent problem fails fast. When frontmatter shell expansion is **disabled** (e.g. `ComposeOptions::only(&[ComposeOperation::Interpolation])`), no later stage re-resolves those values, so the `$(...)` deferral does not apply and every problem fails fast.
+- Recursive compose runs validate every child document after its parent `set=` overlay is applied. A child schema failure aborts the parent compose under `fail_fast` (or when the error is structural); otherwise it surfaces as a transclusion warning.
+- The baseline schema participates in transclusion cache keys and persistent cache option hashing, so cached results are not reused across different baselines.
+
+### Library API
+
+```rust
+use darkmatter::markdown::compose::ComposeOptions;
+use darkmatter::markdown::schemas::SimplifiedSchema;
+
+let baseline: SimplifiedSchema = /* ... */;
+
+let options = ComposeOptions::new()
+    .with_baseline_schema(baseline);
+
+let (composed, report) = md.compose_with(options)?;
+```
+
+`with_baseline_schema` accepts a pre-built `SimplifiedSchema` (not a file path). When both baseline and document `$schema` declare the same property, the **document wins** — matching the existing `schemas::resolve::merge` rule.
+
+There is no CLI flag for baseline injection in this version; `md compose` honors document-level `$schema` only. Library callers (e.g. claudine) inject baselines programmatically.
+
+### Error Rendering
+
+`MarkdownError::SchemaValidationFailed` implements `biscuit_terminal::errors::BlockError`. The rendered status block shows:
+
+- **Header**: `Schema validation failed` plus an OSC8 link to the source file.
+- **Description line**: the document's `description:` frontmatter (if present), rendered dimmed and italic.
+- **One bullet per problem**: styled with the property name inverted and colour-coded by category:
+  - Missing required: `missing <inverse>property</inverse>: required but not provided`.
+  - Wrong type: `type <inverse>property</inverse>: <message>`.
+  - Constraint / format failure: `invalid <inverse>property</inverse>: <message>`.
+- Each bullet carries the YAML source `line:col` when available.
+- Root-union failures include the arm index (e.g. `schema arm 2`).
+
+Schema-preparation errors (unparseable `$schema`, missing referenced file, etc.) produce a block with `schema could not be prepared: <detail>` and an empty problems list, distinguishing them from validation failures (`frontmatter did not satisfy the schema`).
+
+### Compose Report Parity
+
+`md compose` and `md schema validate` share the same `DarkmatterSchemas::validate` call, so their outcomes agree by construction. A document that fails `md schema validate` will also fail `md compose`, and vice versa.
+
 ## Limitations (v1)
 
 - **No remote `$schema`.** Download referenced schemas locally for now.
-- **No nested object schemas.** `object` accepts any shape; use a referenced schema file for stronger typing.
+- **No `$ref` or reusable inline fragments.** Inline objects are anonymous; reuse still requires an external JSON Schema file.
+- **No `lenient` opt-out for inline object `additionalProperties: false`.** Every inline object rejects extra keys. Authors who want looser object typing should drop down to the opaque `object` type, which preserves the root-schema `additionalProperties: true` behavior.
+- **Hard 32-level inline object nesting cap.** The parser rejects deeper nesting with `SchemaError::Grammar`. Reference a JSON Schema file for deeper typing.
+- **No inline object detection.** `md schema detect` continues to emit `object` for object-typed values; inline object schemas must be hand-written.
+- **No quoted inline object property names.** Rename to a valid identifier (alphanumeric, `-`, `_`, leading digits allowed) or use a JSON Schema file.
+- **No escaped commas inside inline object descriptions.** Inline descriptions terminate at the next top-level comma or closing brace — keep descriptions comma-free inside `{ ... }`.
 - **No arrays of unions.** The `[]` suffix binds to a single type expression, and a YAML sequence at a property value is itself the union form. Workaround: reference a JSON Schema file.
-- **No value coercion.** `numberlike` and `boolish` accept either shape but do not rewrite the document.
+- **No coercion opt-out.** [Type coercion](#type-coercion) is default-on with no `--no-coerce` / strict-types flag.
+- **No coercions beyond the matrix.** In particular no `"yes"` / `"no"` / `"1"` / `"0"` → boolean, no string-parsing into `date` / `url` / `email`, and no cross-property coercions. Coercion recurses into inline object fields and inline object arrays when the schema path is unambiguous; for property-level unions, only exactly-one-arm-validates candidates are committed.
+- **No `md schema validate --write`.** The library check path reports post-coercion validity but does not rewrite files; only the compose pipeline mutates the (in-memory) document it composes.
 - **No constraint inference in detection.** Patterns, `min` / `max`, and enum members are never synthesised from values.
-- **No `additionalProperties: false` opt-in.** Generated schemas always allow extra keys; a `strict` mode may land later.
+- **No `additionalProperties: false` opt-in at the root.** Root schemas always allow extra keys; a `strict` mode may land later. Inline objects always set `additionalProperties: false`.
 - **No cross-document constraints.** Uniqueness across a corpus is out of scope for v1.
 
 ## See Also
 
-- [Full specification](../../features/2026-05-11-schemas/spec.md) — authoritative behaviour, EBNF grammar, ADRs.
+- [Schemas specification](../../features/_completed/2026-05-11-schemas/spec.md) — authoritative behavior, EBNF grammar, ADRs.
+- [Compose schema specification](../../features/2026-05-23-compose-schema/spec.md) — schema validation in the compose pipeline.
+- [Inline object spec](../../features/2026-06-10-schema-improvement/spec.md) — inline object literals, postfix constraints, nesting rules, and the `md schema about` descriptor catalog.
 - [`json-schema-primitives.md`](./json-schema-primitives.md) — JSON Schema primitives reused under the hood.
 - [`magic-paths.md`](./magic-paths.md) — `FileReference` resolution rules.
 - [`frontmatter-recursion.md`](./frontmatter-recursion.md) — how frontmatter is layered through the compose pipeline.
+
+## Implementation-Bound Reference
+
+`md schema about` is the **implementation-bound CLI reference** for this topic. Its contents come from a typed descriptor catalog (`schema_type_descriptors`, `schema_constraint_descriptors`, `schema_shape_descriptors`, `inline_object_rule_descriptors`, `coercion_rule_descriptors`, `validation_behavior_descriptors` in `darkmatter::markdown::schemas`), which library callers can consume to render their own reports. Drift between this prose document and the CLI report is caught by parity tests that pin the descriptor catalog to the implemented `SimplifiedType` and `Constraint` enums.

@@ -131,6 +131,14 @@ impl StructuredCodexOutput {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct StructuredSummaryDetails {
     pub(crate) tool_names: Vec<String>,
+    /// The agent's **final response** — output text emitted after the last
+    /// tool call. Accumulated from `OutputText` semantic events and reset
+    /// whenever a `ToolCall` is observed, so interstitial narration between
+    /// tool calls (e.g. "Let me read the docs…") is dropped and only the
+    /// closing turn survives. `inline-compose` writes this (not the
+    /// full accumulated `assistant_text`) into the document body so process
+    /// narration never leaks into the artifact.
+    pub(crate) final_response: String,
 }
 
 impl StructuredSummaryDetails {
@@ -138,6 +146,18 @@ impl StructuredSummaryDetails {
         if !tool_name.is_empty() && !self.tool_names.iter().any(|name| name == tool_name) {
             self.tool_names.push(tool_name.to_string());
         }
+    }
+
+    /// Append a streamed `OutputText` chunk to the in-progress final response.
+    pub(crate) fn push_final_response(&mut self, text: &str) {
+        self.final_response.push_str(text);
+    }
+
+    /// Discard any accumulated final-response text because a new tool call
+    /// began — anything said before the last tool call is process narration,
+    /// not the agent's closing answer.
+    pub(crate) fn reset_final_response(&mut self) {
+        self.final_response.clear();
     }
 }
 
@@ -196,9 +216,10 @@ pub(crate) fn build_structured_plumbing(
 
         let stdout_sink = ObservedSemanticSink::new(shared, stdout_seen);
         let build_parser: super::exec::SemanticParserBuilder =
-            Box::new(move |output_cb, _reasoning_cb| {
+            Box::new(move |output_cb, _reasoning_cb, agent_pid| {
                 if let Ok(mut inner) = live_sink_inner.lock() {
                     inner.set_output_text_sink(output_cb);
+                    inner.set_agent_pid(agent_pid);
                 }
                 claudine::stream::create_semantic_parser(provider, stdout_sink, parser_config)
             });
@@ -219,17 +240,19 @@ pub(crate) fn build_structured_plumbing(
 
         let stdout_sink = shared;
         let build_parser: super::exec::SemanticParserBuilder =
-            Box::new(move |output_cb, _reasoning_cb| {
+            Box::new(move |output_cb, _reasoning_cb, agent_pid| {
                 if let Ok(mut inner) = live_sink_inner.lock() {
                     inner.set_output_text_sink(output_cb);
+                    inner.set_agent_pid(agent_pid);
                 }
                 claudine::stream::create_semantic_parser(provider, stdout_sink, parser_config)
             });
         (build_parser, stderr_bridge)
     } else {
         let build_parser: super::exec::SemanticParserBuilder =
-            Box::new(move |output_cb, _reasoning_cb| {
-                let sink = sink.with_output_text_sink(output_cb);
+            Box::new(move |output_cb, _reasoning_cb, agent_pid| {
+                let mut sink = sink.with_output_text_sink(output_cb);
+                sink.set_agent_pid(agent_pid);
                 claudine::stream::create_semantic_parser(provider, sink, parser_config)
             });
         (build_parser, None)
@@ -253,8 +276,14 @@ pub(crate) struct StreamSummaryContext<'a> {
     pub(crate) verbose: bool,
     pub(crate) details: &'a StructuredSummaryDetails,
     pub(crate) section_stream: Option<&'a super::section::SectionStream>,
+    /// Immediate child PID captured by the wrapper after a successful
+    /// spawn. `None` for failed-spawn paths or paths that never spawn a
+    /// provider child. Threaded through to the synthetic summary event
+    /// so `EventMeta.agent_pid` carries the spawned child PID.
+    pub(crate) agent_pid: Option<u32>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn emit_stream_summary(
     summary: &claudine::stream::summary::StreamExecutionSummary,
     profile: &dyn super::profile::WrapperProfile,
@@ -263,6 +292,7 @@ pub(crate) fn emit_stream_summary(
     verbose: bool,
     details: &StructuredSummaryDetails,
     section_stream: Option<&super::section::SectionStream>,
+    agent_pid: Option<u32>,
 ) {
     emit_stream_summary_inner(
         StreamSummaryContext {
@@ -273,16 +303,10 @@ pub(crate) fn emit_stream_summary(
             verbose,
             details,
             section_stream,
+            agent_pid,
         },
         None,
     );
-}
-
-pub(crate) fn emit_stream_summary_with_context(
-    ctx: StreamSummaryContext<'_>,
-    context_extra: &HashMap<String, serde_json::Value>,
-) {
-    emit_stream_summary_inner(ctx, Some(context_extra));
 }
 
 fn emit_stream_summary_inner(
@@ -297,6 +321,7 @@ fn emit_stream_summary_inner(
         verbose,
         details,
         section_stream,
+        agent_pid,
     } = ctx;
     let primary_markup = if verbosity == Verbosity::Silent {
         None
@@ -358,6 +383,7 @@ fn emit_stream_summary_inner(
             protocol,
             env_context,
             context_extra,
+            agent_pid,
         );
         if let Err(e) = claudine::stream::reporting::write_summary_event(&meta) {
             tracing::warn!("Failed to write stream summary event: {e}");

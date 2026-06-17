@@ -1,5 +1,5 @@
 mod create;
-mod dirty_tree;
+pub mod dirty_tree;
 mod git_graph;
 mod go;
 mod list;

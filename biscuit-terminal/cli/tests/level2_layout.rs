@@ -58,11 +58,8 @@ fn run_bt(args: &str) -> Option<Vec<String>> {
         }
         LevelDecision::Panic(msg) => panic!("{msg}"),
     }
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
     // Reset the pane so prior tests' rendered output cannot leak into
     // this run's capture window.

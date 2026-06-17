@@ -41,6 +41,7 @@ We are expecting to add the following providers soon:
 
 - Pi
 - Kilo Code
+- Antigravity CLI
 
 ## Creating a Level Playing Field
 

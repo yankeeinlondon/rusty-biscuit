@@ -9,7 +9,7 @@ name = "wt"
 path = "src/main.rs"
 
 [dependencies]
-biscuit-terminal = { path = "../../biscuit-terminal/lib" }
+biscuit-terminal = { path = "../../biscuit-terminal/lib", features = ["image"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4", features = ["unstable-dynamic"] }
@@ -19,5 +19,10 @@ sniff = { path = "../../sniff/lib" }
 worktree = { path = "../lib" }
 
 [dev-dependencies]
+worktree = { path = "../lib", features = ["count-git"] }
 assert_cmd = "2"
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
 predicates = "3"
+serial_test = "3"
+tempfile = "3"
+test-toolkit = { path = "../../tools/test-toolkit" }

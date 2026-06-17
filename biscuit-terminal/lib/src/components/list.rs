@@ -14,7 +14,9 @@ use renderable::tree::{ListRenderHints, RenderNode, RenderStrictness, TreeRender
 use crate::{
     components::renderable::{BrowserRenderable, RenderableTerminalContent, TerminalRenderable},
     prelude::Prose,
-    render_tree::projection::{ProjectionMode, project_renderable_content},
+    render_tree::projection::{
+        ProjectionMode, fold_prose_nodes_into_blocks, project_renderable_content,
+    },
     render_tree::{TerminalRenderOptions, render_terminal_node},
     terminal::Terminal,
     utils::{block_constraint::visible_width, layout::Layout},
@@ -392,11 +394,17 @@ impl BrowserRenderable for OrderedList {
 /// [`Compose`](crate::components::compose::Compose), and `OrderedList`).
 ///
 /// When an item is a [`Prose`] component, the helper returns the inline
-/// nodes; this projection wraps them in a single [`Paragraph`](renderable::tree::NodeKind::Paragraph)
-/// so the terminal list renderer carries the prefix through to a single
-/// wrapped line. Without the wrapper, sibling inline children after the
-/// first would be misclassified as block children and get
-/// `indent_children`-style indentation.
+/// nodes (and any fenced code block); this projection folds them into
+/// block-level children via
+/// [`fold_prose_nodes_into_blocks`]. A purely inline body collapses to a
+/// single [`Paragraph`](renderable::tree::NodeKind::Paragraph) so the terminal
+/// list renderer carries the prefix through to one wrapped line — without that
+/// single wrapper, sibling inline children after the first would be
+/// misclassified as block children and get `indent_children`-style
+/// indentation. A `Prose` body carrying a fenced code block keeps the
+/// [`Code`](renderable::tree::NodeKind::Code) node as a block-level sibling
+/// instead of nesting it inside a `Paragraph` (which render-tree validation
+/// rejects, leaving the list renderer with empty output).
 ///
 /// For any other item the helper's structural fallback is used directly —
 /// block-level children (a nested `List`, `Section`, etc.) become the
@@ -428,7 +436,7 @@ fn project_list_items(
             let projected =
                 project_renderable_content(item, ProjectionMode::Structural { terminal_hint });
             let children = if is_prose {
-                vec![RenderNode::paragraph(projected)]
+                fold_prose_nodes_into_blocks(projected)
             } else {
                 projected
             };
@@ -1149,19 +1157,86 @@ mod tests {
 
     #[test]
     fn ordered_list_render_tree_node_carries_layout_when_margins_set() {
-        use crate::utils::layout::{Length, Margin};
+        use crate::utils::layout::{Length, Edges};
         let mut list = OrderedList::new(vec!["First", "Second"]);
-        list.layout_mut().margin = Margin::x(Length::ch(2));
+        list.layout_mut().margin = Edges::x(Length::ch(2));
         let node = list.render_tree_node().unwrap();
         assert!(node.attrs.layout().is_some());
     }
 
     #[test]
     fn unordered_list_render_tree_node_carries_layout_when_margins_set() {
-        use crate::utils::layout::{Length, Margin};
+        use crate::utils::layout::{Length, Edges};
         let mut list = UnorderedList::new(vec!["Apple", "Banana"]);
-        list.layout_mut().margin = Margin::x(Length::ch(2));
+        list.layout_mut().margin = Edges::x(Length::ch(2));
         let node = list.render_tree_node().unwrap();
         assert!(node.attrs.layout().is_some());
+    }
+
+    // =========================================================================
+    // Embedded Prose Fenced Code (regression for review-2 container gap)
+    // =========================================================================
+
+    /// `true` if any `Paragraph` node directly contains a block-level `Code`
+    /// child — the invalid shape that tripped render-tree validation before the
+    /// fold fix (the list renderer then swallowed it into empty output).
+    fn paragraph_contains_code(node: &RenderNode) -> bool {
+        use renderable::tree::NodeKind;
+        let bad_here = matches!(node.kind, NodeKind::Paragraph { .. })
+            && node
+                .children()
+                .iter()
+                .any(|c| matches!(c.kind, NodeKind::Code { .. }));
+        bad_here || node.children().iter().any(paragraph_contains_code)
+    }
+
+    /// `true` if a block-level `Code` node appears anywhere in the tree.
+    fn has_code(node: &RenderNode) -> bool {
+        use renderable::tree::NodeKind;
+        matches!(node.kind, NodeKind::Code { .. }) || node.children().iter().any(has_code)
+    }
+
+    const STYLED_FENCE: &str = "<red>before\n```\ncode\n```\nafter</red>";
+
+    #[test]
+    fn ordered_list_with_styled_fenced_code_prose_renders_via_tree() {
+        use crate::components::prose::Prose;
+        let items = vec![RenderableTerminalContent::Component(Rc::new(Prose::new(
+            STYLED_FENCE,
+        )))];
+        let list = OrderedList::from(items);
+        let result = list.render_optimistic(Some(80));
+        // Non-empty proves validation passed: `render_via_tree` swallows a
+        // validation failure into an empty string.
+        assert!(!result.is_empty(), "expected non-empty render");
+        for needle in ["before", "code", "after"] {
+            assert!(result.contains(needle), "missing `{needle}`: {result:?}");
+        }
+        let node = list.render_tree();
+        assert!(
+            !paragraph_contains_code(&node),
+            "a block-level Code node must not nest inside a Paragraph"
+        );
+        assert!(has_code(&node), "expected a block-level Code node in the tree");
+    }
+
+    #[test]
+    fn unordered_list_with_styled_fenced_code_prose_renders_via_tree() {
+        use crate::components::prose::Prose;
+        let items = vec![RenderableTerminalContent::Component(Rc::new(Prose::new(
+            STYLED_FENCE,
+        )))];
+        let list = UnorderedList::from(items);
+        let result = list.render_optimistic(Some(80));
+        assert!(!result.is_empty(), "expected non-empty render");
+        for needle in ["before", "code", "after"] {
+            assert!(result.contains(needle), "missing `{needle}`: {result:?}");
+        }
+        let node = list.render_tree();
+        assert!(
+            !paragraph_contains_code(&node),
+            "a block-level Code node must not nest inside a Paragraph"
+        );
+        assert!(has_code(&node), "expected a block-level Code node in the tree");
     }
 }

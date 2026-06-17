@@ -1,0 +1,5 @@
+---
+source: darkmatter/lib/tests/cutover_reference.rs
+expression: "render_terminal(&md, 80)"
+---
+[38;2;100;100;100m▐   [39mA quoted paragraph.

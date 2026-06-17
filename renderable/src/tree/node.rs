@@ -1,5 +1,7 @@
 //! The canonical owned render tree node and its kinds.
 
+use std::borrow::Cow;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -143,6 +145,21 @@ pub enum NodeKind {
     },
     /// A thematic break (horizontal rule).
     ThematicBreak,
+    /// A disclosure block: a summary label and a disclosed body.
+    ///
+    /// The `summary` contains phrasing content shown by default; `children`
+    /// holds the block-level body revealed by the disclosure. There is no
+    /// terminal interactivity — the body is always rendered, styled to
+    /// distinguish it from the summary.
+    Disclosure {
+        /// Phrasing content for the always-visible summary label.
+        summary: Vec<RenderNode>,
+        /// Block-level body content revealed by the disclosure.
+        children: Vec<RenderNode>,
+        /// Inline style hints parsed from `::disclosure key=value ...`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        style: Option<Box<crate::tree::DisclosureStyleHints>>,
+    },
     /// A table.
     Table {
         /// Per-column alignment.
@@ -231,6 +248,23 @@ pub enum NodeKind {
         /// Whether the HTML is block-level.
         block: bool,
     },
+    /// A target-agnostic extension node identified by a `token`.
+    ///
+    /// Carries nested inline `children` for wrap-style extensions (such as
+    /// `mark` and `dim`) and an optional scalar `payload` for atomic
+    /// extensions. Renderers dispatch on `token`; a token a renderer does not
+    /// recognize falls back to a neutral default that preserves `children`.
+    Extended {
+        /// The extension identifier (for example `"mark"` or `"dim"`).
+        ///
+        /// `Cow<'static, str>` keeps built-in tokens zero-allocation literals
+        /// while still allowing owned dynamic tokens.
+        token: Cow<'static, str>,
+        /// Nested inline content for wrap-style extensions.
+        children: Vec<RenderNode>,
+        /// A scalar value for atomic extensions; `None` for pure wrap tokens.
+        payload: Option<String>,
+    },
     /// Content that has no canonical representation.
     Unsupported {
         /// A label describing the unsupported content.
@@ -281,14 +315,16 @@ impl RenderNode {
             | NodeKind::BlockQuote { children }
             | NodeKind::List { children, .. }
             | NodeKind::ListItem { children, .. }
-            | NodeKind::Table { children, .. }
+            |             NodeKind::Table { children, .. }
             | NodeKind::TableRow { children }
             | NodeKind::TableCell { children }
             | NodeKind::FootnoteDefinition { children, .. }
+            | NodeKind::Disclosure { children, .. }
             | NodeKind::Emphasis { children }
             | NodeKind::Strong { children }
             | NodeKind::Delete { children }
             | NodeKind::Span { children }
+            | NodeKind::Extended { children, .. }
             | NodeKind::Link { children, .. } => children,
             NodeKind::Code { .. }
             | NodeKind::ThematicBreak
@@ -317,14 +353,16 @@ impl RenderNode {
             | NodeKind::BlockQuote { children }
             | NodeKind::List { children, .. }
             | NodeKind::ListItem { children, .. }
-            | NodeKind::Table { children, .. }
+            |             NodeKind::Table { children, .. }
             | NodeKind::TableRow { children }
             | NodeKind::TableCell { children }
             | NodeKind::FootnoteDefinition { children, .. }
+            | NodeKind::Disclosure { children, .. }
             | NodeKind::Emphasis { children }
             | NodeKind::Strong { children }
             | NodeKind::Delete { children }
             | NodeKind::Span { children }
+            | NodeKind::Extended { children, .. }
             | NodeKind::Link { children, .. } => Some(children),
             NodeKind::Code { .. }
             | NodeKind::ThematicBreak
@@ -410,6 +448,24 @@ impl RenderNode {
     #[must_use]
     pub fn thematic_break() -> Self {
         Self::synthetic(NodeKind::ThematicBreak)
+    }
+
+    /// Creates a [`NodeKind::Disclosure`] node.
+    ///
+    /// `summary` holds phrasing content for the always-visible label; `children`
+    /// holds the disclosed block-level body. `style` carries optional inline
+    /// `key=value` hints parsed from the opener line.
+    #[must_use]
+    pub fn disclosure(
+        summary: Vec<RenderNode>,
+        children: Vec<RenderNode>,
+        style: Option<crate::tree::DisclosureStyleHints>,
+    ) -> Self {
+        Self::synthetic(NodeKind::Disclosure {
+            summary,
+            children,
+            style: style.map(Box::new),
+        })
     }
 
     /// Creates a [`NodeKind::Table`] node.
@@ -527,6 +583,20 @@ impl RenderNode {
         Self::synthetic(NodeKind::Html {
             value: value.into(),
             block,
+        })
+    }
+
+    /// Creates a [`NodeKind::Extended`] node for the given extension `token`.
+    #[must_use]
+    pub fn extended(
+        token: impl Into<Cow<'static, str>>,
+        children: Vec<RenderNode>,
+        payload: Option<String>,
+    ) -> Self {
+        Self::synthetic(NodeKind::Extended {
+            token: token.into(),
+            children,
+            payload,
         })
     }
 

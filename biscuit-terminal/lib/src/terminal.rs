@@ -13,6 +13,7 @@ use crate::discovery::locale::{CharEncoding, TerminalLocale};
 use crate::discovery::os_detection::{
     LinuxDistro, OsType, detect_linux_distro, detect_os_type, is_ci,
 };
+use crate::discovery::osc_queries::{RgbValue, bg_color, text_color};
 
 /// Walk up from `start` looking for a `.git` directory. Returns the repo root if found.
 fn find_git_root(start: &Path) -> Option<PathBuf> {
@@ -47,6 +48,8 @@ fn new_terminal() -> Terminal {
         is_tty: is_tty(),
         color_depth: color_depth(),
         color_mode: color_mode(),
+        text_color: text_color(),
+        background_color: bg_color(),
         os: detect_os_type(),
         distro: detect_linux_distro(),
         config_file,
@@ -183,6 +186,10 @@ pub struct Terminal {
     pub color_depth: ColorDepth,
     /// Whether the terminal is in light or dark mode
     pub color_mode: ColorMode,
+    /// The detected terminal foreground/text color, when available.
+    pub text_color: Option<RgbValue>,
+    /// The detected terminal background color, when available.
+    pub background_color: Option<RgbValue>,
 
     /// The operating system type
     pub os: OsType,
@@ -270,7 +277,9 @@ impl From<&Terminal> for Terminal {
             osc_link_support: value.osc_link_support,
             is_tty: value.is_tty,
             color_depth: value.color_depth,
-            color_mode: value.color_mode.clone(),
+            color_mode: value.color_mode,
+            text_color: value.text_color,
+            background_color: value.background_color,
             os: value.os,
             distro: value.distro.clone(),
             config_file: value.config_file.clone(),
@@ -414,6 +423,8 @@ impl Terminal {
             is_tty: true,
             color_depth: ColorDepth::TrueColor,
             color_mode: ColorMode::Dark,
+            text_color: None,
+            background_color: None,
             os: OsType::Unknown,
             distro: None,
             config_file: None,
@@ -501,7 +512,7 @@ impl Terminal {
     /// }
     /// ```
     pub fn color_mode(&self) -> ColorMode {
-        self.color_mode.clone()
+        self.color_mode
     }
 
     /// Render content to the terminal with default layout.
@@ -704,6 +715,8 @@ impl TerminalBuilder {
             is_tty: self.is_tty.unwrap_or(detected.is_tty),
             color_depth: self.color_depth.unwrap_or(detected.color_depth),
             color_mode: self.color_mode.unwrap_or(detected.color_mode),
+            text_color: detected.text_color,
+            background_color: detected.background_color,
             is_ci: self.is_ci.unwrap_or(detected.is_ci),
             is_nerd_font: self.is_nerd_font.unwrap_or(detected.is_nerd_font),
             fixed_width: self.fixed_width,

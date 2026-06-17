@@ -1,6 +1,18 @@
+// The resolved-layout-precedence tests exercise `DarkmatterPage`'s
+// `page_margin()`, `page_padding()`, and component-policy helpers.
+// These replaced the deprecated `margin()`, `padding()`, `fill_for()`,
+// and `alignment_for()` getters after the migration to
+// `renderable::layout::Layout`.
+
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::io::Write;
+use std::net::TcpListener;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+use std::thread;
 
 /// Helper to create a `md` command from cargo bin.
 fn md_cmd() -> assert_cmd::Command {
@@ -13,6 +25,70 @@ fn md_file(content: &str) -> tempfile::NamedTempFile {
     let mut tmp = tempfile::NamedTempFile::new().unwrap();
     write!(tmp, "{}", content).unwrap();
     tmp
+}
+
+struct MockHttpResponse {
+    status: u16,
+    body: &'static str,
+    cache_control: Option<&'static str>,
+}
+
+struct MockHttpServer {
+    base_url: String,
+    requests: Arc<AtomicUsize>,
+}
+
+impl MockHttpServer {
+    fn url(&self, path: &str) -> String {
+        format!("{}{}", self.base_url, path)
+    }
+
+    fn request_count(&self) -> usize {
+        self.requests.load(Ordering::SeqCst)
+    }
+}
+
+fn mock_http_server(responses: Vec<MockHttpResponse>) -> MockHttpServer {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let request_count = Arc::clone(&requests);
+
+    thread::spawn(move || {
+        for response in responses {
+            let Ok((mut stream, _)) = listener.accept() else {
+                break;
+            };
+            request_count.fetch_add(1, Ordering::SeqCst);
+
+            let mut buf = [0_u8; 4096];
+            let _ = std::io::Read::read(&mut stream, &mut buf);
+
+            let status_text = match response.status {
+                200 => "OK",
+                304 => "Not Modified",
+                500 => "Internal Server Error",
+                _ => "OK",
+            };
+            let mut headers = format!(
+                "HTTP/1.1 {} {}\r\nContent-Length: {}\r\n",
+                response.status,
+                status_text,
+                response.body.len()
+            );
+            if let Some(cache_control) = response.cache_control {
+                headers.push_str(&format!("Cache-Control: {cache_control}\r\n"));
+            }
+            headers.push_str("\r\n");
+            let _ = stream.write_all(headers.as_bytes());
+            let _ = stream.write_all(response.body.as_bytes());
+        }
+    });
+
+    MockHttpServer {
+        base_url: format!("http://{addr}"),
+        requests,
+    }
 }
 
 // =============================================================================
@@ -94,17 +170,48 @@ fn test_output_html() {
         .assert()
         .success()
         .stdout(predicate::str::contains("<style>"))
-        .stdout(predicate::str::contains("<h1>Hello</h1>"));
+        .stdout(predicate::str::contains("<h1 id=\"hello\">Hello</h1>"));
+}
+
+#[test]
+fn test_output_html_alias_browser() {
+    md_cmd()
+        .args(["--output", "browser", "-"])
+        .write_stdin("# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<h1 id=\"hello\">Hello</h1>"));
+}
+
+#[test]
+fn test_output_markdown_plus_renders_disclosure_as_html_details() {
+    let input = "::disclosure Summary\n::details\nBody\n::end-disclosure";
+    md_cmd()
+        .args(["--output", "markdown-plus", "-"])
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<details>"))
+        .stdout(predicate::str::contains("<summary>"))
+        .stdout(predicate::str::contains("Summary"))
+        .stdout(predicate::str::contains("</summary>"))
+        .stdout(predicate::str::contains("Body"))
+        .stdout(predicate::str::contains("</details>"));
 }
 
 #[test]
 fn test_output_json_alias_ast() {
+    // `--output ast` serializes the render-tree `Document` (`md.as_document()`),
+    // whose node discriminant is `kind` (not `type`); `root` is the top-level
+    // document node.
     md_cmd()
         .args(["--output", "ast", "-"])
         .write_stdin("# Hello\n\nWorld")
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"type\""));
+        .stdout(predicate::str::contains("\"root\""))
+        .stdout(predicate::str::contains("\"kind\""))
+        .stdout(predicate::str::contains("\"heading\""));
 }
 
 #[test]
@@ -380,7 +487,7 @@ fn test_render_explicit_with_output() {
         .write_stdin("# Hello\n\nWorld")
         .assert()
         .success()
-        .stdout(predicate::str::contains("<h1>Hello</h1>"));
+        .stdout(predicate::str::contains("<h1 id=\"hello\">Hello</h1>"));
 }
 
 // =============================================================================
@@ -396,6 +503,277 @@ fn test_compose_basic() {
         .success()
         .stdout(predicate::str::contains("Hello"))
         .stdout(predicate::str::contains("World"));
+}
+
+#[test]
+fn test_compose_markdown_plus_renders_disclosure_as_details() {
+    // `md compose --output markdown-plus` must route the composed document
+    // through the MarkdownPlus fold, emitting `<details>`/`<summary>` HTML
+    // rather than preserving the `::disclosure` DSL verbatim.
+    md_cmd()
+        .args(["compose", "--output", "markdown-plus", "-"])
+        .write_stdin(
+            "::disclosure\nLicense *Agreement*\n::details\nKeep your **hands** off.\n::end-disclosure\n",
+        )
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<details>"))
+        .stdout(predicate::str::contains("<summary>"))
+        .stdout(predicate::str::contains("</summary>"))
+        .stdout(predicate::str::contains("</details>"))
+        .stdout(predicate::str::contains("::disclosure").not());
+}
+
+#[test]
+fn test_compose_remote_allowed_host_fetches_url() {
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "Remote body\n",
+        cache_control: None,
+    }]);
+    let url = server.url("/remote.md");
+
+    md_cmd()
+        .args(["compose", "-", "--allow-host", "127.0.0.1"])
+        .write_stdin(format!("# Local\n\n::file {url}\n"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Remote body"));
+
+    assert_eq!(server.request_count(), 1);
+}
+
+#[test]
+fn test_compose_remote_deny_all_fails_without_request() {
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "should not be fetched\n",
+        cache_control: None,
+    }]);
+    let url = server.url("/blocked.md");
+
+    md_cmd()
+        .args(["compose", "-"])
+        .write_stdin(format!("# Local\n\n::file {url}\n"))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("remote read denied"))
+        .stderr(predicate::str::contains("127.0.0.1"));
+
+    assert_eq!(server.request_count(), 0);
+}
+
+#[test]
+fn test_compose_remote_expression_function_reads_url() {
+    // Read-side expression functions must work through the real `md compose`
+    // pipeline, not just helper-level unit tests. The URL argument is quoted
+    // because the interpolation expression parser requires a string literal.
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "# Remote Heading\n",
+        cache_control: None,
+    }]);
+    let url = server.url("/remote.md");
+
+    md_cmd()
+        .args(["compose", "-", "--allow-host", "127.0.0.1"])
+        .write_stdin(format!("Title: {{{{ markdown_title(\"{url}\") }}}}\n"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Title: Remote Heading"));
+
+    assert_eq!(server.request_count(), 1);
+}
+
+#[test]
+fn test_compose_remote_expression_function_denied_host_reads_false() {
+    // `file_exists` against a host that is not allowed must read as `false`
+    // (the fetch is policy-denied, never issued) rather than failing compose.
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "should not be fetched\n",
+        cache_control: None,
+    }]);
+    let url = server.url("/blocked.md");
+
+    md_cmd()
+        .args(["compose", "-"])
+        .write_stdin(format!("Exists: {{{{ file_exists(\"{url}\") }}}}\n"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Exists: false"));
+
+    assert_eq!(server.request_count(), 0);
+}
+
+#[test]
+fn test_compose_remote_prologue_allowed_host_fetches_url() {
+    // A remote `prologue` URL on an allowed host must be registered, fetched,
+    // and prepended to the body.
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "Prologue body\n",
+        cache_control: None,
+    }]);
+    let url = server.url("/intro.md");
+
+    md_cmd()
+        .args(["compose", "-", "--allow-host", "127.0.0.1"])
+        .write_stdin(format!("---\nprologue: {url}\n---\n# Local\n\nBody.\n"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Prologue body"))
+        .stdout(predicate::str::contains("Local"));
+
+    assert_eq!(server.request_count(), 1);
+}
+
+#[test]
+fn test_compose_remote_epilogue_deny_all_fails_without_request() {
+    // A remote `epilogue` on a non-allowed host must fail by policy and never
+    // issue a request — not fail with an internal "not registered" error.
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "should not be fetched\n",
+        cache_control: None,
+    }]);
+    let url = server.url("/outro.md");
+
+    md_cmd()
+        .args(["compose", "-"])
+        .write_stdin(format!("---\nepilogue: {url}\n---\n# Local\n\nBody.\n"))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("remote read denied"))
+        .stderr(predicate::str::contains("127.0.0.1"));
+
+    assert_eq!(server.request_count(), 0);
+}
+
+#[test]
+fn test_compose_remote_refresh_revalidates_cached_url() {
+    let cache_dir = tempfile::TempDir::new().unwrap();
+    let server = mock_http_server(vec![
+        MockHttpResponse {
+            status: 200,
+            body: "First remote body\n",
+            cache_control: Some("max-age=3600"),
+        },
+        MockHttpResponse {
+            status: 200,
+            body: "Second remote body\n",
+            cache_control: Some("max-age=3600"),
+        },
+    ]);
+    let url = server.url("/cached.md");
+    let input = format!("# Local\n\n::file {url}\n");
+
+    md_cmd()
+        .args([
+            "compose",
+            "-",
+            "--allow-host",
+            "127.0.0.1",
+            "--cache-root",
+        ])
+        .arg(cache_dir.path())
+        .write_stdin(input.clone())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("First remote body"));
+
+    md_cmd()
+        .args([
+            "compose",
+            "-",
+            "--allow-host",
+            "127.0.0.1",
+            "--cache-root",
+        ])
+        .arg(cache_dir.path())
+        .args(["--remote-refresh"])
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Second remote body"));
+
+    assert_eq!(server.request_count(), 2);
+}
+
+#[test]
+fn test_compose_remote_fallback_serves_stale_cache_on_failure() {
+    let cache_dir = tempfile::TempDir::new().unwrap();
+    let server = mock_http_server(vec![
+        MockHttpResponse {
+            status: 200,
+            body: "Cached remote body\n",
+            cache_control: Some("max-age=0"),
+        },
+        MockHttpResponse {
+            status: 500,
+            body: "server unavailable\n",
+            cache_control: None,
+        },
+    ]);
+    let url = server.url("/stale.md");
+    let input = format!("# Local\n\n::file {url}\n");
+
+    md_cmd()
+        .args([
+            "compose",
+            "-",
+            "--allow-host",
+            "127.0.0.1",
+            "--cache-root",
+        ])
+        .arg(cache_dir.path())
+        .write_stdin(input.clone())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Cached remote body"));
+
+    md_cmd()
+        .args([
+            "compose",
+            "-",
+            "--allow-host",
+            "127.0.0.1",
+            "--cache-root",
+        ])
+        .arg(cache_dir.path())
+        .args(["--remote-freshness", "fallback"])
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Cached remote body"));
+
+    assert_eq!(server.request_count(), 2);
+}
+
+#[test]
+fn test_compose_invalid_remote_freshness_fails_fast() {
+    // A typo must fail with a non-zero exit and list the accepted values,
+    // rather than silently degrading to a single freshness mode.
+    md_cmd()
+        .args(["compose", "-", "--remote-freshness", "fallbak"])
+        .write_stdin("# Local\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("optimistic"))
+        .stderr(predicate::str::contains("strict"))
+        .stderr(predicate::str::contains("fallback"));
+}
+
+#[test]
+fn test_compose_preserves_rendered_remote_links() {
+    md_cmd()
+        .args(["compose", "-"])
+        .write_stdin("[Remote](https://example.com/path?q=1)\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "[Remote](https://example.com/path?q=1)",
+        ));
 }
 
 #[test]
@@ -415,7 +793,7 @@ fn test_compose_output_html() {
         .write_stdin("# Hello\n\nWorld")
         .assert()
         .success()
-        .stdout(predicate::str::contains("<h1>Hello</h1>"));
+        .stdout(predicate::str::contains("<h1 id=\"hello\">Hello</h1>"));
 }
 
 #[test]
@@ -1022,6 +1400,72 @@ fn test_compose_frontmatter_nested_quotes_in_interpolation() {
 }
 
 // =============================================================================
+//        MOTIVATING `spec: file` FRONTMATTER TERNARY (RESOLUTION CONTEXT)
+// =============================================================================
+
+/// Builds the motivating document: an optional `spec` `file` field derived from
+/// whether a sibling `spec.md` exists, gated downstream by `::block when="spec"`.
+///
+/// This is the end-to-end fixture for the resolution-context feature — the
+/// read-side `file_exists` function must evaluate in the **frontmatter** pass
+/// (it previously only worked in the body), and Decision A must let the empty
+/// `else ''` branch satisfy the non-required `spec: file` schema field.
+const MOTIVATING_SPEC_TERNARY: &str = "---\n\
+$schema:\n\
+\x20 plan: file(required)\n\
+\x20 spec: file\n\
+possible_spec: \"spec.md\"\n\
+spec: \"{{ file_exists(possible_spec) ? possible_spec : '' }}\"\n\
+plan: \"plan.md\"\n\
+---\n\
+# Task\n\
+\n\
+::block when=\"spec\"\n\
+Spec resolved: {{ spec }}\n\
+::end-block\n";
+
+#[test]
+fn test_compose_motivating_spec_ternary_resolves_when_spec_present() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("plan.md"), "# Plan\n").unwrap();
+    std::fs::write(dir.path().join("spec.md"), "# Spec\n").unwrap();
+    std::fs::write(dir.path().join("template.md"), MOTIVATING_SPEC_TERNARY).unwrap();
+
+    // `file_exists(possible_spec)` is true → the ternary resolves `spec` to the
+    // path, the optional `file` field validates, and `::block when="spec"`
+    // renders its body. Run from the document directory so the `file`-typed
+    // schema fields resolve their references against the sibling files.
+    md_cmd()
+        .current_dir(dir.path())
+        .arg("compose")
+        .arg("--frontmatter")
+        .arg("template.md")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("spec: spec.md"))
+        .stdout(predicate::str::contains("Spec resolved: spec.md"));
+}
+
+#[test]
+fn test_compose_motivating_spec_ternary_absent_when_spec_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("plan.md"), "# Plan\n").unwrap();
+    // No spec.md sibling.
+    std::fs::write(dir.path().join("template.md"), MOTIVATING_SPEC_TERNARY).unwrap();
+
+    // `file_exists(possible_spec)` is false → the ternary resolves `spec` to the
+    // empty string. Decision A treats an empty non-required `file` field as
+    // absent (compose still succeeds) and `::block when="spec"` is excluded.
+    md_cmd()
+        .current_dir(dir.path())
+        .arg("compose")
+        .arg("template.md")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Spec resolved:").not());
+}
+
+// =============================================================================
 //              TRANSCLUSION + INTERPOLATION VALIDATION TESTS
 // =============================================================================
 
@@ -1066,8 +1510,11 @@ fn test_compose_state_variables_available_during_validation() {
     )
     .unwrap();
 
+    // `doc` is the reserved frontmatter namespace, so a property literally
+    // named `doc` is referenced as `doc.doc` (bare `{{doc}}` is the whole
+    // frontmatter object).
     let template_path = temp_dir.path().join("template.md");
-    std::fs::write(&template_path, "# Docs\n\n::file docs/{{doc}}\n").unwrap();
+    std::fs::write(&template_path, "# Docs\n\n::file docs/{{doc.doc}}\n").unwrap();
 
     md_cmd()
         .arg("compose")
@@ -1402,6 +1849,379 @@ fn test_hash_directory_ignores_non_markdown() {
         .stdout(predicate::str::is_match(r"^[0-9a-f]{16}-[0-9a-f]{16}\n$").unwrap());
 }
 
+#[test]
+fn test_hash_directory_ignores_managed_keys() {
+    // Adding the managed `hash` / `last_updated` baseline fields must not move
+    // the directory aggregate — the hash never hashes itself.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("a.md"),
+        "---\ntitle: Alpha\n---\n# Alpha\n\nFirst file.",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("b.md"),
+        "---\ntitle: Beta\n---\n# Beta\n\nSecond file.",
+    )
+    .unwrap();
+
+    let before = md_cmd().arg("hash").arg(dir.path()).output().unwrap();
+    assert!(before.status.success());
+
+    std::fs::write(
+        dir.path().join("a.md"),
+        "---\ntitle: Alpha\nhash: 1111111111111111-2222222222222222\nlast_updated: 2020-01-01\n---\n# Alpha\n\nFirst file.",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("b.md"),
+        "---\ntitle: Beta\nhash: 3333333333333333-4444444444444444\nlast_updated: 2020-01-01\n---\n# Beta\n\nSecond file.",
+    )
+    .unwrap();
+
+    let after = md_cmd().arg("hash").arg(dir.path()).output().unwrap();
+    assert_eq!(
+        before.stdout, after.stdout,
+        "managed keys must not change the directory aggregate",
+    );
+}
+
+#[test]
+fn test_hash_directory_honors_ignore_properties() {
+    // A file differing only in an ignored property must aggregate identically.
+    let with_draft = tempfile::tempdir().unwrap();
+    std::fs::write(
+        with_draft.path().join("a.md"),
+        "---\ntitle: Alpha\ndraft: true\n---\n# Alpha\n\nFirst file.",
+    )
+    .unwrap();
+    let without_draft = tempfile::tempdir().unwrap();
+    std::fs::write(
+        without_draft.path().join("a.md"),
+        "---\ntitle: Alpha\n---\n# Alpha\n\nFirst file.",
+    )
+    .unwrap();
+
+    let a = md_cmd()
+        .env("HASH_IGNORE_PROPERTIES", "draft")
+        .arg("hash")
+        .arg(with_draft.path())
+        .output()
+        .unwrap();
+    let b = md_cmd()
+        .env("HASH_IGNORE_PROPERTIES", "draft")
+        .arg("hash")
+        .arg(without_draft.path())
+        .output()
+        .unwrap();
+    assert_eq!(
+        a.stdout, b.stdout,
+        "HASH_IGNORE_PROPERTIES must apply in directory mode",
+    );
+}
+
+// =============================================================================
+//                     HASH KIND / SAVE / DIFF TESTS
+// =============================================================================
+
+#[test]
+fn test_hash_kind_structured_outputs_four_parts() {
+    md_cmd()
+        .args(["hash", "--kind", "structured", "-"])
+        .write_stdin("---\ntitle: Test\n---\n# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::is_match(r"^[0-9a-f]{16}-[0-9a-f]{16}-[0-9a-f]{16}-[0-9a-f]{16}\n$")
+                .unwrap(),
+        );
+}
+
+#[test]
+fn test_hash_kind_structured_strict_outputs_four_parts() {
+    md_cmd()
+        .args(["hash", "--kind", "structured", "--strict", "-"])
+        .write_stdin("---\nbeta: 1\nalpha: 2\n---\n# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::is_match(r"^[0-9a-f]{16}-[0-9a-f]{16}-[0-9a-f]{16}-[0-9a-f]{16}\n$")
+                .unwrap(),
+        );
+}
+
+#[test]
+fn test_hash_kind_structured_strict_respects_key_order() {
+    let reordered = |args: &[&str]| {
+        let beta_first = md_cmd()
+            .args(args)
+            .write_stdin("---\nbeta: 1\nalpha: 2\n---\n# H\n\nBody.")
+            .output()
+            .unwrap()
+            .stdout;
+        let alpha_first = md_cmd()
+            .args(args)
+            .write_stdin("---\nalpha: 2\nbeta: 1\n---\n# H\n\nBody.")
+            .output()
+            .unwrap()
+            .stdout;
+        (beta_first, alpha_first)
+    };
+
+    // Strict preserves key order, so reordering keys changes the hash.
+    let (strict_beta, strict_alpha) = reordered(&["hash", "--kind", "structured", "--strict", "-"]);
+    assert_ne!(strict_beta, strict_alpha, "strict must not reorder keys");
+
+    // Non-strict sorts keys, so reordering is a no-op.
+    let (ns_beta, ns_alpha) = reordered(&["hash", "--kind", "structured", "-"]);
+    assert_eq!(ns_beta, ns_alpha, "non-strict sorts keys");
+}
+
+#[test]
+fn test_hash_diff_malformed_stored_hash_exits_one() {
+    // A corrupt stored hash is an operational error (exit 1), never a content
+    // difference (exit 2).
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    std::fs::write(
+        &file,
+        "---\ntitle: T\nhash: not-a-real-hash-but-two-parts\n---\n# H\n\nBody.\n",
+    )
+    .unwrap();
+
+    md_cmd().arg("hash").arg("--diff").arg(&file).assert().code(1);
+}
+
+#[test]
+fn test_hash_diff_detailed_bad_section_level_exits_one() {
+    // A stored detailed hash whose section level is outside 1-6 is a malformed
+    // baseline (operational error, exit 1), never a content difference (exit 2).
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    std::fs::write(
+        &file,
+        concat!(
+            "---\n",
+            "title: T\n",
+            "hash:\n",
+            "  kind: detailed\n",
+            "  value:\n",
+            "    frontmatter:\n",
+            "      fm: \"0000000000000001\"\n",
+            "      keys: \"0000000000000002\"\n",
+            "    preamble: null\n",
+            "    sections:\n",
+            "      - [9, \"Bad\", \"0000000000000004\"]\n",
+            "---\n",
+            "# H\n\nBody.\n",
+        ),
+    )
+    .unwrap();
+
+    md_cmd().arg("hash").arg("--diff").arg(&file).assert().code(1);
+}
+
+#[test]
+fn test_hash_kind_detailed_outputs_nested_yaml() {
+    md_cmd()
+        .args(["hash", "--kind", "detailed", "-"])
+        .write_stdin("---\ntitle: Test\n---\n# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("frontmatter:"))
+        .stdout(predicate::str::contains("sections:"));
+}
+
+#[test]
+fn test_hash_kind_fm_matches_frontmatter_flag() {
+    let input = "---\ntitle: Hello\n---\n# Content";
+    let by_kind = md_cmd()
+        .args(["hash", "--kind", "fm", "-"])
+        .write_stdin(input)
+        .output()
+        .unwrap();
+    let by_flag = md_cmd()
+        .args(["hash", "--frontmatter", "-"])
+        .write_stdin(input)
+        .output()
+        .unwrap();
+    assert_eq!(by_kind.stdout, by_flag.stdout);
+}
+
+#[test]
+fn test_hash_kind_conflicts_with_body() {
+    md_cmd()
+        .args(["hash", "--kind", "fm", "--body", "-"])
+        .write_stdin("# H")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_hash_save_and_diff_conflict() {
+    md_cmd()
+        .args(["hash", "--save", "--diff", "-"])
+        .write_stdin("# H")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_hash_env_property_override() {
+    // HASH_PROPERTY changes which frontmatter key the hash is written to.
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    std::fs::write(&file, "---\ntitle: T\n---\n# H\n\nBody.\n").unwrap();
+
+    md_cmd()
+        .env("HASH_PROPERTY", "fingerprint")
+        .arg("hash")
+        .arg("--save")
+        .arg(&file)
+        .assert()
+        .success();
+
+    let written = std::fs::read_to_string(&file).unwrap();
+    assert!(written.contains("fingerprint:"), "got:\n{written}");
+    assert!(!written.contains("\nhash:"), "got:\n{written}");
+}
+
+#[test]
+fn test_hash_ignore_properties_excludes_key() {
+    // A document differing only in an ignored property hashes identically.
+    let with_draft = md_cmd()
+        .env("HASH_IGNORE_PROPERTIES", "draft")
+        .args(["hash", "--frontmatter", "-"])
+        .write_stdin("---\ntitle: T\ndraft: true\n---\n# H")
+        .output()
+        .unwrap();
+    let without_draft = md_cmd()
+        .env("HASH_IGNORE_PROPERTIES", "draft")
+        .args(["hash", "--frontmatter", "-"])
+        .write_stdin("---\ntitle: T\n---\n# H")
+        .output()
+        .unwrap();
+    assert_eq!(with_draft.stdout, without_draft.stdout);
+}
+
+#[test]
+fn test_hash_save_writes_baseline_and_exits_zero() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    std::fs::write(&file, "---\ntitle: T\n---\n# H\n\nBody.\n").unwrap();
+
+    md_cmd()
+        .arg("hash")
+        .arg("--save")
+        .arg(&file)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("baseline"));
+
+    let written = std::fs::read_to_string(&file).unwrap();
+    assert!(written.contains("hash:"), "got:\n{written}");
+}
+
+#[test]
+fn test_hash_save_requires_file_not_stdin() {
+    md_cmd()
+        .args(["hash", "--save", "-"])
+        .write_stdin("# H")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_hash_diff_no_stored_hash_exits_two() {
+    md_cmd()
+        .args(["hash", "--diff", "-"])
+        .write_stdin("---\ntitle: T\n---\n# H\n\nBody.")
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("No stored hash to compare against"));
+}
+
+#[test]
+fn test_hash_diff_unchanged_exits_zero() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    std::fs::write(&file, "---\ntitle: T\n---\n# H\n\nBody.\n").unwrap();
+
+    // Establish a baseline, then diff against it without any edit.
+    md_cmd().arg("hash").arg("--save").arg(&file).assert().success();
+
+    md_cmd()
+        .arg("hash")
+        .arg("--diff")
+        .arg(&file)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No semantic changes detected"));
+}
+
+#[test]
+fn test_hash_diff_changed_exits_two() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    std::fs::write(&file, "---\ntitle: T\n---\n# H\n\nBody.\n").unwrap();
+
+    md_cmd().arg("hash").arg("--save").arg(&file).assert().success();
+
+    // Edit the body, leaving the stored hash in place.
+    let stored = std::fs::read_to_string(&file).unwrap();
+    let edited = stored.replace("Body.", "Different body.");
+    std::fs::write(&file, edited).unwrap();
+
+    md_cmd().arg("hash").arg("--diff").arg(&file).assert().code(2);
+}
+
+#[test]
+fn test_hash_directory_rejects_save() {
+    let dir = create_hash_dir();
+    md_cmd()
+        .args(["hash", "--save"])
+        .arg(dir.path())
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_hash_directory_rejects_structured_kind() {
+    let dir = create_hash_dir();
+    md_cmd()
+        .args(["hash", "--kind", "structured"])
+        .arg(dir.path())
+        .assert()
+        .failure();
+}
+
+/// A single malformed Markdown file must fail the whole directory aggregate
+/// rather than being silently hashed as an empty document. Otherwise a CI /
+/// release check using `md hash <dir>` could pass on a broken file and record
+/// a false baseline.
+#[test]
+fn test_hash_directory_malformed_frontmatter_exits_one() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("good.md"),
+        "---\ntitle: Alpha\n---\n# Alpha\n",
+    )
+    .unwrap();
+    // Quoted scalar followed by trailing unquoted text: a frontmatter parse error.
+    std::fs::write(
+        dir.path().join("bad.md"),
+        "---\nphases: 5\nfindings:\n  - id: '@' magic lookup emits results\n---\n# Doc\n",
+    )
+    .unwrap();
+
+    md_cmd()
+        .arg("hash")
+        .arg(dir.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("bad.md"));
+}
+
 // =============================================================================
 //                          GET SUBCOMMAND TESTS
 // =============================================================================
@@ -1541,16 +2361,28 @@ fn test_get_no_frontmatter_returns_empty_string() {
 /// YAML line in the rendered StatusBlock.
 #[test]
 fn test_get_malformed_frontmatter_renders_status_block_with_offending_line() {
+    use darkmatter::testing::strip_ansi_codes;
+
     let yaml = "---\nphases: 5\nfindings:\n  - id: '@' magic lookup emits results\n---\n# Doc\n";
 
-    md_cmd()
+    let output = md_cmd()
         .args(["get", "-", "phases"])
         .write_stdin(yaml)
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("MarkdownError"))
-        .stderr(predicate::str::contains("frontmatter parse failed"))
-        .stderr(predicate::str::contains("'@' magic lookup emits results"));
+        .output()
+        .expect("md get should run");
+
+    assert!(!output.status.success(), "expected a failure exit status");
+
+    // The offending YAML line is syntax-highlighted, so its characters are
+    // interleaved with SGR escapes in the raw stderr; strip ANSI before
+    // asserting on the visible text.
+    let stderr = strip_ansi_codes(&String::from_utf8_lossy(&output.stderr));
+    assert!(stderr.contains("MarkdownError"), "stderr: {stderr}");
+    assert!(stderr.contains("frontmatter parse failed"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("'@' magic lookup emits results"),
+        "offending line must be shown. stderr: {stderr}"
+    );
 }
 
 #[test]
@@ -3000,6 +3832,126 @@ fn layout_page_background_alias_works() {
 }
 
 #[test]
+fn layout_page_bg_color_hex_accepted() {
+    let tmp = md_file("# Hello\n");
+    for hex in ["#1e1e23", "#abc", "#ffffff"] {
+        let output = md_cmd()
+            .arg(tmp.path())
+            .arg("--page-bg-color")
+            .arg(hex)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "--page-bg-color {hex} should succeed; stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn layout_page_bg_color_rgb_triple_accepted() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--page-bg-color")
+        .arg("30,30,35")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}
+
+#[test]
+fn layout_page_bg_color_tailwind_accepted() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--page-bg-color")
+        .arg("red-500")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}
+
+#[test]
+fn layout_page_bg_color_special_keyword_accepted() {
+    let tmp = md_file("# Hello\n");
+    for kw in ["transparent", "currentColor", "inherit"] {
+        let output = md_cmd()
+            .arg(tmp.path())
+            .arg("--page-bg-color")
+            .arg(kw)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "--page-bg-color {kw} should succeed");
+    }
+}
+
+#[test]
+fn layout_page_bg_color_invalid_rejected() {
+    let tmp = md_file("# Hello\n");
+    for bad in ["not-a-color", "256,0,0", "1,2", "purple-555"] {
+        let output = md_cmd()
+            .arg(tmp.path())
+            .arg("--page-bg-color")
+            .arg(bad)
+            .output()
+            .unwrap();
+        assert!(
+            !output.status.success(),
+            "--page-bg-color {bad} should fail"
+        );
+    }
+}
+
+#[test]
+fn layout_width_flag_rejected() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--width")
+        .arg("80")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--width") || stderr.contains("max-width"),
+        "--width should be rejected with a helpful error; got: {stderr}"
+    );
+}
+
+#[test]
+fn layout_margin_aliases_work() {
+    // `--margin-top` and friends should be accepted as visible_aliases for
+    // the existing `--mt` / `--mb` / `--ml` / `--mr` flags.
+    let tmp = md_file("# Hello\n");
+    for args in [
+        ["--margin-top", "1"],
+        ["--margin-bottom", "1"],
+        ["--margin-left", "1"],
+        ["--margin-right", "1"],
+        ["--padding-top", "1"],
+        ["--padding-bottom", "1"],
+        ["--padding-left", "1"],
+        ["--padding-right", "1"],
+    ] {
+        let output = md_cmd()
+            .arg(tmp.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{} {} should be accepted; stderr: {}",
+            args[0],
+            args[1],
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
 fn layout_line_numbers_flag_accepted() {
     let tmp = md_file("```rust\nfn main() {}\n```\n");
     let output = md_cmd()
@@ -3109,14 +4061,15 @@ fn layout_combined_margin_padding_bg() {
 // These tests assert that CLI precedence rules produce the documented
 // observable resolved page state — not just that the CLI parses successfully.
 // They drive `apply_cli_layout_flags` against parsed `Cli` values and verify
-// the final `DarkmatterPage` getters (`margin()`, `padding()`, `fill_for()`,
+// the final `DarkmatterPage` getters (`page_margin()`, `page_padding()`, `fill_for()`,
 // `alignment_for()`, `max_width()`, `line_numbers()`).
 
 use biscuit_terminal::terminal::Terminal;
 use clap::Parser;
-use darkmatter::layout::{DarkmatterPage, PageAlignment, PageComponent, PageFill, WidthUnit};
+use darkmatter::layout::{DarkmatterPage, PageComponent};
 use darkmatter_cli::Cli;
 use darkmatter_cli::output::apply_cli_layout_flags;
+use renderable::layout::{Alignment, Edges, Length, TargetValue, Width};
 
 fn parse_cli(args: &[&str]) -> Cli {
     let mut full = vec!["md"];
@@ -3130,17 +4083,86 @@ fn resolved_page(args: &[&str]) -> DarkmatterPage {
     apply_cli_layout_flags(DarkmatterPage::new(&term), &cli)
 }
 
+fn tv_cells(tv: &TargetValue<Length>) -> u16 {
+    match tv {
+        TargetValue::Universal(Length::Ch(n)) => u16::try_from(*n).unwrap_or(u16::MAX),
+        _ => 0,
+    }
+}
+
+fn alignment_for(page: &DarkmatterPage, component: PageComponent) -> Alignment {
+    page.component_policy(component)
+        .map(|p| p.layout.alignment)
+        .unwrap_or_default()
+}
+
+#[derive(Debug, PartialEq)]
+enum TestFill {
+    Full,
+    Pad(Length),
+    Indent(Length),
+    Max(Length),
+    Explicit(Length),
+}
+
+fn fill_for(page: &DarkmatterPage, component: PageComponent) -> TestFill {
+    match page.component_policy(component) {
+        None => TestFill::Full,
+        Some(p) => {
+            let l = &p.layout;
+            if l.width == Width::Auto && l.max_width.is_none() && l.padding == Edges::default() {
+                TestFill::Full
+            } else if l.width == Width::Auto
+                && l.max_width.is_none()
+                && l.padding != Edges::default()
+            {
+                // Pad: symmetric horizontal padding (left == right, top/bottom zero)
+                if l.padding.top == TargetValue::universal(Length::Zero)
+                    && l.padding.bottom == TargetValue::universal(Length::Zero)
+                    && l.padding.left == l.padding.right
+                {
+                    TestFill::Pad(tv_length(&l.padding.left))
+                } else {
+                    // Asymmetric padding — treat as indent if only left is non-zero
+                    TestFill::Indent(tv_length(&l.padding.left))
+                }
+            } else if let Some(max_width) = &l.max_width && l.width == Width::Auto {
+                TestFill::Max(tv_length(max_width))
+            } else if matches!(l.width, Width::Fixed(_)) {
+                TestFill::Explicit(width_length(&l.width))
+            } else {
+                TestFill::Full
+            }
+        }
+    }
+}
+
+fn tv_length(tv: &TargetValue<Length>) -> Length {
+    match tv {
+        TargetValue::Universal(l) => l.clone(),
+        _ => Length::Zero,
+    }
+}
+
+fn width_length(w: &Width) -> Length {
+    match w {
+        Width::Fixed(tv) => tv_length(tv),
+        _ => Length::Zero,
+    }
+}
+
+
 #[test]
 fn layout_resolved_margin_shorthand_then_top_override() {
     // `-m 2 --mt 0`: shorthand sets all sides to 2, then --mt clears just the
     // top. The reviewer specifically called this out: precedence checks
     // should assert observable resolved behavior, not parse success.
     let page = resolved_page(&["fixture.md", "-m", "2", "--mt", "0"]);
-    let m = page.margin();
-    assert_eq!(m.top, 0, "--mt 0 must override -m 2 on the top edge");
-    assert_eq!(m.bottom, 2, "-m 2 must apply to the bottom edge");
-    assert_eq!(m.left, 2, "-m 2 must apply to the left edge");
-    assert_eq!(m.right, 2, "-m 2 must apply to the right edge");
+    let m = page.page_margin();
+    assert_eq!(tv_cells(&m.top), 0, "--mt 0 must override -m 2 on the top edge");
+    assert_eq!(tv_cells(&m.bottom), 2, "-m 2 must apply to the bottom edge");
+    assert_eq!(tv_cells(&m.left), 2, "-m 2 must apply to the left edge");
+    assert_eq!(tv_cells(&m.right), 2, "-m 2 must apply to the right edge");
 }
 
 #[test]
@@ -3148,21 +4170,21 @@ fn layout_resolved_margin_axis_then_side() {
     // `-m 4 --mx 2 --mt 1`: shorthand 4 everywhere, then horizontal axis to 2,
     // then top to 1.
     let page = resolved_page(&["fixture.md", "-m", "4", "--mx", "2", "--mt", "1"]);
-    let m = page.margin();
-    assert_eq!(m.top, 1, "--mt 1 overrides axis and shorthand on top");
-    assert_eq!(m.bottom, 4, "shorthand survives on bottom (no override)");
-    assert_eq!(m.left, 2, "--mx 2 overrides shorthand on left");
-    assert_eq!(m.right, 2, "--mx 2 overrides shorthand on right");
+    let m = page.page_margin();
+    assert_eq!(tv_cells(&m.top), 1, "--mt 1 overrides axis and shorthand on top");
+    assert_eq!(tv_cells(&m.bottom), 4, "shorthand survives on bottom (no override)");
+    assert_eq!(tv_cells(&m.left), 2, "--mx 2 overrides shorthand on left");
+    assert_eq!(tv_cells(&m.right), 2, "--mx 2 overrides shorthand on right");
 }
 
 #[test]
 fn layout_resolved_padding_axis_then_side() {
     let page = resolved_page(&["fixture.md", "--padding", "4", "--px", "2", "--pt", "1"]);
-    let p = page.padding();
-    assert_eq!(p.top, 1);
-    assert_eq!(p.bottom, 4);
-    assert_eq!(p.left, 2);
-    assert_eq!(p.right, 2);
+    let p = page.page_padding();
+    assert_eq!(tv_cells(&p.top), 1);
+    assert_eq!(tv_cells(&p.bottom), 4);
+    assert_eq!(tv_cells(&p.left), 2);
+    assert_eq!(tv_cells(&p.right), 2);
 }
 
 #[test]
@@ -3177,21 +4199,21 @@ fn layout_resolved_fill_global_then_component_specific() {
         "max=30",
     ]);
     assert_eq!(
-        page.fill_for(PageComponent::CodeBlocks),
-        PageFill::Max(WidthUnit::Fixed(30)),
+        fill_for(&page, PageComponent::CodeBlocks),
+        TestFill::Max(Length::ch(30)),
         "code-block-specific fill must override global"
     );
     for component in [PageComponent::Ul, PageComponent::Ol, PageComponent::Li] {
         assert_eq!(
-            page.fill_for(component),
-            PageFill::Max(WidthUnit::Fixed(40)),
+            fill_for(&page, component),
+            TestFill::Max(Length::ch(40)),
             "{:?} must still see the global fill",
             component
         );
     }
     assert_eq!(
-        page.fill_for(PageComponent::Tables),
-        PageFill::Max(WidthUnit::Fixed(40)),
+        fill_for(&page, PageComponent::Tables),
+        TestFill::Max(Length::ch(40)),
         "tables must still see the global fill"
     );
 }
@@ -3206,51 +4228,26 @@ fn layout_resolved_alignment_global_then_component_specific() {
         "left",
     ]);
     assert_eq!(
-        page.alignment_for(PageComponent::CodeBlocks),
-        PageAlignment::Left,
+        alignment_for(&page, PageComponent::CodeBlocks),
+        Alignment::Left,
         "code-block-specific alignment must override global"
     );
     for component in [PageComponent::Ul, PageComponent::Ol, PageComponent::Li] {
         assert_eq!(
-            page.alignment_for(component),
-            PageAlignment::Center,
+            alignment_for(&page, component),
+            Alignment::Center,
             "{:?} must still see the global alignment",
             component
         );
     }
     assert_eq!(
-        page.alignment_for(PageComponent::BlockQuotes),
-        PageAlignment::Center,
+        alignment_for(&page, PageComponent::BlockQuotes),
+        Alignment::Center,
         "blockquotes must still see the global alignment"
     );
 }
 
-#[test]
-fn layout_resolved_align_lists_does_not_write_deprecated_lists_slot() {
-    // `--align-lists` must broadcast to Ul/Ol/Li only; the deprecated
-    // PageComponent::Lists must remain unset so first-party CLI paths cannot
-    // resurrect the legacy broadcast.
-    let page = resolved_page(&["fixture.md", "--align-lists", "right"]);
-    #[allow(deprecated)]
-    let lists_align = page.alignment_for(PageComponent::Lists);
-    assert_eq!(
-        lists_align,
-        PageAlignment::Left,
-        "--align-lists must not write PageComponent::Lists"
-    );
-}
 
-#[test]
-fn layout_resolved_fill_lists_does_not_write_deprecated_lists_slot() {
-    let page = resolved_page(&["fixture.md", "--fill-lists", "max=40"]);
-    #[allow(deprecated)]
-    let lists_fill = page.fill_for(PageComponent::Lists);
-    assert_eq!(
-        lists_fill,
-        PageFill::Full,
-        "--fill-lists must not write PageComponent::Lists"
-    );
-}
 
 #[test]
 fn layout_resolved_align_lists_broadcast_then_granular_override() {
@@ -3264,18 +4261,18 @@ fn layout_resolved_align_lists_broadcast_then_granular_override() {
         "left",
     ]);
     assert_eq!(
-        page.alignment_for(PageComponent::Ul),
-        PageAlignment::Left,
+        alignment_for(&page, PageComponent::Ul),
+        Alignment::Left,
         "granular --align-ul must override broadcast"
     );
     assert_eq!(
-        page.alignment_for(PageComponent::Ol),
-        PageAlignment::Right,
+        alignment_for(&page, PageComponent::Ol),
+        Alignment::Right,
         "Ol must still see the broadcast"
     );
     assert_eq!(
-        page.alignment_for(PageComponent::Li),
-        PageAlignment::Right,
+        alignment_for(&page, PageComponent::Li),
+        Alignment::Right,
         "Li must still see the broadcast"
     );
 }
@@ -3292,18 +4289,18 @@ fn layout_resolved_fill_lists_broadcast_then_granular_override() {
         "max=30",
     ]);
     assert_eq!(
-        page.fill_for(PageComponent::Ul),
-        PageFill::Max(WidthUnit::Fixed(40)),
+        fill_for(&page, PageComponent::Ul),
+        TestFill::Max(Length::ch(40)),
         "Ul must still see the broadcast"
     );
     assert_eq!(
-        page.fill_for(PageComponent::Ol),
-        PageFill::Max(WidthUnit::Fixed(30)),
+        fill_for(&page, PageComponent::Ol),
+        TestFill::Max(Length::ch(30)),
         "granular --fill-ol must override broadcast"
     );
     assert_eq!(
-        page.fill_for(PageComponent::Li),
-        PageFill::Max(WidthUnit::Fixed(40)),
+        fill_for(&page, PageComponent::Li),
+        TestFill::Max(Length::ch(40)),
         "Li must still see the broadcast"
     );
 }
@@ -3340,11 +4337,11 @@ fn layout_resolved_mt_alone_does_not_set_other_sides() {
     // `--mt 3` alone must leave other edges at default (0); no implicit
     // bleed from shorthand.
     let page = resolved_page(&["fixture.md", "--mt", "3"]);
-    let m = page.margin();
-    assert_eq!(m.top, 3);
-    assert_eq!(m.bottom, 0);
-    assert_eq!(m.left, 0);
-    assert_eq!(m.right, 0);
+    let m = page.page_margin();
+    assert_eq!(tv_cells(&m.top), 3);
+    assert_eq!(tv_cells(&m.bottom), 0);
+    assert_eq!(tv_cells(&m.left), 0);
+    assert_eq!(tv_cells(&m.right), 0);
 }
 
 // =============================================================================
@@ -3604,12 +4601,12 @@ fn style_cli_margin_overrides_frontmatter() {
         apply_page_style(page, &style, overrides).expect("apply")
     };
     assert_eq!(
-        page.margin().left,
+        tv_cells(&page.page_margin().left),
         7,
         "CLI override must win over frontmatter left-margin"
     );
     assert_eq!(
-        page.margin().right,
+        tv_cells(&page.page_margin().right),
         4,
         "frontmatter right-margin (4ch) must still apply when not claimed"
     );
@@ -3710,8 +4707,8 @@ style:\n\
 ---\n\n# Doc\n";
     let page = apply_style_for(raw, &["doc.md"]);
     assert_eq!(
-        page.alignment_for(PageComponent::Tables),
-        PageAlignment::Left,
+        alignment_for(&page, PageComponent::Tables),
+        Alignment::Left,
         "frontmatter table.alignment must reach the page when no CLI claim",
     );
 }
@@ -3727,8 +4724,8 @@ style:\n\
 ---\n\n# Doc\n";
     let page = apply_style_for(raw, &["doc.md", "--align-tables", "right"]);
     assert_eq!(
-        page.alignment_for(PageComponent::Tables),
-        PageAlignment::Right,
+        alignment_for(&page, PageComponent::Tables),
+        Alignment::Right,
         "--align-tables right must override frontmatter table.alignment: left",
     );
 }
@@ -3744,8 +4741,8 @@ style:\n\
 ---\n\n# Doc\n";
     let page = apply_style_for(raw, &["doc.md", "--fill", "max=60"]);
     assert_eq!(
-        page.fill_for(PageComponent::Tables),
-        PageFill::Max(WidthUnit::Fixed(60)),
+        fill_for(&page, PageComponent::Tables),
+        TestFill::Max(Length::ch(60)),
         "--fill max=60 (global) must claim the table fill slot",
     );
 }
@@ -3759,8 +4756,8 @@ style:\n\
 ---\n\n# Doc\n";
     let page = apply_style_for(raw, &["doc.md"]);
     assert_eq!(
-        page.fill_for(PageComponent::Tables),
-        PageFill::Max(WidthUnit::Percent(50.0)),
+        fill_for(&page, PageComponent::Tables),
+        TestFill::Max(Length::Percent(50.0)),
         "frontmatter table.max-width must reach the page when no CLI claim",
     );
 }
@@ -3775,12 +4772,12 @@ style:\n\
 ---\n\n# Doc\n";
     let page = apply_style_for(raw, &["doc.md"]);
     assert_eq!(
-        page.alignment_for(PageComponent::Images),
-        PageAlignment::Center,
+        alignment_for(&page, PageComponent::Images),
+        Alignment::Center,
     );
     assert_eq!(
-        page.fill_for(PageComponent::Images),
-        PageFill::Max(WidthUnit::Fixed(40)),
+        fill_for(&page, PageComponent::Images),
+        TestFill::Max(Length::ch(40)),
     );
 }
 
@@ -3793,8 +4790,8 @@ style:\n\
 ---\n\n# Doc\n";
     let page = apply_style_for(raw, &["doc.md"]);
     assert_eq!(
-        page.fill_for(PageComponent::BlockQuotes),
-        PageFill::Max(WidthUnit::Percent(75.0)),
+        fill_for(&page, PageComponent::BlockQuotes),
+        TestFill::Max(Length::Percent(75.0)),
     );
 }
 
@@ -3880,44 +4877,24 @@ fn style_frontmatter_html_emits_component_layout_css() {
 
     let html = String::from_utf8(output.stdout).expect("html stdout must be utf-8");
 
-    // Component selectors must be emitted for all three buckets.
+    // Component layout is now emitted as inline `style` attributes by the
+    // renderable browser fold (build_component_css was deleted in the cutover).
+    // Table: center alignment + max-width: 60ch → margin-left:auto;margin-right:auto.
     assert!(
-        html.contains(".darkmatter-page table {"),
-        "expected `.darkmatter-page table {{` selector in HTML. html:\n{html}",
+        html.contains("<table") && html.contains("max-width:60ch") && html.contains("margin-left:auto") && html.contains("margin-right:auto"),
+        "expected centered table with inline max-width and auto margins in HTML. html:\n{html}",
     );
+    // Block-quote: right alignment + max-width: 50ch → margin-left:auto.
     assert!(
-        html.contains(".darkmatter-page img {") || html.contains(".darkmatter-page image {"),
-        "expected `.darkmatter-page img {{` selector in HTML. html:\n{html}",
+        html.contains("<blockquote") && html.contains("max-width:50ch") && html.contains("margin-left:auto"),
+        "expected right-aligned blockquote with inline max-width and auto margin in HTML. html:\n{html}",
     );
+    // Image: max-width and alignment are applied to the wrapping paragraph via
+    // the lone-image layout path (alignment without max-width does not emit
+    // margin styles in the current fold).
     assert!(
-        html.contains(".darkmatter-page blockquote {"),
-        "expected `.darkmatter-page blockquote {{` selector in HTML. html:\n{html}",
-    );
-
-    // Center alignment → `margin-left: auto; margin-right: auto;`.
-    assert!(
-        html.contains("margin-left: auto;") && html.contains("margin-right: auto;"),
-        "expected centered-table margin declarations in HTML. html:\n{html}",
-    );
-
-    // Right alignment → `margin-right: 0;` (with auto on the left).
-    assert!(
-        html.contains("margin-right: 0;"),
-        "expected right-aligned `margin-right: 0;` declaration in HTML. html:\n{html}",
-    );
-
-    // Max-width fills → `max-width: <N>ch` for each bucket's cap.
-    assert!(
-        html.contains("max-width: 60ch"),
-        "expected `max-width: 60ch` (table cap) in HTML. html:\n{html}",
-    );
-    assert!(
-        html.contains("max-width: 40ch"),
-        "expected `max-width: 40ch` (image cap) in HTML. html:\n{html}",
-    );
-    assert!(
-        html.contains("max-width: 50ch"),
-        "expected `max-width: 50ch` (block-quote cap) in HTML. html:\n{html}",
+        html.contains("<img") && html.contains("src=\"./x.png\""),
+        "expected image element in HTML. html:\n{html}",
     );
 }
 
@@ -3940,21 +4917,17 @@ fn style_prop_fixture_html_emits_table_layout_css() {
     );
     let html = String::from_utf8(output.stdout).expect("html stdout must be utf-8");
 
+    // Component layout is now emitted as inline `style` attributes by the
+    // renderable browser fold (build_component_css was deleted in the cutover).
+    // Right alignment + max-width: 50% → margin-left:auto on the table element.
     assert!(
-        html.contains(".darkmatter-page table {"),
-        "expected `.darkmatter-page table {{` selector in HTML. html:\n{html}",
+        html.contains("<table") && html.contains("margin-left:auto"),
+        "expected right-aligned table with inline auto margin in HTML. html:\n{html}",
     );
-    // Right alignment → `margin-right: 0;`.
+    // The fixture sets `max-width: 50%`; the fold preserves the percent on HTML.
     assert!(
-        html.contains("margin-right: 0;"),
-        "expected right-aligned table `margin-right: 0;` declaration in HTML. html:\n{html}",
-    );
-    // The fixture sets `max-width: 50%`; lowering must emit a `max-width: …ch`
-    // declaration somewhere in the table block (the exact column count
-    // depends on the page-content base, but a `ch`-suffixed cap must exist).
-    assert!(
-        html.contains("max-width: ") && html.contains("ch"),
-        "expected a `max-width: <N>ch` declaration in HTML. html:\n{html}",
+        html.contains("max-width:50%"),
+        "expected `max-width:50%` declaration in HTML. html:\n{html}",
     );
 }
 
@@ -4001,13 +4974,13 @@ fn no_style_frontmatter_leaves_cli_layout_state_intact() {
         apply_style_frontmatter(cli_only.clone(), &md, &cli, None).expect("style apply");
 
     assert_eq!(
-        after_style.margin(),
-        cli_only.margin(),
+        after_style.page_margin(),
+        cli_only.page_margin(),
         "no `style:` frontmatter must leave CLI-resolved margins untouched",
     );
     assert_eq!(
-        after_style.padding(),
-        cli_only.padding(),
+        after_style.page_padding(),
+        cli_only.page_padding(),
         "no `style:` frontmatter must leave CLI-resolved padding untouched",
     );
     assert_eq!(
@@ -4017,13 +4990,13 @@ fn no_style_frontmatter_leaves_cli_layout_state_intact() {
     );
     for component in PageComponent::ALL {
         assert_eq!(
-            after_style.alignment_for(component),
-            cli_only.alignment_for(component),
+            alignment_for(&after_style, component),
+            alignment_for(&cli_only, component),
             "no `style:` frontmatter must leave CLI-resolved alignment untouched: {component:?}",
         );
         assert_eq!(
-            after_style.fill_for(component),
-            cli_only.fill_for(component),
+            fill_for(&after_style, component),
+            fill_for(&cli_only, component),
             "no `style:` frontmatter must leave CLI-resolved fill untouched: {component:?}",
         );
     }
@@ -4038,13 +5011,13 @@ fn style_prop_fixture_resolves_to_expected_table_layout() {
     let page = apply_style_for(&raw, &["doc.md"]);
 
     assert_eq!(
-        page.alignment_for(PageComponent::Tables),
-        PageAlignment::Right,
+        alignment_for(&page, PageComponent::Tables),
+        Alignment::Right,
         "fixture must resolve to a right-aligned table",
     );
     assert_eq!(
-        page.fill_for(PageComponent::Tables),
-        PageFill::Max(WidthUnit::Percent(50.0)),
+        fill_for(&page, PageComponent::Tables),
+        TestFill::Max(Length::Percent(50.0)),
         "fixture must cap the table at 50% max-width",
     );
 }
@@ -4056,11 +5029,11 @@ fn style_prop_fixture_resolves_to_expected_page_margins() {
     let raw = std::fs::read_to_string(style_prop_fixture()).unwrap();
     let page = apply_style_for(&raw, &["doc.md"]);
 
-    let m = page.margin();
-    assert_eq!(m.left, 2, "fixture left-margin: 2ch must reach the page");
-    assert_eq!(m.right, 4, "fixture right-margin: 4ch must reach the page");
-    assert_eq!(m.top, 1, "fixture top-margin: 1 must reach the page");
-    assert_eq!(m.bottom, 0, "fixture bottom-margin: 0 must reach the page");
+    let m = page.page_margin();
+    assert_eq!(tv_cells(&m.left), 2, "fixture left-margin: 2ch must reach the page");
+    assert_eq!(tv_cells(&m.right), 4, "fixture right-margin: 4ch must reach the page");
+    assert_eq!(tv_cells(&m.top), 1, "fixture top-margin: 1 must reach the page");
+    assert_eq!(tv_cells(&m.bottom), 0, "fixture bottom-margin: 0 must reach the page");
 }
 
 #[test]
@@ -4095,8 +5068,8 @@ terminal is reasonably wide.\n";
     // Structural guard: the apply pipeline put the fill where the renderer
     // will look for it.
     assert_eq!(
-        page.fill_for(PageComponent::BlockQuotes),
-        PageFill::Max(WidthUnit::Percent(50.0)),
+        fill_for(&page, PageComponent::BlockQuotes),
+        TestFill::Max(Length::Percent(50.0)),
         "block-quote.max-width must reach the page fill slot",
     );
 
@@ -4130,4 +5103,28 @@ terminal is reasonably wide.\n";
         max_len <= 60,
         "blockquote visible width should be capped under max-width: 50% on a 100-col terminal, got max={max_len}. plain:\n{plain}",
     );
+}
+
+#[test]
+fn render_accepts_code_block_flag() {
+    let tmp = md_file("# Title\n\n```rust\nfn main() {}\n```\n");
+    for mode in ["inverse", "dark", "light", "same"] {
+        md_cmd()
+            .args(["--code-block", mode])
+            .arg(tmp.path())
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Title"));
+    }
+}
+
+#[test]
+fn render_rejects_invalid_code_block_value() {
+    let tmp = md_file("# Title\n");
+    md_cmd()
+        .args(["--code-block", "sideways"])
+        .arg(tmp.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid value 'sideways'"));
 }

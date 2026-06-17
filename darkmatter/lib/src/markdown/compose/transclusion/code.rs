@@ -1,21 +1,28 @@
 //! Code transclusion formatting helpers.
 
-use lazy_static::lazy_static;
+use crate::markdown::language_grammar::LanguageGrammar;
 use std::path::Path;
-use syntect::parsing::SyntaxSet;
 
-lazy_static! {
-    static ref SYNTAX_SET: SyntaxSet = SyntaxSet::load_defaults_newlines();
-}
-
-/// Infers markdown code-fence language from file extension.
+/// Infers markdown code-fence language from a file path.
+///
+/// The path is validated against [`LanguageGrammar`] so the lookup uses
+/// Darkmatter's full two-face grammar set rather than syntect's smaller
+/// default set. When the path resolves, the returned token is the lowercase
+/// file extension (or basename for extensionless paths) so that existing
+/// output such as `main.rs` -> `rs` is preserved.
 pub fn infer_language(path: &Path, fallback: &str) -> String {
-    let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
-        return fallback.to_string();
-    };
+    let raw = path.to_string_lossy();
 
-    if SYNTAX_SET.find_syntax_by_extension(ext).is_some() {
+    if LanguageGrammar::from_filename(raw.as_ref()).is_err() {
+        return fallback.to_string();
+    }
+
+    if let Some(ext) = path.extension().and_then(|ext| ext.to_str()) {
         return ext.to_ascii_lowercase();
+    }
+
+    if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+        return name.to_ascii_lowercase();
     }
 
     fallback.to_string()
@@ -60,13 +67,27 @@ mod tests {
     }
 
     #[test]
+    fn two_face_only_extension_emits_real_extension() {
+        assert_eq!(infer_language(Path::new("component.ts"), "txt"), "ts");
+    }
+
+    #[test]
     fn unknown_extension_uses_fallback() {
         assert_eq!(infer_language(Path::new("sample.weird"), "txt"), "txt");
     }
 
     #[test]
-    fn fallback_language_when_no_extension() {
-        assert_eq!(infer_language(Path::new("Makefile"), "txt"), "txt");
+    fn recognizes_extensionless_well_known_filename() {
+        // `Makefile` has no extension but is a supported source filename; the
+        // returned fence token is the lowercase basename so composed Markdown
+        // surfaces the language hint instead of falling back to plain text.
+        assert_eq!(infer_language(Path::new("Makefile"), "txt"), "makefile");
+        assert_eq!(infer_language(Path::new("Dockerfile"), "txt"), "dockerfile");
+    }
+
+    #[test]
+    fn fallback_language_when_no_extension_and_unknown_basename() {
+        assert_eq!(infer_language(Path::new("not-a-known-name"), "txt"), "txt");
     }
 
     #[test]

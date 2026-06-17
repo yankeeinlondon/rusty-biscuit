@@ -64,9 +64,6 @@ sanity:
 test *args="":
     @just _test {{ LIBRARY }} {{ args }}
     @just _test {{ CLI }} {{ args }}
-    @echo
-    @echo "👀 {{ BOLD }}Note:{{ RESET }} {{ BLUE }}just test{{ RESET }} runs Level-1 only; use {{ BLUE }}just test-l2{{ RESET }} for real-terminal tests"
-    @echo
 
 # Level-2 real-terminal tests. Skips cleanly if the harness is unavailable
 # unless `BISCUIT_TEST_LEVEL_REQUIRED=2` is set in the environment.
@@ -74,12 +71,13 @@ test-l2 *args="":
     @just _test_l2 {{ CLI }} {{ args }}
 
 # not applicable: biscuit-terminal has no OS-keyboard-injection (Level-3) tests
-test-l3:
-    @echo "test-l3: not applicable for biscuit-terminal"
+test-l3 *args="":
+    @just _test_l3 {{ LIBRARY }} {{ args }}
+    @just _test_l3 {{ CLI }} {{ args }}
 
-# not applicable today; planned alongside the BrowserRenderable target
+# Headless-browser tests (computed-style parity for BrowserRenderable output).
 test-browser:
-    @echo "test-browser: not applicable for biscuit-terminal yet"
+    @just _test_browser {{ LIBRARY }}
 
 # not applicable: biscuit-terminal has no real-resource tier
 test-real:

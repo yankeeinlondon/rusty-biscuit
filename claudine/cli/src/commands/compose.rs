@@ -15,10 +15,12 @@
 #![allow(clippy::result_large_err)]
 
 use std::collections::BTreeSet;
+use std::io::IsTerminal;
 
 use clap::Args;
 use claudine::composition::{
-    self, CompositionExecutionRequest, CompositionMode, OutputFormat as CompositionOutputFormat,
+    self, CompositionError, CompositionExecutionRequest, CompositionMode,
+    OutputFormat as CompositionOutputFormat, ResolvedSessionInteractivity,
 };
 use claudine::provider::Provider;
 use claudine::system_prompt::SystemPromptArgs;
@@ -98,6 +100,10 @@ pub struct SharedComposeArgs {
     /// Run the provider session in interactive mode.
     #[arg(short = 'i', long)]
     pub interactive: bool,
+
+    /// Run the provider session in non-interactive mode.
+    #[arg(long, conflicts_with = "interactive")]
+    pub no_interactive: bool,
 
     /// Preserve this env var even when it matches sensitive-name filters.
     #[arg(long = "include", value_name = "ENV_NAME")]
@@ -261,6 +267,37 @@ impl SharedComposeArgs {
             None => Ok(None),
         }
     }
+
+    /// Resolve the session interactivity from CLI flags and frontmatter.
+    ///
+    /// Precedence (highest → lowest): `--no-interactive` flag, `-i` / `--interactive`
+    /// flag, authored `interactive` frontmatter value, then default non-interactive.
+    pub(crate) fn resolve_session_interactivity(
+        &self,
+        frontmatter_interactive: Option<bool>,
+    ) -> ResolvedSessionInteractivity {
+        if self.no_interactive {
+            ResolvedSessionInteractivity {
+                value: false,
+                source: claudine::composition::SessionInteractivitySource::NoInteractiveFlag,
+            }
+        } else if self.interactive {
+            ResolvedSessionInteractivity {
+                value: true,
+                source: claudine::composition::SessionInteractivitySource::InteractiveFlag,
+            }
+        } else if let Some(value) = frontmatter_interactive {
+            ResolvedSessionInteractivity {
+                value,
+                source: claudine::composition::SessionInteractivitySource::Frontmatter,
+            }
+        } else {
+            ResolvedSessionInteractivity {
+                value: false,
+                source: claudine::composition::SessionInteractivitySource::Default,
+            }
+        }
+    }
 }
 
 /// Compose a Markdown document through an agentic CLI.
@@ -319,6 +356,23 @@ pub fn run_inline_compose(
     std::process::exit(code);
 }
 
+/// Record a named prep work unit (P-5a) when `--perf` is active.
+///
+/// Each unit is a disjoint sub-window of the `compose_entry` → request prep
+/// window, so the recorded timings carve `prep_phase` into reconciling
+/// `Structural` children (`shell approval` being the usual dominant cost),
+/// leaving the small remainder in `prep → unattributed`.
+fn record_prep_substage(
+    out: &mut Vec<crate::perf::SubstageTiming>,
+    enabled: bool,
+    name: &'static str,
+    started: std::time::Instant,
+) {
+    if enabled {
+        out.push(crate::perf::SubstageTiming::new(name, started.elapsed()));
+    }
+}
+
 fn run_compose_inner(
     args: ComposeArgs,
     verbose: u8,
@@ -326,22 +380,12 @@ fn run_compose_inner(
 ) -> Result<i32> {
     let compose_entry = std::time::Instant::now();
     let ComposeArgs { shared, args } = args;
+    let perf_enabled = shared.perf;
+    let mut prep_substages: Vec<crate::perf::SubstageTiming> = Vec::new();
     let parsed = parse_composition_positionals(&args)?;
     let file = parsed.file_ref.ok_or_else(|| {
         eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
     })?;
-
-    // Receipt banner: immediate feedback that the request was accepted.
-    // Suppressed only by `--silent`. Per spec W1, `--quiet` follows the
-    // existing execution header's detail rules — which include emitting
-    // the brief one-liner — so the banner appears under `--quiet`.
-    if !shared.silent {
-        use biscuit_terminal::components::renderable::TerminalRenderable;
-        use biscuit_terminal::components::status::Status;
-        let term = crate::log::terminal();
-        let status = Status::from_prose(format!("→ Composing {file}…"));
-        crate::log::message(&status.render(&term));
-    }
 
     // Install the process-scoped SIGINT handler now so Ctrl+C during the
     // (potentially slow) compose prep phase produces the same INFO notice
@@ -364,7 +408,36 @@ fn run_compose_inner(
     let set_overrides = merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
     let system_prompt_args = shared.system_prompt_args();
 
+    let prep_t = std::time::Instant::now();
     let source = composition::resolve_composition_source(&file)?;
+    record_prep_substage(&mut prep_substages, perf_enabled, "frontmatter load", prep_t);
+
+    // Schema-aware pre-prepare validation. Runs BEFORE the preflight
+    // compose pass so the user-visible error surface is Claudine's
+    // typed `CompositionError` rather than Darkmatter's raw
+    // `MarkdownError::SchemaValidationFailed`. Drives interactive
+    // collection of missing required values when allowed and merges the
+    // collected values into `set_overrides`. Invalid optional values are
+    // dropped in place. Schema-load failures, invalid required values,
+    // and missing required values (non-interactive) surface as typed
+    // errors here, never as Darkmatter raw errors.
+    let schema_t = std::time::Instant::now();
+    let (source, set_overrides) = {
+        let interactive_opts =
+            super::schema_interactive::resolve_interactive_options(shared.silent);
+        let term = crate::log::terminal();
+        let pre = super::schema_interactive::pre_validate_with_interactive_collection(
+            &source,
+            set_overrides.as_ref(),
+            interactive_opts,
+            &term,
+        )?;
+        super::schema_interactive::emit_dropped_optional_warnings(&pre.dropped_optionals);
+        (pre.source, pre.set_overrides)
+    };
+    // Includes any interactive collection wait when stdin is a TTY; in the
+    // common non-interactive / dry-run `--perf` case this is pure validation.
+    record_prep_substage(&mut prep_substages, perf_enabled, "schema validation", schema_t);
 
     let _compose_span = info_span!(
         "compose",
@@ -378,11 +451,13 @@ fn run_compose_inner(
     // immediately after source resolution. The context owns the single
     // source-repo-root discovery, the loaded selection config, and the
     // installed-provider snapshot used by every later prep phase.
+    let prep_ctx_t = std::time::Instant::now();
     let prep_context = super::wrap::composition::CompositionPrepContext::new(
         &file,
         &source.resolved_path,
         &shared.excluded(),
     )?;
+    record_prep_substage(&mut prep_substages, perf_enabled, "prep context", prep_ctx_t);
 
     // -- Eager target resolution -------------------------------------------
     // Resolve the execution target *before* composing templates so that
@@ -397,19 +472,64 @@ fn run_compose_inner(
             &raw_hints,
             shared.explicit_provider(),
             shared.model.as_deref(),
+            shared.dry_run,
+            &source.resolved_path,
         )?
     };
 
     let mut env_overrides: std::collections::BTreeMap<String, String> =
         std::collections::BTreeMap::new();
-    super::wrap::composition::install_agent_env_for_composition(
-        &resolved_target,
-        &mut env_overrides,
-    );
+    if let Some(ref target) = resolved_target {
+        super::wrap::composition::install_agent_env_for_composition(target, shared.yolo, &mut env_overrides);
+    }
+
+    // Render the execution line the moment the agent is known. Eager
+    // resolution above prompts the interactive picker when the agent is
+    // ambiguous, so by this point the target is settled for every real
+    // run — and this lands *before* the expensive prepare/compose work, so
+    // the user sees immediate feedback. The lone case without a target is
+    // a `--dry-run` with an unresolved agent; the executor emits the
+    // header itself there after rendering the unresolved state.
+    //
+    // The header must describe the *resolved* session mode, not the raw
+    // `-i` flag: a document with `interactive: true` and no flag still runs
+    // interactively. `raw_hints.interactive` carries the authored
+    // frontmatter value, so resolving it here keeps the eager header in
+    // agreement with the executor's `session_interactive`.
+    let header_interactive =
+        shared.resolve_session_interactivity(raw_hints.interactive).value;
+    let header_emitted = match (shared.silent, resolved_target.as_ref()) {
+        (false, Some(target)) => super::wrap::composition::emit_execution_header(
+            target.provider,
+            shared.yolo,
+            header_interactive,
+            verbose > 0,
+            shared.repo,
+            false, // is_inline
+            false, // sequence
+            shared.operation.as_deref(),
+            &file,
+            prep_context.launch_workspace.package_context.clone(),
+            &crate::log::terminal(),
+        ),
+        _ => false,
+    };
 
     // ── Pre-flight shell approval ────────────────────────────────────
+    //
+    // `ComposeContext::capture()` + `env_mut().insert(...)` installs the
+    // resolved `AGENT` (and any other composition env overrides) into
+    // the same Darkmatter compose pipeline that the preflight pass
+    // walks. Without this, frontmatter values that derive from env
+    // (e.g. `runtime_agent: '{{ env.AGENT }}'`) fail Darkmatter's
+    // built-in schema validation during preflight, before reaching
+    // `prepare_direct_with_schema`.
     let compose_options = {
-        let mut opts = darkmatter::markdown::compose::ComposeOptions::new()
+        let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
+        for (key, value) in &env_overrides {
+            ctx.env_mut().insert(key.clone(), value.clone());
+        }
+        let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
             .with_source_file(&source.resolved_path);
         if let Some(ref overrides) = set_overrides {
             opts = opts.with_set_overrides(overrides.clone());
@@ -420,12 +540,17 @@ fn run_compose_inner(
     let shared_approval_cache =
         std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
 
-    let approval_options = super::wrap::build_harness_shell_options_with_cache(
-        &source.resolved_path,
-        prep_context.source_repo_root.as_deref(),
-        Some(std::sync::Arc::clone(&shared_approval_cache)),
+    let approval_options = super::wrap::apply_composition_shell_overrides(
+        super::wrap::build_harness_shell_options_with_cache(
+            &source.resolved_path,
+            prep_context.source_repo_root.as_deref(),
+            Some(std::sync::Arc::clone(&shared_approval_cache)),
+        ),
+        shared.dry_run,
+        shared.yolo,
     );
 
+    let shell_approval_t = std::time::Instant::now();
     let preflight = {
         let _span = info_span!("compose_prep.shell_preflight").entered();
         composition::resolve_shell_approvals(
@@ -435,6 +560,7 @@ fn run_compose_inner(
             &approval_options,
         )?
     };
+    record_prep_substage(&mut prep_substages, perf_enabled, "shell approval", shell_approval_t);
 
     // Post-prep interrupt checkpoint. If the user pressed Ctrl+C during
     // any of the prep phases (compose source parse, target resolution,
@@ -455,14 +581,24 @@ fn run_compose_inner(
         // Engine polls this during rate-limit pause sleeps so Ctrl+C
         // surfaces as `LoopInterrupted` instead of waiting out the timer.
         interrupt_check: Some(crate::output::user_interrupt_observed),
+        pause_reset_margin: claudine::composition::resolve_pause_reset_margin_from_env(),
     };
 
+    // `--dry-run` bypasses the iteration engine entirely: a single
+    // composition + single render (Decision 4). Loop detection is skipped so
+    // a doc with `loop:` frontmatter renders once rather than iterating.
     let file_for_loop = file.clone();
-    if let Some(loop_result) =
+    if !shared.dry_run && let Some(loop_result) =
         run_loop_with_overrides(&source, set_overrides.as_ref(), loop_options, |ctx| {
             let prepared = {
                 let _span = info_span!("compose_prep.prepare_direct").entered();
-                composition::prepare_direct(
+                // Schema-aware variant: typed `SchemaLoad` /
+                // `SchemaValidation` / `MissingProperties` errors and
+                // drop-and-retry for invalid optionals apply per
+                // iteration. Interactive collection is NOT driven inside
+                // loops; missing required values surface as
+                // `MissingProperties` on the first iteration.
+                composition::prepare_direct_with_schema(
                     &source,
                     composition::PrepareOptions {
                         set_overrides: Some(ctx.as_set_overrides()),
@@ -470,42 +606,50 @@ fn run_compose_inner(
                         env_overrides: env_overrides.clone(),
                         perf_enabled: shared.perf,
                         source_repo_root: prep_context.source_repo_root.clone(),
+                        shell_working_directory: Some(
+                            prep_context.launch_workspace.child_cwd.clone(),
+                        ),
                     },
                 )?
             };
 
-            let request = CompositionExecutionRequest {
-                mode: CompositionMode::ChainedDocument,
-                file_ref: file_for_loop.clone(),
-                prepared,
-                resolved_target: Some(resolved_target.clone()),
-                explicit_provider: shared.explicit_provider(),
-                excluded: shared.excluded(),
-                yolo: shared.yolo,
-                include: shared.include.clone(),
-                model: shared.model.clone(),
-                output: shared.output,
-                system_prompt_args: system_prompt_args.clone(),
-                timeout: shared.timeout.clone(),
-                step_timeout: shared.step_timeout.clone(),
-                operation: shared.operation.clone(),
-                sandbox: shared.sandbox,
-                repo: shared.repo,
-                dry_run: shared.dry_run,
-                mcp: shared.mcp,
-                mcp_use: shared.mcp_use.clone(),
-                strict: shared.strict,
-                session_interactive: shared.interactive,
-                quiet: shared.quiet,
-                silent: shared.silent,
-                env_overrides: env_overrides.clone(),
-                shared_approval_cache: Some(std::sync::Arc::clone(&shared_approval_cache)),
-                sequence: false,
-                installed_snapshot: Some(prep_context.installed_snapshot.clone()),
-                prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
-                prep_launch_context: Some(prep_context.launch_context.clone()),
-                prep_env_context: Some(prep_context.env_context.clone()),
-                prep_launch_detection_error: prep_context.launch_detection_error.clone(),
+            let request = {
+                let resolved = shared.resolve_session_interactivity(prepared.selection_hints.interactive);
+                CompositionExecutionRequest {
+                    mode: CompositionMode::ChainedDocument,
+                    file_ref: file_for_loop.clone(),
+                    prepared,
+                    resolved_target: resolved_target.clone(),
+                    explicit_provider: shared.explicit_provider(),
+                    excluded: shared.excluded(),
+                    yolo: shared.yolo,
+                    include: shared.include.clone(),
+                    model: shared.model.clone(),
+                    output: shared.output,
+                    system_prompt_args: system_prompt_args.clone(),
+                    timeout: shared.timeout.clone(),
+                    step_timeout: shared.step_timeout.clone(),
+                    operation: shared.operation.clone(),
+                    sandbox: shared.sandbox,
+                    repo: shared.repo,
+                    dry_run: shared.dry_run,
+                    mcp: shared.mcp,
+                    mcp_use: shared.mcp_use.clone(),
+                    strict: shared.strict,
+                    session_interactive: resolved.value,
+                    session_interactive_source: resolved.source,
+                    quiet: shared.quiet,
+                    silent: shared.silent,
+                    env_overrides: env_overrides.clone(),
+                    shared_approval_cache: Some(std::sync::Arc::clone(&shared_approval_cache)),
+                    sequence: false,
+                    installed_snapshot: Some(prep_context.installed_snapshot.clone()),
+                    prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
+                    prep_launch_context: Some(prep_context.launch_context.clone()),
+                    prep_env_context: Some(prep_context.env_context.clone()),
+                    prep_launch_detection_error: prep_context.launch_detection_error.clone(),
+                    header_emitted,
+                }
             };
 
             let outcome = super::wrap::composition::execute_composition_request_inner(
@@ -562,9 +706,13 @@ fn run_compose_inner(
     }
 
     // ── Single execution path (no loop) ──────────────────────────────────
+    // Pre-validation (with interactive collection) has already run, so
+    // schema requirements are satisfied. Call the schema-aware prepare
+    // directly — typed errors still surface for any residual issues
+    // (e.g. drop-and-retry on a latent optional).
     let prepared = {
         let _span = info_span!("compose_prep.prepare_direct").entered();
-        composition::prepare_direct(
+        composition::prepare_direct_with_schema(
             &source,
             composition::PrepareOptions {
                 set_overrides,
@@ -572,46 +720,54 @@ fn run_compose_inner(
                 env_overrides: env_overrides.clone(),
                 perf_enabled: shared.perf,
                 source_repo_root: prep_context.source_repo_root.clone(),
+                shell_working_directory: Some(prep_context.launch_workspace.child_cwd.clone()),
             },
         )?
     };
+    super::schema_interactive::emit_dropped_optional_warnings(&prepared.dropped_optionals);
 
-    let request = CompositionExecutionRequest {
-        mode: CompositionMode::ChainedDocument,
-        file_ref: file,
-        prepared,
-        resolved_target: Some(resolved_target),
-        explicit_provider: shared.explicit_provider(),
-        excluded: shared.excluded(),
-        yolo: shared.yolo,
-        include: shared.include,
-        model: shared.model,
-        output: shared.output,
-        system_prompt_args,
-        timeout: shared.timeout.clone(),
-        step_timeout: shared.step_timeout.clone(),
-        operation: shared.operation,
-        sandbox: shared.sandbox,
-        repo: shared.repo,
-        dry_run: shared.dry_run,
-        mcp: shared.mcp,
-        mcp_use: shared.mcp_use,
-        strict: shared.strict,
-        session_interactive: shared.interactive,
-        quiet: shared.quiet,
-        silent: shared.silent,
-        env_overrides,
-        shared_approval_cache: Some(shared_approval_cache),
-        sequence: false,
-        installed_snapshot: Some(prep_context.installed_snapshot.clone()),
-        prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
-        prep_launch_context: Some(prep_context.launch_context.clone()),
-        prep_env_context: Some(prep_context.env_context.clone()),
-        prep_launch_detection_error: prep_context.launch_detection_error.clone(),
+    let request = {
+        let resolved = shared.resolve_session_interactivity(prepared.selection_hints.interactive);
+        CompositionExecutionRequest {
+            mode: CompositionMode::ChainedDocument,
+            file_ref: file,
+            prepared,
+            resolved_target,
+            explicit_provider: shared.explicit_provider(),
+            excluded: shared.excluded(),
+            yolo: shared.yolo,
+            include: shared.include,
+            model: shared.model,
+            output: shared.output,
+            system_prompt_args,
+            timeout: shared.timeout.clone(),
+            step_timeout: shared.step_timeout.clone(),
+            operation: shared.operation,
+            sandbox: shared.sandbox,
+            repo: shared.repo,
+            dry_run: shared.dry_run,
+            mcp: shared.mcp,
+            mcp_use: shared.mcp_use,
+            strict: shared.strict,
+            session_interactive: resolved.value,
+            session_interactive_source: resolved.source,
+            quiet: shared.quiet,
+            silent: shared.silent,
+            env_overrides,
+            shared_approval_cache: Some(shared_approval_cache),
+            sequence: false,
+            installed_snapshot: Some(prep_context.installed_snapshot.clone()),
+            prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
+            prep_launch_context: Some(prep_context.launch_context.clone()),
+            prep_env_context: Some(prep_context.env_context.clone()),
+            prep_launch_detection_error: prep_context.launch_detection_error.clone(),
+            header_emitted,
+        }
     };
 
     if let Some(ref mut timings) = startup_timings {
         timings.prep_phase = compose_entry.elapsed();
+        timings.prep_substages = prep_substages;
     }
 
     execute_composition_request(request, verbose, startup_timings, shared.perf)
@@ -624,22 +780,12 @@ fn run_inline_compose_inner(
 ) -> Result<i32> {
     let inline_compose_entry = std::time::Instant::now();
     let InlineComposeArgs { shared, args } = args;
+    let perf_enabled = shared.perf;
+    let mut prep_substages: Vec<crate::perf::SubstageTiming> = Vec::new();
     let parsed = parse_composition_positionals(&args)?;
     let file = parsed.file_ref.ok_or_else(|| {
         eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
     })?;
-
-    // Receipt banner: immediate feedback that the request was accepted.
-    // Suppressed only by `--silent`. Per spec W1, `--quiet` follows the
-    // existing execution header's detail rules — which include emitting
-    // the brief one-liner — so the banner appears under `--quiet`.
-    if !shared.silent {
-        use biscuit_terminal::components::renderable::TerminalRenderable;
-        use biscuit_terminal::components::status::Status;
-        let term = crate::log::terminal();
-        let status = Status::from_prose(format!("→ Composing {file}…"));
-        crate::log::message(&status.render(&term));
-    }
 
     // Install the process-scoped SIGINT handler now so Ctrl+C during the
     // (potentially slow) compose prep phase produces the same INFO notice
@@ -668,11 +814,13 @@ fn run_inline_compose_inner(
         None
     };
 
+    let frontmatter_load_t = std::time::Instant::now();
     let source = match composition::resolve_composition_source(&file) {
         Ok(source) => {
-            if let Some(ref t) = term {
-                claudine::harness::report::report_source_file(&file, &source.resolved_path, t);
-            }
+            // The "resolved source file" success line is deferred until
+            // after the execution header (see the reporting block below the
+            // early header) so nothing prints before the header. The
+            // not-found error path stays fail-fast in the `Err` arm.
             let _inline_span = info_span!(
                 "inline_compose",
                 file = %source.resolved_path.display(),
@@ -683,15 +831,55 @@ fn run_inline_compose_inner(
             source
         }
         Err(e) => {
-            if let Some(ref t) = term {
+            // Only a genuine reference-resolution failure means the file was
+            // not found. A file that resolved but failed to load/parse (e.g.
+            // malformed frontmatter) must not be reported as "no match" — its
+            // own typed error already names the file and the cause.
+            if let Some(ref t) = term
+                && matches!(
+                    e,
+                    CompositionError::FileNotFound(_) | CompositionError::InvalidReference(_)
+                )
+            {
                 claudine::harness::report::report_source_file(&file, std::path::Path::new(""), t);
             }
             return Err(e.into());
         }
     };
+    record_prep_substage(
+        &mut prep_substages,
+        perf_enabled,
+        "frontmatter load",
+        frontmatter_load_t,
+    );
+
+    // -- Fail-fast: inline-compose / sequence mismatch ----------------------
+    //
+    // A document authoring both a non-null `prompt` and a non-null `sequence`
+    // defines an inline sequence and must run under `claudine sequence`. Reject
+    // it here — after load/parse (so `FrontmatterParse` keeps precedence) but
+    // before the prompt-property pre-validation, schema scrubbing, overrides,
+    // composition, provider selection, and execution. Detection reads authored
+    // frontmatter only; `set_overrides` never participate.
+    if composition::is_inline_sequence_mismatch(&source) {
+        let raw_yaml =
+            composition::capture_frontmatter_yaml(&source.original_text).unwrap_or_default();
+        let stderr_is_tty = std::io::stderr().is_terminal();
+        return Err(CompositionError::InlineComposeSequenceMismatch {
+            source_path: source.resolved_path.clone(),
+            raw_yaml,
+            stderr_is_tty,
+        }
+        .into());
+    }
 
     // -- Pre-validation: prompt frontmatter property ------------------------
-
+    //
+    // This MUST run before the schema-aware pre-validation. Otherwise a
+    // schema like `$schema: { prompt: string }` with `prompt: 123` would
+    // be dropped by the invalid-optional scrub, and inline-compose would
+    // then incorrectly report `PromptPropertyMissing` instead of
+    // `PromptPropertyWrongType` — masking the real problem.
     let prompt_value = source
         .markdown
         .frontmatter()
@@ -704,18 +892,60 @@ fn run_inline_compose_inner(
         .and_then(|v| v.as_str())
         .is_some_and(|s| !s.trim().is_empty());
 
-    if let Some(ref t) = term {
+    // Fail-fast diagnostics (missing / present-but-empty) print before the
+    // header; the success line is deferred to the reporting block after the
+    // early header so nothing precedes the execution line.
+    if let Some(ref t) = term
+        && !(has_prompt && is_non_empty)
+    {
         claudine::harness::report::report_prompt_property(has_prompt, is_non_empty, t);
     }
+
+    // Drive the inline-specific contract eagerly so a wrong-type or
+    // missing `prompt` produces the right typed error before any schema
+    // scrubbing kicks in.
+    if !has_prompt {
+        return Err(CompositionError::PromptPropertyMissing.into());
+    }
+    if let Some(value) = prompt_value.as_ref()
+        && !matches!(value, serde_json::Value::String(_))
+    {
+        return Err(CompositionError::PromptPropertyWrongType(
+            json_type_name(value).to_string(),
+        )
+        .into());
+    }
+
+    // Schema-aware pre-prepare validation. Runs AFTER the prompt-property
+    // check so the inline-compose contract takes precedence over the
+    // generic schema check. See the same call in `run_compose_inner` for
+    // the full rationale.
+    let schema_t = std::time::Instant::now();
+    let (source, set_overrides) = {
+        let interactive_opts =
+            super::schema_interactive::resolve_interactive_options(shared.silent);
+        let term_for_schema = crate::log::terminal();
+        let pre = super::schema_interactive::pre_validate_with_interactive_collection(
+            &source,
+            set_overrides.as_ref(),
+            interactive_opts,
+            &term_for_schema,
+        )?;
+        super::schema_interactive::emit_dropped_optional_warnings(&pre.dropped_optionals);
+        (pre.source, pre.set_overrides)
+    };
+    record_prep_substage(&mut prep_substages, perf_enabled, "schema validation", schema_t);
 
     // Phase 2 (2026-05-09-slow-prep): single source-root discovery for the
     // whole inline-compose invocation; downstream prep phases reuse this
     // context rather than rediscovering the repo root.
+    let prep_ctx_t = std::time::Instant::now();
     let prep_context = super::wrap::composition::CompositionPrepContext::new(
         &file,
         &source.resolved_path,
         &shared.excluded(),
     )?;
+    record_prep_substage(&mut prep_substages, perf_enabled, "prep context", prep_ctx_t);
 
     // -- Eager target resolution ------------------------------------------
     let raw_hints =
@@ -727,19 +957,64 @@ fn run_inline_compose_inner(
             &raw_hints,
             shared.explicit_provider(),
             shared.model.as_deref(),
+            shared.dry_run,
+            &source.resolved_path,
         )?
     };
 
     let mut env_overrides: std::collections::BTreeMap<String, String> =
         std::collections::BTreeMap::new();
-    super::wrap::composition::install_agent_env_for_composition(
-        &resolved_target,
-        &mut env_overrides,
-    );
+    if let Some(ref target) = resolved_target {
+        super::wrap::composition::install_agent_env_for_composition(target, shared.yolo, &mut env_overrides);
+    }
+
+    // Render the execution line the moment the agent is known — see the
+    // matching block in `run_compose_inner` for the rationale. `is_inline`
+    // is `true` here so the header shows the inline-compose badge. As in the
+    // direct-compose block, resolve the session mode from the raw
+    // frontmatter so the header reflects `interactive: true` documents.
+    let header_interactive =
+        shared.resolve_session_interactivity(raw_hints.interactive).value;
+    let header_emitted = match (shared.silent, resolved_target.as_ref()) {
+        (false, Some(target)) => super::wrap::composition::emit_execution_header(
+            target.provider,
+            shared.yolo,
+            header_interactive,
+            verbose > 0,
+            shared.repo,
+            true, // is_inline
+            false, // sequence
+            shared.operation.as_deref(),
+            &file,
+            prep_context.launch_workspace.package_context.clone(),
+            &crate::log::terminal(),
+        ),
+        _ => false,
+    };
+
+    // Deferred success reports: the execution header has now been emitted,
+    // so the source-file and prompt-property confirmations belong here in
+    // the reporting section (success messages must not precede the header).
+    // The missing / present-but-empty variants already printed fail-fast
+    // above.
+    if let Some(ref t) = term {
+        claudine::harness::report::report_source_file(&file, &source.resolved_path, t);
+        if has_prompt && is_non_empty {
+            claudine::harness::report::report_prompt_property(has_prompt, is_non_empty, t);
+        }
+    }
 
     // ── Pre-flight shell approval ────────────────────────────────────
+    //
+    // See the matching block in `run_compose_inner` for why we install
+    // `env_overrides` into the compose context: it lets template values
+    // like `{{ env.AGENT }}` resolve during preflight's schema check.
     let compose_options = {
-        let mut opts = darkmatter::markdown::compose::ComposeOptions::new()
+        let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
+        for (key, value) in &env_overrides {
+            ctx.env_mut().insert(key.clone(), value.clone());
+        }
+        let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
             .with_source_file(&source.resolved_path);
         if let Some(ref overrides) = set_overrides {
             opts = opts.with_set_overrides(overrides.clone());
@@ -750,12 +1025,17 @@ fn run_inline_compose_inner(
     let shared_approval_cache =
         std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
 
-    let approval_options = super::wrap::build_harness_shell_options_with_cache(
-        &source.resolved_path,
-        prep_context.source_repo_root.as_deref(),
-        Some(std::sync::Arc::clone(&shared_approval_cache)),
+    let approval_options = super::wrap::apply_composition_shell_overrides(
+        super::wrap::build_harness_shell_options_with_cache(
+            &source.resolved_path,
+            prep_context.source_repo_root.as_deref(),
+            Some(std::sync::Arc::clone(&shared_approval_cache)),
+        ),
+        shared.dry_run,
+        shared.yolo,
     );
 
+    let shell_approval_t = std::time::Instant::now();
     let preflight = {
         let _span = info_span!("compose_prep.shell_preflight").entered();
         composition::resolve_shell_approvals(
@@ -765,6 +1045,7 @@ fn run_inline_compose_inner(
             &approval_options,
         )?
     };
+    record_prep_substage(&mut prep_substages, perf_enabled, "shell approval", shell_approval_t);
 
     // Post-prep interrupt checkpoint. If the user pressed Ctrl+C during
     // any of the prep phases (compose source parse, target resolution,
@@ -785,14 +1066,27 @@ fn run_inline_compose_inner(
         // Engine polls this during rate-limit pause sleeps so Ctrl+C
         // surfaces as `LoopInterrupted` instead of waiting out the timer.
         interrupt_check: Some(crate::output::user_interrupt_observed),
+        pause_reset_margin: claudine::composition::resolve_pause_reset_margin_from_env(),
     };
 
+    // `--dry-run` bypasses the iteration engine entirely: a single
+    // composition + single render (Decision 4). Loop detection is skipped so
+    // a doc with `loop:` frontmatter renders once rather than iterating. The
+    // single-render path (below) reaches the post-preflight dry-run seam,
+    // which returns before the provider launches — so the source file is
+    // never mutated (Decision 2).
     let file_for_loop = file.clone();
-    if let Some(loop_result) =
+    if !shared.dry_run && let Some(loop_result) =
         run_loop_with_overrides(&source, set_overrides.as_ref(), loop_options, |ctx| {
             let prepared = {
                 let _span = info_span!("compose_prep.prepare_inline").entered();
-                composition::prepare_inline(
+                // Schema-aware variant: typed `SchemaLoad` /
+                // `SchemaValidation` / `MissingProperties` errors and
+                // drop-and-retry for invalid optionals apply per
+                // iteration. Interactive collection is NOT driven inside
+                // loops; missing required values surface as
+                // `MissingProperties` on the first iteration.
+                composition::prepare_inline_with_schema(
                     &source,
                     composition::PrepareOptions {
                         set_overrides: Some(ctx.as_set_overrides()),
@@ -800,42 +1094,50 @@ fn run_inline_compose_inner(
                         env_overrides: env_overrides.clone(),
                         perf_enabled: shared.perf,
                         source_repo_root: prep_context.source_repo_root.clone(),
+                        shell_working_directory: Some(
+                            prep_context.launch_workspace.child_cwd.clone(),
+                        ),
                     },
                 )?
             };
 
-            let request = CompositionExecutionRequest {
-                mode: CompositionMode::InlineFrontmatterPrompt,
-                file_ref: file_for_loop.clone(),
-                prepared,
-                resolved_target: Some(resolved_target.clone()),
-                explicit_provider: shared.explicit_provider(),
-                excluded: shared.excluded(),
-                yolo: shared.yolo,
-                include: shared.include.clone(),
-                model: shared.model.clone(),
-                output: shared.output,
-                system_prompt_args: system_prompt_args.clone(),
-                timeout: shared.timeout.clone(),
-                step_timeout: shared.step_timeout.clone(),
-                operation: shared.operation.clone(),
-                sandbox: shared.sandbox,
-                repo: shared.repo,
-                dry_run: shared.dry_run,
-                mcp: shared.mcp,
-                mcp_use: shared.mcp_use.clone(),
-                strict: shared.strict,
-                session_interactive: shared.interactive,
-                quiet: shared.quiet,
-                silent: shared.silent,
-                env_overrides: env_overrides.clone(),
-                shared_approval_cache: Some(std::sync::Arc::clone(&shared_approval_cache)),
-                sequence: false,
-                installed_snapshot: Some(prep_context.installed_snapshot.clone()),
-                prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
-                prep_launch_context: Some(prep_context.launch_context.clone()),
-                prep_env_context: Some(prep_context.env_context.clone()),
-                prep_launch_detection_error: prep_context.launch_detection_error.clone(),
+            let request = {
+                let resolved = shared.resolve_session_interactivity(prepared.selection_hints.interactive);
+                CompositionExecutionRequest {
+                    mode: CompositionMode::InlineFrontmatterPrompt,
+                    file_ref: file_for_loop.clone(),
+                    prepared,
+                    resolved_target: resolved_target.clone(),
+                    explicit_provider: shared.explicit_provider(),
+                    excluded: shared.excluded(),
+                    yolo: shared.yolo,
+                    include: shared.include.clone(),
+                    model: shared.model.clone(),
+                    output: shared.output,
+                    system_prompt_args: system_prompt_args.clone(),
+                    timeout: shared.timeout.clone(),
+                    step_timeout: shared.step_timeout.clone(),
+                    operation: shared.operation.clone(),
+                    sandbox: shared.sandbox,
+                    repo: shared.repo,
+                    dry_run: shared.dry_run,
+                    mcp: shared.mcp,
+                    mcp_use: shared.mcp_use.clone(),
+                    strict: shared.strict,
+                    session_interactive: resolved.value,
+                    session_interactive_source: resolved.source,
+                    quiet: shared.quiet,
+                    silent: shared.silent,
+                    env_overrides: env_overrides.clone(),
+                    shared_approval_cache: Some(std::sync::Arc::clone(&shared_approval_cache)),
+                    sequence: false,
+                    installed_snapshot: Some(prep_context.installed_snapshot.clone()),
+                    prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
+                    prep_launch_context: Some(prep_context.launch_context.clone()),
+                    prep_env_context: Some(prep_context.env_context.clone()),
+                    prep_launch_detection_error: prep_context.launch_detection_error.clone(),
+                    header_emitted,
+                }
             };
 
             let outcome = super::wrap::composition::execute_composition_request_inner(
@@ -892,9 +1194,12 @@ fn run_inline_compose_inner(
     }
 
     // ── Single execution path (no loop) ──────────────────────────────────
+    // Pre-validation (with interactive collection) has already run, so
+    // schema requirements are satisfied. Call the schema-aware prepare
+    // directly for typed-error fidelity on residual issues.
     let prepared = {
         let _span = info_span!("compose_prep.prepare_inline").entered();
-        composition::prepare_inline(
+        composition::prepare_inline_with_schema(
             &source,
             composition::PrepareOptions {
                 set_overrides,
@@ -902,46 +1207,54 @@ fn run_inline_compose_inner(
                 env_overrides: env_overrides.clone(),
                 perf_enabled: shared.perf,
                 source_repo_root: prep_context.source_repo_root.clone(),
+                shell_working_directory: Some(prep_context.launch_workspace.child_cwd.clone()),
             },
         )?
     };
+    super::schema_interactive::emit_dropped_optional_warnings(&prepared.dropped_optionals);
 
-    let request = CompositionExecutionRequest {
-        mode: CompositionMode::InlineFrontmatterPrompt,
-        file_ref: file,
-        prepared,
-        resolved_target: Some(resolved_target),
-        explicit_provider: shared.explicit_provider(),
-        excluded: shared.excluded(),
-        yolo: shared.yolo,
-        include: shared.include,
-        model: shared.model,
-        output: shared.output,
-        system_prompt_args,
-        timeout: shared.timeout.clone(),
-        step_timeout: shared.step_timeout.clone(),
-        operation: shared.operation,
-        sandbox: shared.sandbox,
-        repo: shared.repo,
-        dry_run: shared.dry_run,
-        mcp: shared.mcp,
-        mcp_use: shared.mcp_use,
-        strict: shared.strict,
-        session_interactive: shared.interactive,
-        quiet: shared.quiet,
-        silent: shared.silent,
-        env_overrides,
-        shared_approval_cache: Some(shared_approval_cache),
-        sequence: false,
-        installed_snapshot: Some(prep_context.installed_snapshot.clone()),
-        prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
-        prep_launch_context: Some(prep_context.launch_context.clone()),
-        prep_env_context: Some(prep_context.env_context.clone()),
-        prep_launch_detection_error: prep_context.launch_detection_error.clone(),
+    let request = {
+        let resolved = shared.resolve_session_interactivity(prepared.selection_hints.interactive);
+        CompositionExecutionRequest {
+            mode: CompositionMode::InlineFrontmatterPrompt,
+            file_ref: file,
+            prepared,
+            resolved_target,
+            explicit_provider: shared.explicit_provider(),
+            excluded: shared.excluded(),
+            yolo: shared.yolo,
+            include: shared.include,
+            model: shared.model,
+            output: shared.output,
+            system_prompt_args,
+            timeout: shared.timeout.clone(),
+            step_timeout: shared.step_timeout.clone(),
+            operation: shared.operation,
+            sandbox: shared.sandbox,
+            repo: shared.repo,
+            dry_run: shared.dry_run,
+            mcp: shared.mcp,
+            mcp_use: shared.mcp_use,
+            strict: shared.strict,
+            session_interactive: resolved.value,
+            session_interactive_source: resolved.source,
+            quiet: shared.quiet,
+            silent: shared.silent,
+            env_overrides,
+            shared_approval_cache: Some(shared_approval_cache),
+            sequence: false,
+            installed_snapshot: Some(prep_context.installed_snapshot.clone()),
+            prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
+            prep_launch_context: Some(prep_context.launch_context.clone()),
+            prep_env_context: Some(prep_context.env_context.clone()),
+            prep_launch_detection_error: prep_context.launch_detection_error.clone(),
+            header_emitted,
+        }
     };
 
     if let Some(ref mut timings) = startup_timings {
         timings.prep_phase = inline_compose_entry.elapsed();
+        timings.prep_substages = prep_substages;
     }
 
     execute_composition_request(request, verbose, startup_timings, shared.perf)
@@ -1059,6 +1372,18 @@ where
 
     let prompt_path = source.resolved_path.clone();
 
+    // Capture the launch CWD (and PWD) before any iteration runs so we can
+    // restore them between iterations. The wrap layer's
+    // `switch_process_cwd` mutates the process-global CWD to the detected
+    // repo/git root inside each iteration; without restoration, iteration
+    // 2's `prepare_direct_with_schema` resolves any CLI-supplied
+    // `file(required)` setter against the post-switch root rather than
+    // the user's original launch directory. A path that validated on
+    // iteration 1 then fails iteration 2 as `not a "darkmatter-file"`,
+    // even though nothing about the value changed.
+    let launch_cwd = std::env::current_dir().ok();
+    let launch_pwd = std::env::var_os("PWD");
+
     // The Ctrl+C SIGINT handler is installed at the top of the compose
     // subcommand (see `install_user_interrupt_guard`) so it covers the
     // entire prep window, not just the loop. The wrapped executor below
@@ -1074,6 +1399,20 @@ where
                     prompt_path: prompt_path_for_executor.clone(),
                 },
             ));
+        }
+        // Restore launch CWD/PWD before each iteration so per-iteration
+        // schema validation (which uses ambient CWD via
+        // `validate_file_reference`) sees the same root that the pre-loop
+        // validation saw. SAFETY: single-threaded loop driver — no other
+        // thread reads or writes `PWD` concurrently.
+        if let Some(ref cwd) = launch_cwd {
+            let _ = std::env::set_current_dir(cwd);
+            unsafe {
+                match launch_pwd {
+                    Some(ref value) => std::env::set_var("PWD", value),
+                    None => std::env::remove_var("PWD"),
+                }
+            }
         }
         let output = executor(ctx)?;
         if crate::output::user_interrupt_observed() {
@@ -1315,6 +1654,22 @@ pub(crate) fn parse_composition_positionals(
         file_ref,
         shorthand_setters,
     })
+}
+
+/// Return a stable type name for a `serde_json::Value`.
+///
+/// Used by `inline-compose` (and the sequence orchestrator) to construct
+/// [`CompositionError::PromptPropertyWrongType`] when the frontmatter
+/// `prompt` value is present but not a string.
+pub(crate) fn json_type_name(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "boolean",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
 }
 
 /// Merge `--set` JSON with shorthand setters. Shorthand wins on overlapping keys.
@@ -1566,6 +1921,109 @@ mod tests {
         short.insert("b".into(), json!(2));
         let result = merge_set_overrides(Some(r#"{"a":"1"}"#), short).unwrap();
         assert_eq!(result, Some(json!({"a": "1", "b": 2})));
+    }
+
+    // ── resolve_session_interactivity ────────────────────────────────
+
+    #[test]
+    fn no_interactive_wins_over_frontmatter_true() {
+        use clap::Parser;
+
+        #[derive(Debug, clap::Parser)]
+        struct Probe {
+            #[command(flatten)]
+            shared: SharedComposeArgs,
+        }
+
+        let shared = Probe::try_parse_from(["probe", "--no-interactive"])
+            .expect("--no-interactive must parse")
+            .shared;
+        let resolved = shared.resolve_session_interactivity(Some(true));
+        assert!(!resolved.value);
+        assert_eq!(
+            resolved.source,
+            claudine::composition::SessionInteractivitySource::NoInteractiveFlag
+        );
+    }
+
+    #[test]
+    fn interactive_flag_wins_over_frontmatter_true() {
+        use clap::Parser;
+
+        #[derive(Debug, clap::Parser)]
+        struct Probe {
+            #[command(flatten)]
+            shared: SharedComposeArgs,
+        }
+
+        let shared = Probe::try_parse_from(["probe", "-i"])
+            .expect("-i must parse")
+            .shared;
+        let resolved = shared.resolve_session_interactivity(Some(true));
+        assert!(resolved.value);
+        assert_eq!(
+            resolved.source,
+            claudine::composition::SessionInteractivitySource::InteractiveFlag
+        );
+    }
+
+    #[test]
+    fn frontmatter_true_beats_default_false() {
+        use clap::Parser;
+
+        #[derive(Debug, clap::Parser)]
+        struct Probe {
+            #[command(flatten)]
+            shared: SharedComposeArgs,
+        }
+
+        let shared = Probe::try_parse_from(["probe"])
+            .expect("baseline probe must parse")
+            .shared;
+        let resolved = shared.resolve_session_interactivity(Some(true));
+        assert!(resolved.value);
+        assert_eq!(
+            resolved.source,
+            claudine::composition::SessionInteractivitySource::Frontmatter
+        );
+    }
+
+    #[test]
+    fn absent_frontmatter_uses_default_non_interactive() {
+        use clap::Parser;
+
+        #[derive(Debug, clap::Parser)]
+        struct Probe {
+            #[command(flatten)]
+            shared: SharedComposeArgs,
+        }
+
+        let shared = Probe::try_parse_from(["probe"])
+            .expect("baseline probe must parse")
+            .shared;
+        let resolved = shared.resolve_session_interactivity(None);
+        assert!(!resolved.value);
+        assert_eq!(
+            resolved.source,
+            claudine::composition::SessionInteractivitySource::Default
+        );
+    }
+
+    #[test]
+    fn interactive_and_no_interactive_are_mutually_exclusive() {
+        use clap::Parser;
+
+        #[derive(Debug, clap::Parser)]
+        struct Probe {
+            #[command(flatten)]
+            shared: SharedComposeArgs,
+        }
+
+        let result = Probe::try_parse_from(["probe", "--interactive", "--no-interactive"]);
+        assert!(
+            result.is_err(),
+            "--interactive + --no-interactive must be rejected by clap"
+        );
     }
 
     // ── SIGINT / Ctrl+C during prep (Phase 5) ────────────────────────

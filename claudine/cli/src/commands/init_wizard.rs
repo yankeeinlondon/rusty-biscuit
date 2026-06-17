@@ -275,6 +275,7 @@ fn build_config(
             attention: Some("doorbell".to_string()),
             error: Some("error-1".to_string()),
         },
+        prompt_for_missing: true,
     }
 }
 

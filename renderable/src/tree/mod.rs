@@ -24,26 +24,87 @@
 mod attrs;
 mod diagnostic;
 mod document;
+pub mod embed;
 mod error;
+pub mod graphics;
+mod inherit;
 mod node;
 pub mod render;
 mod source;
 mod validate;
 
 pub use attrs::{
-    CodeRenderHints, ColumnConditional, ColumnWidthKind, ColumnsHints, HintNamespace,
-    ListMarkerPolicy, ListRenderHints, NodeAttrs, ProgressHints, SequenceJoin, TableCellHints,
-    TableColumnHints, TableTerminalHints, TaskHints, TaskState,
+    AriaAttrName, BrowserAttrNameError, BrowserAttrs, CodeRenderHints, ColumnConditional,
+    ColumnWidthKind, ColumnsHints, ComponentHints, DataAttrName, DisclosureStyleHints,
+    HintNamespace, HrAlignment, HrKind, HrWeight, ImageBrowserAttrs, ImageDecoding, ImageLoading,
+    LinkBrowserAttrs, LinkRelation, LinkTarget, ListMarkerPolicy, ListRenderHints, NodeAttrs,
+    ProgressHints, SequenceJoin, TableCellHints, TableColumnHints, TableHints, TableTerminalHints,
+    TaskHints, TaskState, TextLayoutHints, TextOverflow, ThematicBreakAttrs,
 };
+// Test-only instrumentation (gated): exposed so a downstream crate's perf-gate
+// test can observe the `NodeAttrs::data` hint-access counter while folding a
+// corpus through renderable. See the `hint-access-counter` feature.
+#[cfg(any(test, feature = "hint-access-counter"))]
+pub use attrs::{hint_accesses, reset_hint_accesses};
 pub use diagnostic::{Diagnostic, DiagnosticKind, Severity};
+pub use embed::{
+    EMBED_CLOSE, EMBED_MARKER_SUFFIX, EMBED_OPEN_PREFIX, EmbedError, decode_embedded_open,
+    encode_embedded_subtree, is_embedded_close,
+};
+pub use inherit::InheritedStyle;
 pub use document::{Document, DocumentMetadata, Frontmatter, FrontmatterFormat};
 pub use error::{RenderError, RenderStrictness, Rendered};
+pub use graphics::horizontal_rule_svg;
 pub use node::{ColumnAlign, HeadingDepth, HeadingDepthError, NodeKind, RenderNode};
 pub use render::{
     BrowserRenderOptions, CodeRenderer, MarkdownDialect, MarkdownRenderOptions,
-    MarkdownStyleOptions, RawHtmlPolicy, render_browser_document, render_browser_node,
-    render_markdown_document, render_markdown_node,
+    MarkdownStyleOptions, RawHtmlPolicy, render_browser_document, render_browser_document_html,
+    render_browser_node, render_markdown_document, render_markdown_node,
 };
+
+/// The graphics fidelity tier a renderer should use.
+///
+/// The [`Default`] is [`GraphicsMode::Rich`] — the highest tier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GraphicsMode {
+    /// No graphics: render text or structural fallbacks only.
+    Off,
+    /// Vector graphics only: SVG, box-drawing, and other scalable forms.
+    Vector,
+    /// Full graphics: raster images, interactive diagrams, and all rich media.
+    #[default]
+    Rich,
+}
+
+/// How Mermaid diagrams are rendered in browser output.
+///
+/// The [`Default`] is [`BrowserMermaidMode::Code`] — a plain fenced code block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BrowserMermaidMode {
+    /// Render as a plain `<pre><code>` block.
+    #[default]
+    Code,
+    /// Render as a static inline `<svg>`.
+    StaticSvg,
+    /// Render as an interactive Mermaid diagram (e.g. with pan/zoom).
+    Interactive,
+}
+
+/// How Mermaid diagrams are rendered in terminal output.
+///
+/// [`GraphicsMode`] is the fidelity *ceiling*; this is the orthogonal *opt-in*
+/// that decides whether a `lang="mermaid"` code block is promoted at all.
+/// The [`Default`] is [`TerminalMermaidMode::Code`] — Mermaid fences stay
+/// ordinary code blocks unless the caller opts in, preserving public defaults.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TerminalMermaidMode {
+    /// Keep Mermaid fences as code blocks (no promotion).
+    #[default]
+    Code,
+    /// Promote Mermaid fences to rasterized images where the tier and
+    /// terminal capability allow (rasterized only at [`GraphicsMode::Rich`]).
+    Image,
+}
 
 // Re-export terminal capability types for tree-render consumers.
 pub use crate::color::{ColorDepth, ColorMode, TerminalCodeContext};
@@ -75,7 +136,7 @@ mod tests {
 
     #[test]
     fn tree_renderable_can_supply_a_layout() {
-        use crate::layout::{Layout, Length, Margin};
+        use crate::layout::{Layout, Length, Edges};
 
         struct Demo;
         impl TreeRenderable for Demo {
@@ -84,7 +145,7 @@ mod tests {
             }
             fn tree_layout(&self) -> Option<Layout> {
                 Some(Layout {
-                    margin: Margin::x(Length::ch(1)),
+                    margin: Edges::x(Length::ch(1)),
                     ..Layout::default()
                 })
             }

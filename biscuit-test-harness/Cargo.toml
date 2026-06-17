@@ -17,3 +17,10 @@ tempfile = "3"
 [package.metadata.benchmarks]
 required = false
 reason = "Test/dev infrastructure crate; no measurable hot paths."
+
+# `biscuit-harness-broker` spawns shared terminal panes once per
+# `_test_l2` invocation so nextest child processes can attach instead of
+# paying a 2-3 s spawn cost per test. Invoked from `just/devops.just`.
+[[bin]]
+name = "biscuit-harness-broker"
+path = "src/bin/broker.rs"

@@ -64,13 +64,21 @@
 //! topic.
 
 pub mod ast;
+pub mod catalog;
 pub mod ctx;
+pub(crate) mod doc_namespace;
 pub mod functions;
 pub mod lexer;
 pub mod parser;
+pub mod resolve_ctx;
 
 pub use ast::{BinaryOp, Expr};
+pub use catalog::{
+    expression_function_descriptors, ExpressionFunctionDescriptor,
+    EXPRESSION_FUNCTION_DESCRIPTORS,
+};
 pub use ctx::CtxLookup;
+pub use resolve_ctx::ResolutionContext;
 pub use lexer::{
     ComparisonOp, ExpressionFinder, ExpressionLocation, Lexer, LexerError, ParseMode, Token,
 };
@@ -179,6 +187,24 @@ pub trait EvaluationLookup {
             Some(Value::Bool(b)) => b.to_string(),
             Some(v) => v.to_string(),
         }
+    }
+
+    /// Returns the document-relative resolution context that the seven
+    /// read-side functions (`file_exists`, `frontmatter`, `markdown_title`,
+    /// `markdown_body_empty`, `validate_schema`, `absolute`, `relative`)
+    /// resolve their path arguments against.
+    ///
+    /// The default `None` is the **opt-out / test** case: a lookup that has no
+    /// document anchor (or a unit test that does not exercise read-side
+    /// functions). Every production surface that evaluates the grammar against
+    /// a real document — frontmatter interpolation, body interpolation, `$()`
+    /// ternary conditions, `when=` conditions, the public condition API, and
+    /// claudine's loop/hook conditions — overrides this to return
+    /// `Some(ctx)` so read-side functions resolve identically wherever the
+    /// grammar runs. A `None`-returning lookup makes a read-side function
+    /// return the recoverable "requires a document resolution context" error.
+    fn resolution_context(&self) -> Option<ResolutionContext> {
+        None
     }
 }
 
@@ -464,6 +490,13 @@ fn evaluate_member(base: &Value, name: &str) -> Value {
     current
 }
 
+/// Error-message prefix for an unrecognized function name.
+///
+/// A stable contract: interpolation treats evaluation errors starting with
+/// this prefix as fatal even in non-fail-fast mode, since an unknown symbol can
+/// never resolve and would otherwise leak its literal `{{ … }}` text downstream.
+pub(crate) const UNKNOWN_FUNCTION_PREFIX: &str = "Unknown function:";
+
 fn evaluate_function<L: EvaluationLookup>(
     name: &str,
     args: &[Expr],
@@ -471,6 +504,8 @@ fn evaluate_function<L: EvaluationLookup>(
 ) -> Result<Value, String> {
     let name = name.to_ascii_lowercase();
     match name.as_str() {
+        // `and`/`or` short-circuit, so they must evaluate their arguments
+        // lazily and stay here rather than in the eagerly-evaluated registries.
         "and" => {
             for arg in args {
                 let value = evaluate(arg, lookup)?;
@@ -489,90 +524,31 @@ fn evaluate_function<L: EvaluationLookup>(
             }
             Ok(Value::Bool(false))
         }
-        "haskey" | "has_key" => {
-            if args.len() < 2 {
-                return Err("has_key() requires 2 arguments".to_string());
-            }
-            let object = evaluate(&args[0], lookup)?;
-            let key = scalar_string(&evaluate(&args[1], lookup)?);
-            let has = object
-                .as_object()
-                .map(|obj| obj.contains_key(&key))
-                .unwrap_or(false);
-            Ok(Value::Bool(has))
-        }
-        "contains" => {
-            if args.len() < 2 {
-                return Err("contains() requires 2 arguments".to_string());
-            }
-            let haystack = evaluate(&args[0], lookup)?;
-            let needle = evaluate(&args[1], lookup)?;
-            let found = match haystack {
-                Value::Array(values) => values
-                    .iter()
-                    .any(|value| scalar_string(value) == scalar_string(&needle)),
-                Value::Object(values) => values
-                    .values()
-                    .any(|value| scalar_string(value) == scalar_string(&needle)),
-                Value::String(value) => value.contains(&scalar_string(&needle)),
-                value => scalar_string(&value).contains(&scalar_string(&needle)),
-            };
-            Ok(Value::Bool(found))
-        }
-        "length" => {
-            if args.is_empty() {
-                return Err("length() requires 1 argument".to_string());
-            }
-            let value = evaluate(&args[0], lookup)?;
-            let len = match value {
-                Value::String(s) => s.chars().count(),
-                Value::Array(arr) => arr.len(),
-                Value::Object(obj) => obj.len(),
-                Value::Number(n) => n.to_string().chars().count(),
-                Value::Bool(_) => 0,
-                Value::Null => 0,
-            };
-            Ok(Value::Number(serde_json::Number::from(len)))
-        }
-        "number" => {
-            if args.is_empty() {
-                return Err("number() requires at least 1 argument".to_string());
-            }
-            let value = evaluate(&args[0], lookup)?;
-            let default = if args.len() > 1 {
-                to_number_coerce(&evaluate(&args[1], lookup)?)
-            } else {
-                0.0
-            };
-            let number = to_number(&value).unwrap_or(default);
-            let json_number = if number.fract() == 0.0 {
-                serde_json::Number::from(number as i64)
-            } else {
-                serde_json::Number::from_f64(number)
-                    .ok_or_else(|| "Unable to represent number".to_string())?
-            };
-            Ok(Value::Number(json_number))
-        }
-        "round" => {
-            if args.is_empty() {
-                return Err("round() requires at least 1 argument".to_string());
-            }
-            let value = evaluate(&args[0], lookup)?;
-            let default = if args.len() > 1 {
-                to_number_coerce(&evaluate(&args[1], lookup)?)
-            } else {
-                0.0
-            };
-            let number = to_number(&value).unwrap_or(default).round() as i64;
-            Ok(Value::Number(serde_json::Number::from(number)))
-        }
+        // Every other function evaluates its arguments eagerly and resolves
+        // through the authoritative dispatch tables in `functions`.
         other => {
             let evaluated: Vec<Value> = args
                 .iter()
                 .map(|arg| evaluate(arg, lookup))
                 .collect::<Result<_, _>>()?;
-            functions::dispatch(other, &evaluated)
-                .unwrap_or_else(|| Err(format!("Unknown function: {name}")))
+            if let Some(ctx) = lookup.resolution_context()
+                && let Some(result) = functions::dispatch_fs(other, &evaluated, &ctx)
+            {
+                return result;
+            }
+            if let Some(result) = functions::dispatch(other, &evaluated) {
+                return result;
+            }
+            // A known filesystem function reaches here only because the lookup
+            // returned no resolution context — an opt-out or test lookup, not a
+            // real document surface (all of which now supply one). Keep it
+            // recoverable so it doesn't read as an unknown symbol.
+            if functions::is_fs_function(other) {
+                return Err(format!(
+                    "Filesystem function '{name}' requires a document resolution context, which is unavailable here"
+                ));
+            }
+            Err(format!("{UNKNOWN_FUNCTION_PREFIX} {name}"))
         }
     }
 }

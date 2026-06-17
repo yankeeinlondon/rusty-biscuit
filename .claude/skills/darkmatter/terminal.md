@@ -22,15 +22,25 @@ pub struct TerminalOptions {
 
 ## Output Functions
 
-```rust
-use darkmatter::markdown::output::{TerminalOptions, write_terminal, for_terminal};
+Terminal rendering is the `Markdown::as_terminal` method; it builds a complete
+`renderable` render tree and runs one terminal fold over it. (The legacy
+free-standing `for_terminal` / `write_terminal` event-stream serializers were
+deleted in the tree cutover.)
 
-// Write directly to a writer
-write_terminal(&mut std::io::stdout(), &md, TerminalOptions::default())?;
+```rust
+use darkmatter::markdown::Markdown;
+use darkmatter::markdown::output::TerminalOptions;
+
+let md: Markdown = "# Hello\n\nWorld".into();
 
 // Get as string
-let output = for_terminal(&md, TerminalOptions::default())?;
+let output = md.as_terminal(TerminalOptions::default())?;
+print!("{output}");
 ```
+
+For page-framed terminal output (margins, padding, page background, `style:`
+frontmatter), use `DarkmatterPage::render(&md)` instead — see the darkmatter
+skill's *Common Entry Points*.
 
 ## Theme Pairs
 
@@ -43,16 +53,19 @@ Themes come in light/dark pairs with automatic mode detection:
 | `Gruvbox` | Gruvbox Light | Gruvbox Dark |
 | `Solarized` | Solarized Light | Solarized Dark |
 | `Base16Ocean` | Base16 Ocean Light | Base16 Ocean Dark |
-| `Nord` | Nord | Nord |
-| `Dracula` | Dracula | Dracula |
-| `Monokai` | Monokai | Monokai |
-| `VisualStudioDark` | VS Dark | VS Dark |
+| `Nord` | One Half Light | Nord |
+| `Dracula` | One Half Light | Dracula |
+| `Monokai` | One Half Light | Monokai Extended |
+| `VisualStudioDark` | GitHub Light | VS Dark |
 
-**`ThemePair` is an abstract, mode-agnostic name.** `ThemePair::resolve(ColorMode)`
-maps the name **plus** a mode to a concrete light/dark theme (`(Github, Dark) →
-GithubDark`). The bottom four pairs are **single-variant by design** — they ignore
-the mode and resolve to one theme. Do not confuse the user-facing name with a
-concrete light/dark theme.
+**`ThemePair` is an abstract, mode-agnostic name.** A `ThemePair` is simply a
+(light theme, dark theme) couple; `ThemePair::resolve(ColorMode)` maps the name
+**plus** a mode to one of those two themes (`(Github, Dark) → GithubDark`).
+**Every pair resolves to a distinct light *and* dark theme** — the light and
+dark slots never collapse to one theme. Note that several pairs use the same
+theme in their light slot: `Dracula`, `Nord`, and `Monokai` all use One Half
+Light, and `VS-Dark` uses GitHub Light. Do not confuse the user-facing name with
+a concrete light/dark theme.
 
 ### Code blocks invert for page contrast (terminal and HTML)
 
@@ -61,14 +74,22 @@ Code blocks resolve their theme *variant* against the **inverted** terminal mode
 This lifts the code panel off the page. Prose, headings, tables, and the page
 background follow the terminal's real mode so body text stays readable.
 
-- Paired themes contrast correctly (dark terminal → light variant).
-- Single-variant themes (`dracula`/`nord`/`monokai`/`vs-dark`) are a deliberate
-  no-op — they have no opposite variant, so they cannot lift contrast. Documented,
-  not a bug.
+- Every pair contrasts correctly because every pair has both a light and a dark
+  theme: a dark terminal resolves the light theme and a light terminal the dark
+  one. For `dracula`/`nord`/`monokai` the light theme is One Half Light and for
+  `vs-dark` it is GitHub Light (the light slots several pairs share).
+- Because no pair is mode-invariant, the same `ThemePair` produces **different**
+  terminal and HTML output under dark vs light pages — do not expect identical
+  bytes across modes for any theme.
+- **The terminal is the source of truth for color mode** (Decision #4):
+  `DarkmatterPage::with_color_mode` (and `TerminalOptions::color_mode`) only wins
+  when terminal detection is `Unknown`. `Terminal::new_optimistic` reports
+  `Dark`, so to render against a *light* surface in a test set
+  `term.color_mode = ColorMode::Light` before `DarkmatterPage::new` — overriding
+  via `with_color_mode(Light)` is ignored.
 - The panel's *internal* contrast (header-pill text color, highlight-line
   background math) keys off the **resolved** theme background
-  (`code_block::mode_for_background`), not the requested mode — so a single-variant
-  dark theme still gets light header text.
+  (`code_block::mode_for_background`), not the requested mode.
 - **HTML inverts too** (Defect D): the `color_mode` is the caller-declared page
   mode, and the code theme resolves against its inverse just like the terminal,
   so a Markdown code fence and a `YamlBlock` render byte-identically.
@@ -119,10 +140,12 @@ The soft reset sequence `\x1b[22;23;24;25;27;28;29;39m` clears:
 - `25` blink off, `27` inverse off, `28` conceal off, `29` strikethrough off
 - `39` default foreground
 
-But **preserves** `48` (background color). This is implemented in:
-- `push_prose_text()` for blockquote prose words
-- `push_inline_code_with_bg()` for inline code inside blockquotes
-- `LineWrapper::clear_blockquote()` emits a final hard reset after padding
+But **preserves** `48` (background color). Since the tree cutover, terminal SGR
+emission lives in `biscuit-terminal`'s render-tree fold (`render_tree::render` /
+`render_tree::style`), not in darkmatter — the bespoke darkmatter terminal
+serializer (and its `push_prose_text` / `push_inline_code_with_bg` /
+`LineWrapper` helpers) has been deleted. The soft-reset principle still applies
+to any code that paints adjacent background segments by hand.
 
 **Reference issue**: Background gaps were visible as missing background on blank characters and commas inside inline code and blockquotes (2026-05-06).
 

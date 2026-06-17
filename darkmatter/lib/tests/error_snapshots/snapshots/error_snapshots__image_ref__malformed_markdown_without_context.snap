@@ -1,11 +1,14 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/image_ref.rs
-assertion_line: 79
 expression: out
 ---
 ⤫ ImageRefError: malformed markdown image
+┃ 
 ┃ Message: missing closing bracket
 ┃ 
 ┃ Image parsing failed here:
 ┃ 
-Use the pattern !alt with balanced brackets.
+┃ ```md
+┃ ```
+┃ 
+┃ Use the pattern !alt with balanced brackets.

@@ -334,7 +334,8 @@ fn test_semantic_undefined_symbol_rust() {
 "#,
     );
 
-    let tree_file = TreeFile::new(&path).unwrap();
+    let mut tree_file = TreeFile::new(&path).unwrap();
+    tree_file.experimental_semantics = true;
     let diagnostics = tree_file.lint_diagnostics();
 
     let undefined_diagnostic = diagnostics
@@ -362,7 +363,8 @@ fn main() {
 "#,
     );
 
-    let tree_file = TreeFile::new(&path).unwrap();
+    let mut tree_file = TreeFile::new(&path).unwrap();
+    tree_file.experimental_semantics = true;
     let diagnostics = tree_file.lint_diagnostics();
 
     let unused_diagnostic = diagnostics
@@ -507,6 +509,75 @@ fn test_no_false_positive_unwrap_or() {
 }
 
 #[test]
+fn test_pub_use_reexport_not_flagged_as_unused_import() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "lib.rs",
+        "use std::io::Write;\npub use std::collections::HashMap;\npub(crate) use std::fmt::Debug;\n",
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let unused: Vec<String> = diagnostics
+        .iter()
+        .filter(|d| d.rule.as_deref() == Some("unused-import"))
+        .map(|d| d.message.clone())
+        .collect();
+
+    // A private `use` that is never referenced is a genuine unused import.
+    assert!(
+        unused.iter().any(|m| m.contains("Write")),
+        "private unused `use` should still be flagged, got: {unused:?}"
+    );
+    // `pub use` / `pub(crate) use` are re-exports, not unused imports.
+    assert!(
+        !unused.iter().any(|m| m.contains("HashMap")),
+        "pub use re-export should not be flagged, got: {unused:?}"
+    );
+    assert!(
+        !unused.iter().any(|m| m.contains("Debug")),
+        "pub(crate) use re-export should not be flagged, got: {unused:?}"
+    );
+}
+
+#[test]
+fn test_import_used_only_in_type_position_not_flagged() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "lib.rs",
+        "use std::fmt::Debug;\nuse std::collections::HashMap;\nuse std::io::Write;\n\
+         pub fn takes(value: Debug) -> Debug { value }\n\
+         pub struct Holder {\n    map: HashMap,\n}\n",
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let unused: Vec<String> = tree_file
+        .lint_diagnostics()
+        .iter()
+        .filter(|d| d.rule.as_deref() == Some("unused-import"))
+        .map(|d| d.message.clone())
+        .collect();
+
+    // `Debug` (parameter/return type) and `HashMap` (field type) are used.
+    assert!(
+        !unused.iter().any(|m| m.contains("Debug")),
+        "import used as a parameter/return type should not be flagged, got: {unused:?}"
+    );
+    assert!(
+        !unused.iter().any(|m| m.contains("HashMap")),
+        "import used as a field type should not be flagged, got: {unused:?}"
+    );
+    // `Write` is genuinely unused and must still be flagged.
+    assert!(
+        unused.iter().any(|m| m.contains("Write")),
+        "genuinely unused import should still be flagged, got: {unused:?}"
+    );
+}
+
+#[test]
 fn test_no_false_positive_eval_identifier() {
     let dir = TempDir::new().unwrap();
     let path = create_temp_file(
@@ -547,7 +618,8 @@ fn test_undefined_module_rust_reports_warning() {
 "#,
     );
 
-    let tree_file = TreeFile::new(&path).unwrap();
+    let mut tree_file = TreeFile::new(&path).unwrap();
+    tree_file.experimental_semantics = true;
     let diagnostics = tree_file.lint_diagnostics();
 
     let undefined_module = diagnostics
@@ -1021,7 +1093,8 @@ fn test_unified_diagnostics_semantic_kind() {
 "#,
     );
 
-    let tree_file = TreeFile::new(&path).unwrap();
+    let mut tree_file = TreeFile::new(&path).unwrap();
+    tree_file.experimental_semantics = true;
     let diagnostics = tree_file.diagnostics();
 
     let undefined_diagnostic = diagnostics
@@ -1491,5 +1564,530 @@ fn test_swift_struct_field_not_undefined() {
         undefined_fields.count(),
         0,
         "Swift struct fields 'x' and 'y' should NOT be flagged as undefined"
+    );
+}
+
+// ============================================================================
+// Negative Fixture Tests - Phase 2
+// These tests verify that definition-like contexts do NOT produce
+// false-positive undefined-symbol diagnostics.
+// ============================================================================
+
+#[test]
+fn test_rust_import_declaration_not_undefined() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.rs",
+        r#"use std::io::Read;
+
+fn main() {
+    let mut buf = String::new();
+}
+"#,
+    );
+
+    let mut tree_file = TreeFile::new(&path).unwrap();
+    tree_file.experimental_semantics = true;
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let undefined_read = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("undefined-symbol") && d.message.contains("'Read'"));
+    assert!(
+        undefined_read.is_none(),
+        "Imported symbol 'Read' should NOT be flagged as undefined"
+    );
+}
+
+#[test]
+fn test_rust_pattern_binding_not_undefined() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.rs",
+        r#"fn main() {
+    let (x, y) = (1, 2);
+    let _ = x + y;
+}
+"#,
+    );
+
+    let mut tree_file = TreeFile::new(&path).unwrap();
+    tree_file.experimental_semantics = true;
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let undefined_xy = diagnostics.iter().find(|d| {
+        d.rule.as_deref() == Some("undefined-symbol")
+            && (d.message.contains("'x'") || d.message.contains("'y'"))
+    });
+    assert!(
+        undefined_xy.is_none(),
+        "Pattern bindings 'x' and 'y' should NOT be flagged as undefined"
+    );
+}
+
+#[test]
+fn test_rust_struct_field_not_undefined() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.rs",
+        r#"struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn main() {
+    let p = Point { x: 1, y: 2 };
+}
+"#,
+    );
+
+    let mut tree_file = TreeFile::new(&path).unwrap();
+    tree_file.experimental_semantics = true;
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let undefined_fields = diagnostics.iter().find(|d| {
+        d.rule.as_deref() == Some("undefined-symbol")
+            && (d.message.contains("'x'") || d.message.contains("'y'"))
+    });
+    assert!(
+        undefined_fields.is_none(),
+        "Struct field names should NOT be flagged as undefined"
+    );
+}
+
+#[test]
+fn test_rust_for_loop_variable_not_undefined() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.rs",
+        r#"fn main() {
+    for i in 0..10 {
+        let _ = i;
+    }
+}
+"#,
+    );
+
+    let mut tree_file = TreeFile::new(&path).unwrap();
+    tree_file.experimental_semantics = true;
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let undefined_i = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("undefined-symbol") && d.message.contains("'i'"));
+    assert!(
+        undefined_i.is_none(),
+        "For-loop variable 'i' should NOT be flagged as undefined"
+    );
+}
+
+#[test]
+fn test_python_decorator_not_undefined() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.py",
+        r#"@property
+def my_func():
+    return 1
+"#,
+    );
+
+    let mut tree_file = TreeFile::new(&path).unwrap();
+    tree_file.experimental_semantics = true;
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let undefined_property = diagnostics.iter().find(|d| {
+        d.rule.as_deref() == Some("undefined-symbol") && d.message.contains("'property'")
+    });
+    assert!(
+        undefined_property.is_none(),
+        "Builtin decorator 'property' should NOT be flagged as undefined"
+    );
+}
+
+#[test]
+fn test_python_keyword_argument_label_not_undefined() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.py",
+        r#"def greet(name):
+    return f"Hello, {name}!"
+
+def main():
+    result = greet(name="World")
+    return result
+"#,
+    );
+
+    let mut tree_file = TreeFile::new(&path).unwrap();
+    tree_file.experimental_semantics = true;
+    let diagnostics = tree_file.lint_diagnostics();
+
+    // 'name' in `greet(name="World")` is a keyword argument label.
+    // It should NOT be flagged as undefined because it's the parameter name.
+    let undefined_name = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("undefined-symbol") && d.message.contains("'name'"));
+    assert!(
+        undefined_name.is_none(),
+        "Keyword argument label 'name' should NOT be flagged as undefined"
+    );
+}
+
+#[test]
+fn test_python_import_declaration_not_undefined() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.py",
+        r#"import os
+import sys
+
+def main():
+    return os.path.join("a", "b")
+"#,
+    );
+
+    let mut tree_file = TreeFile::new(&path).unwrap();
+    tree_file.experimental_semantics = true;
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let undefined_imports = diagnostics.iter().find(|d| {
+        d.rule.as_deref() == Some("undefined-symbol")
+            && (d.message.contains("'os'") || d.message.contains("'sys'"))
+    });
+    assert!(
+        undefined_imports.is_none(),
+        "Imported modules should NOT be flagged as undefined"
+    );
+}
+
+#[test]
+fn test_javascript_import_declaration_not_undefined() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.js",
+        r#"import { useState } from "react";
+
+function Component() {
+    const [count, setCount] = useState(0);
+    return count;
+}
+"#,
+    );
+
+    let mut tree_file = TreeFile::new(&path).unwrap();
+    tree_file.experimental_semantics = true;
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let undefined_imports = diagnostics.iter().find(|d| {
+        d.rule.as_deref() == Some("undefined-symbol")
+            && (d.message.contains("'useState'") || d.message.contains("'Component'"))
+    });
+    assert!(
+        undefined_imports.is_none(),
+        "Imported symbols and function declarations should NOT be flagged as undefined"
+    );
+}
+
+#[test]
+fn test_javascript_destructuring_not_undefined() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.js",
+        r#"function main() {
+    const { x, y } = { x: 1, y: 2 };
+    return x + y;
+}
+"#,
+    );
+
+    let mut tree_file = TreeFile::new(&path).unwrap();
+    tree_file.experimental_semantics = true;
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let undefined_destructured = diagnostics.iter().find(|d| {
+        d.rule.as_deref() == Some("undefined-symbol")
+            && (d.message.contains("'x'") || d.message.contains("'y'"))
+    });
+    assert!(
+        undefined_destructured.is_none(),
+        "Destructured bindings should NOT be flagged as undefined"
+    );
+}
+
+// ============================================================================
+// New Pattern Rule Tests - Phase 2
+// ============================================================================
+
+#[test]
+fn test_javascript_console_log_detected() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.js",
+        r#"function debug() {
+    console.log("hello");
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let console_log = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("console-log"));
+    assert!(console_log.is_some(), "Expected console-log rule");
+}
+
+#[test]
+fn test_python_print_detected() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.py",
+        r#"def debug():
+    print("hello")
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let print_call = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("print-call"));
+    assert!(print_call.is_some(), "Expected print-call rule");
+}
+
+#[test]
+fn test_go_fmt_println_detected() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.go",
+        r#"package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("hello")
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let fmt_println = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("fmt-println"));
+    assert!(fmt_println.is_some(), "Expected fmt-println rule");
+}
+
+// ============================================================================
+// Dead Code Negative Tests - Phase 2
+// These tests verify that dead-code detection does NOT flag code
+// inside conditionals, loops, closures, or after defer-like constructs.
+// ============================================================================
+
+#[test]
+fn test_no_false_positive_dead_code_in_conditional() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.rs",
+        r#"fn demo(x: i32) {
+    if x > 0 {
+        return;
+    }
+    let after_if = 1;
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let dead_code = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("dead-code"));
+    assert!(
+        dead_code.is_none(),
+        "Code after conditional return should NOT be flagged as dead"
+    );
+}
+
+#[test]
+fn test_no_false_positive_dead_code_in_loop() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.rs",
+        r#"fn demo() {
+    loop {
+        break;
+    }
+    let after_loop = 1;
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let dead_code = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("dead-code"));
+    assert!(
+        dead_code.is_none(),
+        "Code after loop break should NOT be flagged as dead"
+    );
+}
+
+#[test]
+fn test_no_false_positive_dead_code_in_closure() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.rs",
+        r#"fn demo() {
+    let f = || {
+        return;
+    };
+    let after_closure = 1;
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let dead_code = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("dead-code"));
+    assert!(
+        dead_code.is_none(),
+        "Code after closure return should NOT be flagged as dead"
+    );
+}
+
+#[test]
+fn test_no_false_positive_dead_code_javascript_conditional() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.js",
+        r#"function demo(x) {
+    if (x > 0) {
+        return;
+    }
+    const afterIf = 1;
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let dead_code = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("dead-code"));
+    assert!(
+        dead_code.is_none(),
+        "JS code after conditional return should NOT be flagged as dead"
+    );
+}
+
+#[test]
+fn test_no_false_positive_dead_code_python_try_finally() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.py",
+        r#"def demo():
+    try:
+        return 1
+    finally:
+        cleanup()
+    after_try = 2
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let dead_code = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("dead-code"));
+    assert!(
+        dead_code.is_none(),
+        "Python code in finally or after try/return should NOT be flagged as dead"
+    );
+}
+
+#[test]
+fn test_no_false_positive_dead_code_go_defer() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.go",
+        r#"package main
+
+func demo() {
+    defer cleanup()
+    println("hello")
+}
+
+func cleanup() {}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let dead_code = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("dead-code"));
+    assert!(
+        dead_code.is_none(),
+        "Go code after defer should NOT be flagged as dead"
+    );
+}
+
+#[test]
+fn test_no_false_positive_dead_code_rust_match_arm() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.rs",
+        r#"fn demo(x: Option<i32>) {
+    match x {
+        Some(v) => return,
+        None => {},
+    }
+    let after_match = 1;
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let dead_code = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("dead-code"));
+    assert!(
+        dead_code.is_none(),
+        "Code after match arm return should NOT be flagged as dead"
     );
 }

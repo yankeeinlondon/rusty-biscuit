@@ -1,8 +1,9 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/transclusion.rs
-assertion_line: 114
 expression: out
 ---
 ⤫ TransclusionError: binary code source
+┃ 
 ┃ The code source ./binary.bin is not valid UTF-8 text.
-::code transclusion only supports text files.
+┃ 
+┃ ::code transclusion only supports text files.

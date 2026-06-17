@@ -175,6 +175,14 @@ impl EffectiveState {
     ///
     /// Returns `None` if the key doesn't exist or the path is invalid.
     pub fn get(&self, path: &str) -> Option<Value> {
+        // Reserved `doc` namespace — intercepted before normal key lookup and
+        // before the bare-name `ctx.*` fallback, so a missing `doc.*` never
+        // collapses into `ctx.*`.
+        if super::expression::doc_namespace::is_doc_namespace(path) {
+            let root = Value::Object(self.data.clone().into_iter().collect());
+            return super::expression::doc_namespace::resolve_doc_namespace(path, &root);
+        }
+
         // Handle special prefixes
         if let Some(ctx_key) = path.strip_prefix("ctx.") {
             return self.get_context_value(ctx_key);
@@ -301,6 +309,51 @@ impl super::expression::EvaluationLookup for EffectiveState {
 
     fn get_string(&self, path: &str) -> String {
         self.get_string(path)
+    }
+}
+
+/// Wraps an [`EffectiveState`] with a [`ResolutionContext`] so any surface that
+/// evaluates the grammar against the effective state — body interpolation,
+/// `when=` conditions, page blocks — can run the read-side expression
+/// functions (`frontmatter`, `file_exists`, `markdown_title`,
+/// `markdown_body_empty`, `validate_schema`, `absolute`, `relative`).
+///
+/// Bare `EffectiveState` returns `None` from `resolution_context()`, which
+/// disables those functions; this adapter supplies the document-relative base
+/// directory, magic search paths, and — when the supplied context enables remote
+/// reads — the run's remote-fetch runtime so HTTP(S) URL arguments resolve from
+/// the fetch cache. These body-side surfaces are the only ones that carry a
+/// remote runtime; frontmatter surfaces are local-only (Decision B). `absolute`
+/// and `relative` are local-only path transforms — they require the context for
+/// the base directory but never touch the network.
+pub(crate) struct ResolvingLookup<'a> {
+    state: &'a EffectiveState,
+    resolution_context: super::expression::ResolutionContext,
+}
+
+impl<'a> ResolvingLookup<'a> {
+    pub(crate) fn new(
+        state: &'a EffectiveState,
+        resolution_context: super::expression::ResolutionContext,
+    ) -> Self {
+        Self {
+            state,
+            resolution_context,
+        }
+    }
+}
+
+impl super::expression::EvaluationLookup for ResolvingLookup<'_> {
+    fn get(&self, path: &str) -> Option<Value> {
+        self.state.get(path)
+    }
+
+    fn get_string(&self, path: &str) -> String {
+        self.state.get_string(path)
+    }
+
+    fn resolution_context(&self) -> Option<super::expression::ResolutionContext> {
+        Some(self.resolution_context.clone())
     }
 }
 
@@ -486,6 +539,46 @@ mod tests {
         assert_eq!(state.get("user.name"), Some(json!("Alice")));
         assert_eq!(state.get("user.address.city"), Some(json!("London")));
         assert_eq!(state.get("user.missing"), None);
+    }
+
+    #[test]
+    fn doc_namespace_resolves_against_frontmatter_only() {
+        let mut fm = HashMap::new();
+        fm.insert("build".to_string(), json!("frontmatter-build"));
+        fm.insert("config".to_string(), json!({ "retries": 3 }));
+        // A frontmatter property literally named `doc`.
+        fm.insert("doc".to_string(), json!({ "child": "literal-doc" }));
+        let state = EffectiveState::new(&fm, None, test_context());
+
+        // doc.<path> resolves a frontmatter property.
+        assert_eq!(state.get("doc.build"), Some(json!("frontmatter-build")));
+        assert_eq!(state.get("doc.config.retries"), Some(json!(3)));
+
+        // bare doc returns the whole frontmatter object.
+        let obj = state.get("doc").expect("bare doc resolves");
+        assert!(obj.is_object());
+        assert_eq!(obj.get("build"), Some(&json!("frontmatter-build")));
+
+        // a literal property named `doc` is reached as doc.doc.
+        assert_eq!(state.get("doc.doc"), Some(json!({ "child": "literal-doc" })));
+        assert_eq!(state.get("doc.doc.child"), Some(json!("literal-doc")));
+
+        // missing doc.* values do NOT fall back to ctx.* — `today` exists only
+        // in the runtime context, never as a frontmatter property.
+        assert_eq!(state.get("ctx.today"), Some(json!("2024-06-15")));
+        assert_eq!(state.get("doc.today"), None);
+    }
+
+    #[test]
+    fn bare_doc_resolves_when_no_doc_property_exists() {
+        let mut fm = HashMap::new();
+        fm.insert("title".to_string(), json!("Hello"));
+        let state = EffectiveState::new(&fm, None, test_context());
+
+        // No frontmatter property named `doc`; bare doc is still the object and
+        // must not fall back to `ctx.doc`.
+        let obj = state.get("doc").expect("bare doc resolves to the object");
+        assert_eq!(obj.get("title"), Some(&json!("Hello")));
     }
 
     #[test]

@@ -72,6 +72,23 @@ fn redact_session_id(input: &str) -> String {
     )
 }
 
+fn redact_claudine_pid(input: &str) -> String {
+    const PREFIX: &str = "CLAUDINE_PID=";
+    let mut result = input.to_string();
+    let mut search_from = 0;
+    while let Some(start) = result[search_from..].find(PREFIX) {
+        let start = search_from + start;
+        let value_start = start + PREFIX.len();
+        let value_end = result[value_start..]
+            .find(|c: char| !c.is_ascii_digit())
+            .map(|i| value_start + i)
+            .unwrap_or(result.len());
+        result.replace_range(value_start..value_end, "<redacted>");
+        search_from = start + PREFIX.len() + "<redacted>".len();
+    }
+    result
+}
+
 fn redact_temp_home(input: &str) -> String {
     const MARKER: &str = "HOME=/var/folders/";
     let Some(start) = input.find(MARKER) else {
@@ -452,7 +469,7 @@ exit 0
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     let redacted = redact_workspace_paths(
         workspace.path(),
-        &redact_temp_home(&redact_session_id(&strip_ansi(&stderr))),
+        &redact_claudine_pid(&redact_temp_home(&redact_session_id(&strip_ansi(&stderr)))),
     );
     insta::assert_snapshot!(redacted);
 }
@@ -590,6 +607,11 @@ fn wrapper_sets_interactive_true_by_default() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    // Isolate HOME so the wrapper reads a seeded empty config instead of the
+    // developer's real `~/.claudine/config.json`, whose lifecycle actions can
+    // spawn detached side-effect processes that hold the stdout pipe open
+    // (assert_cmd then blocks on the pipe and nextest reports leaked handles).
+    seed_minimal_config(workspace.path());
     let env_path = workspace.path().join("env.txt");
 
     write_executable(
@@ -602,6 +624,7 @@ exit 0
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_ENV_FILE", &env_path)
         .args(["codex", "--", "--version"])
@@ -1154,16 +1177,12 @@ exit 0
         "stderr should contain Performance section; got: {plain}"
     );
     assert!(
-        plain.contains("CLI Overhead"),
-        "stderr should contain CLI Overhead section; got: {plain}"
+        plain.contains("pre-dispatch"),
+        "stderr should contain the pre-dispatch bucket; got: {plain}"
     );
     assert!(
-        plain.contains("Agent Execution"),
-        "stderr should contain Agent Execution section; got: {plain}"
-    );
-    assert!(
-        plain.contains("launches:"),
-        "stderr should show launch count; got: {plain}"
+        plain.contains("agent execution"),
+        "stderr should contain the agent execution bucket; got: {plain}"
     );
 }
 
@@ -1199,8 +1218,8 @@ exit 1
         "stderr should contain Performance section; got: {plain}"
     );
     assert!(
-        plain.contains("CLI Overhead"),
-        "stderr should contain CLI Overhead section; got: {plain}"
+        plain.contains("pre-dispatch"),
+        "stderr should contain the pre-dispatch bucket; got: {plain}"
     );
     assert!(
         plain.contains("dry run") || plain.contains("skipped"),
@@ -1252,7 +1271,7 @@ exit 0
         "Quiet mode should suppress env details but stderr was: {stderr}"
     );
     assert!(
-        stderr_plain.contains("System Prompt(appended)"),
+        stderr_plain.contains("System Prompt (appended)"),
         "Quiet mode should still show the system prompt when set but stderr was: {stderr}"
     );
 
@@ -1525,6 +1544,199 @@ printf '%s' 'Final assistant response' > "$LAST"
         1
     );
     assert!(log_contents.contains("\"provider_summary\":{\"raw_summary\""));
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 — PID capture end-to-end verification
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[test]
+fn wrapper_injects_claudine_pid_into_provider_env() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+    let env_path = workspace.path().join("env.txt");
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+{
+  printf 'CLAUDINE_PID=%s\n' "$CLAUDINE_PID"
+  if [ -n "${AGENT_PID:-}" ]; then
+    printf 'HAS_AGENT_PID=1\n'
+  else
+    printf 'HAS_AGENT_PID=0\n'
+  fi
+} > "$CLAUDINE_ENV_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_ENV_FILE", &env_path)
+        .args(["codex", "--", "--version"])
+        .assert()
+        .success();
+
+    let env_lines = fs::read_to_string(&env_path).unwrap();
+    assert!(
+        env_lines.contains("CLAUDINE_PID="),
+        "provider must receive CLAUDINE_PID; got: {env_lines}"
+    );
+    let claudine_pid_value = env_lines
+        .lines()
+        .find(|l| l.starts_with("CLAUDINE_PID="))
+        .and_then(|l| l.strip_prefix("CLAUDINE_PID="))
+        .unwrap_or("");
+    assert!(
+        !claudine_pid_value.is_empty(),
+        "CLAUDINE_PID must not be empty; got: {env_lines}"
+    );
+    assert!(
+        claudine_pid_value.parse::<u32>().is_ok(),
+        "CLAUDINE_PID must be a valid PID; got: {env_lines}"
+    );
+    assert!(
+        env_lines.contains("HAS_AGENT_PID=0"),
+        "provider must not receive AGENT_PID in its environment; got: {env_lines}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_structured_summary_includes_pids_in_jsonl() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+    seed_minimal_config(&fake_home);
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+printf '%s\n' '{"type":"thread.started","thread_id":"thread-pid-test"}'
+printf '%s\n' '{"type":"turn.started"}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"msg-1","type":"agent_message","text":"pid test"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":12,"output_tokens":5},"duration_ms":1000,"status":"completed"}'
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .args(["codex", "--model", "codex-mini", "test prompt"])
+        .assert()
+        .success();
+
+    let log_path = today_log_path(&fake_home);
+    let log_contents = fs::read_to_string(log_path).unwrap();
+
+    let summary_line = log_contents
+        .lines()
+        .find(|line| line.contains("\"synthetic_kind\":\"stream_wrapper_summary\""))
+        .expect("summary event should be written");
+
+    let summary: serde_json::Value = serde_json::from_str(summary_line).unwrap();
+
+    let claudine_pid = summary
+        .get("env")
+        .and_then(|e| e.get("claudine_pid"))
+        .and_then(|v| v.as_u64());
+    assert!(
+        claudine_pid.is_some(),
+        "summary event must include env.claudine_pid; got: {summary_line}"
+    );
+
+    let agent_pid = summary.get("agent_pid").and_then(|v| v.as_u64());
+    assert!(
+        agent_pid.is_some(),
+        "summary event must include agent_pid after successful spawn; got: {summary_line}"
+    );
+
+    // Review-1 Finding 1: live per-event records (not just the lifecycle
+    // summary) must carry agent_pid once the child has spawned. These are the
+    // synthetic `stream_semantic_event` rows the sink logs for every event.
+    let semantic_line = log_contents
+        .lines()
+        .find(|line| line.contains("\"synthetic_kind\":\"stream_semantic_event\""))
+        .expect("at least one live semantic event should be logged");
+    let semantic: serde_json::Value = serde_json::from_str(semantic_line).unwrap();
+    assert!(
+        semantic.get("agent_pid").and_then(|v| v.as_u64()).is_some(),
+        "live semantic event must include agent_pid after spawn; got: {semantic_line}"
+    );
+    assert!(
+        semantic
+            .get("env")
+            .and_then(|e| e.get("claudine_pid"))
+            .and_then(|v| v.as_u64())
+            .is_some(),
+        "live semantic event must include env.claudine_pid; got: {semantic_line}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_dry_run_does_not_fabricate_agent_pid_in_jsonl() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+echo "SHOULD NOT RUN"
+exit 1
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .args(["codex", "--dry-run", "--", "--version"])
+        .assert()
+        .success();
+
+    let log_path = today_log_path(workspace.path());
+    assert!(
+        !log_path.exists(),
+        "dry run must not create a JSONL log file; found: {log_path:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_missing_binary_does_not_fabricate_agent_pid_in_jsonl() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    // Do NOT create a codex binary — binary resolution will fail.
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .args(["codex", "--", "--version"])
+        .assert()
+        .failure();
+
+    let log_path = today_log_path(workspace.path());
+    assert!(
+        !log_path.exists(),
+        "failed binary resolution must not create a JSONL log file; found: {log_path:?}"
+    );
 }
 
 #[cfg(unix)]
@@ -2227,6 +2439,119 @@ fn compose_preflight_error_includes_source_provenance() {
     );
 }
 
+/// Non-TTY dry-run gate: an unapproved `::shell` command (no approval
+/// handler, no whitelist) makes `compose --dry-run` exit non-zero with the
+/// exact spec message naming the offending command. This is the CI gate
+/// "working correctly".
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_non_tty_unapproved_shell_emits_gate_error() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("template.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: dry-run gate\n---\n::shell echo dryrun-needs-approval\n",
+    )
+    .unwrap();
+
+    // Provider stub so target resolution succeeds before preflight aborts.
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\necho 'provider should not run' >&2\nexit 99\n",
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args([
+            "compose",
+            "--goose",
+            "--dry-run",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let plain = strip_ansi(&stderr);
+    // The prose renderer hard-wraps the styled error block inside a box, so
+    // drop the box-border glyphs and collapse whitespace runs before matching
+    // the spec message (semantic check, not byte-for-byte — wrapping width is
+    // terminal-dependent).
+    let collapsed = plain
+        .replace('┃', " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    assert!(
+        collapsed.contains(
+            "Cannot dry-run: shell command 'echo dryrun-needs-approval' requires interactive \
+             approval."
+        ),
+        "expected the dry-run gate message naming the command; stderr was:\n{plain}"
+    );
+    assert!(
+        collapsed.contains("--yolo"),
+        "gate message should point at --yolo; stderr was:\n{plain}"
+    );
+    assert!(
+        !plain.contains("provider should not run"),
+        "provider must not execute when the dry-run gate fires; stderr was:\n{plain}"
+    );
+}
+
+/// `--dry-run --yolo` auto-approves shell commands so the gate is bypassed:
+/// the command runs for real and its output is interpolated into the body
+/// that lands on stdout.
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_yolo_bypasses_shell_gate() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("template.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: yolo bypass\n---\n::shell echo yolo-marker\n",
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\necho 'provider should not run' >&2\nexit 99\n",
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args([
+            "compose",
+            "--goose",
+            "--dry-run",
+            "--yolo",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).to_string();
+    let plain = strip_ansi(&stdout);
+
+    assert!(
+        plain.contains("yolo-marker"),
+        "composed body on stdout should contain the executed command output; stdout was:\n{plain}"
+    );
+}
+
 /// When the prompt file lives outside any git repo, `CompositionPrepContext`
 /// must fall back to the ambient CWD to load `selection_config`. Without this
 /// fallback non-TTY resolution loses the favorite-agent and model overrides
@@ -2276,9 +2601,11 @@ fn compose_non_tty_uses_cwd_config_when_source_outside_git() {
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
     let plain = strip_ansi(&stderr);
 
+    // With no agent hint and no explicit provider, dry-run shows the
+    // unresolved no-agent state rather than auto-selecting the favorite.
     assert!(
-        plain.contains("Goose"),
-        "non-TTY compose with source outside git should use CWD config favorite; stderr was:\n{plain}"
+        plain.contains("didn't specify the Agent"),
+        "non-TTY compose dry-run should show the no-agent state; stderr was:\n{plain}"
     );
 }
 
@@ -2674,6 +3001,245 @@ fn inline_compose_preserves_frontmatter() {
     );
 }
 
+/// Phase 4 dry-run: `inline-compose --dry-run` runs the full composition
+/// pipeline up to (but not including) provider launch, leaves the source
+/// file byte-identical (no write-back, `last_updated` untouched), and prints
+/// the composed prompt — what *would* be sent — to stdout.
+#[cfg(unix)]
+#[test]
+fn inline_compose_dry_run_leaves_file_unchanged_and_prints_prompt() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    let original =
+        "---\nprompt: Generate the documentation\nlast_updated: 2026-01-01\n---\nOriginal body\n";
+    fs::write(&md_file, original).unwrap();
+
+    // Provider binary writes a sentinel file when it runs; under --dry-run it
+    // must never launch, so the sentinel must be absent afterwards.
+    let sentinel = workspace.path().join("provider-ran.flag");
+    write_executable(
+        &path_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\ntouch '{}'\nprintf 'New body from agent\\n'\nexit 0\n",
+            sentinel.display()
+        ),
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args([
+            "inline-compose",
+            "--goose",
+            "--dry-run",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    // Source file is byte-identical: no write-back, `last_updated` untouched.
+    let final_content = fs::read_to_string(&md_file).unwrap();
+    assert_eq!(
+        final_content, original,
+        "inline-compose --dry-run must not mutate the source file"
+    );
+
+    // Provider never launched.
+    assert!(
+        !sentinel.exists(),
+        "provider must not execute under inline-compose --dry-run"
+    );
+
+    // Composed prompt (what would be sent) is on stdout.
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).to_string();
+    assert!(
+        strip_ansi(&stdout).contains("Generate the documentation"),
+        "stdout should carry the composed prompt; stdout was:\n{stdout}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn inline_compose_writes_only_final_response_not_narration() {
+    // Regression: with a structured provider that narrates between tool
+    // calls, inline-compose must write ONLY the agent's final response (the
+    // output text after the last tool call) into the document body. The
+    // interstitial "Let me read…/Now let me write…" narration must never
+    // leak into the artifact.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+    seed_minimal_config(&fake_home);
+
+    let md_file = workspace.path().join("doc.md");
+    fs::write(
+        &md_file,
+        "---\nprompt: Generate the document body.\n---\nOriginal placeholder body.\n",
+    )
+    .unwrap();
+
+    // Claude stream-json stub: narrate, call a tool, narrate again, call a
+    // second tool, then emit the FINAL response. Each narration block is a
+    // separate text-only assistant message, so without the fix all of them
+    // accumulate into `assistant_text` and leak into the body.
+    write_executable(
+        &path_dir.join("claude"),
+        r##"#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"claude-final","model":"claude-sonnet-4"}'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Let me read the research documents first."}]}}'
+printf '%s\n' '{"type":"tool_use","name":"read_file","input":{"path":"research.md"}}'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Now let me write the document."}]}}'
+printf '%s\n' '{"type":"tool_use","name":"write_file","input":{"path":"doc.md"}}'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"# Final Document\n\nThis is the only content that belongs in the body."}]}}'
+printf '%s\n' '{"type":"result","subtype":"success","stop_reason":"end_turn","num_turns":3,"duration_ms":100,"usage":{"input_tokens":3,"output_tokens":60}}'
+"##,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .args(["inline-compose", "--claude", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let final_doc = fs::read_to_string(&md_file).unwrap();
+    assert!(
+        final_doc.contains("This is the only content that belongs in the body."),
+        "the final response should be written to the body; doc:\n{final_doc}"
+    );
+    assert!(
+        !final_doc.contains("Let me read the research documents first."),
+        "first narration block leaked into the body; doc:\n{final_doc}"
+    );
+    assert!(
+        !final_doc.contains("Now let me write the document."),
+        "second narration block leaked into the body; doc:\n{final_doc}"
+    );
+    assert!(
+        !final_doc.contains("Original placeholder body."),
+        "the original body should have been replaced; doc:\n{final_doc}"
+    );
+    // Frontmatter is preserved through the inline rewrite.
+    assert!(
+        final_doc.contains("prompt: Generate the document body."),
+        "original frontmatter should be preserved; doc:\n{final_doc}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn inline_compose_final_response_converges_across_harness_and_non_harness_paths() {
+    // Convergence test: the same structured-stream inline-compose scenario must
+    // produce identical body content whether it runs through the harness loop
+    // (document has harness properties) or the non-harness path (no harness
+    // properties). Both must write ONLY the agent's final response into the
+    // body — never the interstitial narration.
+    //
+    // This test is the safety net for the "always-harness" unification effort
+    // (see claudine/features/2026-06-03-always-harness/spec.md). If it fails,
+    // the two execution paths have diverged.
+
+    // --- Shared stub: Claude stream-json that narrates, uses tools, then responds ---
+    let claude_stub = r##"#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"conv-test","model":"claude-sonnet-4"}'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Let me gather the required context."}]}}'
+printf '%s\n' '{"type":"tool_use","name":"read_file","input":{"path":"context.md"}}'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Now I will compose the final output."}]}}'
+printf '%s\n' '{"type":"tool_use","name":"write_file","input":{"path":"output.md"}}'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"# Converged Output\n\nOnly this paragraph should appear in the body."}]}}'
+printf '%s\n' '{"type":"result","subtype":"success","stop_reason":"end_turn","num_turns":3,"duration_ms":80,"usage":{"input_tokens":5,"output_tokens":50}}'
+"##;
+
+    // --- Helper: run inline-compose with given frontmatter, return body content ---
+    let run_with_frontmatter = |fm_extra: &str, label: &str| -> String {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        let fake_home = workspace.path().join("home");
+        fs::create_dir_all(&path_dir).unwrap();
+        fs::create_dir_all(&fake_home).unwrap();
+        seed_minimal_config(&fake_home);
+
+        let md_file = workspace.path().join(format!("doc-{label}.md"));
+        let frontmatter = format!(
+            "---\nprompt: Generate the document body.\n{fm_extra}---\nOriginal placeholder body.\n"
+        );
+        fs::write(&md_file, &frontmatter).unwrap();
+
+        // Create a trivial pre-check target for the harness variant.
+        fs::write(workspace.path().join("always-exists.txt"), "ok").unwrap();
+
+        write_executable(&path_dir.join("claude"), claude_stub);
+
+        cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("HOME", &fake_home)
+            .env("PATH", &path_dir)
+            .args(["inline-compose", "--claude", md_file.to_str().unwrap()])
+            .current_dir(workspace.path())
+            .assert()
+            .success();
+
+        let doc = fs::read_to_string(&md_file).unwrap();
+        // Extract body: everything after the closing ---\n of frontmatter.
+        doc.split_once("\n---\n")
+            .map(|(_, body)| body.to_string())
+            .unwrap_or(doc)
+    };
+
+    // --- Non-harness path: no harness properties ---
+    let non_harness_body = run_with_frontmatter("", "bare");
+
+    // --- Harness path: trivial pre-check that always passes ---
+    let harness_body = run_with_frontmatter(
+        "pre_checks:\n  file_exists: \"always-exists.txt\"\n",
+        "harness",
+    );
+
+    // Both paths must produce the same body.
+    assert_eq!(
+        non_harness_body.trim(),
+        harness_body.trim(),
+        "non-harness body and harness body must be identical;\n  non-harness: {:?}\n  harness:     {:?}",
+        non_harness_body.trim(),
+        harness_body.trim(),
+    );
+
+    // Both must contain only the final response.
+    let expected = "# Converged Output\n\nOnly this paragraph should appear in the body.";
+    assert_eq!(
+        non_harness_body.trim(),
+        expected,
+        "non-harness body must be the final response only"
+    );
+    assert_eq!(
+        harness_body.trim(),
+        expected,
+        "harness body must be the final response only"
+    );
+
+    // Neither must contain narration.
+    for (body, label) in [&non_harness_body, &harness_body].iter().zip(["non-harness", "harness"]) {
+        assert!(
+            !body.contains("Let me gather the required context."),
+            "{label}: first narration leaked into body"
+        );
+        assert!(
+            !body.contains("Now I will compose the final output."),
+            "{label}: second narration leaked into body"
+        );
+    }
+}
+
 #[cfg(unix)]
 #[test]
 #[serial_test::serial]
@@ -2789,7 +3355,7 @@ exit 0
         .assert()
         .code(1)
         .stderr(contains(
-            "inline-compose with --interactive is not supported",
+            "inline-compose in interactive mode (from --interactive) is not supported",
         ));
 }
 
@@ -3412,17 +3978,15 @@ exit 99
         .current_dir(workspace.path())
         .args(["compose", md_file.to_str().unwrap()])
         .assert()
-        .success();
+        .code(1);
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
     let plain = strip_ansi(&stderr);
+    // Non-TTY with no agent hint aborts with the no-agent message;
+    // the config favorite is no longer used as a non-TTY fallback.
     assert!(
-        plain.contains("Goose"),
-        "repo config favorite should select Goose; stderr was: {plain}"
-    );
-    assert!(
-        args_file.exists(),
-        "goose should have been invoked via the config favorite"
+        plain.contains("didn't specify the Agent"),
+        "non-TTY no-agent should abort with the no-agent message; stderr was: {plain}"
     );
 }
 
@@ -3461,9 +4025,11 @@ fn agent_hint_resolved_early_in_non_tty() {
 
 #[cfg(unix)]
 #[test]
-fn unknown_agent_hint_fails_early_in_non_tty() {
-    // Verifies that an unknown `agent` hint fails during preparation
-    // instead of hanging on interactive selection.
+fn unknown_agent_hint_is_non_fatal_and_aborts_in_non_tty() {
+    // Invalid `agent` values are no longer fatal during preparation.
+    // In non-TTY mode the invalid hint is discarded and the run aborts
+    // because no provider can be resolved, mirroring the no-agent
+    // non-TTY behavior until the Phase 3 live-path messaging lands.
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
@@ -3490,7 +4056,139 @@ fn unknown_agent_hint_fails_early_in_non_tty() {
         .args(["compose", md_file.to_str().unwrap()])
         .assert()
         .code(1)
-        .stderr(contains("does not match any known provider"));
+        .stderr(contains("agent resolution failed"));
+}
+
+/// End-to-end (Finding 1): a frontmatter `agent` list resolving to exactly one
+/// installed provider must render the **auto-select header** in the dry-run
+/// `Agent` cell — not collapse to a bare provider name. Before the fix the
+/// resolved target masked the list state at the dry-run seam.
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_list_one_installed_renders_auto_select_header() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    // Suggest two agents; install only `claude` so the list resolves to a
+    // single installed provider (ListOneInstalled).
+    let md_file = workspace.path().join("doc.md");
+    fs::write(
+        &md_file,
+        "---\nname: one-installed\nagent: [claude, gemini]\n---\nBODY\n",
+    )
+    .unwrap();
+    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        // Restrict PATH to the fake bin so only `claude` is "installed".
+        .env("PATH", &path_dir)
+        .args(["compose", "--dry-run", md_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "dry-run should succeed; stderr was:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    // `prompting` only appears in the auto-select header ("…without the need
+    // for interactive prompting"); it is the single-token proof that the cell
+    // is the list auto-select state, not a bare `Selected` provider name.
+    assert!(
+        stderr.contains("prompting"),
+        "list-with-one-installed dry-run must render the auto-select header; stderr was:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Claude"),
+        "the auto-selected provider must still be named; stderr was:\n{stderr}"
+    );
+}
+
+/// End-to-end (Finding 2): a single-entry all-invalid `agent` list
+/// (`agent: [not-real]`) must render the **zero-installed-list** state, not the
+/// single-invalid scalar cell. Before the fix the lost list-ness collapsed it
+/// to `Invalid Agent(…)`.
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_single_entry_invalid_list_is_zero_installed() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("doc.md");
+    fs::write(&md_file, "---\nname: zero\nagent: [not-real]\n---\nBODY\n").unwrap();
+    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .args(["compose", "--dry-run", md_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "dry-run should succeed; stderr was:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    // `installed/valid` is the single-token signature of the zero-installed
+    // header; it survives table word-wrap.
+    assert!(
+        stderr.contains("installed/valid"),
+        "single-entry invalid list must render the zero-installed-list state; stderr was:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("not-real"),
+        "the invalid suggestion must appear in the NOT-valid list; stderr was:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("Invalid Agent"),
+        "must NOT render the single-invalid scalar cell; stderr was:\n{stderr}"
+    );
+}
+
+/// End-to-end (Findings 3/4): `--silent` governs status verbosity only — it
+/// must not suppress the live no-TTY agent-resolution report, and the run must
+/// still abort with a non-zero exit.
+#[cfg(unix)]
+#[test]
+fn compose_silent_does_not_suppress_agent_resolution_report() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    // No agent hint, no explicit provider → live no-TTY abort.
+    let md_file = workspace.path().join("doc.md");
+    fs::write(&md_file, "---\ntitle: t\n---\nPrompt body\n").unwrap();
+    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+    let stdin_file = workspace.path().join("empty-stdin.txt");
+    fs::write(&stdin_file, "").unwrap();
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .pipe_stdin(&stdin_file)
+        .unwrap()
+        .args(["compose", "--silent", md_file.to_str().unwrap()])
+        .assert()
+        .code(1);
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(
+        stderr.contains("didn't specify the Agent"),
+        "--silent must not suppress the agent-resolution report; stderr was:\n{stderr}"
+    );
 }
 
 #[cfg(unix)]
@@ -4128,6 +4826,822 @@ fn sequence_composition_dry_run_for_every_provider() {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 5 — sequence dry-run (dividers, concatenation, fail-fast)
+// ---------------------------------------------------------------------------
+
+/// `claudine sequence --dry-run` over a multi-step sequence:
+/// - each step's composed body is concatenated to **stdout** in order,
+/// - a `=== Document N of M ===` divider precedes documents 2..M on
+///   **stderr** (none before the first document),
+/// - no provider is ever launched (sentinel absent).
+#[cfg(unix)]
+#[test]
+fn sequence_dry_run_concatenates_bodies_with_dividers() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    // Provider stub writes a sentinel; under --dry-run it must never run.
+    let sentinel = workspace.path().join("provider-ran.flag");
+    write_executable(
+        &path_dir.join("goose"),
+        &format!("#!/bin/sh\ntouch '{}'\nexit 0\n", sentinel.display()),
+    );
+
+    // Three-step sequence; every step composes the same document body, so the
+    // body marker appears once per step on stdout.
+    let compose_file = workspace.path().join("compose.md");
+    fs::write(
+        &compose_file,
+        "---\nsequence:\n  - step_one\n  - step_two\n  - step_three\n---\nSEQUENCE_BODY_XYZZY\n",
+    )
+    .unwrap();
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["sequence", "compose.md", "--goose", "--dry-run"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "sequence dry-run should succeed; stderr was:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+
+    // All three composed bodies are concatenated to stdout in order.
+    assert_eq!(
+        stdout.matches("SEQUENCE_BODY_XYZZY").count(),
+        3,
+        "stdout should contain all three composed bodies; stdout was:\n{stdout}"
+    );
+
+    // Horizontal-rule delimiters precede documents 2 and 3, but never the
+    // first document. The old text divider is no longer emitted.
+    assert!(
+        !stderr.contains("=== Document"),
+        "old text divider must not appear; stderr was:\n{stderr}"
+    );
+    let hr_lines: Vec<&str> = stderr
+        .lines()
+        .filter(|l| l.len() >= 10 && l.chars().all(|c| c == '╌' || c == '-'))
+        .collect();
+    // Each document emits an HR after its body, plus one HR between docs 2&3.
+    // That's 3 per-document HRs + 2 inter-document HRs = 5 total.
+    assert!(
+        hr_lines.len() >= 2,
+        "stderr should contain horizontal-rule delimiters; stderr was:\n{stderr}"
+    );
+
+    // No provider launched.
+    assert!(
+        !sentinel.exists(),
+        "provider must not execute under sequence --dry-run"
+    );
+}
+
+/// `--quiet` and `--silent` have no effect on sequence dry-run output: the
+/// concatenated bodies and the between-document dividers render regardless.
+#[cfg(unix)]
+#[test]
+fn sequence_dry_run_quiet_and_silent_are_no_op() {
+    for flag in ["--quiet", "--silent"] {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        fs::create_dir_all(&path_dir).unwrap();
+        seed_minimal_config(workspace.path());
+
+        write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+        let compose_file = workspace.path().join("compose.md");
+        fs::write(
+            &compose_file,
+            "---\nsequence:\n  - step_one\n  - step_two\n---\nSEQUENCE_BODY_XYZZY\n",
+        )
+        .unwrap();
+
+        let output = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("HOME", workspace.path())
+            .env("PATH", augmented_path(&path_dir))
+            .current_dir(workspace.path())
+            .args(["sequence", "compose.md", "--goose", "--dry-run", flag])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "sequence dry-run {flag} should succeed; stderr was:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+        let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+
+        assert_eq!(
+            stdout.matches("SEQUENCE_BODY_XYZZY").count(),
+            2,
+            "{flag} must not suppress the composed bodies; stdout was:\n{stdout}"
+        );
+        assert!(
+            !stderr.contains("=== Document"),
+            "{flag}: old text divider must not appear; stderr was:\n{stderr}"
+        );
+        let hr_lines: Vec<&str> = stderr
+            .lines()
+            .filter(|l| l.len() >= 10 && l.chars().all(|c| c == '╌' || c == '-'))
+            .collect();
+        assert!(
+            hr_lines.len() >= 2,
+            "{flag} must not suppress the dry-run horizontal rules; stderr was:\n{stderr}"
+        );
+    }
+}
+
+/// Fail-fast: a composition error (here, a `$schema`-required property the
+/// sequence frontmatter does not satisfy) renders to **stderr** and stops the
+/// sequence with a non-zero exit, before any provider launches.
+#[cfg(unix)]
+#[test]
+fn sequence_dry_run_fail_fast_on_composition_error() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let sentinel = workspace.path().join("provider-ran.flag");
+    write_executable(
+        &path_dir.join("goose"),
+        &format!("#!/bin/sh\ntouch '{}'\nexit 0\n", sentinel.display()),
+    );
+
+    let compose_file = workspace.path().join("compose.md");
+    fs::write(
+        &compose_file,
+        "---\n$schema:\n  topic: 'string(required)'\nsequence:\n  - step_one\n  - step_two\n---\nPlan for {{topic}}.\n",
+    )
+    .unwrap();
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["sequence", "compose.md", "--goose", "--dry-run"])
+        .assert()
+        .failure();
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(
+        stderr.to_lowercase().contains("missing properties"),
+        "composition error should surface a missing-properties report on stderr; stderr was:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("topic"),
+        "error should name the unsatisfied `topic` property; stderr was:\n{stderr}"
+    );
+    assert!(
+        !sentinel.exists(),
+        "provider must not launch when sequence dry-run fails composition"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// review-2 — sequence --dry-run agent-resolution states (no explicit provider)
+//
+// `claudine sequence --dry-run` with no `--<provider>` flag must NOT run the
+// legacy non-TTY resolver (which auto-picks or aborts) before the per-step
+// dry-run seam. Each step must instead render the classified agent-resolution
+// state into the metadata table, exactly like `compose --dry-run`. These L1
+// tests cover the states a bare sequence can hit: no-agent, single-invalid,
+// single-not-installed, and zero-installed-list.
+// ---------------------------------------------------------------------------
+
+/// Run `claudine sequence compose.md --dry-run` (no explicit provider) over a
+/// two-step sequence whose frontmatter carries `agent_line` (empty for the
+/// no-agent case), with only `installed` providers on PATH. Returns
+/// `(success, ansi_stripped_stdout, ansi_stripped_stderr)` and asserts that no
+/// provider ever launched.
+#[cfg(unix)]
+fn run_sequence_dry_run_agent_state(
+    agent_line: &str,
+    installed: &[&str],
+) -> (bool, String, String) {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    // Any installed provider writes a sentinel; under --dry-run it must never
+    // run, regardless of how the agent state resolves.
+    let sentinel = workspace.path().join("provider-ran.flag");
+    for slug in installed {
+        write_executable(
+            &path_dir.join(slug),
+            &format!("#!/bin/sh\ntouch '{}'\nexit 0\n", sentinel.display()),
+        );
+    }
+
+    let compose_file = workspace.path().join("compose.md");
+    fs::write(
+        &compose_file,
+        format!("---\nsequence:\n  - step_one\n  - step_two\n{agent_line}---\nSEQ_BODY_MARKER\n"),
+    )
+    .unwrap();
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        // Restrict PATH to the fake bin so only `installed` providers count.
+        .env("PATH", &path_dir)
+        .current_dir(workspace.path())
+        .args(["sequence", "compose.md", "--dry-run"])
+        .output()
+        .unwrap();
+
+    assert!(
+        !sentinel.exists(),
+        "provider must not execute under sequence --dry-run"
+    );
+
+    (
+        output.status.success(),
+        strip_ansi(&String::from_utf8_lossy(&output.stdout)),
+        strip_ansi(&String::from_utf8_lossy(&output.stderr)),
+    )
+}
+
+/// No frontmatter `agent` and no explicit provider: every step renders the
+/// no-agent state instead of aborting through the legacy resolver.
+#[cfg(unix)]
+#[test]
+fn sequence_dry_run_no_agent_renders_state_per_step() {
+    let (ok, stdout, stderr) = run_sequence_dry_run_agent_state("", &["goose"]);
+    assert!(ok, "no-agent sequence dry-run should succeed; stderr:\n{stderr}");
+    // Both composed bodies still reach stdout.
+    assert_eq!(
+        stdout.matches("SEQ_BODY_MARKER").count(),
+        2,
+        "each step's body must reach stdout; stdout:\n{stdout}"
+    );
+    // The no-agent breakdown renders once per step (one per metadata table).
+    assert!(
+        stderr.matches("didn't specify the Agent").count() >= 2,
+        "each step must render the no-agent state; stderr:\n{stderr}"
+    );
+}
+
+/// A scalar invalid `agent` (`agent: not-real`) is non-fatal under dry-run:
+/// every step renders the single-invalid cell rather than aborting.
+#[cfg(unix)]
+#[test]
+fn sequence_dry_run_single_invalid_renders_state_per_step() {
+    let (ok, _stdout, stderr) =
+        run_sequence_dry_run_agent_state("agent: not-real\n", &["claude"]);
+    assert!(ok, "single-invalid sequence dry-run should succeed; stderr:\n{stderr}");
+    assert!(
+        stderr.matches("Invalid Agent").count() >= 2,
+        "each step must render the single-invalid cell; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("not-real"),
+        "the invalid hint must be named; stderr:\n{stderr}"
+    );
+}
+
+/// A single valid-but-not-installed `agent` (`agent: gemini`, only `claude`
+/// installed) renders the not-installed cell per step under dry-run.
+#[cfg(unix)]
+#[test]
+fn sequence_dry_run_single_not_installed_renders_state_per_step() {
+    let (ok, _stdout, stderr) =
+        run_sequence_dry_run_agent_state("agent: gemini\n", &["claude"]);
+    assert!(
+        ok,
+        "single-not-installed sequence dry-run should succeed; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.matches("Agent Not Installed").count() >= 2,
+        "each step must render the not-installed cell; stderr:\n{stderr}"
+    );
+}
+
+/// A frontmatter `agent` list resolving to zero installed providers — here an
+/// all-invalid list (`agent: [not-real, also-fake]`), which is deterministic
+/// regardless of which providers the host has installed — renders the
+/// zero-installed-list state per step under dry-run.
+#[cfg(unix)]
+#[test]
+fn sequence_dry_run_zero_installed_list_renders_state_per_step() {
+    let (ok, _stdout, stderr) =
+        run_sequence_dry_run_agent_state("agent: [not-real, also-fake]\n", &["claude"]);
+    assert!(
+        ok,
+        "zero-installed-list sequence dry-run should succeed; stderr:\n{stderr}"
+    );
+    // `installed/valid` is the single-token signature of the zero-installed
+    // header; it survives table word-wrap.
+    assert!(
+        stderr.matches("installed/valid").count() >= 2,
+        "each step must render the zero-installed-list state; stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("Invalid Agent"),
+        "a list state must not render the single-invalid scalar cell; stderr:\n{stderr}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Live (non-dry-run) sequence agent-resolution gate
+//
+// The dry-run table promises a prompting state would prompt-or-abort; the
+// real `sequence` command must honor that. In a no-TTY session every
+// prompting state aborts with the same styled `AgentResolutionFailed`
+// message — never auto-running a substitute provider through the legacy
+// favorite/default resolver. These tests are the live counterpart to the
+// `sequence_dry_run_*_renders_state_per_step` tests above.
+// ---------------------------------------------------------------------------
+
+/// Run `claudine sequence compose.md` (live: no `--dry-run`, no explicit
+/// provider) over a two-step sequence whose frontmatter carries `agent_line`,
+/// with only `installed` providers on PATH and **no TTY** (piped empty stdin).
+///
+/// Each installed provider records a launch by writing a sentinel via the
+/// POSIX shell builtin `: > file` — claudine restricts the child PATH to the
+/// fake bin, so an external `touch` would not resolve, but a redirect always
+/// does. Returns `(exit_code, ansi_stripped_stderr, provider_ran)`.
+#[cfg(unix)]
+fn run_sequence_live_agent_state(agent_line: &str, installed: &[&str]) -> (i32, String, bool) {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let sentinel = workspace.path().join("provider-ran.flag");
+    for slug in installed {
+        write_executable(
+            &path_dir.join(slug),
+            &format!("#!/bin/sh\n: > '{}'\nexit 0\n", sentinel.display()),
+        );
+    }
+
+    let compose_file = workspace.path().join("compose.md");
+    fs::write(
+        &compose_file,
+        format!("---\nsequence:\n  - step_one\n  - step_two\n{agent_line}---\nSEQ_BODY_MARKER\n"),
+    )
+    .unwrap();
+
+    let stdin_file = workspace.path().join("empty-stdin.txt");
+    fs::write(&stdin_file, "").unwrap();
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        // Restrict PATH to the fake bin so only `installed` providers count.
+        .env("PATH", &path_dir)
+        .pipe_stdin(&stdin_file)
+        .unwrap()
+        .current_dir(workspace.path())
+        .args(["sequence", "compose.md"])
+        .output()
+        .unwrap();
+
+    (
+        output.status.code().unwrap_or(-1),
+        strip_ansi(&String::from_utf8_lossy(&output.stderr)),
+        sentinel.exists(),
+    )
+}
+
+/// No frontmatter `agent` and no explicit provider in a no-TTY session: the
+/// live run aborts with the no-agent breakdown instead of auto-picking the
+/// favorite/default and launching a provider.
+#[cfg(unix)]
+#[test]
+fn sequence_live_no_agent_aborts_without_launching_provider() {
+    let (code, stderr, ran) = run_sequence_live_agent_state("", &["claude"]);
+    assert!(!ran, "no provider may launch for a no-agent live sequence");
+    assert_eq!(code, 1, "no-agent live sequence must abort; stderr:\n{stderr}");
+    assert!(
+        stderr.contains("agent resolution failed"),
+        "abort must surface the structured agent-resolution error; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("didn't specify the Agent"),
+        "abort body must be the same no-agent breakdown the dry-run table shows; stderr:\n{stderr}"
+    );
+}
+
+/// A scalar invalid `agent` (`agent: not-real`) aborts live in no-TTY mode
+/// with the imperative `Invalid Agent:` message — it must NOT fall back to the
+/// only installed provider.
+#[cfg(unix)]
+#[test]
+fn sequence_live_single_invalid_aborts_without_launching_provider() {
+    let (code, stderr, ran) = run_sequence_live_agent_state("agent: not-real\n", &["claude"]);
+    assert!(!ran, "no provider may launch for an invalid-agent live sequence");
+    assert_eq!(code, 1, "invalid-agent live sequence must abort; stderr:\n{stderr}");
+    assert!(
+        stderr.contains("agent resolution failed"),
+        "abort must surface the structured agent-resolution error; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Invalid Agent") && stderr.contains("not-real"),
+        "abort body must name the invalid hint; stderr:\n{stderr}"
+    );
+}
+
+/// A single valid-but-not-installed `agent` (`agent: gemini`, only `claude`
+/// installed) aborts live in no-TTY mode rather than substituting `claude`.
+#[cfg(unix)]
+#[test]
+fn sequence_live_single_not_installed_aborts_without_launching_provider() {
+    let (code, stderr, ran) = run_sequence_live_agent_state("agent: gemini\n", &["claude"]);
+    assert!(!ran, "no provider may launch for a not-installed-agent live sequence");
+    assert_eq!(
+        code, 1,
+        "not-installed-agent live sequence must abort; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("agent resolution failed"),
+        "abort must surface the structured agent-resolution error; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Agent Not Installed"),
+        "abort body must be the not-installed breakdown; stderr:\n{stderr}"
+    );
+}
+
+/// A frontmatter `agent` list resolving to zero installed providers
+/// (`agent: [not-real, also-fake]`) aborts live in no-TTY mode.
+#[cfg(unix)]
+#[test]
+fn sequence_live_zero_installed_list_aborts_without_launching_provider() {
+    let (code, stderr, ran) =
+        run_sequence_live_agent_state("agent: [not-real, also-fake]\n", &["claude"]);
+    assert!(!ran, "no provider may launch for a zero-installed-list live sequence");
+    assert_eq!(
+        code, 1,
+        "zero-installed-list live sequence must abort; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("agent resolution failed"),
+        "abort must surface the structured agent-resolution error; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("installed/valid"),
+        "abort body must be the zero-installed-list breakdown; stderr:\n{stderr}"
+    );
+}
+
+/// Counterpart guard: an auto-selectable state (`agent: claude`, installed)
+/// must NOT abort — the gate only fires for prompting states. The provider
+/// launches and the run succeeds.
+#[cfg(unix)]
+#[test]
+fn sequence_live_auto_selectable_launches_provider() {
+    let (code, stderr, ran) = run_sequence_live_agent_state("agent: claude\n", &["claude"]);
+    assert!(
+        ran,
+        "an auto-selectable agent must launch the provider; stderr:\n{stderr}"
+    );
+    assert_eq!(
+        code, 0,
+        "auto-selectable live sequence must succeed; stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("agent resolution failed"),
+        "auto-selectable state must not trip the resolution gate; stderr:\n{stderr}"
+    );
+}
+
+/// `--silent` suppresses status chatter but must not suppress the
+/// agent-resolution abort: a no-TTY invalid-agent live sequence still aborts
+/// with the styled message (mirrors the direct-compose `--silent` guarantee).
+#[cfg(unix)]
+#[test]
+fn sequence_live_silent_does_not_suppress_agent_resolution_abort() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let sentinel = workspace.path().join("provider-ran.flag");
+    write_executable(
+        &path_dir.join("claude"),
+        &format!("#!/bin/sh\n: > '{}'\nexit 0\n", sentinel.display()),
+    );
+
+    let compose_file = workspace.path().join("compose.md");
+    fs::write(
+        &compose_file,
+        "---\nsequence:\n  - step_one\nagent: not-real\n---\nSEQ_BODY_MARKER\n",
+    )
+    .unwrap();
+
+    let stdin_file = workspace.path().join("empty-stdin.txt");
+    fs::write(&stdin_file, "").unwrap();
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .pipe_stdin(&stdin_file)
+        .unwrap()
+        .current_dir(workspace.path())
+        .args(["sequence", "compose.md", "--silent"])
+        .output()
+        .unwrap();
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(!sentinel.exists(), "no provider may launch under the abort");
+    assert_eq!(output.status.code(), Some(1), "must abort; stderr:\n{stderr}");
+    assert!(
+        stderr.contains("agent resolution failed") && stderr.contains("Invalid Agent"),
+        "--silent must not suppress the agent-resolution abort message; stderr:\n{stderr}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 6 — cross-cutting hardening (stdout/stderr discipline, error
+// surfaces, quiet/silent matrix)
+// ---------------------------------------------------------------------------
+
+/// Data/status discipline: under `compose --dry-run` the composed body is the
+/// *only* thing on **stdout**; the finalized frontmatter and the metadata
+/// table land on **stderr**. Verifies the two streams never cross.
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_body_only_on_stdout_metadata_on_stderr() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("doc.md");
+    fs::write(
+        &md_file,
+        "---\nname: disc-doc\ndescription: a discipline doc\nagent: goose\n---\nBODY_MARKER_QQQ\n",
+    )
+    .unwrap();
+
+    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--goose", "--dry-run", md_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+
+    // stdout: body only — the composed body, none of the metadata-table
+    // labels or frontmatter that belong on stderr.
+    assert!(
+        stdout.contains("BODY_MARKER_QQQ"),
+        "stdout should carry the composed body; stdout was:\n{stdout}"
+    );
+    for leak in ["YOLO", "Document", "Field", "Agent", "name:"] {
+        assert!(
+            !stdout.contains(leak),
+            "stdout must not contain the `{leak}` metadata leaked from stderr; stdout was:\n{stdout}"
+        );
+    }
+
+    // stderr: horizontal rule, heading, frontmatter (YAML) + metadata table.
+    let hr_lines: Vec<&str> = stderr
+        .lines()
+        .filter(|l| l.len() >= 10 && l.chars().all(|c| c == '╌' || c == '-'))
+        .collect();
+    assert!(
+        !hr_lines.is_empty(),
+        "stderr should contain a horizontal rule; stderr was:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Frontmatter") && stderr.contains("resolved"),
+        "stderr should carry the 'Frontmatter (resolved):' heading; stderr was:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("name:") && stderr.contains("description:"),
+        "stderr should carry the highlighted frontmatter; stderr was:\n{stderr}"
+    );
+    for label in ["Document", "Agent", "Model", "YOLO"] {
+        assert!(
+            stderr.contains(label),
+            "stderr should carry the `{label}` metadata-table row; stderr was:\n{stderr}"
+        );
+    }
+}
+
+/// `--quiet` and `--silent` have no effect on `compose --dry-run` output:
+/// the body still lands on stdout and the full metadata block on stderr.
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_quiet_and_silent_are_no_op() {
+    for flag in ["--quiet", "--silent"] {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        fs::create_dir_all(&path_dir).unwrap();
+        seed_minimal_config(workspace.path());
+
+        let md_file = workspace.path().join("doc.md");
+        fs::write(
+            &md_file,
+            "---\nname: qs-doc\nagent: goose\n---\nBODY_MARKER_QQQ\n",
+        )
+        .unwrap();
+
+        write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+        let output = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("HOME", workspace.path())
+            .env("PATH", augmented_path(&path_dir))
+            .args([
+                "compose",
+                "--goose",
+                "--dry-run",
+                flag,
+                md_file.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "compose dry-run {flag} should succeed; stderr was:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+        let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+
+        assert!(
+            stdout.contains("BODY_MARKER_QQQ"),
+            "{flag} must not suppress the composed body on stdout; stdout was:\n{stdout}"
+        );
+        assert!(
+            stderr.contains("YOLO") && stderr.contains("name:"),
+            "{flag} must not suppress the dry-run metadata on stderr; stderr was:\n{stderr}"
+        );
+        assert!(
+            stderr.contains("Frontmatter") && stderr.contains("resolved"),
+            "{flag} must not suppress the dry-run heading on stderr; stderr was:\n{stderr}"
+        );
+    }
+}
+
+/// `--quiet` and `--silent` have no effect on `inline-compose --dry-run`
+/// output: the composed prompt still lands on stdout, the metadata on stderr,
+/// and the source file is left byte-identical.
+#[cfg(unix)]
+#[test]
+fn inline_compose_dry_run_quiet_and_silent_are_no_op() {
+    for flag in ["--quiet", "--silent"] {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        fs::create_dir_all(&path_dir).unwrap();
+        seed_minimal_config(workspace.path());
+
+        let md_file = workspace.path().join("doc.md");
+        let original = "---\nprompt: PROMPT_MARKER_QQQ\nagent: goose\n---\nOriginal body\n";
+        fs::write(&md_file, original).unwrap();
+
+        write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+        let output = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("HOME", workspace.path())
+            .env("PATH", augmented_path(&path_dir))
+            .args([
+                "inline-compose",
+                "--goose",
+                "--dry-run",
+                flag,
+                md_file.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "inline-compose dry-run {flag} should succeed; stderr was:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+
+        assert!(
+            stdout.contains("PROMPT_MARKER_QQQ"),
+            "{flag} must not suppress the composed prompt on stdout; stdout was:\n{stdout}"
+        );
+        assert_eq!(
+            fs::read_to_string(&md_file).unwrap(),
+            original,
+            "{flag} inline-compose --dry-run must not mutate the source file"
+        );
+    }
+}
+
+/// Error surface (compose): a missing source file under `--dry-run` renders
+/// the error to **stderr**, exits **non-zero**, and leaves stdout clean.
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_missing_file_errors_to_stderr_with_clean_stdout() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--goose", "--dry-run", "does-not-exist.md"])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "missing-file dry-run must exit non-zero"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "stdout must stay clean on error; stdout was:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(
+        stderr.contains("does-not-exist.md"),
+        "error naming the missing file must appear on stderr; stderr was:\n{stderr}"
+    );
+}
+
+/// Error surface (inline-compose): an unsatisfied `$schema` required property
+/// under `--dry-run` renders to **stderr**, exits **non-zero**, leaves stdout
+/// clean, and never mutates the source file.
+#[cfg(unix)]
+#[test]
+fn inline_compose_dry_run_schema_error_to_stderr_with_clean_stdout() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("doc.md");
+    let original =
+        "---\n$schema:\n  topic: 'string(required)'\nprompt: Plan {{topic}}\nagent: goose\n---\nOriginal body\n";
+    fs::write(&md_file, original).unwrap();
+
+    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args([
+            "inline-compose",
+            "--goose",
+            "--dry-run",
+            md_file.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "schema-error dry-run must exit non-zero"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "stdout must stay clean on error; stdout was:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(
+        stderr.to_lowercase().contains("missing properties") && stderr.contains("topic"),
+        "missing-properties error naming `topic` must appear on stderr; stderr was:\n{stderr}"
+    );
+    assert_eq!(
+        fs::read_to_string(&md_file).unwrap(),
+        original,
+        "inline-compose --dry-run must not mutate the source file on error"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // OpenCode model resolution (Phase 7 integration tests)
 // ---------------------------------------------------------------------------
 
@@ -4699,6 +6213,84 @@ exit 0
     }
 }
 
+/// Phase 6 regression: service-less new-format stderr lines must be consumed
+/// by the bridge and not leak as raw `timestamp=` passthrough during compose.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn compose_opencode_serviceless_stderr_lines_are_consumed() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+    seed_minimal_config(&fake_home);
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nHello\n").unwrap();
+
+    // Fake opencode emits the exact service-less lines observed in the
+    // wild (spec.md:17-24) plus matching NDJSON stdout so the wrapper
+    // completes normally.
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' 'timestamp=2026-06-10T16:11:27.352Z level=INFO run=df5a9474 message=tracking hash=86a6603a' >&2
+printf '%s\n' 'timestamp=2026-06-10T16:11:27.460Z level=INFO run=df5a9474 message=loop session.id=ses_14db step=1' >&2
+printf '%s\n' 'timestamp=2026-06-10T16:11:27.559Z level=INFO run=df5a9474 message=tracking hash=86a6603a' >&2
+printf '%s\n' 'timestamp=2026-06-10T16:11:27.574Z level=INFO run=df5a9474 message=process session.id=ses_14db' >&2
+printf '%s\n' 'timestamp=2026-06-10T16:11:27.574Z level=INFO run=df5a9474 message=stream providerID=zai-coding-plan modelID=glm-5.1' >&2
+printf '%s\n' 'timestamp=2026-06-10T16:11:27.575Z level=INFO run=df5a9474 message="llm runtime selected"' >&2
+printf '%s\n' 'timestamp=2026-06-10T16:11:31.461Z level=INFO run=df5a9474 message=evaluated permission=glob' >&2
+printf '%s\n' '{"type":"init","session_id":"ses_14db","model":"test-model"}'
+printf '%s\n' '{"type":"step_start","sessionID":"ses_14db"}'
+printf '%s\n' '{"type":"text","text":"Done."}'
+printf '%s\n' '{"type":"step_complete","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2},"duration_ms":50}'
+exit 0
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", augmented_path(&path_dir))
+        .env("OPENCODE_MODEL", "test-model")
+        .args(["compose", "--opencode", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+
+    // The user-visible regression: raw timestamp= lines must not appear.
+    assert!(
+        !stderr.contains("timestamp="),
+        "raw timestamp= lines must be consumed by the bridge, not passthrough to stderr; got: {stderr}"
+    );
+
+    // Verify the JSONL summary contains the expected stderr diagnostics.
+    let row = read_summary_row(&fake_home);
+    let diagnostics = &row["extra"]["provider_summary"]["stderr_diagnostics"];
+    assert_eq!(
+        diagnostics["log_records_parsed"].as_u64().unwrap_or(0),
+        7,
+        "all 7 new-format lines should be parsed; row={row}",
+    );
+    // The bridge should have promoted the service-less lifecycle lines into
+    // semantic events (StepLoop, LlmCall, PermissionEvaluated).  They won't
+    // be visible in the summary directly, but the diagnostics counter proves
+    // the bridge consumed and classified them rather than leaving them as
+    // raw passthrough.
+    assert_eq!(
+        row["extra"]["exit_code"],
+        serde_json::json!(0),
+        "session should succeed: row={row}",
+    );
+}
+
 // ============================================================================
 // Performance flag tests
 // ============================================================================
@@ -4735,12 +6327,12 @@ fn compose_perf_emits_report_to_stderr() {
         "stderr should contain Performance section; got: {plain}"
     );
     assert!(
-        plain.contains("CLI Overhead"),
-        "stderr should contain CLI Overhead section; got: {plain}"
+        plain.contains("pre-dispatch"),
+        "stderr should contain the pre-dispatch bucket; got: {plain}"
     );
     assert!(
-        plain.contains("Agent Execution"),
-        "stderr should contain Agent Execution section; got: {plain}"
+        plain.contains("agent execution"),
+        "stderr should contain the agent execution bucket; got: {plain}"
     );
 }
 
@@ -4826,12 +6418,12 @@ fn inline_compose_perf_emits_report_to_stderr() {
         "stderr should contain Performance section; got: {plain}"
     );
     assert!(
-        plain.contains("CLI Overhead"),
-        "stderr should contain CLI Overhead section; got: {plain}"
+        plain.contains("pre-dispatch"),
+        "stderr should contain the pre-dispatch bucket; got: {plain}"
     );
     assert!(
-        plain.contains("Agent Execution"),
-        "stderr should contain Agent Execution section; got: {plain}"
+        plain.contains("agent execution"),
+        "stderr should contain the agent execution bucket; got: {plain}"
     );
 }
 
@@ -4968,22 +6560,22 @@ fn perf_arg_parsing_includes_clap_time() {
     // The arg parsing line must be present and show a duration.
     // We allow 0µs because timer resolution varies, but the line must exist.
     assert!(
-        plain.contains("arg parsing:"),
+        plain.contains("arg parsing"),
         "perf report must include arg parsing timing; got: {plain}"
     );
 
     // Ensure the other startup timings are also present, confirming the
-    // full CLI Overhead section is rendered.
+    // pre-dispatch and environment-setup buckets are rendered.
     assert!(
-        plain.contains("config loading:"),
+        plain.contains("config loading"),
         "perf report must include config loading timing; got: {plain}"
     );
     assert!(
-        plain.contains("tracing init:"),
+        plain.contains("tracing init"),
         "perf report must include tracing init timing; got: {plain}"
     );
     assert!(
-        plain.contains("environment setup:"),
+        plain.contains("environment setup"),
         "perf report must include environment setup timing; got: {plain}"
     );
 }
@@ -5578,7 +7170,6 @@ fn compose_opencode_dry_run_calls_opencode_models_and_fails_with_test_double() {
         .args([
             "compose",
             "--opencode",
-            "--dry-run",
             md_file.to_str().unwrap(),
         ])
         .assert()
@@ -5663,7 +7254,7 @@ fn sequence_claude_dry_run_does_not_call_opencode_models() {
 #[cfg(unix)]
 #[test]
 #[serial_test::serial]
-fn compose_sigint_during_prep_exits_130_with_notice() {
+fn slow_compose_sigint_during_prep_exits_130_with_notice() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
@@ -5681,15 +7272,21 @@ fn compose_sigint_during_prep_exits_130_with_notice() {
     )
     .unwrap();
 
-    // Fake `opencode models` sleeps for 10s so prep is slow enough to
-    // interrupt, and so a regression to the uncancellable blocking path
-    // would clearly exceed the 4s interrupt-to-exit budget below (it would
-    // have to wait ~9s for the sleep to finish). The `opencode` provider
-    // binary itself never runs.
+    // Fake `opencode models` touches a readiness marker, then sleeps for
+    // 10s so prep is slow enough to interrupt, and so a regression to the
+    // uncancellable blocking path would clearly exceed the 4s
+    // interrupt-to-exit budget below (it would have to wait ~9s for the
+    // sleep to finish). The marker is the test's synchronization barrier:
+    // it is written only once the model-validation refresh has reached the
+    // `opencode models` subprocess, which happens *after* the SIGINT handler
+    // is installed at the top of `compose`. The `opencode` provider binary
+    // itself never runs.
+    let ready_marker = workspace.path().join("opencode-models-started");
     write_executable(
         &path_dir.join("opencode"),
         r#"#!/bin/sh
 if [ "$1" = "models" ]; then
+  : > "$CLAUDINE_READY_MARKER"
   /bin/sleep 10
   printf '%s\n' '["test-model"]'
   exit 0
@@ -5703,10 +7300,10 @@ exit 0
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .env("CLAUDINE_READY_MARKER", &ready_marker)
         .args([
             "compose",
             "--opencode",
-            "--dry-run",
             md_file.to_str().unwrap(),
         ])
         .stdout(std::process::Stdio::piped())
@@ -5716,13 +7313,20 @@ exit 0
 
     let pid = child.id() as i32;
 
-    // Wait until the child has entered prep and reached the slow
-    // `opencode models` call before delivering SIGINT. The fake binary
-    // sleeps for 5s, so a 1s wait lands comfortably inside that window
-    // even when parallel test contention slows wrapper startup — a
-    // 300ms wait was prone to firing SIGINT before the signal handler
-    // and cancellable refresh were both wired up.
-    std::thread::sleep(std::time::Duration::from_secs(1));
+    // Poll for the readiness marker rather than sleeping a fixed interval:
+    // the marker proves the child reached the cancellable `opencode models`
+    // refresh, which is strictly after the SIGINT handler is installed. A
+    // fixed sleep was flaky under full-suite contention — slow wrapper
+    // startup could push handler installation past the deadline, so SIGINT
+    // hit the default disposition (exit 130 but no clean notice).
+    let marker_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !ready_marker.exists() {
+        assert!(
+            std::time::Instant::now() < marker_deadline,
+            "child never reached the opencode models refresh within 30s"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
     let interrupt_sent_at = std::time::Instant::now();
     unsafe {
         libc::kill(pid, libc::SIGINT);
@@ -5740,9 +7344,9 @@ exit 0
 
     // Bounded interrupt latency: the cancellable refresh path returns
     // within ~50 ms of the interrupt poll under normal conditions. The
-    // fake `opencode models` sleeps for 5s — anywhere near that means
+    // fake `opencode models` sleeps for 10s — anywhere near that means
     // we've regressed to the uncancellable `refresh_provider_blocking`
-    // path. A 4-second ceiling sits comfortably below the 5s blocking
+    // path. A 4-second ceiling sits comfortably below the 10s blocking
     // floor while leaving headroom for OS scheduling under contention.
     assert!(
         interrupt_to_exit < std::time::Duration::from_secs(4),

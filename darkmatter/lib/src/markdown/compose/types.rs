@@ -9,6 +9,7 @@
 
 use super::super::normalize::NormalizationReport;
 use super::cache::{CacheAccessMode, CacheFreshnessMode, CacheStats};
+use super::remote::{RemoteFreshnessMode, RemoteReadConfig};
 use super::shell_expansion::types::ShellTimeoutBehavior;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -17,10 +18,11 @@ use url::Url;
 
 /// Every discrete operation in the compose pipeline.
 ///
-/// Operations are grouped into three phases for execution:
+/// Operations are grouped into four phases for execution:
 /// - **Inline Pre**: serial, runs before transclusion
 /// - **Transclusion**: concurrent, recursive document inclusion
 /// - **Inline Post**: serial, runs after transclusion
+/// - **Finalization**: root-only serial, runs after Inline Post on the outermost document
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ComposeOperation {
     /// Resolves `{{ variable }}` expressions inside frontmatter values
@@ -68,6 +70,12 @@ pub enum ComposeOperation {
     /// table of contents from an external document's headings.
     TocLinking,
 
+    /// Expands `::file-links` directives by discovering a bounded set of
+    /// document files and rendering them as a linked
+    /// [`FileSystem`](biscuit_terminal::components::filesystem::FileSystem)
+    /// tree.
+    FileLinks,
+
     /// Normalizes markdown formatting: injects blank lines between
     /// block elements and aligns table columns.
     Cleanup,
@@ -86,6 +94,193 @@ pub enum ComposeOperation {
     /// paths).
     LinkNormalization,
 }
+
+/// Operation-level performance metric kinds.
+///
+/// These correspond to the user-toggleable [`ComposeOperation`] variants that
+/// have dedicated timing metrics in the runner. Transclusion operations are
+/// measured as parse/prepare/resolve/apply sub-stages rather than per
+/// operation, so they have no entry here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ComposeOperationPerfMetric {
+    /// Frontmatter interpolation.
+    FrontmatterInterpolation,
+    /// Frontmatter shell expansion.
+    FrontmatterShellExpansion,
+    /// Text replacement.
+    TextReplacement,
+    /// Page blocks.
+    PageBlocks,
+    /// Body interpolation.
+    Interpolation,
+    /// Shell directive expansion.
+    ShellExpansion,
+    /// Shell block execution.
+    ShellBlocks,
+    /// Local link resolution to absolute paths.
+    LinkResolve,
+    /// Cleanup formatting pass.
+    Cleanup,
+    /// Heading normalization.
+    Normalization,
+    /// Link normalization to portable forms.
+    LinkNormalization,
+}
+
+/// Metadata describing a single compose pipeline operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ComposeOperationDescriptor {
+    /// The operation this descriptor describes.
+    pub operation: ComposeOperation,
+    /// Stable index used for fixed-size operation sets and reports.
+    pub index: usize,
+    /// Execution phase this operation belongs to.
+    pub phase: ComposePhase,
+    /// Whether the operation is enabled by default.
+    pub default_enabled: bool,
+    /// Human-readable label for reports and diagnostics.
+    pub label: &'static str,
+    /// Operation-level perf metric, if one exists.
+    pub perf_kind: Option<ComposeOperationPerfMetric>,
+}
+
+/// Authoritative metadata table for every [`ComposeOperation`] variant.
+///
+/// Entries are ordered by default execution order (the order returned by
+/// [`ComposeOperation::default_order`]) so that the descriptor table is the
+/// single source of truth for both operation metadata and run order. The
+/// `index` field is a stable identifier that matches the historical enum
+/// discriminant values used by [`ComposeOperationSet`].
+const COMPOSE_OPERATION_DESCRIPTORS: &[ComposeOperationDescriptor] = &[
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::FrontmatterInterpolation,
+        index: 0,
+        phase: ComposePhase::InlinePre,
+        default_enabled: true,
+        label: "frontmatter interpolation",
+        perf_kind: Some(ComposeOperationPerfMetric::FrontmatterInterpolation),
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::FrontmatterShellExpansion,
+        index: 1,
+        phase: ComposePhase::InlinePre,
+        default_enabled: true,
+        label: "frontmatter shell expansion",
+        perf_kind: Some(ComposeOperationPerfMetric::FrontmatterShellExpansion),
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::TextReplacement,
+        index: 2,
+        phase: ComposePhase::InlinePre,
+        default_enabled: true,
+        label: "text replacement",
+        perf_kind: Some(ComposeOperationPerfMetric::TextReplacement),
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::PageBlocks,
+        index: 3,
+        phase: ComposePhase::InlinePre,
+        default_enabled: true,
+        label: "page blocks",
+        perf_kind: Some(ComposeOperationPerfMetric::PageBlocks),
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::Interpolation,
+        index: 4,
+        phase: ComposePhase::InlinePre,
+        default_enabled: true,
+        label: "interpolation",
+        perf_kind: Some(ComposeOperationPerfMetric::Interpolation),
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::ShellExpansion,
+        index: 5,
+        phase: ComposePhase::InlinePre,
+        default_enabled: true,
+        label: "shell expansion",
+        perf_kind: Some(ComposeOperationPerfMetric::ShellExpansion),
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::ShellBlocks,
+        index: 6,
+        phase: ComposePhase::InlinePre,
+        default_enabled: true,
+        label: "shell blocks",
+        perf_kind: Some(ComposeOperationPerfMetric::ShellBlocks),
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::LinkResolve,
+        index: 14,
+        phase: ComposePhase::InlinePre,
+        default_enabled: true,
+        label: "link resolve",
+        perf_kind: Some(ComposeOperationPerfMetric::LinkResolve),
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::BlockTransclusion,
+        index: 7,
+        phase: ComposePhase::Transclusion,
+        default_enabled: true,
+        label: "block transclusion",
+        perf_kind: None,
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::FrontmatterTransclusion,
+        index: 8,
+        phase: ComposePhase::Transclusion,
+        default_enabled: true,
+        label: "frontmatter transclusion",
+        perf_kind: None,
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::CodeTransclusion,
+        index: 9,
+        phase: ComposePhase::Transclusion,
+        default_enabled: true,
+        label: "code transclusion",
+        perf_kind: None,
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::TocLinking,
+        index: 10,
+        phase: ComposePhase::Transclusion,
+        default_enabled: true,
+        label: "TOC linking",
+        perf_kind: None,
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::FileLinks,
+        index: 11,
+        phase: ComposePhase::Transclusion,
+        default_enabled: true,
+        label: "file links",
+        perf_kind: None,
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::Cleanup,
+        index: 12,
+        phase: ComposePhase::InlinePost,
+        default_enabled: true,
+        label: "cleanup",
+        perf_kind: Some(ComposeOperationPerfMetric::Cleanup),
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::Normalization,
+        index: 13,
+        phase: ComposePhase::InlinePost,
+        default_enabled: true,
+        label: "normalization",
+        perf_kind: Some(ComposeOperationPerfMetric::Normalization),
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::LinkNormalization,
+        index: 15,
+        phase: ComposePhase::Finalization,
+        default_enabled: true,
+        label: "link normalization",
+        perf_kind: Some(ComposeOperationPerfMetric::LinkNormalization),
+    },
+];
 
 /// Fixed-size operation set keyed by [`ComposeOperation`] discriminants.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -168,50 +363,27 @@ pub enum ComposePhase {
 
 impl ComposeOperation {
     /// Total number of compose operations.
-    pub const COUNT: usize = 15;
+    pub const COUNT: usize = COMPOSE_OPERATION_DESCRIPTORS.len();
+
+    /// Returns the descriptor for this operation.
+    ///
+    /// Descriptors are ordered by default execution order. The lookup is a
+    /// small linear search because the table is fixed at 16 entries.
+    pub fn descriptor(self) -> &'static ComposeOperationDescriptor {
+        COMPOSE_OPERATION_DESCRIPTORS
+            .iter()
+            .find(|d| d.operation == self)
+            .expect("every ComposeOperation has a descriptor")
+    }
 
     /// Stable discriminant index for fixed-size operation sets.
     pub const fn index(self) -> usize {
-        match self {
-            Self::FrontmatterInterpolation => 0,
-            Self::FrontmatterShellExpansion => 1,
-            Self::TextReplacement => 2,
-            Self::PageBlocks => 3,
-            Self::Interpolation => 4,
-            Self::ShellExpansion => 5,
-            Self::ShellBlocks => 6,
-            Self::BlockTransclusion => 7,
-            Self::FrontmatterTransclusion => 8,
-            Self::CodeTransclusion => 9,
-            Self::TocLinking => 10,
-            Self::Cleanup => 11,
-            Self::Normalization => 12,
-            Self::LinkResolve => 13,
-            Self::LinkNormalization => 14,
-        }
+        self as usize
     }
 
     /// Returns the default phase this operation belongs to.
     pub fn phase(&self) -> ComposePhase {
-        match self {
-            Self::FrontmatterInterpolation
-            | Self::FrontmatterShellExpansion
-            | Self::TextReplacement
-            | Self::PageBlocks
-            | Self::Interpolation
-            | Self::ShellExpansion
-            | Self::ShellBlocks
-            | Self::LinkResolve => ComposePhase::InlinePre,
-
-            Self::BlockTransclusion
-            | Self::FrontmatterTransclusion
-            | Self::CodeTransclusion
-            | Self::TocLinking => ComposePhase::Transclusion,
-
-            Self::Cleanup | Self::Normalization => ComposePhase::InlinePost,
-
-            Self::LinkNormalization => ComposePhase::Finalization,
-        }
+        self.descriptor().phase
     }
 
     /// Returns all operations in their default execution order.
@@ -231,12 +403,23 @@ impl ComposeOperation {
             Self::FrontmatterTransclusion,
             Self::CodeTransclusion,
             Self::TocLinking,
+            Self::FileLinks,
             // Inline Post (serial)
             Self::Cleanup,
             Self::Normalization,
             // Finalization (root-only)
             Self::LinkNormalization,
         ]
+    }
+
+    /// Human-readable label for reports and diagnostics.
+    pub fn label(self) -> &'static str {
+        self.descriptor().label
+    }
+
+    /// Operation-level perf metric, if one exists.
+    pub fn perf_metric(self) -> Option<ComposeOperationPerfMetric> {
+        self.descriptor().perf_kind
     }
 
     /// Returns the set of all operations.
@@ -259,6 +442,7 @@ impl std::fmt::Display for ComposeOperation {
             Self::FrontmatterTransclusion => write!(f, "FrontmatterTransclusion"),
             Self::CodeTransclusion => write!(f, "CodeTransclusion"),
             Self::TocLinking => write!(f, "TocLinking"),
+            Self::FileLinks => write!(f, "FileLinks"),
             Self::Cleanup => write!(f, "Cleanup"),
             Self::Normalization => write!(f, "Normalization"),
             Self::LinkResolve => write!(f, "LinkResolve"),
@@ -506,6 +690,24 @@ pub struct ComposeOptions {
     /// the same property, the document wins.
     pub(crate) baseline_schema: Option<crate::markdown::schemas::SimplifiedSchema>,
 
+    // ── Remote reads ────────────────────────────────────────────
+    /// Configuration for remote URL reads: allowed hosts, concurrency,
+    /// TTL, freshness mode, and refresh behavior.
+    ///
+    /// Defaults to deny-all. Wired into eager prefetch, read-side expression
+    /// resolution (`frontmatter(url)`, …), and the persistent remote-artifact
+    /// cache.
+    pub(crate) remote_read_config: RemoteReadConfig,
+
+    // ── Schema validation ──────────────────────────────────────────
+    /// When `true`, the always-on schema validation stage is skipped
+    /// entirely. Used by internal non-terminal passes (e.g. shell-command
+    /// discovery) that strip `FrontmatterShellExpansion` to avoid executing
+    /// commands but where validating still-literal `$(...)` values would
+    /// wrongly report them as final schema violations. The terminal compose
+    /// pass validates the resolved frontmatter. Default: `false`.
+    pub(crate) skip_schema_validation: bool,
+
     // ── Link normalization ────────────────────────────────────────
     /// Environment variables that may be used as path-prefix abstractions
     /// during the Finalization stage's Link Normalization operation.
@@ -582,6 +784,7 @@ impl std::fmt::Debug for ComposeOptions {
                 &self.allow_reassigned_frontmatter_property,
             )
             .field("context", &self.context)
+            .field("remote_read_config", &self.remote_read_config)
             .finish()
     }
 }
@@ -639,6 +842,8 @@ impl ComposeOptions {
             shell_strip_ansi: true,
             env_path_whitelist: Vec::new(),
             baseline_schema: None,
+            remote_read_config: RemoteReadConfig::default(),
+            skip_schema_validation: false,
         }
     }
 
@@ -987,6 +1192,64 @@ impl ComposeOptions {
         }
     }
 
+    /// The document's base directory: relative and `@` references resolve here.
+    ///
+    /// File sources resolve to the directory the source file lives in; all other
+    /// sources (string/stdin) fall back to the current directory.
+    fn resolution_base_dir(&self) -> PathBuf {
+        match &self.source {
+            ComposeSource::File(path) => path
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from(".")),
+            _ => PathBuf::from("."),
+        }
+    }
+
+    /// Builds the [`ResolutionContext`] used by read-side expression functions
+    /// during interpolation.
+    ///
+    /// Carries the document's base directory (so relative/`@` references
+    /// resolve where the source lives), the configured magic search paths, and
+    /// — only when remote reads are enabled — the run's remote-fetch runtime so
+    /// HTTP(S) URL arguments read from the fetch cache rather than disk.
+    ///
+    /// [`ResolutionContext`]: super::expression::ResolutionContext
+    pub(crate) fn expression_resolution_context(
+        &self,
+        remote_fetch: &super::remote_fetch::RemoteFetchRuntime,
+    ) -> super::expression::ResolutionContext {
+        super::expression::ResolutionContext {
+            base_dir: self.resolution_base_dir(),
+            magic_paths: self.magic_paths.clone(),
+            remote_fetch: self.remote_reads_enabled().then(|| remote_fetch.clone()),
+            ctx_values: capture_agent_values(&self.resolution_base_dir()),
+            home_dir: dirs::home_dir(),
+        }
+    }
+
+    /// Builds the local-only [`ResolutionContext`] used by read-side expression
+    /// functions on **frontmatter** surfaces (both interpolation passes and the
+    /// `$()` shell ternary condition/branch evaluation).
+    ///
+    /// Unlike [`expression_resolution_context`], this never attaches a
+    /// remote-fetch runtime: per Decision B of the resolution-context spec,
+    /// frontmatter is local-filesystem only. A remote URL argument to a
+    /// read-side function in frontmatter therefore fails loudly rather than
+    /// performing a network read.
+    ///
+    /// [`expression_resolution_context`]: Self::expression_resolution_context
+    /// [`ResolutionContext`]: super::expression::ResolutionContext
+    pub(crate) fn frontmatter_resolution_context(&self) -> super::expression::ResolutionContext {
+        super::expression::ResolutionContext {
+            base_dir: self.resolution_base_dir(),
+            magic_paths: self.magic_paths.clone(),
+            remote_fetch: None,
+            ctx_values: capture_agent_values(&self.resolution_base_dir()),
+            home_dir: dirs::home_dir(),
+        }
+    }
+
     /// Returns a `ShellExpansionOptions` view of the shell-related fields.
     ///
     /// Used internally to pass shell config to executor and policy functions
@@ -1031,6 +1294,74 @@ impl ComposeOptions {
     pub(crate) fn with_replace_parent_wins(mut self, enabled: bool) -> Self {
         self.replace_parent_wins = enabled;
         self
+    }
+
+    /// Sets the remote read configuration.
+    #[must_use]
+    pub fn with_remote_read_config(mut self, config: RemoteReadConfig) -> Self {
+        self.remote_read_config = config;
+        self
+    }
+
+    /// Whether the remote-fetch capability is enabled for this run.
+    ///
+    /// Read-side expression URL reads (`markdown_title(url)`, `frontmatter(url)`,
+    /// …) are a separate capability from `::file`/`::code` block transclusion: a
+    /// caller that configures an allowed host via [`with_remote_read_config`]
+    /// enables them without also opting into remote transclusion. Block
+    /// transclusion keeps its own explicit [`with_allow_remote_transclusion`]
+    /// gate. An empty allowlist with the transclusion flag unset means remote
+    /// reads stay fully disabled, preserving the deny-all default.
+    ///
+    /// [`with_remote_read_config`]: Self::with_remote_read_config
+    /// [`with_allow_remote_transclusion`]: Self::with_allow_remote_transclusion
+    pub(crate) fn remote_reads_enabled(&self) -> bool {
+        self.allow_remote_transclusion || !self.remote_read_config.allowed_hosts.is_empty()
+    }
+
+    /// Adds a single allowed host for remote URL reads.
+    ///
+    /// Convenience wrapper that appends to the existing allowlist.
+    #[must_use]
+    pub fn with_allowed_host(mut self, host: impl Into<String>) -> Self {
+        self.remote_read_config.allowed_hosts.push(host.into());
+        self
+    }
+
+    /// Sets the maximum number of concurrent remote fetches.
+    #[must_use]
+    pub fn with_remote_concurrency(mut self, cap: usize) -> Self {
+        self.remote_read_config.remote_concurrency = cap.max(1);
+        self
+    }
+
+    /// Sets the remote artifact TTL override.
+    ///
+    /// When `None` (default), server-provided cache headers are used.
+    #[must_use]
+    pub fn with_remote_ttl(mut self, ttl: Option<Duration>) -> Self {
+        self.remote_read_config.remote_ttl = ttl;
+        self
+    }
+
+    /// Forces revalidation of remote artifacts even when cached content
+    /// is otherwise fresh.
+    #[must_use]
+    pub fn with_remote_refresh(mut self, refresh: bool) -> Self {
+        self.remote_read_config.refresh = refresh;
+        self
+    }
+
+    /// Sets the freshness mode for remote cache artifacts.
+    #[must_use]
+    pub fn with_remote_freshness_mode(mut self, mode: RemoteFreshnessMode) -> Self {
+        self.remote_read_config.freshness_mode = mode;
+        self
+    }
+
+    /// Returns a reference to the remote read configuration.
+    pub fn remote_read_config(&self) -> &RemoteReadConfig {
+        &self.remote_read_config
     }
 
     /// Internal builder: sets a one-off replace map for this document only.
@@ -1106,6 +1437,15 @@ impl ComposeSource {
             Self::Unknown => std::borrow::Cow::Borrowed("<stdin>"),
         }
     }
+}
+
+fn capture_agent_values(base_dir: &std::path::Path) -> serde_json::Map<String, serde_json::Value> {
+    let (values, _diagnostics, _timings) =
+        super::context::capture::capture_runtime_context_for_groups(
+            base_dir,
+            &[super::context::capture::ContextGroup::Agent],
+        );
+    values
 }
 
 /// Transclusion-specific options (internal convenience type).
@@ -1456,6 +1796,112 @@ impl ComposeContext {
     }
 }
 
+/// A timing span for a single executed `::shell` directive (DM-3).
+///
+/// `command_display` is redacted, whitespace-normalized, and length-capped
+/// (OQ-2 Option B); `command_hash` is a stable non-crypto xxHash of the raw
+/// command for local correlation without exposing the full text.
+///
+/// ## Notes
+///
+/// Only the timing fields are carried. A span is recorded only on the
+/// success path (the executor returns `Err` for a non-zero exit, which
+/// propagates before the span is taken), and shell results are not cached,
+/// so neither an exit status nor a cache flag would carry signal here.
+/// Surfacing them accurately would require widening the directive executor's
+/// return type — deliberately out of scope (NG-1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellCommandSpan {
+    /// Redacted, whitespace-normalized, length-capped command text.
+    pub command_display: String,
+    /// Lowercase hex xxHash of the raw (un-redacted) command.
+    pub command_hash: String,
+    /// Wall-clock time spent executing this directive.
+    pub elapsed: Duration,
+}
+
+/// Redact, whitespace-normalize, and length-cap a raw shell command for
+/// display (OQ-2 Option B).
+///
+/// Collapses whitespace, masks common secret/credential patterns with `***`,
+/// and truncates the final string to 80 display characters (appending `…`).
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::compose::redact_shell_command;
+///
+/// let out = redact_shell_command("curl -H 'Authorization: Bearer abc123'");
+/// assert!(out.contains("Bearer ***"));
+/// ```
+pub fn redact_shell_command(raw: &str) -> String {
+    use std::sync::LazyLock;
+
+    // Authorization headers / bearer tokens.
+    static BEARER_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"(?i)bearer\s+[^\s'\x22]+").expect("valid bearer regex")
+    });
+    // Secret-carrying flags in `--flag=VALUE` form.
+    static FLAG_EQ_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"(?i)(--(?:token|password|api-?key|secret))=\S+")
+            .expect("valid flag-eq regex")
+    });
+    // Secret-carrying flags in `--flag VALUE` (space-separated) form.
+    static FLAG_SP_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"(?i)(--(?:token|password|api-?key|secret))(\s+)\S+")
+            .expect("valid flag-space regex")
+    });
+    // URL credentials: scheme://user:pass@host.
+    static URL_CRED_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"([a-zA-Z][a-zA-Z0-9+.\-]*://)[^/\s:@]+:[^/\s@]+@")
+            .expect("valid url-cred regex")
+    });
+    // Query-string secrets: ?token=… / &access_token=… / &password=… / &key=….
+    static QUERY_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"(?i)([?&](?:access_token|token|password|api-?key|secret|key)=)[^&\s'\x22]+")
+            .expect("valid query regex")
+    });
+    // Long opaque token-like blobs (JWT / base64): mixes letters and digits,
+    // no slash, length >= 40.
+    static BLOB_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"[A-Za-z0-9_\-.+=]{40,}").expect("valid blob regex")
+    });
+
+    // Collapse all whitespace runs to single spaces and trim.
+    let normalized = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    let mut out = normalized;
+    out = BEARER_RE.replace_all(&out, "Bearer ***").into_owned();
+    out = FLAG_EQ_RE.replace_all(&out, "$1=***").into_owned();
+    out = FLAG_SP_RE.replace_all(&out, "$1$2***").into_owned();
+    out = URL_CRED_RE.replace_all(&out, "$1***@").into_owned();
+    out = QUERY_RE.replace_all(&out, "$1***").into_owned();
+    // Only redact blobs that look token-like: contain both a letter and a
+    // digit. This avoids masking ordinary long words while catching JWTs and
+    // base64 secrets. (Blobs containing `/` are already excluded by the class.)
+    out = BLOB_RE
+        .replace_all(&out, |caps: &regex::Captures<'_>| {
+            let m = &caps[0];
+            let has_alpha = m.bytes().any(|b| b.is_ascii_alphabetic());
+            let has_digit = m.bytes().any(|b| b.is_ascii_digit());
+            if has_alpha && has_digit {
+                "***".to_string()
+            } else {
+                m.to_string()
+            }
+        })
+        .into_owned();
+
+    // Length-cap the final redacted string to 80 display chars.
+    const MAX_CHARS: usize = 80;
+    if out.chars().count() > MAX_CHARS {
+        let truncated: String = out.chars().take(MAX_CHARS).collect();
+        format!("{truncated}…")
+    } else {
+        out
+    }
+}
+
 /// A single timing metric from the compose pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComposePerfMetric {
@@ -1474,6 +1920,12 @@ pub struct ComposePerfReport {
     pub total: Duration,
     /// Per-stage metrics in deterministic order.
     pub metrics: Vec<ComposePerfMetric>,
+    /// Per-`::shell`-directive timing spans (DM-3). Populated only when
+    /// perf collection is enabled.
+    pub shell_spans: Vec<ShellCommandSpan>,
+    /// Per-group context-capture timings (DM-4), as `(group_name, elapsed)`.
+    /// Populated only when perf collection is enabled.
+    pub capture_timings: Vec<(String, Duration)>,
 }
 
 /// Named compose pipeline stages for type-safe metric identification.
@@ -1482,8 +1934,8 @@ pub struct ComposePerfReport {
 /// a deterministic, intuitive ordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ComposeStage {
-    SchemaValidation,
     FrontmatterInterpolation,
+    SchemaValidation,
     FrontmatterShellExpansion,
     EffectiveStateBuild,
     TextReplacement,
@@ -1504,8 +1956,8 @@ pub enum ComposeStage {
 impl std::fmt::Display for ComposeStage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::SchemaValidation => "schema validation",
             Self::FrontmatterInterpolation => "frontmatter interpolation",
+            Self::SchemaValidation => "schema validation",
             Self::FrontmatterShellExpansion => "frontmatter shell expansion",
             Self::EffectiveStateBuild => "effective state build",
             Self::TextReplacement => "text replacement",
@@ -1525,12 +1977,44 @@ impl std::fmt::Display for ComposeStage {
     }
 }
 
+impl ComposeStage {
+    /// Returns the `ComposePhase` this stage belongs to (DM-2).
+    ///
+    /// Feeds the claudine perf tree, where the 17 flat stages nest under
+    /// their four phases.
+    pub fn phase(&self) -> ComposePhase {
+        match self {
+            Self::FrontmatterInterpolation
+            | Self::SchemaValidation
+            | Self::FrontmatterShellExpansion
+            | Self::EffectiveStateBuild
+            | Self::TextReplacement
+            | Self::PageBlocks
+            | Self::Interpolation
+            | Self::ShellExpansion
+            | Self::ShellBlocks
+            | Self::LinkResolve => ComposePhase::InlinePre,
+
+            Self::TransclusionParse
+            | Self::TransclusionPrepare
+            | Self::TransclusionResolve
+            | Self::TransclusionApply => ComposePhase::Transclusion,
+
+            Self::Cleanup | Self::Normalization => ComposePhase::InlinePost,
+
+            Self::LinkNormalization => ComposePhase::Finalization,
+        }
+    }
+}
+
 impl ComposePerfReport {
     /// Creates an empty perf report.
     pub fn new() -> Self {
         Self {
             total: Duration::ZERO,
             metrics: Vec::new(),
+            shell_spans: Vec::new(),
+            capture_timings: Vec::new(),
         }
     }
 
@@ -1551,6 +2035,11 @@ impl ComposePerfReport {
                 self.metrics.push(*other_metric);
             }
         }
+
+        self.shell_spans
+            .extend(other.shell_spans.iter().cloned());
+        self.capture_timings
+            .extend(other.capture_timings.iter().cloned());
     }
 }
 
@@ -1628,6 +2117,9 @@ pub struct ComposeReport {
 
     /// Source map tracking which byte ranges came from transcluded files.
     pub source_map: Vec<SourceRange>,
+
+    /// Remote-fetch statistics from this compose run.
+    pub remote_fetch_stats: Option<super::remote_fetch::RemoteFetchStats>,
 }
 
 /// Maps a byte range in composed output to its originating source file.
@@ -1773,6 +2265,22 @@ impl ComposeReport {
             parts.push(format!(
                 "cache: {} hit(s), {} miss(es)",
                 stats.hits, stats.misses
+            ));
+        }
+
+        if let Some(ref rf_stats) = self.remote_fetch_stats
+            && (rf_stats.fetched > 0 || rf_stats.cache_hits > 0 || rf_stats.not_modified > 0)
+        {
+            parts.push(format!(
+                "remote: {} fetched, {} cached, {} revalidated ({} not-modified, {} stale), \
+                 {} denied, {} failed",
+                rf_stats.fetched,
+                rf_stats.cache_hits,
+                rf_stats.revalidations,
+                rf_stats.not_modified,
+                rf_stats.stale_served,
+                rf_stats.policy_denials,
+                rf_stats.failures
             ));
         }
 
@@ -1972,6 +2480,7 @@ mod tests {
                 ComposeOperation::FrontmatterTransclusion,
                 ComposeOperation::CodeTransclusion,
                 ComposeOperation::TocLinking,
+                ComposeOperation::FileLinks,
                 ComposeOperation::Cleanup,
                 ComposeOperation::Normalization,
                 ComposeOperation::LinkNormalization,
@@ -2008,6 +2517,7 @@ mod tests {
                 ComposePhase::Transclusion,
             ),
             (ComposeOperation::TocLinking, ComposePhase::Transclusion),
+            (ComposeOperation::FileLinks, ComposePhase::Transclusion),
             (ComposeOperation::Cleanup, ComposePhase::InlinePost),
             (ComposeOperation::Normalization, ComposePhase::InlinePost),
             (ComposeOperation::LinkResolve, ComposePhase::InlinePre),
@@ -2268,6 +2778,7 @@ mod tests {
                     calls: 2,
                 },
             ],
+            ..Default::default()
         };
         let child = ComposePerfReport {
             total: Duration::from_millis(7),
@@ -2283,6 +2794,7 @@ mod tests {
                     calls: 1,
                 },
             ],
+            ..Default::default()
         };
 
         parent.merge(&child);
@@ -2327,6 +2839,7 @@ mod tests {
                 elapsed: Duration::from_millis(5),
                 calls: 1,
             }],
+            ..Default::default()
         });
 
         report_a.merge(report_b);
@@ -2347,6 +2860,7 @@ mod tests {
                 elapsed: Duration::from_millis(3),
                 calls: 1,
             }],
+            ..Default::default()
         });
 
         let mut report_b = ComposeReport::new();
@@ -2357,6 +2871,7 @@ mod tests {
                 elapsed: Duration::from_millis(2),
                 calls: 1,
             }],
+            ..Default::default()
         });
 
         report_a.merge(report_b);
@@ -2426,8 +2941,81 @@ mod tests {
     }
 
     #[test]
-    fn default_order_has_fifteen_operations() {
-        assert_eq!(ComposeOperation::default_order().len(), 15);
+    fn compose_stage_phase_mapping() {
+        assert_eq!(ComposeStage::ShellExpansion.phase(), ComposePhase::InlinePre);
+        assert_eq!(
+            ComposeStage::TransclusionApply.phase(),
+            ComposePhase::Transclusion
+        );
+        assert_eq!(ComposeStage::Cleanup.phase(), ComposePhase::InlinePost);
+        assert_eq!(
+            ComposeStage::LinkNormalization.phase(),
+            ComposePhase::Finalization
+        );
+    }
+
+    #[test]
+    fn redact_shell_command_masks_bearer_token() {
+        let out = redact_shell_command("curl -H 'Authorization: Bearer abc123def456'");
+        assert!(out.contains("Bearer ***"), "got: {out}");
+        assert!(!out.contains("abc123def456"), "got: {out}");
+    }
+
+    #[test]
+    fn redact_shell_command_masks_token_flag() {
+        let out = redact_shell_command("gh --token=ghp_secretvalue123 repo list");
+        assert!(out.contains("--token=***"), "got: {out}");
+        assert!(!out.contains("ghp_secretvalue123"), "got: {out}");
+    }
+
+    #[test]
+    fn redact_shell_command_masks_space_separated_flag() {
+        let out = redact_shell_command("tool --password hunter2value list");
+        assert!(out.contains("--password ***"), "got: {out}");
+        assert!(!out.contains("hunter2value"), "got: {out}");
+    }
+
+    #[test]
+    fn redact_shell_command_masks_url_credentials() {
+        let out = redact_shell_command("git clone https://user:secretpw@example.com/repo.git");
+        assert!(out.contains("https://***@example.com"), "got: {out}");
+        assert!(!out.contains("secretpw"), "got: {out}");
+    }
+
+    #[test]
+    fn redact_shell_command_masks_query_secret() {
+        let out = redact_shell_command("curl 'https://api.test/v1?access_token=qsValue9876xyz'");
+        assert!(out.contains("access_token=***"), "got: {out}");
+        assert!(!out.contains("qsValue9876xyz"), "got: {out}");
+    }
+
+    #[test]
+    fn redact_shell_command_masks_long_jwt_blob() {
+        // A JWT-like opaque blob (letters + digits, >= 40 chars, no slash).
+        let jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload1234567890abcdef";
+        let out = redact_shell_command(&format!("echo {jwt}"));
+        assert!(out.contains("***"), "got: {out}");
+        assert!(!out.contains(jwt), "got: {out}");
+    }
+
+    #[test]
+    fn redact_shell_command_normalizes_whitespace() {
+        let out = redact_shell_command("echo\t hello\n\n   world");
+        assert_eq!(out, "echo hello world");
+    }
+
+    #[test]
+    fn redact_shell_command_length_caps() {
+        let raw = "echo ".to_string() + &"a".repeat(200);
+        let out = redact_shell_command(&raw);
+        // 80 chars + the ellipsis.
+        assert_eq!(out.chars().count(), 81, "got: {out}");
+        assert!(out.ends_with('…'), "got: {out}");
+    }
+
+    #[test]
+    fn default_order_has_sixteen_operations() {
+        assert_eq!(ComposeOperation::default_order().len(), 16);
     }
 
     #[test]
@@ -2477,5 +3065,169 @@ mod tests {
             options.effective_env_path_whitelist(),
             vec!["MY_VAR".to_string(), "OTHER".to_string()]
         );
+    }
+
+    #[test]
+    fn remote_read_config_defaults_to_deny_all() {
+        let options = ComposeOptions::new();
+        let config = options.remote_read_config();
+        assert!(config.allowed_hosts.is_empty());
+        assert_eq!(
+            config.remote_concurrency,
+            crate::markdown::compose::remote::DEFAULT_REMOTE_CONCURRENCY
+        );
+        assert_eq!(config.freshness_mode, RemoteFreshnessMode::Fallback);
+    }
+
+    #[test]
+    fn with_allowed_host_adds_to_allowlist() {
+        let options = ComposeOptions::new()
+            .with_allowed_host("example.com")
+            .with_allowed_host("cdn.example.com");
+        let config = options.remote_read_config();
+        assert!(config.is_host_allowed("example.com"));
+        assert!(config.is_host_allowed("cdn.example.com"));
+        assert!(!config.is_host_allowed("other.com"));
+    }
+
+    #[test]
+    fn with_remote_concurrency_sets_value() {
+        let options = ComposeOptions::new().with_remote_concurrency(8);
+        assert_eq!(options.remote_read_config().remote_concurrency, 8);
+    }
+
+    #[test]
+    fn with_remote_ttl_sets_duration() {
+        let options = ComposeOptions::new().with_remote_ttl(Some(Duration::from_secs(300)));
+        assert_eq!(
+            options.remote_read_config().remote_ttl,
+            Some(Duration::from_secs(300))
+        );
+    }
+
+    #[test]
+    fn with_remote_refresh_sets_flag() {
+        let options = ComposeOptions::new().with_remote_refresh(true);
+        assert!(options.remote_read_config().refresh);
+    }
+
+    #[test]
+    fn with_remote_freshness_mode_sets_mode() {
+        let options =
+            ComposeOptions::new().with_remote_freshness_mode(RemoteFreshnessMode::Optimistic);
+        assert_eq!(
+            options.remote_read_config().freshness_mode,
+            RemoteFreshnessMode::Optimistic
+        );
+    }
+
+    #[test]
+    fn with_remote_read_config_replaces_entire_config() {
+        let custom = RemoteReadConfig {
+            allowed_hosts: vec!["custom.host".to_string()],
+            remote_concurrency: 2,
+            remote_ttl: Some(Duration::from_secs(60)),
+            refresh: true,
+            freshness_mode: RemoteFreshnessMode::Fallback,
+        };
+        let options = ComposeOptions::new().with_remote_read_config(custom);
+        let config = options.remote_read_config();
+        assert!(config.is_host_allowed("custom.host"));
+        assert_eq!(config.remote_concurrency, 2);
+        assert_eq!(config.remote_ttl, Some(Duration::from_secs(60)));
+        assert!(config.refresh);
+        assert_eq!(config.freshness_mode, RemoteFreshnessMode::Fallback);
+    }
+
+    #[test]
+    fn compose_operation_descriptors_cover_all_variants() {
+        assert_eq!(COMPOSE_OPERATION_DESCRIPTORS.len(), ComposeOperation::COUNT);
+
+        let mut seen_indices = std::collections::HashSet::new();
+        for descriptor in COMPOSE_OPERATION_DESCRIPTORS.iter() {
+            assert!(
+                seen_indices.insert(descriptor.index),
+                "duplicate descriptor index {} for {:?}",
+                descriptor.index,
+                descriptor.operation
+            );
+            assert_eq!(
+                descriptor.index,
+                descriptor.operation.index(),
+                "descriptor index mismatch for {:?}",
+                descriptor.operation
+            );
+        }
+
+        assert_eq!(seen_indices.len(), ComposeOperation::COUNT);
+        for expected in 0..ComposeOperation::COUNT {
+            assert!(
+                seen_indices.contains(&expected),
+                "missing descriptor index {expected}"
+            );
+        }
+
+        // Every enum variant must appear exactly once in the descriptor table.
+        let descriptor_ops: std::collections::HashSet<_> = COMPOSE_OPERATION_DESCRIPTORS
+            .iter()
+            .map(|d| d.operation)
+            .collect();
+        assert_eq!(descriptor_ops.len(), ComposeOperation::COUNT);
+        for operation in ComposeOperation::default_order() {
+            assert!(
+                descriptor_ops.contains(operation),
+                "missing descriptor for {:?}",
+                operation
+            );
+        }
+    }
+
+    #[test]
+    fn compose_operation_default_order_matches_descriptor_enabled_order() {
+        let expected: Vec<_> = COMPOSE_OPERATION_DESCRIPTORS
+            .iter()
+            .filter(|d| d.default_enabled)
+            .map(|d| d.operation)
+            .collect();
+        assert_eq!(
+            ComposeOperation::default_order(),
+            expected.as_slice(),
+            "default_order() must equal descriptors filtered by default_enabled"
+        );
+    }
+
+    #[test]
+    fn compose_operation_perf_mapping_is_exhaustive_and_consistent() {
+        for operation in ComposeOperation::default_order() {
+            let descriptor = operation.descriptor();
+            match operation.phase() {
+                ComposePhase::InlinePre | ComposePhase::InlinePost | ComposePhase::Finalization => {
+                    assert!(
+                        descriptor.perf_kind.is_some(),
+                        "{:?} in phase {:?} must have an operation-level perf metric",
+                        operation,
+                        operation.phase()
+                    );
+                }
+                ComposePhase::Transclusion => {
+                    assert!(
+                        descriptor.perf_kind.is_none(),
+                        "{:?} is a transclusion operation and must use transclusion sub-stage \
+                         perf metrics (parse/prepare/resolve/apply) rather than an operation-level metric",
+                        operation
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn compose_operation_label_returns_descriptor_label() {
+        assert_eq!(
+            ComposeOperation::FrontmatterInterpolation.label(),
+            "frontmatter interpolation"
+        );
+        assert_eq!(ComposeOperation::BlockTransclusion.label(), "block transclusion");
+        assert_eq!(ComposeOperation::LinkNormalization.label(), "link normalization");
     }
 }

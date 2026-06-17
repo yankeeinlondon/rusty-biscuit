@@ -9,8 +9,8 @@ This plan addresses **all nine findings**.
 
 Repo layout reminder:
 
-- Library: `biscuit-tui/lib/` (package `tui-chrome`).
-- CLI: `biscuit-tui/cli/` (package `tui-chrome-cli`, binary `question`).
+- Library: `biscuit-tui/lib/` (package `biscuit-tui`).
+- CLI: `biscuit-tui/cli/` (package `biscuit-tui-cli`, binary `question`).
 - Area verification: `just -f biscuit-tui/justfile test`, `just -f biscuit-tui/justfile lint`
   (run from repo root, or `cd biscuit-tui/ && just test && just lint`).
 - The root `justfile` does **not** cover `biscuit-tui`; use the area `justfile`.
@@ -130,8 +130,8 @@ Keep `&mut state` for the `scroll_offset` / `hover` writes.
 
 **New tests:** No new tests — this is a refactor with no behaviour change.
 Existing `scroll_*` / `draw_list` tests continue to exercise the path. Confirm
-by running `cargo test -p tui-chrome components::choose_one` and
-`cargo test -p tui-chrome components::choose_many`.
+by running `cargo test -p biscuit-tui components::choose_one` and
+`cargo test -p biscuit-tui components::choose_many`.
 
 **Risk / sequencing:** `adjust_scroll` is a private `fn`, so this is a pure
 internal refactor. No callers outside the same file.
@@ -140,8 +140,8 @@ internal refactor. No callers outside the same file.
 
 ```bash
 cd biscuit-tui
-cargo test -p tui-chrome -p tui-chrome-cli
-cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings
+cargo test -p biscuit-tui -p biscuit-tui-cli
+cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings
 just test
 just lint
 ```
@@ -247,11 +247,11 @@ keystrokes through the same event iterator pattern used by
 
 ```bash
 cd biscuit-tui
-cargo test -p tui-chrome core::fuzzy
-cargo test -p tui-chrome components::choose_one
-cargo test -p tui-chrome components::choose_many
-cargo test -p tui-chrome core::standalone
-cargo test -p tui-chrome-cli commands::choose_many::tests::run_propagates_percent_height_to_prompt
+cargo test -p biscuit-tui core::fuzzy
+cargo test -p biscuit-tui components::choose_one
+cargo test -p biscuit-tui components::choose_many
+cargo test -p biscuit-tui core::standalone
+cargo test -p biscuit-tui-cli commands::choose_many::tests::run_propagates_percent_height_to_prompt
 just test
 just lint
 ```
@@ -334,9 +334,9 @@ only exercises at the math layer.
 
 ```bash
 cd biscuit-tui
-cargo test -p tui-chrome-cli --test choose_cli
+cargo test -p biscuit-tui-cli --test choose_cli
 # Optional PTY run (local only):
-QUESTION_INTERACTIVE_PTY=1 cargo test -p tui-chrome-cli --test choose_cli -- pty::
+QUESTION_INTERACTIVE_PTY=1 cargo test -p biscuit-tui-cli --test choose_cli -- pty::
 just test
 just lint
 ```
@@ -359,8 +359,8 @@ just lint
 Equivalent direct commands if `just` is unavailable:
 
 ```bash
-cargo test -p tui-chrome -p tui-chrome-cli
-cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings
+cargo test -p biscuit-tui -p biscuit-tui-cli
+cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings
 ```
 
 Both must pass with zero failures and zero warnings. Review 2 pre-stated the
@@ -371,7 +371,7 @@ clean — this plan should raise both unit-test counts by the additions above
 Optional local smoke:
 
 ```bash
-QUESTION_INTERACTIVE_PTY=1 cargo test -p tui-chrome-cli --test choose_cli -- pty::
+QUESTION_INTERACTIVE_PTY=1 cargo test -p biscuit-tui-cli --test choose_cli -- pty::
 ```
 
 Confirms the PTY-backed flows including the new `--height 100%` case.

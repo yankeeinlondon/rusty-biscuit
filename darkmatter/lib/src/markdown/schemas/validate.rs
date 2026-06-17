@@ -161,7 +161,7 @@ impl ValidatorCache {
 
 /// Builds a `Validator` configured with darkmatter's custom format and
 /// keywords.
-fn build_validator(schema: &Value) -> Result<Validator, SchemaError> {
+pub(super) fn build_validator(schema: &Value) -> Result<Validator, SchemaError> {
     let opts = jsonschema::options()
         .with_draft(Draft::Draft202012)
         .with_pattern_options(PatternOptions::regex());
@@ -250,14 +250,43 @@ fn build_problem(
         .and_then(|k| positions.get(k).copied())
         .map(|(l, c)| (Some(l), Some(c)))
         .unwrap_or((None, None));
+    let message = darkmatter_file_format_message(err).unwrap_or_else(|| err.to_string());
     ValidationProblem {
         path,
-        message: err.to_string(),
+        message,
         kind,
         property,
         line,
         column,
         arm_index,
+    }
+}
+
+/// Returns a substituted message for `format: darkmatter-file` failures so
+/// users see the targeted [`format::FileReferenceFailure`] diagnostic instead
+/// of the generic `"<value>" is not a "darkmatter-file"` text produced by
+/// `jsonschema`.
+///
+/// Re-runs [`format::resolve_file_reference`] against the failing instance
+/// string. The format validator already ran during `jsonschema` validation
+/// (returning `false` on failure), so any resolution outcome here reproduces
+/// the exact path that produced the `false`. Returns `None` for non-string
+/// instances, non-darkmatter-file formats, or any other error kind so the
+/// caller falls back to `err.to_string()`.
+fn darkmatter_file_format_message(err: &jsonschema::ValidationError<'_>) -> Option<String> {
+    let ValidationErrorKind::Format { format } = err.kind() else {
+        return None;
+    };
+    if format != format::DARKMATTER_FILE_FORMAT {
+        return None;
+    }
+    let instance = err.instance();
+    let Value::String(value) = instance.as_ref() else {
+        return None;
+    };
+    match format::resolve_file_reference(value) {
+        Ok(_) => None,
+        Err(failure) => Some(failure.to_string()),
     }
 }
 
@@ -273,6 +302,16 @@ fn classify_kind(kind: &ValidationErrorKind) -> ValidationProblemKind {
         ValidationErrorKind::Type { .. } => ValidationProblemKind::Type,
         _ => ValidationProblemKind::Invalid,
     }
+}
+
+/// Top-level frontmatter key a validation error is attributable to, if any.
+///
+/// Mirrors the attribution [`collect_problems`] uses (the missing-property name
+/// for `Required`, otherwise the first JSON-pointer segment), so callers that
+/// reason about which key caused a failure stay consistent with reported
+/// problems without re-deriving the rule.
+pub(super) fn error_top_level_key(err: &jsonschema::ValidationError<'_>) -> Option<String> {
+    identify_key(err.instance_path().as_str(), err.kind())
 }
 
 /// Picks the top-level frontmatter key to attribute a problem to.
@@ -636,5 +675,336 @@ mod tests {
         let problems = collect_root_union_problems(&[v0, v1], &instance, &PositionMap::new());
         assert!(!problems.is_empty());
         assert!(problems.iter().all(|p| p.arm_index == Some(0)));
+    }
+
+    // The `darkmatter-file` format tests below mutate the process CWD so the
+    // `FileReference` resolver sees a deterministic filesystem state. They are
+    // serialised with `serial_test::serial("darkmatter-file-cwd")` so this
+    // module and `format::tests` share the same process-global lock.
+
+    struct FileFormatCwdGuard {
+        prior: std::path::PathBuf,
+    }
+
+    impl FileFormatCwdGuard {
+        fn enter(dir: &std::path::Path) -> Self {
+            let prior = std::env::current_dir().expect("read CWD");
+            std::env::set_current_dir(dir).expect("set CWD");
+            Self { prior }
+        }
+    }
+
+    impl Drop for FileFormatCwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.prior);
+        }
+    }
+
+    fn darkmatter_file_schema() -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "doc": { "type": "string", "format": "darkmatter-file" }
+            }
+        })
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn darkmatter_file_format_error_surfaces_no_match_message() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let _cwd = FileFormatCwdGuard::enter(dir.path());
+        let v = build_validator(&darkmatter_file_schema()).unwrap();
+        let instance = json!({ "doc": "./does-not-exist.md" });
+        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
+        let problem = &problems[0];
+        assert_eq!(problem.path, "/doc");
+        assert_eq!(problem.kind, ValidationProblemKind::Invalid);
+        assert!(
+            problem.message.contains("no existing file matched reference"),
+            "expected NoMatch-style message, got: {}",
+            problem.message,
+        );
+        assert!(
+            problem.message.contains("`./does-not-exist.md`"),
+            "expected instance value in message, got: {}",
+            problem.message,
+        );
+        assert!(
+            !problem.message.contains(r#"is not a "darkmatter-file""#),
+            "generic jsonschema message should have been replaced, got: {}",
+            problem.message,
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn darkmatter_file_format_error_surfaces_invalid_syntax_message() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let _cwd = FileFormatCwdGuard::enter(dir.path());
+        let v = build_validator(&darkmatter_file_schema()).unwrap();
+        // An empty string is rejected at parse time.
+        let instance = json!({ "doc": "" });
+        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
+        let problem = &problems[0];
+        assert_eq!(problem.path, "/doc");
+        assert!(
+            problem.message.contains("is not a valid file reference"),
+            "expected InvalidSyntax message, got: {}",
+            problem.message,
+        );
+        assert!(
+            !problem.message.contains(r#"is not a "darkmatter-file""#),
+            "generic jsonschema message should have been replaced, got: {}",
+            problem.message,
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn darkmatter_file_format_succeeds_for_existing_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("exists.md");
+        std::fs::write(&path, b"x").unwrap();
+        let _cwd = FileFormatCwdGuard::enter(dir.path());
+        let v = build_validator(&darkmatter_file_schema()).unwrap();
+        let instance = json!({ "doc": "./exists.md" });
+        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        assert!(
+            problems.is_empty(),
+            "expected no problems for existing file, got: {problems:?}",
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn non_darkmatter_file_format_keeps_default_message() {
+        // A `format` other than `darkmatter-file` should not be intercepted
+        // by the substitution — the default `jsonschema` text must flow
+        // through unchanged.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let _cwd = FileFormatCwdGuard::enter(dir.path());
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "v": { "type": "string", "format": "email" }
+            }
+        });
+        let v = build_validator(&schema).unwrap();
+        let instance = json!({ "v": "not-an-email" });
+        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
+        let problem = &problems[0];
+        assert!(
+            problem.message.contains(r#"is not a "email""#),
+            "expected unmodified default message, got: {}",
+            problem.message,
+        );
+    }
+
+    #[test]
+    fn x_darkmatter_match_without_darkmatter_file_format_fails_to_build() {
+        // Schema-build guard: pairing `x-darkmatter-match` with anything
+        // other than `format: darkmatter-file` must surface a build error so
+        // authors cannot silently produce a validator that runs the glob
+        // check without the parse-and-exists format check alongside it.
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "doc": {
+                    "type": "string",
+                    "x-darkmatter-match": ["*.md"]
+                }
+            }
+        });
+        let err = build_validator(&schema).expect_err("expected build failure");
+        let SchemaError::BuildValidator { message } = &err else {
+            panic!("expected BuildValidator, got {err:?}");
+        };
+        assert!(
+            message.contains("darkmatter-file"),
+            "expected error to name the required format, got: {message}",
+        );
+    }
+
+    #[test]
+    fn x_darkmatter_match_with_darkmatter_file_format_builds() {
+        // Sanity counterpart to the negative case above — the guard must
+        // not reject the legitimate combination emitted by the
+        // SimplifiedSchema converter.
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "doc": {
+                    "type": "string",
+                    "format": "darkmatter-file",
+                    "x-darkmatter-match": ["*.md"]
+                }
+            }
+        });
+        let v = build_validator(&schema).expect("expected build success");
+        // We don't need a real file for this smoke test — we only need the
+        // schema to compile and the validator to be a working object.
+        let _ = v.is_valid(&json!({}));
+    }
+
+    fn darkmatter_file_match_schema() -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "doc": {
+                    "type": "string",
+                    "format": "darkmatter-file",
+                    "x-darkmatter-match": ["*.md"]
+                }
+            }
+        })
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn darkmatter_file_match_missing_file_produces_one_file_reference_diagnostic() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let _cwd = FileFormatCwdGuard::enter(dir.path());
+        let v = build_validator(&darkmatter_file_match_schema()).unwrap();
+        let instance = json!({ "doc": "./does-not-exist.md" });
+        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        assert_eq!(
+            problems.len(),
+            1,
+            "expected exactly one file-reference diagnostic, got: {problems:?}"
+        );
+        let problem = &problems[0];
+        assert_eq!(problem.path, "/doc");
+        assert_eq!(problem.kind, ValidationProblemKind::Invalid);
+        assert!(
+            problem.message.contains("no existing file matched reference"),
+            "expected NoMatch-style message, got: {}",
+            problem.message,
+        );
+        assert!(
+            problem.message.contains("`./does-not-exist.md`"),
+            "expected instance value in message, got: {}",
+            problem.message,
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn darkmatter_file_match_existing_mismatch_produces_one_glob_diagnostic() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("exists.txt");
+        std::fs::write(&path, b"x").unwrap();
+        let _cwd = FileFormatCwdGuard::enter(dir.path());
+        let v = build_validator(&darkmatter_file_match_schema()).unwrap();
+        let instance = json!({ "doc": "./exists.txt" });
+        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        assert_eq!(
+            problems.len(),
+            1,
+            "expected exactly one glob diagnostic, got: {problems:?}"
+        );
+        let problem = &problems[0];
+        assert_eq!(problem.path, "/doc");
+        assert_eq!(problem.kind, ValidationProblemKind::Invalid);
+        assert!(
+            problem.message.contains("does not match the configured file globs"),
+            "expected glob mismatch message, got: {}",
+            problem.message,
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn darkmatter_file_format_error_retains_nested_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let _cwd = FileFormatCwdGuard::enter(dir.path());
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "doc": {
+                    "type": "object",
+                    "properties": {
+                        "cover": { "type": "string", "format": "darkmatter-file" }
+                    }
+                }
+            }
+        });
+        let v = build_validator(&schema).unwrap();
+        let instance = json!({ "doc": { "cover": "./missing.md" } });
+        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
+        assert_eq!(problems[0].path, "/doc/cover");
+        assert!(
+            problems[0].message.contains("no existing file matched reference"),
+            "expected improved message, got: {}",
+            problems[0].message,
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn darkmatter_file_format_error_retains_array_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let _cwd = FileFormatCwdGuard::enter(dir.path());
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "docs": {
+                    "type": "array",
+                    "items": { "type": "string", "format": "darkmatter-file" }
+                }
+            }
+        });
+        let v = build_validator(&schema).unwrap();
+        let instance = json!({ "docs": ["./missing.md"] });
+        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
+        assert_eq!(problems[0].path, "/docs/0");
+        assert!(
+            problems[0].message.contains("no existing file matched reference"),
+            "expected improved message, got: {}",
+            problems[0].message,
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn root_union_preserves_arm_index_for_file_format_message() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let _cwd = FileFormatCwdGuard::enter(dir.path());
+        let arm0 = wrap_arm_as_root_schema(&json!({
+            "type": "object",
+            "properties": {
+                "doc": { "type": "string", "format": "darkmatter-file" }
+            },
+            "required": ["doc"]
+        }));
+        let arm1 = wrap_arm_as_root_schema(&json!({
+            "type": "object",
+            "properties": {
+                "doc": { "type": "number" }
+            },
+            "required": ["doc"]
+        }));
+        let v0 = Arc::new(build_validator(&arm0).unwrap());
+        let v1 = Arc::new(build_validator(&arm1).unwrap());
+        let instance = json!({ "doc": "./missing.md" });
+        let problems = collect_root_union_problems(&[v0, v1], &instance, &PositionMap::new());
+        assert_eq!(
+            problems.len(),
+            1,
+            "expected one problem from the closest matching arm, got: {problems:?}"
+        );
+        let problem = &problems[0];
+        assert_eq!(problem.arm_index, Some(0));
+        assert_eq!(problem.path, "/doc");
+        assert!(
+            problem.message.contains("no existing file matched reference"),
+            "expected improved file-reference message in root-union arm, got: {}",
+            problem.message,
+        );
     }
 }

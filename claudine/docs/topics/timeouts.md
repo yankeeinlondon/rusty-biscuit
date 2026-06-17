@@ -588,6 +588,10 @@ frontmatter, or override per run with `--on-rate-limit <pause|abort|continue>`.
 CLI > frontmatter > default precedence applies, identical to
 `--max-iterations` and `--step-timeout`.
 
+The `pause` safety margin defaults to `5s` but can be overridden with the
+`CLAUDINE_PAUSE_RESET_MARGIN` environment variable (duration string, e.g.
+`10s`, `0.5s`); invalid values fall back to the built-in default.
+
 ```yaml
 ---
 loop:

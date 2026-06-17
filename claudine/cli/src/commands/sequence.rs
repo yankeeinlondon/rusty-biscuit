@@ -1,11 +1,14 @@
 //! Top-level `claudine sequence <file>` command.
 
 use clap::Args;
-use claudine::composition::{self, SequenceExecutionOptions};
+use claudine::composition::{
+    self, CompositionError, SequenceExecutionOptions, parse_interactive_hint,
+};
 use color_eyre::eyre::{Result, eyre};
 use tracing::info_span;
 
 use super::compose::SharedComposeArgs;
+use super::schema_interactive::emit_dropped_optional_warnings;
 
 /// Run a Markdown document as a serial sequence of composition steps.
 ///
@@ -51,6 +54,25 @@ pub fn run_sequence(
     std::process::exit(code);
 }
 
+#[allow(clippy::result_large_err)]
+fn reject_sequence_interactive(
+    source: &claudine::composition::ResolvedCompositionSource,
+) -> std::result::Result<(), CompositionError> {
+    if let Some(Some(true)) = source
+        .markdown
+        .frontmatter()
+        .as_map()
+        .get("interactive")
+        .map(parse_interactive_hint)
+        .transpose()?
+    {
+        return Err(CompositionError::SequenceInteractiveRejected(
+            source.resolved_path.clone(),
+        ));
+    }
+    Ok(())
+}
+
 fn run_sequence_inner(
     args: SequenceArgs,
     verbose: u8,
@@ -84,6 +106,8 @@ fn run_sequence_inner(
 
     let source = composition::resolve_composition_source(&file)?;
 
+    reject_sequence_interactive(&source)?;
+
     let _sequence_span = info_span!(
         "sequence",
         file = %source.resolved_path.display(),
@@ -101,6 +125,19 @@ fn run_sequence_inner(
     let set_overrides =
         super::compose::merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
 
+    // Schema-aware doc-level scrub: drop invalid optional values only.
+    // Required-value validation is deferred to per-step pre-validation
+    // (`wrap::sequence::run_phase_1c_attempt`) so a missing required
+    // property is aggregated across ALL failing steps and surfaced as
+    // `SequenceMissingProperties` — not short-circuited here with a
+    // single-document `MissingProperties` error. Interactive collection
+    // for missing required values is driven by
+    // `wrap::sequence::run_phase_1c_with_schema` against the
+    // deduplicated cross-step set.
+    let (source, set_overrides, dropped_optionals) =
+        composition::drop_invalid_optionals(source, set_overrides);
+    emit_dropped_optional_warnings(&dropped_optionals);
+
     let execution_options = SequenceExecutionOptions {
         fail_fast_override: fail_fast,
     };
@@ -115,4 +152,73 @@ fn run_sequence_inner(
         shared.perf,
         startup_timings,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use darkmatter::markdown::{Frontmatter, Markdown};
+    use serde_json::json;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn source_with_frontmatter(
+        dir: &TempDir,
+        frontmatter: &[(&str, serde_json::Value)],
+    ) -> claudine::composition::ResolvedCompositionSource {
+        let file = dir.path().join("seq.md");
+        let mut fm = Frontmatter::new();
+        for (key, value) in frontmatter {
+            fm.insert(key, value.clone()).unwrap();
+        }
+        // Provide a minimal sequence so the document is otherwise valid.
+        if !frontmatter.iter().any(|(k, _)| *k == "sequence") {
+            fm.insert("sequence", json!(["step-1"])).unwrap();
+        }
+        let md = Markdown::with_frontmatter(fm, "body");
+        fs::write(&file, md.as_string()).unwrap();
+        claudine::composition::resolve_composition_source(file.to_string_lossy().as_ref())
+            .unwrap()
+    }
+
+    #[test]
+    fn sequence_rejects_interactive_true() {
+        let dir = TempDir::new().unwrap();
+        let source = source_with_frontmatter(&dir, &[("interactive", json!(true))]);
+        let err = reject_sequence_interactive(&source)
+            .expect_err("interactive: true must be rejected for sequence");
+        assert!(
+            matches!(err, CompositionError::SequenceInteractiveRejected(_)),
+            "expected SequenceInteractiveRejected, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn sequence_allows_interactive_false_null_and_absent() {
+        let dir = TempDir::new().unwrap();
+        let cases: Vec<Vec<(&str, serde_json::Value)>> = vec![
+            vec![("interactive", json!(false))],
+            vec![("interactive", json!(null))],
+            vec![],
+        ];
+        for case in cases {
+            let source = source_with_frontmatter(&dir, &case);
+            assert!(
+                reject_sequence_interactive(&source).is_ok(),
+                "sequence should proceed for frontmatter {case:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn sequence_rejects_interactive_wrong_type() {
+        let dir = TempDir::new().unwrap();
+        let source = source_with_frontmatter(&dir, &[("interactive", json!("yes"))]);
+        let err = reject_sequence_interactive(&source)
+            .expect_err("interactive string must be rejected for sequence");
+        assert!(
+            matches!(err, CompositionError::InteractiveHintWrongType(_)),
+            "expected InteractiveHintWrongType, got {err:?}"
+        );
+    }
 }

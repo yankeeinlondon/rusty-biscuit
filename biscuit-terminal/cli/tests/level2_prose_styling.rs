@@ -44,11 +44,8 @@ fn level2_prose_emits_sgr_in_real_terminal() {
 
     // `WezTermHarness::new()` spawns into a dedicated background
     // workspace, so the pane never grabs focus or steals the desktop.
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -96,11 +93,8 @@ fn level2_prose_osc8_link_renders() {
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -123,11 +117,8 @@ fn level2_no_color_strips_sgr_in_real_terminal() {
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -158,11 +149,8 @@ fn level2_prose_emits_sgr_in_kitty() {
 
     // `KittyHarness::new()` passes `--keep-focus` so the spawned OS
     // window never steals focus from the developer's session.
-    let mut guard = SHARED_KITTY.get_or_init(|| {
-        let mut h = KittyHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -201,11 +189,8 @@ fn level2_prose_osc8_link_renders_in_kitty() {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard = SHARED_KITTY.get_or_init(|| {
-        let mut h = KittyHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -232,11 +217,8 @@ fn level2_pad_columns_respect_actual_pane_width() {
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -286,11 +268,8 @@ fn level2_columns_word_wrap_in_pane() {
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -404,9 +383,10 @@ fn level2_columns_word_wrap_in_pane() {
 /// underline, foreground and background RGB color, and a fenced code
 /// block — the styling the IR-backed terminal renderer must preserve.
 ///
-/// The visible output collapses (whitespace removed) to `bisufgq`, which
-/// [`find_bt_output_line`] uses to isolate the rendered row from the
-/// shell prompt and the command echo.
+/// The fenced code block (`q`) renders on its own indented rows, so the
+/// styled inline run and the dim code occupy separate lines;
+/// [`rendered_region_effects`] decodes SGR across the whole rendered region
+/// (excluding the shell prompt) rather than a single row.
 const RICH_PROSE_INPUT: &str = "<b><i>bi</i></b> <~>s</~> <u>u</u> \
      <rgb 4,5,6>f</rgb> <bg-rgb 1,2,3>g</bg-rgb> \
      <code-block lang=rust>q</code-block>";
@@ -443,22 +423,16 @@ fn assert_rich_prose_sgr<H: TerminalHarness>(harness: &mut H) {
     std::thread::sleep(std::time::Duration::from_millis(200));
     let frame = harness.capture().expect("capture failed");
 
-    // Isolate the rendered output row so SGR carried by a colored shell
-    // prompt (bold/italic/dim in a starship theme, etc.) cannot satisfy
-    // the assertion.
-    let output_line = find_bt_output_line(&frame, "bisufgq").unwrap_or_else(|| {
-        panic!(
-            "could not locate the rich-prose output row (compact `bisufgq`).\nraw:\n{}",
-            frame.raw
-        )
-    });
-    let effects = decode_sgr_effects(output_line);
+    // Decode SGR across the whole rendered region (the styled inline run and
+    // the dim fenced code block land on separate rows). The trailing prompt —
+    // which may carry its own theme SGR — is excluded.
+    let effects = rendered_region_effects(&frame);
 
     for expected in RICH_EXPECTED_SGR {
         assert!(
             effects.contains(expected),
-            "expected {expected:?} in the captured output row's SGR.\n\
-             decoded effects: {effects:?}\noutput row:\n{output_line:?}\nraw:\n{}",
+            "expected {expected:?} in the rendered region's SGR.\n\
+             decoded effects: {effects:?}\nraw:\n{}",
             frame.raw,
         );
     }
@@ -473,11 +447,8 @@ fn level2_prose_rich_styling_emits_sgr_in_wezterm() {
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -493,11 +464,8 @@ fn level2_prose_rich_styling_emits_sgr_in_kitty() {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard = SHARED_KITTY.get_or_init(|| {
-        let mut h = KittyHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -511,19 +479,21 @@ fn level2_prose_rich_styling_emits_sgr_in_kitty() {
 /// `bt prose` input where a fenced code block sits inside an active
 /// `<red>` span with sibling text on both sides.
 ///
-/// The compact visible form is `beforecodeafter`, which
-/// [`find_bt_output_line`] uses to isolate the rendered row.
+/// The code block is block-level, so it renders as its own dim, indented
+/// block on separate rows; `before` and `after` therefore land on their
+/// own lines, each isolatable by [`find_bt_output_line`].
 const NESTED_CODE_BLOCK_INPUT: &str =
     "<red>before <code-block lang=rust>code</code-block> after</red>";
 
 /// Runs [`NESTED_CODE_BLOCK_INPUT`] through `bt prose` in the given real
-/// terminal and asserts the enclosing red style is restored after the
-/// code block — i.e. the trailing `after` text is still red.
+/// terminal and asserts the enclosing red style wraps the inline text on
+/// **both** sides of the code block — i.e. `before` and `after` are each
+/// still red.
 ///
-/// Regression for review-5: the code block's hard `\x1b[0m` reset
-/// previously cleared the enclosing span, leaving `after` unstyled. The
-/// proof is the terminal's own `get-text` capture: the SGR run between
-/// the dim `code` cells and the `after` cells must re-select red.
+/// Regression for the prose-tree cutover: a fenced code block nested in a
+/// styled span is split around the block child, so the block's own reset
+/// cannot clear the enclosing span. The proof is the terminal's own
+/// `get-text` capture: the `before` and `after` rows must each select red.
 fn assert_code_block_restores_parent_style<H: TerminalHarness>(harness: &mut H) {
     harness
         .send_command_with_env(
@@ -535,24 +505,27 @@ fn assert_code_block_restores_parent_style<H: TerminalHarness>(harness: &mut H) 
     std::thread::sleep(std::time::Duration::from_millis(200));
     let frame = harness.capture().expect("capture failed");
 
-    let row = find_bt_output_line(&frame, "beforecodeafter").unwrap_or_else(|| {
+    let before_row = find_bt_output_line(&frame, "before").unwrap_or_else(|| {
         panic!(
-            "could not locate the nested code-block output row (compact \
-             `beforecodeafter`).\nraw:\n{}",
+            "could not locate the `before` output row.\nraw:\n{}",
             frame.raw
         )
     });
-    let code_pos = row.find("code").expect("`code` text present in row");
-    let after_pos = row.find("after").expect("`after` text present in row");
     assert!(
-        code_pos < after_pos,
-        "expected `code` before `after` in the output row: {row:?}",
+        segment_selects_red(before_row),
+        "expected the `before` text to be red.\nrow: {before_row:?}",
     );
-    let between = &row[code_pos + "code".len()..after_pos];
+
+    let after_row = find_bt_output_line(&frame, "after").unwrap_or_else(|| {
+        panic!(
+            "could not locate the `after` output row.\nraw:\n{}",
+            frame.raw
+        )
+    });
     assert!(
-        segment_selects_red(between),
-        "expected the enclosing red style to be restored before the \
-         post-code-block `after` text.\nbetween: {between:?}\nrow: {row:?}",
+        segment_selects_red(after_row),
+        "expected the enclosing red style to be restored for the \
+         post-code-block `after` text.\nrow: {after_row:?}",
     );
 }
 
@@ -595,11 +568,8 @@ fn level2_prose_code_block_restores_parent_style_in_wezterm() {
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -615,11 +585,8 @@ fn level2_prose_code_block_restores_parent_style_in_kitty() {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard = SHARED_KITTY.get_or_init(|| {
-        let mut h = KittyHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -635,11 +602,8 @@ fn level2_prose_nested_emphasis_visible_text_in_wezterm() {
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -663,6 +627,119 @@ fn level2_prose_nested_emphasis_visible_text_in_wezterm() {
 }
 
 // ------------------------------------------------------------------
+// Inverse (SGR 7) — shared TextEmphasis::inverse through the tree
+// ------------------------------------------------------------------
+
+/// Runs `<inverse>` through `bt prose` and asserts the reverse-video SGR
+/// (`7`) is present in the cells the real terminal displayed.
+///
+/// `<inverse>` / `<reverse>` lower to `TextEmphasis::inverse`, which the
+/// shared terminal tree renderer emits as SGR 7. This is the strict
+/// Level 2 proof for the new inverse capability: the evidence is the
+/// terminal's own `get-text` capture decoded by [`decode_sgr_effects`],
+/// which accepts both the semicolon and colon SGR sub-parameter forms.
+fn assert_prose_inverse_sgr<H: TerminalHarness>(harness: &mut H) {
+    harness
+        .send_command_with_env(
+            "bt prose --force-color \"<inverse>x</inverse>\"",
+            &[("FORCE_COLOR", "1")],
+        )
+        .expect("send_command_with_env failed");
+    let _ = biscuit_test_harness::wait_for_prompt(harness);
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let frame = harness.capture().expect("capture failed");
+
+    let row = find_bt_output_line(&frame, "x").unwrap_or_else(|| {
+        panic!(
+            "could not locate the inverse output row (compact `x`).\nraw:\n{}",
+            frame.raw
+        )
+    });
+    let effects = decode_sgr_effects(row);
+    assert!(
+        effects.contains(&Sgr::Inverse),
+        "expected SGR 7 (inverse) in the captured output row.\n\
+         decoded effects: {effects:?}\noutput row:\n{row:?}\nraw:\n{}",
+        frame.raw,
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_prose_inverse_emits_sgr_in_wezterm() {
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
+
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
+    assert_prose_inverse_sgr(harness);
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_prose_inverse_emits_sgr_in_kitty() {
+    require_level!(
+        Level::L2,
+        KittyHarness::available(),
+        "Kitty remote control (set KITTY_LISTEN_ON)",
+    );
+
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let harness = guard.as_mut().expect("shared Kitty harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
+    assert_prose_inverse_sgr(harness);
+}
+
+// ------------------------------------------------------------------
+// `<hidden>` — REMOVED: renders as inert literal text
+// ------------------------------------------------------------------
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_prose_hidden_renders_as_literal_text_in_wezterm() {
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
+
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
+
+    send_bt_command(harness, "prose \"<hidden>x</hidden>\"");
+    let _ = biscuit_test_harness::wait_for_prompt(harness);
+    let frame = harness.capture().expect("capture failed");
+
+    // `<hidden>` is no longer recognized: the whole tag passes through as
+    // visible literal text. The isolated output row's compact plain form is
+    // exactly the literal markup.
+    let row = find_bt_output_line(&frame, "<hidden>x</hidden>").unwrap_or_else(|| {
+        panic!(
+            "expected `<hidden>x</hidden>` to render as literal text on its \
+             own row.\nplain:\n{}\nraw:\n{}",
+            frame.plain, frame.raw
+        )
+    });
+    // The renderer must not emit the SGR 8 conceal sequence the old bespoke
+    // path used for `<hidden>`.
+    assert!(
+        !row.contains("\x1b[8m"),
+        "expected no SGR 8 (conceal) for the removed `<hidden>` tag.\nrow:\n{row:?}",
+    );
+}
+
+// ------------------------------------------------------------------
 // SGR decoding — strict Level 2 capture verification
 // ------------------------------------------------------------------
 
@@ -675,6 +752,7 @@ enum Sgr {
     Italic,
     Underline,
     Strikethrough,
+    Inverse,
     FgRgb(i64, i64, i64),
     BgRgb(i64, i64, i64),
 }
@@ -729,6 +807,7 @@ fn decode_sgr_params(params: &[i64], out: &mut Vec<Sgr>) {
             2 => out.push(Sgr::Dim),
             3 => out.push(Sgr::Italic),
             4 => out.push(Sgr::Underline),
+            7 => out.push(Sgr::Inverse),
             9 => out.push(Sgr::Strikethrough),
             38 | 48 => {
                 let is_fg = params[i] == 38;
@@ -778,6 +857,34 @@ fn find_bt_output_line<'a>(frame: &'a CapturedFrame, compact_plain: &str) -> Opt
         }
     }
     None
+}
+
+/// Decode every [`Sgr`] effect in the rendered output region — the rows
+/// after the `bt prose` command echo and before the next shell prompt.
+///
+/// Block-level content (a fenced code block) renders on its own indented
+/// rows, so a styled run and its sibling code block occupy different lines;
+/// a single-row decode cannot see them both. The command echo carries the
+/// literal markup as plain text (no escape bytes), so including it
+/// contributes no spurious effects, and the trailing prompt — which may
+/// carry its own theme SGR — is excluded by stopping at the prompt suffix.
+fn rendered_region_effects(frame: &CapturedFrame) -> Vec<Sgr> {
+    let raw_lines: Vec<&str> = frame.raw.lines().collect();
+    let plain_lines: Vec<&str> = frame.plain.lines().collect();
+    let Some(cmd_idx) = plain_lines.iter().position(|l| l.contains("bt prose")) else {
+        return Vec::new();
+    };
+    let mut effects = Vec::new();
+    for (i, plain) in plain_lines.iter().enumerate().skip(cmd_idx + 1) {
+        let trimmed = plain.trim_end();
+        if trimmed.ends_with('$') || trimmed.ends_with('%') || trimmed.ends_with('#') {
+            break;
+        }
+        if let Some(raw) = raw_lines.get(i) {
+            effects.extend(decode_sgr_effects(raw));
+        }
+    }
+    effects
 }
 
 /// Whether the isolated `<red>x</red>` output row carries SGR red.

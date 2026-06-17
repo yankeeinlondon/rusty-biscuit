@@ -22,6 +22,11 @@ retries = 3
 # and finish in 5–10s isolated but get squeezed past 15s under heavy parallel
 # load. 30s catches real hangs without killing healthy-but-contended tests.
 slow-timeout = { period = "5s", terminate-after = 6 }
+# Fail any test that leaves a child process holding its stdout/stderr open when
+# it exits (nextest's `LEAK` status). Keep the default 100ms grace period so
+# clean tests are not slowed — only an actual leak waits the window out. To
+# downgrade leaks back to a non-fatal warning, drop `result = "fail"`.
+leak-timeout = { period = "100ms", result = "fail" }
 
 # Tests that intentionally wait on a real clock (e.g. rate-limit pause policies)
 # need an even longer leash than the default termination window.
@@ -29,14 +34,33 @@ slow-timeout = { period = "5s", terminate-after = 6 }
 filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# Browser-tier tests spawn real headless Chrome, whose multi-process teardown
+# (helper + crashpad processes that inherit the test's stdout) routinely takes
+# longer than the default 100ms leak window — producing spurious LEAK-FAILs even
+# though the test itself exits cleanly (code 0). Give Chrome room to reap before
+# the leak check fires; keep `result = "fail"` so a genuinely runaway browser
+# still fails. The tier also runs with `-j 1` (see `_test_browser`) so only one
+# Chrome tears down at a time.
+[[profile.default.overrides]]
+filter = 'test(/browser_/)'
+leak-timeout = { period = "5s", result = "fail" }
+
 [profile.ci]
 # Same behavior for CI environment
 retries = 3
 # Stricter slow-test marker for CI, same generous termination ceiling.
 slow-timeout = { period = "10s", terminate-after = 3 }
+# Leaked child processes are a hard failure in CI as well.
+leak-timeout = { period = "100ms", result = "fail" }
 # JUnit XML for CI dashboards.
 junit = { path = "test-results.xml" }
 
 [[profile.ci.overrides]]
 filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
 slow-timeout = { period = "30s", terminate-after = 3 }
+
+# See the default-profile note: headless-Chrome teardown exceeds the 100ms leak
+# window. CI hosts may be slower still, so the same generous grace applies.
+[[profile.ci.overrides]]
+filter = 'test(/browser_/)'
+leak-timeout = { period = "5s", result = "fail" }

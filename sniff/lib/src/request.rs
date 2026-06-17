@@ -296,6 +296,11 @@ pub struct GitRequest {
     /// containment. Lower values reduce deep-git latency for repos with many
     /// remote branches. `None` means no limit.
     pub max_remote_branches: Option<usize>,
+    /// Compute ahead/behind, merge status, and conflict detection for every
+    /// linked worktree. When `false` (default), only the current worktree
+    /// receives full detail; all other linked worktrees skip the expensive
+    /// commit graph walks.
+    pub full_worktree_details: bool,
 }
 
 impl GitRequest {
@@ -311,10 +316,18 @@ impl GitRequest {
             include_remote_branch_details: false,
             include_commit_remote_containment: false,
             max_remote_branches: None,
+            full_worktree_details: false,
         }
     }
 
-    /// Branch + dirty status counts. No commits, no file details, no worktrees.
+    /// Branch + dirty yes/no flag. No per-category counts, no commits, no file
+    /// details, no worktrees.
+    ///
+    /// Currently produces the same field set as [`minimal`](Self::minimal):
+    /// both satisfy [`is_minimal`](Self::is_minimal), so detection takes the
+    /// dirty-flag-only path and leaves `staged_count` / `unstaged_count` /
+    /// `untracked_count` at `0`. Use a request that is *not* minimal (e.g. with
+    /// `commit_count > 0`) to populate per-category counts.
     pub fn summary() -> Self {
         Self {
             commit_count: 0,
@@ -325,11 +338,17 @@ impl GitRequest {
             include_remote_branch_details: false,
             include_commit_remote_containment: false,
             max_remote_branches: None,
+            full_worktree_details: false,
         }
     }
 
     /// Standard detection with 10 commits, file change stats (paths and line counts),
     /// worktrees, but no unified diff payloads and no remote refresh.
+    ///
+    /// Worktrees are enumerated, but expensive ahead/behind and merge-conflict
+    /// probes are skipped for non-current linked worktrees. Use
+    /// [`Self::deep()`] or call `.full_worktree_details(true)` to force full
+    /// detail for every worktree.
     pub fn full() -> Self {
         Self {
             commit_count: 10,
@@ -340,6 +359,7 @@ impl GitRequest {
             include_remote_branch_details: false,
             include_commit_remote_containment: false,
             max_remote_branches: None,
+            full_worktree_details: false,
         }
     }
 
@@ -355,6 +375,7 @@ impl GitRequest {
             include_remote_branch_details: true,
             include_commit_remote_containment: true,
             max_remote_branches: Some(50),
+            full_worktree_details: true,
         }
     }
 
@@ -392,8 +413,28 @@ impl GitRequest {
             && !self.refresh_remote_tracking
     }
 
+    /// Whether this request needs repo metadata enrichment — remotes, git
+    /// config, local branches, and tracking status.
+    ///
+    /// Computing local branches walks `graph_ahead_behind` once per branch,
+    /// which dominates latency on repos with many branches. A pure file-change
+    /// query (`include_file_changes` with no commits, worktrees, or remote
+    /// refresh) maps changed files to packages and never renders any of that
+    /// metadata, so it must skip the walk — unlike [`is_minimal`], whose
+    /// contract treats `include_file_changes` as non-minimal.
+    ///
+    /// [`is_minimal`]: Self::is_minimal
+    pub fn wants_repo_metadata(&self) -> bool {
+        self.commit_count > 0 || self.include_worktrees || self.refresh_remote_tracking
+    }
+
     pub fn max_remote_branches(mut self, limit: Option<usize>) -> Self {
         self.max_remote_branches = limit;
+        self
+    }
+
+    pub fn full_worktree_details(mut self, full: bool) -> Self {
+        self.full_worktree_details = full;
         self
     }
 }
@@ -614,6 +655,25 @@ mod tests {
 
         let with_changes = GitRequest::minimal().include_file_changes(true);
         assert!(!with_changes.is_minimal());
+    }
+
+    #[test]
+    fn git_request_wants_repo_metadata_flags() {
+        // A pure file-change query must NOT pull repo metadata (branches etc.),
+        // even though `include_file_changes` makes it non-minimal.
+        let changes_only = GitRequest::summary().include_file_changes(true);
+        assert!(!changes_only.is_minimal());
+        assert!(!changes_only.wants_repo_metadata());
+
+        // Plain summary and minimal want no metadata either.
+        assert!(!GitRequest::summary().wants_repo_metadata());
+        assert!(!GitRequest::minimal().wants_repo_metadata());
+
+        // full() (worktrees) and deep() (remote refresh) still render branches
+        // and remotes, so they must keep the metadata enrichment.
+        assert!(GitRequest::full().wants_repo_metadata());
+        assert!(GitRequest::deep().wants_repo_metadata());
+        assert!(GitRequest::minimal().commit_count(1).wants_repo_metadata());
     }
 
     #[test]

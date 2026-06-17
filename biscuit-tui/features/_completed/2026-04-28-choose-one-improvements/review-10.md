@@ -20,8 +20,8 @@ Both Review 9 blockers are now resolved with strong test coverage:
   the new path through dedicated CLI integration tests.
 
 The default test suite is green:
-`cargo test -p tui-chrome -p tui-chrome-cli` → 892 tests pass, 0 fail.
-`cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets` → clean.
+`cargo test -p biscuit-tui -p biscuit-tui-cli` → 892 tests pass, 0 fail.
+`cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets` → clean.
 The opt-in gates pass when invoked locally:
 `RUN_PTY_TESTS=1` keyboard-protocol tests → 4/4 pass;
 `RUN_SHELL_TESTS=1` completions-shell tests → 8/8 pass.
@@ -100,7 +100,7 @@ The repository has a dedicated `biscuit-file` skill/library with rich
 file-reference handling, and the project CLAUDE.md explicitly says
 "whenever you are attempt to convert a string based file reference to
 a real file path in the filesystem you should use `FileReference`
-struct from `biscuit-file`." `tui-chrome-cli` does not depend on
+struct from `biscuit-file`." `biscuit-tui-cli` does not depend on
 `biscuit-file` today.
 
 Severity: low. Not a regression; the tech-design language is
@@ -166,11 +166,11 @@ investment, not a correctness fix.
 ## Test Results
 
 ```
-cargo test -p tui-chrome -p tui-chrome-cli            # 892 / 892 pass
-cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets # clean
-RUN_PTY_TESTS=1   cargo test -p tui-chrome-cli --test keyboard_protocol  # 4 / 4 pass
-RUN_SHELL_TESTS=1 cargo test -p tui-chrome-cli --test completions_shell  # 8 / 8 pass
-QUESTION_INTERACTIVE_PTY=1 cargo test -p tui-chrome-cli --test choose_cli pty:: # 3 / 4 pass
+cargo test -p biscuit-tui -p biscuit-tui-cli            # 892 / 892 pass
+cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets # clean
+RUN_PTY_TESTS=1   cargo test -p biscuit-tui-cli --test keyboard_protocol  # 4 / 4 pass
+RUN_SHELL_TESTS=1 cargo test -p biscuit-tui-cli --test completions_shell  # 8 / 8 pass
+QUESTION_INTERACTIVE_PTY=1 cargo test -p biscuit-tui-cli --test choose_cli pty:: # 3 / 4 pass
                                                       # (1 pre-existing harness defect, see Finding 1)
 ```
 
@@ -204,4 +204,4 @@ and the opt-in PTY/shell verification suites pass when invoked. The
 remaining findings are either pre-existing harness defects already
 documented in `pty-test-bugs.md`, follow-up CI hardening, or
 ergonomic polish — none affect observable user behavior of the
-`question` binary or the `tui-chrome` library.
+`question` binary or the `biscuit-tui` library.

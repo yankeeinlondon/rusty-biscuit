@@ -6,7 +6,7 @@ use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::html::HtmlPage;
 use renderable::layout::TargetValue;
 use renderable::markdown::MarkdownRenderable;
-use renderable::style::{Border, BorderSides, PerMode, Style};
+use renderable::style::{Border, BorderSides, PaintColor, PerMode, Style};
 use renderable::target::RenderTarget;
 use renderable::tree::render::{MarkdownDialect, MarkdownRenderOptions, render_markdown_node};
 use renderable::tree::{NodeKind, RenderNode, RenderStrictness, TreeRenderable};
@@ -21,7 +21,7 @@ use crate::{
     utils::{
         block_constraint::{split_lines, visible_width, wrap_lines},
         color::{Color, Tailwind},
-        layout::{Layout, LayoutTerminalExt},
+        layout::{Layout, LayoutTerminalExt, Length},
     },
 };
 
@@ -32,8 +32,8 @@ use crate::{
 /// path onto the legacy compatibility renderer.
 const DEFAULT_BORDER: &str = "│ ";
 
-/// Wraps a plain [`Color`] as a universal [`Style`] color value.
-fn universal_color(color: Color) -> TargetValue<PerMode<Color>> {
+/// Wraps a plain [`Color`] as an opaque universal [`Style`] color value.
+fn universal_color(color: Color) -> TargetValue<PerMode<PaintColor>> {
     TargetValue::universal(PerMode::universal(color))
 }
 
@@ -42,10 +42,10 @@ fn universal_color(color: Color) -> TargetValue<PerMode<Color>> {
 /// A universal value resolves directly; an adaptive value resolves to its
 /// dark-mode branch — the migrated builder shims only ever store universal
 /// values, so this is a lossless inverse for the compatibility path.
-fn color_of(slot: &Option<TargetValue<PerMode<Color>>>) -> Option<Color> {
+fn color_of(slot: &Option<TargetValue<PerMode<PaintColor>>>) -> Option<Color> {
     match slot.as_ref()?.resolve(RenderTarget::Terminal)? {
-        PerMode::Universal(color) => Some(*color),
-        PerMode::Adaptive { dark, .. } => Some(*dark),
+        PerMode::Universal(paint) => Some(paint.color),
+        PerMode::Adaptive { dark, .. } => Some(dark.color),
     }
 }
 
@@ -507,12 +507,17 @@ impl BrowserRenderable for BlockQuote {
 }
 
 impl BlockQuote {
-    /// Builds the inline children for the quote's main paragraph in the
+    /// Builds the inline node sequence for inline quote content in the
     /// canonical render tree.
     ///
     /// Used only when the content is inherently inline — a plain `String` or a
-    /// [`Prose`] component. Non-`Prose` block-level components project
-    /// structurally through [`Self::project_block_children`] instead.
+    /// [`Prose`] component. The caller
+    /// ([`Self::project_block_children`]) folds the returned sequence into
+    /// block-level children: a plain `String` is one `Text` node that becomes
+    /// a single `Paragraph`, while a `Prose` body that carries a fenced code
+    /// block yields a `Code` node that must stay a block-level sibling rather
+    /// than nesting inside a `Paragraph`. Non-`Prose` block-level components
+    /// project structurally through [`Self::project_block_children`] instead.
     ///
     /// Delegates to the shared
     /// [`project_renderable_content`](crate::render_tree::projection::project_renderable_content)
@@ -528,9 +533,12 @@ impl BlockQuote {
     /// Builds the top-level children for the quote's projected
     /// [`NodeKind::BlockQuote`].
     ///
-    /// `String` content and [`Prose`] components are inline — they produce a
-    /// single `Paragraph` wrapping inline nodes. Any other component projects
-    /// structurally via
+    /// `String` content and [`Prose`] components are inline — their projected
+    /// node sequence is folded into block-level children via
+    /// [`fold_prose_nodes_into_blocks`](crate::render_tree::projection::fold_prose_nodes_into_blocks),
+    /// so contiguous inline runs become a single `Paragraph` and any fenced
+    /// code block a `Prose` body carries stays a block-level sibling. Any
+    /// other component projects structurally via
     /// [`ProjectionMode::Structural`](crate::render_tree::projection::ProjectionMode::Structural):
     /// its `render_tree_node` output (or the structural fallback) becomes a
     /// direct block-level child of the `BlockQuote`. This closes the Stage 3
@@ -542,9 +550,16 @@ impl BlockQuote {
     /// wrapped in a `Paragraph` so the `BlockQuote` contract still has
     /// block-level children.
     fn project_block_children(&self) -> Vec<RenderNode> {
-        use crate::render_tree::projection::{ProjectionMode, project_renderable_content};
+        use crate::render_tree::projection::{
+            ProjectionMode, fold_prose_nodes_into_blocks, project_renderable_content,
+        };
 
-        // Inline content (String, Prose) always wraps in a single Paragraph.
+        // Inline content (String, Prose) folds into block-level children:
+        // contiguous inline runs become a single `Paragraph` and any fenced
+        // code block a `Prose` body carries stays a block-level sibling.
+        // Wrapping the whole sequence in one `Paragraph` would nest that
+        // block-level `Code` inside phrasing content, which the render tree
+        // rejects.
         let is_inline_content = match &self.content {
             RenderableTerminalContent::String(_) => true,
             RenderableTerminalContent::Component(component) => {
@@ -552,7 +567,7 @@ impl BlockQuote {
             }
         };
         if is_inline_content {
-            return vec![RenderNode::paragraph(self.paragraph_children())];
+            return fold_prose_nodes_into_blocks(self.paragraph_children());
         }
 
         let nodes = project_renderable_content(
@@ -629,12 +644,19 @@ impl TreeRenderable for BlockQuote {
         }
 
         let mut node = RenderNode::block_quote(children);
-        // A block quote carries an intrinsic word-wrap default, so compare
-        // against the component's own baseline rather than `Layout::default()`
-        // — only a caller-customized layout is recorded on the node.
-        if self.layout != Self::default().layout {
-            node.attrs.set_layout(&self.layout);
+        // The left border's inner gap is `Layout::padding` now — the terminal
+        // tree renderer no longer inserts an implicit space inside the border —
+        // so reserve one cell to reproduce the `│ ` gap. This is the
+        // component's *default*: a caller that configured its own left padding
+        // (through `layout_mut`) keeps it, so a larger / percentage / per-target
+        // gap is not silently clobbered. The intrinsic word-wrap baseline is
+        // applied by the renderer's block-quote branch, not read from the node,
+        // so carrying the layout on the node is harmless.
+        let mut node_layout = self.layout.clone();
+        if node_layout.padding.left == TargetValue::universal(Length::Zero) {
+            node_layout.padding.left = TargetValue::universal(Length::ch(1));
         }
+        node.attrs.set_layout(&node_layout);
         if !self.style.is_empty() {
             node.attrs.set_style(&self.style);
         }
@@ -698,6 +720,35 @@ mod tests {
         );
         let result = quote.render_optimistic(None);
         assert_eq!(strip_ansi(&result), "│ Direct content");
+    }
+
+    #[test]
+    fn render_tree_seeds_default_left_padding_gap() {
+        // With no caller-configured padding the projection reserves the 1ch
+        // gap that replaces the border's old implicit interior space.
+        let quote = BlockQuote::from("Hello world");
+        let node = quote.render_tree();
+        let layout = node.attrs.layout_ref().expect("layout recorded");
+        assert_eq!(
+            layout.padding.left,
+            TargetValue::universal(Length::ch(1)),
+            "default left padding gap must be seeded"
+        );
+    }
+
+    #[test]
+    fn render_tree_preserves_caller_left_padding() {
+        // A caller that deliberately set a wider left padding keeps it — the
+        // default 1ch gap must not clobber an explicit configuration.
+        let mut quote = BlockQuote::from("Hello world");
+        quote.layout_mut().padding.left = TargetValue::universal(Length::ch(4));
+        let node = quote.render_tree();
+        let layout = node.attrs.layout_ref().expect("layout recorded");
+        assert_eq!(
+            layout.padding.left,
+            TargetValue::universal(Length::ch(4)),
+            "explicit caller left padding must survive projection"
+        );
     }
 
     // =========================================================================
@@ -1167,7 +1218,7 @@ mod tests {
         let rendered =
             render_browser_node(&node, &BrowserRenderOptions::default()).expect("browser render");
         let html = rendered.output.render();
-        assert!(html.contains("<blockquote>"));
+        assert!(html.contains("<blockquote"));
         assert!(html.contains("Quoted text"));
     }
 
@@ -1263,7 +1314,7 @@ mod tests {
     fn test_browser_renderable_fragment_contains_blockquote() {
         let quote = BlockQuote::from("Quoted text");
         let html = BrowserRenderable::render_html_fragment(&quote).render();
-        assert!(html.contains("<blockquote>"));
+        assert!(html.contains("<blockquote"));
         assert!(html.contains("Quoted text"));
     }
 
@@ -1274,7 +1325,7 @@ mod tests {
             Some("Shakespeare"),
         );
         let html = BrowserRenderable::render_html_fragment(&quote).render();
-        assert!(html.contains("<blockquote>"));
+        assert!(html.contains("<blockquote"));
         assert!(html.contains("To be or not to be"));
         assert!(html.contains("— Shakespeare"));
         // Attribution becomes a second paragraph inside the blockquote.
@@ -1286,7 +1337,7 @@ mod tests {
         let prose = Prose::new("<b>bold content</b>");
         let quote = BlockQuote::from(prose);
         let html = BrowserRenderable::render_html_fragment(&quote).render();
-        assert!(html.contains("<blockquote>"));
+        assert!(html.contains("<blockquote"));
         // Prose styling is flattened to plain text by `render_tree`.
         assert!(html.contains("bold content"));
     }
@@ -1295,7 +1346,7 @@ mod tests {
     fn test_browser_renderable_empty_fragment() {
         let quote = BlockQuote::from("");
         let html = BrowserRenderable::render_html_fragment(&quote).render();
-        assert!(html.contains("<blockquote>"));
+        assert!(html.contains("<blockquote"));
     }
 
     #[test]
@@ -1305,7 +1356,7 @@ mod tests {
         let html = page.render();
         assert!(html.contains("<html"));
         assert!(html.contains("<body>"));
-        assert!(html.contains("<blockquote>"));
+        assert!(html.contains("<blockquote"));
         assert!(html.contains("Quoted text"));
     }
 
@@ -1324,7 +1375,7 @@ mod tests {
         let html = page.render();
         // PageOptions wire through to the rolled-up CSS, and the fragment is
         // preserved inside the body.
-        assert!(html.contains("<blockquote>"));
+        assert!(html.contains("<blockquote"));
         assert!(html.contains("Quoted text"));
     }
 
@@ -1458,5 +1509,63 @@ mod tests {
             "expected a foreground color SGR for <red>; got: {rendered:?}"
         );
         assert!(strip_ansi(&rendered).contains("error"));
+    }
+
+    // =========================================================================
+    // Embedded Prose Fenced Code (regression for review-2 container gap)
+    // =========================================================================
+
+    /// `true` if any `Paragraph` node anywhere in the tree directly contains a
+    /// block-level `Code` child — the invalid shape that tripped render-tree
+    /// validation before the fold fix.
+    fn paragraph_contains_code(node: &RenderNode) -> bool {
+        let bad_here = matches!(node.kind, NodeKind::Paragraph { .. })
+            && node
+                .children()
+                .iter()
+                .any(|c| matches!(c.kind, NodeKind::Code { .. }));
+        bad_here || node.children().iter().any(paragraph_contains_code)
+    }
+
+    /// `true` if a block-level `Code` node appears anywhere in the tree.
+    fn has_code(node: &RenderNode) -> bool {
+        matches!(node.kind, NodeKind::Code { .. })
+            || node.children().iter().any(has_code)
+    }
+
+    /// Regression: a `Prose` body carrying a fenced code block embedded in a
+    /// `BlockQuote` must project to a render-tree-valid shape. Before the fold
+    /// fix the quote wrapped the whole Prose node sequence — including the
+    /// block-level `Code` node — in a single `Paragraph`, which tree
+    /// validation rejected, so the terminal renderer emitted empty output
+    /// (`bt quote '<red>before \`\`\`code\`\`\` after</red>'`).
+    #[test]
+    fn test_prose_fenced_code_in_block_quote_renders_via_tree() {
+        let prose = Prose::new("<red>before\n```\ncode\n```\nafter</red>");
+        let quote = BlockQuote::from(prose);
+        let term = Terminal::new_optimistic(80);
+        let rendered = quote.render(&term);
+
+        // A non-empty render proves validation passed: `render_via_tree`
+        // swallows a validation failure into an empty string.
+        assert!(!rendered.is_empty(), "expected non-empty render");
+        let stripped = strip_ansi(&rendered);
+        assert!(stripped.contains("before"), "missing `before`: {stripped:?}");
+        assert!(stripped.contains("code"), "missing `code`: {stripped:?}");
+        assert!(stripped.contains("after"), "missing `after`: {stripped:?}");
+    }
+
+    /// The embedded fenced code block stays a block-level sibling of the
+    /// surrounding paragraphs instead of nesting inside one.
+    #[test]
+    fn test_prose_fenced_code_in_block_quote_is_block_sibling() {
+        let prose = Prose::new("<red>before\n```\ncode\n```\nafter</red>");
+        let quote = BlockQuote::from(prose);
+        let node = quote.render_tree();
+        assert!(
+            !paragraph_contains_code(&node),
+            "a block-level Code node must not nest inside a Paragraph"
+        );
+        assert!(has_code(&node), "expected a block-level Code node in the tree");
     }
 }

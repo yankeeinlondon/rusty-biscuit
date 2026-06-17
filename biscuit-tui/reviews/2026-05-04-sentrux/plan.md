@@ -71,12 +71,12 @@ docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
   - ../.claude/skills/biscuit-tui/SKILL.md
 packages:
-  - tui-chrome-cli
+  - biscuit-tui-cli
 ---
 
 # biscuit-tui Refactor Plan
 
-This plan operationalizes the 15 suggestions in [`review-1.md`](./review-1.md). The refactor targets modularity, code equality (reducing LOC concentration), and removing redundancy across the `tui-chrome` library and `tui-chrome-cli`.
+This plan operationalizes the 15 suggestions in [`review-1.md`](./review-1.md). The refactor targets modularity, code equality (reducing LOC concentration), and removing redundancy across the `biscuit-tui` library and `biscuit-tui-cli`.
 
 ## Phase 1: Critical Modularity & State Consolidation
 *Goal: Fix the primary peer coupling and reduce massive duplication in choice components.*

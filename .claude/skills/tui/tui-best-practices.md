@@ -76,5 +76,6 @@ Best Practices:
 
 ## Related Skills
 
+- **ratatui-best-practices.md** - production Ratatui app structure, lifecycle, and readiness checklist
 - **bubble-tea-architecture.md** - Go TUI patterns
 - **ratatui-architecture.md** - Rust TUI patterns

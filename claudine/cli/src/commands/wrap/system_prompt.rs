@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use claudine::composition::LaunchWorkspaceContext;
 use claudine::provider::{SystemPromptDelivery, SystemPromptSpec};
 use claudine::system_prompt::{
-    EffectiveSystemPrompt, StandardPromptScope, SystemPromptMode, SystemPromptSource,
+    ResolvedSystemPrompt, StandardPromptScope, SystemPromptMode, SystemPromptSource,
 };
 use color_eyre::eyre::Result;
 use tempfile::{NamedTempFile, TempDir};
@@ -94,14 +94,14 @@ pub(crate) fn describe_source(source: &SystemPromptSource) -> String {
 }
 
 /// Format the effective system prompt for dry-run output.
-pub(crate) fn describe_effective(effective: &EffectiveSystemPrompt) -> Option<Vec<String>> {
+pub(crate) fn describe_effective(effective: &ResolvedSystemPrompt) -> Option<Vec<String>> {
     match effective {
-        EffectiveSystemPrompt::None => None,
-        EffectiveSystemPrompt::Disabled { source } => Some(vec![
+        ResolvedSystemPrompt::None => None,
+        ResolvedSystemPrompt::Disabled { source } => Some(vec![
             format!("source: {}", describe_source(source)),
             "status: disabled (empty body)".to_string(),
         ]),
-        EffectiveSystemPrompt::Ready(prepared) => {
+        ResolvedSystemPrompt::Ready(prepared) => {
             let mode_label = match prepared.mode {
                 SystemPromptMode::Append => "append",
                 SystemPromptMode::Replace => "replace",

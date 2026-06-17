@@ -114,8 +114,8 @@ pub struct ClaudeAssistant {
 
 /// `user` event carrying a replay of the user's previous turn or a nested
 /// `tool_result` block. The parser extracts tool_result blocks into
-/// [`SemanticEvent::ToolResult`]; text blocks are silently dropped because
-/// they only echo input.
+/// [`SemanticEvent::ToolResult`](crate::stream::semantic::SemanticEvent::ToolResult);
+/// text blocks are silently dropped because they only echo input.
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ClaudeUser {
     #[serde(default)]

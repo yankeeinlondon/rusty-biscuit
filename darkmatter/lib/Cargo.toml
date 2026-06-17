@@ -17,6 +17,14 @@ path = "src/lib.rs"
 # "N ignored" block) before the Criterion `[[bench]]` targets.
 bench = false
 
+[features]
+default = []
+# Test-only instrumentation. Enables process-wide counters that let downstream
+# test suites assert a documentation-only code path constructs no `EffectEngine`
+# and attempts no network access. Off by default; production builds carry no
+# counter state and expose none of the instrumentation API.
+effects-instrumentation = []
+
 [dependencies]
 # Tracing
 tracing = "0.1"
@@ -25,7 +33,7 @@ tracing = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 indexmap = { version = "2", features = ["serde"] }
-biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml", "file-reference"] }
+biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml", "file-reference", "fetch"] }
 
 # Error handling
 thiserror = "2.0"
@@ -48,7 +56,7 @@ reqwest = { version = "0.13", features = ["json", "gzip"] }
 url = "2.5"
 
 # Async runtime
-tokio = { version = "1.48", features = ["time", "macros", "rt-multi-thread"] }
+tokio = { version = "1.48", features = ["time", "macros", "rt-multi-thread", "sync"] }
 
 # Syntax highlighting
 syntect = "5.2"
@@ -67,8 +75,13 @@ markdown = { version = "1.0.0-alpha.22", features = ["serde"] }
 html-escape = "0.2"
 similar = { version = "2.6", features = ["inline"] }
 
+# SVG sanitization for promoted Mermaid static <svg> before raw-HTML emission.
+# Pinned to the version `syntect`/`plist` already pull in so cargo unifies on a
+# single copy rather than compiling a second quick-xml.
+quick-xml = "0.39"
+
 # Terminal image rendering and mermaid diagrams (via biscuit-terminal)
-biscuit-terminal = { path = "../../biscuit-terminal/lib" }
+biscuit-terminal = { path = "../../biscuit-terminal/lib", features = ["image"] }
 
 # Hashing (for Mermaid diagram caching and markdown TOC)
 biscuit-hash = { path = "../../biscuit-hash/lib" }
@@ -82,23 +95,34 @@ jsonschema = { version = "0.42", default-features = false }
 sha2 = "0.10"
 
 [dev-dependencies]
+# Re-declares the renderable path dep with the test-only `hint-access-counter`
+# feature so the structural performance gate (`render_tree::structural_gate`)
+# can observe the `NodeAttrs::data` hint-access counter while folding a styled
+# corpus through the real Darkmatter entry points. Cargo unifies this with the
+# `[dependencies]` declaration for the test build.
+renderable = { path = "../../renderable", features = ["hint-access-counter"] }
 tokio = { version = "1.48", features = ["full", "test-util"] }
 tracing-test = "0.2"
 insta = "1.41"
 serial_test = "3.0"
-git2 = "0.20"
+# Only used to `init` a throwaway repo in transclusion tests; pure-Rust, no libgit2.
+gix = { version = "=0.84.0", default-features = false, features = ["sha1"] }
 proptest = "1.6"
 criterion = { version = "0.5", features = ["html_reports"] }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 biscuit-browser-harness = { path = "../../biscuit-browser-harness" }
 test-toolkit = { path = "../../tools/test-toolkit" }
 tempfile = "3"
+# Encodes the distinctive-fill probe image and decodes the screen capture in the
+# Level-2 terminal-image paint test (`level2_render_tree_terminal`).
+image = "0.25"
 # Used by the `html_to_png` example for direct visual inspection. The browser
 # *tests* go through biscuit-browser-harness; the example reaches for the
 # chromiumoxide screenshot API directly because the harness intentionally
 # doesn't expose `full_page` screenshots.
 chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
 futures-util = "0.3"
+wiremock = "0.6"
 
 [[bench]]
 name = "schema_validation"
@@ -116,14 +140,10 @@ harness = false
 name = "render_pipeline"
 harness = false
 
-# DMTR-6 — side-by-side legacy vs render-tree benchmarks for every public
-# render target. Drives the parity-baseline measurement gate before any public
-# cutover; see
-# `renderable/features/2026-05-20-darkmatter-tree/benchmark-harness-shape.md`.
 [[bench]]
-name = "migration_parity"
+name = "prose_highlighter"
 harness = false
 
 [[bench]]
-name = "prose_highlighter"
+name = "render_pipeline_steps"
 harness = false

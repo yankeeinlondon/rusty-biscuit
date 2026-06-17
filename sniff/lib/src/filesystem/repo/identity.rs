@@ -69,12 +69,10 @@ pub struct RepoIdentity {
 /// Returns [`SniffError::NotARepository`] if `dir` is not inside a git
 /// repository.
 pub fn detect_repo_identity(dir: &Path) -> Result<RepoIdentity> {
-    let repo = git2::Repository::discover(dir)
-        .map_err(|_| SniffError::NotARepository(dir.to_path_buf()))?;
-    let root = repo
-        .workdir()
-        .ok_or_else(|| SniffError::NotARepository(dir.to_path_buf()))?
-        .to_path_buf();
+    // Trust/permission/I/O/corruption failures surface via `?`; only genuine
+    // repository absence becomes `NotARepository`.
+    let root = crate::filesystem::repo_root(dir)?
+        .ok_or_else(|| SniffError::NotARepository(dir.to_path_buf()))?;
 
     let monorepo = detect_repo_structure(&root)?;
     let (is_monorepo, package_count) = match monorepo {
@@ -82,7 +80,7 @@ pub fn detect_repo_identity(dir: &Path) -> Result<RepoIdentity> {
         _ => (false, None),
     };
 
-    let name = resolve_name(&root, &repo);
+    let name = resolve_name(&root);
     let version = resolve_version(&root);
     let language = if is_monorepo {
         None
@@ -100,11 +98,11 @@ pub fn detect_repo_identity(dir: &Path) -> Result<RepoIdentity> {
 }
 
 /// Resolve the display name in priority order: manifest → remote → dir name.
-fn resolve_name(root: &Path, repo: &git2::Repository) -> String {
+fn resolve_name(root: &Path) -> String {
     if let Some(name) = manifest_name(root) {
         return name;
     }
-    if let Some(name) = remote_basename(repo) {
+    if let Some(name) = remote_basename(root) {
         return name;
     }
     root.file_name()
@@ -144,19 +142,12 @@ fn manifest_name(root: &Path) -> Option<String> {
     None
 }
 
-fn remote_basename(repo: &git2::Repository) -> Option<String> {
-    let remote_name = repo
-        .find_remote("origin")
+fn remote_basename(root: &Path) -> Option<String> {
+    // `origin` if present, otherwise the first configured remote with a URL.
+    let url = crate::filesystem::preferred_remote_url(root)
         .ok()
-        .map(|_| "origin".to_string())
-        .or_else(|| {
-            repo.remotes()
-                .ok()
-                .and_then(|list| list.iter().flatten().next().map(String::from))
-        })?;
-    let remote = repo.find_remote(&remote_name).ok()?;
-    let url = remote.url()?;
-    parse_remote_basename(url)
+        .flatten()?;
+    parse_remote_basename(&url)
 }
 
 /// Extract the trailing path segment from a git remote URL, stripping `.git`.

@@ -6,9 +6,19 @@
 //! (skipping code regions) and plain-text scanning.
 
 use super::{EvalResult, Evaluator, ExpressionFinder, ExpressionLocation, parse};
-use crate::markdown::compose::expression::EvaluationLookup;
+use crate::markdown::compose::expression::{EvaluationLookup, UNKNOWN_FUNCTION_PREFIX};
 use crate::markdown::compose::types::ComposeWarning;
 use crate::markdown::types::MarkdownError;
+
+/// Whether an evaluation error is fatal even in non-fail-fast mode.
+///
+/// An unknown function is an authoring mistake, not a data-dependent miss
+/// (unlike an undefined variable, which resolves to an empty string by design).
+/// Tolerating it would leave the literal `{{ … }}` text in place to poison a
+/// later consumer with an unrelated error, so it is always surfaced here.
+fn is_fatal_eval_error(message: &str) -> bool {
+    message.starts_with(UNKNOWN_FUNCTION_PREFIX)
+}
 
 /// Controls how `interpolate_text` scans for `{{ }}` expressions.
 pub(crate) enum ScanMode {
@@ -99,7 +109,9 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
                         output.replace_range(loc.start..loc.end, &replacement);
                         count += 1;
                     }
-                    EvalResult::Error { message, .. } if fail_fast => {
+                    EvalResult::Error { message, .. }
+                        if fail_fast || is_fatal_eval_error(&message) =>
+                    {
                         return Err(MarkdownError::Transform(format!(
                             "Interpolation evaluation failed for '{}': {}",
                             loc.expression, message
@@ -254,6 +266,26 @@ mod tests {
         assert!(result.warnings[0].message.contains("failed to parse"));
         // Original is preserved
         assert!(result.output.contains("{{ > invalid }}"));
+    }
+
+    #[test]
+    fn unknown_function_is_fatal_even_without_fail_fast() {
+        // An unrecognized symbol can never resolve; it must surface as an error
+        // rather than leaking its literal `{{ … }}` text downstream, even when
+        // fail_fast is off.
+        let state = make_state(json!({"spec": "a/b/spec.md"}));
+        let evaluator = Evaluator::new(&state);
+        let result = interpolate_text(
+            "{{ unknown_fn(spec) }}",
+            &evaluator,
+            ScanMode::Plain,
+            false,
+            "test",
+        );
+        let Err(err) = result else {
+            panic!("unknown function must be fatal");
+        };
+        assert!(err.to_string().contains("Unknown function: unknown_fn"));
     }
 
     #[test]

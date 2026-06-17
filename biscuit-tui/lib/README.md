@@ -1,4 +1,4 @@
-# tui-chrome
+# biscuit-tui
 
 A library of reusable TUI input components built on [ratatui](https://ratatui.rs).
 
@@ -43,7 +43,7 @@ The [`prelude`](src/prelude.rs) module re-exports the most commonly used types f
 ### Embedded in a TUI application
 
 ```rust
-use tui_chrome::{TextInput, TextInputState, EventOutcome, HandleEvent};
+use biscuit_tui::{TextInput, TextInputState, EventOutcome, HandleEvent};
 use ratatui::prelude::*;
 use crossterm::event::{Event, KeyCode, KeyModifiers};
 
@@ -74,7 +74,7 @@ terminal.draw(|frame| {
 ### Standalone window
 
 ```rust
-use tui_chrome::{run_standalone, TextInput, TextInputState};
+use biscuit_tui::{run_standalone, TextInput, TextInputState};
 
 let state = TextInputState::new().with_max_length(100);
 match run_standalone(TextInput, state, None) {
@@ -118,7 +118,7 @@ Customize via `state.with_key_bindings(KeyBindings::default())`.
 Choice components (`ChooseOne`, `ChooseMany`) are generic over the value type `V`:
 
 ```rust
-use tui_chrome::{ChooseOneState, ChoiceInput, ChoiceOption};
+use biscuit_tui::{ChooseOneState, ChoiceInput, ChoiceOption};
 
 // Library consumers can project string options into typed values
 let options = vec![
@@ -143,7 +143,7 @@ The CLI always uses `V = String`.
 `InputTable` returns typed rows (introduced in Phase 5):
 
 ```rust
-use tui_chrome::{InputTableState, InputTableColumn, CellValue, Row};
+use biscuit_tui::{InputTableState, InputTableColumn, CellValue, Row};
 
 let columns = vec![
     InputTableColumn::StaticText { id: "name".into(), text: "Name".into() },
@@ -177,12 +177,12 @@ Two-tier validation model:
 
 Library unit tests cover state transitions, layout math, fuzzy filter
 behaviour, and rendering of choice badges / hotkey display modes. Run
-them with `cargo test -p tui-chrome --lib`.
+them with `cargo test -p biscuit-tui --lib`.
 
 For end-to-end and real-terminal verification (Level 1 / Level 2 /
 Level 3 testing rigor — including the `wezterm cli` / `kitty @` / `tmux`
 harnesses and `cliclick` keyboard injection on macOS), see the
-[`tui-chrome-cli` README's "Test Rigor" section](../cli/README.md#test-rigor--level-1--level-2--level-3)
+[`biscuit-tui-cli` README's "Test Rigor" section](../cli/README.md#test-rigor--level-1--level-2--level-3)
 and the shared harness crate's
 [`biscuit-test-harness/README.md`](../../biscuit-test-harness/README.md),
 which documents the harness variants and the environment each requires.

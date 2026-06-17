@@ -89,11 +89,14 @@ In this example:
 - `metadata` is templated because one nested string contains `{{ ... }}`
 
 
-### Multipass Requirements
+### Two-Pass Interpolation
 
-> **NEW REQUIREMENT**
-
-Because we always run Frontmatter Shell expansion _before_ Frontmatter Interpolation we have a guarantee that all shell expansion will have been resolved and it's presence will **not** ever force us to use a multi-pass interpolation but even though we'd prefer to complete all interpolation in one pass there are cases where that might not be possible.
+Frontmatter interpolation runs in **two passes** that bracket Frontmatter Shell
+Expansion. Pass 1 runs _first_ — before Schema Validation and shell expansion —
+and **defers** any templated key that references a whole-value `$(...)` shell
+value, since that literal form must survive into shell expansion. Pass 2 runs
+_after_ shell expansion and resolves the deferred keys against the now-concrete
+values. A single pass therefore cannot always suffice.
 
 1. Recursive Interpolation
     
@@ -108,13 +111,36 @@ Because we always run Frontmatter Shell expansion _before_ Frontmatter Interpola
 
 ## Available Variables
 
-Frontmatter interpolation resolves against three sources:
+Frontmatter interpolation resolves against these sources:
 
 | Prefix | Source | Example |
 |---|---|---|
-| *(none)* | Non-templated frontmatter seed values | `{{ base }}` |
+| *(none)* | Non-templated frontmatter seed values (plus already-resolved keys) | `{{ base }}` |
+| `doc` / `doc.` | The current document's frontmatter object / a property of it | `{{ doc.base }}` |
 | `ctx.` | Runtime context (demand-driven) | `{{ ctx.today }}` |
 | `env.` | Environment variables | `{{ env.HOME }}` |
+
+Bare `doc` is the whole frontmatter object; `doc.<path>` reads a property, and a
+property literally named `doc` is reached as `doc.doc`. See
+[Namespaces](../topics/darkmatter-expressions.md#namespaces).
+
+### Read-Side Functions
+
+The [read-side functions](../topics/darkmatter-expressions.md#read-side-functions)
+(`file_exists`, `frontmatter`, `markdown_title`, `markdown_body_empty`,
+`validate_schema`, `absolute`, `relative`) resolve in frontmatter interpolation
+just as they do in body interpolation — both passes carry a document-relative
+resolution context. The motivating pattern relies on this:
+
+```yaml
+possible_spec: "{{dir}}/spec.md"
+spec: "{{ file_exists(possible_spec) ? possible_spec : '' }}"
+```
+
+The frontmatter context is local-filesystem only — this holds for both the
+pre-shell and post-shell interpolation passes, and for the `$()` shell ternary
+condition/branch: a remote URL argument fails loudly here (use body
+interpolation for remote reads).
 
 Dotted access into nested seed values is supported:
 

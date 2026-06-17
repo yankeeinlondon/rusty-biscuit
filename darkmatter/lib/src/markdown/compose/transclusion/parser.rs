@@ -9,6 +9,24 @@ use crate::markdown::compose::parse_utils::{Cursor, find_code_regions, is_in_cod
 use biscuit_terminal::errors::SourceContext;
 use serde_json::Value;
 
+/// Returns `true` when `line` starts with one of the block transclusion
+/// directive keywords (`::file`, `::code`, `::url`) and is **not** a
+/// distinct directive such as `::file-links` that merely shares a prefix.
+fn is_block_directive_line(line: &str) -> bool {
+    let prefixes = [("::file", "::file-links"), ("::code", ""), ("::url", "")];
+    for (prefix, exclusion) in prefixes {
+        if let Some(rest) = line.strip_prefix(prefix) {
+            if !exclusion.is_empty() && line.starts_with(exclusion) {
+                return false;
+            }
+            // Require a word boundary after the prefix so `::file-foo` is
+            // rejected rather than mis-parsed.
+            return rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t');
+        }
+    }
+    false
+}
+
 /// Parses block transclusion directives from markdown content.
 pub fn parse_directives(
     content: &str,
@@ -32,10 +50,7 @@ pub fn parse_directives(
         let line = &content[line_start..line_end];
         let trimmed = line.trim();
 
-        if trimmed.starts_with("::file")
-            || trimmed.starts_with("::code")
-            || trimmed.starts_with("::url")
-        {
+        if is_block_directive_line(trimmed) {
             let first_non_ws = line_start + line.len().saturating_sub(line.trim_start().len());
             if !is_in_code_region(first_non_ws, &code_regions) {
                 let (kind, raw_target, options) = parse_directive_line(trimmed, line_number, &ctx)?;
@@ -368,6 +383,8 @@ fn apply_option(
         "disclosure" => {
             if value.eq_ignore_ascii_case("false") {
                 options.disclosure = None;
+            } else if value.eq_ignore_ascii_case("true") {
+                options.disclosure = Some(String::new());
             } else {
                 options.disclosure = Some(value.to_string());
             }
@@ -420,6 +437,24 @@ mod tests {
         assert_eq!(options.quotation, Some(String::new()));
         assert_eq!(options.disclosure, Some("More".to_string()));
         assert_eq!(options.when_expr, Some("env.DEBUG".to_string()));
+    }
+
+    #[test]
+    fn parses_disclosure_true_as_empty_summary() {
+        let content = r#"::code ./mod.rs disclosure=true"#;
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].options.disclosure, Some(String::new()));
+    }
+
+    #[test]
+    fn parses_disclosure_false_as_disabled() {
+        let content = r#"::code ./mod.rs disclosure=false"#;
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].options.disclosure, None);
     }
 
     #[test]

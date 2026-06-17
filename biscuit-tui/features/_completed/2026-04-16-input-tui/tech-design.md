@@ -8,7 +8,7 @@ This document is the engineering companion to the [spec](./spec.md). Where the s
 
 ```
 biscuit-tui/                         # package area
-├── lib/                             # library crate (package: tui-chrome)
+├── lib/                             # library crate (package: biscuit-tui)
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs
@@ -36,7 +36,7 @@ biscuit-tui/                         # package area
 │       └── helpers/
 │           ├── mod.rs
 │           └── choice_builders.rs   # from_csv, from_markdown, from_dictionary
-└── cli/                             # binary crate (package: tui-chrome-cli, bin: question)
+└── cli/                             # binary crate (package: biscuit-tui-cli, bin: question)
     ├── Cargo.toml
     └── src/
         ├── main.rs
@@ -67,7 +67,7 @@ unicode-width = "0.2"       # label/column width measurement
 
 # biscuit-tui/cli/Cargo.toml
 [dependencies]
-tui-chrome = { path = "../lib" }
+biscuit-tui = { path = "../lib" }
 clap = { version = "4", features = ["derive"] }
 serde_json = "1"
 ```

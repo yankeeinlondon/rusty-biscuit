@@ -2,39 +2,17 @@
 
 use darkmatter::markdown::Markdown;
 
-use super::types::PromptVerbosity;
+use super::types::ReportMode;
 
-/// Parse the `verbosity` property from the frontmatter of a `system-prompt.md`
-/// file.
-///
-/// The raw markdown text is parsed to extract the YAML frontmatter, and the
-/// `verbosity` key is read as a string.  Valid values are `silent`, `quiet`,
-/// and `verbose` (case-insensitive).
-///
-/// ## Returns
-///
-/// Returns `Some(PromptVerbosity)` when the frontmatter contains a valid
-/// `verbosity` value, or `None` when the key is missing or the value is
-/// unrecognized.
-///
-/// ## Examples
-///
-/// ```
-/// use claudine::prompt_reporting::{parse_frontmatter_verbosity, PromptVerbosity};
-///
-/// let text = "---\nverbosity: verbose\n---\n\n# System Prompt\n";
-/// assert_eq!(
-///     parse_frontmatter_verbosity(text),
-///     Some(PromptVerbosity::Verbose)
-/// );
-///
-/// let no_verbosity = "# No frontmatter\n";
-/// assert_eq!(parse_frontmatter_verbosity(no_verbosity), None);
-/// ```
-pub fn parse_frontmatter_verbosity(raw_text: &str) -> Option<PromptVerbosity> {
+/// Parse the `verbosity` property from a `system-prompt.md` file's
+/// frontmatter as a [`ReportMode`]. Valid values are `silent`, `quiet`, and
+/// `verbose` (case-insensitive), which map to [`ReportMode::Silent`],
+/// [`ReportMode::Summary`], and [`ReportMode::Full`] respectively. Any other
+/// value returns `None`.
+pub fn parse_frontmatter_verbosity(raw_text: &str) -> Option<ReportMode> {
     let md: Markdown = raw_text.into();
     let value: Option<String> = md.fm_get("verbosity").ok().flatten();
-    value.as_deref().and_then(PromptVerbosity::parse)
+    value.as_deref().and_then(ReportMode::parse)
 }
 
 #[cfg(test)]
@@ -44,28 +22,19 @@ mod tests {
     #[test]
     fn parses_verbose_lowercase() {
         let text = "---\nverbosity: verbose\n---\n\n# Prompt\n";
-        assert_eq!(
-            parse_frontmatter_verbosity(text),
-            Some(PromptVerbosity::Verbose)
-        );
+        assert_eq!(parse_frontmatter_verbosity(text), Some(ReportMode::Full));
     }
 
     #[test]
     fn parses_quiet_mixed_case() {
         let text = "---\nverbosity: Quiet\n---\n\n# Prompt\n";
-        assert_eq!(
-            parse_frontmatter_verbosity(text),
-            Some(PromptVerbosity::Quiet)
-        );
+        assert_eq!(parse_frontmatter_verbosity(text), Some(ReportMode::Summary));
     }
 
     #[test]
     fn parses_silent_uppercase() {
         let text = "---\nverbosity: SILENT\n---\n\n# Prompt\n";
-        assert_eq!(
-            parse_frontmatter_verbosity(text),
-            Some(PromptVerbosity::Silent)
-        );
+        assert_eq!(parse_frontmatter_verbosity(text), Some(ReportMode::Silent));
     }
 
     #[test]

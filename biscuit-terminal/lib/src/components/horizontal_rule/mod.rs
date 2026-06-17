@@ -12,9 +12,11 @@ pub mod style;
 
 pub use style::{RuleAlignment, RuleStyle, RuleWeight};
 
+#[cfg(feature = "image")]
 use std::io::Cursor;
 
 use crate::components::renderable::TerminalRenderable;
+#[cfg(feature = "image")]
 use crate::components::terminal_image::TerminalImage;
 use crate::discovery::detection::{ColorDepth, ColorMode, ImageSupport};
 use crate::terminal::Terminal;
@@ -157,7 +159,33 @@ impl TerminalRenderable for HorizontalRule {
             return image;
         }
 
-        // Determine the width based on alignment, custom width, and terminal width
+        self.render_text_tier(term)
+    }
+
+    fn layout(&self) -> &Layout {
+        &self.layout
+    }
+
+    fn layout_mut(&mut self) -> &mut Layout {
+        &mut self.layout
+    }
+
+    fn is_block_level(&self) -> bool {
+        true
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+impl HorizontalRule {
+    /// Renders the text tier (Unicode or ASCII glyphs) without attempting
+    /// the image tier.
+    ///
+    /// Used by the render-tree renderer when [`GraphicsMode::Off`] suppresses
+    /// graphics, or when the image tier is unavailable or fails.
+    pub(crate) fn render_text_tier(&self, term: &Terminal) -> String {
         let term_width = term.width() as usize;
         let rule_width = self.resolve_width(term_width);
 
@@ -191,24 +219,6 @@ impl TerminalRenderable for HorizontalRule {
         }
     }
 
-    fn layout(&self) -> &Layout {
-        &self.layout
-    }
-
-    fn layout_mut(&mut self) -> &mut Layout {
-        &mut self.layout
-    }
-
-    fn is_block_level(&self) -> bool {
-        true
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
-impl HorizontalRule {
     /// Resolves the width of the rule in characters based on the terminal
     /// width and the CSS-like width specification.
     ///
@@ -318,7 +328,7 @@ impl HorizontalRule {
     /// [`DEFAULT_CELL_WIDTH`]×[`DEFAULT_CELL_HEIGHT`] (8×16 px) per cell.
     /// This matches typical monospace fonts at common DPI; oversized fonts
     /// render a proportionally thicker-looking rule.
-    fn render_image_tier(&self, term: &Terminal) -> Option<String> {
+    pub(crate) fn render_image_tier(&self, term: &Terminal) -> Option<String> {
         if !term.is_tty
             || !matches!(
                 term.image_support,
@@ -363,39 +373,47 @@ impl HorizontalRule {
         height_cells: u32,
     ) -> Option<String> {
         let term_width = term.width() as usize;
-        let png = match rasterize_svg_to_png(svg.as_bytes()) {
-            Ok(png) => png,
-            Err(err) => {
-                tracing::warn!(
-                    error = %err,
-                    "horizontal rule image rendering failed; falling back to text"
-                );
-                return None;
-            }
-        };
+        #[cfg(feature = "image")]
+        {
+            let png = match rasterize_svg_to_png(svg.as_bytes()) {
+                Ok(png) => png,
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        "horizontal rule image rendering failed; falling back to text"
+                    );
+                    return None;
+                }
+            };
 
-        // Both Kitty-protocol terminals and modern iTerm2 accept
-        // `render_kitty_cells` for cell-sized inline images; see the rustdoc
-        // note on `render_image_tier` for the reasoning behind the unified
-        // emitter.
-        let image =
-            TerminalImage::default().render_kitty_cells(&png, rule_width as u32, height_cells);
-        let content_width = rule_width;
-        let x_offset = match self.alignment {
-            RuleAlignment::Full | RuleAlignment::Left => 0,
-            RuleAlignment::Centered => term_width.saturating_sub(content_width) / 2,
-            RuleAlignment::Right => term_width.saturating_sub(content_width),
-        };
-        let prefix = if x_offset > 0 {
-            format!("\x1b[{}C", x_offset)
-        } else {
-            String::new()
-        };
+            // Both Kitty-protocol terminals and modern iTerm2 accept
+            // `render_kitty_cells` for cell-sized inline images; see the rustdoc
+            // note on `render_image_tier` for the reasoning behind the unified
+            // emitter.
+            let image =
+                TerminalImage::default().render_kitty_cells(&png, rule_width as u32, height_cells);
+            let content_width = rule_width;
+            let x_offset = match self.alignment {
+                RuleAlignment::Full | RuleAlignment::Left => 0,
+                RuleAlignment::Centered => term_width.saturating_sub(content_width) / 2,
+                RuleAlignment::Right => term_width.saturating_sub(content_width),
+            };
+            let prefix = if x_offset > 0 {
+                format!("\x1b[{}C", x_offset)
+            } else {
+                String::new()
+            };
 
-        Some(format!(
-            "\x1b[s{}{}\x1b[u\x1b[{}B\r",
-            prefix, image, height_cells
-        ))
+            Some(format!(
+                "\x1b[s{}{}\x1b[u\x1b[{}B\r",
+                prefix, image, height_cells
+            ))
+        }
+        #[cfg(not(feature = "image"))]
+        {
+            let _ = (term_width, svg, rule_width, height_cells);
+            None
+        }
     }
 
     fn render_image_svg(&self, pixel_width: u32, pixel_height: u32, default_color: &str) -> String {
@@ -695,6 +713,7 @@ impl HorizontalRule {
     }
 }
 
+#[cfg(feature = "image")]
 pub(crate) fn rasterize_svg_to_png(svg_data: &[u8]) -> Result<Vec<u8>, String> {
     let tree = resvg::usvg::Tree::from_data(svg_data, &resvg::usvg::Options::default())
         .map_err(|err| format!("SVG parse error: {err}"))?;
@@ -866,6 +885,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "image")]
     fn test_render_uses_kitty_image_tier_when_supported() {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Waves)
@@ -1578,6 +1598,7 @@ mod tests {
     // ================================================================
 
     #[test]
+    #[cfg(feature = "image")]
     fn test_render_uses_image_tier_when_iterm() {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
@@ -1619,6 +1640,7 @@ mod tests {
     // ================================================================
 
     #[test]
+    #[cfg(feature = "image")]
     fn test_rasterize_svg_to_png_fails_on_garbage() {
         let result = rasterize_svg_to_png(b"<not-an-svg>");
         assert!(
@@ -1628,6 +1650,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "image")]
     #[tracing_test::traced_test]
     fn test_render_image_tier_falls_through_on_rasterization_failure() {
         // Feed `render_image_tier_from_svg` deliberately broken SVG bytes
@@ -2625,9 +2648,9 @@ mod tests {
     fn test_render_to_browser_percent_margin() {
         use crate::utils::layout::Layout;
         let layout = Layout {
-            margin: crate::utils::layout::Margin {
+            margin: crate::utils::layout::Edges {
                 top: TargetValue::universal(Length::percent(2.0).unwrap()),
-                ..crate::utils::layout::Margin::default()
+                ..crate::utils::layout::Edges::default()
             },
             ..Layout::default()
         };
@@ -2731,6 +2754,188 @@ mod tests {
             }
             let json = serde_json::to_string(&RuleWeight::Thick).unwrap();
             assert_eq!(json, "\"thick\"");
+        }
+
+        // ================================================================
+        // Phase 2 parity: renderable::tree::graphics::horizontal_rule_svg
+        // must match HorizontalRule::render_browser_svg byte-for-byte.
+        // ================================================================
+
+        #[test]
+        fn parity_default_dashes() {
+            let rule = HorizontalRule::new();
+            let expected = rule.render_browser_svg();
+            let actual = renderable::tree::graphics::horizontal_rule_svg(
+                None, None, None, None, "0", "0",
+            );
+            assert_eq!(
+                actual, expected,
+                "default dashed SVG must match between renderable and biscuit-terminal"
+            );
+        }
+
+        #[test]
+        fn parity_waves_thick_blue() {
+            let rule = HorizontalRule::new()
+                .style(RuleStyle::Waves)
+                .weight(RuleWeight::Thick)
+                .color("blue");
+            let expected = rule.render_browser_svg();
+            let actual = renderable::tree::graphics::horizontal_rule_svg(
+                Some("waves"),
+                Some("thick"),
+                None,
+                Some("blue"),
+                "0",
+                "0",
+            );
+            assert_eq!(
+                actual, expected,
+                "waves+thick+blue SVG must match between renderable and biscuit-terminal"
+            );
+        }
+
+        #[test]
+        fn parity_dots_thin_custom_width() {
+            let rule = HorizontalRule::new()
+                .style(RuleStyle::Dots)
+                .weight(RuleWeight::Thin)
+                .width("50%");
+            let expected = rule.render_browser_svg();
+            let actual = renderable::tree::graphics::horizontal_rule_svg(
+                Some("dots"),
+                Some("thin"),
+                Some("50%"),
+                None,
+                "0",
+                "0",
+            );
+            assert_eq!(
+                actual, expected,
+                "dots+thin+50% SVG must match between renderable and biscuit-terminal"
+            );
+        }
+
+        #[test]
+        fn parity_line_star() {
+            let rule = HorizontalRule::new().style(RuleStyle::LineStar);
+            let expected = rule.render_browser_svg();
+            let actual = renderable::tree::graphics::horizontal_rule_svg(
+                Some("line-star"),
+                None,
+                None,
+                None,
+                "0",
+                "0",
+            );
+            assert_eq!(
+                actual, expected,
+                "line-star SVG must match between renderable and biscuit-terminal"
+            );
+        }
+
+        #[test]
+        fn parity_line_circle() {
+            let rule = HorizontalRule::new().style(RuleStyle::LineCircle);
+            let expected = rule.render_browser_svg();
+            let actual = renderable::tree::graphics::horizontal_rule_svg(
+                Some("line-circle"),
+                None,
+                None,
+                None,
+                "0",
+                "0",
+            );
+            assert_eq!(
+                actual, expected,
+                "line-circle SVG must match between renderable and biscuit-terminal"
+            );
+        }
+
+        #[test]
+        fn parity_inset_line() {
+            let rule = HorizontalRule::new().style(RuleStyle::InsetLine);
+            let expected = rule.render_browser_svg();
+            let actual = renderable::tree::graphics::horizontal_rule_svg(
+                Some("inset-line"),
+                None,
+                None,
+                None,
+                "0",
+                "0",
+            );
+            assert_eq!(
+                actual, expected,
+                "inset-line SVG must match between renderable and biscuit-terminal"
+            );
+        }
+
+        #[test]
+        fn parity_curtain_rod() {
+            let rule = HorizontalRule::new().style(RuleStyle::CurtainRod);
+            let expected = rule.render_browser_svg();
+            let actual = renderable::tree::graphics::horizontal_rule_svg(
+                Some("curtain-rod"),
+                None,
+                None,
+                None,
+                "0",
+                "0",
+            );
+            assert_eq!(
+                actual, expected,
+                "curtain-rod SVG must match between renderable and biscuit-terminal"
+            );
+        }
+
+        #[test]
+        fn parity_with_custom_margins() {
+            let rule = HorizontalRule::new()
+                .with_layout(crate::utils::layout::Layout {
+                    margin: crate::utils::layout::Edges {
+                        top: renderable::layout::TargetValue::universal(
+                            renderable::layout::Length::ch(2),
+                        ),
+                        right: renderable::layout::TargetValue::universal(
+                            renderable::layout::Length::Zero,
+                        ),
+                        bottom: renderable::layout::TargetValue::universal(
+                            renderable::layout::Length::ch(1),
+                        ),
+                        left: renderable::layout::TargetValue::universal(
+                            renderable::layout::Length::Zero,
+                        ),
+                    },
+                    ..crate::utils::layout::Layout::default()
+                });
+            let expected = rule.render_browser_svg();
+            let actual = renderable::tree::graphics::horizontal_rule_svg(
+                None, None, None, None, "2ch", "1ch",
+            );
+            assert_eq!(
+                actual, expected,
+                "SVG with custom margins must match between renderable and biscuit-terminal"
+            );
+        }
+
+        #[test]
+        fn render_text_tier_matches_render_when_image_unavailable() {
+            let _guard = ScopedLcAll::force_utf8();
+            let hr = HorizontalRule::new()
+                .style(RuleStyle::Waves)
+                .alignment(RuleAlignment::Centered)
+                .width("50%");
+            let term = text_terminal_with_width(80);
+
+            // text_terminal disables the image tier, so render() falls through
+            // to the text tier automatically.
+            let via_render = hr.render(&term);
+            let via_text_tier = hr.render_text_tier(&term);
+
+            assert_eq!(
+                via_render, via_text_tier,
+                "render_text_tier must match render() when image tier is unavailable"
+            );
         }
     }
 }

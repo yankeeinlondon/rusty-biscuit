@@ -13,7 +13,7 @@ use std::io::{self, IsTerminal, Read};
 use std::path::Path;
 
 use serde_json::Value as JsonValue;
-use tui_chrome::{
+use biscuit_tui::{
     ChoiceBuilderError, ChoiceOption, choice_options_from_csv, choice_options_from_dictionary,
     choice_options_from_markdown_list,
 };

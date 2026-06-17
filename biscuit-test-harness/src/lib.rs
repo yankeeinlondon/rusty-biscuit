@@ -24,7 +24,7 @@
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub mod apple_terminal;
 pub mod cliclick;
@@ -237,8 +237,8 @@ pub trait TerminalHarness {
     }
 }
 
-/// Strips CSI / OSC / SGR / charset-designation escape sequences from
-/// `s`, returning a plain-text rendering of the visible glyphs.
+/// Strips CSI / OSC / APC-DCS-PM / SGR / charset-designation escape sequences
+/// from `s`, returning a plain-text rendering of the visible glyphs.
 ///
 /// Used by `CapturedFrame::from_raw` so test assertions can match on
 /// option labels without contending with embedded styling sequences.
@@ -280,6 +280,21 @@ pub fn strip_ansi(s: &str) -> String {
                         i += 1;
                         break;
                     }
+                }
+                continue;
+            }
+            // String-terminator sequences: APC (`ESC _`, Kitty graphics), DCS
+            // (`ESC P`), and PM (`ESC ^`) all run until ST (`ESC \`). Without
+            // this, a Kitty image's base64 payload leaks into the visible-width
+            // measurement (the payload has no other escape framing).
+            if matches!(next, b'_' | b'P' | b'^') {
+                i += 2;
+                while i < bytes.len() {
+                    if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'\\' {
+                        i += 2;
+                        break;
+                    }
+                    i += 1;
                 }
                 continue;
             }
@@ -368,11 +383,14 @@ pub fn cargo_bin_dir(bin_name: &str) -> Option<PathBuf> {
         }
     }
 
-    // Derive from the current test executable location:
-    // <target_dir>/<profile>/deps/<exe>  →  <target_dir>/<profile>
+    // Derive from the current executable location:
+    // - test binary: <target_dir>/<profile>/deps/<exe> → <target_dir>/<profile>
+    // - broker/bin:  <target_dir>/<profile>/<exe>      → <target_dir>/<profile>
     let exe = std::env::current_exe().ok()?;
-    let mut dir = exe.parent()?.to_path_buf(); // deps/
-    dir = dir.parent()?.to_path_buf(); // <profile>/
+    let mut dir = exe.parent()?.to_path_buf();
+    if dir.file_name().and_then(|n| n.to_str()) == Some("deps") {
+        dir = dir.parent()?.to_path_buf();
+    }
     let bin = dir.join(bin_name);
     if bin.exists() {
         return Some(dir);
@@ -417,8 +435,17 @@ pub fn apply_color_forcing_env(cmd: &mut std::process::Command) {
 /// Waits for a shell prompt to appear in the harness output.
 ///
 /// Polls [`TerminalHarness::capture`] every 100 ms, looking for a
-/// trailing `$`, `#`, or `%` character on the last line. Times out
-/// after 5 seconds and returns silently so that callers don't hang.
+/// trailing `$`, `#`, or `%` character on the last **non-blank** line.
+/// Times out after 5 seconds and returns silently so that callers don't hang.
+///
+/// ## Notes
+///
+/// tmux's `capture-pane` pads the capture with trailing blank lines, so the
+/// literal last line is usually empty. Scanning only `lines().last()` never
+/// matched the prompt and burned the full 5 s timeout on every tmux capture
+/// (multiplied across the many `bt` invocations in a single test). Scanning
+/// from the bottom for the last non-blank line fixes that without affecting
+/// backends whose capture is not padded.
 pub fn wait_for_prompt(harness: &mut impl TerminalHarness) -> io::Result<()> {
     for _ in 0..50 {
         std::thread::sleep(Duration::from_millis(100));
@@ -426,7 +453,7 @@ pub fn wait_for_prompt(harness: &mut impl TerminalHarness) -> io::Result<()> {
             Ok(f) => f,
             Err(_) => continue,
         };
-        if let Some(last_line) = frame.plain.lines().last() {
+        if let Some(last_line) = frame.plain.lines().rev().find(|l| !l.trim().is_empty()) {
             let trimmed = last_line.trim_end();
             if trimmed.ends_with('$') || trimmed.ends_with('#') || trimmed.ends_with('%') {
                 return Ok(());
@@ -434,6 +461,49 @@ pub fn wait_for_prompt(harness: &mut impl TerminalHarness) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Captures the pane repeatedly until its rendered output has *settled* —
+/// two consecutive captures are byte-identical and a shell prompt is
+/// visible — or `MAX` elapses, whichever comes first.
+///
+/// This is the adaptive replacement for the fixed post-command sleep dance
+/// (`settle` + a blind [`wait_for_prompt`] poll + an explicit `sleep` + a
+/// single `capture`). On a quiet machine it returns after the first stable
+/// pair (~one poll interval); under load it keeps polling up to the budget
+/// rather than capturing a half-drawn frame.
+///
+/// ## Notes
+///
+/// The prompt check reuses the bottom-most non-blank heuristic from
+/// [`wait_for_prompt`]: emulators pad captures with trailing blank lines,
+/// so the literal last line is usually empty.
+pub fn capture_settled(harness: &mut impl TerminalHarness) -> io::Result<CapturedFrame> {
+    const POLL: Duration = Duration::from_millis(40);
+    const MAX: Duration = Duration::from_millis(2000);
+    let deadline = Instant::now() + MAX;
+    let mut prev: Option<String> = None;
+    loop {
+        let frame = harness.capture()?;
+        let prompt_ready = frame
+            .plain
+            .lines()
+            .rev()
+            .find(|l| !l.trim().is_empty())
+            .map(|l| {
+                let t = l.trim_end();
+                t.ends_with('$') || t.ends_with('#') || t.ends_with('%')
+            })
+            .unwrap_or(false);
+        if prompt_ready && prev.as_deref() == Some(frame.raw.as_str()) {
+            return Ok(frame);
+        }
+        if Instant::now() >= deadline {
+            return Ok(frame);
+        }
+        prev = Some(frame.raw.clone());
+        std::thread::sleep(POLL);
+    }
 }
 
 /// Best-effort cleanup for stale resources owned by the real-terminal

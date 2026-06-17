@@ -252,7 +252,7 @@ Outcome: `compose` and `inline-compose` resolve provider/model once, prompt corr
 
 Files:
 
-- `claudine/cli/Cargo.toml` (add `tui-chrome` workspace dep)
+- `claudine/cli/Cargo.toml` (add `biscuit-tui` workspace dep)
 - `claudine/cli/src/commands/wrap/composition.rs`
 - `claudine/cli/src/commands/wrap/selection_ui.rs` (new)
 - `claudine/cli/src/commands/compose.rs`
@@ -260,7 +260,7 @@ Files:
 
 Steps:
 
-- [ ] Add `tui-chrome` (workspace path: `biscuit-tui/lib/`) as a dependency of `claudine-cli` and confirm crate is reachable from the workspace root.
+- [ ] Add `biscuit-tui` (workspace path: `biscuit-tui/lib/`) as a dependency of `claudine-cli` and confirm crate is reachable from the workspace root.
 - [ ] Create `wrap/selection_ui.rs` and implement `prompt_one_shot_provider(plan: ProviderPickerPlan) -> Result<Provider, ...>` built on `tui_chrome::ChooseOne` + `tui_chrome::run_standalone`. Map each `ProviderPickerOption` to a `ChoiceOption`, set the initial selection from `plan.default_index`, and translate `EventOutcome::Submitted` / `Cancelled` into a resolved provider or an abort error.
 - [ ] Build the installed-provider snapshot once at command start using `InstalledAiClients::is_installed(provider.sniff_ai_cli())`.
 - [ ] Replace the current `select_provider(...)` plus fallback `interactive_select(...)` flow with the new mode-aware resolver and picker-plan flow, calling `selection_ui::prompt_one_shot_provider` only in TTY mode when no `--<provider>` flag was supplied.

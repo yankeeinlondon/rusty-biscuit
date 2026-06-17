@@ -14,7 +14,7 @@
 //!
 //! The predicates operate on plain strings and a small expectation struct —
 //! they carry no darkmatter- or biscuit-terminal-specific dependency. Both
-//! crates share the same `Layout`/`Margin`/background-fill model, so both can
+//! crates share the same `Layout`/`Edges`/background-fill model, so both can
 //! sweep their renderable components against this one contract.
 //!
 //! ## Invariant catalogue
@@ -140,10 +140,10 @@ fn update_bg(params: &str, bg_active: &mut bool) {
                 // background (`100`-`107`) each activate a background fill.
                 // Colon-form `38:…` (foreground) parses here too and is
                 // intentionally ignored without state.
-                if let Ok(n) = other.parse::<u16>() {
-                    if (40..=47).contains(&n) || (100..=107).contains(&n) {
-                        *bg_active = true;
-                    }
+                if let Ok(n) = other.parse::<u16>()
+                    && ((40..=47).contains(&n) || (100..=107).contains(&n))
+                {
+                    *bg_active = true;
                 }
             }
         }
@@ -534,14 +534,14 @@ mod tests {
     fn bg_extent_measures_full_width_glyphs_in_cells() {
         // 2 spaces of leading, then a backgrounded full-width glyph (2 cells),
         // then reset and trailing whitespace. The fill must be 2, not 1.
-        let line = format!("  \x1b[48;2;0;0;0m日\x1b[0m  ");
+        let line = "  \x1b[48;2;0;0;0m日\x1b[0m  ".to_string();
         assert_eq!(bg_extent(&line), Some((2, 2)));
     }
 
     #[test]
     fn bg_extent_ignores_zero_width_combining_marks() {
         // Background spans "e" + combining acute = one cell total.
-        let line = format!("  \x1b[48;2;0;0;0me\u{0301}\x1b[0m  ");
+        let line = "  \x1b[48;2;0;0;0me\u{0301}\x1b[0m  ".to_string();
         assert_eq!(bg_extent(&line), Some((2, 1)));
     }
 

@@ -9,63 +9,36 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 
-use crate::system_prompt::{EffectiveSystemPrompt, SystemPromptMode, SystemPromptSource};
-
-use super::formatting::prompt_body_width;
-use super::{
-    PromptReportFormat, SystemPromptReportConfig, TruncationMode, estimate_system_prompt_tokens,
-    render_markdown_for_terminal, system_prompt_blockquote_styled, truncate_front_back,
+use crate::system_prompt::{
+    PreparedSystemPrompt, ResolvedSystemPrompt, SystemPromptMode, SystemPromptSource,
 };
 
-/// Nerd Font codepoint used as the in-repo hyperlink label when the terminal
-/// supports Nerd Fonts. Renders as a single glyph standing in for the path.
+use super::formatting::{prompt_body_width, render_markdown_for_terminal, system_prompt_blockquote_styled};
+use super::tokens::estimate_system_prompt_tokens;
+use super::truncation::truncate_front_back;
+use super::{ReportMode, TruncationMode};
+
+/// Nerd Font git icon used as the in-repo hyperlink label when the terminal
+/// supports Nerd Fonts. Stands in for the repo root path.
 const NERD_FONT_REPO_GLYPH: char = '\u{F02A2}';
 
-/// Render the system-prompt header line.
-///
-/// Format: `<bg-orange-500><white><b> 📔 System Prompt(<i>{action}</i>) </b></white></bg-orange-500>`
-/// where action is `appended` or `replaced`. The entire header line — icon
-/// included — is rendered as white text on an orange-500 background. The
-/// orange-500 swatch matches the bg-painted vertical bar of the system-
-/// prompt BlockQuote below, producing a continuous "label badge → bar"
-/// visual that ties the header to its body.
-///
-/// ## Examples
-///
-/// ```
-/// use claudine::prompt_reporting::render_system_prompt_header;
-/// use biscuit_terminal::terminal::Terminal;
-///
-/// let term = Terminal::new();
-/// let header = render_system_prompt_header("appended", &term);
-/// assert!(header.contains("System Prompt"));
-/// assert!(header.contains("appended"));
-/// ```
-pub fn render_system_prompt_header(action: &str, term: &Terminal) -> String {
+/// Render the system-prompt header line. `action` is `appended` or `replaced`.
+fn render_system_prompt_header(action: &str, term: &Terminal) -> String {
     Prose::new(format!(
-        "<bg-orange-500><white><b> 📔 System Prompt(<i>{action}</i>) </b></white></bg-orange-500>"
+        "\n<orange-500><b>■ System Prompt (<i>{action}</i>)</b></orange-500>"
     ))
     .render(term)
 }
 
-/// Resolve the visible label for a prompt-file hyperlink.
+/// Resolve the visible label for a prompt-file hyperlink. Returns plain
+/// text (no markup); callers apply styling and OSC8 wrapping.
 ///
-/// Three branches, in priority order:
-///
-/// 1. **Nerd Font glyph + path** — when the terminal reports Nerd Font
-///    support (`Terminal::is_nerd_font == Some(true)`) **and** `absolute`
-///    resolves inside `base`, return `{f02a2}/{rel}` where `{f02a2}` is the
-///    in-repo glyph [`NERD_FONT_REPO_GLYPH`] (`\u{F02A2}`) standing in for
-///    the repo root and `{rel}` is the path inside `base`.
-/// 2. **Relative path with `./` prefix** — when `absolute` resolves inside
-///    `base` but the terminal lacks Nerd Font support, return `./{rel}`.
-/// 3. **Absolute path** — when `base` is `None` or `absolute` is outside it,
-///    return the absolute path.
-///
-/// The returned label is plain text (no Prose markup). Callers wrap it in
-/// the Prose link/color syntax (`<blue-400>[label](file://abs)</blue-400>`)
-/// so OSC8 emission and the blue styling are handled by Prose.
-pub(crate) fn resolve_display_label(
+/// The form depends on terminal capability and whether `absolute` lies
+/// inside `base`: Nerd Font terminals with an in-base path get
+/// [`NERD_FONT_REPO_GLYPH`] joined to the relative path; non-Nerd-Font
+/// terminals with an in-base path get a `./`-prefixed relative path;
+/// otherwise the absolute path is returned unchanged.
+fn resolve_display_label(
     absolute: &Path,
     base: Option<&Path>,
     term: &Terminal,
@@ -78,48 +51,14 @@ pub(crate) fn resolve_display_label(
     }
 }
 
-/// Render the summary view for a system prompt.
+/// Render the summary view for a system prompt as a single prose sentence
+/// of the form: `The system prompt was **{action}**; the content was
+/// _composed_ from <hyperlink>. {token-message}`.
 ///
-/// Produces the spec-mandated prose sentence:
-/// `The system prompt was **{action}**; the content was _composed_ from
-/// <hyperlink>. {token-message}`
-///
-/// - `{action}` is `appended to` for [`SystemPromptMode::Append`] and
-///   `replaced` for [`SystemPromptMode::Replace`].
-/// - `{token-message}` is `The composed system prompt is roughly {#} tokens.`
-///   for append and `The replacement system prompt is roughly {#} tokens.`
-///   for replace.
-///
-/// ## Arguments
-///
-/// - `source` — where the system prompt originated.
-/// - `mode` — append or replace.
-/// - `token_count` — the estimated token count of the composed prompt.
-/// - `base_path` — optional base directory used to compute the relative
-///   path displayed in the hyperlink. When `None`, the absolute path is
-///   used as the visible label.
-/// - `term` — terminal for capability-aware rendering.
-///
-/// ## Examples
-///
-/// ```
-/// use claudine::prompt_reporting::render_system_prompt_summary;
-/// use claudine::system_prompt::{SystemPromptMode, SystemPromptSource};
-/// use biscuit_terminal::terminal::Terminal;
-///
-/// let term = Terminal::new();
-/// let source = SystemPromptSource::BuiltInNonInteractive;
-/// let summary = render_system_prompt_summary(
-///     &source,
-///     SystemPromptMode::Append,
-///     42,
-///     None,
-///     &term,
-/// );
-/// assert!(summary.contains("42"));
-/// assert!(summary.contains("appended to"));
-/// ```
-pub fn render_system_prompt_summary(
+/// `base_path` is the optional directory used to compute the relative path
+/// displayed in the hyperlink label; when `None`, the absolute path is
+/// shown verbatim.
+fn render_system_prompt_summary(
     source: &SystemPromptSource,
     mode: SystemPromptMode,
     token_count: u64,
@@ -161,45 +100,21 @@ pub fn render_system_prompt_summary(
     .render(term)
 }
 
-/// Render the system-prompt body content (no `BlockQuote` wrapper).
+/// Render the system-prompt body content as ANSI text (no `BlockQuote`
+/// wrapper), ready to be concatenated with the rendered summary and
+/// wrapped in a single [`system_prompt_blockquote_styled`].
 ///
-/// Returns the markdown-rendered body as ANSI text, ready to be concatenated
-/// with the rendered summary and wrapped in a single
-/// [`system_prompt_blockquote_styled`].
-///
-/// - `Summary` → empty string.
-/// - `PartialPrompt` → `FrontBack`-truncated text run through the markdown
-///   renderer.
-/// - `FullPrompt` → the full text run through the markdown renderer.
-///
-/// ## Examples
-///
-/// ```
-/// use claudine::prompt_reporting::{
-///     render_system_prompt_body, PromptReportFormat, TruncationMode,
-/// };
-/// use biscuit_terminal::terminal::Terminal;
-///
-/// let term = Terminal::new();
-/// let body = render_system_prompt_body(
-///     "Line 1\nLine 2\nLine 3",
-///     PromptReportFormat::FullPrompt,
-///     TruncationMode::FrontBack,
-///     &term,
-/// );
-/// let plain = biscuit_terminal::discovery::eval::strip_ansi_codes(&body);
-/// assert!(plain.contains("Line 1"));
-/// ```
-pub fn render_system_prompt_body(
+/// `Summary` returns the empty string; `Partial` truncates per the
+/// embedded `TruncationMode`; `Full` renders the full text.
+fn render_system_prompt_body(
     text: &str,
-    format: PromptReportFormat,
-    truncation: TruncationMode,
+    mode: ReportMode,
     term: &Terminal,
 ) -> String {
     let width = prompt_body_width(term);
-    match format {
-        PromptReportFormat::Summary => String::new(),
-        PromptReportFormat::PartialPrompt => {
+    match mode {
+        ReportMode::Summary => String::new(),
+        ReportMode::Partial { truncation } => {
             let truncated = match truncation {
                 TruncationMode::FrontBack => truncate_front_back(text, 20, 10),
                 TruncationMode::Truncate => {
@@ -213,97 +128,71 @@ pub fn render_system_prompt_body(
             };
             render_markdown_for_terminal(&truncated, term, width)
         }
-        PromptReportFormat::FullPrompt => render_markdown_for_terminal(text, term, width),
+        ReportMode::Full => render_markdown_for_terminal(text, term, width),
+        ReportMode::Silent => String::new(),
     }
 }
 
-/// Top-level system-prompt reporter.
+/// Encapsulated system-prompt report.
 ///
-/// Wires together header resolution, precedence-based configuration, and body
-/// rendering. Returns `None` when the config is `Silent` (suppressed).
-///
-/// ## Arguments
-///
-/// - `effective_sp` — the resolved effective system prompt.
-/// - `config` — the resolved reporting configuration.
-/// - `term` — terminal for capability-aware rendering.
-///
-/// ## Returns
-///
-/// `Some(String)` with the fully rendered report, or `None` if suppressed.
-///
-/// ## Examples
-///
-/// ```
-/// use claudine::prompt_reporting::{
-///     report_system_prompt, SystemPromptReportConfig,
-///     PromptReportFormat, TruncationMode,
-/// };
-/// use claudine::system_prompt::EffectiveSystemPrompt;
-/// use biscuit_terminal::terminal::Terminal;
-///
-/// let term = Terminal::new();
-/// let config = SystemPromptReportConfig {
-///     show_header: true,
-///     show_summary: true,
-///     format: PromptReportFormat::Summary,
-///     truncation: TruncationMode::FrontBack,
-/// };
-/// let output = report_system_prompt(
-///     &EffectiveSystemPrompt::None,
-///     config,
-///     &term,
-/// );
-/// // None produces no output in Summary mode
-/// assert!(output.is_none());
-/// ```
-pub fn report_system_prompt(
-    effective_sp: &EffectiveSystemPrompt,
-    config: SystemPromptReportConfig,
-    term: &Terminal,
-) -> Option<String> {
-    report_system_prompt_with_base(effective_sp, config, None, term)
+/// Construct with [`SystemPromptReport::new`] and render with
+/// [`SystemPromptReport::render`]. The report borrows the resolved system
+/// prompt and an optional base path; it does not take ownership.
+pub struct SystemPromptReport<'a> {
+    resolved: &'a ResolvedSystemPrompt,
+    mode: ReportMode,
+    base: Option<&'a Path>,
 }
 
-/// Variant of [`report_system_prompt`] that accepts a base path for relative
-/// path display in the summary's hyperlink label.
-pub fn report_system_prompt_with_base(
-    effective_sp: &EffectiveSystemPrompt,
-    config: SystemPromptReportConfig,
-    base_path: Option<&Path>,
-    term: &Terminal,
-) -> Option<String> {
-    if !config.show_header {
-        return None;
+impl<'a> SystemPromptReport<'a> {
+    /// Create a new system-prompt report.
+    pub fn new(
+        resolved: &'a ResolvedSystemPrompt,
+        mode: ReportMode,
+        base: Option<&'a Path>,
+    ) -> Self {
+        Self {
+            resolved,
+            mode,
+            base,
+        }
     }
 
-    let prepared = match effective_sp {
-        EffectiveSystemPrompt::Ready(p) => p,
-        EffectiveSystemPrompt::None => {
-            // For None, only show something in verbose mode
-            // In Summary mode (default), suppress
+    /// Render the report.
+    ///
+    /// Returns `None` when the report should be suppressed (`Silent` mode, or
+    /// `ResolvedSystemPrompt::{None, Disabled}` in any mode below `Full`).
+    pub fn render(&self, term: &Terminal) -> Option<String> {
+        if matches!(self.mode, ReportMode::Silent) {
             return None;
         }
-        EffectiveSystemPrompt::Disabled { .. } => {
-            // For Disabled, only show something in verbose mode
-            return None;
+
+        match self.resolved {
+            ResolvedSystemPrompt::Ready(prepared) => Some(self.render_ready(prepared, term)),
+            ResolvedSystemPrompt::None => {
+                self.render_empty("none", "the system prompt has not been modified", term)
+            }
+            ResolvedSystemPrompt::Disabled { .. } => {
+                self.render_empty("disabled", "the system prompt has been disabled", term)
+            }
         }
-    };
+    }
 
-    let action = match prepared.mode {
-        SystemPromptMode::Append => "appended",
-        SystemPromptMode::Replace => "replaced",
-    };
+    fn render_ready(&self, prepared: &PreparedSystemPrompt, term: &Terminal,
+    ) -> String {
+        let action = match prepared.mode {
+            SystemPromptMode::Append => "appended",
+            SystemPromptMode::Replace => "replaced",
+        };
 
-    // Header line is always emitted on its own (above the BlockQuote).
-    let header = render_system_prompt_header(action, term);
+        // Header line is always emitted on its own (above the BlockQuote).
+        let header = render_system_prompt_header(action, term);
 
-    // Compose summary + body into one rendered string; both go into a
-    // single orange BlockQuote so the bar runs continuously beneath the
-    // 📔 icon.
-    let mut body_parts: Vec<String> = Vec::new();
+        // Compose summary + body into one rendered string; both go into a
+        // single orange BlockQuote so the bar runs continuously beneath the
+        // icon.
+        let mut body_parts: Vec<String> = Vec::new();
 
-    if config.show_summary {
         let tokens = estimate_system_prompt_tokens(
             &prepared.composed_markdown,
             prepared
@@ -315,75 +204,52 @@ pub fn report_system_prompt_with_base(
             &prepared.source,
             prepared.mode,
             tokens,
-            base_path,
+            self.base,
             term,
         ));
-    }
 
-    match config.format {
-        PromptReportFormat::Summary => {}
-        PromptReportFormat::PartialPrompt | PromptReportFormat::FullPrompt => {
+        if !matches!(self.mode, ReportMode::Summary) {
             let body = render_system_prompt_body(
                 &prepared.composed_markdown,
-                config.format,
-                config.truncation,
+                self.mode,
                 term,
             );
             if !body.is_empty() {
                 body_parts.push(body);
             }
         }
-    }
 
-    if body_parts.is_empty() {
-        return Some(header);
-    }
-
-    let combined = body_parts.join("\n\n");
-    let quote = system_prompt_blockquote_styled(&combined).render(term);
-    Some(format!("{header}\n{quote}"))
-}
-
-/// Report a system prompt with the None or Disabled variants.
-///
-/// This produces output only when verbose reporting is requested (i.e.
-/// `config.format` is `FullPrompt`).
-pub fn report_system_prompt_empty(
-    effective_sp: &EffectiveSystemPrompt,
-    config: SystemPromptReportConfig,
-    term: &Terminal,
-) -> Option<String> {
-    if !config.show_header {
-        return None;
-    }
-
-    let (action, body_text) = match effective_sp {
-        EffectiveSystemPrompt::None => ("none", "the system prompt has not been modified"),
-        EffectiveSystemPrompt::Disabled { .. } => {
-            ("disabled", "the system prompt has been disabled")
+        if body_parts.is_empty() {
+            return header;
         }
-        EffectiveSystemPrompt::Ready(_) => return None,
-    };
 
-    if config.format != PromptReportFormat::FullPrompt {
-        return None;
+        let combined = body_parts.join("\n\n");
+        let quote = system_prompt_blockquote_styled(&combined).render(term);
+        format!("{header}\n{quote}")
     }
 
-    let header = render_system_prompt_header(action, term);
-    let body_rendered = render_system_prompt_body(
-        body_text,
-        PromptReportFormat::FullPrompt,
-        config.truncation,
-        term,
-    );
-    let quote = system_prompt_blockquote_styled(&body_rendered).render(term);
-    Some(format!("{header}\n{quote}"))
+    fn render_empty(
+        &self,
+        action: &str,
+        body_text: &str,
+        term: &Terminal,
+    ) -> Option<String> {
+        if !matches!(self.mode, ReportMode::Full) {
+            return None;
+        }
+
+        let header = render_system_prompt_header(action, term);
+        let body = render_markdown_for_terminal(body_text, term, prompt_body_width(term));
+        let quote = system_prompt_blockquote_styled(&body).render(term);
+        Some(format!("{header}\n{quote}"))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::system_prompt::PreparedSystemPrompt;
+    use biscuit_terminal::discovery::detection::ColorDepth;
     use biscuit_terminal::terminal::Terminal;
     use std::path::PathBuf;
 
@@ -411,10 +277,10 @@ mod tests {
     // --- Header tests ---
 
     #[test]
-    fn header_contains_book_emoji() {
+    fn header_contains_marker_glyph() {
         let term = test_terminal();
         let header = render_system_prompt_header("appended", &term);
-        assert!(header.contains("📔"));
+        assert!(header.contains("■"));
     }
 
     #[test]
@@ -610,7 +476,11 @@ mod tests {
     fn summary_visible_label_is_blue() {
         // The visible label (post-OSC-strip) should carry an ANSI sequence
         // for Tailwind Blue 400 (RGB 96, 165, 250) in 24-bit color mode.
-        let term = Terminal::builder().osc_link_support(true).build();
+        let term = Terminal::builder()
+            .is_tty(true)
+            .color_depth(ColorDepth::TrueColor)
+            .osc_link_support(true)
+            .build();
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path().canonicalize().unwrap();
         let sp = base.join("system-prompt.md");
@@ -655,8 +525,7 @@ mod tests {
         let term = test_terminal();
         let body = render_system_prompt_body(
             "some content",
-            PromptReportFormat::Summary,
-            TruncationMode::FrontBack,
+            ReportMode::Summary,
             &term,
         );
         assert!(body.is_empty());
@@ -667,8 +536,7 @@ mod tests {
         let term = test_terminal();
         let body = render_system_prompt_body(
             "Hello world",
-            PromptReportFormat::FullPrompt,
-            TruncationMode::FrontBack,
+            ReportMode::Full,
             &term,
         );
         let plain = strip_ansi_codes(&body);
@@ -684,8 +552,9 @@ mod tests {
         let term = test_terminal();
         let body = render_system_prompt_body(
             &text,
-            PromptReportFormat::PartialPrompt,
-            TruncationMode::FrontBack,
+            ReportMode::Partial {
+                truncation: TruncationMode::FrontBack,
+            },
             &term,
         );
         let plain = strip_ansi_codes(&body);
@@ -716,8 +585,9 @@ mod tests {
         let term = test_terminal();
         let body = render_system_prompt_body(
             text,
-            PromptReportFormat::PartialPrompt,
-            TruncationMode::FrontBack,
+            ReportMode::Partial {
+                truncation: TruncationMode::FrontBack,
+            },
             &term,
         );
         let plain = strip_ansi_codes(&body);
@@ -728,146 +598,103 @@ mod tests {
         assert!(!plain.contains("---"));
     }
 
-    // --- Top-level reporter tests ---
+    // --- SystemPromptReport direct tests ---
 
     #[test]
-    fn silent_config_returns_none() {
+    fn report_silent_returns_none() {
         let term = test_terminal();
         let prepared = test_prepared(SystemPromptMode::Append, "Test prompt");
-        let config = SystemPromptReportConfig {
-            show_header: false,
-            show_summary: false,
-            format: PromptReportFormat::Summary,
-            truncation: TruncationMode::FrontBack,
-        };
-        let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
-        assert!(result.is_none());
+        let resolved = ResolvedSystemPrompt::Ready(prepared);
+        let report = SystemPromptReport::new(&resolved, ReportMode::Silent, None);
+        assert!(report.render(&term).is_none());
     }
 
     #[test]
-    fn summary_format_renders_header_and_summary() {
+    fn report_summary_renders_header_and_summary() {
         let term = test_terminal();
         let prepared = test_prepared(SystemPromptMode::Append, "Test prompt content here.");
-        let config = SystemPromptReportConfig {
-            show_header: true,
-            show_summary: true,
-            format: PromptReportFormat::Summary,
-            truncation: TruncationMode::FrontBack,
-        };
-        let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
-        let output = result.expect("should produce output");
-        assert!(output.contains("📔"));
+        let resolved = ResolvedSystemPrompt::Ready(prepared);
+        let report = SystemPromptReport::new(&resolved, ReportMode::Summary, None);
+        let output = report.render(&term).expect("should produce output");
+        assert!(output.contains("■"));
         assert!(output.contains("System Prompt"));
         assert!(output.contains("appended"));
         assert!(output.contains("tokens"));
     }
 
     #[test]
-    fn full_format_renders_header_and_body() {
+    fn report_full_renders_body() {
         let term = test_terminal();
         let prepared = test_prepared(SystemPromptMode::Replace, "Full prompt body.");
-        let config = SystemPromptReportConfig {
-            show_header: true,
-            show_summary: true,
-            format: PromptReportFormat::FullPrompt,
-            truncation: TruncationMode::FrontBack,
-        };
-        let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
-        let output = result.expect("should produce output");
+        let resolved = ResolvedSystemPrompt::Ready(prepared);
+        let report = SystemPromptReport::new(&resolved, ReportMode::Full, None);
+        let output = report.render(&term).expect("should produce output");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("📔"));
+        assert!(plain.contains("■"));
         assert!(plain.contains("replaced"));
         assert!(plain.contains("Full prompt body"));
     }
 
     #[test]
-    fn partial_format_renders_truncated_body() {
+    fn report_partial_renders_truncated_body() {
         let text: String = (1..=50)
             .map(|i| format!("Line {i}"))
             .collect::<Vec<_>>()
             .join("\n");
         let term = test_terminal();
         let prepared = test_prepared(SystemPromptMode::Append, &text);
-        let config = SystemPromptReportConfig {
-            show_header: true,
-            show_summary: true,
-            format: PromptReportFormat::PartialPrompt,
-            truncation: TruncationMode::FrontBack,
-        };
-        let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
-        let output = result.expect("should produce output");
-        let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("📔"));
-        assert!(plain.contains("Line 1"));
-        // Because of line wrapping, "Line 50" may be split across lines
-        assert!(plain.contains(" 50"), "should contain the last line number");
-        // Verify truncation happened by checking middle lines are omitted
-        assert!(
-            !plain.contains("Line 25"),
-            "middle lines should be truncated"
+        let resolved = ResolvedSystemPrompt::Ready(prepared);
+        let report = SystemPromptReport::new(
+            &resolved,
+            ReportMode::Partial {
+                truncation: TruncationMode::FrontBack,
+            },
+            None,
         );
-    }
-
-    #[test]
-    fn none_variant_returns_none_in_summary() {
-        let term = test_terminal();
-        let config = SystemPromptReportConfig {
-            show_header: true,
-            show_summary: true,
-            format: PromptReportFormat::Summary,
-            truncation: TruncationMode::FrontBack,
-        };
-        let result = report_system_prompt(&EffectiveSystemPrompt::None, config, &term);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn disabled_variant_returns_none_in_summary() {
-        let term = test_terminal();
-        let source = SystemPromptSource::BuiltInNonInteractive;
-        let config = SystemPromptReportConfig {
-            show_header: true,
-            show_summary: true,
-            format: PromptReportFormat::Summary,
-            truncation: TruncationMode::FrontBack,
-        };
-        let result =
-            report_system_prompt(&EffectiveSystemPrompt::Disabled { source }, config, &term);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn none_variant_renders_in_full_mode() {
-        let term = test_terminal();
-        let config = SystemPromptReportConfig {
-            show_header: true,
-            show_summary: true,
-            format: PromptReportFormat::FullPrompt,
-            truncation: TruncationMode::FrontBack,
-        };
-        let result = report_system_prompt_empty(&EffectiveSystemPrompt::None, config, &term);
-        let output = result.expect("should produce output in full mode");
+        let output = report.render(&term).expect("should produce output");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("📔"));
+        assert!(plain.contains("■"));
+        assert!(plain.contains("Line 1"));
+        assert!(plain.contains(" 50"), "should contain the last line number");
+        assert!(!plain.contains("Line 25"), "middle lines should be truncated");
+    }
+
+    #[test]
+    fn report_none_in_summary_returns_none() {
+        let term = test_terminal();
+        let resolved = ResolvedSystemPrompt::None;
+        let report = SystemPromptReport::new(&resolved, ReportMode::Summary, None);
+        assert!(report.render(&term).is_none());
+    }
+
+    #[test]
+    fn report_none_in_full_renders() {
+        let term = test_terminal();
+        let resolved = ResolvedSystemPrompt::None;
+        let report = SystemPromptReport::new(&resolved, ReportMode::Full, None);
+        let output = report.render(&term).expect("should produce output");
+        let plain = strip_ansi_codes(&output);
         assert!(plain.contains("none"));
         assert!(plain.contains("not been modified"));
     }
 
     #[test]
-    fn disabled_variant_renders_in_full_mode() {
+    fn report_disabled_in_summary_returns_none() {
         let term = test_terminal();
         let source = SystemPromptSource::BuiltInNonInteractive;
-        let config = SystemPromptReportConfig {
-            show_header: true,
-            show_summary: true,
-            format: PromptReportFormat::FullPrompt,
-            truncation: TruncationMode::FrontBack,
-        };
-        let result =
-            report_system_prompt_empty(&EffectiveSystemPrompt::Disabled { source }, config, &term);
-        let output = result.expect("should produce output in full mode");
+        let resolved = ResolvedSystemPrompt::Disabled { source };
+        let report = SystemPromptReport::new(&resolved, ReportMode::Summary, None);
+        assert!(report.render(&term).is_none());
+    }
+
+    #[test]
+    fn report_disabled_in_full_renders() {
+        let term = test_terminal();
+        let source = SystemPromptSource::BuiltInNonInteractive;
+        let resolved = ResolvedSystemPrompt::Disabled { source };
+        let report = SystemPromptReport::new(&resolved, ReportMode::Full, None);
+        let output = report.render(&term).expect("should produce output");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("📔"));
         assert!(plain.contains("disabled"));
         assert!(plain.contains("been disabled"));
     }
@@ -880,18 +707,13 @@ mod tests {
         // BlockQuote's prefix (one-space left margin + `│ `).
         let term = test_terminal();
         let prepared = test_prepared(SystemPromptMode::Append, "Body content");
-        let config = SystemPromptReportConfig {
-            show_header: true,
-            show_summary: true,
-            format: PromptReportFormat::Summary,
-            truncation: TruncationMode::FrontBack,
-        };
-        let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
-        let output = result.expect("should produce output");
+        let resolved = ResolvedSystemPrompt::Ready(prepared);
+        let report = SystemPromptReport::new(&resolved, ReportMode::Summary, None);
+        let output = report.render(&term).expect("should produce output");
         let plain = strip_ansi_codes(&output);
-        let mut lines = plain.lines();
+        let mut lines = plain.lines().filter(|l| !l.trim().is_empty());
         let header = lines.next().expect("header line");
-        assert!(header.contains("📔"), "header line should contain 📔");
+        assert!(header.contains("■"), "header line should contain ■");
         // At least one subsequent non-empty line must begin with the
         // BlockQuote prefix.
         let mut saw_quote = false;
@@ -899,10 +721,8 @@ mod tests {
             if line.trim().is_empty() {
                 continue;
             }
-            // System bar is rendered as a bg-painted space cell, so after
-            // ANSI stripping the prefix is two spaces.
             assert!(
-                line.starts_with("  "),
+                line.starts_with("┃ "),
                 "expected BlockQuote prefix on body line, got {line:?}"
             );
             saw_quote = true;
@@ -914,14 +734,9 @@ mod tests {
     fn replace_mode_shows_replaced_action() {
         let term = test_terminal();
         let prepared = test_prepared(SystemPromptMode::Replace, "Replacement prompt.");
-        let config = SystemPromptReportConfig {
-            show_header: true,
-            show_summary: true,
-            format: PromptReportFormat::Summary,
-            truncation: TruncationMode::FrontBack,
-        };
-        let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
-        let output = result.expect("should produce output");
+        let resolved = ResolvedSystemPrompt::Ready(prepared);
+        let report = SystemPromptReport::new(&resolved, ReportMode::Summary, None);
+        let output = report.render(&term).expect("should produce output");
         assert!(output.contains("replaced"));
     }
 }

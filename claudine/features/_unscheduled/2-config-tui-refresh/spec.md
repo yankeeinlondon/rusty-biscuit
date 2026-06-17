@@ -1,8 +1,8 @@
-# Config TUI Refresh: Reusable `tui-chrome` Components
+# Config TUI Refresh: Reusable `biscuit-tui` Components
 
 ## Context
 
-Claudine's `config` command is a custom Ratatui application under `claudine/cli/src/commands/config_tui/`. It owns terminal setup, tab state, modal stack state, dirty tracking for user and repo configs, and all key routing. The UI is functional, but it duplicates input widgets and interaction patterns that now exist in `biscuit-tui`'s `tui-chrome` library.
+Claudine's `config` command is a custom Ratatui application under `claudine/cli/src/commands/config_tui/`. It owns terminal setup, tab state, modal stack state, dirty tracking for user and repo configs, and all key routing. The UI is functional, but it duplicates input widgets and interaction patterns that now exist in the `biscuit-tui` library.
 
 The reusable component set currently available in `biscuit-tui/lib` is:
 
@@ -18,9 +18,9 @@ All components follow the same integration model: a zero-sized `StatefulWidget`,
 
 ## Goals
 
-- Replace hand-written modal list, text input, and toggle behavior with `tui-chrome` components where the behavior is semantically equivalent.
+- Replace hand-written modal list, text input, and toggle behavior with `biscuit-tui` components where the behavior is semantically equivalent.
 - Keep Claudine's config loading, user/repo merge semantics, dirty tracking, async webhook test workflow, and save behavior in Claudine.
-- Preserve existing config TUI workflows and hotkeys unless a `tui-chrome` behavior is clearly better and documented in the implementation plan.
+- Preserve existing config TUI workflows and hotkeys unless a `biscuit-tui` behavior is clearly better and documented in the implementation plan.
 - Make reusable widget state explicit in `App` instead of deriving all interactive state from ad hoc `highlighted`, `buffer`, and `field_index` fields.
 - Improve testability by moving modal-specific value transformation into small builders/reducers and testing the component state transitions separately from rendering.
 
@@ -48,11 +48,11 @@ The custom reusable pieces inside Claudine today are:
 - `widgets::modal::build_modal_hotkey_line`: footer help line.
 - `widgets::toggle::Toggle`: display-only `On / Off` row.
 
-These are the immediate duplication points against `tui-chrome`.
+These are the immediate duplication points against `biscuit-tui`.
 
 ## Recommended Architecture
 
-Introduce a narrow adapter layer in `claudine/cli/src/commands/config_tui/components.rs` or `config_tui/tui_chrome_adapters.rs`.
+Introduce a narrow adapter layer in `claudine/cli/src/commands/config_tui/components.rs` or `config_tui/biscuit_tui_adapters.rs`.
 
 The adapter should provide:
 
@@ -154,7 +154,7 @@ Specification:
 Acceptance criteria:
 
 - Existing hotkeys still toggle the config.
-- The visual switch style is consistent with other `tui-chrome` controls.
+- The visual switch style is consistent with other `biscuit-tui` controls.
 - Dirty tracking remains scoped to the changed config layer.
 
 ### 4. Text Inputs to `TextInput`
@@ -176,7 +176,7 @@ Specification:
 
 Limitations:
 
-- Current `TextInput` does not support masked rendering. Webhook URL fields should remain on Claudine's existing masked renderer until `tui-chrome` gets a sensitive input mode.
+- Current `TextInput` does not support masked rendering. Webhook URL fields should remain on Claudine's existing masked renderer until `biscuit-tui` gets a sensitive input mode.
 - Current `TextInput` is single-line only. Message/template fields that may grow should move to `TextAreaInput`, not stay single-line.
 
 Acceptance criteria:
@@ -243,7 +243,7 @@ Specification:
 
 - Convert provider selection to `ChooseOne`.
 - Convert non-secret fields to `TextInput`.
-- Keep secret webhook URL fields on custom masked input until `tui-chrome` supports masked `TextInput`.
+- Keep secret webhook URL fields on custom masked input until `biscuit-tui` supports masked `TextInput`.
 - Keep the sequential wizard shape until `InputTable` supports secret cells and field-level side-effect actions.
 - Keep async test connection in Claudine; component state should only render status and validation errors.
 
@@ -271,13 +271,13 @@ Default modal chrome:
 - Title: current modal title.
 - Width/height: keep current percentages per modal for the first migration to avoid layout churn.
 
-The top-level tab overview and detail pages should remain custom Claudine rendering. `tui-chrome` should be used for interactive controls, not for the entire application shell.
+The top-level tab overview and detail pages should remain custom Claudine rendering. `biscuit-tui` should be used for interactive controls, not for the entire application shell.
 
 ## Event Routing
 
 Embedded component routing should follow this shape:
 
-1. If a modal owns a `tui-chrome` state, call its `handle_event(key)`.
+1. If a modal owns a `biscuit-tui` state, call its `handle_event(key)`.
 2. If the outcome is `Consumed`, redraw.
 3. If `Submitted`, convert and commit through a Claudine reducer, then close or pop the modal.
 4. If `Cancelled`, close or pop without dirtying.
@@ -301,7 +301,7 @@ For components whose current default key conflicts with Claudine behavior, use `
 
 ### Phase 1: Shared Adapters and Low-Risk Pickers
 
-- Add `tui_chrome_adapters` module.
+- Add `biscuit_tui_adapters` module.
 - Convert favorite agent, user provider, repo provider, TTS provider, messenger select, repo messenger select, and messenger add provider to `ChooseOne`.
 - Add cancel/dirty regression tests.
 
@@ -319,13 +319,13 @@ For components whose current default key conflicts with Claudine behavior, use `
 
 ### Phase 4: Messenger Form Refinement
 
-- Revisit messenger route creation after `tui-chrome` supports masked input and richer form hints.
+- Revisit messenger route creation after `biscuit-tui` supports masked input and richer form hints.
 - Convert the wizard to either an `InputTable` form or a reusable form component, depending on what lands in `biscuit-tui`.
 
 ## Open Decisions
 
 - Whether picker fuzzy filtering should be enabled for all lists or only long lists.
-- Whether `ChooseOne` should gain a cancel-on-Esc mode in `tui-chrome`, or Claudine should always intercept Esc before calling `handle_event`.
+- Whether `ChooseOne` should gain a cancel-on-Esc mode in `biscuit-tui`, or Claudine should always intercept Esc before calling `handle_event`.
 - Whether action editing should be modeled as one-row-many-columns or many-rows-with-field/value columns. One-row-many-columns maps better to typed cells; many-rows is easier to read on narrow terminals.
 - Whether `BooleanSwitch` should become fully focus-driven in tabs now, or initially remain hotkey-driven with reusable rendering only.
 

@@ -377,6 +377,9 @@ pub enum TransclusionError {
     #[error("Remote URL transclusion is disabled: {url}")]
     UrlExecutionDisabled { url: String },
 
+    #[error("Remote fetch failed for {url}: {reason}")]
+    RemoteFetchFailed { url: String, reason: String },
+
     #[error(
         "Invalid frontmatter assignment on '::file' directive at line {line}: {reason} (value: {raw})"
     )]
@@ -598,6 +601,15 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                     Prose::escape_text(url)
                 ))
                 .hint("Enable <dim>allow_remote: true</dim> in frontmatter or CLI options."),
+
+            TransclusionError::RemoteFetchFailed { url, reason } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("TransclusionError", "remote fetch failed"))
+                .body(format!(
+                    "Fetching <cyan>{}</cyan> failed: {}",
+                    Prose::escape_text(url),
+                    Prose::escape_text(reason)
+                ))
+                .hint("Check the URL, the allowed-hosts policy, and network availability."),
 
             TransclusionError::InvalidFrontmatterAssignment {
                 ctx,

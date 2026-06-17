@@ -1,8 +1,8 @@
 //! Shared, target-neutral text-styling leaf primitives.
 //!
 //! [`TextEmphasis`] is the single source of truth for text weight and
-//! decoration intent — bold, dim, italic, underline, strikethrough, and
-//! blink. It is reused by `biscuit-terminal`'s `Prose` styling and is
+//! decoration intent — bold, dim, italic, underline, strikethrough, blink,
+//! and inverse. It is reused by `biscuit-terminal`'s `Prose` styling and is
 //! intended to back the render-tree `Style` primitive, so terminal SGR
 //! emission and browser CSS / semantic-HTML emission are written once here
 //! and never drift between targets.
@@ -14,13 +14,17 @@
 //! Alongside the leaf primitives, this module also defines [`Style`] — the
 //! appearance primitive a component declares and the tree renderers apply,
 //! the sibling of [`Layout`](crate::layout::Layout). `Style` re-homes the
-//! foreground/background color, text emphasis, border, and fill concepts
-//! that were previously expressed as bespoke component fields.
+//! foreground/background color, text emphasis, and border concepts that were
+//! previously expressed as bespoke component fields.
 
 use serde::{Deserialize, Serialize};
 
 use crate::color::{Color, ColorMode};
 use crate::layout::{Length, TargetValue};
+
+pub mod paint;
+
+pub use paint::{Opacity, PaintColor};
 
 /// The underline variant a styled region requests.
 ///
@@ -86,6 +90,8 @@ pub enum EmphasisLayer {
     Strikethrough,
     /// Blink.
     Blink,
+    /// Inverse (reverse video) — swaps foreground and background.
+    Inverse,
 }
 
 impl EmphasisLayer {
@@ -97,6 +103,7 @@ impl EmphasisLayer {
             Self::Underline => "\x1b[24m",
             Self::Strikethrough => "\x1b[29m",
             Self::Blink => "\x1b[25m",
+            Self::Inverse => "\x1b[27m",
         }
     }
 }
@@ -121,6 +128,12 @@ pub struct TextEmphasis {
     pub strikethrough: bool,
     /// Blink.
     pub blink: bool,
+    /// Inverse (reverse video) — swaps the foreground and background.
+    ///
+    /// `#[serde(default)]` so render trees serialized before `inverse`
+    /// existed deserialize with `inverse == false`.
+    #[serde(default)]
+    pub inverse: bool,
     /// Underline variant, if any.
     pub underline: Option<UnderlineStyle>,
 }
@@ -154,6 +167,9 @@ impl TextEmphasis {
         if self.strikethrough {
             ops.push((EmphasisLayer::Strikethrough, "\x1b[9m"));
         }
+        if self.inverse {
+            ops.push((EmphasisLayer::Inverse, "\x1b[7m"));
+        }
         ops
     }
 
@@ -170,6 +186,7 @@ impl TextEmphasis {
             italic: self.italic || parent.italic,
             strikethrough: self.strikethrough || parent.strikethrough,
             blink: self.blink || parent.blink,
+            inverse: self.inverse || parent.inverse,
             underline: self.underline.or(parent.underline),
         }
     }
@@ -205,6 +222,9 @@ impl TextEmphasis {
                 "</span>",
             ));
         }
+        if self.inverse {
+            wrappers.push(("<span style=\"filter: invert(1)\">".to_string(), "</span>"));
+        }
         wrappers
     }
 }
@@ -234,13 +254,21 @@ pub enum PerMode<T> {
 
 impl<T> PerMode<T> {
     /// A value used for every background mode.
-    pub fn universal(value: T) -> PerMode<T> {
-        PerMode::Universal(value)
+    ///
+    /// Accepts any `Into<T>`, so an opaque [`PaintColor`] slot takes a plain
+    /// [`Color`](crate::color::Color) directly via [`From<Color>`](PaintColor).
+    pub fn universal(value: impl Into<T>) -> PerMode<T> {
+        PerMode::Universal(value.into())
     }
 
     /// Distinct values for light and dark backgrounds.
-    pub fn adaptive(light: T, dark: T) -> PerMode<T> {
-        PerMode::Adaptive { light, dark }
+    ///
+    /// Each side accepts any `Into<T>`, matching [`universal`](Self::universal).
+    pub fn adaptive(light: impl Into<T>, dark: impl Into<T>) -> PerMode<T> {
+        PerMode::Adaptive {
+            light: light.into(),
+            dark: dark.into(),
+        }
     }
 
     /// Resolve the value for `mode`.
@@ -322,7 +350,10 @@ pub enum BorderSides {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Border {
     /// Border color, if any. `None` uses the target's default line color.
-    pub color: Option<TargetValue<PerMode<Color>>>,
+    ///
+    /// Carries [`PaintColor`], so a border edge can request alpha; the
+    /// terminal renderer paints the underlying color and ignores it.
+    pub color: Option<TargetValue<PerMode<PaintColor>>>,
     /// Visual weight.
     pub weight: BorderWeight,
     /// Line treatment.
@@ -333,47 +364,35 @@ pub struct Border {
     pub radius: Option<TargetValue<Length>>,
 }
 
-/// How intensely a [`Fill`] paints its band relative to the background.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FillIntensity {
-    /// No paint — the band is left transparent.
-    Transparent,
-    /// A faint tint.
-    #[default]
-    Subtle,
-    /// A strong, clearly visible band.
-    Pronounced,
-}
-
-/// How wide a band a [`Fill`] paints across the available width.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FillBand {
-    /// Paint the full available width.
-    #[default]
-    Full,
-    /// Paint the content band, leaving the component's padding unpainted.
-    Padded,
-    /// Paint an indented band, inset from both edges.
-    Indented,
-}
-
-/// How a component paints its band of available width.
+/// Constructors for the adaptive background tints that the deleted `Fill`
+/// intensities used to supply implicitly.
 ///
-/// `Fill` models painted-band *behavior* — how and whether the width is
-/// painted — and is intentionally separate from [`Style::background`], which
-/// is plain adaptive color. A fill does not inherit through the render tree.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-pub struct Fill {
-    /// Fill color, if any. `None` derives a tint from the background.
-    pub color: Option<TargetValue<PerMode<Color>>>,
-    /// Paint intensity.
-    pub intensity: FillIntensity,
-    /// The band painted across the available width.
-    pub band: FillBand,
-    /// Optional inset applied to the painted band.
-    pub inset: Option<TargetValue<Length>>,
+/// These return the `TargetValue<PerMode<PaintColor>>` value
+/// [`Style::background`] holds; `Background` itself is a zero-sized constructor
+/// namespace, never stored. The tints are opaque, so the elided-opacity serde
+/// shape keeps `Style.background` carrying only the color value.
+pub struct Background;
+
+impl Background {
+    /// A faint adaptive tint (the former subtle fill tint):
+    /// `rgb(235,235,238)` on light, `rgb(30,30,34)` on dark.
+    pub fn subtle() -> TargetValue<PerMode<PaintColor>> {
+        use crate::color::{BasicColor, RgbColor};
+        TargetValue::universal(PerMode::adaptive(
+            Color::Rgb(RgbColor::new(235, 235, 238, BasicColor::White)),
+            Color::Rgb(RgbColor::new(30, 30, 34, BasicColor::Black)),
+        ))
+    }
+
+    /// A strong adaptive tint (the former pronounced fill tint):
+    /// `rgb(215,215,220)` on light, `rgb(50,50,56)` on dark.
+    pub fn pronounced() -> TargetValue<PerMode<PaintColor>> {
+        use crate::color::{BasicColor, RgbColor};
+        TargetValue::universal(PerMode::adaptive(
+            Color::Rgb(RgbColor::new(215, 215, 220, BasicColor::White)),
+            Color::Rgb(RgbColor::new(50, 50, 56, BasicColor::Black)),
+        ))
+    }
 }
 
 /// How a component paints itself and its named sub-parts.
@@ -385,8 +404,8 @@ pub struct Fill {
 ///
 /// `Style` may attach to block nodes and inline `Span` nodes. Only the text
 /// appearance fields — `color` and `emphasis` — inherit through render-tree
-/// traversal; `background`, `border`, and `fill` are box-painting properties
-/// that stay explicit on the node that paints them.
+/// traversal; `background` and `border` are box-painting properties that stay
+/// explicit on the node that paints them.
 ///
 /// ## Serialized shape
 ///
@@ -399,13 +418,13 @@ pub struct Fill {
 ///   "color": {
 ///     "universal": {
 ///       "adaptive": {
-///         "light": { "Tailwind": "Blue700" },
-///         "dark": { "Tailwind": "Blue300" }
+///         "light": { "color": { "Tailwind": "Blue700" } },
+///         "dark": { "color": { "Tailwind": "Blue300" } }
 ///       }
 ///     }
 ///   },
 ///   "background": {
-///     "universal": { "universal": { "Tailwind": "Slate100" } }
+///     "universal": { "universal": { "color": { "Tailwind": "Slate100" } } }
 ///   },
 ///   "emphasis": {
 ///     "bold": true,
@@ -413,6 +432,7 @@ pub struct Fill {
 ///     "italic": true,
 ///     "strikethrough": false,
 ///     "blink": false,
+///     "inverse": false,
 ///     "underline": null
 ///   },
 ///   "border": {
@@ -422,16 +442,15 @@ pub struct Fill {
 ///     "sides": { "sides": { "top": false, "right": false,
 ///                           "bottom": false, "left": true } },
 ///     "radius": null
-///   },
-///   "fill": null
+///   }
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Style {
-    /// Foreground (text) color. Inherits through the render tree.
-    pub color: Option<TargetValue<PerMode<Color>>>,
-    /// Background color of the component's box. Does not inherit.
-    pub background: Option<TargetValue<PerMode<Color>>>,
+    /// Foreground (text) color, with alpha. Inherits through the render tree.
+    pub color: Option<TargetValue<PerMode<PaintColor>>>,
+    /// Background color of the component's box, with alpha. Does not inherit.
+    pub background: Option<TargetValue<PerMode<PaintColor>>>,
     /// Text emphasis — the shared [`TextEmphasis`] leaf. Inherits through the
     /// render tree.
     ///
@@ -441,9 +460,6 @@ pub struct Style {
     pub emphasis: TextEmphasis,
     /// Border appearance, if any. Does not inherit.
     pub border: Option<Border>,
-    /// Fill — how the component paints its band of available width. Does not
-    /// inherit.
-    pub fill: Option<Fill>,
 }
 
 impl Style {
@@ -458,9 +474,9 @@ impl Style {
     /// [`color`](Self::color) falls back to the parent's color, and
     /// [`emphasis`](Self::emphasis) is the union of the parent's and this
     /// style's emphasis via [`TextEmphasis::inherited_from`]. The
-    /// box-painting fields — [`background`](Self::background),
-    /// [`border`](Self::border), and [`fill`](Self::fill) — never inherit
-    /// and are taken from `self` unchanged.
+    /// box-painting fields — [`background`](Self::background) and
+    /// [`border`](Self::border) — never inherit and are taken from `self`
+    /// unchanged.
     #[must_use]
     pub fn inherited_from(&self, parent: &Style) -> Style {
         Style {
@@ -468,7 +484,6 @@ impl Style {
             background: self.background.clone(),
             emphasis: self.emphasis.inherited_from(&parent.emphasis),
             border: self.border.clone(),
-            fill: self.fill.clone(),
         }
     }
 }
@@ -477,6 +492,74 @@ impl Style {
 mod tests {
     use super::*;
     use crate::color::Tailwind;
+    use crate::target::RenderTarget;
+
+    #[test]
+    fn background_subtle_matches_former_fill_tints() {
+        use crate::color::{BasicColor, Color, ColorMode, RgbColor};
+
+        let bg = Background::subtle();
+        let per_mode = bg.resolve(RenderTarget::Terminal).unwrap();
+        // The tint is opaque paint: compare the underlying color.
+        assert_eq!(
+            per_mode.resolve(ColorMode::Dark).color,
+            Color::Rgb(RgbColor::new(30, 30, 34, BasicColor::Black))
+        );
+        assert_eq!(
+            per_mode.resolve(ColorMode::Light).color,
+            Color::Rgb(RgbColor::new(235, 235, 238, BasicColor::White))
+        );
+    }
+
+    #[test]
+    fn background_pronounced_matches_former_fill_tints() {
+        use crate::color::{BasicColor, Color, ColorMode, RgbColor};
+
+        let per_mode = *Background::pronounced().resolve(RenderTarget::Terminal).unwrap();
+        assert_eq!(
+            per_mode.resolve(ColorMode::Dark).color,
+            Color::Rgb(RgbColor::new(50, 50, 56, BasicColor::Black))
+        );
+        assert_eq!(
+            per_mode.resolve(ColorMode::Light).color,
+            Color::Rgb(RgbColor::new(215, 215, 220, BasicColor::White))
+        );
+    }
+
+    #[test]
+    fn style_with_only_background_is_not_empty() {
+        let style = Style {
+            background: Some(Background::subtle()),
+            ..Style::default()
+        };
+        assert!(!style.is_empty());
+    }
+
+    #[test]
+    fn old_style_payload_with_fill_key_still_deserializes() {
+        // serde ignores unknown fields by default, so a pre-deletion tree that
+        // still carries "fill": null deserializes fine.
+        let json = r#"{
+            "color": null, "background": null,
+            "emphasis": { "bold": false, "dim": false, "italic": false,
+                          "strikethrough": false, "blink": false, "underline": null },
+            "border": null, "fill": null
+        }"#;
+        let style: Style = serde_json::from_str(json).unwrap();
+        assert!(style.is_empty());
+    }
+
+    #[test]
+    fn pre_paint_color_style_shape_is_rejected() {
+        // Documents the clean serde break: before `PaintColor`, the `color`
+        // slot's `PerMode` leaf was a bare `Color` (`{ "Tailwind": "Blue500" }`).
+        // The leaf is now a `PaintColor` (`{ "color": { ... } }`), so the old
+        // shape no longer deserializes — there is no migration path.
+        let old_shape = r#"{
+            "color": { "universal": { "universal": { "Tailwind": "Blue500" } } }
+        }"#;
+        assert!(serde_json::from_str::<Style>(old_shape).is_err());
+    }
 
     #[test]
     fn default_is_empty() {
@@ -530,6 +613,58 @@ mod tests {
     }
 
     #[test]
+    fn sgr_ops_includes_inverse_set_code() {
+        let e = TextEmphasis {
+            inverse: true,
+            ..Default::default()
+        };
+        let ops = e.sgr_ops();
+        assert_eq!(ops, vec![(EmphasisLayer::Inverse, "\x1b[7m")]);
+    }
+
+    #[test]
+    fn inverse_layer_resets_with_sgr_27() {
+        assert_eq!(EmphasisLayer::Inverse.sgr_reset(), "\x1b[27m");
+    }
+
+    #[test]
+    fn inverse_html_wrapper_uses_invert_filter() {
+        let e = TextEmphasis {
+            inverse: true,
+            ..Default::default()
+        };
+        let wrappers = e.html_wrappers();
+        assert_eq!(wrappers[0].0, "<span style=\"filter: invert(1)\">");
+    }
+
+    #[test]
+    fn inverse_inheritance_unions_from_parent() {
+        let parent = TextEmphasis {
+            inverse: true,
+            ..Default::default()
+        };
+        // A child that declares no inverse inherits the parent's.
+        let merged = TextEmphasis::default().inherited_from(&parent);
+        assert!(merged.inverse);
+    }
+
+    #[test]
+    fn missing_inverse_deserializes_as_false() {
+        // A render tree serialized before `inverse` existed omits the field.
+        let json = r#"{
+            "bold": true,
+            "dim": false,
+            "italic": false,
+            "strikethrough": false,
+            "blink": false,
+            "underline": null
+        }"#;
+        let e: TextEmphasis = serde_json::from_str(json).unwrap();
+        assert!(e.bold);
+        assert!(!e.inverse);
+    }
+
+    #[test]
     fn text_emphasis_serde_roundtrip() {
         let e = TextEmphasis {
             bold: true,
@@ -544,7 +679,7 @@ mod tests {
 
     #[test]
     fn per_mode_universal_resolves_for_every_mode() {
-        let value = PerMode::universal(Color::Tailwind(Tailwind::Blue500));
+        let value: PerMode<Color> = PerMode::universal(Color::Tailwind(Tailwind::Blue500));
         for mode in [ColorMode::Light, ColorMode::Dark, ColorMode::Unknown] {
             assert_eq!(value.resolve(mode), &Color::Tailwind(Tailwind::Blue500));
         }
@@ -552,7 +687,7 @@ mod tests {
 
     #[test]
     fn per_mode_adaptive_resolves_per_mode() {
-        let value = PerMode::adaptive(
+        let value: PerMode<Color> = PerMode::adaptive(
             Color::Tailwind(Tailwind::Blue700),
             Color::Tailwind(Tailwind::Blue300),
         );
@@ -573,7 +708,7 @@ mod tests {
 
     #[test]
     fn per_mode_serde_roundtrip() {
-        let value = PerMode::adaptive(
+        let value: PerMode<Color> = PerMode::adaptive(
             Color::Tailwind(Tailwind::Slate100),
             Color::Tailwind(Tailwind::Slate900),
         );
@@ -604,24 +739,19 @@ mod tests {
     }
 
     #[test]
-    fn fill_serde_roundtrip() {
-        let fill = Fill {
-            color: Some(TargetValue::universal(PerMode::adaptive(
-                Color::Tailwind(Tailwind::Slate100),
-                Color::Tailwind(Tailwind::Slate800),
-            ))),
-            intensity: FillIntensity::Pronounced,
-            band: FillBand::Padded,
-            inset: Some(TargetValue::universal(Length::ch(2))),
-        };
-        let json = serde_json::to_string(&fill).unwrap();
-        let back: Fill = serde_json::from_str(&json).unwrap();
-        assert_eq!(fill, back);
+    fn style_default_is_empty() {
+        assert!(Style::default().is_empty());
     }
 
     #[test]
-    fn style_default_is_empty() {
-        assert!(Style::default().is_empty());
+    fn default_style_pins_every_field() {
+        // The defaulting contract: an un-styled node paints nothing. Pinned
+        // field-by-field rather than only through `is_empty()`.
+        let style = Style::default();
+        assert_eq!(style.color, None);
+        assert_eq!(style.background, None);
+        assert!(style.emphasis.is_empty());
+        assert_eq!(style.border, None);
     }
 
     #[test]
@@ -648,7 +778,6 @@ mod tests {
                 },
                 ..Border::default()
             }),
-            fill: None,
         };
         let json = serde_json::to_string(&style).unwrap();
         let back: Style = serde_json::from_str(&json).unwrap();
@@ -718,14 +847,12 @@ mod tests {
                 Tailwind::Slate100,
             )))),
             border: Some(Border::default()),
-            fill: Some(Fill::default()),
             ..Style::default()
         };
         // The child declares no box-painting properties; none are inherited.
         let merged = Style::default().inherited_from(&parent);
         assert!(merged.background.is_none());
         assert!(merged.border.is_none());
-        assert!(merged.fill.is_none());
     }
 
     #[test]
@@ -734,13 +861,13 @@ mod tests {
             "color": {
               "universal": {
                 "adaptive": {
-                  "light": { "Tailwind": "Blue700" },
-                  "dark": { "Tailwind": "Blue300" }
+                  "light": { "color": { "Tailwind": "Blue700" } },
+                  "dark": { "color": { "Tailwind": "Blue300" } }
                 }
               }
             },
             "background": {
-              "universal": { "universal": { "Tailwind": "Slate100" } }
+              "universal": { "universal": { "color": { "Tailwind": "Slate100" } } }
             },
             "emphasis": {
               "bold": true,

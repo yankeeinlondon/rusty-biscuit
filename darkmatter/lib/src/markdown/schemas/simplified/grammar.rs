@@ -6,8 +6,18 @@
 //!
 //! ```text
 //! type_expr_string := type_expr ( "->" description )?
-//! type_expr        := type_name ( "(" item_constraints ")" )?
+//! type_expr        := simple_type
+//!                   | inline_object
+//! simple_type      := type_name ( "(" item_constraints ")" )?
 //!                                ( "[]" ( "(" arr_constraints ")" )? )?
+//! inline_object    := "{" ws* property_list? ws* "}"
+//!                     ( "(" item_constraints ")"
+//!                     | "[]" ( "(" arr_constraints ")" )?
+//!                     )?
+//! property_list    := property_def ( "," ws* property_def )* ","?
+//! property_def     := identifier ws* ":" ws* type_expr_string
+//! ws               := <whitespace or line-break>
+//! identifier       := ( ASCII_ALNUM | "-" | "_" )+
 //! type_name        := "string" | "date" | "datetime" | "time" | "number"
 //!                   | "numberlike" | "boolean" | "boolish" | "object"
 //!                   | "file" | "enum" | "url" | "email" | "any"
@@ -17,8 +27,12 @@
 //!                   | IDENT "(" arglist ")"
 //! arglist          := arg ( "," arg )*
 //! arg              := NUMBER | BARE_WORD | SQUOTED | DQUOTED
-//! description      := <rest-of-string, trimmed>
+//! description      := <rest-of-top-level-field, trimmed>
 //! ```
+//!
+//! Inside an `inline_object`, `description` consumes text only until the
+//! next top-level comma or closing brace (Decision #9). Inline object
+//! nesting is capped at [`MAX_INLINE_OBJECT_DEPTH`] levels (Decision #11).
 //!
 //! Errors surface as [`SchemaError::Grammar`] with the byte span of the
 //! offending token.
@@ -27,7 +41,11 @@ use std::ops::Range;
 
 use crate::markdown::schemas::errors::SchemaError;
 
-use super::types::{Constraint, PropertyAtom, SimplifiedType};
+use super::types::{Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedType, TypeExpr};
+
+/// Hard maximum number of nested inline object levels the parser will accept.
+/// Exceeding this depth is a grammar error (Decision #11).
+pub const MAX_INLINE_OBJECT_DEPTH: usize = 32;
 
 /// Parses a single type-and-constraint string into a [`PropertyAtom`].
 ///
@@ -382,28 +400,319 @@ impl<'a> Parser<'a> {
     }
 
     fn parse(&mut self) -> Result<PropertyAtom, SchemaError> {
-        let atom = self.parse_type_expr()?;
-        // Optional description.
+        // Inline object literal dispatches before primitive-type parsing.
+        self.lex.skip_ws();
+        if self.lex.peek_byte() == Some(b'{') {
+            let shape = self.parse_inline_object_body(0)?;
+            // Postfix `()` and `[]` apply to the inline object as a whole.
+            let (constraints, is_array, array_constraints) =
+                self.parse_postfix_after_inline_object()?;
+            // Top-level description: take the rest of the string (the
+            // top-level field has no surrounding `}` to act as a terminator).
+            let description = self.parse_top_level_description()?;
+            Ok(PropertyAtom {
+                ty: TypeExpr::InlineObject(shape),
+                is_array,
+                constraints,
+                array_constraints,
+                description,
+            })
+        } else {
+            let atom = self.parse_type_expr()?;
+            // Optional description.
+            self.lex.skip_ws();
+            let after = self.lex.pos;
+            let next = self.next_token(LexMode::Outer)?;
+            match next.tok {
+                Tok::Eof => Ok(atom),
+                Tok::Arrow => {
+                    let rest = self.src[self.lex.pos..].trim().to_string();
+                    if rest.is_empty() {
+                        return self.err("`->` must be followed by a description", next.span);
+                    }
+                    self.lex.pos = self.src.len();
+                    Ok(PropertyAtom {
+                        description: Some(rest),
+                        ..atom
+                    })
+                }
+                other => self.err(
+                    format!("expected end of expression or `->`, found `{:?}`", other),
+                    after..next.span.end,
+                ),
+            }
+        }
+    }
+
+    /// Parses the optional `(value_constraints)`, `[]`, and
+    /// `[](array_constraints)` suffix that follows an inline object.
+    fn parse_postfix_after_inline_object(
+        &mut self,
+    ) -> Result<(Vec<Constraint>, bool, Vec<Constraint>), SchemaError> {
+        let mut value_constraints = Vec::new();
+        self.lex.skip_ws();
+        if self.lex.peek_byte() == Some(b'(') {
+            self.lex.pos += 1;
+            value_constraints = self.parse_constraint_list(SimplifiedType::String, false)?;
+            self.expect(Tok::RParen)?;
+        }
+
+        let mut is_array = false;
+        let mut array_constraints = Vec::new();
+        self.lex.skip_ws();
+        if self.lex.peek_byte() == Some(b'[') {
+            if !value_constraints.is_empty() {
+                return self.err(
+                    "inline object array constraints must follow `[]`",
+                    self.lex.pos..self.lex.pos + 1,
+                );
+            }
+            self.lex.pos += 1;
+            self.expect(Tok::RBracket)?;
+            is_array = true;
+            self.lex.skip_ws();
+            if self.lex.peek_byte() == Some(b'(') {
+                self.lex.pos += 1;
+                array_constraints = self.parse_constraint_list(SimplifiedType::String, true)?;
+                self.expect(Tok::RParen)?;
+            }
+        }
+        Ok((value_constraints, is_array, array_constraints))
+    }
+
+    /// Top-level `-> description` consumes the rest of the input.
+    fn parse_top_level_description(&mut self) -> Result<Option<String>, SchemaError> {
         self.lex.skip_ws();
         let after = self.lex.pos;
         let next = self.next_token(LexMode::Outer)?;
         match next.tok {
-            Tok::Eof => Ok(atom),
+            Tok::Eof => Ok(None),
             Tok::Arrow => {
                 let rest = self.src[self.lex.pos..].trim().to_string();
                 if rest.is_empty() {
                     return self.err("`->` must be followed by a description", next.span);
                 }
                 self.lex.pos = self.src.len();
-                Ok(PropertyAtom {
-                    description: Some(rest),
-                    ..atom
-                })
+                Ok(Some(rest))
             }
             other => self.err(
                 format!("expected end of expression or `->`, found `{:?}`", other),
                 after..next.span.end,
             ),
+        }
+    }
+
+    /// Parses the body of an inline object literal — the comma-separated
+    /// property definitions enclosed by `{` and `}`.
+    ///
+    /// `depth` is the current nesting level; it must not exceed
+    /// [`MAX_INLINE_OBJECT_DEPTH`] (Decision #11).
+    fn parse_inline_object_body(&mut self, depth: usize) -> Result<SchemaShape, SchemaError> {
+        if depth >= MAX_INLINE_OBJECT_DEPTH {
+            return self.err(
+                format!(
+                    "inline objects may not nest more than {MAX_INLINE_OBJECT_DEPTH} levels deep",
+                ),
+                self.lex.pos..self.lex.pos,
+            );
+        }
+        // Consume opening `{`.
+        self.expect_byte(b'{', "expected `{` to start an inline object")?;
+        let mut properties = indexmap::IndexMap::new();
+        self.lex.skip_ws();
+        // Empty object `{}` is legal.
+        if self.lex.peek_byte() == Some(b'}') {
+            self.lex.pos += 1;
+            return Ok(SchemaShape { properties });
+        }
+        loop {
+            self.lex.skip_ws();
+            // Read property name (unquoted identifier per Decision #8).
+            let (name, name_span) = self.read_inline_object_ident()?;
+            if name.is_empty() {
+                return self.err("expected an inline object property name", name_span);
+            }
+            self.lex.skip_ws();
+            self.expect_byte(b':', "expected `:` after inline object property name")?;
+            self.lex.skip_ws();
+            // Read the property's type expression string (recursively).
+            let def = self.parse_inline_object_property_value(depth)?;
+            if properties.insert(name.clone(), def).is_some() {
+                return self.err(
+                    format!("duplicate property `{name}` in inline object"),
+                    name_span,
+                );
+            }
+            self.lex.skip_ws();
+            match self.lex.peek_byte() {
+                Some(b',') => {
+                    self.lex.pos += 1;
+                    self.lex.skip_ws();
+                    // Trailing comma is legal: `{ foo: string, }`.
+                    if self.lex.peek_byte() == Some(b'}') {
+                        self.lex.pos += 1;
+                        return Ok(SchemaShape { properties });
+                    }
+                }
+                Some(b'}') => {
+                    self.lex.pos += 1;
+                    return Ok(SchemaShape { properties });
+                }
+                Some(other) => {
+                    let span = self.lex.pos..self.lex.pos + 1;
+                    return self.err(
+                        format!(
+                            "expected `,` or `}}` between inline object properties, found `{}`",
+                            other as char
+                        ),
+                        span,
+                    );
+                }
+                None => {
+                    let span = self.lex.pos..self.lex.pos;
+                    return self.err(
+                        "unterminated inline object (missing `}`)",
+                        span,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Reads a single inline object property name: ASCII alphanumerics plus
+    /// `-` and `_`, including leading digits (Decision #8). Returns an empty
+    /// string and the span of the offending byte when the name starts with a
+    /// disallowed character; callers decide whether to treat this as a
+    /// "expected name" error.
+    fn read_inline_object_ident(&mut self) -> Result<(String, Range<usize>), SchemaError> {
+        let start = self.lex.pos;
+        while let Some(b) = self.lex.peek_byte() {
+            if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' {
+                self.lex.pos += 1;
+            } else {
+                break;
+            }
+        }
+        let name = self.src[start..self.lex.pos].to_string();
+        Ok((name, start..self.lex.pos))
+    }
+
+    /// Parses a single property value inside an inline object: the
+    /// `type_expr_string` form (a `type_expr` optionally followed by a
+    /// `-> description` whose description text terminates at the next
+    /// top-level `,` or `}` for the current inline object).
+    fn parse_inline_object_property_value(
+        &mut self,
+        depth: usize,
+    ) -> Result<PropertyDef, SchemaError> {
+        self.lex.skip_ws();
+        // The property value is a single type expression, possibly with a
+        // postfix `-> description`. Inline object property values cannot
+        // be property-level unions (the YAML-shape layer rejects nested
+        // mapping arms at property positions).
+        let atom = if self.lex.peek_byte() == Some(b'{') {
+            let shape = self.parse_inline_object_body(depth + 1)?;
+            let (constraints, is_array, array_constraints) =
+                self.parse_postfix_after_inline_object()?;
+            // After the closing `}` and any postfix, an inline object
+            // property may also carry a description that terminates at
+            // the next `,` or `}` in the *outer* object's body.
+            let description = if self.lex.peek_byte() == Some(b'-')
+                && self.lex.bytes.get(self.lex.pos + 1).copied() == Some(b'>')
+            {
+                self.lex.pos += 2;
+                Some(self.read_inline_object_description()?)
+            } else {
+                None
+            };
+            PropertyAtom {
+                ty: TypeExpr::InlineObject(shape),
+                is_array,
+                constraints,
+                array_constraints,
+                description,
+            }
+        } else {
+            let mut atom = self.parse_type_expr()?;
+            self.lex.skip_ws();
+            if self.lex.peek_byte() == Some(b'-')
+                && self.lex.bytes.get(self.lex.pos + 1).copied() == Some(b'>')
+            {
+                // Consume the arrow and parse the description with the
+                // inline-object terminator.
+                self.lex.pos += 2;
+                let desc = self.read_inline_object_description()?;
+                atom.description = Some(desc);
+            }
+            atom
+        };
+        Ok(PropertyDef::Single(atom))
+    }
+
+    /// Reads a description text from the current position up to (but not
+    /// consuming) the next `,` or `}` at the current inline-object depth.
+    /// Tracks nested `{`/`}` and constraint `(`/`)` so commas and braces
+    /// inside nested structures do not terminate the description.
+    ///
+    /// Decision #9 says: descriptions terminate at the next top-level comma
+    /// or closing brace in the *current* inline object body. The caller is
+    /// responsible for ensuring the terminator is actually present.
+    fn read_inline_object_description(&mut self) -> Result<String, SchemaError> {
+        let start = self.lex.pos;
+        let bytes = self.lex.bytes;
+        let mut pos = start;
+        let mut brace_depth: usize = 0;
+        let mut paren_depth: usize = 0;
+        while pos < bytes.len() {
+            let b = bytes[pos];
+            match b {
+                b'{' => brace_depth += 1,
+                b'}' => {
+                    if brace_depth == 0 {
+                        break;
+                    }
+                    brace_depth -= 1;
+                }
+                b'(' => paren_depth += 1,
+                b')' => {
+                    if paren_depth == 0 {
+                        return self.err(
+                            "unbalanced `)` in inline object description",
+                            pos..pos + 1,
+                        );
+                    }
+                    paren_depth -= 1;
+                }
+                b',' if brace_depth == 0 && paren_depth == 0 => break,
+                _ => {}
+            }
+            pos += 1;
+        }
+        let raw = &self.src[start..pos];
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return self.err(
+                "`->` must be followed by a description",
+                start..pos,
+            );
+        }
+        self.lex.pos = pos;
+        Ok(trimmed.to_string())
+    }
+
+    fn expect_byte(&mut self, expected: u8, msg: &str) -> Result<(), SchemaError> {
+        let pos = self.lex.pos;
+        if self.lex.peek_byte() == Some(expected) {
+            self.lex.pos += 1;
+            Ok(())
+        } else {
+            self.err(
+                format!(
+                    "{msg}, found `{}`",
+                    self.lex.peek_byte().map(|b| b as char).unwrap_or('\0')
+                ),
+                pos..pos,
+            )
         }
     }
 
@@ -465,7 +774,7 @@ impl<'a> Parser<'a> {
         }
 
         Ok(PropertyAtom {
-            ty,
+            ty: TypeExpr::Primitive(ty),
             is_array,
             constraints: item_constraints,
             array_constraints,
@@ -975,7 +1284,7 @@ mod tests {
     #[test]
     fn parses_bare_type() {
         let atom = parse("string");
-        assert_eq!(atom.ty, SimplifiedType::String);
+        assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::String));
         assert!(!atom.is_array);
         assert!(atom.constraints.is_empty());
         assert!(atom.array_constraints.is_empty());
@@ -999,7 +1308,7 @@ mod tests {
             SimplifiedType::Any,
         ] {
             let atom = parse(ty.as_keyword());
-            assert_eq!(atom.ty, ty);
+            assert_eq!(atom.ty, TypeExpr::Primitive(ty));
         }
     }
 
@@ -1213,7 +1522,7 @@ mod tests {
     #[test]
     fn parses_description() {
         let atom = parse("string -> The author's full name");
-        assert_eq!(atom.ty, SimplifiedType::String);
+        assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::String));
         assert_eq!(atom.description.as_deref(), Some("The author's full name"));
     }
 
@@ -1274,5 +1583,288 @@ mod tests {
     fn min_negative_ok_for_number() {
         let atom = parse("number(min(-5))");
         assert_eq!(atom.constraints, vec![Constraint::Min(-5.0)]);
+    }
+
+    // ── Inline object parser tests (Phase 1, Decision #1 — #11) ──────
+
+    use super::super::types::SchemaShape;
+
+    fn inline_shape(atom: &PropertyAtom) -> &SchemaShape {
+        match &atom.ty {
+            TypeExpr::InlineObject(s) => s,
+            other => panic!("expected InlineObject, got {other:?}"),
+        }
+    }
+
+    fn prop<'a>(shape: &'a SchemaShape, name: &str) -> &'a PropertyAtom {
+        match shape.properties.get(name) {
+            Some(PropertyDef::Single(a)) => a,
+            other => panic!("expected single property `{name}`, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_bare_inline_object() {
+        let atom = parse("{ foo: string, bar: number }");
+        let shape = inline_shape(&atom);
+        assert_eq!(shape.properties.len(), 2);
+        assert_eq!(prop(shape, "foo").ty, TypeExpr::Primitive(SimplifiedType::String));
+        assert_eq!(prop(shape, "bar").ty, TypeExpr::Primitive(SimplifiedType::Number));
+        assert!(!atom.is_array);
+    }
+
+    #[test]
+    fn parses_inline_object_array() {
+        let atom = parse("{ foo: string }[]");
+        let shape = inline_shape(&atom);
+        assert_eq!(prop(shape, "foo").ty, TypeExpr::Primitive(SimplifiedType::String));
+        assert!(atom.is_array);
+    }
+
+    #[test]
+    fn parses_required_single_inline_object() {
+        let atom = parse("{ host: string }(required)");
+        let shape = inline_shape(&atom);
+        assert_eq!(prop(shape, "host").ty, TypeExpr::Primitive(SimplifiedType::String));
+        assert!(!atom.is_array);
+        assert_eq!(atom.constraints, vec![Constraint::Required]);
+    }
+
+    #[test]
+    fn parses_constrained_inline_object_array() {
+        let atom = parse("{ name: string }[](min(1); required)");
+        assert!(atom.is_array);
+        let shape = inline_shape(&atom);
+        assert_eq!(prop(shape, "name").ty, TypeExpr::Primitive(SimplifiedType::String));
+        assert_eq!(
+            atom.array_constraints,
+            vec![Constraint::MinItems(1), Constraint::Required]
+        );
+    }
+
+    #[test]
+    fn rejects_inline_object_constraints_before_array_suffix() {
+        for input in [
+            "{ foo: string }(required)[]",
+            "{ foo: string }(default({}))[]",
+            "{ foo: string }(min(1))[]",
+        ] {
+            let err = parse_err(input);
+            let SchemaError::Grammar { message, .. } = err else {
+                panic!("expected grammar error");
+            };
+            assert!(
+                message.contains("inline object array constraints must follow `[]`"),
+                "unexpected error for {input:?}: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_nested_inline_object() {
+        let atom = parse("{ outer: { inner: string } }");
+        let outer = inline_shape(&atom);
+        assert_eq!(
+            prop(outer, "outer").ty,
+            TypeExpr::InlineObject({
+                let mut s = SchemaShape::new();
+                s.properties.insert(
+                    "inner".into(),
+                    PropertyDef::Single(PropertyAtom::bare(SimplifiedType::String)),
+                );
+                s
+            })
+        );
+    }
+
+    #[test]
+    fn inline_object_at_depth_32_is_accepted() {
+        // Build `{a: {a: {a: ... {a: string} ... }}}` with 32 levels.
+        // There are 32 inline objects and one innermost `string` value.
+        let mut input = String::new();
+        for _ in 0..32 {
+            input.push_str("{a:");
+        }
+        input.push_str("string");
+        for _ in 0..32 {
+            input.push('}');
+        }
+        let atom = parse(&input);
+        let shape = inline_shape(&atom);
+        // Walk down 32 levels of `a` and confirm the innermost is a string.
+        let mut current = shape;
+        for _ in 0..31 {
+            let inner = prop(current, "a");
+            current = inline_shape(inner);
+        }
+        // The 32nd `a` is the string value itself.
+        assert_eq!(
+            prop(current, "a").ty,
+            TypeExpr::Primitive(SimplifiedType::String)
+        );
+    }
+
+    #[test]
+    fn inline_object_at_depth_33_is_rejected() {
+        // 33 levels should fail the depth check.
+        let mut input = String::new();
+        for _ in 0..33 {
+            input.push_str("{a:");
+        }
+        input.push_str("string");
+        for _ in 0..33 {
+            input.push('}');
+        }
+        let err = parse_err(&input);
+        let SchemaError::Grammar { message, .. } = err else {
+            panic!("expected Grammar error, got {err:?}")
+        };
+        assert!(
+            message.contains("nesting") || message.contains("deep"),
+            "unexpected message: {message}"
+        );
+    }
+
+    #[test]
+    fn whitespace_inside_inline_object_is_ignored() {
+        let compact = parse("{ foo: string, bar: number }");
+        let padded = parse("{  foo : string , bar : number  }");
+        assert_eq!(compact, padded);
+    }
+
+    #[test]
+    fn multi_line_inline_object_parses() {
+        let atom = parse(
+            "{\n    url: url(scheme(https); required),\n    method: enum(GET, POST, PUT, DELETE; required),\n    timeout: number(default(30))\n}[]",
+        );
+        assert!(atom.is_array);
+        let shape = inline_shape(&atom);
+        assert_eq!(shape.properties.len(), 3);
+        assert_eq!(prop(shape, "url").ty, TypeExpr::Primitive(SimplifiedType::Url));
+        assert_eq!(prop(shape, "method").ty, TypeExpr::Primitive(SimplifiedType::Enum));
+        assert_eq!(prop(shape, "timeout").ty, TypeExpr::Primitive(SimplifiedType::Number));
+    }
+
+    #[test]
+    fn inline_object_with_property_constraints() {
+        let atom = parse("{ foo: string(required; not-empty), bar: number(min(0)) }");
+        let shape = inline_shape(&atom);
+        let foo = prop(shape, "foo");
+        assert_eq!(
+            foo.constraints,
+            vec![Constraint::Required, Constraint::NotEmpty]
+        );
+        let bar = prop(shape, "bar");
+        assert_eq!(bar.constraints, vec![Constraint::Min(0.0)]);
+    }
+
+    #[test]
+    fn inline_object_with_descriptions() {
+        let atom = parse("{ foo: string(required) -> The foo, bar: number -> The bar }");
+        let shape = inline_shape(&atom);
+        let foo = prop(shape, "foo");
+        assert_eq!(foo.description.as_deref(), Some("The foo"));
+        let bar = prop(shape, "bar");
+        assert_eq!(bar.description.as_deref(), Some("The bar"));
+    }
+
+    #[test]
+    fn inline_object_description_with_unescaped_comma_is_not_supported() {
+        // `second` is treated as the next property start; since `second`
+        // is not a known type and the `:` separator is missing, the
+        // parser reports a grammar error. Decision #9 leaves escaping
+        // out of scope for this feature.
+        let err = parse_err("{ foo: string -> first, second }");
+        let SchemaError::Grammar { message, .. } = err else {
+            panic!("expected Grammar error, got {err:?}")
+        };
+        // The exact message depends on whether the trailing `}` looks
+        // like the end of a property definition or a type-name error.
+        assert!(
+            message.contains("unknown type")
+                || message.contains("expected a type name")
+                || message.contains("`:`")
+                || message.contains("expected `:`"),
+            "unexpected message: {message}"
+        );
+    }
+
+    #[test]
+    fn inline_object_accepts_known_identifier_shapes() {
+        for name in ["name", "foo_id", "x-custom", "api2_version", "123abc"] {
+            let input = format!("{{ {name}: string }}");
+            let atom = parse(&input);
+            let shape = inline_shape(&atom);
+            assert!(shape.properties.contains_key(name), "missing: {name}");
+        }
+    }
+
+    #[test]
+    fn inline_object_rejects_invalid_identifier_shapes() {
+        for name in ["display name", "@type", "x.custom"] {
+            let input = format!("{{ {name}: string }}");
+            let err = parse_err(&input);
+            // All three should produce a Grammar error, but the exact
+            // message differs (whitespace is illegal, `@` and `.` are
+            // unexpected characters). Just confirm a grammar error.
+            assert!(
+                matches!(err, SchemaError::Grammar { .. }),
+                "expected Grammar error for `{name}`, got {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn quoted_property_keys_are_rejected() {
+        let err = parse_err(r#"{ "x-custom": string }"#);
+        assert!(matches!(err, SchemaError::Grammar { .. }));
+    }
+
+    #[test]
+    fn empty_inline_object_is_accepted() {
+        let atom = parse("{}");
+        let shape = inline_shape(&atom);
+        assert!(shape.properties.is_empty());
+        assert!(!atom.is_array);
+    }
+
+    #[test]
+    fn missing_closing_brace_errors() {
+        let err = parse_err("{ foo: string");
+        let SchemaError::Grammar { message, .. } = err else {
+            panic!("expected Grammar error, got {err:?}")
+        };
+        assert!(message.contains("`}`") || message.contains("unterminated"));
+    }
+
+    #[test]
+    fn missing_colon_errors() {
+        let err = parse_err("{ foo string }");
+        let SchemaError::Grammar { message, .. } = err else {
+            panic!("expected Grammar error, got {err:?}")
+        };
+        assert!(message.contains("`:`") || message.contains("expected"));
+    }
+
+    #[test]
+    fn trailing_comma_is_accepted() {
+        let atom = parse("{ foo: string, }");
+        let shape = inline_shape(&atom);
+        assert_eq!(shape.properties.len(), 1);
+        assert_eq!(
+            prop(shape, "foo").ty,
+            TypeExpr::Primitive(SimplifiedType::String)
+        );
+    }
+
+    #[test]
+    fn inline_object_at_property_position_in_yaml_shape() {
+        // The YAML-shape layer passes the *string* value through to
+        // `parse_type_expr`. A YAML mapping is rejected at the YAML layer;
+        // the parser itself is only invoked for scalar string values.
+        let value = "{ foo: string, bar: number }";
+        let atom = parse(value);
+        let shape = inline_shape(&atom);
+        assert_eq!(shape.properties.len(), 2);
     }
 }

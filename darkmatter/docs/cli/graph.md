@@ -2,7 +2,7 @@
 
 Visualizes a Markdown file's dependency graph as a terminal tree, showing
 references (links, images, imports) and transclusion directives (`::file`,
-`::toc-linking`, prologue/epilogue) with their insertion context.
+`::toc-linking`, `::file-links`, prologue/epilogue) with their insertion context.
 
 ## Usage
 
@@ -75,7 +75,7 @@ Each transclusion directive produces an edge with a directional indicator:
 
 | Direction | Connector | Description                                 |
 | --------- | --------- | ------------------------------------------- |
-| Incoming  | `│◀─`     | `::file`, `::code`, prologue, epilogue      |
+| Incoming  | `│◀─`     | `::file`, `::code`, `::file-links`, prologue, epilogue |
 | Outgoing  | `├─▶`     | `::toc-linking`                             |
 
 **Captions** describe the insertion context:
@@ -83,9 +83,10 @@ Each transclusion directive produces an edge with a directional indicator:
 | Directive         | Caption format                                            |
 | ----------------- | --------------------------------------------------------- |
 | `::file`          | `inserted into the '{## Section}' section`                |
-| `::toc-linking`   | `TOC elements linked into the '{## Section}' section`     |
+| `::toc-linking`   | `TOC elements linked into the '{## Section}' section'     |
 | `::code`          | `inserted code into the '{## Section}' section`           |
 | `::url`           | `transcluded from URL into the '{## Section}' section`    |
+| `::file-links`    | `file links rendered into the '{## Section}' section`     |
 
 ### Frontmatter Prologue/Epilogue Edges
 

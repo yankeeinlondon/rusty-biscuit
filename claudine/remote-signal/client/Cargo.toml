@@ -1,0 +1,31 @@
+[package]
+name = "remote-signal-client"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+description = "Test client for the remote-signal daemon. Connects over Unix Domain Sockets and exercises the gRPC control plane."
+
+[[bin]]
+name = "remote-signal-test-client"
+path = "src/main.rs"
+
+[lib]
+name = "remote_signal_client"
+path = "src/lib.rs"
+
+[dependencies]
+remote-signal-core = { path = "../core" }
+tonic = { version = "0.14", default-features = false, features = ["transport", "codegen", "channel"] }
+tonic-prost = "0.14"
+prost = "0.14"
+tokio = { version = "1.48", features = ["rt-multi-thread", "macros", "net", "time"] }
+tower = { version = "0.5", features = ["util"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+thiserror = "2.0"
+
+[dev-dependencies]
+remote-signal-daemon = { path = "../daemon" }
+tempfile = "3"

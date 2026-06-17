@@ -54,10 +54,6 @@ use super::{
     OutputTextCallback, ProcessResult, ProcessTelemetry, ReasoningCallback, SemanticParserBuilder,
 };
 
-// ---------------------------------------------------------------------------
-// Stable identifiers and protocol contract constants
-// ---------------------------------------------------------------------------
-
 /// Wire protocol version Claudine negotiates with Kimi. Phase 0 evidence
 /// confirmed `1.9` is the minimum revision the live `kimi 1.38.0` build
 /// accepts. The parser keys initialize-response handling on this id.
@@ -110,10 +106,6 @@ impl Default for WireClientCapabilities {
         Self::default_for_claudine()
     }
 }
-
-// ---------------------------------------------------------------------------
-// JSON-RPC line builders (pure functions, fully unit-testable)
-// ---------------------------------------------------------------------------
 
 /// Build a JSON-RPC `initialize` request body.
 ///
@@ -287,10 +279,6 @@ impl HookDispatchResult {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Serialized writer
-// ---------------------------------------------------------------------------
-
 /// Single serialized writer over the child's stdin.
 ///
 /// Wraps `ChildStdin` behind a `Mutex` so multiple sender call sites
@@ -341,10 +329,6 @@ impl WireWriter {
         *guard = Box::new(io::sink());
     }
 }
-
-// ---------------------------------------------------------------------------
-// Server request auto-response routing
-// ---------------------------------------------------------------------------
 
 /// Outcome of dispatching a server-initiated request through the wire
 /// auto-response pipeline. The reader thread uses this to decide which
@@ -398,12 +382,65 @@ pub(crate) fn map_kimi_hook_event(event: &str) -> Option<AgenticEvent> {
     Some(canonical)
 }
 
-// ---------------------------------------------------------------------------
-// Hook dispatch wiring
-// ---------------------------------------------------------------------------
+/// Build the [`EventMeta`] for a Kimi `HookRequest` dispatch.
+///
+/// Copies the request context into the typed slots and `extra` map, then
+/// stamps the wrapper [`EnvironmentContext`] and the spawned child PID so the
+/// dispatched hook/action context exposes `claudine_pid` (via
+/// `EnvironmentContext`) and `agent_pid`. Both PIDs are also mirrored into
+/// `extra` — matching the summary/semantic helpers in
+/// [`claudine::stream::reporting`] — so templates and expressions can resolve
+/// them even though the typed fields remain authoritative for JSONL and SQL
+/// ingest.
+fn build_hook_event_meta(
+    request: &KimiHookRequest,
+    canonical_event: AgenticEvent,
+    env_context: &EnvironmentContext,
+    agent_pid: Option<u32>,
+) -> EventMeta {
+    let mut meta = EventMeta::new(Provider::KimiCode, canonical_event);
+    if let Some(context) = request.context.as_ref()
+        && let Some(map) = context.as_object()
+    {
+        for (key, value) in map {
+            meta.extra.insert(key.clone(), value.clone());
+        }
+        if let Some(tool_name) = map.get("tool_name").and_then(Value::as_str) {
+            meta.tool_name = Some(tool_name.to_string());
+        }
+        if let Some(tool_input) = map.get("tool_input") {
+            meta.tool_input = Some(tool_input.clone());
+        }
+        if let Some(tool_response) = map.get("tool_response") {
+            meta.tool_response = Some(tool_response.clone());
+        }
+        if let Some(session) = map.get("session_id").and_then(Value::as_str) {
+            meta.session_id = Some(session.to_string());
+        }
+    }
+
+    meta.env = env_context.clone();
+    meta.agent_pid = agent_pid;
+    if let Some(pid) = env_context.claudine_pid {
+        meta.extra
+            .entry("claudine_pid".to_string())
+            .or_insert(Value::Number(serde_json::Number::from(pid)));
+    }
+    if let Some(pid) = agent_pid {
+        meta.extra
+            .entry("agent_pid".to_string())
+            .or_insert(Value::Number(serde_json::Number::from(pid)));
+    }
+    meta
+}
 
 /// Dispatch a Kimi `HookRequest` through Claudine's canonical pipeline
 /// and return the negotiated [`HookDispatchResult`].
+///
+/// `env_context` and `agent_pid` are the wrapper's session environment and
+/// the spawned child PID; they are stamped onto the dispatched
+/// [`EventMeta`] so the hook/action context, dispatch JSONL, and reporting
+/// ingest all carry `claudine_pid` and `agent_pid`.
 ///
 /// Falls back to [`HookDispatchResult::allow_default`] when no Claudine
 /// config is loaded, when the runtime resolution fails, when the event
@@ -415,6 +452,8 @@ pub(crate) fn dispatch_hook_request(
     request: &KimiHookRequest,
     runtime_handle: Option<&tokio::runtime::Handle>,
     runtime_context: &claudine::dispatch::DispatchRuntimeContext,
+    env_context: &EnvironmentContext,
+    agent_pid: Option<u32>,
 ) -> HookDispatchResult {
     let Some(event_name) = request.event.as_deref() else {
         return HookDispatchResult::allow_default();
@@ -436,26 +475,7 @@ pub(crate) fn dispatch_hook_request(
         return HookDispatchResult::allow_default();
     };
 
-    let mut meta = EventMeta::new(Provider::KimiCode, canonical_event);
-    if let Some(context) = request.context.as_ref()
-        && let Some(map) = context.as_object()
-    {
-        for (key, value) in map {
-            meta.extra.insert(key.clone(), value.clone());
-        }
-        if let Some(tool_name) = map.get("tool_name").and_then(Value::as_str) {
-            meta.tool_name = Some(tool_name.to_string());
-        }
-        if let Some(tool_input) = map.get("tool_input") {
-            meta.tool_input = Some(tool_input.clone());
-        }
-        if let Some(tool_response) = map.get("tool_response") {
-            meta.tool_response = Some(tool_response.clone());
-        }
-        if let Some(session) = map.get("session_id").and_then(Value::as_str) {
-            meta.session_id = Some(session.to_string());
-        }
-    }
+    let meta = build_hook_event_meta(request, canonical_event, env_context, agent_pid);
 
     let dispatch_result = handle.block_on(claudine::dispatch::dispatch_event_meta_with_runtime(
         Provider::KimiCode,
@@ -511,10 +531,6 @@ fn outcome_to_hook_outcome(outcome: &claudine::dispatch::DispatchOutcome) -> Hoo
     }
 }
 
-// ---------------------------------------------------------------------------
-// Initialize response validation
-// ---------------------------------------------------------------------------
-
 /// Validate that the server's initialize response uses a protocol version
 /// Claudine knows how to drive. Returns `Ok(())` on a recognized version
 /// and an error otherwise so the caller can convert into a terminal
@@ -567,10 +583,6 @@ impl std::fmt::Display for WireInitError {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Session orchestrator
-// ---------------------------------------------------------------------------
-
 /// Configuration for a Kimi wire-mode session.
 pub(crate) struct WireSessionConfig<'a> {
     pub binary: &'a Path,
@@ -612,7 +624,6 @@ pub(crate) fn run_kimi_wire_session(
     let span = info_span!("kimi_wire_session");
     let _guard = span.enter();
     let _ = wiring.live_metrics; // reserved for Phase 4 wiring of stall detection
-    let _ = config.env_context; // reserved for Phase 5 hook dispatch context
 
     // Spawn child with stdin/stdout/stderr piped.
     let mut command = Command::new(config.binary);
@@ -632,8 +643,9 @@ pub(crate) fn run_kimi_wire_session(
     }
 
     let mut child = command.spawn()?;
+    let captured_pid = child.id();
     *child_spawned = true;
-    Span::current().record("child_pid", tracing::field::display(child.id()));
+    Span::current().record("child_pid", tracing::field::display(captured_pid));
 
     let stdin = child
         .stdin
@@ -672,6 +684,7 @@ pub(crate) fn run_kimi_wire_session(
     let writer_for_reader = writer.clone();
     let runtime_handle = tokio::runtime::Handle::try_current().ok();
     let runtime_context_for_reader = wiring.runtime_context.clone();
+    let env_context_for_reader = config.env_context.clone();
     let stream_span = Span::current();
     let stream_output = wiring.stream_output.clone();
     let prompt_finished = Arc::new(AtomicBool::new(false));
@@ -690,7 +703,8 @@ pub(crate) fn run_kimi_wire_session(
                 }
             });
             let reasoning_cb: ReasoningCallback = Box::new(|_chunk: &str| {});
-            let mut parser: Box<dyn SemanticStreamParser> = build_parser(output_cb, reasoning_cb);
+            let mut parser: Box<dyn SemanticStreamParser> =
+                build_parser(output_cb, reasoning_cb, Some(captured_pid));
 
             for line in reader.lines() {
                 let Ok(line) = line else { break };
@@ -704,6 +718,8 @@ pub(crate) fn run_kimi_wire_session(
                     &writer_for_reader,
                     runtime_handle.as_ref(),
                     &runtime_context_for_reader,
+                    &env_context_for_reader,
+                    Some(captured_pid),
                 );
 
                 match parser.feed_line(&line) {
@@ -821,6 +837,7 @@ pub(crate) fn run_kimi_wire_session(
             total_elapsed,
             first_response_latency: None,
         },
+        agent_pid: Some(captured_pid),
     })
 }
 
@@ -840,6 +857,8 @@ fn handle_request_dispatch(
     writer: &WireWriter,
     runtime_handle: Option<&tokio::runtime::Handle>,
     runtime_context: &claudine::dispatch::DispatchRuntimeContext,
+    env_context: &EnvironmentContext,
+    agent_pid: Option<u32>,
 ) -> Option<Value> {
     let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
         return None;
@@ -870,7 +889,13 @@ fn handle_request_dispatch(
             build_tool_call_unsupported_error(id)
         }
         WireRequestDispatch::HookRequest(hook) => {
-            let result = dispatch_hook_request(&hook, runtime_handle, runtime_context);
+            let result = dispatch_hook_request(
+                &hook,
+                runtime_handle,
+                runtime_context,
+                env_context,
+                agent_pid,
+            );
             info!(
                 request_id = %id,
                 event = ?hook.event,
@@ -1384,7 +1409,13 @@ mod tests {
             ..Default::default()
         };
         let runtime_context = claudine::dispatch::DispatchRuntimeContext::default();
-        let result = dispatch_hook_request(&request, None, &runtime_context);
+        let result = dispatch_hook_request(
+            &request,
+            None,
+            &runtime_context,
+            &EnvironmentContext::default(),
+            None,
+        );
         assert!(matches!(result.outcome, HookOutcome::Allow { .. }));
         assert!(
             result.warning.is_none(),
@@ -1397,9 +1428,81 @@ mod tests {
     fn dispatch_hook_request_missing_event_returns_allow() {
         let request = KimiHookRequest::default();
         let runtime_context = claudine::dispatch::DispatchRuntimeContext::default();
-        let result = dispatch_hook_request(&request, None, &runtime_context);
+        let result = dispatch_hook_request(
+            &request,
+            None,
+            &runtime_context,
+            &EnvironmentContext::default(),
+            None,
+        );
         assert!(matches!(result.outcome, HookOutcome::Allow { .. }));
         assert!(result.warning.is_none());
+    }
+
+    /// Review-2 Finding — Kimi wire `HookRequest` dispatch must stamp both
+    /// `claudine_pid` (via `EnvironmentContext`) and `agent_pid` onto the
+    /// dispatched [`EventMeta`] after a successful spawn.
+    ///
+    /// `build_hook_event_meta` is the meta-construction step
+    /// `dispatch_hook_request` runs immediately before
+    /// `dispatch_event_meta_with_runtime`, so asserting its output proves the
+    /// hook/action context, dispatch JSONL, and reporting ingest all carry the
+    /// PIDs. Both the typed fields and their `extra` mirrors are verified.
+    #[test]
+    fn build_hook_event_meta_stamps_pids_and_mirrors() {
+        let request = KimiHookRequest {
+            event: Some("PreToolUse".into()),
+            context: Some(json!({
+                "tool_name": "Bash",
+                "session_id": "sess-kimi-pid",
+            })),
+            ..Default::default()
+        };
+        let env = EnvironmentContext {
+            claudine_pid: Some(12_345),
+            ..Default::default()
+        };
+
+        let meta = build_hook_event_meta(&request, AgenticEvent::BeforeTool, &env, Some(67_890));
+
+        // Typed fields remain authoritative for JSONL and SQL ingest.
+        assert_eq!(meta.env.claudine_pid, Some(12_345));
+        assert_eq!(meta.agent_pid, Some(67_890));
+        // Request context still flows through to the typed slots.
+        assert_eq!(meta.tool_name.as_deref(), Some("Bash"));
+        assert_eq!(meta.session_id.as_deref(), Some("sess-kimi-pid"));
+        // `extra` mirrors expose both PIDs to templates and expressions.
+        assert_eq!(
+            meta.extra.get("claudine_pid").and_then(Value::as_u64),
+            Some(12_345)
+        );
+        assert_eq!(
+            meta.extra.get("agent_pid").and_then(Value::as_u64),
+            Some(67_890)
+        );
+    }
+
+    /// Without a spawned child the wire path has no `agent_pid` to report and
+    /// the env carries no `claudine_pid`; the meta must omit both rather than
+    /// fabricate them.
+    #[test]
+    fn build_hook_event_meta_omits_pids_when_unavailable() {
+        let request = KimiHookRequest {
+            event: Some("Stop".into()),
+            ..Default::default()
+        };
+
+        let meta = build_hook_event_meta(
+            &request,
+            AgenticEvent::TurnComplete,
+            &EnvironmentContext::default(),
+            None,
+        );
+
+        assert!(meta.agent_pid.is_none());
+        assert!(meta.env.claudine_pid.is_none());
+        assert!(!meta.extra.contains_key("claudine_pid"));
+        assert!(!meta.extra.contains_key("agent_pid"));
     }
 
     #[test]
@@ -1431,7 +1534,14 @@ mod tests {
             }
         });
         let trimmed = serde_json::to_string(&line).unwrap();
-        let synthetic = handle_request_dispatch(&trimmed, &writer, None, &runtime_context);
+        let synthetic = handle_request_dispatch(
+            &trimmed,
+            &writer,
+            None,
+            &runtime_context,
+            &EnvironmentContext::default(),
+            None,
+        );
         assert!(synthetic.is_none(), "approval requests are not diagnostics");
 
         let captured = buf.lock().unwrap().clone();
@@ -1463,7 +1573,14 @@ mod tests {
             "params": {"type": "TurnEnd", "payload": {}}
         });
         let trimmed = serde_json::to_string(&line).unwrap();
-        let synthetic = handle_request_dispatch(&trimmed, &writer, None, &runtime_context);
+        let synthetic = handle_request_dispatch(
+            &trimmed,
+            &writer,
+            None,
+            &runtime_context,
+            &EnvironmentContext::default(),
+            None,
+        );
         assert!(
             synthetic.is_none(),
             "notifications produce no synthetic envelopes"
@@ -1493,7 +1610,14 @@ mod tests {
             "params": {"type": "ToolCallRequest", "payload": {"id": "x"}}
         });
         let trimmed = serde_json::to_string(&line).unwrap();
-        let synthetic = handle_request_dispatch(&trimmed, &writer, None, &runtime_context);
+        let synthetic = handle_request_dispatch(
+            &trimmed,
+            &writer,
+            None,
+            &runtime_context,
+            &EnvironmentContext::default(),
+            None,
+        );
         assert!(
             synthetic.is_none(),
             "tool call rejections are not diagnostics"

@@ -1,4 +1,4 @@
-//! `question` — CLI front end for the tui-chrome input components.
+//! `question` — CLI front end for the biscuit-tui input components.
 //!
 //! Each supported component is a subcommand. The global `--output`
 //! flag selects the serialisation format applied to the submitted
@@ -8,7 +8,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
-use tui_chrome::HeightSpec;
+use biscuit_tui::HeightSpec;
 
 mod choice_normalize;
 mod commands;
@@ -25,7 +25,7 @@ use commands::text_area_input::{TextAreaInputArgs, run as run_text_area_input};
 use commands::text_input::{TextInputArgs, run as run_text_input};
 use output::OutputMode;
 
-/// Interactive prompts backed by tui-chrome components.
+/// Interactive prompts backed by biscuit-tui components.
 #[derive(Debug, Parser)]
 #[command(name = "question", version, about, long_about = None)]
 struct Cli {

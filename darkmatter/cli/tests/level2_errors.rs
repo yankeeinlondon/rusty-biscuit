@@ -87,11 +87,8 @@ fn run_md_compose_named(
     fs::write(&file_path, file_body).unwrap();
     let canonical = file_path.canonicalize().expect("canonicalize failed");
 
-    let mut guard = SHARED_HARNESS.get_or_init(|| {
-        let mut harness = WezTermHarness::new();
-        harness.spawn_shell().expect("spawn_shell failed");
-        harness
-    });
+    let mut guard = SHARED_HARNESS
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().unwrap();
 
     // Reset the visible region so a previous test's output does not bleed
@@ -111,9 +108,11 @@ const UNTERMINATED_BLOCK: &str = "::block when=\"true\"\nbody\n";
 // Document with an inline `$schema` requiring a property the frontmatter does
 // not satisfy. Drives the styled `SchemaValidationFailed` block through the
 // real binary + terminal so SGR/OSC8 behavior is captured live, not just
-// asserted against a process-local renderer.
-const MISSING_REQUIRED_SCHEMA: &str =
-    "---\n$schema:\n  spec: 'string(min(1); required)'\nspec: \"\"\n---\nBody\n";
+// asserted against a process-local renderer. The top-level `description:`
+// feeds the styled block's `<i><dim>…</dim></i>` description line so the
+// italic+dim contract is verified on a real pane, not only in plain-text
+// snapshots.
+const MISSING_REQUIRED_SCHEMA: &str = "---\n$schema:\n  spec: 'string(min(1); required)'\nspec: \"\"\ndescription: Planner prompt schema\n---\nBody\n";
 
 #[test]
 #[serial(level2_terminal)]
@@ -183,14 +182,39 @@ fn level2_schema_validation_block_renders_styled_link_and_bullet() {
         frame.plain
     );
 
-    // Red SGR (31 / 91 / 38;5;1 / 38;2;...) somewhere in the rendered block,
-    // and inverse SGR (7) on the property name. Be tolerant of theme palette
-    // differences: any one of the red ANSI variants is enough.
+    // The `description:` renders as `<i><dim>…</dim></i>`. Verify both that the
+    // text survives to plain AND that the italic + dim SGR survive the real
+    // terminal, so a regression that drops the italic styling (while keeping
+    // the text) is caught at Level 2 — plain-text snapshots cannot see it.
+    assert!(
+        frame.plain.contains("Planner prompt schema"),
+        "expected schema description text in styled block. plain:\n{}",
+        frame.plain
+    );
+    let has_italic = frame.raw.contains("\x1b[3m") || frame.raw.contains("\x1b[0;3m");
+    assert!(
+        has_italic,
+        "expected italic SGR for the description line. raw:\n{}",
+        frame.raw
+    );
+    let has_dim = frame.raw.contains("\x1b[2m") || frame.raw.contains("\x1b[0;2m");
+    assert!(
+        has_dim,
+        "expected dim SGR for the description line. raw:\n{}",
+        frame.raw
+    );
+
+    // Red SGR on the `missing`/`invalid` category label. `<red>` renders as the
+    // 3-bit `\x1b[31m` and is never promoted to truecolor, so accept only the
+    // red ANSI variants the renderer can plausibly emit. The OSC8 source link
+    // in this same block renders blue via a 24-bit `\x1b[38;2;…` sequence — a
+    // broad `38;2;` branch here would match that link and pass even if the red
+    // label stopped rendering red, so it is deliberately excluded.
     let has_red = frame.raw.contains("\x1b[31m")
         || frame.raw.contains("\x1b[91m")
         || frame.raw.contains("\x1b[0;31m")
         || frame.raw.contains("\x1b[38;5;1")
-        || frame.raw.contains("\x1b[38;2;");
+        || frame.raw.contains("\x1b[38;5;9");
     assert!(
         has_red,
         "expected red SGR for `missing`/`invalid` category label. raw:\n{}",

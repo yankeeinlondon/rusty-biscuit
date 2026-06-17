@@ -26,11 +26,12 @@
 use std::rc::Rc;
 
 use crate::browser::PageOptions;
-use crate::browser::fragment::{BrowserFragment, ComposableNode, Ready};
+use crate::browser::fragment::{BrowserFragment, ComposableNode, Ready, write_attributes};
 use crate::html::HtmlPage;
 use crate::html::attribute::{ClassDefinition, DomId, HtmlDataAttribute};
 use crate::html::tag::{BlockTag, HtmlAttribute, HtmlType, VoidTag};
-use crate::tree::attrs::{HintNamespace, NodeAttrs};
+use crate::tree::attrs::NodeAttrs;
+use crate::tree::{HrAlignment, HrKind, HrWeight};
 use crate::tree::diagnostic::{Diagnostic, Severity};
 use crate::tree::document::Document;
 use crate::tree::error::{RenderError, RenderStrictness, Rendered};
@@ -77,6 +78,10 @@ pub struct BrowserRenderOptions {
     /// highlighting). When `None`, [`NodeKind::Code`] nodes render as a plain
     /// `<pre><code>` block with a `language-<lang>` class.
     pub code_renderer: Option<Rc<dyn CodeRenderer>>,
+    /// The graphics fidelity tier for this render.
+    pub graphics_mode: crate::tree::GraphicsMode,
+    /// How Mermaid diagrams should be rendered in browser output.
+    pub mermaid_mode: crate::tree::BrowserMermaidMode,
 }
 
 impl std::fmt::Debug for BrowserRenderOptions {
@@ -87,6 +92,8 @@ impl std::fmt::Debug for BrowserRenderOptions {
             .field("raw_html", &self.raw_html)
             .field("page", &self.page)
             .field("code_renderer", &self.code_renderer.is_some())
+            .field("graphics_mode", &self.graphics_mode)
+            .field("mermaid_mode", &self.mermaid_mode)
             .finish()
     }
 }
@@ -147,10 +154,16 @@ pub fn render_browser_document(
 ) -> Result<Rendered<HtmlPage>, RenderError> {
     let mut writer = gate(&doc.root, opts)?;
 
-    // The document body is the root's children rendered as page fragments.
-    // A non-`Root` top-level node renders as a single wrapping fragment.
+    // The document body is the root's children rendered as page fragments. When
+    // the root carries a non-empty `Style` (e.g. a page-level foreground), it is
+    // rendered as its own wrapping `<div>` so the style is emitted and inherits
+    // to every descendant through CSS — otherwise the root style would be
+    // silently discarded. A non-`Root` top-level node always renders as a single
+    // wrapping fragment.
     let fragments = match &doc.root.kind {
-        NodeKind::Root { children } => writer.render_each(children)?,
+        NodeKind::Root { children } if root_style_is_empty(&doc.root) => {
+            writer.render_each(children)?
+        }
         _ => vec![writer.render(&doc.root)?],
     };
 
@@ -164,9 +177,113 @@ pub fn render_browser_document(
     })
 }
 
+/// Renders a whole [`Document`] directly to a final HTML [`String`].
+///
+/// This is the **full-document final-string path**: it walks the
+/// [`RenderNode`] tree once and streams HTML into a single output buffer
+/// instead of building an intermediate [`BrowserFragment`] tree per node and
+/// then serializing it. It exists for callers that already own a [`Document`]
+/// and need the complete browser output — the render-tree cutover path and the
+/// browser perf benchmarks.
+///
+/// It does **not** replace [`render_browser_document`] /
+/// [`render_browser_node`], which remain the API for component composition
+/// through [`HtmlPage`] / [`BrowserFragment<Ready>`]. Components still compose
+/// through fragments; this is an additional surface for the document renderer.
+///
+/// The emitted bytes are identical to
+/// `render_browser_document(doc, opts)?.output.render()` for supported tree
+/// inputs — same validation, diagnostics, page options, metadata, stylesheet /
+/// link / script ordering, raw-HTML policy, attributes, escaping, code-renderer
+/// hooks, graphics mode, Mermaid mode, styled HR, and semantic wrappers.
+///
+/// ## Extension islands
+///
+/// When [`BrowserRenderOptions::code_renderer`] returns a
+/// [`BrowserFragment<Ready>`] (a syntax-highlighted code block or a static
+/// Mermaid SVG), only that hook result is serialized into the buffer; the whole
+/// document is never routed through a fragment tree. Such hook fragments may
+/// carry page-level stylesheets, metadata, and dependency links, which roll up
+/// into the page `<head>` exactly as they would through [`HtmlPage`].
+///
+/// ## Errors
+///
+/// Propagates the same fatal errors as [`render_browser_document`]: a
+/// [`RenderError::InvalidTree`] from structural validation (or a strict
+/// warning), and any [`RenderError`] raised while walking a node (raw-HTML
+/// rejection, an unpromotable strict Mermaid SVG, an unsupported node under
+/// [`RenderStrictness::Strict`]).
+pub fn render_browser_document_html(
+    doc: &Document,
+    opts: &BrowserRenderOptions,
+) -> Result<Rendered<String>, RenderError> {
+    let diagnostics = validate_and_collect_diagnostics(&doc.root, opts)?;
+    let mut writer = StreamWriter {
+        opts,
+        diagnostics,
+        hook_fragments: Vec::new(),
+        buf: String::new(),
+    };
+
+    // The body is the root's children streamed in order; a styled root streams
+    // as its own wrapping `<div>` so a page-level style inherits to descendants,
+    // and a non-`Root` top-level node streams as a single wrapping element —
+    // mirroring `render_browser_document`'s body construction.
+    match &doc.root.kind {
+        NodeKind::Root { children } if root_style_is_empty(&doc.root) => {
+            for child in children {
+                writer.write(child)?;
+            }
+        }
+        _ => writer.write(&doc.root)?,
+    }
+
+    let StreamWriter {
+        diagnostics,
+        hook_fragments,
+        buf: body,
+        ..
+    } = writer;
+
+    // The `<head>` is built through the same `HtmlPage` head construction so
+    // the two paths cannot drift. Only hook fragments contribute head rollups
+    // (page-level structural fragments carry no stylesheet / metadata / links),
+    // so a page seeded with just those fragments produces an identical head.
+    // `first_h1_text` walks fragments, which this path does not build, so the
+    // equivalent first-`<h1>` text is computed from the tree and passed in.
+    let mut head_page = HtmlPage::from_fragments(hook_fragments);
+    if let Some(page_options) = opts.page.clone() {
+        head_page.apply_page_options(page_options);
+    }
+    let fallback_title = tree_first_h1_text(&doc.root);
+    let head = head_page.render_head(fallback_title.as_deref());
+    let output = format!("<!DOCTYPE html><html><head>{head}</head><body>{body}</body></html>");
+
+    Ok(Rendered {
+        output,
+        diagnostics,
+    })
+}
+
 /// Validates `node` and builds a [`Writer`], folding (or escalating) every
 /// warning-severity validation finding per the strictness model.
 fn gate<'a>(node: &RenderNode, opts: &'a BrowserRenderOptions) -> Result<Writer<'a>, RenderError> {
+    let diagnostics = validate_and_collect_diagnostics(node, opts)?;
+    Ok(Writer { opts, diagnostics })
+}
+
+/// Runs the shared validation gate for both the fragment writer
+/// ([`gate`]) and the direct document-string writer
+/// ([`render_browser_document_html`]).
+///
+/// Returns the warning-severity validation findings folded into
+/// [`Diagnostic`]s per the strictness model, or a fatal [`RenderError`] when an
+/// error-severity finding is present (always) or a warning is met under
+/// [`RenderStrictness::Strict`].
+fn validate_and_collect_diagnostics(
+    node: &RenderNode,
+    opts: &BrowserRenderOptions,
+) -> Result<Vec<Diagnostic>, RenderError> {
     let report = validate(node, ValidationMode::Full);
     if report.has_errors() {
         return Err(ValidationError {
@@ -175,11 +292,7 @@ fn gate<'a>(node: &RenderNode, opts: &'a BrowserRenderOptions) -> Result<Writer<
         .into());
     }
 
-    let mut writer = Writer {
-        opts,
-        diagnostics: Vec::new(),
-    };
-
+    let mut diagnostics = Vec::new();
     for finding in &report.findings {
         if finding.severity != Severity::Warning {
             continue;
@@ -191,7 +304,7 @@ fn gate<'a>(node: &RenderNode, opts: &'a BrowserRenderOptions) -> Result<Writer<
                 });
             }
             RenderStrictness::Warn => {
-                writer.diagnostics.push(Diagnostic::validation(
+                diagnostics.push(Diagnostic::validation(
                     Severity::Warning,
                     finding.message.clone(),
                     finding.span.clone(),
@@ -200,7 +313,7 @@ fn gate<'a>(node: &RenderNode, opts: &'a BrowserRenderOptions) -> Result<Writer<
             RenderStrictness::Lossy => {}
         }
     }
-    Ok(writer)
+    Ok(diagnostics)
 }
 
 /// Threads render options and accumulating diagnostics through the recursion.
@@ -218,7 +331,7 @@ impl Writer<'_> {
     /// (`<strong>`, `<em>`, `<s>`); a **block** node lowers the same emphasis
     /// to inline CSS via [`node_attributes`], because wrapping a block element
     /// inside `<strong>`/`<em>`/`<s>` is invalid HTML. The color, background,
-    /// underline, dim, and blink layers always lower to CSS.
+    /// underline, dim, blink, and inverse layers always lower to CSS.
     fn render(&mut self, node: &RenderNode) -> Result<BrowserFragment<Ready>, RenderError> {
         let fragment = self.render_kind(node)?;
         if is_inline_node_kind(&node.kind) {
@@ -246,15 +359,15 @@ impl Writer<'_> {
                 // A projected `Progress` widget carries `ProgressHints`. The
                 // browser emits a semantic CSS progress bar before falling
                 // back to normal paragraph rendering.
-                if let Some(hints) = node.attrs.progress_hints() {
-                    self.render_progress(node, &hints, children)
+                if let Some(hints) = node.attrs.progress_hints_ref() {
+                    self.render_progress(node, hints, children)
                 } else {
                     self.block(BlockTag::P, &node.attrs, children)
                 }
             }
             NodeKind::BlockQuote { children } => {
-                if let Some(hints) = node.attrs.columns_hints() {
-                    self.render_columns(node, &hints, children)
+                if let Some(hints) = node.attrs.columns_hints_ref() {
+                    self.render_columns(node, hints, children)
                 } else {
                     self.block(BlockTag::Blockquote, &node.attrs, children)
                 }
@@ -268,7 +381,7 @@ impl Writer<'_> {
                 self.render_list_item(node, *checked, children)
             }
             NodeKind::Code { lang, meta, value } => {
-                Ok(self.render_code_block(node, lang.as_deref(), meta.as_deref(), value))
+                self.render_code_block(node, lang.as_deref(), meta.as_deref(), value)
             }
             NodeKind::ThematicBreak => Ok(self.render_thematic_break(&node.attrs)),
             NodeKind::Table { align, children } => self.render_table(node, align, children),
@@ -299,7 +412,71 @@ impl Writer<'_> {
             NodeKind::SoftBreak => Ok(text_fragment(" ")),
             NodeKind::HardBreak => Ok(self.void(VoidTag::Br, &node.attrs)),
             NodeKind::Html { value, block } => self.render_html(node, value, *block),
+            NodeKind::Extended {
+                token, children, ..
+            } => self.render_extended(node, token, children),
             NodeKind::Unsupported { label } => self.render_unsupported(node, label),
+            NodeKind::Disclosure { summary, children, .. } => {
+                self.render_disclosure(node, summary, children)
+            }
+        }
+    }
+
+    /// Renders a disclosure block as native `\u003cdetails\u003e`/\u003csummary\u003e` HTML.
+    ///
+    /// The summary is rendered as phrasing content inside `\u003csummary\u003e`; the
+    /// disclosed body is rendered as block children inside `\u003cdetails\u003e`. No
+    /// JavaScript is emitted — the native elements provide collapse/expand.
+    fn render_disclosure(
+        &mut self,
+        node: &RenderNode,
+        summary: &[RenderNode],
+        children: &[RenderNode],
+    ) -> Result<BrowserFragment<Ready>, RenderError> {
+        let mut details = BrowserFragment::new().define_as_block_tag(BlockTag::Details, "");
+        for attr in node_attributes(&node.attrs, false) {
+            details = details.add_attribute(attr);
+        }
+
+        let mut summary_fragment =
+            BrowserFragment::new().define_as_block_tag(BlockTag::Summary, "");
+        for child in summary {
+            summary_fragment = summary_fragment.add_component(self.render(child)?);
+        }
+        details = details.add_component(summary_fragment.finalize());
+
+        for child in children {
+            details = details.add_component(self.render(child)?);
+        }
+
+        Ok(details.finalize())
+    }
+
+    /// Renders a [`NodeKind::Extended`] node.
+    ///
+    /// Built-in tokens lower to their semantic browser form: `mark` recovers
+    /// the `<mark>` element (closing the legacy `<span class="mark">` fidelity
+    /// regression) and `dim` becomes a `<span>` carrying the shared dim visual
+    /// policy (`opacity:0.6`, matching [`Style`]'s dim emphasis). An
+    /// unrecognized token falls back to a neutral `<span class="extended-{token}">`
+    /// wrapper whose class lets a stylesheet target it; the nested `children`
+    /// are preserved in every case.
+    ///
+    /// [`Style`]: crate::style::Style
+    fn render_extended(
+        &mut self,
+        node: &RenderNode,
+        token: &str,
+        children: &[RenderNode],
+    ) -> Result<BrowserFragment<Ready>, RenderError> {
+        match token {
+            "mark" => self.block(BlockTag::Mark, &node.attrs, children),
+            "dim" => self.block_with_extra_style(BlockTag::Span, &node.attrs, "opacity:0.6", children),
+            _ => {
+                let mut attrs = node.attrs.clone();
+                attrs.classes.push(format!("extended-{token}"));
+                self.block(BlockTag::Span, &attrs, children)
+            }
         }
     }
 
@@ -333,6 +510,44 @@ impl Writer<'_> {
         Ok(fragment.finalize())
     }
 
+    /// Builds an inline block-tag fragment that also carries an `extra_css`
+    /// inline `style` declaration, merging it onto any `style` produced from
+    /// the node's attrs rather than overwriting it.
+    ///
+    /// Used for tokens (such as `dim`) whose browser lowering has no dedicated
+    /// element and is expressed purely as inline CSS.
+    fn block_with_extra_style(
+        &mut self,
+        tag: BlockTag,
+        attrs: &NodeAttrs,
+        extra_css: &str,
+        children: &[RenderNode],
+    ) -> Result<BrowserFragment<Ready>, RenderError> {
+        let inline = is_inline_block_tag(&tag);
+        let mut fragment = BrowserFragment::new().define_as_block_tag(tag, "");
+        let mut style_emitted = false;
+        for attr in node_attributes(attrs, inline) {
+            match attr {
+                HtmlAttribute::Other(key, value) if key == "style" => {
+                    fragment = fragment.add_attribute(HtmlAttribute::Other(
+                        "style".into(),
+                        format!("{value};{extra_css}"),
+                    ));
+                    style_emitted = true;
+                }
+                other => fragment = fragment.add_attribute(other),
+            }
+        }
+        if !style_emitted {
+            fragment = fragment
+                .add_attribute(HtmlAttribute::Other("style".into(), extra_css.to_string()));
+        }
+        for child in children {
+            fragment = fragment.add_component(self.render(child)?);
+        }
+        Ok(fragment.finalize())
+    }
+
     /// Builds a void-tag fragment carrying `attrs`.
     fn void(&self, tag: VoidTag, attrs: &NodeAttrs) -> BrowserFragment<Ready> {
         let inline = is_inline_void_tag(&tag);
@@ -343,31 +558,47 @@ impl Writer<'_> {
         fragment.finalize()
     }
 
-    /// Builds the `<hr>` for a [`NodeKind::ThematicBreak`], surfacing any
-    /// `darkmatter.hr.*` hints as `data-hr-*` HTML attributes so the styled
-    /// rule is user-observable rather than collapsing to a plain `<hr>`
-    /// (review-4 finding 2).
+    /// Builds the `<hr>` or styled SVG for a [`NodeKind::ThematicBreak`].
     ///
-    /// Renderers that do not understand the hints simply ignore the data
-    /// attributes — the design's "renderers that do not understand the hint
-    /// should render a normal thematic break" contract still holds because a
-    /// `<hr data-hr-style="waves">` degrades to a plain rule when no CSS
-    /// targets the data attribute.
+    /// Under [`GraphicsMode::Off`] the node degrades to a plain `<hr>`
+    /// carrying any typed [`ThematicBreakAttrs`] as `data-hr-*` attributes so
+    /// the styled rule is still user-observable. Under [`GraphicsMode::Vector`]
+    /// and [`GraphicsMode::Rich`] those attrs drive an inline SVG whose
+    /// primitives reference CSS custom properties (`--hr-weight`,
+    /// `--hr-color`, `--hr-width`) so page-level overrides take effect.
+    ///
+    /// [`ThematicBreakAttrs`]: crate::tree::ThematicBreakAttrs
     fn render_thematic_break(&self, attrs: &NodeAttrs) -> BrowserFragment<Ready> {
-        let mut fragment = BrowserFragment::new().define_as_void_tag(VoidTag::Hr);
-        for attr in node_attributes(attrs, is_inline_void_tag(&VoidTag::Hr)) {
-            fragment = fragment.add_attribute(attr);
-        }
-        const HR_NS: HintNamespace = HintNamespace("darkmatter.hr");
-        for key in ["style", "alignment", "weight", "width", "color"] {
-            if let Some(value) = attrs.get_hint(HR_NS, key).and_then(|v| v.as_str()) {
-                fragment = fragment.add_attribute(HtmlAttribute::Data(
-                    HtmlDataAttribute::new(format!("hr-{key}")),
-                    value.to_string(),
-                ));
+        use crate::tree::GraphicsMode;
+
+        let hr = attrs.thematic_break_ref();
+        match self.opts.graphics_mode {
+            GraphicsMode::Off => {
+                let mut fragment = BrowserFragment::new().define_as_void_tag(VoidTag::Hr);
+                for attr in node_attributes(attrs, is_inline_void_tag(&VoidTag::Hr)) {
+                    fragment = fragment.add_attribute(attr);
+                }
+                for (key, value) in hr_data_attr_pairs(hr) {
+                    fragment = fragment.add_attribute(HtmlAttribute::Data(
+                        HtmlDataAttribute::new(format!("hr-{key}")),
+                        value.to_string(),
+                    ));
+                }
+                fragment.finalize()
+            }
+            GraphicsMode::Vector | GraphicsMode::Rich => {
+                let svg = crate::tree::graphics::horizontal_rule_svg(
+                    hr.and_then(|h| h.kind),
+                    hr.and_then(|h| h.weight),
+                    hr.and_then(|h| h.alignment),
+                    hr.and_then(|h| h.width.as_deref()),
+                    hr.and_then(|h| h.color.as_deref()),
+                    "0",
+                    "0",
+                );
+                BrowserFragment::new().define_as_raw_html(svg).finalize()
             }
         }
-        fragment.finalize()
     }
 
     /// Renders a section as `<section>` containing a heading tag and body.
@@ -495,8 +726,8 @@ impl Writer<'_> {
         let fallback_text = plain_text(children);
         let layout_css = node
             .attrs
-            .layout()
-            .map(|layout| layout_to_css(&layout))
+            .layout_ref()
+            .map(layout_to_css)
             .filter(|css| !css.is_empty())
             .unwrap_or_default();
         let html = super::shared::progress_html(hints, &fallback_text, &layout_css);
@@ -607,7 +838,121 @@ impl Writer<'_> {
     /// result is used verbatim. A `None` result (or no hook) falls back to the
     /// built-in plain `<pre><code>` rendering, with the language carried as a
     /// `language-<lang>` class on the `<code>` element.
+    ///
+    /// ## Mermaid promotion
+    ///
+    /// Mermaid code blocks are promoted based on [`BrowserRenderOptions::graphics_mode`]
+    /// (the fidelity ceiling) and [`BrowserRenderOptions::mermaid_mode`] (the
+    /// opt-in):
+    ///
+    /// | `graphics_mode` | `mermaid_mode`   | Result                                          |
+    /// |-----------------|------------------|-------------------------------------------------|
+    /// | `Off`           | any              | Plain `<pre><code>` (no promotion)              |
+    /// | `Vector`/`Rich` | `Code`           | Plain `<pre><code class="language-mermaid">`    |
+    /// | `Vector`        | `Interactive`    | Degrades to `StaticSvg` — `Vector` permits no scripts |
+    /// | `Rich`          | `Interactive`    | `<pre class="mermaid">` (client-side mermaid.js) |
+    /// | `Vector`/`Rich` | `StaticSvg`      | Static `<svg>` via [`CodeRenderer::render_browser_mermaid`]; falls back |
+    ///
+    /// `Interactive` is a script-capable presentation, so it sits above the
+    /// `Vector` ceiling ("no scripts"). A `Vector` + `Interactive` request is
+    /// therefore capped down to `StaticSvg`; only `Rich` reaches the mermaid.js
+    /// path.
+    ///
+    /// `StaticSvg` promotion never runs through the generic
+    /// [`CodeRenderer::render_browser_code`] hook: it uses the dedicated,
+    /// fallible [`CodeRenderer::render_browser_mermaid`] hook so a `None`
+    /// (failed SVG generation) is observable as a failure rather than being
+    /// hidden behind a hook's own code-block fallback, and strictness can apply
+    /// to it. Every non-promotion outcome (`Off`, `Code`, or a `StaticSvg`
+    /// failure that degrades under `Warn`/`Lossy`) instead routes through
+    /// [`Self::render_code_fallback`], which consults `render_browser_code`
+    /// first so the original code-block presentation — `title`, line numbers,
+    /// highlights — is preserved (the spec's lossless-fallback contract). That
+    /// hook's contract forbids promoting `lang="mermaid"`, so consulting it for
+    /// the fallback cannot re-introduce an SVG.
+    ///
+    /// ## Errors
+    ///
+    /// Under [`RenderStrictness::Strict`] a `StaticSvg` promotion that cannot
+    /// produce an SVG returns [`RenderError::LossyRejected`]; under
+    /// [`RenderStrictness::Warn`] it records a lossy diagnostic and falls back
+    /// to the plain code block.
     fn render_code_block(
+        &mut self,
+        node: &RenderNode,
+        lang: Option<&str>,
+        meta: Option<&str>,
+        value: &str,
+    ) -> Result<BrowserFragment<Ready>, RenderError> {
+        use crate::tree::{BrowserMermaidMode, GraphicsMode};
+
+        let is_mermaid = lang
+            .map(|l| l.eq_ignore_ascii_case("mermaid"))
+            .unwrap_or(false);
+
+        if is_mermaid {
+            // Off caps promotion. The block still renders through the lossless
+            // code fallback (title / line numbers / highlights preserved); the
+            // generic `render_browser_code` hook cannot re-promote mermaid, so
+            // consulting it here is safe.
+            if self.opts.graphics_mode == GraphicsMode::Off {
+                return Ok(self.render_code_fallback(node, lang, meta, value));
+            }
+            // `Vector` permits no scripts, so an `Interactive` request degrades
+            // to the static SVG form; only `Rich` reaches the mermaid.js path.
+            let mermaid_mode = match (self.opts.graphics_mode, self.opts.mermaid_mode) {
+                (GraphicsMode::Vector, BrowserMermaidMode::Interactive) => {
+                    BrowserMermaidMode::StaticSvg
+                }
+                (_, mode) => mode,
+            };
+            return match mermaid_mode {
+                BrowserMermaidMode::Interactive => Ok(self.render_mermaid_interactive(node, value)),
+                BrowserMermaidMode::StaticSvg => {
+                    if let Some(renderer) = &self.opts.code_renderer
+                        && let Some(fragment) =
+                            renderer.render_browser_mermaid(value, meta, &node.attrs)
+                    {
+                        return Ok(fragment);
+                    }
+                    // No hook, or SVG generation failed: degrade per strictness.
+                    // The degrade path uses the lossless code fallback so the
+                    // failed diagram keeps its code-block metadata.
+                    match self.opts.strictness {
+                        RenderStrictness::Strict => Err(RenderError::LossyRejected {
+                            message: "Mermaid static SVG promotion failed".to_string(),
+                        }),
+                        RenderStrictness::Warn => {
+                            self.note_lossy(
+                                "Mermaid static SVG promotion failed; rendered as code block",
+                                node,
+                            );
+                            Ok(self.render_code_fallback(node, lang, meta, value))
+                        }
+                        RenderStrictness::Lossy => {
+                            Ok(self.render_code_fallback(node, lang, meta, value))
+                        }
+                    }
+                }
+                BrowserMermaidMode::Code => Ok(self.render_code_fallback(node, lang, meta, value)),
+            };
+        }
+
+        Ok(self.render_code_fallback(node, lang, meta, value))
+    }
+
+    /// Renders a code block through the generic [`CodeRenderer::render_browser_code`]
+    /// hook when one is installed, falling back to the plain `<pre><code>`
+    /// block when there is no hook or it declines (`None`).
+    ///
+    /// This is the lossless fallback for both ordinary code blocks and Mermaid
+    /// blocks whose promotion is disabled (`Off`/`Code`) or has failed: the
+    /// spec requires the original code-block presentation — `title`, line
+    /// numbers, highlights — which the hook reproduces. Mermaid is never
+    /// re-promoted here; the hook's contract forbids promoting `lang="mermaid"`
+    /// (the dedicated [`CodeRenderer::render_browser_mermaid`] hook owns
+    /// promotion), so this path cannot emit an SVG.
+    fn render_code_fallback(
         &self,
         node: &RenderNode,
         lang: Option<&str>,
@@ -619,6 +964,37 @@ impl Writer<'_> {
         {
             return fragment;
         }
+        self.render_plain_code_block(node, lang, value)
+    }
+
+    /// Renders a Mermaid code block as an interactive `<pre class="mermaid">`.
+    ///
+    /// The diagram source is escaped by the fragment renderer so it is safe
+    /// to embed directly. Node attributes (id, classes, layout, style) are
+    /// preserved and merged with the required `mermaid` class.
+    fn render_mermaid_interactive(
+        &self,
+        node: &RenderNode,
+        value: &str,
+    ) -> BrowserFragment<Ready> {
+        let mut fragment = BrowserFragment::new().define_as_block_tag(BlockTag::Pre, "");
+        fragment = fragment.add_attribute(HtmlAttribute::Class(ClassDefinition::new("mermaid")));
+        for attr in node_attributes(&node.attrs, false) {
+            fragment = fragment.add_attribute(attr);
+        }
+        fragment
+            .add_child(ComposableNode::TextFragment(value.to_string()))
+            .finalize()
+    }
+
+    /// Renders a plain `<pre><code>` code block, used as the universal fallback
+    /// when promotion is disabled, unsupported, or fails.
+    fn render_plain_code_block(
+        &self,
+        node: &RenderNode,
+        lang: Option<&str>,
+        value: &str,
+    ) -> BrowserFragment<Ready> {
         let mut code = BrowserFragment::new().define_as_block_tag(BlockTag::Code, "");
         if let Some(lang) = lang.filter(|lang| !lang.is_empty()) {
             code = code.add_attribute(HtmlAttribute::Class(ClassDefinition::new(format!(
@@ -661,7 +1037,7 @@ impl Writer<'_> {
 
         // A table title/caption is emitted as a `<caption>` before `<thead>`
         // and `<tbody>`. An empty or whitespace-only title is ignored.
-        if let Some(title) = node.attrs.table_title()
+        if let Some(title) = node.attrs.table_title_ref()
             && !title.trim().is_empty()
         {
             let caption = BrowserFragment::new()
@@ -919,6 +1295,921 @@ impl Writer<'_> {
     }
 }
 
+/// Threads render options, accumulating diagnostics, hook fragments, and the
+/// output buffer through the direct document-string recursion.
+///
+/// Unlike [`Writer`], which builds a [`BrowserFragment`] per node, this writer
+/// streams HTML straight into [`buf`](StreamWriter::buf). Each method mirrors
+/// the corresponding [`Writer`] method so the bytes match: it reuses
+/// [`node_attributes`] and [`write_attributes`] for opening tags, and the
+/// shared SVG / progress / column helpers for the raw-HTML islands.
+struct StreamWriter<'a> {
+    opts: &'a BrowserRenderOptions,
+    diagnostics: Vec<Diagnostic>,
+    /// Fragments returned by [`BrowserRenderOptions::code_renderer`], retained
+    /// so their page-level stylesheet / metadata / dependency-link rollups feed
+    /// the `<head>` exactly as they would through [`HtmlPage`].
+    hook_fragments: Vec<BrowserFragment<Ready>>,
+    buf: String,
+}
+
+impl StreamWriter<'_> {
+    /// Streams a node and its subtree, applying the semantic emphasis wrappers
+    /// of a declared [`Style`](crate::style::Style) for inline nodes — the
+    /// streaming analogue of [`Writer::render`] + [`wrap_style_emphasis`].
+    fn write(&mut self, node: &RenderNode) -> Result<(), RenderError> {
+        if is_inline_node_kind(&node.kind)
+            && let Some(style) = node.attrs.style_ref().filter(|s| !s.is_empty())
+        {
+            let emphasis = style.emphasis;
+            // Outermost-first so the nesting renders `<strong><em><s>…`,
+            // matching `wrap_style_emphasis`'s innermost-first construction.
+            if emphasis.bold {
+                self.buf.push_str("<strong>");
+            }
+            if emphasis.italic {
+                self.buf.push_str("<em>");
+            }
+            if emphasis.strikethrough {
+                self.buf.push_str("<s>");
+            }
+            self.write_kind(node)?;
+            if emphasis.strikethrough {
+                self.buf.push_str("</s>");
+            }
+            if emphasis.italic {
+                self.buf.push_str("</em>");
+            }
+            if emphasis.bold {
+                self.buf.push_str("</strong>");
+            }
+            return Ok(());
+        }
+        self.write_kind(node)
+    }
+
+    /// Streams a single node by its [`NodeKind`] — the streaming analogue of
+    /// [`Writer::render_kind`].
+    fn write_kind(&mut self, node: &RenderNode) -> Result<(), RenderError> {
+        match &node.kind {
+            NodeKind::Root { children } => self.block(BlockTag::Div, &node.attrs, children),
+            NodeKind::Heading { depth, children } => {
+                self.block(heading_tag(*depth), &node.attrs, children)
+            }
+            NodeKind::Section {
+                depth,
+                heading,
+                children,
+            } => self.write_section(node, *depth, heading, children),
+            NodeKind::Paragraph { children } => {
+                if let Some(hints) = node.attrs.progress_hints_ref() {
+                    self.write_progress(node, hints, children);
+                    Ok(())
+                } else {
+                    self.block(BlockTag::P, &node.attrs, children)
+                }
+            }
+            NodeKind::BlockQuote { children } => {
+                if let Some(hints) = node.attrs.columns_hints_ref() {
+                    self.write_columns(node, hints, children)
+                } else {
+                    self.block(BlockTag::Blockquote, &node.attrs, children)
+                }
+            }
+            NodeKind::List {
+                ordered,
+                start,
+                children,
+            } => self.write_list(node, *ordered, *start, children),
+            NodeKind::ListItem { checked, children } => {
+                self.write_list_item(node, *checked, children)
+            }
+            NodeKind::Code { lang, meta, value } => {
+                self.write_code_block(node, lang.as_deref(), meta.as_deref(), value)
+            }
+            NodeKind::ThematicBreak => {
+                self.write_thematic_break(&node.attrs);
+                Ok(())
+            }
+            NodeKind::Table { align, children } => self.write_table(node, align, children),
+            NodeKind::TableRow { children } => self.block(BlockTag::Tr, &node.attrs, children),
+            NodeKind::TableCell { children } => self.block(BlockTag::Td, &node.attrs, children),
+            NodeKind::FootnoteDefinition {
+                identifier,
+                children,
+            } => self.write_footnote_definition(node, identifier, children),
+            NodeKind::Text { value } => {
+                self.push_text(value);
+                Ok(())
+            }
+            NodeKind::Emphasis { children } => self.block(BlockTag::Em, &node.attrs, children),
+            NodeKind::Strong { children } => self.block(BlockTag::Strong, &node.attrs, children),
+            NodeKind::Delete { children } => self.block(BlockTag::S, &node.attrs, children),
+            NodeKind::Span { children } => self.block(BlockTag::Span, &node.attrs, children),
+            NodeKind::InlineCode { value } => {
+                self.write_inline_code(node, value);
+                Ok(())
+            }
+            NodeKind::Link {
+                url,
+                title,
+                children,
+            } => self.write_link(node, url, title.as_deref(), children),
+            NodeKind::Image { url, title, alt } => {
+                self.write_image(node, url, title.as_deref(), alt);
+                Ok(())
+            }
+            NodeKind::FootnoteReference { identifier } => {
+                self.write_footnote_reference(node, identifier);
+                Ok(())
+            }
+            NodeKind::SoftBreak => {
+                self.buf.push(' ');
+                Ok(())
+            }
+            NodeKind::HardBreak => {
+                self.void(VoidTag::Br, &node.attrs);
+                Ok(())
+            }
+            NodeKind::Html { value, block } => self.write_html(node, value, *block),
+            NodeKind::Extended {
+                token, children, ..
+            } => self.write_extended(node, token, children),
+            NodeKind::Unsupported { label } => self.write_unsupported(node, label),
+            NodeKind::Disclosure { summary, children, .. } => {
+                self.write_disclosure(node, summary, children)
+            }
+        }
+    }
+
+    /// Streams a disclosure block as native `\u003cdetails\u003e`/\u003csummary\u003e` HTML.
+    fn write_disclosure(
+        &mut self,
+        node: &RenderNode,
+        summary: &[RenderNode],
+        children: &[RenderNode],
+    ) -> Result<(), RenderError> {
+        let inline = is_inline_block_tag(&BlockTag::Details);
+        self.open_block(&BlockTag::Details, &node_attributes(&node.attrs, inline));
+
+        self.open_block(&BlockTag::Summary, &[]);
+        for child in summary {
+            self.write(child)?;
+        }
+        self.close_block(&BlockTag::Summary);
+
+        for child in children {
+            self.write(child)?;
+        }
+
+        self.close_block(&BlockTag::Details);
+        Ok(())
+    }
+
+    /// Streams an open tag, child subtrees, and a close tag for a block
+    /// element — the streaming analogue of [`Writer::block`].
+    fn block(
+        &mut self,
+        tag: BlockTag,
+        attrs: &NodeAttrs,
+        children: &[RenderNode],
+    ) -> Result<(), RenderError> {
+        let inline = is_inline_block_tag(&tag);
+        self.open_block(&tag, &node_attributes(attrs, inline));
+        for child in children {
+            self.write(child)?;
+        }
+        self.close_block(&tag);
+        Ok(())
+    }
+
+    /// Writes `<{tag}{attributes}>` for a block element. The empty `base_class`
+    /// matches the fragment writer's `define_as_block_tag(tag, "")`.
+    fn open_block(&mut self, tag: &BlockTag, attributes: &[HtmlAttribute]) {
+        self.buf.push('<');
+        self.buf.push_str(tag.name());
+        write_attributes(&mut self.buf, attributes, Some(""));
+        self.buf.push('>');
+    }
+
+    /// Writes `</{tag}>`.
+    fn close_block(&mut self, tag: &BlockTag) {
+        self.buf.push_str("</");
+        self.buf.push_str(tag.name());
+        self.buf.push('>');
+    }
+
+    /// Writes `<{tag}{attributes}>` for a void element (no `base_class`).
+    fn void(&mut self, tag: VoidTag, attrs: &NodeAttrs) {
+        let inline = is_inline_void_tag(&tag);
+        self.write_void_tag(&tag, &node_attributes(attrs, inline));
+    }
+
+    /// Writes a void element from an explicit attribute list.
+    fn write_void_tag(&mut self, tag: &VoidTag, attributes: &[HtmlAttribute]) {
+        self.buf.push('<');
+        self.buf.push_str(tag.name());
+        write_attributes(&mut self.buf, attributes, None);
+        self.buf.push('>');
+    }
+
+    /// Appends HTML-escaped text — the streaming analogue of [`text_fragment`].
+    fn push_text(&mut self, value: &str) {
+        self.buf
+            .push_str(&crate::browser::utils::escape_text(value));
+    }
+
+    /// Serializes a hook-returned fragment into the buffer and retains it for
+    /// the `<head>` rollup. See [`StreamWriter::hook_fragments`].
+    fn push_hook_fragment(&mut self, fragment: BrowserFragment<Ready>) {
+        self.buf.push_str(&fragment.render());
+        self.hook_fragments.push(fragment);
+    }
+
+    /// Streaming analogue of [`Writer::render_section`].
+    fn write_section(
+        &mut self,
+        node: &RenderNode,
+        depth: HeadingDepth,
+        heading: &[RenderNode],
+        children: &[RenderNode],
+    ) -> Result<(), RenderError> {
+        self.open_block(&BlockTag::Section, &node_attributes(&node.attrs, false));
+        // The heading element carries no attributes (matching the fragment
+        // writer, which builds it with an empty attribute list).
+        let heading_tag = heading_tag(depth);
+        self.open_block(&heading_tag, &[]);
+        for child in heading {
+            self.write(child)?;
+        }
+        self.close_block(&heading_tag);
+        for child in children {
+            self.write(child)?;
+        }
+        self.close_block(&BlockTag::Section);
+        Ok(())
+    }
+
+    /// Streaming analogue of [`Writer::render_progress`].
+    fn write_progress(
+        &mut self,
+        node: &RenderNode,
+        hints: &crate::tree::ProgressHints,
+        children: &[RenderNode],
+    ) {
+        let fallback_text = plain_text(children);
+        let layout_css = node
+            .attrs
+            .layout_ref()
+            .map(layout_to_css)
+            .filter(|css| !css.is_empty())
+            .unwrap_or_default();
+        self.buf
+            .push_str(&super::shared::progress_html(hints, &fallback_text, &layout_css));
+    }
+
+    /// Streaming analogue of [`Writer::render_columns`].
+    fn write_columns(
+        &mut self,
+        node: &RenderNode,
+        hints: &crate::tree::ColumnsHints,
+        children: &[RenderNode],
+    ) -> Result<(), RenderError> {
+        let split = hints.left_count.min(children.len());
+        let (left, right) = children.split_at(split);
+
+        // Build the container's attribute list in the same order the fragment
+        // writer pushes it, then serialize it byte-identically.
+        let mut container_attrs: Vec<HtmlAttribute> = Vec::new();
+        let mut class_emitted = false;
+        let mut style_emitted = false;
+        for attr in node_attributes(&node.attrs, false) {
+            match attr {
+                HtmlAttribute::Class(class) => {
+                    container_attrs.push(HtmlAttribute::Class(ClassDefinition::new(format!(
+                        "columns {}",
+                        class.as_str()
+                    ))));
+                    class_emitted = true;
+                }
+                HtmlAttribute::Other(key, value) if key == "style" => {
+                    container_attrs.push(HtmlAttribute::Other(
+                        "style".into(),
+                        super::shared::columns_container_css(hints, &value),
+                    ));
+                    style_emitted = true;
+                }
+                other => container_attrs.push(other),
+            }
+        }
+        if !class_emitted {
+            container_attrs.push(HtmlAttribute::Class(ClassDefinition::new("columns")));
+        }
+        if !style_emitted {
+            container_attrs.push(HtmlAttribute::Other(
+                "style".into(),
+                super::shared::columns_container_css(hints, ""),
+            ));
+        }
+        self.open_block(&BlockTag::Div, &container_attrs);
+
+        for (group, column_css) in [
+            (left, super::shared::left_column_css(hints.left_width)),
+            (right, super::shared::right_column_css().to_string()),
+        ] {
+            self.open_block(
+                &BlockTag::Div,
+                &[
+                    HtmlAttribute::Class(ClassDefinition::new("column")),
+                    HtmlAttribute::Other("style".into(), column_css),
+                ],
+            );
+            for child in group {
+                self.write(child)?;
+            }
+            self.close_block(&BlockTag::Div);
+        }
+        self.close_block(&BlockTag::Div);
+        Ok(())
+    }
+
+    /// Streaming analogue of [`Writer::render_list`].
+    fn write_list(
+        &mut self,
+        node: &RenderNode,
+        ordered: bool,
+        start: Option<u64>,
+        children: &[RenderNode],
+    ) -> Result<(), RenderError> {
+        let tag = if ordered { BlockTag::Ol } else { BlockTag::Ul };
+        let marker_css = match node.attrs.list_marker_policy() {
+            crate::tree::ListMarkerPolicy::Default => None,
+            crate::tree::ListMarkerPolicy::None => Some("list-style:none"),
+            crate::tree::ListMarkerPolicy::TreeConnectors => {
+                let message = "list marker policy 'tree_connectors' has no \
+                               browser equivalent; degraded to a plain \
+                               no-marker list"
+                    .to_string();
+                match self.opts.strictness {
+                    RenderStrictness::Strict => {
+                        return Err(RenderError::LossyRejected { message });
+                    }
+                    RenderStrictness::Warn => {
+                        self.diagnostics
+                            .push(Diagnostic::lossy(message, Some(node.span.clone())));
+                    }
+                    RenderStrictness::Lossy => {}
+                }
+                Some("list-style:none")
+            }
+        };
+
+        let mut attrs: Vec<HtmlAttribute> = Vec::new();
+        let base = node_attributes(&node.attrs, false);
+        let has_style = base
+            .iter()
+            .any(|a| matches!(a, HtmlAttribute::Other(k, _) if k == "style"));
+        for attr in base {
+            match (&attr, marker_css) {
+                (HtmlAttribute::Other(key, value), Some(extra)) if key == "style" => {
+                    attrs.push(HtmlAttribute::Other(
+                        "style".into(),
+                        format!("{value};{extra}"),
+                    ));
+                }
+                _ => attrs.push(attr),
+            }
+        }
+        if let Some(extra) = marker_css.filter(|_| !has_style) {
+            attrs.push(HtmlAttribute::Other("style".into(), extra.to_string()));
+        }
+        if ordered && let Some(start) = start.filter(|s| *s != 1) {
+            attrs.push(HtmlAttribute::Other("start".into(), start.to_string()));
+        }
+
+        self.open_block(&tag, &attrs);
+        for child in children {
+            self.write(child)?;
+        }
+        self.close_block(&tag);
+        Ok(())
+    }
+
+    /// Streaming analogue of [`Writer::render_list_item`].
+    fn write_list_item(
+        &mut self,
+        node: &RenderNode,
+        checked: Option<bool>,
+        children: &[RenderNode],
+    ) -> Result<(), RenderError> {
+        let mut attrs = node.attrs.clone();
+        if checked.is_some() {
+            attrs.classes.push("task-list-item".to_string());
+        }
+        self.open_block(&BlockTag::Li, &node_attributes(&attrs, false));
+        if let Some(checked) = checked {
+            self.write_checkbox(checked);
+        }
+        for child in children {
+            self.write(child)?;
+        }
+        self.close_block(&BlockTag::Li);
+        Ok(())
+    }
+
+    /// Writes a disabled `<input type=checkbox>` — the streaming analogue of
+    /// [`checkbox`].
+    fn write_checkbox(&mut self, checked: bool) {
+        self.write_void_tag(
+            &VoidTag::Input,
+            &[
+                HtmlAttribute::Type(HtmlType::Checkbox),
+                HtmlAttribute::Disabled(true),
+                HtmlAttribute::Checked(checked),
+            ],
+        );
+    }
+
+    /// Streaming analogue of [`Writer::render_code_block`].
+    fn write_code_block(
+        &mut self,
+        node: &RenderNode,
+        lang: Option<&str>,
+        meta: Option<&str>,
+        value: &str,
+    ) -> Result<(), RenderError> {
+        use crate::tree::{BrowserMermaidMode, GraphicsMode};
+
+        let is_mermaid = lang
+            .map(|l| l.eq_ignore_ascii_case("mermaid"))
+            .unwrap_or(false);
+
+        if is_mermaid {
+            if self.opts.graphics_mode == GraphicsMode::Off {
+                self.write_code_fallback(node, lang, meta, value);
+                return Ok(());
+            }
+            let mermaid_mode = match (self.opts.graphics_mode, self.opts.mermaid_mode) {
+                (GraphicsMode::Vector, BrowserMermaidMode::Interactive) => {
+                    BrowserMermaidMode::StaticSvg
+                }
+                (_, mode) => mode,
+            };
+            match mermaid_mode {
+                BrowserMermaidMode::Interactive => self.write_mermaid_interactive(node, value),
+                BrowserMermaidMode::StaticSvg => {
+                    if let Some(renderer) = &self.opts.code_renderer
+                        && let Some(fragment) =
+                            renderer.render_browser_mermaid(value, meta, &node.attrs)
+                    {
+                        self.push_hook_fragment(fragment);
+                        return Ok(());
+                    }
+                    match self.opts.strictness {
+                        RenderStrictness::Strict => {
+                            return Err(RenderError::LossyRejected {
+                                message: "Mermaid static SVG promotion failed".to_string(),
+                            });
+                        }
+                        RenderStrictness::Warn => {
+                            self.note_lossy(
+                                "Mermaid static SVG promotion failed; rendered as code block",
+                                node,
+                            );
+                            self.write_code_fallback(node, lang, meta, value);
+                        }
+                        RenderStrictness::Lossy => {
+                            self.write_code_fallback(node, lang, meta, value);
+                        }
+                    }
+                }
+                BrowserMermaidMode::Code => self.write_code_fallback(node, lang, meta, value),
+            }
+            return Ok(());
+        }
+
+        self.write_code_fallback(node, lang, meta, value);
+        Ok(())
+    }
+
+    /// Streaming analogue of [`Writer::render_code_fallback`].
+    fn write_code_fallback(
+        &mut self,
+        node: &RenderNode,
+        lang: Option<&str>,
+        meta: Option<&str>,
+        value: &str,
+    ) {
+        if let Some(renderer) = &self.opts.code_renderer
+            && let Some(fragment) = renderer.render_browser_code(lang, value, meta, &node.attrs)
+        {
+            self.push_hook_fragment(fragment);
+            return;
+        }
+        self.write_plain_code_block(node, lang, value);
+    }
+
+    /// Streaming analogue of [`Writer::render_mermaid_interactive`].
+    fn write_mermaid_interactive(&mut self, node: &RenderNode, value: &str) {
+        let mut attrs: Vec<HtmlAttribute> =
+            vec![HtmlAttribute::Class(ClassDefinition::new("mermaid"))];
+        attrs.extend(node_attributes(&node.attrs, false));
+        self.open_block(&BlockTag::Pre, &attrs);
+        self.push_text(value);
+        self.close_block(&BlockTag::Pre);
+    }
+
+    /// Streaming analogue of [`Writer::render_plain_code_block`].
+    fn write_plain_code_block(&mut self, node: &RenderNode, lang: Option<&str>, value: &str) {
+        self.open_block(&BlockTag::Pre, &node_attributes(&node.attrs, false));
+        let code_attrs: Vec<HtmlAttribute> = match lang.filter(|lang| !lang.is_empty()) {
+            Some(lang) => vec![HtmlAttribute::Class(ClassDefinition::new(format!(
+                "language-{lang}"
+            )))],
+            None => Vec::new(),
+        };
+        self.open_block(&BlockTag::Code, &code_attrs);
+        self.push_text(value);
+        self.close_block(&BlockTag::Code);
+        self.close_block(&BlockTag::Pre);
+    }
+
+    /// Streaming analogue of [`Writer::render_inline_code`].
+    fn write_inline_code(&mut self, node: &RenderNode, value: &str) {
+        self.open_block(&BlockTag::Code, &node_attributes(&node.attrs, true));
+        self.push_text(value);
+        self.close_block(&BlockTag::Code);
+    }
+
+    /// Streaming analogue of [`Writer::render_table`].
+    fn write_table(
+        &mut self,
+        node: &RenderNode,
+        align: &[ColumnAlign],
+        children: &[RenderNode],
+    ) -> Result<(), RenderError> {
+        self.open_block(&BlockTag::Table, &node_attributes(&node.attrs, false));
+
+        if let Some(title) = node.attrs.table_title_ref()
+            && !title.trim().is_empty()
+        {
+            self.open_block(&BlockTag::Caption, &[]);
+            self.push_text(title.trim());
+            self.close_block(&BlockTag::Caption);
+        }
+
+        let mut rows = children.iter();
+        if let Some(header) = rows.next() {
+            self.open_block(&BlockTag::Thead, &[]);
+            self.write_table_row(header, align, true)?;
+            self.close_block(&BlockTag::Thead);
+        }
+
+        self.open_block(&BlockTag::Tbody, &[]);
+        for row in rows {
+            self.write_table_row(row, align, false)?;
+        }
+        self.close_block(&BlockTag::Tbody);
+        self.close_block(&BlockTag::Table);
+        Ok(())
+    }
+
+    /// Streaming analogue of [`Writer::render_table_row`].
+    fn write_table_row(
+        &mut self,
+        row: &RenderNode,
+        align: &[ColumnAlign],
+        header: bool,
+    ) -> Result<(), RenderError> {
+        let cells = match &row.kind {
+            NodeKind::TableRow { children } => children.as_slice(),
+            _ => &[],
+        };
+        self.open_block(&BlockTag::Tr, &node_attributes(&row.attrs, false));
+        for (index, cell) in cells.iter().enumerate() {
+            self.write_table_cell(
+                cell,
+                align.get(index).copied().unwrap_or(ColumnAlign::None),
+                header,
+            )?;
+        }
+        self.close_block(&BlockTag::Tr);
+        Ok(())
+    }
+
+    /// Streaming analogue of [`Writer::render_table_cell`].
+    fn write_table_cell(
+        &mut self,
+        cell: &RenderNode,
+        align: ColumnAlign,
+        header: bool,
+    ) -> Result<(), RenderError> {
+        let children = match &cell.kind {
+            NodeKind::TableCell { children } => children.as_slice(),
+            _ => &[],
+        };
+        let tag = if header { BlockTag::Th } else { BlockTag::Td };
+        let align_css = align_value(align).map(|value| format!("text-align:{value}"));
+        let mut attrs: Vec<HtmlAttribute> = Vec::new();
+        let mut style_emitted = false;
+        for attr in node_attributes(&cell.attrs, false) {
+            match (&attr, &align_css) {
+                (HtmlAttribute::Other(key, value), Some(extra)) if key == "style" => {
+                    attrs.push(HtmlAttribute::Other(
+                        "style".into(),
+                        format!("{value};{extra}"),
+                    ));
+                    style_emitted = true;
+                }
+                _ => attrs.push(attr),
+            }
+        }
+        if let Some(extra) = align_css.filter(|_| !style_emitted) {
+            attrs.push(HtmlAttribute::Other("style".into(), extra));
+        }
+        self.open_block(&tag, &attrs);
+        for child in children {
+            self.write(child)?;
+        }
+        self.close_block(&tag);
+        Ok(())
+    }
+
+    /// Streaming analogue of [`Writer::render_footnote_definition`].
+    fn write_footnote_definition(
+        &mut self,
+        node: &RenderNode,
+        identifier: &str,
+        children: &[RenderNode],
+    ) -> Result<(), RenderError> {
+        let mut attrs: Vec<HtmlAttribute> = vec![
+            HtmlAttribute::Id(DomId::new(format!("fn-{identifier}"))),
+            HtmlAttribute::Class(ClassDefinition::new("footnote-definition")),
+        ];
+        attrs.extend(node_attributes(&node.attrs, false));
+        self.open_block(&BlockTag::Div, &attrs);
+        for child in children {
+            self.write(child)?;
+        }
+        self.close_block(&BlockTag::Div);
+        Ok(())
+    }
+
+    /// Streaming analogue of [`Writer::render_footnote_reference`].
+    fn write_footnote_reference(&mut self, node: &RenderNode, identifier: &str) {
+        let mut attrs = node_attributes(&node.attrs, true);
+        attrs.push(HtmlAttribute::Other(
+            "href".into(),
+            format!("#fn-{identifier}"),
+        ));
+        self.open_block(&BlockTag::A, &attrs);
+        self.push_text(identifier);
+        self.close_block(&BlockTag::A);
+    }
+
+    /// Streaming analogue of [`Writer::render_link`].
+    fn write_link(
+        &mut self,
+        node: &RenderNode,
+        url: &str,
+        title: Option<&str>,
+        children: &[RenderNode],
+    ) -> Result<(), RenderError> {
+        let mut attrs = node_attributes(&node.attrs, true);
+        attrs.push(HtmlAttribute::Other("href".into(), url.to_string()));
+        if let Some(title) = title {
+            attrs.push(HtmlAttribute::Title(title.to_string()));
+        }
+        self.open_block(&BlockTag::A, &attrs);
+        for child in children {
+            self.write(child)?;
+        }
+        self.close_block(&BlockTag::A);
+        Ok(())
+    }
+
+    /// Streaming analogue of [`Writer::render_image`].
+    fn write_image(&mut self, node: &RenderNode, url: &str, title: Option<&str>, alt: &str) {
+        let mut attrs = node_attributes(&node.attrs, true);
+        attrs.push(HtmlAttribute::Other("src".into(), url.to_string()));
+        attrs.push(HtmlAttribute::Alt(alt.to_string()));
+        if let Some(title) = title {
+            attrs.push(HtmlAttribute::Title(title.to_string()));
+        }
+        self.write_void_tag(&VoidTag::Img, &attrs);
+    }
+
+    /// Streaming analogue of [`Writer::render_thematic_break`].
+    fn write_thematic_break(&mut self, attrs: &NodeAttrs) {
+        use crate::tree::GraphicsMode;
+
+        let hr = attrs.thematic_break_ref();
+        match self.opts.graphics_mode {
+            GraphicsMode::Off => {
+                let mut out = node_attributes(attrs, is_inline_void_tag(&VoidTag::Hr));
+                for (key, value) in hr_data_attr_pairs(hr) {
+                    out.push(HtmlAttribute::Data(
+                        HtmlDataAttribute::new(format!("hr-{key}")),
+                        value.to_string(),
+                    ));
+                }
+                self.write_void_tag(&VoidTag::Hr, &out);
+            }
+            GraphicsMode::Vector | GraphicsMode::Rich => {
+                let svg = crate::tree::graphics::horizontal_rule_svg(
+                    hr.and_then(|h| h.kind),
+                    hr.and_then(|h| h.weight),
+                    hr.and_then(|h| h.alignment),
+                    hr.and_then(|h| h.width.as_deref()),
+                    hr.and_then(|h| h.color.as_deref()),
+                    "0",
+                    "0",
+                );
+                self.buf.push_str(&svg);
+            }
+        }
+    }
+
+    /// Streaming analogue of [`Writer::render_html`].
+    fn write_html(
+        &mut self,
+        node: &RenderNode,
+        value: &str,
+        _block: bool,
+    ) -> Result<(), RenderError> {
+        match self.opts.raw_html {
+            RawHtmlPolicy::Allow => self.buf.push_str(value),
+            RawHtmlPolicy::Escape => {
+                self.note_lossy("raw HTML emitted as escaped text", node);
+                self.push_text(value);
+            }
+            RawHtmlPolicy::Reject => match self.opts.strictness {
+                RenderStrictness::Strict => {
+                    return Err(RenderError::LossyRejected {
+                        message: "raw HTML rejected by RawHtmlPolicy::Reject".to_string(),
+                    });
+                }
+                RenderStrictness::Warn | RenderStrictness::Lossy => {
+                    self.note_lossy("raw HTML rejected and emitted as escaped text", node);
+                    self.push_text(value);
+                }
+            },
+        }
+        Ok(())
+    }
+
+    /// Streaming analogue of [`Writer::render_extended`].
+    fn write_extended(
+        &mut self,
+        node: &RenderNode,
+        token: &str,
+        children: &[RenderNode],
+    ) -> Result<(), RenderError> {
+        match token {
+            "mark" => self.block(BlockTag::Mark, &node.attrs, children),
+            "dim" => self.block_with_extra_style(BlockTag::Span, &node.attrs, "opacity:0.6", children),
+            _ => {
+                let mut attrs = node.attrs.clone();
+                attrs.classes.push(format!("extended-{token}"));
+                self.block(BlockTag::Span, &attrs, children)
+            }
+        }
+    }
+
+    /// Streaming analogue of [`Writer::block_with_extra_style`].
+    fn block_with_extra_style(
+        &mut self,
+        tag: BlockTag,
+        attrs: &NodeAttrs,
+        extra_css: &str,
+        children: &[RenderNode],
+    ) -> Result<(), RenderError> {
+        let inline = is_inline_block_tag(&tag);
+        let mut out: Vec<HtmlAttribute> = Vec::new();
+        let mut style_emitted = false;
+        for attr in node_attributes(attrs, inline) {
+            match attr {
+                HtmlAttribute::Other(key, value) if key == "style" => {
+                    out.push(HtmlAttribute::Other(
+                        "style".into(),
+                        format!("{value};{extra_css}"),
+                    ));
+                    style_emitted = true;
+                }
+                other => out.push(other),
+            }
+        }
+        if !style_emitted {
+            out.push(HtmlAttribute::Other("style".into(), extra_css.to_string()));
+        }
+        self.open_block(&tag, &out);
+        for child in children {
+            self.write(child)?;
+        }
+        self.close_block(&tag);
+        Ok(())
+    }
+
+    /// Streaming analogue of [`Writer::render_unsupported`].
+    fn write_unsupported(&mut self, node: &RenderNode, label: &str) -> Result<(), RenderError> {
+        match self.opts.strictness {
+            RenderStrictness::Strict => Err(RenderError::Unsupported {
+                label: label.to_string(),
+            }),
+            RenderStrictness::Warn => {
+                self.diagnostics.push(Diagnostic::unsupported(
+                    format!("unsupported content dropped: {label}"),
+                    Some(node.span.clone()),
+                ));
+                self.buf.push_str(&format!("<!-- unsupported: {label} -->"));
+                Ok(())
+            }
+            // Lossy emits nothing (the fragment writer emits an empty text node).
+            RenderStrictness::Lossy => Ok(()),
+        }
+    }
+
+    /// Records a lossy diagnostic, unless strictness is [`RenderStrictness::Lossy`]
+    /// — the streaming analogue of [`Writer::note_lossy`].
+    fn note_lossy(&mut self, message: &str, node: &RenderNode) {
+        if self.opts.strictness != RenderStrictness::Lossy {
+            self.diagnostics.push(Diagnostic::lossy(
+                message.to_string(),
+                Some(node.span.clone()),
+            ));
+        }
+    }
+}
+
+/// Returns the concatenated text content of the first `<h1>` the browser
+/// renderer would emit for `root`, or `None` when the tree produces no `<h1>`.
+///
+/// This mirrors [`HtmlPage::first_h1_text`] on the equivalent fragment tree so
+/// [`render_browser_document_html`] can supply the same `<title>` fallback
+/// without building fragments. An `<h1>` is produced by a depth-1
+/// [`NodeKind::Heading`] or by a depth-1 [`NodeKind::Section`]'s heading; the
+/// scan is document-order and descends container children.
+/// Whether the document root carries no renderable [`Style`](crate::style::Style).
+///
+/// When `true` the document folds emit the root's children directly as page
+/// fragments; when `false` the root is rendered as its own wrapping `<div>` so
+/// its style is emitted and inherits to every descendant.
+fn root_style_is_empty(root: &RenderNode) -> bool {
+    root.attrs.style_ref().is_none_or(|s| s.is_empty())
+}
+
+fn tree_first_h1_text(root: &RenderNode) -> Option<String> {
+    match &root.kind {
+        NodeKind::Heading { depth, children } if depth.get() == 1 => {
+            let mut out = String::new();
+            for child in children {
+                collect_h1_text(child, &mut out);
+            }
+            Some(out)
+        }
+        NodeKind::Section {
+            depth,
+            heading,
+            children,
+        } => {
+            if depth.get() == 1 {
+                let mut out = String::new();
+                for child in heading {
+                    collect_h1_text(child, &mut out);
+                }
+                return Some(out);
+            }
+            children.iter().find_map(tree_first_h1_text)
+        }
+        _ => root.children().iter().find_map(tree_first_h1_text),
+    }
+}
+
+/// Collects the text content of an inline subtree the way
+/// [`crate::html::find_first_h1_text`]'s `collect_text` does over the rendered
+/// fragment tree: text and inline-code values contribute, a soft break is a
+/// space, void elements (images, hard breaks) and raw HTML contribute nothing,
+/// and every other inline container descends into its children.
+fn collect_h1_text(node: &RenderNode, out: &mut String) {
+    match &node.kind {
+        NodeKind::Text { value } | NodeKind::InlineCode { value } => out.push_str(value),
+        NodeKind::FootnoteReference { identifier } => out.push_str(identifier),
+        NodeKind::SoftBreak => out.push(' '),
+        // Void / raw / leaf elements emit no text node to collect.
+        NodeKind::Image { .. }
+        | NodeKind::HardBreak
+        | NodeKind::Html { .. }
+        | NodeKind::ThematicBreak
+        | NodeKind::Code { .. }
+        | NodeKind::Unsupported { .. } => {}
+        _ => {
+            for child in node.children() {
+                collect_h1_text(child, out);
+            }
+        }
+    }
+}
+
 /// Maps a heading depth `1..=6` to its `<h1>`..`<h6>` block tag.
 fn heading_tag(depth: HeadingDepth) -> BlockTag {
     match depth.get() {
@@ -1002,6 +2293,7 @@ fn is_inline_block_tag(tag: &BlockTag) -> bool {
             | BlockTag::Span
             | BlockTag::Code
             | BlockTag::A
+            | BlockTag::Mark
     )
 }
 
@@ -1010,13 +2302,34 @@ fn is_inline_void_tag(tag: &VoidTag) -> bool {
     matches!(tag, VoidTag::Br | VoidTag::Img)
 }
 
+/// Collects the set `(suffix, value)` pairs for a thematic break's `data-hr-*`
+/// degradation attributes, in a fixed key order shared by the fragment and
+/// streaming HR paths so both emit byte-identical `<hr>` output.
+fn hr_data_attr_pairs(
+    hr: Option<&crate::tree::ThematicBreakAttrs>,
+) -> Vec<(&'static str, &str)> {
+    let Some(hr) = hr else {
+        return Vec::new();
+    };
+    [
+        ("kind", hr.kind.map(HrKind::as_str)),
+        ("alignment", hr.alignment.map(HrAlignment::as_str)),
+        ("weight", hr.weight.map(HrWeight::as_str)),
+        ("width", hr.width.as_deref()),
+        ("color", hr.color.as_deref()),
+    ]
+    .into_iter()
+    .filter_map(|(key, value)| value.map(|v| (key, v)))
+    .collect()
+}
+
 /// Translates a node's [`NodeAttrs`] into HTML attributes: `id` to the `id`
 /// attribute, `classes` to a `class` attribute, and a stored
 /// [`Layout`](crate::layout::Layout) plus the CSS-bearing layers of a stored
 /// [`Style`](crate::style::Style) to an inline `style` attribute.
 ///
-/// Layout is skipped for inline nodes; the validation gate records a warning
-/// when an inline node carries a layout, and the renderer drops it per D5.
+/// Layout is skipped for inline nodes; the validation gate rejects a layout on
+/// an inline node as an error, and the renderer drops it per D5.
 /// `Style` is applied to both block nodes and inline `Span` nodes. The
 /// layout and style declarations share a single `style` attribute and never
 /// overwrite each other.
@@ -1032,9 +2345,17 @@ fn node_attributes(attrs: &NodeAttrs, inline: bool) -> Vec<HtmlAttribute> {
     }
 
     let mut decls: Vec<String> = Vec::new();
-    if !inline && let Some(layout) = attrs.layout() {
-        let css = layout_to_css(&layout);
+    // The renderable width contract is content-box: `width` is the content box
+    // and `padding` / `border` are added around it. A page stylesheet may ship a
+    // global `* { box-sizing: border-box }` reset, which would silently
+    // reinterpret the lowered `width` as a border-box width. Emitting
+    // `box-sizing:content-box` on every node that lowers a non-default width,
+    // padding, or border keeps the contract under any such reset.
+    let mut needs_content_box = false;
+    if !inline && let Some(layout) = attrs.layout_ref() {
+        let css = layout_to_css(layout);
         if !css.is_empty() {
+            needs_content_box |= layout_lowers_box(layout);
             decls.push(css);
         }
     }
@@ -1042,44 +2363,208 @@ fn node_attributes(attrs: &NodeAttrs, inline: bool) -> Vec<HtmlAttribute> {
     // nodes. Bold / italic / strikethrough emphasis lowers to CSS here for
     // block nodes; for inline nodes it is applied as semantic wrappers by
     // `wrap_style_emphasis` instead, so the CSS form is suppressed.
-    if let Some(style) = attrs.style().filter(|s| !s.is_empty()) {
-        let css = style_css_declarations(&style, !inline);
+    if let Some(style) = attrs.style_ref().filter(|s| !s.is_empty()) {
+        let css = style_css_declarations(style, !inline);
         if !css.is_empty() {
+            needs_content_box |= style_draws_border(style);
             decls.push(css);
         }
+    }
+    if needs_content_box {
+        // Prepend so the contract is set before the width/padding it governs.
+        decls.insert(0, "box-sizing:content-box".into());
+    }
+    // Validated `inline_style` (browser-only author CSS, already merged over
+    // frontmatter defaults upstream) is the author's per-node intent: it
+    // *replaces* the derived `Layout` / `Style` declaration for any property it
+    // sets, then its remaining declarations append last. Replacing — rather than
+    // appending a shadowing duplicate — keeps the overridden frontmatter value
+    // out of the attribute entirely (the spec's per-node-wins contract). Derived
+    // declarations whose property `inline_style` does not set are untouched, so
+    // intentional internal pairs (e.g. an explicit margin plus an `auto`
+    // centering margin) are preserved. It is a validated `CssStyle`, so no
+    // unparsed CSS can be injected here.
+    let inline_decls: Vec<String> = attrs
+        .browser_ref()
+        .and_then(|browser| browser.inline_style.as_ref())
+        .map(css_style_declarations)
+        .unwrap_or_default();
+    if !inline_decls.is_empty() {
+        let overridden: std::collections::HashSet<String> =
+            inline_decls.iter().map(|d| css_property_of(d)).collect();
+        let mut merged: Vec<String> = decls
+            .into_iter()
+            .flat_map(|group| {
+                group
+                    .split(';')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|decl| !overridden.contains(&css_property_of(decl)))
+            .collect();
+        merged.extend(inline_decls);
+        decls = merged;
     }
     if !decls.is_empty() {
         out.push(HtmlAttribute::Other("style".into(), decls.join(";")));
     }
+    push_browser_attributes(&mut out, attrs);
     out
+}
+
+/// The property name of a `name:value` CSS declaration (the text before the
+/// first `:`, trimmed). Used to let a validated `inline_style` override the
+/// derived `Layout` / `Style` declaration for the same property.
+fn css_property_of(decl: &str) -> String {
+    decl.split(':').next().unwrap_or("").trim().to_string()
+}
+
+/// Lowers a validated [`CssStyle`](crate::stylesheet::CssStyle) to compact
+/// `name:value` declaration strings matching the inline-`style` form the
+/// browser renderer emits for `Layout` / `Style`.
+///
+/// [`CssStyle::to_css`](crate::stylesheet::CssStyle::to_css) produces the
+/// human-spaced `name: value;` form (one declaration per line); this collapses
+/// each line to `name:value` so it merges cleanly into the joined `style`
+/// attribute.
+fn css_style_declarations(style: &crate::stylesheet::CssStyle) -> Vec<String> {
+    style
+        .to_css()
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim().trim_end_matches(';');
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.replacen(": ", ":", 1))
+            }
+        })
+        .collect()
+}
+
+/// Appends the typed browser attributes carried by [`NodeAttrs::browser`].
+///
+/// The kind-specific `link` / `image` sub-groups are emitted unconditionally
+/// from whichever group is present — validation guarantees a `link` group only
+/// rides a [`NodeKind::Link`] and an `image` group only a [`NodeKind::Image`],
+/// so no node-kind check is needed here. `data_attrs` and `aria_attrs` emit in
+/// the deterministic [`BTreeMap`](std::collections::BTreeMap) key order with a
+/// fixed `data-` / `aria-` prefix, so an arbitrary attribute (`onclick`,
+/// `href`, `src`, `style`) can never be injected through them. `inline_style`
+/// is handled by [`node_attributes`] so it coalesces into the single `style`
+/// attribute.
+fn push_browser_attributes(out: &mut Vec<HtmlAttribute>, attrs: &NodeAttrs) {
+    let Some(browser) = attrs.browser_ref() else {
+        return;
+    };
+    if let Some(link) = &browser.link {
+        if let Some(target) = &link.target {
+            out.push(HtmlAttribute::Target(target.as_str().to_string()));
+        }
+        if !link.rel.is_empty() {
+            let rel = link
+                .rel
+                .iter()
+                .map(|r| r.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            out.push(HtmlAttribute::Other("rel".into(), rel));
+        }
+        if let Some(download) = &link.download {
+            out.push(HtmlAttribute::Other("download".into(), download.clone()));
+        }
+    }
+    if let Some(image) = &browser.image {
+        if let Some(loading) = image.loading {
+            out.push(HtmlAttribute::Other(
+                "loading".into(),
+                loading.as_str().to_string(),
+            ));
+        }
+        if let Some(decoding) = image.decoding {
+            out.push(HtmlAttribute::Other(
+                "decoding".into(),
+                decoding.as_str().to_string(),
+            ));
+        }
+    }
+    for (name, value) in &browser.data_attrs {
+        out.push(HtmlAttribute::Other(
+            format!("data-{}", name.as_str()),
+            value.clone(),
+        ));
+    }
+    for (name, value) in &browser.aria_attrs {
+        out.push(HtmlAttribute::Other(
+            format!("aria-{}", name.as_str()),
+            value.clone(),
+        ));
+    }
+}
+
+/// Whether a [`Layout`](crate::layout::Layout) lowers a non-default `width` or
+/// `padding` for the browser — the box-model declarations whose width contract
+/// is content-box. Mirrors the emission conditions in [`layout_to_css`].
+fn layout_lowers_box(layout: &crate::layout::Layout) -> bool {
+    use crate::layout::{Length, Width};
+    use crate::target::RenderTarget;
+    // The default `Edges` resolve to `Some(Length::Zero)` (not `None`), so a
+    // zero side is a no-op padding that does not widen the box.
+    let p = &layout.padding;
+    let padded = [&p.top, &p.right, &p.bottom, &p.left]
+        .into_iter()
+        .any(|tv| !matches!(tv.resolve(RenderTarget::Browser), None | Some(Length::Zero)));
+    let sized = match &layout.width {
+        Width::Auto => false,
+        Width::FitContent => true,
+        Width::Fixed(tv) => tv.resolve(RenderTarget::Browser).is_some(),
+    };
+    padded || sized
+}
+
+/// Whether a [`Style`](crate::style::Style) draws at least one border edge — the
+/// case where `border` widens the box and the content-box contract matters.
+fn style_draws_border(style: &crate::style::Style) -> bool {
+    use crate::style::BorderSides;
+    style
+        .border
+        .as_ref()
+        .is_some_and(|b| !matches!(b.sides, BorderSides::None))
 }
 
 /// Lowers the CSS-bearing layers of a [`Style`](crate::style::Style) to an
 /// inline CSS declaration string.
 ///
 /// Always covers `color`, `background` (as `background-color`), and the
-/// underline / dim / blink emphasis layers. When `emit_emphasis` is `true`
+/// underline / dim / blink / inverse emphasis layers. When `emit_emphasis` is `true`
 /// (a block node) the bold / italic / strikethrough layers are *also* lowered
 /// here, to `font-weight` / `font-style` / `text-decoration-line` — wrapping a
 /// block element in `<strong>`/`<em>`/`<s>` would be invalid HTML. When it is
 /// `false` (an inline node) those three layers are left to the semantic
 /// wrappers applied by [`wrap_style_emphasis`].
 ///
-/// `border` and `fill` are intentionally ignored until the broader Browser
-/// Style box-painting work defines those semantics.
+/// `border` lowers to the CSS `border-*` matrix via [`lower_border`]. The
+/// deleted `fill` field no longer exists; a painted box is `background`.
 fn style_css_declarations(style: &crate::style::Style, emit_emphasis: bool) -> String {
     use crate::color::ColorMode;
     use crate::target::RenderTarget;
 
     let mut decls: Vec<String> = Vec::new();
 
+    // Both color slots and the border share one lowering: `PaintColor` →
+    // validated `CssColor` (`rgb()` / `rgba()` / keyword) via the shared
+    // `paint_to_css_color`, so alpha survives and the CSS form stays consistent
+    // with the MarkdownPlus emitter.
     let resolve_color = |tv: &crate::layout::TargetValue<
-        crate::style::PerMode<crate::color::Color>,
+        crate::style::PerMode<crate::style::PaintColor>,
     >|
      -> Option<String> {
         tv.resolve(RenderTarget::Browser)
             .map(|per_mode| *per_mode.resolve(ColorMode::Dark))
-            .and_then(super::shared::color_to_css)
+            .and_then(super::shared::paint_to_css_color)
+            .map(|css| css.to_string())
     };
 
     if let Some(color) = style.color.as_ref().and_then(&resolve_color) {
@@ -1104,6 +2589,9 @@ fn style_css_declarations(style: &crate::style::Style, emit_emphasis: bool) -> S
     if style.emphasis.blink {
         decls.push("text-decoration:blink".into());
     }
+    if style.emphasis.inverse {
+        decls.push("filter:invert(1)".into());
+    }
     // Block emphasis: lower bold / italic / strikethrough to CSS rather than
     // to the semantic element wrappers used for inline nodes.
     if emit_emphasis {
@@ -1117,7 +2605,82 @@ fn style_css_declarations(style: &crate::style::Style, emit_emphasis: bool) -> S
             decls.push("text-decoration-line:line-through".into());
         }
     }
+    if let Some(border) = style.border.as_ref() {
+        lower_border(border, resolve_color, &mut decls);
+    }
     decls.join(";")
+}
+
+/// Lowers a [`Border`](crate::style::Border) to inline CSS declarations.
+///
+/// `weight` maps to a pixel `border-width` (`Thin`→`1px`, `Medium`→`2px`,
+/// `Thick`→`3px`); `line_style` to the matching `border-style` keyword; and
+/// `color` through the shared `PerMode` → CSS color path.
+/// [`BorderSides::All`] emits the `border-{width,style,color}` shorthands;
+/// [`BorderSides::Sides`] emits only the enabled per-side `border-{side}-*`
+/// declarations; [`BorderSides::None`] emits no edges. `radius` lowers to
+/// `border-radius` regardless of which sides are drawn.
+///
+/// [`BorderSides::All`]: crate::style::BorderSides::All
+/// [`BorderSides::Sides`]: crate::style::BorderSides::Sides
+/// [`BorderSides::None`]: crate::style::BorderSides::None
+fn lower_border(
+    border: &crate::style::Border,
+    resolve_color: impl Fn(
+        &crate::layout::TargetValue<crate::style::PerMode<crate::style::PaintColor>>,
+    ) -> Option<String>,
+    decls: &mut Vec<String>,
+) {
+    use crate::style::{BorderLineStyle, BorderSides, BorderWeight};
+    use crate::target::RenderTarget;
+
+    let width = match border.weight {
+        BorderWeight::Thin => "1px",
+        BorderWeight::Medium => "2px",
+        BorderWeight::Thick => "3px",
+    };
+    let line_style = match border.line_style {
+        BorderLineStyle::Solid => "solid",
+        BorderLineStyle::Dashed => "dashed",
+        BorderLineStyle::Dotted => "dotted",
+        BorderLineStyle::Double => "double",
+    };
+    let color = border.color.as_ref().and_then(resolve_color);
+
+    match border.sides {
+        BorderSides::All => {
+            decls.push(format!("border-width:{width}"));
+            decls.push(format!("border-style:{line_style}"));
+            if let Some(color) = &color {
+                decls.push(format!("border-color:{color}"));
+            }
+        }
+        BorderSides::None => {}
+        BorderSides::Sides {
+            top,
+            right,
+            bottom,
+            left,
+        } => {
+            for (enabled, side) in [
+                (top, "top"),
+                (right, "right"),
+                (bottom, "bottom"),
+                (left, "left"),
+            ] {
+                if enabled {
+                    decls.push(format!("border-{side}-width:{width}"));
+                    decls.push(format!("border-{side}-style:{line_style}"));
+                    if let Some(color) = &color {
+                        decls.push(format!("border-{side}-color:{color}"));
+                    }
+                }
+            }
+        }
+    }
+    if let Some(len) = border.radius.as_ref().and_then(|r| r.resolve(RenderTarget::Browser)) {
+        decls.push(format!("border-radius:{}", css_len(len, false)));
+    }
 }
 
 /// Wraps `fragment` in semantic emphasis tags (`<strong>`, `<em>`, `<s>`) for
@@ -1126,13 +2689,13 @@ fn style_css_declarations(style: &crate::style::Style, emit_emphasis: bool) -> S
 /// This applies only the bold / italic / strikethrough layers and is invoked
 /// only for **inline** nodes — wrapping a block element in these tags is
 /// invalid HTML, so a block node lowers the same layers to CSS through
-/// [`style_css_declarations`]. The underline / dim / blink layers are always
-/// applied as CSS by [`style_css_declarations`].
+/// [`style_css_declarations`]. The underline / dim / blink / inverse layers
+/// are always applied as CSS by [`style_css_declarations`].
 fn wrap_style_emphasis(
     attrs: &NodeAttrs,
     fragment: BrowserFragment<Ready>,
 ) -> BrowserFragment<Ready> {
-    let Some(style) = attrs.style().filter(|s| !s.is_empty()) else {
+    let Some(style) = attrs.style_ref().filter(|s| !s.is_empty()) else {
         return fragment;
     };
     let emphasis = style.emphasis;
@@ -1162,27 +2725,34 @@ fn wrap_style_emphasis(
 /// Lowers a [`Layout`](crate::layout::Layout) to an inline CSS declaration
 /// string for the browser target.
 ///
-/// Margin sides are resolved with [`TargetValue::resolve`] for
-/// [`RenderTarget::Browser`]. Vertical sides (`top` / `bottom`) lower a
-/// [`Length::Ch`] to `lh` (line-height units); horizontal sides lower it to
-/// `ch`. A `max_width` adds `margin-left` / `margin-right: auto` per the
-/// node's [`Alignment`]. [`WordWrap::None`] adds `white-space:nowrap`; any
-/// wrapping variant adds `overflow-wrap:break-word`.
+/// `margin` and `padding` edge sides are resolved with
+/// [`TargetValue::resolve`] for [`RenderTarget::Browser`]. Vertical sides
+/// (`top` / `bottom`) lower a [`Length::Ch`] to `lh` (line-height units);
+/// horizontal sides lower it to `ch`. [`Width::FitContent`] emits
+/// `width:fit-content` and [`Width::Fixed`] emits an explicit `width`;
+/// [`Width::Auto`] omits the property. A `max_width` adds `margin-left` /
+/// `margin-right: auto` per the node's [`Alignment`]. [`WordWrap::None`] adds
+/// `white-space:nowrap`; any wrapping variant adds `overflow-wrap:break-word`.
+/// Lowers a [`Length`](crate::layout::Length) to a CSS dimension. A
+/// [`Length::Ch`] becomes `lh` (line-height units) when `vertical`, otherwise
+/// `ch`; the other variants are target-independent.
+fn css_len(len: &crate::layout::Length, vertical: bool) -> String {
+    use crate::layout::Length;
+    match len {
+        Length::Zero => "0".into(),
+        Length::Ch(n) if vertical => format!("{n}lh"),
+        Length::Ch(n) => format!("{n}ch"),
+        Length::Percent(p) => format!("{p}%"),
+        Length::Css(sizing) => sizing.to_string(),
+    }
+}
+
 fn layout_to_css(layout: &crate::layout::Layout) -> String {
-    use crate::layout::{Alignment, Length, TargetValue, WordWrap};
+    use crate::layout::{Alignment, Length, TargetValue, Width, WordWrap};
     use crate::target::RenderTarget;
 
     fn resolve(tv: &TargetValue<Length>) -> Option<&Length> {
         tv.resolve(RenderTarget::Browser)
-    }
-    fn css_len(len: &Length, vertical: bool) -> String {
-        match len {
-            Length::Zero => "0".into(),
-            Length::Ch(n) if vertical => format!("{n}lh"),
-            Length::Ch(n) => format!("{n}ch"),
-            Length::Percent(p) => format!("{p}%"),
-            Length::Css(sizing) => sizing.to_string(),
-        }
     }
 
     let m = &layout.margin;
@@ -1198,6 +2768,28 @@ fn layout_to_css(layout: &crate::layout::Layout) -> String {
     }
     if let Some(l) = resolve(&m.right) {
         decls.push(format!("margin-right:{}", css_len(l, false)));
+    }
+    let p = &layout.padding;
+    if let Some(l) = resolve(&p.top) {
+        decls.push(format!("padding-top:{}", css_len(l, true)));
+    }
+    if let Some(l) = resolve(&p.bottom) {
+        decls.push(format!("padding-bottom:{}", css_len(l, true)));
+    }
+    if let Some(l) = resolve(&p.left) {
+        decls.push(format!("padding-left:{}", css_len(l, false)));
+    }
+    if let Some(l) = resolve(&p.right) {
+        decls.push(format!("padding-right:{}", css_len(l, false)));
+    }
+    match &layout.width {
+        Width::Auto => {}
+        Width::FitContent => decls.push("width:fit-content".into()),
+        Width::Fixed(tv) => {
+            if let Some(l) = resolve(tv) {
+                decls.push(format!("width:{}", css_len(l, false)));
+            }
+        }
     }
     if let Some(mw) = layout.max_width.as_ref().and_then(resolve) {
         decls.push(format!("max-width:{}", css_len(mw, false)));
@@ -1263,6 +2855,14 @@ mod tests {
         render(node).output.render()
     }
 
+    fn html_with_graphics_mode(node: &RenderNode, mode: crate::tree::GraphicsMode) -> String {
+        let opts = BrowserRenderOptions {
+            graphics_mode: mode,
+            ..BrowserRenderOptions::default()
+        };
+        render_browser_node(node, &opts).expect("render").output.render()
+    }
+
     #[test]
     fn default_options_use_warn_and_escape() {
         let opts = BrowserRenderOptions::default();
@@ -1291,6 +2891,54 @@ mod tests {
         assert_eq!(html(&em), "<em>e</em>");
         assert_eq!(html(&st), "<strong>s</strong>");
         assert_eq!(html(&de), "<s>d</s>");
+    }
+
+    #[test]
+    fn extended_unknown_token_falls_back_to_classed_span() {
+        // An unrecognized token wraps its children in a neutral
+        // `<span class="extended-{token}">` that a stylesheet can target.
+        let node = RenderNode::extended("custom-token", vec![RenderNode::text("hi")], None);
+        assert_eq!(html(&node), "<span class=\"extended-custom-token\">hi</span>");
+
+        // Nested inline content is preserved, and any author classes are kept
+        // alongside the generated `extended-{token}` class.
+        let mut nested = RenderNode::extended(
+            "custom-token",
+            vec![RenderNode::strong(vec![RenderNode::text("b")])],
+            None,
+        );
+        nested.attrs.classes.push("authored".to_string());
+        assert_eq!(
+            html(&nested),
+            "<span class=\"authored extended-custom-token\"><strong>b</strong></span>"
+        );
+    }
+
+    #[test]
+    fn extended_mark_recovers_semantic_mark_element() {
+        // `mark` lowers to the semantic `<mark>` element, not a classed span —
+        // this recovers the legacy `<span class="mark">` fidelity regression.
+        let node = RenderNode::extended("mark", vec![RenderNode::text("hi")], None);
+        let out = html(&node);
+        assert_eq!(out, "<mark>hi</mark>");
+        assert!(!out.contains("class=\"mark\""));
+        assert!(!out.contains("extended-mark"));
+
+        // Nested inline content is preserved inside the `<mark>`.
+        let nested = RenderNode::extended(
+            "mark",
+            vec![RenderNode::strong(vec![RenderNode::text("b")])],
+            None,
+        );
+        assert_eq!(html(&nested), "<mark><strong>b</strong></mark>");
+    }
+
+    #[test]
+    fn extended_dim_lowers_to_opacity_span() {
+        // `dim` has no dedicated element; it lowers to a span carrying the
+        // shared dim visual policy (`opacity:0.6`).
+        let node = RenderNode::extended("dim", vec![RenderNode::text("hi")], None);
+        assert_eq!(html(&node), "<span style=\"opacity:0.6\">hi</span>");
     }
 
     #[test]
@@ -1349,6 +2997,447 @@ mod tests {
     }
 
     #[test]
+    fn mermaid_off_mode_renders_as_plain_code_block() {
+        let block = RenderNode::code(Some("mermaid".into()), None, "graph TD; A to B");
+        let opts = BrowserRenderOptions {
+            graphics_mode: crate::tree::GraphicsMode::Off,
+            ..BrowserRenderOptions::default()
+        };
+        let out = render_browser_node(&block, &opts).unwrap().output.render();
+        assert!(
+            out.contains(r#"<pre><code class="language-mermaid">"#),
+            "expected plain code block under Off mode, got: {out}"
+        );
+        assert!(out.contains("graph TD"), "source must survive: {out}");
+    }
+
+    #[test]
+    fn mermaid_code_mode_renders_as_plain_code_block() {
+        let block = RenderNode::code(Some("mermaid".into()), None, "graph TD; A to B");
+        let opts = BrowserRenderOptions {
+            mermaid_mode: crate::tree::BrowserMermaidMode::Code,
+            ..BrowserRenderOptions::default()
+        };
+        let out = render_browser_node(&block, &opts).unwrap().output.render();
+        assert!(
+            out.contains(r#"<pre><code class="language-mermaid">"#),
+            "expected plain code block under Code mode, got: {out}"
+        );
+        assert!(out.contains("graph TD"), "source must survive: {out}");
+    }
+
+    #[test]
+    fn mermaid_interactive_mode_emits_pre_class_mermaid() {
+        let block = RenderNode::code(Some("mermaid".into()), None, "graph TD; A to B");
+        let opts = BrowserRenderOptions {
+            mermaid_mode: crate::tree::BrowserMermaidMode::Interactive,
+            ..BrowserRenderOptions::default()
+        };
+        let out = render_browser_node(&block, &opts).unwrap().output.render();
+        assert!(
+            out.contains(r#"<pre class="mermaid">"#),
+            "expected interactive mermaid pre, got: {out}"
+        );
+        assert!(out.contains("graph TD"), "source must survive: {out}");
+    }
+
+    #[test]
+    fn mermaid_interactive_escapes_html_in_source() {
+        let block = RenderNode::code(
+            Some("mermaid".into()),
+            None,
+            "graph TD; A[script node] to B",
+        );
+        let opts = BrowserRenderOptions {
+            mermaid_mode: crate::tree::BrowserMermaidMode::Interactive,
+            ..BrowserRenderOptions::default()
+        };
+        let out = render_browser_node(&block, &opts).unwrap().output.render();
+        assert!(
+            out.contains("script node"),
+            "text must survive escaping: {out}"
+        );
+    }
+
+    #[test]
+    fn mermaid_static_svg_tries_code_renderer_then_fallback() {
+        use std::rc::Rc;
+
+        struct SvgCodeRenderer;
+        impl crate::tree::CodeRenderer for SvgCodeRenderer {
+            fn render_terminal_code(
+                &self,
+                _lang: Option<&str>,
+                _value: &str,
+                _meta: Option<&str>,
+                _attrs: &crate::tree::NodeAttrs,
+                _context: crate::color::TerminalCodeContext,
+            ) -> Option<String> {
+                None
+            }
+            fn render_browser_code(
+                &self,
+                _lang: Option<&str>,
+                _value: &str,
+                _meta: Option<&str>,
+                _attrs: &crate::tree::NodeAttrs,
+            ) -> Option<BrowserFragment<Ready>> {
+                None
+            }
+            fn render_browser_mermaid(
+                &self,
+                _value: &str,
+                _meta: Option<&str>,
+                _attrs: &crate::tree::NodeAttrs,
+            ) -> Option<BrowserFragment<Ready>> {
+                Some(
+                    BrowserFragment::new()
+                        .define_as_raw_html("<svg></svg>".to_string())
+                        .finalize(),
+                )
+            }
+        }
+
+        let block = RenderNode::code(Some("mermaid".into()), None, "graph TD; A to B");
+        let opts = BrowserRenderOptions {
+            mermaid_mode: crate::tree::BrowserMermaidMode::StaticSvg,
+            code_renderer: Some(Rc::new(SvgCodeRenderer)),
+            ..BrowserRenderOptions::default()
+        };
+        let out = render_browser_node(&block, &opts).unwrap().output.render();
+        assert!(
+            out.contains("<svg>"),
+            "expected SVG from code_renderer hook, got: {out}"
+        );
+
+        // Without the hook, falls back to plain code block.
+        let opts2 = BrowserRenderOptions {
+            mermaid_mode: crate::tree::BrowserMermaidMode::StaticSvg,
+            ..BrowserRenderOptions::default()
+        };
+        let out2 = render_browser_node(&block, &opts2).unwrap().output.render();
+        assert!(
+            out2.contains(r#"<pre><code class="language-mermaid">"#),
+            "expected fallback code block, got: {out2}"
+        );
+    }
+
+    #[test]
+    fn non_mermaid_code_ignores_mermaid_mode() {
+        let block = RenderNode::code(Some("rust".into()), None, "let a = 1;");
+        let opts = BrowserRenderOptions {
+            mermaid_mode: crate::tree::BrowserMermaidMode::Interactive,
+            ..BrowserRenderOptions::default()
+        };
+        let out = render_browser_node(&block, &opts).unwrap().output.render();
+        assert!(
+            out.contains(r#"<pre><code class="language-rust">"#),
+            "non-mermaid code must not be affected by mermaid_mode, got: {out}"
+        );
+    }
+
+    #[test]
+    fn mermaid_preserves_node_attrs_in_interactive_mode() {
+        let mut block = RenderNode::code(Some("mermaid".into()), None, "graph TD");
+        block.attrs.id = Some("diagram-1".into());
+        let opts = BrowserRenderOptions {
+            mermaid_mode: crate::tree::BrowserMermaidMode::Interactive,
+            ..BrowserRenderOptions::default()
+        };
+        let out = render_browser_node(&block, &opts).unwrap().output.render();
+        assert!(out.contains(r#"id="diagram-1""#), "id must be preserved: {out}");
+        assert!(
+            out.contains(r#"class="mermaid""#),
+            "mermaid class must be present: {out}"
+        );
+    }
+
+    /// Review-2 finding 1: `Interactive` is script-capable and so sits above the
+    /// `Vector` ceiling ("no scripts"). Under `Vector`, an `Interactive` request
+    /// must NOT emit the client-side mermaid.js `<pre class="mermaid">`; it
+    /// degrades to the static SVG rung. Only `Rich` reaches mermaid.js.
+    #[test]
+    fn mermaid_interactive_under_vector_degrades_to_static_svg() {
+        use std::rc::Rc;
+
+        let block = RenderNode::code(Some("mermaid".into()), None, "graph TD");
+
+        // With a StaticSvg-capable hook, the degraded rung produces SVG.
+        let opts = BrowserRenderOptions {
+            graphics_mode: crate::tree::GraphicsMode::Vector,
+            mermaid_mode: crate::tree::BrowserMermaidMode::Interactive,
+            code_renderer: Some(Rc::new(MermaidSvgHook)),
+            ..BrowserRenderOptions::default()
+        };
+        let out = render_browser_node(&block, &opts).unwrap().output.render();
+        assert!(
+            !out.contains(r#"<pre class="mermaid">"#),
+            "Vector must not reach the interactive mermaid.js path, got: {out}"
+        );
+        assert!(
+            out.contains("<svg"),
+            "Vector + Interactive must degrade to static SVG, got: {out}"
+        );
+
+        // Under `Rich`, the same request DOES reach mermaid.js.
+        let rich = BrowserRenderOptions {
+            graphics_mode: crate::tree::GraphicsMode::Rich,
+            mermaid_mode: crate::tree::BrowserMermaidMode::Interactive,
+            ..BrowserRenderOptions::default()
+        };
+        let rich_out = render_browser_node(&block, &rich).unwrap().output.render();
+        assert!(
+            rich_out.contains(r#"<pre class="mermaid">"#),
+            "Rich + Interactive must reach mermaid.js, got: {rich_out}"
+        );
+    }
+
+    #[test]
+    fn mermaid_static_svg_with_off_graphics_mode_fallback() {
+        let block = RenderNode::code(Some("mermaid".into()), None, "graph TD");
+        let opts = BrowserRenderOptions {
+            graphics_mode: crate::tree::GraphicsMode::Off,
+            mermaid_mode: crate::tree::BrowserMermaidMode::StaticSvg,
+            ..BrowserRenderOptions::default()
+        };
+        let out = render_browser_node(&block, &opts).unwrap().output.render();
+        assert!(
+            out.contains(r#"<pre><code class="language-mermaid">"#),
+            "Off mode must suppress StaticSvg, got: {out}"
+        );
+    }
+
+    /// A code renderer whose Mermaid hook always emits SVG — exactly the shape
+    /// darkmatter installs.
+    struct MermaidSvgHook;
+    impl crate::tree::CodeRenderer for MermaidSvgHook {
+        fn render_terminal_code(
+            &self,
+            _lang: Option<&str>,
+            _value: &str,
+            _meta: Option<&str>,
+            _attrs: &crate::tree::NodeAttrs,
+            _context: crate::color::TerminalCodeContext,
+        ) -> Option<String> {
+            None
+        }
+        fn render_browser_code(
+            &self,
+            _lang: Option<&str>,
+            _value: &str,
+            _meta: Option<&str>,
+            _attrs: &crate::tree::NodeAttrs,
+        ) -> Option<BrowserFragment<Ready>> {
+            None
+        }
+        fn render_browser_mermaid(
+            &self,
+            _value: &str,
+            _meta: Option<&str>,
+            _attrs: &crate::tree::NodeAttrs,
+        ) -> Option<BrowserFragment<Ready>> {
+            Some(
+                BrowserFragment::new()
+                    .define_as_raw_html("<svg></svg>".to_string())
+                    .finalize(),
+            )
+        }
+    }
+
+    /// Finding 3 (review-1): under `GraphicsMode::Off`, a `lang="mermaid"` block
+    /// must render as a plain code block even when a Mermaid-aware code renderer
+    /// (which would otherwise emit SVG via `render_browser_mermaid`) is
+    /// installed. The Off branch must short-circuit before consulting any hook.
+    #[test]
+    fn mermaid_off_bypasses_svg_emitting_code_renderer() {
+        use std::rc::Rc;
+
+        let block = RenderNode::code(Some("mermaid".into()), None, "graph TD; A to B");
+        let opts = BrowserRenderOptions {
+            graphics_mode: crate::tree::GraphicsMode::Off,
+            // Default mermaid_mode (Code) — and a hook that would emit SVG.
+            code_renderer: Some(Rc::new(MermaidSvgHook)),
+            ..BrowserRenderOptions::default()
+        };
+        let out = render_browser_node(&block, &opts).unwrap().output.render();
+        assert!(
+            !out.contains("<svg"),
+            "Off must not emit SVG even with an SVG-capable hook installed, got: {out}"
+        );
+        assert!(
+            out.contains(r#"<pre><code class="language-mermaid">"#),
+            "Off must degrade to a plain code block, got: {out}"
+        );
+    }
+
+    /// Finding 7 (review-1): a `StaticSvg` promotion that cannot produce an SVG
+    /// (no hook installed) must reject under `Strict` and degrade with a lossy
+    /// diagnostic under `Warn`.
+    #[test]
+    fn mermaid_static_svg_failure_honors_strictness() {
+        let block = RenderNode::code(Some("mermaid".into()), None, "graph TD");
+
+        let strict = BrowserRenderOptions {
+            mermaid_mode: crate::tree::BrowserMermaidMode::StaticSvg,
+            strictness: RenderStrictness::Strict,
+            ..BrowserRenderOptions::default()
+        };
+        let err = render_browser_node(&block, &strict)
+            .err()
+            .expect("strict StaticSvg failure must reject");
+        assert!(
+            matches!(err, RenderError::LossyRejected { .. }),
+            "expected LossyRejected; got {err:?}",
+        );
+
+        let warn = BrowserRenderOptions {
+            mermaid_mode: crate::tree::BrowserMermaidMode::StaticSvg,
+            strictness: RenderStrictness::Warn,
+            ..BrowserRenderOptions::default()
+        };
+        let rendered = render_browser_node(&block, &warn).expect("warn renders");
+        assert!(
+            rendered.output.render().contains(r#"<pre><code class="language-mermaid">"#),
+            "warn StaticSvg failure must degrade to a code block",
+        );
+        assert!(
+            !rendered.diagnostics.is_empty(),
+            "warn StaticSvg failure must surface a diagnostic",
+        );
+    }
+
+    /// A code renderer whose `render_browser_code` hook reproduces the rich
+    /// code-block presentation (here a sentinel `code-block-title` wrapper) and
+    /// whose Mermaid hook always declines — exactly the shape that exercises the
+    /// lossless fallback contract: the generic hook carries title / line-number
+    /// / highlight metadata, but never promotes mermaid to SVG.
+    struct RichCodeHook;
+    impl crate::tree::CodeRenderer for RichCodeHook {
+        fn render_terminal_code(
+            &self,
+            _lang: Option<&str>,
+            _value: &str,
+            _meta: Option<&str>,
+            _attrs: &crate::tree::NodeAttrs,
+            _context: crate::color::TerminalCodeContext,
+        ) -> Option<String> {
+            None
+        }
+        fn render_browser_code(
+            &self,
+            _lang: Option<&str>,
+            value: &str,
+            meta: Option<&str>,
+            _attrs: &crate::tree::NodeAttrs,
+        ) -> Option<BrowserFragment<Ready>> {
+            let title = meta.unwrap_or("untitled");
+            Some(
+                BrowserFragment::new()
+                    .define_as_raw_html(format!(
+                        "<figure class=\"code-block\"><figcaption class=\"code-block-title\">{title}</figcaption><pre><code>{value}</code></pre></figure>"
+                    ))
+                    .finalize(),
+            )
+        }
+        fn render_browser_mermaid(
+            &self,
+            _value: &str,
+            _meta: Option<&str>,
+            _attrs: &crate::tree::NodeAttrs,
+        ) -> Option<BrowserFragment<Ready>> {
+            None
+        }
+    }
+
+    /// Review-3 finding 1: a non-promoted Mermaid block (`Off`, `Code`, or a
+    /// degraded `StaticSvg` failure) must keep its full code-block presentation
+    /// by routing through the generic `render_browser_code` hook — not
+    /// short-circuiting to a bare `<pre><code>` that drops `title` /
+    /// line-numbering / highlight metadata.
+    #[test]
+    fn mermaid_non_promotion_preserves_code_block_metadata_via_hook() {
+        use std::rc::Rc;
+
+        let block = RenderNode::code(
+            Some("mermaid".into()),
+            Some("title=\"Diagram\"".into()),
+            "graph TD; A --> B",
+        );
+
+        // Each non-promotion outcome must reach the rich hook fallback.
+        let cases = [
+            // (graphics_mode, mermaid_mode) — all are non-promotion outcomes.
+            (
+                crate::tree::GraphicsMode::Off,
+                crate::tree::BrowserMermaidMode::StaticSvg,
+            ),
+            (
+                crate::tree::GraphicsMode::Rich,
+                crate::tree::BrowserMermaidMode::Code,
+            ),
+            // StaticSvg with a hook that declines mermaid promotion → degrades.
+            (
+                crate::tree::GraphicsMode::Rich,
+                crate::tree::BrowserMermaidMode::StaticSvg,
+            ),
+        ];
+
+        for (graphics_mode, mermaid_mode) in cases {
+            let opts = BrowserRenderOptions {
+                graphics_mode,
+                mermaid_mode,
+                strictness: RenderStrictness::Warn,
+                code_renderer: Some(Rc::new(RichCodeHook)),
+                ..BrowserRenderOptions::default()
+            };
+            let out = render_browser_node(&block, &opts).unwrap().output.render();
+            assert!(
+                out.contains("code-block-title") && out.contains("Diagram"),
+                "{graphics_mode:?}/{mermaid_mode:?} must preserve title metadata via the \
+                 render_browser_code hook, got: {out}",
+            );
+            assert!(
+                !out.contains("<svg"),
+                "{graphics_mode:?}/{mermaid_mode:?} must not promote to SVG, got: {out}",
+            );
+        }
+    }
+
+    /// Companion to the above: with no code renderer installed, the same
+    /// non-promotion outcomes still degrade cleanly to the plain `<pre><code>`
+    /// block — the hook is consulted first but its absence is not an error.
+    #[test]
+    fn mermaid_non_promotion_falls_back_to_plain_code_without_hook() {
+        let block = RenderNode::code(Some("mermaid".into()), None, "graph TD; A --> B");
+        for (graphics_mode, mermaid_mode) in [
+            (
+                crate::tree::GraphicsMode::Off,
+                crate::tree::BrowserMermaidMode::StaticSvg,
+            ),
+            (
+                crate::tree::GraphicsMode::Rich,
+                crate::tree::BrowserMermaidMode::Code,
+            ),
+            (
+                crate::tree::GraphicsMode::Rich,
+                crate::tree::BrowserMermaidMode::StaticSvg,
+            ),
+        ] {
+            let opts = BrowserRenderOptions {
+                graphics_mode,
+                mermaid_mode,
+                strictness: RenderStrictness::Warn,
+                ..BrowserRenderOptions::default()
+            };
+            let out = render_browser_node(&block, &opts).unwrap().output.render();
+            assert!(
+                out.contains(r#"<pre><code class="language-mermaid">"#),
+                "{graphics_mode:?}/{mermaid_mode:?} must fall back to a plain code block, got: {out}",
+            );
+        }
+    }
+
+    #[test]
     fn link_and_image() {
         let link = RenderNode::link(
             "https://example.com",
@@ -1365,30 +3454,163 @@ mod tests {
     }
 
     #[test]
+    fn link_emits_typed_browser_attributes() {
+        let mut link = RenderNode::link("https://example.com/x", None, vec![RenderNode::text("go")]);
+        let browser = crate::tree::BrowserAttrs {
+            link: Some(crate::tree::LinkBrowserAttrs {
+                target: Some(crate::tree::LinkTarget::Blank),
+                rel: vec![
+                    crate::tree::LinkRelation::NoOpener,
+                    crate::tree::LinkRelation::NoReferrer,
+                ],
+                download: Some("file.txt".into()),
+            }),
+            ..Default::default()
+        };
+        link.attrs.set_browser(&browser);
+        assert_eq!(
+            html(&link),
+            r#"<a target="_blank" rel="noopener noreferrer" download="file.txt" href="https://example.com/x">go</a>"#
+        );
+    }
+
+    #[test]
+    fn image_emits_typed_browser_attributes() {
+        let mut image = RenderNode::image("p.png", None, "alt");
+        let browser = crate::tree::BrowserAttrs {
+            image: Some(crate::tree::ImageBrowserAttrs {
+                loading: Some(crate::tree::ImageLoading::Lazy),
+                decoding: Some(crate::tree::ImageDecoding::Async),
+            }),
+            ..Default::default()
+        };
+        image.attrs.set_browser(&browser);
+        assert_eq!(
+            html(&image),
+            r#"<img loading="lazy" decoding="async" src="p.png" alt="alt">"#
+        );
+    }
+
+    #[test]
+    fn node_emits_data_and_aria_attributes_in_deterministic_order_and_escaped() {
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        let mut browser = crate::tree::BrowserAttrs::default();
+        // Insert out of sorted order; BTreeMap emits them sorted.
+        browser
+            .data_attrs
+            .insert(crate::tree::DataAttrName::new("z-last").unwrap(), "1".into());
+        browser.data_attrs.insert(
+            crate::tree::DataAttrName::new("prompt").unwrap(),
+            "explain < this".into(),
+        );
+        browser.aria_attrs.insert(
+            crate::tree::AriaAttrName::new("label").unwrap(),
+            "info".into(),
+        );
+        para.attrs.set_browser(&browser);
+        assert_eq!(
+            html(&para),
+            r#"<p data-prompt="explain &lt; this" data-z-last="1" aria-label="info">x</p>"#
+        );
+    }
+
+    #[test]
+    fn inline_style_merges_with_node_style_into_a_single_attribute() {
+        use crate::style::{PaintColor, PerMode, Style};
+        let mut span = RenderNode::span(vec![], vec![RenderNode::text("x")]);
+        // Node `Style` sets a foreground color; inline_style sets a background.
+        span.attrs.set_style(&Style {
+            color: Some(crate::layout::TargetValue::universal(PerMode::universal(
+                PaintColor::new(crate::color::Color::Tailwind(crate::color::Tailwind::Inherit)),
+            ))),
+            ..Default::default()
+        });
+        let browser = crate::tree::BrowserAttrs {
+            inline_style: Some(crate::stylesheet::CssStyle::new().add(
+                crate::stylesheet::CssColorProp::BackgroundColor,
+                crate::stylesheet::CssColor::rgb(0x33, 0x66, 0x99),
+            )),
+            ..Default::default()
+        };
+        span.attrs.set_browser(&browser);
+        // A single `style` attribute carries both the node-`Style` color and the
+        // inline_style background, inline_style last so it wins in source order.
+        assert_eq!(
+            html(&span),
+            r#"<span style="color:inherit;background-color:rgb(51, 102, 153)">x</span>"#
+        );
+    }
+
+    /// The validated `data-*` / `aria-*` name newtypes make it impossible to
+    /// inject a duplicate/replacement `href`, `src`, raw `style`, or
+    /// event-handler attribute through the typed extension maps — the spec's
+    /// "no attribute injection" contract.
+    #[test]
+    fn browser_attr_name_newtypes_reject_injection_vectors() {
+        for forbidden in ["href", "src", "style", "onclick", "onload"] {
+            // A `data-`/`aria-` prefix is always prepended, so even an accepted
+            // name cannot become a bare `href`/`src`/`style`/`onclick`. The
+            // names here are themselves valid suffixes, proving the prefix — not
+            // name rejection — is the guard.
+            let data = crate::tree::DataAttrName::new(forbidden).unwrap();
+            assert_eq!(data.as_str(), forbidden);
+        }
+        // Names that *could* break out of the attribute token are rejected.
+        assert!(crate::tree::DataAttrName::new("on click").is_err());
+        assert!(crate::tree::DataAttrName::new("href=\"x\"").is_err());
+        assert!(crate::tree::AriaAttrName::new("foo>bar").is_err());
+    }
+
+    #[test]
     fn thematic_break_and_breaks() {
-        assert_eq!(html(&RenderNode::thematic_break()), "<hr>");
+        // Under GraphicsMode::Off a plain break degrades to <hr>.
+        assert_eq!(
+            html_with_graphics_mode(&RenderNode::thematic_break(), crate::tree::GraphicsMode::Off),
+            "<hr>"
+        );
+        // Under the default Rich mode a plain break produces the default SVG.
+        let svg = html(&RenderNode::thematic_break());
+        assert!(
+            svg.starts_with("<svg "),
+            "expected SVG under Rich mode, got: {svg}"
+        );
         assert_eq!(html(&RenderNode::hard_break()), "<br>");
         assert_eq!(html(&RenderNode::soft_break()), " ");
     }
 
-    /// Review-4 finding 2: a `<hr>` produced from darkmatter's HR-attribute
-    /// fold must surface its `darkmatter.hr.*` hints as `data-hr-*` HTML
-    /// attributes so the styled rule is user-observable in the browser. A
-    /// plain `ThematicBreak` (no hints) still degrades to a bare `<hr>`.
+    /// Review-4 finding 2: under GraphicsMode::Off a `<hr>` produced from
+    /// darkmatter's HR-attribute fold must surface its typed
+    /// [`ThematicBreakAttrs`](crate::tree::ThematicBreakAttrs) as `data-hr-*`
+    /// HTML attributes so the styled rule is still user-observable. Under
+    /// Vector/Rich those attrs drive an SVG instead.
     #[test]
     fn thematic_break_surfaces_darkmatter_hr_hints_as_data_attrs() {
+        use crate::tree::{HrKind, HrWeight, ThematicBreakAttrs};
         let mut hr = RenderNode::thematic_break();
-        let ns = HintNamespace("darkmatter.hr");
-        hr.attrs.set_hint(ns, "style", serde_json::json!("waves"));
-        hr.attrs.set_hint(ns, "weight", serde_json::json!("thick"));
-        let rendered = html(&hr);
+        hr.attrs.set_thematic_break(&ThematicBreakAttrs {
+            kind: Some(HrKind::Waves),
+            weight: Some(HrWeight::Thick),
+            ..Default::default()
+        });
+
+        let off = html_with_graphics_mode(&hr, crate::tree::GraphicsMode::Off);
         assert!(
-            rendered.contains(r#"data-hr-style="waves""#),
-            "expected data-hr-style attribute: {rendered}",
+            off.contains(r#"data-hr-kind="waves""#),
+            "expected data-hr-kind attribute: {off}",
         );
         assert!(
-            rendered.contains(r#"data-hr-weight="thick""#),
-            "expected data-hr-weight attribute: {rendered}",
+            off.contains(r#"data-hr-weight="thick""#),
+            "expected data-hr-weight attribute: {off}",
+        );
+
+        let rich = html(&hr);
+        assert!(
+            rich.starts_with("<svg "),
+            "expected SVG under Rich mode, got: {rich}"
+        );
+        assert!(
+            rich.contains("stroke-dasharray") || rich.contains("M0 20"),
+            "expected styled SVG content: {rich}"
         );
     }
 
@@ -1654,6 +3876,461 @@ mod tests {
         assert!(!html.contains("Ignored"), "{html}");
     }
 
+    /// Builds a `Document` whose root carries a foreground `Style`.
+    fn doc_with_root_color() -> Document {
+        use crate::style::{PaintColor, PerMode, Style};
+        let mut root = RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text("Body")])]);
+        root.attrs.set_style(&Style {
+            color: Some(crate::layout::TargetValue::universal(PerMode::universal(
+                PaintColor::new(crate::color::Color::Tailwind(crate::color::Tailwind::Red500)),
+            ))),
+            ..Style::default()
+        });
+        Document {
+            sources: SourceRegistry::default(),
+            metadata: DocumentMetadata::default(),
+            root,
+        }
+    }
+
+    #[test]
+    fn document_root_foreground_wraps_body_for_inheritance() {
+        // Review-1 finding 3: a styled root must be rendered as a wrapping
+        // element so its foreground is emitted and inherits to descendants —
+        // not silently discarded. Both document folds must agree.
+        let doc = doc_with_root_color();
+        let opts = BrowserRenderOptions::default();
+
+        let via_page = render_browser_document(&doc, &opts)
+            .expect("render")
+            .output
+            .render();
+        let direct = render_browser_document_html(&doc, &opts)
+            .expect("render")
+            .output;
+
+        for (label, html) in [("fragment", &via_page), ("direct", &direct)] {
+            assert!(
+                html.contains("<body><div style=\"color:rgb(251, 44, 54)\"><p>Body</p></div></body>"),
+                "{label}: root foreground must wrap the body in an inheriting div; got:\n{html}"
+            );
+        }
+        assert_eq!(via_page, direct, "both folds must emit identical HTML");
+    }
+
+    #[test]
+    fn document_unstyled_root_emits_children_directly() {
+        // No-regression guard: an unstyled root still streams its children with
+        // no extra wrapping div.
+        let doc = Document {
+            sources: SourceRegistry::default(),
+            metadata: DocumentMetadata::default(),
+            root: RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text("Body")])]),
+        };
+        let opts = BrowserRenderOptions::default();
+        let html = render_browser_document_html(&doc, &opts).expect("render").output;
+        assert!(html.contains("<body><p>Body</p></body>"), "{html}");
+    }
+
+    // ── render_browser_document_html: direct document-string renderer ────────
+
+    /// A diverse single-document corpus exercising prose, headings, emphasis,
+    /// inline code, lists (incl. ordered `start` and task items), a GFM table
+    /// with alignment, links, images, block quotes, nested styling, footnotes,
+    /// and a `mark`/`dim` extension — every structural node the direct writer
+    /// must keep byte-compatible with the fragment-page path.
+    fn parity_corpus() -> Vec<RenderNode> {
+        vec![
+            RenderNode::heading(
+                HeadingDepth::new(1).unwrap(),
+                vec![
+                    RenderNode::text("Doc "),
+                    RenderNode::strong(vec![RenderNode::text("Title")]),
+                ],
+            ),
+            RenderNode::paragraph(vec![
+                RenderNode::text("Prose with "),
+                RenderNode::emphasis(vec![RenderNode::text("em")]),
+                RenderNode::text(", "),
+                RenderNode::inline_code("code < x"),
+                RenderNode::text(" & a "),
+                RenderNode::link(
+                    "https://example.com/a?b=1&c=2",
+                    Some("Tip".into()),
+                    vec![RenderNode::text("link")],
+                ),
+                RenderNode::text("."),
+            ]),
+            RenderNode::list(
+                false,
+                None,
+                vec![
+                    RenderNode::list_item(None, vec![RenderNode::text("a")]),
+                    RenderNode::list_item(Some(true), vec![RenderNode::text("done")]),
+                    RenderNode::list_item(Some(false), vec![RenderNode::text("todo")]),
+                ],
+            ),
+            RenderNode::list(
+                true,
+                Some(3),
+                vec![RenderNode::list_item(None, vec![RenderNode::text("x")])],
+            ),
+            RenderNode::table(
+                vec![ColumnAlign::Left, ColumnAlign::Right],
+                vec![
+                    RenderNode::table_row(vec![
+                        RenderNode::table_cell(vec![RenderNode::text("H1")]),
+                        RenderNode::table_cell(vec![RenderNode::text("H2")]),
+                    ]),
+                    RenderNode::table_row(vec![
+                        RenderNode::table_cell(vec![RenderNode::text("a & b")]),
+                        RenderNode::table_cell(vec![RenderNode::text("c")]),
+                    ]),
+                ],
+            ),
+            RenderNode::block_quote(vec![RenderNode::paragraph(vec![RenderNode::text("quote")])]),
+            RenderNode::paragraph(vec![
+                RenderNode::image("img.png", Some("T".into()), "alt < text"),
+                RenderNode::soft_break(),
+                RenderNode::extended("mark", vec![RenderNode::text("hi")], None),
+                RenderNode::hard_break(),
+                RenderNode::extended("dim", vec![RenderNode::text("lo")], None),
+            ]),
+            RenderNode::code(Some("rust".into()), None, "let a = 1 < 2;"),
+            RenderNode::thematic_break(),
+            RenderNode::footnote_definition(
+                "1",
+                vec![RenderNode::paragraph(vec![RenderNode::text("note")])],
+            ),
+            // A paragraph carrying typed browser attrs (inline style merged with
+            // node Style, plus data-* / aria-* maps) — exercises the generic
+            // browser-attr lowering in both writers.
+            {
+                let mut para = RenderNode::paragraph(vec![RenderNode::text("attrs")]);
+                let mut browser = crate::tree::BrowserAttrs {
+                    inline_style: Some(crate::stylesheet::CssStyle::new().add(
+                        crate::stylesheet::CssColorProp::Color,
+                        crate::stylesheet::CssColor::rgb(0x33, 0x66, 0x99),
+                    )),
+                    ..Default::default()
+                };
+                browser.data_attrs.insert(
+                    crate::tree::DataAttrName::new("prompt").unwrap(),
+                    "explain < this".into(),
+                );
+                browser.aria_attrs.insert(
+                    crate::tree::AriaAttrName::new("label").unwrap(),
+                    "info".into(),
+                );
+                para.attrs.set_browser(&browser);
+                para
+            },
+            // A link carrying typed link browser attrs and an image carrying
+            // typed image browser attrs — exercises the kind-specific lowering.
+            RenderNode::paragraph(vec![
+                {
+                    let mut link = RenderNode::link(
+                        "https://example.com/x",
+                        None,
+                        vec![RenderNode::text("go")],
+                    );
+                    let browser = crate::tree::BrowserAttrs {
+                        link: Some(crate::tree::LinkBrowserAttrs {
+                            target: Some(crate::tree::LinkTarget::Blank),
+                            rel: vec![
+                                crate::tree::LinkRelation::NoOpener,
+                                crate::tree::LinkRelation::NoReferrer,
+                            ],
+                            download: Some("file.txt".into()),
+                        }),
+                        ..Default::default()
+                    };
+                    link.attrs.set_browser(&browser);
+                    link
+                },
+                {
+                    let mut image = RenderNode::image("p.png", None, "alt");
+                    let browser = crate::tree::BrowserAttrs {
+                        image: Some(crate::tree::ImageBrowserAttrs {
+                            loading: Some(crate::tree::ImageLoading::Lazy),
+                            decoding: Some(crate::tree::ImageDecoding::Async),
+                        }),
+                        ..Default::default()
+                    };
+                    image.attrs.set_browser(&browser);
+                    image
+                },
+            ]),
+        ]
+    }
+
+    /// The direct document-string renderer must emit byte-identical output to
+    /// `render_browser_document(...).output.render()` across the shared corpus,
+    /// for every graphics mode (the HR/SVG branch differs by mode).
+    #[test]
+    fn document_html_matches_fragment_page_bytes() {
+        for mode in [
+            crate::tree::GraphicsMode::Off,
+            crate::tree::GraphicsMode::Vector,
+            crate::tree::GraphicsMode::Rich,
+        ] {
+            let doc = Document {
+                sources: SourceRegistry::default(),
+                metadata: DocumentMetadata::default(),
+                root: RenderNode::root(parity_corpus()),
+            };
+            let opts = BrowserRenderOptions {
+                graphics_mode: mode,
+                ..BrowserRenderOptions::default()
+            };
+            let direct = render_browser_document_html(&doc, &opts).expect("direct render");
+            let via_page = render_browser_document(&doc, &opts)
+                .expect("fragment render")
+                .output
+                .render();
+            assert_eq!(direct.output, via_page, "byte mismatch under {mode:?}");
+        }
+    }
+
+    /// The `<title>` must fall back to the first `<h1>` text exactly as the
+    /// fragment-page path does, including when the heading carries nested
+    /// inline markup.
+    #[test]
+    fn document_html_title_falls_back_to_first_h1() {
+        let doc = Document {
+            sources: SourceRegistry::default(),
+            metadata: DocumentMetadata::default(),
+            root: RenderNode::root(vec![
+                RenderNode::heading(
+                    HeadingDepth::new(1).unwrap(),
+                    vec![
+                        RenderNode::text("Hello "),
+                        RenderNode::strong(vec![RenderNode::text("World")]),
+                    ],
+                ),
+                RenderNode::paragraph(vec![RenderNode::text("body")]),
+            ]),
+        };
+        let opts = BrowserRenderOptions::default();
+        let direct = render_browser_document_html(&doc, &opts).expect("render");
+        assert!(
+            direct.output.contains("<title>Hello World</title>"),
+            "{}",
+            direct.output
+        );
+        let via_page = render_browser_document(&doc, &opts)
+            .expect("render")
+            .output
+            .render();
+        assert_eq!(direct.output, via_page);
+    }
+
+    /// Page options (stylesheet + CSS variables) must roll into the `<head>`
+    /// identically on the direct path.
+    #[test]
+    fn document_html_applies_page_options() {
+        let doc = Document {
+            sources: SourceRegistry::default(),
+            metadata: DocumentMetadata::default(),
+            root: RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text("x")])]),
+        };
+        let mut sheet = crate::stylesheet::Stylesheet::new();
+        sheet.push(crate::stylesheet::CssRule::new(
+            "body",
+            crate::stylesheet::CssStyle::new(),
+        ));
+        let opts = BrowserRenderOptions {
+            page: Some(PageOptions {
+                stylesheet: Some(sheet),
+                css_variables: Some(vec![("primary".into(), "#336699".into())]),
+                external_stylesheet: None,
+                external_code: None,
+            }),
+            ..BrowserRenderOptions::default()
+        };
+        let direct = render_browser_document_html(&doc, &opts).expect("render");
+        assert!(direct.output.contains("--primary: #336699;"), "{}", direct.output);
+        let via_page = render_browser_document(&doc, &opts)
+            .expect("render")
+            .output
+            .render();
+        assert_eq!(direct.output, via_page);
+    }
+
+    /// A code-renderer hook fragment is an extension island: only its result is
+    /// serialized into the body, and its page-level rollups (here a metadata
+    /// title) must reach the `<head>` exactly as through `HtmlPage`.
+    #[test]
+    fn document_html_serializes_code_renderer_hook_and_rolls_up_head() {
+        use crate::microdata::MicrodataKey;
+        use std::rc::Rc;
+
+        struct TitleCodeHook;
+        impl crate::tree::CodeRenderer for TitleCodeHook {
+            fn render_terminal_code(
+                &self,
+                _lang: Option<&str>,
+                _value: &str,
+                _meta: Option<&str>,
+                _attrs: &crate::tree::NodeAttrs,
+                _context: crate::color::TerminalCodeContext,
+            ) -> Option<String> {
+                None
+            }
+            fn render_browser_code(
+                &self,
+                _lang: Option<&str>,
+                _value: &str,
+                _meta: Option<&str>,
+                _attrs: &crate::tree::NodeAttrs,
+            ) -> Option<BrowserFragment<Ready>> {
+                Some(
+                    BrowserFragment::new()
+                        .define_as_raw_html("<pre class=\"hl\">highlighted</pre>")
+                        .add_metadata_keypair(MicrodataKey::Title, "From Hook")
+                        .finalize(),
+                )
+            }
+        }
+
+        let doc = Document {
+            sources: SourceRegistry::default(),
+            metadata: DocumentMetadata::default(),
+            root: RenderNode::root(vec![RenderNode::code(Some("rust".into()), None, "fn x() {}")]),
+        };
+        let opts = BrowserRenderOptions {
+            code_renderer: Some(Rc::new(TitleCodeHook)),
+            ..BrowserRenderOptions::default()
+        };
+        let direct = render_browser_document_html(&doc, &opts).expect("render");
+        assert!(
+            direct.output.contains("<pre class=\"hl\">highlighted</pre>"),
+            "hook body must be serialized: {}",
+            direct.output
+        );
+        assert!(
+            direct.output.contains("<title>From Hook</title>"),
+            "hook metadata must roll up into head: {}",
+            direct.output
+        );
+        let via_page = render_browser_document(&doc, &opts)
+            .expect("render")
+            .output
+            .render();
+        assert_eq!(direct.output, via_page);
+    }
+
+    /// Diagnostics and fatal validation behavior must match the fragment-page
+    /// path across strictness modes.
+    #[test]
+    fn document_html_shares_strictness_and_diagnostics() {
+        // Warn: a raw-HTML node under the escape policy records one diagnostic
+        // on both paths.
+        let doc = Document {
+            sources: SourceRegistry::default(),
+            metadata: DocumentMetadata::default(),
+            root: RenderNode::root(vec![RenderNode::html("<b>raw</b>", false)]),
+        };
+        let warn = opts(RenderStrictness::Warn, RawHtmlPolicy::Escape);
+        let direct = render_browser_document_html(&doc, &warn).expect("render");
+        let via_page = render_browser_document(&doc, &warn).expect("render");
+        assert_eq!(direct.output, via_page.output.render());
+        assert_eq!(direct.diagnostics.len(), via_page.diagnostics.len());
+        assert_eq!(direct.diagnostics.len(), 1);
+
+        // Strict: an unsupported node fails the validation gate identically.
+        let bad = Document {
+            sources: SourceRegistry::default(),
+            metadata: DocumentMetadata::default(),
+            root: RenderNode::root(vec![RenderNode::unsupported("custom")]),
+        };
+        let strict = opts(RenderStrictness::Strict, RawHtmlPolicy::Escape);
+        assert!(matches!(
+            render_browser_document_html(&bad, &strict),
+            Err(RenderError::InvalidTree { .. })
+        ));
+    }
+
+    /// Every non-fatal [`RawHtmlPolicy`] / [`RenderStrictness`] combination must
+    /// produce byte-identical output and the same diagnostic count on the direct
+    /// document-string path and the fragment-page path.
+    #[test]
+    fn document_html_raw_html_policy_parity() {
+        let doc = Document {
+            sources: SourceRegistry::default(),
+            metadata: DocumentMetadata::default(),
+            root: RenderNode::root(vec![
+                RenderNode::paragraph(vec![RenderNode::text("before")]),
+                RenderNode::html("<b>raw & <i>markup</i></b>", true),
+                RenderNode::paragraph(vec![RenderNode::text("after")]),
+            ]),
+        };
+        for raw in [
+            RawHtmlPolicy::Allow,
+            RawHtmlPolicy::Escape,
+            RawHtmlPolicy::Reject,
+        ] {
+            // `Reject` under `Strict` is the only fatal combination; the rest
+            // degrade to escaped text and stay comparable byte-for-byte.
+            for strictness in [RenderStrictness::Warn, RenderStrictness::Lossy] {
+                let o = opts(strictness, raw);
+                let direct = render_browser_document_html(&doc, &o).expect("direct render");
+                let via_page = render_browser_document(&doc, &o).expect("fragment render");
+                assert_eq!(
+                    direct.output,
+                    via_page.output.render(),
+                    "byte mismatch under {raw:?}/{strictness:?}"
+                );
+                assert_eq!(
+                    direct.diagnostics.len(),
+                    via_page.diagnostics.len(),
+                    "diagnostic count mismatch under {raw:?}/{strictness:?}"
+                );
+            }
+        }
+    }
+
+    /// Mermaid promotion must produce byte-identical output on both paths across
+    /// every `graphics_mode` × `mermaid_mode` pairing — covering the static-SVG
+    /// hook island, the interactive `<pre class="mermaid">` form, and the
+    /// lossless code fallback.
+    #[test]
+    fn document_html_mermaid_mode_parity() {
+        use crate::tree::{BrowserMermaidMode, GraphicsMode};
+        use std::rc::Rc;
+
+        let doc = Document {
+            sources: SourceRegistry::default(),
+            metadata: DocumentMetadata::default(),
+            root: RenderNode::root(vec![RenderNode::code(
+                Some("mermaid".into()),
+                None,
+                "graph TD; A-->B",
+            )]),
+        };
+        for graphics_mode in [GraphicsMode::Off, GraphicsMode::Vector, GraphicsMode::Rich] {
+            for mermaid_mode in [
+                BrowserMermaidMode::Code,
+                BrowserMermaidMode::StaticSvg,
+                BrowserMermaidMode::Interactive,
+            ] {
+                let o = BrowserRenderOptions {
+                    graphics_mode,
+                    mermaid_mode,
+                    code_renderer: Some(Rc::new(MermaidSvgHook)),
+                    ..BrowserRenderOptions::default()
+                };
+                let direct = render_browser_document_html(&doc, &o).expect("direct render");
+                let via_page = render_browser_document(&doc, &o).expect("fragment render");
+                assert_eq!(
+                    direct.output,
+                    via_page.output.render(),
+                    "byte mismatch under {graphics_mode:?}/{mermaid_mode:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn section_renders_as_section_element() {
         let section = RenderNode::section(
@@ -1714,11 +4391,11 @@ mod tests {
 
     #[test]
     fn browser_renderer_lowers_layout_to_css() {
-        use crate::layout::{Alignment, Layout, Length, Margin, TargetValue};
+        use crate::layout::{Alignment, Layout, Length, Edges, TargetValue};
 
         let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
         para.attrs.set_layout(&Layout {
-            margin: Margin::x(Length::ch(2)),
+            margin: Edges::x(Length::ch(2)),
             alignment: Alignment::Center,
             max_width: Some(TargetValue::universal(Length::Percent(80.0))),
             ..Layout::default()
@@ -1745,11 +4422,11 @@ mod tests {
 
     #[test]
     fn browser_renderer_lowers_vertical_margin_to_lh() {
-        use crate::layout::{Layout, Length, Margin};
+        use crate::layout::{Layout, Length, Edges};
 
         let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
         para.attrs.set_layout(&Layout {
-            margin: Margin::y(Length::ch(1)),
+            margin: Edges::y(Length::ch(1)),
             ..Layout::default()
         });
         let root = RenderNode::root(vec![para]);
@@ -1761,6 +4438,141 @@ mod tests {
             html.contains("1lh"),
             "vertical Ch margin must lower to lh: {html}"
         );
+    }
+
+    #[test]
+    fn layout_to_css_emits_padding() {
+        use crate::layout::{Edges, Layout, Length};
+
+        let css = layout_to_css(&Layout {
+            padding: Edges::x(Length::ch(3)),
+            ..Default::default()
+        });
+        assert!(
+            css.contains("padding-left:3ch") && css.contains("padding-right:3ch"),
+            "{css}"
+        );
+    }
+
+    #[test]
+    fn layout_to_css_emits_width_modes() {
+        use crate::layout::{Layout, Length, TargetValue, Width};
+
+        assert!(
+            layout_to_css(&Layout {
+                width: Width::FitContent,
+                ..Default::default()
+            })
+            .contains("width:fit-content")
+        );
+        let fixed = layout_to_css(&Layout {
+            width: Width::Fixed(TargetValue::universal(Length::ch(60))),
+            ..Default::default()
+        });
+        assert!(fixed.contains("width:60ch"), "{fixed}");
+        // Auto omits an explicit width.
+        assert!(!layout_to_css(&Layout::default()).contains("width:"));
+    }
+
+    #[test]
+    fn border_lowers_full_matrix() {
+        use crate::color::{Color, Tailwind};
+        use crate::layout::{Length, TargetValue};
+        use crate::style::{
+            Border, BorderLineStyle, BorderSides, BorderWeight, PerMode, Style,
+        };
+
+        let style = Style {
+            border: Some(Border {
+                weight: BorderWeight::Thick,
+                line_style: BorderLineStyle::Dashed,
+                sides: BorderSides::Sides {
+                    top: false,
+                    right: false,
+                    bottom: false,
+                    left: true,
+                },
+                radius: Some(TargetValue::universal(Length::ch(1))),
+                color: Some(TargetValue::universal(PerMode::universal(Color::Tailwind(
+                    Tailwind::Indigo500,
+                )))),
+            }),
+            ..Default::default()
+        };
+        let css = style_css_declarations(&style, true);
+        assert!(css.contains("border-left-style:dashed"), "{css}");
+        assert!(css.contains("border-left-width:"), "{css}");
+        assert!(css.contains("border-radius:"), "{css}");
+        assert!(
+            css.contains("border-left-color:") || css.contains("border-color:"),
+            "{css}"
+        );
+    }
+
+    #[test]
+    fn border_all_sides_uses_shorthand() {
+        use crate::style::{Border, BorderSides, Style};
+
+        let style = Style {
+            border: Some(Border {
+                sides: BorderSides::All,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let css = style_css_declarations(&style, true);
+        assert!(css.contains("border-style:solid"), "{css}");
+    }
+
+    #[test]
+    fn width_and_padding_emit_box_sizing_content_box() {
+        use crate::layout::{Edges, Layout, Length, TargetValue, Width};
+
+        // A node lowering an explicit `width` + `padding` must carry
+        // `box-sizing:content-box` so a global `border-box` reset cannot
+        // reinterpret the width contract.
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        para.attrs.set_layout(&Layout {
+            width: Width::Fixed(TargetValue::universal(Length::ch(20))),
+            padding: Edges::x(Length::ch(2)),
+            ..Default::default()
+        });
+        let out = html(&para);
+        assert!(out.contains("box-sizing:content-box"), "{out}");
+        assert!(out.contains("width:20ch"), "{out}");
+        assert!(out.contains("padding-left:2ch"), "{out}");
+    }
+
+    #[test]
+    fn border_emits_box_sizing_content_box() {
+        use crate::style::{Border, BorderSides, Style};
+
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        para.attrs.set_style(&Style {
+            border: Some(Border {
+                sides: BorderSides::All,
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let out = html(&para);
+        assert!(out.contains("box-sizing:content-box"), "{out}");
+        assert!(out.contains("border-style:solid"), "{out}");
+    }
+
+    #[test]
+    fn plain_node_omits_box_sizing() {
+        use crate::layout::{Edges, Layout, Length};
+
+        // Margin alone is a transparent outer layer with no width contract, so
+        // it must not drag in a `box-sizing` declaration.
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        para.attrs.set_layout(&Layout {
+            margin: Edges::x(Length::ch(2)),
+            ..Default::default()
+        });
+        let out = html(&para);
+        assert!(!out.contains("box-sizing"), "{out}");
     }
 
     // ── RT-PROGRESS-001: browser progress ──────────────────────────────────
@@ -1891,7 +4703,7 @@ mod tests {
 
     #[test]
     fn progress_applies_node_layout_to_outer_element() {
-        use crate::layout::{Layout, Length, Margin};
+        use crate::layout::{Layout, Length, Edges};
         let mut node = progress_para(
             "40%",
             crate::tree::ProgressHints {
@@ -1900,7 +4712,7 @@ mod tests {
             },
         );
         node.attrs.set_layout(&Layout {
-            margin: Margin::x(Length::ch(3)),
+            margin: Edges::x(Length::ch(3)),
             ..Layout::default()
         });
         let out = html(&node);
@@ -2003,7 +4815,7 @@ mod tests {
 
     fn universal_color(
         c: crate::color::Color,
-    ) -> crate::layout::TargetValue<crate::style::PerMode<crate::color::Color>> {
+    ) -> crate::layout::TargetValue<crate::style::PerMode<crate::style::PaintColor>> {
         crate::layout::TargetValue::universal(crate::style::PerMode::universal(c))
     }
 
@@ -2015,7 +4827,25 @@ mod tests {
             ..Default::default()
         });
         let out = html(&node);
-        assert!(out.contains("color:#"), "{out}");
+        assert!(out.contains("color:rgb("), "{out}");
+    }
+
+    #[test]
+    fn style_foreground_alpha_lowers_to_rgba() {
+        use crate::color::{BasicColor, Color, RgbColor};
+        use crate::style::{Opacity, PaintColor, PerMode};
+        let paint = PaintColor::new(Color::Rgb(RgbColor::new(255, 0, 0, BasicColor::Red)))
+            .with_opacity(Opacity::from_percent(50).unwrap());
+        let node = styled_para(crate::style::Style {
+            color: Some(crate::layout::TargetValue::universal(PerMode::universal(
+                paint,
+            ))),
+            ..Default::default()
+        });
+        let out = html(&node);
+        // A single declaration carrying the alpha — no opaque pre-declaration.
+        assert!(out.contains("color:rgba(255, 0, 0,"), "{out}");
+        assert_eq!(out.matches("color:").count(), 1, "{out}");
     }
 
     #[test]
@@ -2026,7 +4856,7 @@ mod tests {
             ..Default::default()
         });
         let out = html(&node);
-        assert!(out.contains("background-color:#"), "{out}");
+        assert!(out.contains("background-color:rgb("), "{out}");
     }
 
     #[test]
@@ -2122,23 +4952,36 @@ mod tests {
     }
 
     #[test]
+    fn style_inverse_lowers_to_invert_filter() {
+        use crate::style::{Style, TextEmphasis};
+        let node = styled_para(Style {
+            emphasis: TextEmphasis {
+                inverse: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        assert!(html(&node).contains("filter:invert(1)"));
+    }
+
+    #[test]
     fn style_and_layout_share_one_style_attribute() {
         use crate::color::{BasicColor, Color};
-        use crate::layout::{Layout, Length, Margin};
+        use crate::layout::{Layout, Length, Edges};
         let mut para = RenderNode::paragraph(vec![RenderNode::text("text")]);
         para.attrs.set_style(&crate::style::Style {
             color: Some(universal_color(Color::BasicColor(BasicColor::Red))),
             ..Default::default()
         });
         para.attrs.set_layout(&Layout {
-            margin: Margin::x(Length::ch(2)),
+            margin: Edges::x(Length::ch(2)),
             ..Layout::default()
         });
         let out = html(&RenderNode::root(vec![para]));
         // A single style attribute carrying both layout and style CSS.
         assert_eq!(out.matches("style=").count(), 1, "{out}");
         assert!(out.contains("margin-left:2ch"), "{out}");
-        assert!(out.contains("color:#"), "{out}");
+        assert!(out.contains("color:rgb("), "{out}");
     }
 
     #[test]
@@ -2150,7 +4993,7 @@ mod tests {
             ..Default::default()
         });
         let out = html(&span);
-        assert!(out.contains("color:#"), "{out}");
+        assert!(out.contains("color:rgb("), "{out}");
     }
 
     #[test]
@@ -2236,10 +5079,10 @@ mod tests {
 
     #[test]
     fn columns_layout_and_column_css_coexist() {
-        use crate::layout::{Layout, Length, Margin};
+        use crate::layout::{Layout, Length, Edges};
         let mut node = columns_bq(crate::tree::ColumnsHints::default(), vec![]);
         node.attrs.set_layout(&Layout {
-            margin: Margin::x(Length::ch(2)),
+            margin: Edges::x(Length::ch(2)),
             ..Layout::default()
         });
         let out = html(&node);
@@ -2339,7 +5182,7 @@ mod tests {
         let td_attrs = &after[..after.find('>').expect("td close")];
         assert_eq!(td_attrs.matches("style=").count(), 1, "{out}");
         assert!(td_attrs.contains("text-align:right"), "{out}");
-        assert!(td_attrs.contains("color:#"), "{out}");
+        assert!(td_attrs.contains("color:rgb("), "{out}");
     }
 
     // ── RT-FILESYSTEM-001: browser marker policy ───────────────────────────

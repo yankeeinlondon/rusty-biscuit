@@ -107,6 +107,10 @@ pub enum RepoAction {
         no_error: bool,
         on_error: Option<String>,
     },
+    Area {
+        no_error: bool,
+        on_error: Option<String>,
+    },
     DirtyPackages {
         filter: Vec<String>,
         package: Option<String>,
@@ -183,6 +187,7 @@ pub enum RepoAction {
         on_error: Option<String>,
     },
     Worktrees {
+        md: bool,
         list: bool,
         csv: bool,
         verbose: bool,
@@ -416,6 +421,17 @@ pub enum RepoSubcommand {
         #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
         on_error: Option<String>,
     },
+    /// Output the area for the current directory (package name when inside a
+    /// package, else the surrounding package-area, else "root")
+    Area {
+        /// Exit 0 with no output when no results found (default is exit 1)
+        #[arg(long)]
+        no_error: bool,
+
+        /// Message to display when no results found
+        #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
+        on_error: Option<String>,
+    },
     /// Output only package names that have uncommitted changes
     DirtyPackages {
         /// Filter packages by name (or @area); prefix with ! to exclude
@@ -587,12 +603,16 @@ pub enum RepoSubcommand {
     /// List all worktrees in the repository
     #[command(name = "worktrees")]
     Worktrees {
-        /// Output as bullet list (one item per line with `- ` prefix)
-        #[arg(long, conflicts_with = "csv")]
+        /// Render as a Markdown unordered list (one `- name` per line)
+        #[arg(long, conflicts_with_all = ["list", "csv"])]
+        md: bool,
+
+        /// Output as a newline-delimited list (one name per line)
+        #[arg(long, conflicts_with_all = ["md", "csv"])]
         list: bool,
 
         /// Output as comma-separated values on a single line
-        #[arg(long, conflicts_with = "list")]
+        #[arg(long, conflicts_with_all = ["md", "list"])]
         csv: bool,
     },
     /// Output the repository name (plain text); use -v for version + language/monorepo info

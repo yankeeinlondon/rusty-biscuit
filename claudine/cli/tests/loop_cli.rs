@@ -713,6 +713,87 @@ exit 0
     );
 }
 
+/// Sibling to `compose_loop_rate_limit_abort_exits_75`, exercising the same
+/// rate-limit abort contract on a document with minimal harness frontmatter.
+/// The always-harness unification routes parsed-harness documents through
+/// `run_harness_loop`, so the terminal-attempt rate-limit signal must still
+/// reach the loop policy and halt with EX_TEMPFAIL (75).
+#[cfg(unix)]
+#[test]
+fn compose_loop_rate_limit_abort_exits_75_on_harness_doc() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    // `post_checks: []` is a harmless harness key: it forces the parsed-harness
+    // plan path without adding any check that would alter the run.
+    let md_file = workspace.path().join("loop.md");
+    fs::write(
+        &md_file,
+        r#"---
+post_checks: []
+loop:
+  while: "true"
+  actions:
+    - "increment(counter)"
+  max: 3
+---
+Iteration {{counter}}
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' '{"type":"init","session_id":"loop-rate","model":"test-model"}'
+printf '%s\n' '{"type":"finish","sessionID":"loop-rate"}'
+printf '%s\n' 'ERROR 2026-04-15T19:26:02 +3054ms service=llm providerID=zai-coding-plan modelID=glm-5.1 error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"code\":\"1308\",\"message\":\"Usage limit reached. Your limit will reset at 2099-01-01 00:00:00\"}}"}]}}' >&2
+exit 0
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("OPENCODE_MODEL", "test-model")
+        .current_dir(workspace.path())
+        .args([
+            "compose",
+            "--opencode",
+            "--on-rate-limit",
+            "abort",
+            md_file.to_str().unwrap(),
+        ])
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .failure();
+
+    let exit_code = assert.get_output().status.code().unwrap_or(-1);
+    assert_eq!(
+        exit_code,
+        75,
+        "parsed-harness rate-limit abort must exit with EX_TEMPFAIL (75); got {exit_code}, stderr: {}",
+        String::from_utf8_lossy(&assert.get_output().stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("rate limited") || plain.contains("rate_limit"),
+        "stderr must surface the rate-limit halt; got: {plain}"
+    );
+    assert!(
+        !plain.contains("invalid loop definition"),
+        "rate-limit halt must not be mislabeled; got: {plain}"
+    );
+}
+
 /// `--on-rate-limit pause` waits out a usable reset clock and then runs
 /// the next iteration. A reset_at ~3s in the future should produce a
 /// noticeable but bounded delay (no unbounded blocking) before iteration 2
@@ -744,9 +825,11 @@ Iteration {{counter}}
     )
     .unwrap();
 
-    // First call: emit a 429 with a reset clock ~8s in the future. Second
+    // First call: emit a 429 with a reset clock ~3s in the future. Second
     // call: just succeed. The engine should pause between iterations and
-    // both calls should land.
+    // both calls should land. `CLAUDINE_PAUSE_RESET_MARGIN` (set below)
+    // trims the production 5s safety margin to 1s so the test exercises the
+    // real pause-then-continue path without the full wall-clock wait.
     write_executable(
         &path_dir.join("opencode"),
         r#"#!/bin/sh
@@ -766,9 +849,10 @@ printf '%s\n' '{"type":"init","session_id":"loop-pause","model":"test-model"}'
 printf '%s\n' '{"type":"finish","sessionID":"loop-pause"}'
 
 if [ "$count" = "1" ]; then
-  # Reset ~8s in the future; far enough to stay ahead of iteration
-  # overhead (~3s) plus margin, short enough that the test stays fast.
-  reset_at=$(/bin/date -u -v+8S '+%Y-%m-%d %H:%M:%S' 2>/dev/null || /bin/date -u -d '+8 seconds' '+%Y-%m-%d %H:%M:%S')
+  # Reset ~3s in the future: comfortably ahead of the tail of iteration 1
+  # (stream parse + teardown, well under 1s) so the engine still sees a
+  # future reset, but short enough to keep the test fast.
+  reset_at=$(/bin/date -u -v+3S '+%Y-%m-%d %H:%M:%S' 2>/dev/null || /bin/date -u -d '+3 seconds' '+%Y-%m-%d %H:%M:%S')
   printf '%s\n' "ERROR 2026-04-15T19:26:02 +3054ms service=llm providerID=zai-coding-plan modelID=glm-5.1 error={\"error\":{\"name\":\"AI_RetryError\",\"reason\":\"maxRetriesExceeded\",\"errors\":[{\"name\":\"AI_APICallError\",\"statusCode\":429,\"responseBody\":\"{\\\"error\\\":{\\\"code\\\":\\\"1308\\\",\\\"message\\\":\\\"Usage limit reached. Your limit will reset at $reset_at\\\"}}\"}]}}" >&2
 fi
 exit 0
@@ -782,6 +866,7 @@ exit 0
         .env("PATH", augmented_path(&path_dir))
         .env("OPENCODE_MODEL", "test-model")
         .env("CLAUDINE_COUNT_FILE", &count_path)
+        .env("CLAUDINE_PAUSE_RESET_MARGIN", "1s")
         .current_dir(workspace.path())
         .args([
             "compose",
@@ -802,11 +887,11 @@ exit 0
         "pause policy must let the second iteration run; got {} calls",
         calls.trim()
     );
-    // 8s reset + 5s safety margin = ~13s pause baseline; allow a generous
-    // floor to account for stream/test overhead. Confirm it actually waited
-    // (not zero).
+    // 3s reset + 1s margin ≈ 4s pause. The floor must stay clearly above the
+    // ~2s no-pause path (two back-to-back subprocess spawns) so a regression
+    // that skips the wait is still caught.
     assert!(
-        elapsed >= std::time::Duration::from_secs(8),
+        elapsed >= std::time::Duration::from_secs(3),
         "pause should produce a noticeable delay; elapsed = {elapsed:?}"
     );
 }
@@ -872,3 +957,246 @@ exit 0
         String::from_utf8_lossy(&assert.get_output().stderr)
     );
 }
+
+// ============================================================================
+// CWD preservation across loop iterations
+// ============================================================================
+
+/// Regression: a `file(required)` setter that resolves against the user's
+/// launch CWD must keep validating across every iteration, not just the
+/// first. The wrap layer's `switch_process_cwd` mutates the process-global
+/// CWD to the detected repo/git root inside each iteration; without
+/// restoring the launch CWD before the next iteration's
+/// `prepare_direct_with_schema`, a relative `plan=...` setter that
+/// validated on iteration 1 fails iteration 2 as `not a "darkmatter-file"`
+/// even though the in-memory state is identical.
+#[cfg(unix)]
+#[test]
+fn compose_loop_file_required_setter_revalidates_against_launch_cwd_each_iteration() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    // Create a git repo at the workspace so the wrap layer's
+    // `detect_repo_root` resolves to a directory ABOVE the launch CWD.
+    // Then run from a subdirectory of the repo where the relative
+    // `plan=...` path resolves. Without the CWD-restore fix, iteration 2
+    // would resolve `plan` against the repo root instead of the subdir
+    // and validation would fail.
+    std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(workspace.path())
+        .status()
+        .unwrap();
+
+    let subdir = workspace.path().join("package");
+    fs::create_dir_all(&subdir).unwrap();
+    let plan_dir = subdir.join("features");
+    fs::create_dir_all(&plan_dir).unwrap();
+    let plan_file = plan_dir.join("plan.md");
+    fs::write(&plan_file, "# plan\n").unwrap();
+
+    // Prompt is at the repo root (not the subdir) so we point at it via
+    // `../` from the subdir, matching the real-world layout where the
+    // user runs from a package area against a repo-root prompts file.
+    let md_file = workspace.path().join("loop.md");
+    fs::write(
+        &md_file,
+        r#"---
+$schema:
+  phase: 'number(required)'
+  total_phases: 'number(required)'
+  plan: 'file(required)'
+phase: 1
+total_phases: 0
+loop:
+  until: "phase > total_phases"
+  action: "increment(phase)"
+---
+Phase {{phase}} of {{total_phases}}.
+"#,
+    )
+    .unwrap();
+
+    let count_path = workspace.path().join("call-count.txt");
+
+    write_executable(
+        &path_dir.join("goose"),
+        r#"#!/bin/sh
+count=0
+if [ -f "$CLAUDINE_COUNT_FILE" ]; then
+  IFS= read -r count < "$CLAUDINE_COUNT_FILE"
+fi
+count=$((count + 1))
+printf '%s' "$count" > "$CLAUDINE_COUNT_FILE"
+cat > /dev/null
+exit 0
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("CLAUDINE_COUNT_FILE", &count_path)
+        .current_dir(&subdir)
+        .args([
+            "compose",
+            "--goose",
+            "../loop.md",
+            "plan=features/plan.md",
+            "total_phases=3",
+        ])
+        .assert()
+        .success();
+
+    let calls = fs::read_to_string(&count_path).unwrap_or_default();
+    assert_eq!(
+        calls.trim(),
+        "3",
+        "all three iterations must run; loop bailing on iteration 2 \
+         with a schema validation error indicates the launch CWD was \
+         not restored between iterations. stderr:\n{}",
+        strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr))
+    );
+}
+
+// ============================================================================
+// Phase 1: loop iteration signals from structured stream
+// ============================================================================
+
+/// Regression safety net for the always-harness unification work. A loop
+/// whose iteration emits a structured `exit_reason` must surface that reason
+/// in `LoopIterationFailed` (honest error cause). This variant has no harness
+/// frontmatter, so it exercises the current non-harness path and should pass
+/// today.
+#[cfg(unix)]
+#[test]
+fn compose_loop_exit_reason_surfaces_on_non_harness_doc() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("loop.md");
+    fs::write(
+        &md_file,
+        r#"---
+loop:
+  while: "true"
+  max: 1
+---
+Iteration {{counter}}
+"#,
+    )
+    .unwrap();
+
+    // Fake opencode emits an error event with a structured error_kind and
+    // exits non-zero. The loop must surface the exit_reason honestly instead
+    // of mislabeling it as an invalid loop definition.
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' '{"type":"init","session_id":"loop-exit","model":"test-model"}'
+printf '%s\n' '{"type":"step_start","sessionID":"loop-exit"}'
+printf '%s\n' '{"type":"error","error_type":"api_timeout","error_message":"upstream timeout"}'
+exit 1
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("OPENCODE_MODEL", "test-model")
+        .current_dir(workspace.path())
+        .args(["compose", "--opencode", md_file.to_str().unwrap()])
+        .timeout(std::time::Duration::from_secs(30))
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("Iteration 1 exited with code 1"),
+        "stderr must surface the loop iteration failure; got: {plain}"
+    );
+    assert!(
+        plain.contains("api_timeout"),
+        "stderr must carry the structured exit_reason; got: {plain}"
+    );
+    assert!(
+        !plain.contains("invalid loop definition"),
+        "honest exit_reason must not be mislabeled as invalid loop definition; got: {plain}"
+    );
+}
+
+/// Sibling to the above test, exercising the same signal contract on a
+/// document with minimal harness frontmatter. Phase 2 of the always-harness
+/// plan surfaces terminal-attempt signals from `run_harness_loop`, so this
+/// test should now pass alongside the non-harness variant.
+#[cfg(unix)]
+#[test]
+fn compose_loop_exit_reason_surfaces_on_harness_doc() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("loop.md");
+    fs::write(
+        &md_file,
+        r#"---
+post_checks: []
+loop:
+  while: "true"
+  max: 1
+---
+Iteration {{counter}}
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' '{"type":"init","session_id":"loop-exit","model":"test-model"}'
+printf '%s\n' '{"type":"step_start","sessionID":"loop-exit"}'
+printf '%s\n' '{"type":"error","error_type":"api_timeout","error_message":"upstream timeout"}'
+exit 1
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("OPENCODE_MODEL", "test-model")
+        .current_dir(workspace.path())
+        .args(["compose", "--opencode", md_file.to_str().unwrap()])
+        .timeout(std::time::Duration::from_secs(30))
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("Iteration 1 exited with code 1"),
+        "stderr must surface the loop iteration failure; got: {plain}"
+    );
+    assert!(
+        plain.contains("api_timeout"),
+        "stderr must carry the structured exit_reason; got: {plain}"
+    );
+    assert!(
+        !plain.contains("invalid loop definition"),
+        "honest exit_reason must not be mislabeled as invalid loop definition; got: {plain}"
+    );
+}
+

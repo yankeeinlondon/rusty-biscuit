@@ -644,6 +644,8 @@ impl RemoteRepoProvider for GiteaRemote {
                 conclusion: None,
                 html_url: Some(format!("{}/{}/{}/actions", web_base, owner, repo)),
                 started_at: None,
+                head_branch: None,
+                event: None,
             }));
         }
 
@@ -662,6 +664,8 @@ impl RemoteRepoProvider for GiteaRemote {
                 conclusion: None,
                 html_url: None, // Drone runs on separate infrastructure
                 started_at: None,
+                head_branch: None,
+                event: None,
             }));
         }
 
@@ -680,6 +684,8 @@ impl RemoteRepoProvider for GiteaRemote {
                 conclusion: None,
                 html_url: None, // Woodpecker runs on separate infrastructure
                 started_at: None,
+                head_branch: None,
+                event: None,
             }));
         }
 
@@ -698,6 +704,8 @@ impl RemoteRepoProvider for GiteaRemote {
                 conclusion: None,
                 html_url: None,
                 started_at: None,
+                head_branch: None,
+                event: None,
             }));
         }
 

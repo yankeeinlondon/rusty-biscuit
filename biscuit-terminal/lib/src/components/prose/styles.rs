@@ -1,45 +1,15 @@
-//! Color name lookups, href resolution, and per-layer SGR state.
+//! Color name lookups, href resolution, and the [`ProseStyle`] tag-intent
+//! helper.
 //!
-//! Resolves bracketed-tag color names to [`renderable::color`] values and
-//! tracks the active SGR escape for each independent style layer so the
-//! terminal emitter can restore a *parent* span's value when a child span
-//! closes (instead of issuing a nuclear `\x1b[0m`).
+//! Resolves bracketed-tag color names to [`renderable::color`] values, an
+//! href to an absolute reference, and a tag name to the [`ProseStyle`] intent
+//! the parser lowers into a shared render-tree node. No terminal escapes are
+//! emitted here — the shared tree renderers own all SGR lowering.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::{
-    terminal::Terminal,
-    utils::color::{Tailwind, WebColor},
-};
-
-/// Resolves the opening SGR escape for a `<double-underline>` request
-/// against the terminal's actual underline-support profile.
-///
-/// ## Returns
-///
-/// - `Some("\x1b[4:2m")` when no terminal context is available (legacy
-///   optimistic behavior) **or** when the terminal advertises
-///   [`UnderlineSupport::double`].
-/// - `Some("\x1b[4m")` when only [`UnderlineSupport::straight`] is
-///   advertised — the canonical Apple Terminal path.
-/// - `None` when neither variant is supported, signalling the caller to
-///   suppress the underline entirely (no SGR at all).
-///
-/// ## Notes
-///
-/// The closing SGR for any non-`None` return is always `"\x1b[24m"`.
-///
-/// [`UnderlineSupport::double`]: crate::discovery::detection::UnderlineSupport::double
-/// [`UnderlineSupport::straight`]: crate::discovery::detection::UnderlineSupport::straight
-pub(super) fn degraded_double_underline_open(term: Option<&Terminal>) -> Option<&'static str> {
-    match term {
-        None => Some("\x1b[4:2m"),
-        Some(t) if t.underline_support.double => Some("\x1b[4:2m"),
-        Some(t) if t.underline_support.straight => Some("\x1b[4m"),
-        Some(_) => None,
-    }
-}
+use crate::utils::color::{Tailwind, WebColor};
 
 /// Parse an RGB string in multiple formats into (r, g, b).
 ///
@@ -220,17 +190,6 @@ fn find_package_root(start: &Path, git_root: &Path) -> Option<PathBuf> {
     }
 
     None
-}
-
-/// Render a [`Color`](renderable::color::Color) as a CSS color string.
-///
-/// Shared by the Browser and MarkdownPlus emitters. Colors that have no RGB
-/// representation degrade to `inherit`.
-pub(super) fn css_color(color: &renderable::color::Color) -> String {
-    match color.to_rgb() {
-        Some((r, g, b)) => format!("rgb({}, {}, {})", r, g, b),
-        None => "inherit".to_string(),
-    }
 }
 
 /// Compare two strings case-insensitively, skipping hyphens in `input`.
@@ -670,146 +629,66 @@ pub(super) fn tailwind_by_name(name: &str) -> Option<Tailwind> {
         .map(|(_, tw)| *tw)
 }
 
-/// Independent style layers tracked by [`StyleState`].
+// ── ProseStyle (moved from deleted ir.rs) ──────────────────────────
+
+use renderable::color::Color;
+use renderable::style::{TextEmphasis, UnderlineStyle};
+
+/// Tag-resolution intent for one bracketed Prose tag.
 ///
-/// Each variant maps to a single SGR attribute group. Nested spans push/pop
-/// per-layer so that closing a span restores the *parent's* value instead of
-/// issuing a nuclear `\x1b[0m` reset.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum StyleLayer {
-    FontWeight,
-    Foreground,
-    Background,
-    Italic,
-    Underline,
-    Strikethrough,
-    Blink,
-    Inverse,
-    Hidden,
-}
-
-impl StyleLayer {
-    /// Map a shared [`EmphasisLayer`] onto its terminal [`StyleLayer`].
-    pub(super) fn from_emphasis(layer: renderable::style::EmphasisLayer) -> Self {
-        use renderable::style::EmphasisLayer;
-        match layer {
-            EmphasisLayer::Weight => Self::FontWeight,
-            EmphasisLayer::Italic => Self::Italic,
-            EmphasisLayer::Underline => Self::Underline,
-            EmphasisLayer::Strikethrough => Self::Strikethrough,
-            EmphasisLayer::Blink => Self::Blink,
-        }
-    }
-
-    /// The SGR code that clears this layer back to the terminal default.
-    fn default_reset(self) -> &'static str {
-        match self {
-            Self::FontWeight => "\x1b[22m",
-            Self::Foreground => "\x1b[39m",
-            Self::Background => "\x1b[49m",
-            Self::Italic => "\x1b[23m",
-            Self::Underline => "\x1b[24m",
-            Self::Strikethrough => "\x1b[29m",
-            Self::Blink => "\x1b[25m",
-            Self::Inverse => "\x1b[27m",
-            Self::Hidden => "\x1b[28m",
-        }
-    }
-}
-
-/// Tracks the current SGR escape code for each [`StyleLayer`].
+/// This is a lightweight parser helper, **not** a rendering IR: the parser
+/// produces one `ProseStyle` per bracketed tag (so in practice exactly one
+/// attribute is set) and immediately lowers it into a shared render-tree node
+/// via [`project_span`](super::tree::project_span). Nothing renders from
+/// `ProseStyle` directly.
 ///
-/// Spans call [`set`](StyleState::set) on open and
-/// [`restore`](StyleState::restore) on close, so nested spans of the same
-/// layer correctly restore the parent's value.
-#[derive(Debug, Default)]
-pub(super) struct StyleState {
-    font_weight: Option<String>,
-    foreground: Option<String>,
-    background: Option<String>,
-    italic: Option<String>,
-    underline: Option<String>,
-    strikethrough: Option<String>,
-    blink: Option<String>,
-    inverse: Option<String>,
-    hidden: Option<String>,
-    /// True once any style escape has been emitted.
-    pub(super) used_styles: bool,
+/// Weight and decoration intent — bold, dim, italic, underline, strikethrough,
+/// blink, and inverse — live in the shared [`TextEmphasis`] leaf reused by the
+/// render-tree style primitive. Colors use [`renderable::color::Color`]
+/// directly; `Prose` keeps no color type of its own.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(super) struct ProseStyle {
+    /// Shared weight / decoration leaf.
+    pub emphasis: TextEmphasis,
+    /// Foreground color.
+    pub fg: Option<Color>,
+    /// Background color.
+    pub bg: Option<Color>,
 }
 
-impl StyleState {
-    fn get(&self, layer: StyleLayer) -> Option<&str> {
-        let slot = match layer {
-            StyleLayer::FontWeight => &self.font_weight,
-            StyleLayer::Foreground => &self.foreground,
-            StyleLayer::Background => &self.background,
-            StyleLayer::Italic => &self.italic,
-            StyleLayer::Underline => &self.underline,
-            StyleLayer::Strikethrough => &self.strikethrough,
-            StyleLayer::Blink => &self.blink,
-            StyleLayer::Inverse => &self.inverse,
-            StyleLayer::Hidden => &self.hidden,
-        };
-        slot.as_deref()
+impl ProseStyle {
+    /// A span carrying a single mutation of the default style.
+    fn build(set: impl FnOnce(&mut ProseStyle)) -> Self {
+        let mut s = ProseStyle::default();
+        set(&mut s);
+        s
     }
 
-    /// Set a layer's active escape code. Returns the previous value.
-    pub(super) fn set(&mut self, layer: StyleLayer, code: &str) -> Option<String> {
-        self.used_styles = true;
-        let slot = self.slot_mut(layer);
-        let prev = slot.take();
-        *slot = Some(code.to_string());
-        prev
+    pub(super) fn bold() -> Self {
+        Self::build(|s| s.emphasis.bold = true)
     }
-
-    /// Restore a layer to a previous value (typically from [`set`](Self::set)).
-    pub(super) fn restore(&mut self, layer: StyleLayer, prev: Option<String>) {
-        *self.slot_mut(layer) = prev;
+    pub(super) fn dim() -> Self {
+        Self::build(|s| s.emphasis.dim = true)
     }
-
-    /// The escape code to emit when closing a span on `layer`.
-    ///
-    /// Returns the parent's code if one exists, otherwise the layer's
-    /// default reset.
-    pub(super) fn close_code(&self, layer: StyleLayer) -> &str {
-        self.get(layer).unwrap_or(layer.default_reset())
+    pub(super) fn italic() -> Self {
+        Self::build(|s| s.emphasis.italic = true)
     }
-
-    /// Re-emit the opening escape for every currently-active layer.
-    ///
-    /// Used after a hard `\x1b[0m` reset — such as the one closing a
-    /// fenced code block — to restore an enclosing span's styling so
-    /// following sibling text is not left unstyled.
-    pub(super) fn reapply_active_layers(&self, out: &mut String) {
-        for code in [
-            &self.font_weight,
-            &self.foreground,
-            &self.background,
-            &self.italic,
-            &self.underline,
-            &self.strikethrough,
-            &self.blink,
-            &self.inverse,
-            &self.hidden,
-        ]
-        .into_iter()
-        .flatten()
-        {
-            out.push_str(code);
-        }
+    pub(super) fn blink() -> Self {
+        Self::build(|s| s.emphasis.blink = true)
     }
-
-    fn slot_mut(&mut self, layer: StyleLayer) -> &mut Option<String> {
-        match layer {
-            StyleLayer::FontWeight => &mut self.font_weight,
-            StyleLayer::Foreground => &mut self.foreground,
-            StyleLayer::Background => &mut self.background,
-            StyleLayer::Italic => &mut self.italic,
-            StyleLayer::Underline => &mut self.underline,
-            StyleLayer::Strikethrough => &mut self.strikethrough,
-            StyleLayer::Blink => &mut self.blink,
-            StyleLayer::Inverse => &mut self.inverse,
-            StyleLayer::Hidden => &mut self.hidden,
-        }
+    pub(super) fn strikethrough() -> Self {
+        Self::build(|s| s.emphasis.strikethrough = true)
+    }
+    pub(super) fn underline(kind: UnderlineStyle) -> Self {
+        Self::build(|s| s.emphasis.underline = Some(kind))
+    }
+    pub(super) fn inverse() -> Self {
+        Self::build(|s| s.emphasis.inverse = true)
+    }
+    pub(super) fn fg(color: Color) -> Self {
+        Self::build(|s| s.fg = Some(color))
+    }
+    pub(super) fn bg(color: Color) -> Self {
+        Self::build(|s| s.bg = Some(color))
     }
 }

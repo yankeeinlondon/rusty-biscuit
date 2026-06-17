@@ -48,4 +48,23 @@ pub enum ProviderError {
 
     #[error("Failed to build client for {provider}: {reason}")]
     ClientBuildFailed { provider: String, reason: String },
+
+    #[error("No runnable model found for capability {capability}")]
+    NoRunnableModel { capability: String },
+
+    #[error("LLM execution failed for {provider}: {reason}")]
+    ExecutionFailed { provider: String, reason: String },
+
+    /// The requested operation is not supported by the resolved model or
+    /// provider at all (as opposed to a transient credential/availability
+    /// problem). Distinct from [`ExecutionFailed`] so callers can surface a
+    /// stable "unsupported" category instead of a generic provider failure.
+    #[error("Operation not supported by {provider}: {reason}")]
+    Unsupported { provider: String, reason: String },
+
+    /// A structured-output response could not be parsed into a single JSON
+    /// value. Carried as a distinct variant so the contract layer can map it to
+    /// an invalid-response category rather than a generic provider failure.
+    #[error("Structured response was not a single valid JSON value: {reason}")]
+    StructuredParse { reason: String },
 }

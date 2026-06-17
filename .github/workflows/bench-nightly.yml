@@ -4,8 +4,11 @@ name: bench-nightly
 #
 # Prerequisites:
 #   1. Create a project in Bencher Cloud (https://bencher.dev).
-#   2. Create an API token and add it as BENCHER_API_TOKEN repository secret.
-#   3. Set the BENCHER_PROJECT secret (or hardcode the project slug below).
+#   2. Create a project-scoped API key (starts with `bencher_run_`) and add
+#      it as the BENCHER_API_KEY repository secret. User API tokens (JWTs)
+#      are NOT accepted on the --key flag; use the matching --token flag if
+#      you switch back to a user token.
+#   3. Set the BENCHER_PROJECT variable (or hardcode the project slug below).
 #
 # The workflow runs benchmarks with Criterion and uploads the results using
 # the `rust_criterion` adapter so Bencher can track trends and alert on
@@ -61,7 +64,6 @@ jobs:
         run: |
           bencher run \
             --project "${{ vars.BENCHER_PROJECT || 'darkmatter' }}" \
-            --token '${{ secrets.BENCHER_API_TOKEN }}' \
             --branch "${{ github.ref_name }}" \
             --testbed "ubuntu-latest" \
             --adapter rust_criterion \
@@ -70,4 +72,4 @@ jobs:
             just bench
         working-directory: darkmatter
         env:
-          BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+          BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}

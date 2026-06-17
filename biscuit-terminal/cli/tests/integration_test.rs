@@ -2083,17 +2083,15 @@ fn test_prose_styled_snapshot() {
 
 #[test]
 fn test_quote_snapshot() {
-    // `bt quote` is rendered through the canonical render-tree path, which
-    // emits truecolor SGR for the left border regardless of `NO_COLOR`
-    // — there is no NO_COLOR-aware downgrade in that path today (see the
-    // BlockQuote review notes). Asserting the styled snapshot is the
-    // honest contract; revisit if/when the tree renderer learns to honor
-    // NO_COLOR end to end.
+    // `bt quote` is rendered through the canonical render-tree path. In the
+    // non-TTY snapshot environment the border stays visible but color SGR is
+    // suppressed.
     let output = cargo_bin_cmd!("bt")
         .arg("quote")
         .arg("To be or not to be, that is the question.")
         .arg("--attribution")
         .arg("Shakespeare")
+        .env("NO_COLOR", "1")
         .output()
         .expect("Failed to execute command");
 
@@ -3848,6 +3846,108 @@ fn test_table_example_emits_command_line() {
         stdout.contains("bt table"),
         "example shows the bt table command string: {stdout}"
     );
+}
+
+#[test]
+fn test_table_typed_currency_column_formats_value() {
+    // A `usd` entry in `--column-types` declares a currency column whose
+    // `--mixed-row` cell is formatted; the literal header is untouched.
+    let output = cargo_bin_cmd!("bt")
+        .args([
+            "table",
+            "--columns",
+            "Item,Amount",
+            "--column-types",
+            ",usd",
+            "--mixed-row",
+            "Widget,9.99",
+        ])
+        .output()
+        .expect("Failed to execute command");
+    assert!(output.status.success(), "typed currency column should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("$9.99"), "currency value formatted: {stdout}");
+    assert!(stdout.contains("Amount"), "literal header is preserved: {stdout}");
+}
+
+#[test]
+fn test_table_unknown_column_type_errors() {
+    // `--column-types` is an explicit declaration, so an unrecognized token is a
+    // user error rather than silently-ignored header text.
+    let output = cargo_bin_cmd!("bt")
+        .args([
+            "table",
+            "--columns",
+            "Item,Amount",
+            "--column-types",
+            ",bogus",
+            "--row",
+            "Widget,9.99",
+        ])
+        .output()
+        .expect("Failed to execute command");
+    assert!(
+        !output.status.success(),
+        "an unknown column type must be rejected"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unknown column type") && stderr.contains("bogus"),
+        "the error names the offending token: {stderr}"
+    );
+}
+
+#[test]
+fn test_table_literal_colon_header_is_preserved() {
+    // Header text is always literal now that types live in `--column-types`, so
+    // a colon-bearing header is preserved verbatim, never split into a type.
+    let output = cargo_bin_cmd!("bt")
+        .args(["table", "--columns", "Time: Value", "--row", "12:00"])
+        .output()
+        .expect("Failed to execute command");
+    assert!(
+        output.status.success(),
+        "a colon-bearing header must not error: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Time: Value"),
+        "the literal colon-bearing header is preserved verbatim: {stdout}"
+    );
+    assert!(stdout.contains("12:00"), "the colon-bearing cell renders: {stdout}");
+}
+
+#[test]
+fn test_table_header_ending_in_type_word_is_literal() {
+    // Regression: a literal header that ends in a recognized type word (with or
+    // without a colon) must render verbatim. The previous `Header:type` suffix
+    // parsing silently dropped these words and changed the column's alignment;
+    // types now live in `--column-types`, so the header text is untouched.
+    for header in [
+        "Revenue: USD",
+        "Total int",
+        "Steps integer",
+        "Speed float",
+        "Price usd",
+        "Cost gbp",
+        "Sum eur",
+    ] {
+        let output = cargo_bin_cmd!("bt")
+            .args(["table", "--columns", header, "--row", "1"])
+            .output()
+            .expect("Failed to execute command");
+        assert!(
+            output.status.success(),
+            "header {header:?} must not error: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains(header),
+            "the literal header {header:?} is preserved verbatim: {stdout}"
+        );
+    }
 }
 
 // -------------------------------------------------------------------------

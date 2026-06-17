@@ -99,25 +99,14 @@ struct DriftKey {
 /// `right_margin_4`, and `word_wrap_prose` — now agree with the render tree
 /// across every facet and carry no ledger entries.
 ///
-/// Every remaining entry is `BespokeBehind` and confined to the *vertical*
-/// margin scenarios (`top_margin_2`, `bottom_margin_2`): the bespoke renderer
-/// applies layout by calling `Layout::apply_layout` on the built
-/// `{header}\n{body}` string, which loses the code block's intrinsic top/bottom
-/// padding rows and the vertical-margin blank lines. The render tree instead
-/// emits the vertical margins as blank lines around the block. No entry is
-/// `TreeBehind`.
-#[rustfmt::skip]
-const KNOWN_DRIFT: &[(&str, &str, Facet, Verdict)] = &[
-    ("YamlBlock", "bottom_margin_2", Facet::Exact, Verdict::BespokeBehind),
-    ("YamlBlock", "bottom_margin_2", Facet::Text, Verdict::BespokeBehind),
-    ("YamlBlock", "bottom_margin_2", Facet::Indent, Verdict::BespokeBehind),
-    ("YamlBlock", "bottom_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
-    ("YamlBlock", "top_margin_2", Facet::Exact, Verdict::BespokeBehind),
-    ("YamlBlock", "top_margin_2", Facet::Text, Verdict::BespokeBehind),
-    ("YamlBlock", "top_margin_2", Facet::Indent, Verdict::BespokeBehind),
-    ("YamlBlock", "top_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
-    ("YamlBlock", "top_margin_2", Facet::Styling, Verdict::BespokeBehind),
-];
+/// The vertical-margin scenarios (`top_margin_2`, `bottom_margin_2`) now agree
+/// too. The tree-cutover Phase 4 flip collapsed `YamlBlock::render` onto the
+/// shared tree terminal renderer (both arms project the same `code_node()`), so
+/// the `render()` arm no longer applies layout to a pre-built `{header}\n{body}`
+/// string — it emits the node's top/bottom margins as blank lines exactly like
+/// the direct tree-node arm. The ledger is therefore empty: the two paths agree
+/// across every facet of every matrix cell.
+const KNOWN_DRIFT: &[(&str, &str, Facet, Verdict)] = &[];
 
 /// Returns `true` when `a` and `b` are byte-for-byte identical.
 fn extract_exact(a: &str, b: &str) -> bool {

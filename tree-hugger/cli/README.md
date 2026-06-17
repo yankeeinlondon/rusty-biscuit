@@ -29,7 +29,7 @@ hug imports --json "tests/fixtures/**/*.js"
 ## Options
 
 - `--language <LANG>` - Override language detection (`js`/`javascript`, `ts`/`typescript`, `cpp`/`c++`, `c-sharp`/`c#`)
-- `--exclude-files <GLOB>` - Exclude files matching glob patterns
+- `--exclude-files <GLOB>` - Exclude files matching glob patterns (in addition to the defaults below)
 - `--exclude-symbols <GLOB>` - Exclude symbol names matching glob patterns
 - `--json` - Output as JSON
 - `--plain` - Disable colors and hyperlinks
@@ -37,6 +37,18 @@ hug imports --json "tests/fixtures/**/*.js"
 - `--group-by-module` - Group symbol output by module
 - `--sort-by-kind` - Sort symbols by kind then name
 - `--sort-by-module` - Sort symbols by module then other sort keys
+
+## Default Scan Exclusions
+
+A whole-package scan (no path/glob argument) honors `.gitignore` and additionally
+skips test *data* directories, whose contents are inputs rather than compiled
+source: `**/fixtures/**`, `**/__fixtures__/**`, `**/snapshots/**`, `**/testdata/**`.
+Naming such a file explicitly (e.g. `hug lint tests/fixtures/sample.rs`) overrides
+the exclusion. Normal test code (`tests/*.rs`) is still scanned.
+
+For `lint`, a multi-file scan only prints files that have diagnostics; if every
+file is clean it prints a single `No lint diagnostics in N files.` line. A
+single-file lint still prints `(no diagnostics)` as explicit confirmation.
 
 ## Output Format
 
@@ -148,6 +160,9 @@ hug lint "src/**/*.rs" --lint-only
 
 # Run only syntax diagnostics
 hug lint "src/**/*.rs" --syntax-only
+
+# List registered lint rules
+hug lint --list-rules
 ```
 
 ## Classes Command
@@ -209,3 +224,9 @@ src/main.rs (Rust)
 Options:
 - `--lint-only` - Show only lint diagnostics (pattern rules and semantic analysis)
 - `--syntax-only` - Show only syntax diagnostics (parse errors)
+- `--deny <RULE|CATEGORY>` - Treat matching lint rules as errors
+- `--warn <RULE|CATEGORY>` - Treat matching lint rules as warnings
+- `--allow <RULE|CATEGORY>` - Treat matching lint rules as info
+- `--strict` - Promote warnings to errors
+- `--experimental-semantics` - Enable experimental semantic diagnostics
+- `--list-rules` - Print registered rule metadata and exit

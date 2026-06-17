@@ -32,11 +32,11 @@ pub(crate) use flags::{
 };
 pub(crate) use harness_orch::{
     AttemptLaunch, CachedHarnessLoopContext, HarnessPromptMode, HarnessPromptState,
-    MaterializedHarnessPrompt, build_harness_launch, build_harness_shell_options,
-    build_harness_shell_options_with_cache, execute_harness_attempt, find_wrapper_harness_source,
-    harness_policy_root, harness_prompt_mode_label, materialize_harness_prompt,
-    materialize_passthrough_harness_seed, materialized_harness_prompt_from_prepared,
-    run_harness_loop,
+    MaterializedHarnessPrompt, apply_composition_shell_overrides, build_harness_launch,
+    build_harness_shell_options, build_harness_shell_options_with_cache, execute_harness_attempt,
+    find_wrapper_harness_source, harness_policy_root, harness_prompt_mode_label,
+    materialize_harness_prompt, materialize_passthrough_harness_seed,
+    materialized_harness_prompt_from_prepared, run_harness_loop,
 };
 pub(crate) use inline::{
     extract_tags_from_prompt, report_inline_agent_status, strip_prompt_tags_for_provider,
@@ -46,7 +46,7 @@ pub(crate) use overlay::{frontmatter_map_to_value, merge_frontmatter_overlay};
 pub(crate) use policy::{
     StreamSummaryContext, StructuredCodexOutput, StructuredSummaryDetails,
     WrapperHarnessPermissionProbe, build_structured_plumbing, emit_stream_summary,
-    emit_stream_summary_with_context, format_summary_prose, format_verbose_summary_details_prose,
+    format_summary_prose, format_verbose_summary_details_prose,
 };
 pub(crate) use prompt_source::{maybe_edit_prompt_source, maybe_edit_prompt_source_with};
 pub(crate) use resume::{
@@ -310,7 +310,6 @@ pub fn run_provider_wrapper(
         return Ok(());
     }
 
-    let wrapper_start = std::time::Instant::now();
     let mut perf_collector =
         startup_timings.map(|timings| crate::perf::CommandPerfCollector::new("Wrapper", timings));
 
@@ -331,9 +330,7 @@ pub fn run_provider_wrapper(
     // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
     // The perf report is always emitted to stderr when requested.
     if let Some(collector) = perf_collector {
-        let total = wrapper_start.elapsed();
-        let report = collector.into_report(total);
-        eprint!("{}", crate::perf::render_perf_report(&report));
+        crate::perf::emit_report(&collector.into_report());
     }
 
     std::process::exit(code);
@@ -665,9 +662,9 @@ fn run_provider_wrapper_inner(
     );
 
     match &effective_sp {
-        claudine::system_prompt::EffectiveSystemPrompt::None
-        | claudine::system_prompt::EffectiveSystemPrompt::Disabled { .. } => {}
-        claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
+        claudine::system_prompt::ResolvedSystemPrompt::None
+        | claudine::system_prompt::ResolvedSystemPrompt::Disabled { .. } => {}
+        claudine::system_prompt::ResolvedSystemPrompt::Ready(prepared) => {
             let application = profile.apply_system_prompt(
                 prepared,
                 !non_interactive_requested,
@@ -709,6 +706,7 @@ fn run_provider_wrapper_inner(
         repo_requested,
         needs_mcp_shadow_home,
         launch_workspace,
+        false,
     )?;
 
     if !silent_requested && !quiet_requested {
@@ -982,7 +980,7 @@ fn run_provider_wrapper_inner(
         if !quiet_requested
             || matches!(
                 effective_sp,
-                claudine::system_prompt::EffectiveSystemPrompt::Ready(_)
+                claudine::system_prompt::ResolvedSystemPrompt::Ready(_)
             )
         {
             log::message("");
@@ -1068,6 +1066,7 @@ fn run_provider_wrapper_inner(
             let seed = harness_orch::materialize_passthrough_harness_seed(
                 &source_path,
                 base_prompt.clone(),
+                Some(child_cwd),
             )?;
             let harness_enabled = claudine::harness::has_harness_properties(&seed.frontmatter);
             if harness_enabled {
@@ -1158,7 +1157,7 @@ fn run_provider_wrapper_inner(
         };
         let default_lifecycle_emitter = claudine::composition::DefaultLifecycleEmitter;
 
-        let (harness_code, harness_perf) = harness_orch::run_harness_loop(
+        let (harness_code, harness_perf, _harness_signals) = harness_orch::run_harness_loop(
             provider,
             profile,
             binary_path.as_path(),
@@ -1322,6 +1321,7 @@ fn run_provider_wrapper_inner(
             detail_requested,
             &summary_details.lock().unwrap().clone(),
             Some(&section_stream),
+            stream_result.agent_pid,
         );
 
         let stderr_text = summary.stderr_text.clone();
@@ -1508,6 +1508,7 @@ mod tests {
             }),
             warnings: Vec::new(),
             shadow_home_path: None,
+            perf_substages: Vec::new(),
         };
 
         let rendered = crate::output::package_name_display(&env_plan).unwrap();
@@ -1531,6 +1532,7 @@ mod tests {
             }),
             warnings: Vec::new(),
             shadow_home_path: None,
+            perf_substages: Vec::new(),
         };
 
         assert!(crate::output::package_name_display(&env_plan).is_none());
