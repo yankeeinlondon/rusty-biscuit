@@ -26,37 +26,63 @@ repository-structure scan as `sniff repo structure`.
 
 ## Default Behavior
 
-Prints a styled table of distinct runners and their evidence, one row per
-runner. For a Cargo workspace that configures nextest at the workspace root:
+The command aims for a **single answer**: the test runner you actually use. The
+default text output is comma-separated (CSV); when the scope resolves to one
+runner it is a single bare name:
 
 ```
-┌──────────────────┬──────────────────────┐
-│ Runner           │ Source               │
-├──────────────────┼──────────────────────┤
-│ cargo test       │ ecosystem default    │
-│ cargo-nextest    │ config               │
-│                  │ .config/nextest.toml │
-└──────────────────┴──────────────────────┘
-
-distinct runners (across all packages)
+cargo-nextest
 ```
 
-When exactly one runner is in scope, a focused single-runner report is printed
-instead of the table. When no runner is declared for the context, nothing is
-written to STDOUT (a dim hint goes to STDERR unless `--plain`) and the process
-exits `1`.
+A package that configures or declares a runner reports **that runner alone** —
+the implicit `cargo test` / `go test` / `unittest` ecosystem default is
+superseded (see [Prioritization](#prioritization)). Only when several packages
+in scope use *different* runners is the answer a list:
 
-## Evidence Sources
+```
+cargo-nextest (sniff package), vitest (sniff-cli package)
+```
 
-Each runner carries the strongest signal that attributed it. Sources are ordered
-by signal strength (strongest first):
+When no runner is declared for the context, nothing is written to STDOUT (a dim
+hint goes to STDERR unless `--plain`) and the process exits `1`.
+
+### Evidence under `--verbose`
+
+The evidence source is provenance, shown only under `-v/--verbose`, appended in
+parentheses. For a `config` source the located file is a clickable link to its
+repo-root-relative path:
+
+```
+cargo-nextest (configuration located at: .config/nextest.toml)
+```
+
+In a multi-runner list, `-v` also names the attributing package:
+
+```
+cargo-nextest (configuration located at: .config/nextest.toml, sniff package),
+vitest (configuration located at: sniff-cli/vitest.config.ts, sniff-cli package)
+```
+
+A runner shared by many packages through one workspace-root config names no
+single package (it is repo-wide). Use `--json` for the source in structured form.
+
+## Prioritization
+
+Each package collapses to the **strongest evidence tier present**, so a single
+answer emerges wherever one exists. Sources rank strongest-first:
 
 | Source | Meaning |
 |--------|---------|
 | `config` | A config file owned by the runner was found (e.g. `vitest.config.ts`, `.config/nextest.toml`). Disambiguates runners that share a manifest key. |
 | `manifest` | The runner appears as an exact dependency key in a package manifest (e.g. `vitest`, `phpunit/phpunit`). Exact match only — a package merely *named* `jest-helper` does not count. |
-| `ecosystem default` | The runner is the implicit built-in for its ecosystem (`cargo test`, `go test`, `node --test`, `unittest`, `mix test`, …). Reported even when no explicit runner is configured, so consumers can tell "explicitly configured" from "implicitly available". |
-| `convention` | Weakest. Inferred from test-file naming only, emitted for stdlib runners (`unittest`, Minitest, `node --test`) with no dedicated config or manifest marker. |
+| `ecosystem default` | The implicit built-in for the ecosystem (`cargo test`, `go test`, `node --test`, `unittest`, `mix test`, …). Reported **only when it is the sole signal** — a configured or declared runner supersedes it. |
+| `convention` | Weakest. Inferred from test-file naming only, for stdlib runners with no dedicated config or manifest marker. |
+
+So a Cargo crate with a nextest config reports `cargo-nextest`, not `cargo-nextest`
+*and* `cargo test`. A plain crate with no explicit runner reports `cargo test`
+(the default is then the only signal). A package can still yield more than one
+runner when two markers of the same top tier are present (e.g. pytest + tox, both
+config files).
 
 ### Workspace-root config (nextest)
 
@@ -73,33 +99,47 @@ default, because no member crate carries a nextest marker of its own.
 
 ## Aggregation Scope
 
-Per-package runners are collapsed into a distinct set whose breadth depends on
+Per-package effective runners are collapsed across the scope, which depends on
 where the command runs (mirrors the `package-manager` collapse rule):
 
 ```text
-package        -> the runners that package declares
-package-area   -> union across packages in the area; uniform -> singular,
-                  else unique list
-repo root      -> union across all packages; uniform -> singular, else list
+package        -> the runner(s) that package uses
+package-area   -> union across packages in the area; uniform -> single answer,
+                  else attributed list
+repo root      -> union across all packages; uniform -> single answer, else list
 ```
 
-In a non-monorepo, or a monorepo with no discovered packages, detection runs at
-the resolved root directory directly. The scope label is shown beneath the table
-(`across all packages`, `within this package-area`, …).
+Entries are deduplicated by `(runner, source)`: packages sharing one
+workspace-root config collapse to a single entry naming all of them, while
+per-package configs of the same runner stay distinct. In a non-monorepo, or a
+monorepo with no discovered packages, detection runs at the resolved root
+directory directly (no package attribution to carry).
 
 ## Arguments and Flags
 
 | Argument | Description |
 |----------|-------------|
 | `-b/--base <DIR>` | Analyze a specific directory instead of the current one. Also fixes the scope to that directory. |
-| `--csv` | Render runners comma-separated on a single line. |
-| `--list` | Render runners newline-delimited, one per line. |
-| `--md` | Render runners as a Markdown unordered list (`- name`). |
+| `--csv` | Comma-separated on a single line. |
+| `--list` | Newline-delimited, one per line. |
+| `--md` | Markdown unordered list (`- item`). |
 | `--json` | Emit the structured report (see below). |
-| `-v/--verbose` | Add evidence detail to the styled text report. |
+| `-v/--verbose` | Add each runner's evidence source (and, in a list, its package). |
 
-`--csv`, `--list`, and `--md` are mutually exclusive and emit names only (no
-evidence column). Use `--json` when the evidence source matters to a script.
+The default output is a styled CSV that adds evidence under `-v` and package
+attribution in a multi-runner list. `--csv`/`--list`/`--md` are **machine
+formats** (plain text, no styling/hyperlinks), mutually exclusive:
+
+- without `-v` — distinct runner names only.
+- with `-v` — each item keeps the same provenance the styled CSV shows
+  (`configuration located at: …`, `declared as dependency: …`, plus the package
+  in a multi-runner list), as plain text in the chosen delimiter. For example
+  `--list -v`:
+
+  ```
+  cargo-nextest (configuration located at: .config/nextest.toml)
+  vitest (declared as dependency: vitest, sniff-cli package)
+  ```
 
 ## Exit Codes
 
@@ -109,54 +149,68 @@ evidence column). Use `--json` when the evidence source matters to a script.
 | `1` | No runner is declared for the context (text mode only; nothing on STDOUT). |
 
 Under `--json` the command always exits `0` and emits a document even when no
-runner is declared — the empty result is `{ "test_runner": null }`.
+runner is declared — the empty result is `{ "test_runners": [] }`.
 
 ## Examples
 
 ```bash
-# Styled table for the current context
+# The runner for the current context (single answer where one exists)
 sniff repo test-runner
+# → cargo-nextest
 
-# Just the names, for piping
+# Add evidence (and package, in a list) under --verbose
+sniff repo test-runner -v
+# → cargo-nextest (configuration located at: .config/nextest.toml)
+
+# Names only, for piping
 sniff repo test-runner --list
-# → cargo test
-#   cargo-nextest
-
-# Single comma-separated line
-sniff repo test-runner --csv
-# → cargo test, cargo-nextest
+# → cargo-nextest
 
 # Analyze a specific package directory
 sniff repo test-runner -b sniff/lib
 
-# Structured evidence for a script
-sniff repo test-runner --json | jq '.test_runners[].runner'
+# Structured metadata for a script
+sniff repo test-runner --json | jq -r '.test_runners[].binary'
+# → cargo nextest run
 ```
 
 ## JSON Output (`--json`)
 
-A singular result is emitted as a single object under `test_runner`; multiple
-results as an array under `test_runners`. Each entry has the runner variant and
-a tagged `source`:
+Always a `test_runners` array (length 0, 1, or N — matching the `TestRunner[]`
+shape). Each entry carries the runner identity, the literal **run command**
+(`binary`), the documentation `website`, the tagged `source`, and the in-scope
+`packages` that attribute it:
 
 ```json
 {
   "test_runners": [
     {
-      "runner": "CargoTest",
-      "source": { "kind": "ecosystem_default" }
-    },
-    {
       "runner": "Nextest",
-      "source": { "kind": "config", "filename": ".config/nextest.toml" }
+      "name": "cargo-nextest",
+      "binary": "cargo nextest run",
+      "website": "https://nexte.st/",
+      "source": {
+        "kind": "config",
+        "filename": ".config/nextest.toml",
+        "path": ".config/nextest.toml",
+        "href": "file:///abs/path/.config/nextest.toml"
+      },
+      "packages": ["sniff-lib", "sniff-cli"]
     }
   ]
 }
 ```
 
-The `source` object is tagged by `kind`: `config` (with `filename`), `manifest`
-(with `key`), `ecosystem_default`, or `convention`. STDOUT carries the full JSON
-document; nothing is written to STDERR under `--json`.
+Fields:
+
+- `binary` — the command you'd type to run the tests, ignoring task runners like
+  `just` (e.g. `cargo nextest run`, `cargo test`, `go test ./...`, `vitest run`).
+- `source` is tagged by `kind`: `config` (with `filename`, repo-relative `path`,
+  and an absolute `file://` `href`), `manifest` (with `key`), `ecosystem_default`,
+  or `convention`.
+- `packages` — every in-scope package that resolves to this exact `(runner, source)`.
+
+STDOUT carries the full JSON document; nothing is written to STDERR under `--json`.
 
 ## Bare `sniff repo --json`
 

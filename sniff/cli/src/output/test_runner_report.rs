@@ -1,162 +1,163 @@
 //! Output rendering for `sniff repo test-runner`.
 //!
-//! Reports library-provided `TestRunnerUsage` values (runner + evidence
-//! source). The CLI never re-detects; it only formats what the library
-//! already collapsed via `aggregate_package_values`.
+//! Reports library-provided [`TestRunnerAttribution`] entries (a distinct
+//! runner + evidence source, plus the packages that attribute it). The CLI
+//! never re-detects or re-prioritizes; it only formats what the library
+//! collapsed via `aggregate_test_runners`.
+
+use std::path::Path;
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
-use biscuit_terminal::components::table::{Table as TerminalTable, TableCellContent, TableColumn};
 use biscuit_terminal::terminal::Terminal;
-use biscuit_terminal::utils::layout::Alignment;
-use sniff::filesystem::repo::{AggregateResult, TestRunnerSource, TestRunnerUsage};
-use sniff::programs::contract::CategoryEnum;
+use sniff::filesystem::repo::{TestRunnerAttribution, TestRunnerSource};
 use sniff::programs::schema::ProgramMetadata;
+use sniff::programs::test_runner_spec::run_command;
 
-/// Build the `--json` value for a test-runner aggregate result.
+/// Build the `--json` value: always `{ "test_runners": [ ... ] }`.
 ///
-/// Shape:
-/// - Singular: `{ "test_runner": <usage> }`
-/// - Multiple: `{ "test_runners": [<usage>, ...] }`
-/// - Empty:    `{ "test_runner": null }`
-pub fn build_test_runner_json(result: &AggregateResult<TestRunnerUsage>) -> serde_json::Value {
-    match result {
-        AggregateResult::Singular(usage) => serde_json::json!({
-            "test_runner": serde_json::to_value(usage).unwrap_or(serde_json::Value::Null),
-        }),
-        AggregateResult::Multiple(usages) => {
-            let arr: Vec<serde_json::Value> = usages
-                .iter()
-                .map(|u| serde_json::to_value(u).unwrap_or(serde_json::Value::Null))
-                .collect();
-            serde_json::json!({ "test_runners": arr })
-        }
-        AggregateResult::Empty => serde_json::json!({ "test_runner": null }),
-    }
+/// Each entry carries the runner identity, the literal run command (`binary`),
+/// the documentation `website`, the evidence `source`, and the in-scope
+/// `packages` that attribute it.
+pub fn build_test_runner_json(
+    entries: &[TestRunnerAttribution],
+    repo_root: &Path,
+) -> serde_json::Value {
+    let runners: Vec<serde_json::Value> = entries
+        .iter()
+        .map(|entry| {
+            let info = entry.usage.runner.info();
+            serde_json::json!({
+                "runner": serde_json::to_value(entry.usage.runner)
+                    .unwrap_or(serde_json::Value::Null),
+                "name": info.display_name,
+                "binary": run_command(entry.usage.runner),
+                "website": info.website,
+                "source": source_json(&entry.usage.source, repo_root),
+                "packages": entry.packages,
+            })
+        })
+        .collect();
+    serde_json::json!({ "test_runners": runners })
 }
 
-/// Render the singular (single-runner) default styled text.
-pub fn render_singular(usage: &TestRunnerUsage, verbose: u8, term: &Terminal) -> String {
-    let info = usage.runner.info();
-    let body = format!(
-        "<b>{}</b> <dim>{}</dim>",
-        info.display_name,
-        render_source_suffix(&usage.source, term)
-    );
-    let mut out = Prose::new(body).render(term);
-    if verbose > 0 {
-        out.push_str(&render_evidence_detail(usage, term));
-    }
-    out.push('\n');
-    out
-}
-
-/// Render the multiple-runner default styled text as a small table.
-pub fn render_multiple(
-    usages: &[TestRunnerUsage],
-    scope_kind: &str,
-    verbose: u8,
-    term: &Terminal,
-) -> String {
-    let mut columns = vec![
-        TableColumn::new("Runner"),
-        TableColumn::new("Source")
-            .with_alignment(Alignment::Left)
-            .with_max_width(28),
-    ];
-    if verbose > 0 {
-        columns.push(TableColumn::new("Ecosystem"));
-        columns.push(TableColumn::new("Kind"));
-    }
-
-    let mut table = TerminalTable::new()
-        .with_columns(columns)
-        .prefer_cursor_alignment();
-
-    for usage in usages {
-        let info = usage.runner.info();
-        let mut cells: Vec<TableCellContent> = vec![
-            Prose::new(format!(
-                r#"<a href="{}">{}</a>"#,
-                info.website,
-                info.display_name
-            ))
-            .render(term)
-            .into(),
-            render_source_cell(&usage.source, term).into(),
-        ];
-        if verbose > 0 {
-            let spec =
-                sniff::programs::test_runner_spec::TEST_RUNNER_SPEC[usage.runner.variant_index()];
-            cells.push(format!("{:?}", spec.ecosystem).to_lowercase().into());
-            cells.push(format!("{:?}", spec.kind).to_lowercase().into());
-        }
-        table.add_row(cells);
-    }
-
-    let mut out = table.display(term).to_string();
-    // Append a dim scope hint so a reader knows whether the list is a
-    // package-area/repo union or a single package.
-    let hint = match scope_kind {
-        "package-area" => " (across the current package-area)",
-        "repo" => " (across all packages)",
-        _ => "",
-    };
-    if !hint.is_empty() {
-        let _ = std::fmt::Write::write_fmt(
-            &mut out,
-            format_args!(
-                "\n{}",
-                Prose::new(format!("<dim>distinct runners{hint}</dim>")).render(term)
-            ),
+/// Serialize a source, enriching `Config` with an absolute `href` to the file.
+fn source_json(source: &TestRunnerSource, repo_root: &Path) -> serde_json::Value {
+    let mut value = serde_json::to_value(source).unwrap_or(serde_json::Value::Null);
+    if let (TestRunnerSource::Config { path, .. }, Some(obj)) = (source, value.as_object_mut()) {
+        obj.insert(
+            "href".to_string(),
+            serde_json::Value::String(file_href(repo_root, path)),
         );
     }
+    value
+}
+
+/// Render the styled, comma-separated answer (the default text format).
+///
+/// A single entry collapses to a bare runner name; multiple entries are joined
+/// with `, `. Under `--verbose` each entry gains its evidence source, and when
+/// more than one entry is present, the attributing package is named so the
+/// caller can tell which package uses which runner.
+pub fn render_entries(
+    entries: &[TestRunnerAttribution],
+    verbose: u8,
+    repo_root: &Path,
+    term: &Terminal,
+) -> String {
+    let multi = entries.len() > 1;
+    let markup = entries
+        .iter()
+        .map(|entry| entry_markup(entry, verbose, multi, repo_root))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut out = Prose::new(markup).render(term);
     out.push('\n');
     out
 }
 
-fn render_source_cell(source: &TestRunnerSource, term: &Terminal) -> String {
-    match source {
-        TestRunnerSource::Config { filename } => Prose::new(format!(
-            "<green>config</green> <dim>{filename}</dim>"
-        ))
-        .render(term),
-        TestRunnerSource::Manifest { key } => Prose::new(format!(
-            "<cyan>manifest</cyan> <dim>{key}</dim>"
-        ))
-        .render(term),
-        TestRunnerSource::EcosystemDefault => {
-            Prose::new("<dim>ecosystem default</dim>").render(term)
+/// Distinct runner display names, first-seen order — the payload for the
+/// name-only `--csv` / `--list` / `--md` formats without `--verbose`.
+pub fn entry_names(entries: &[TestRunnerAttribution]) -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = Vec::new();
+    for entry in entries {
+        let name = entry.usage.runner.info().display_name;
+        if !names.contains(&name) {
+            names.push(name);
         }
-        TestRunnerSource::Convention => Prose::new("<dim>convention</dim>").render(term),
+    }
+    names
+}
+
+/// Plain-text (un-styled) rendering of one entry for the machine formats under
+/// `--verbose`: the runner name plus its evidence source and, in a multi-runner
+/// list, the attributing package. The same provenance the styled CSV shows,
+/// without ANSI or hyperlinks so it stays pipe-friendly.
+pub fn entry_plain(entry: &TestRunnerAttribution, multi: bool) -> String {
+    let name = entry.usage.runner.info().display_name;
+    let mut detail = vec![source_detail_plain(&entry.usage.source)];
+    if multi && entry.packages.len() == 1 {
+        detail.push(format!("{} package", entry.packages[0]));
+    }
+    format!("{name} ({})", detail.join(", "))
+}
+
+/// Plain-text counterpart to [`source_detail_markup`] (no styling or link).
+fn source_detail_plain(source: &TestRunnerSource) -> String {
+    match source {
+        TestRunnerSource::Config { path, .. } => {
+            format!("configuration located at: {path}")
+        }
+        TestRunnerSource::Manifest { key } => format!("declared as dependency: {key}"),
+        TestRunnerSource::EcosystemDefault => "ecosystem default".to_string(),
+        TestRunnerSource::Convention => "by convention".to_string(),
     }
 }
 
-fn render_source_suffix(source: &TestRunnerSource, term: &Terminal) -> String {
+/// Markup for one entry: the bold runner name, plus a parenthetical with the
+/// evidence source (verbose) and/or attributing package (multi-entry).
+fn entry_markup(
+    entry: &TestRunnerAttribution,
+    verbose: u8,
+    multi: bool,
+    repo_root: &Path,
+) -> String {
+    let name = entry.usage.runner.info().display_name;
+    let mut detail: Vec<String> = Vec::new();
+    if verbose > 0 {
+        detail.push(source_detail_markup(&entry.usage.source, repo_root));
+    }
+    // Name the package only when disambiguation helps: a shared usage (one
+    // workspace-root config across many crates) names no single package.
+    if multi && entry.packages.len() == 1 {
+        detail.push(format!(
+            "<yellow>{}</yellow><i> package</i>",
+            entry.packages[0]
+        ));
+    }
+    if detail.is_empty() {
+        format!("<b>{name}</b>")
+    } else {
+        format!("<b>{name}</b> (<dim>{}</dim>)", detail.join(", "))
+    }
+}
+
+/// The inner (un-parenthesized) markup describing why a runner was attributed.
+fn source_detail_markup(source: &TestRunnerSource, repo_root: &Path) -> String {
     match source {
-        TestRunnerSource::Config { filename } => {
-            Prose::new(format!("via <green>config</green> <dim>{filename}</dim>")).render(term)
-        }
+        TestRunnerSource::Config { path, .. } => format!(
+            "<i>configuration located at:</i> <blue><a href=\"{}\">{path}</a></blue>",
+            file_href(repo_root, path)
+        ),
         TestRunnerSource::Manifest { key } => {
-            Prose::new(format!("via <cyan>manifest</cyan> <dim>{key}</dim>")).render(term)
+            format!("<i>declared as dependency:</i> {key}")
         }
-        TestRunnerSource::EcosystemDefault => {
-            Prose::new("<dim>ecosystem default</dim>").render(term)
-        }
-        TestRunnerSource::Convention => Prose::new("<dim>convention</dim>").render(term),
+        TestRunnerSource::EcosystemDefault => "<i>ecosystem default</i>".to_string(),
+        TestRunnerSource::Convention => "<i>by convention</i>".to_string(),
     }
 }
 
-fn render_evidence_detail(usage: &TestRunnerUsage, term: &Terminal) -> String {
-    let spec = sniff::programs::test_runner_spec::TEST_RUNNER_SPEC[usage.runner.variant_index()];
-    format!(
-        "\n{}",
-        Prose::new(format!(
-            "<dim>ecosystem {} · kind {} · invocation {}</dim>",
-            format!("{:?}", spec.ecosystem).to_lowercase(),
-            format!("{:?}", spec.kind).to_lowercase(),
-            format!("{:?}", spec.invocation).to_lowercase(),
-        ))
-        .render(term)
-    )
+/// A `file://` URL to the repo-relative config `rel`, for terminal hyperlinks.
+fn file_href(repo_root: &Path, rel: &str) -> String {
+    format!("file://{}", repo_root.join(rel).display())
 }

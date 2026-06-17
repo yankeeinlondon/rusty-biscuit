@@ -6,8 +6,56 @@
 //! the static catalog (`TestRunnerSpec`) and the host-resolution result
 //! (`Availability`) used by the `TestRunner` category.
 
+use crate::programs::enums::TestRunner;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+/// The command a developer types to run a package's tests with `runner`,
+/// ignoring task orchestrators such as `just`, `make`, or `npm run`.
+///
+/// This is the "what would I type at the terminal" answer surfaced by
+/// `sniff repo test-runner --json`. It is the runner's own invocation, e.g.
+/// `cargo nextest run` rather than the bare `cargo-nextest` binary name, and
+/// `node --test` rather than the friendly display label.
+#[must_use]
+pub fn run_command(runner: TestRunner) -> &'static str {
+    match runner {
+        TestRunner::CargoTest => "cargo test",
+        TestRunner::Nextest => "cargo nextest run",
+        TestRunner::GoTest => "go test ./...",
+        TestRunner::Gotestsum => "gotestsum",
+        TestRunner::Ginkgo => "ginkgo",
+        TestRunner::Vitest => "vitest run",
+        TestRunner::Jest => "jest",
+        TestRunner::Mocha => "mocha",
+        TestRunner::Ava => "ava",
+        TestRunner::NodeTest => "node --test",
+        TestRunner::Jasmine => "jasmine",
+        TestRunner::NodeTap => "tap",
+        TestRunner::Uvu => "uvu",
+        TestRunner::Pytest => "pytest",
+        TestRunner::Unittest => "python -m unittest",
+        TestRunner::Nose2 => "nose2",
+        TestRunner::Tox => "tox",
+        TestRunner::Nox => "nox",
+        TestRunner::PhpUnit => "phpunit",
+        TestRunner::Pest => "pest",
+        TestRunner::Codeception => "codecept run",
+        TestRunner::Behat => "behat",
+        TestRunner::Atoum => "atoum",
+        TestRunner::RSpec => "rspec",
+        TestRunner::Minitest => "rake test",
+        TestRunner::TestUnit => "rake test",
+        TestRunner::JUnit5 => "mvn test",
+        TestRunner::JUnit4 => "mvn test",
+        TestRunner::TestNg => "mvn test",
+        TestRunner::XUnit => "dotnet test",
+        TestRunner::NUnit => "dotnet test",
+        TestRunner::MsTest => "dotnet test",
+        TestRunner::ExUnit => "mix test",
+        TestRunner::ESpec => "mix espec",
+    }
+}
 
 /// How a test runner is invoked on the host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

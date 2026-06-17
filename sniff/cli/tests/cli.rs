@@ -2098,11 +2098,16 @@ fn test_repo_test_runner_json_reports_package_usage() {
         .clone();
 
     let json: Value = serde_json::from_slice(&output).expect("stdout is valid JSON");
-    assert_eq!(json["test_runner"]["runner"], "CargoTest");
-    assert_eq!(
-        json["test_runner"]["source"]["kind"],
-        "ecosystem_default"
-    );
+    let runners = json["test_runners"]
+        .as_array()
+        .expect("test_runners is always an array");
+    assert_eq!(runners.len(), 1, "single Rust crate => one runner");
+    let entry = &runners[0];
+    assert_eq!(entry["runner"], "CargoTest");
+    assert_eq!(entry["source"]["kind"], "ecosystem_default");
+    // Enriched metadata: the run command and documentation website.
+    assert_eq!(entry["binary"], "cargo test");
+    assert_eq!(entry["website"], "https://doc.rust-lang.org/cargo/commands/cargo-test.html");
 }
 
 #[test]
@@ -2153,6 +2158,35 @@ fn test_repo_test_runner_output_modes() {
 }
 
 #[test]
+fn test_repo_test_runner_verbose_machine_formats_keep_evidence() {
+    // `--list`/`--md`/`--csv` with `-v` carry the same provenance the styled
+    // CSV shows, formatted per their delimiter, as pipe-friendly plain text.
+    let (_dir, path) = create_cargo_workspace_repo();
+    std::fs::create_dir_all(path.join(".config")).unwrap();
+    std::fs::write(path.join(".config/nextest.toml"), "[profile.default]\n").unwrap();
+    let base = path.to_str().unwrap();
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", base, "repo", "test-runner", "-v", "--list"])
+        .assert()
+        .success()
+        .stdout("cargo-nextest (configuration located at: .config/nextest.toml)\n");
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", base, "repo", "test-runner", "-v", "--md"])
+        .assert()
+        .success()
+        .stdout("- cargo-nextest (configuration located at: .config/nextest.toml)\n");
+
+    // Without -v the machine formats stay names-only.
+    cargo_bin_cmd!("sniff")
+        .args(["--base", base, "repo", "test-runner", "--list"])
+        .assert()
+        .success()
+        .stdout("cargo-nextest\n");
+}
+
+#[test]
 fn test_repo_test_runner_detects_workspace_root_nextest() {
     // nextest is configured once at the workspace root; the member crate carries
     // no nextest marker of its own. The repo aggregate must still surface it.
@@ -2181,12 +2215,29 @@ fn test_repo_test_runner_detects_workspace_root_nextest() {
     let json: Value = serde_json::from_slice(&output).expect("stdout is valid JSON");
     let runners = json["test_runners"]
         .as_array()
-        .expect("multiple runners => test_runners array");
+        .expect("test_runners is always an array");
+    // The configured runner supersedes the cargo test ecosystem default, so the
+    // single member crate collapses to nextest alone.
+    assert_eq!(runners.len(), 1, "configured nextest should be the lone answer, got {json}");
+    let entry = &runners[0];
+    assert_eq!(entry["runner"], "Nextest");
+    assert_eq!(entry["source"]["kind"], "config");
+    assert_eq!(entry["source"]["filename"], ".config/nextest.toml");
+    assert_eq!(entry["binary"], "cargo nextest run");
+
+    // Default text output is the single answer with no cargo test noise.
+    let text = cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "test-runner", "--plain"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8_lossy(&text);
+    assert_eq!(text.trim(), "cargo-nextest");
     assert!(
-        runners.iter().any(|r| r["runner"] == "Nextest"
-            && r["source"]["kind"] == "config"
-            && r["source"]["filename"] == ".config/nextest.toml"),
-        "workspace-root nextest config should surface in the aggregate, got {json}"
+        !text.contains("cargo test"),
+        "cargo test must be superseded by configured nextest, got {text:?}"
     );
 }
 

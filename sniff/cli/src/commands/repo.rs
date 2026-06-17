@@ -512,10 +512,9 @@ pub(super) fn handle_repo_test_runner(
     use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::terminal::Terminal;
     use sniff::filesystem::repo::{
-        AggregateResult, AggregateScope, TestRunnerUsage, aggregate_package_values,
-        detect_repo_structure, detect_test_runners_for_dir, resolve_scope,
+        TestRunnerAttribution, aggregate_test_runners, detect_repo_structure,
+        detect_test_runners_for_dir, resolve_scope,
     };
-    use sniff::programs::schema::ProgramMetadata;
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
     let explicit = base_dir.unwrap_or(&cwd);
@@ -531,47 +530,33 @@ pub(super) fn handle_repo_test_runner(
     // "what does THIS directory declare?" rather than always the repo root.
     let dir_for_scope = if base_dir.is_some() { explicit } else { &cwd };
 
-    // Build the aggregate result. Two paths:
-    //   1. Monorepo with packages → collapse via the shared helper.
-    //   2. Non-monorepo / no packages → detect at the directory directly.
-    let (result, scope_kind): (AggregateResult<TestRunnerUsage>, &'static str) = match &info {
+    // Collapse to distinct runner usages, each carrying its attributing
+    // packages. Two paths:
+    //   1. Monorepo with packages → aggregate across the resolved scope.
+    //   2. Non-monorepo / no packages → detect at the directory directly
+    //      (no per-package attribution to carry).
+    let entries: Vec<TestRunnerAttribution> = match &info {
         Some(info) if info.is_monorepo && info.packages.as_ref().is_some_and(|p| !p.is_empty()) => {
             let packages = info.packages.as_deref().expect("non-empty packages");
             let scope = resolve_scope(info, dir_for_scope);
-            let kind = match &scope {
-                AggregateScope::Package(_) => "package",
-                AggregateScope::PackageArea(_) => "package-area",
-                AggregateScope::Repo => "repo",
-            };
-            let result = aggregate_package_values(
-                packages,
-                &scope,
-                |pkg| pkg.test_runners.clone(),
-                |usage: &TestRunnerUsage| usage.runner,
-            );
-            (result, kind)
+            aggregate_test_runners(packages, &scope)
         }
-        _ => {
-            // Non-monorepo (or no discovered packages): detect at the
-            // resolved root directory directly. The result is trivially
-            // singular or empty.
-            let usages = detect_test_runners_for_dir(&root);
-            let result = match usages.len() {
-                0 => AggregateResult::Empty,
-                1 => AggregateResult::Singular(usages.into_iter().next().expect("one")),
-                _ => AggregateResult::Multiple(usages),
-            };
-            (result, "package")
-        }
+        _ => detect_test_runners_for_dir(&root)
+            .into_iter()
+            .map(|usage| TestRunnerAttribution {
+                usage,
+                packages: Vec::new(),
+            })
+            .collect(),
     };
 
     if json {
-        let value = crate::output::test_runner_report::build_test_runner_json(&result);
+        let value = crate::output::test_runner_report::build_test_runner_json(&entries, &root);
         crate::output::print_json_value(value, perf.build_report().as_ref());
         return Ok(());
     }
 
-    if matches!(result, AggregateResult::Empty) {
+    if entries.is_empty() {
         // No declared runner. Emit nothing on stdout; hint on stderr when not plain.
         if !plain {
             eprintln!(
@@ -584,42 +569,40 @@ pub(super) fn handle_repo_test_runner(
         std::process::exit(1);
     }
 
-    let term = Terminal::default();
-    let display = |usage: &TestRunnerUsage| usage.runner.info().display_name;
-
-    let rendered = match &result {
-        AggregateResult::Singular(usage) => {
-            if args.csv || args.list {
-                format!("{}\n", display(usage))
-            } else if args.md {
-                format!("- {}\n", display(usage))
-            } else {
-                crate::output::test_runner_report::render_singular(usage, verbose, &term)
+    let rendered = if args.csv || args.list || args.md {
+        // Machine formats (plain text). Without -v: distinct runner names only.
+        // With -v: each item keeps the evidence/attribution the styled CSV
+        // shows, rendered as plain text in the chosen delimiter.
+        let items: Vec<String> = if verbose > 0 {
+            let multi = entries.len() > 1;
+            entries
+                .iter()
+                .map(|entry| crate::output::test_runner_report::entry_plain(entry, multi))
+                .collect()
+        } else {
+            crate::output::test_runner_report::entry_names(&entries)
+                .into_iter()
+                .map(str::to_string)
+                .collect()
+        };
+        let mut out = String::new();
+        use std::fmt::Write;
+        if args.csv {
+            let _ = writeln!(out, "{}", items.join(", "));
+        } else {
+            let prefix = if args.md { "- " } else { "" };
+            for item in &items {
+                let _ = writeln!(out, "{prefix}{item}");
             }
         }
-        AggregateResult::Multiple(usages) => {
-            let names: Vec<&str> = usages.iter().map(display).collect();
-            if args.csv {
-                format!("{}\n", names.join(", "))
-            } else if args.list {
-                let mut out = String::new();
-                for name in names {
-                    use std::fmt::Write;
-                    let _ = writeln!(out, "{name}");
-                }
-                out
-            } else if args.md {
-                let mut out = String::new();
-                for name in names {
-                    use std::fmt::Write;
-                    let _ = writeln!(out, "- {name}");
-                }
-                out
-            } else {
-                crate::output::test_runner_report::render_multiple(usages, scope_kind, verbose, &term)
-            }
-        }
-        AggregateResult::Empty => unreachable!("handled above"),
+        out
+    } else {
+        crate::output::test_runner_report::render_entries(
+            &entries,
+            verbose,
+            &root,
+            &Terminal::default(),
+        )
     };
 
     crate::output::emit_text(&rendered, plain);
