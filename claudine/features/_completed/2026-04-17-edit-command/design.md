@@ -212,7 +212,7 @@ Semantics are identical to Darkmatter's `resolve_editor_command()`:
    from Darkmatter's static table. Terminal editors get no extra flag.
 
 If all three paths fail, Claudine returns an error with the
-`sniff editors install` hint (see "Error handling").
+`sniff software editors install` hint (see "Error handling").
 
 ## Temp File Workflow
 
@@ -456,7 +456,7 @@ Specific error messages:
    > Error: no editor found; set $EDITOR or $VISUAL, or install one
    > of: nvim, vim, code, nano
    >
-   > Tip: run `sniff editors install` to pick one interactively.
+   > Tip: run `sniff software editors install` to pick one interactively.
 2. **Editor non-zero exit** — `EditorError::NonZeroExit(code)` renders
    as `editor exited with status <code> (prompt abandoned)`.
 3. **Missing file** — `EditorError::Missing` renders as `prompt buffer

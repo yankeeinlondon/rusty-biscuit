@@ -29,7 +29,7 @@ The design goals that shaped `GraphExpression`:
 | Consumer | Crate | Use case |
 |----------|-------|----------|
 | `bt graph-expression` CLI command | `biscuit-terminal/cli` | User-facing CLI: parses expression or DOT input, renders the graph inline, emits metadata with `--meta`, supports `--inverse`, `--orientation`, `--width`, `--font`. |
-| `sniff repo deps --ui` | `sniff/cli` | Builds a DOT digraph from workspace dependency data and renders the dependency diagram inline in the terminal. Also has an SVG export path (`render_repo_deps_svg`) for non-terminal consumers. |
+| `sniff repo package-dependencies --ui` | `sniff/cli` | Builds a DOT digraph from workspace dependency data and renders the dependency diagram inline in the terminal. Also has an SVG export path (`render_repo_deps_svg`) for non-terminal consumers. |
 | Library composition | `biscuit-terminal/lib` | Any code that builds a `GraphExpression` and composes it into `Section`, `Compose`, or other `TerminalRenderable` containers. |
 
 ### Example usage
@@ -61,7 +61,7 @@ let term = biscuit_terminal::terminal::Terminal::new();
 println!("{}", graph.display(&term));
 ```
 
-**Library (sniff repo deps):**
+**Library (sniff repo package-dependencies):**
 
 ```rust
 let graph = GraphExpression::for_terminal(&dot, GraphInputSyntax::Dot)?
@@ -208,7 +208,7 @@ The tree rendering model assumes that `render_tree()` produces a `RenderNode` *s
 
 The `TreeRenderable::render_tree(&self)` signature takes `&self` only -- it has no access to `Terminal`, `TerminalRenderOptions`, or any target context. The tree node must be produced *before* the renderer walks it. But `GraphExpression` cannot decide what artifact to produce until it knows the target.
 
-**Example of how this presents itself:** `sniff repo deps --ui` builds a `GraphExpression` and calls `graph.render(&term)`. The terminal width determines the PNG pixel dimensions, which changes the cache key, which determines whether a cached PNG is reused or a new one is rendered. This entire decision chain is triggered during `render()`, not during tree construction.
+**Example of how this presents itself:** `sniff repo package-dependencies --ui` builds a `GraphExpression` and calls `graph.render(&term)`. The terminal width determines the PNG pixel dimensions, which changes the cache key, which determines whether a cached PNG is reused or a new one is rendered. This entire decision chain is triggered during `render()`, not during tree construction.
 
 ```rust
 #[test]
