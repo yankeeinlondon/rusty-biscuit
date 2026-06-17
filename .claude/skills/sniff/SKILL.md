@@ -15,8 +15,8 @@ Cross-platform system detection library and CLI for Rust.
 | OS | Distribution, kernel, architecture, package managers, locale, timezone, NTP status |
 | Hardware | CPU (with SIMD), GPU (Metal), memory, storage, audio devices |
 | Network | Interface enumeration with IPv4/IPv6, WAN IP (TTL-cached) |
-| Filesystem | Git repos, monorepos, languages, file types, EditorConfig, docs, blast radius, justfiles, recent commits |
-| Programs | 8 categories with macOS bundle support, install + remote-bash consent (parallel via Rayon, shared executable index) |
+| Filesystem | Git repos, monorepos, languages, file types, EditorConfig, docs, blast radius, justfiles, recent commits, package-manager/test-runner usage collapse |
+| Programs | 9 categories with macOS bundle support, install + remote-bash consent (parallel via Rayon, shared executable index). The 9th category — test runners — resolves via PATH, project-local bins (`node_modules/.bin`, `vendor/bin`, `.venv/bin`, …), and parent binaries, reporting an `availability` discriminator instead of a bare boolean. |
 | Services | 10+ init systems (systemd, launchd, OpenRC, runit, etc.) |
 | Packages | 110+ package manager abstraction |
 | Remote | GitHub, GitLab, Gitea, Bitbucket repository metadata |
@@ -99,10 +99,11 @@ let result = detect_with_config(config)?;
 |------|-------------|
 | `SniffResult` | Top-level: os, hardware, network, filesystem (all `Option<T>`) |
 | `DetectionPlan` | Plan-based config with per-domain request types |
-| `ProgramsInfo` | 8 category fields with shared `ExecutableIndex` + parallel Rayon detection |
+| `ProgramsInfo` | 9 category fields with shared `ExecutableIndex` + parallel Rayon detection. `test_runners` carries `InstalledTestRunners` (`Vec<TestRunnerEntry>` with `Availability` discriminators `installed` / `local` / `via_parent` / `not_found`). |
 | `ServicesInfo` | Init system + service list (via `ServiceManager::detect()`) |
 | `Package` | Package path, languages, managers, dependencies |
 | `GitRepo` | `gix::Repository` handle from trusted discovery. All git access (status, diff, history, refs, remotes, config, worktrees) is pure-Rust gix; git2/libgit2 is gone from production and retained only as a dev-dependency for test/bench fixtures. |
+| `BranchInfo` | Local branch projection with branch name, current flag, tip SHA, upstream, ahead/behind counts, and whether any locally known remote-tracking ref points at the branch tip. Default branch detection uses known refs only; refresh requires explicit opt-in. |
 | `get_current_worktree_name` | Early-return helper: returns the basename of the linked worktree directory, or `None` if in the main worktree |
 | `MonorepoStandard` | Standard-based monorepo descriptor (Cargo, pnpm, Nx, Bazel, etc.) with `BinarySpec` and advisory `InvocationTemplate`s |
 | `DetectedStandard` | Detected instance of a `MonorepoStandard`, including a `ResolvedBinary` (`Path`, `Wrapper`, or missing) and version satisfaction |
@@ -157,7 +158,7 @@ CLI text derives the one-liner from `RepoInfo::primary_layer()`. The shared labe
 - **Git status layers**: counts-only vs full file changes vs full unified diffs, selectable via `GitRequest` flags
 - **Parallel remote fetch**: deep git mode fetches multiple remotes concurrently with bounded parallelism; `GIT_TERMINAL_PROMPT=0` is preserved to avoid interactive hangs
 - **Ancestry-walk containment**: per-commit remote containment is computed with a single ancestry walk per remote, cached in a `HashMap<Oid, Vec<remote>>`
-- **ExecutableIndex**: scans `PATH` + macOS bundles once, shared across all 8 program categories via `Arc`
+- **ExecutableIndex**: scans `PATH` + macOS bundles once, shared across all 9 program categories via `Arc`. The test-runner category additionally consults a cwd-sensitive `LocalBinIndex` for project-local bin dirs.
 - **CLI async model**: the CLI is a single-shot command runner; most paths are synchronous (git, filesystem, subprocess) and run directly in the async entrypoint. `spawn_blocking` is avoided unless true concurrent async work exists
 
 ## CLI
@@ -168,10 +169,11 @@ sniff --json               # Full system info (JSON output)
 sniff hardware             # Hardware only (text output)
 sniff cpu                  # Just CPU info
 sniff audio-devices        # Audio input/output devices
-sniff programs             # All programs
-sniff editors              # Just editors
-sniff editors install      # Install an editor (interactive)
-sniff agents               # AI CLI tools
+sniff software             # All program categories
+sniff software editors     # Just editors
+sniff software editors install  # Install an editor (interactive)
+sniff software test-runners   # Test runners with availability discriminator
+sniff software agents      # AI CLI tools
 sniff services             # System services
 sniff docs                 # Markdown documents
 sniff topics               # Table of available topics
@@ -182,10 +184,15 @@ sniff repo name -v         # Repository name only (verbose styling)
 sniff repo is-monorepo     # Monorepo label (e.g. `cargo`; `false` if not). Exits non-zero when false unless `--no-error`. `--json` emits `{ "is_monorepo": true, "authority": "...", "orchestrators": [...] }` / `{ "is_monorepo": false }`
 sniff repo package-count   # Number of discovered packages (`{ "package-count": N }` with --json)
 sniff repo version         # Repository version from root manifest (`{ "version": "..." | null }` with --json)
+sniff repo package-manager # Package manager(s) for the current package/area/repo context (`--csv`, `--list`, `--md`, `--json`)
+sniff repo test-runner     # Declared test runner(s) for the current package/area/repo context with evidence (`--csv`, `--list`, `--md`, `--json`)
 sniff repo git-status      # Git status with commit history
 sniff repo language        # Primary programming language for the repository
 sniff repo worktree        # Linked worktree name (exit 1 if main worktree)
 sniff repo worktrees       # List all worktrees (default, --md, --list, --csv, --verbose, --json)
+sniff repo branches        # Local branches from known refs (`--refresh-remotes` opts into fetch)
+sniff repo package-dependencies # Internal workspace dependency graph (`--ui` for diagram)
+sniff repo dependencies    # External package dependencies with family filters
 sniff repo remote origin   # Inspect remote repository
 sniff repo pr              # List open pull requests
 sniff repo pr --status merged  # List merged pull requests
@@ -200,11 +207,11 @@ sniff hardware --json      # Subcommand with JSON output
 - With subcommand: Text (default), `--json` for JSON, `--plain` for unstyled
 
 **`sniff repo --json` aggregate:**
-Bare `sniff repo --json` returns a scope-complete aggregate of all participating child subcommands, keyed by subcommand name. Single-key leaves (e.g. `name`, `version`, `is-monorepo`, `package-count`, `worktree`, `package`) contribute their unwrapped value; multi-field children (e.g. `structure`, `deps`, `packages`, `package-areas`, `git-status`, `worktrees`, file-list leaves, package-change families, boolean leaves, commit families) contribute their whole scope object. Network-primary subcommands (`remote`, `pr`) and parameterized subcommands (`hash`) are excluded, and no network requests are made by the aggregate. Note that the focused `sniff repo is-monorepo --json` leaf uses the snake_case object shape `{ "is_monorepo": ... }`; the aggregate keeps the legacy unwrapped `"is-monorepo"` bool key for compatibility.
+Bare `sniff repo --json` returns the consolidated `SniffRepo` projection with snake_case top-level keys. Identity fields remain top-level (`name`, `version`, `language`, `is_monorepo`, `package_count`, `root`), cwd-relative facts live under `context`, worktrees and branches appear once as top-level arrays, and change data is grouped into four `ScopeBucket` objects: `dirty`, `staged`, `unstaged`, and `untracked`. Each bucket contains `files`, `source_code`, `documentation`, `packages`, and `package_areas` arrays. Aggregate `git_status` is intentionally lean (`current_branch`, `config`, compact `file_changes`, and dirty/staged/unstaged/untracked counts), while focused commands such as `repo git-status --json`, `repo structure --json`, and `repo recent-commits --json` keep their richer contracts. Network-primary subcommands (`remote`, `pr`) and parameterized subcommands (`hash`) are excluded, and no network requests are made by the aggregate.
 
 ## Detailed Topics
 
-- [Programs](./programs.md) - 8 categories, macOS bundle detection
+- [Programs](./programs.md) - 9 categories, macOS bundle detection, test-runner availability
 - [Services](./services.md) - Init systems, service listing
 - [Extending](./extending.md) - Add new detection capabilities
 - [Architecture](../../../sniff/docs/sniff-library-architecture.md) - Cost model, shared-work design
