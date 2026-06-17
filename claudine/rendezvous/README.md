@@ -1,8 +1,8 @@
-# Remote Signal
+# Rendezvous
 
 ## Service Overview
 
-The **Remote Signal** daemon process is meant to compliment the Claudine CLI by providing a long running service which can provide:
+The **Rendezvous** daemon process is meant to compliment the Claudine CLI by providing a long running service which can provide:
 
 1. [Logging](./docs/logging.md)
 2. [Scheduling & Queuing](./docs/scheduling-and-queuing.md)
@@ -13,11 +13,11 @@ The **Remote Signal** daemon process is meant to compliment the Claudine CLI by 
 
 The implementation is split across three crates:
 
-1. `remote-signal-core` 
+1. `rendezvous-core` 
     - shared protobuf/gRPC stubs, identity, signed envelopes, invitations, IPC helpers
-2. `remote-signal-daemon` 
+2. `rendezvous-daemon` 
     - the long-running service
-3. `remote-signal-client` (TESTING)
+3. `rendezvous-client` (TESTING)
     - a thin gRPC test client. 
     - the local client drives the daemon over a Unix Domain Socket; 
     - the daemon persists session logs through a `redb → Loro → DuckDB` pipeline and syncs with remote peers over an authenticated QUIC mesh.
@@ -37,15 +37,15 @@ On a single device/host the interactions are:
 
 ```mermaid
 flowchart TB
-    subgraph client["remote-signal-client"]
+    subgraph client["rendezvous-client"]
         TC["Test client<br/>(tonic gRPC over UDS)"]
     end
 
-    subgraph daemon["remote-signal-daemon"]
+    subgraph daemon["rendezvous-daemon"]
         direction TB
 
         subgraph control["Control plane"]
-            SVC["RemoteSignalService<br/>(tonic gRPC impl)"]
+            SVC["RendezvousService<br/>(tonic gRPC impl)"]
         end
 
         subgraph persist["Session-log persistence"]
@@ -100,25 +100,25 @@ flowchart TB
 
 ### Tech Stack
 
-- **CRDT Engine:** [`loro`](../docs/research/remote-signal/loro.md) 
+- **CRDT Engine:** [`loro`](../docs/research/rendezvous/loro.md) 
   - chosen for its high-performance Movable Tree capabilities and efficient version tracking
-  - research found at @claudine/docs/research/remote-signal/loro.md
-- **Mesh Networking:** [`web-transport`](../docs/research/remote-signal/web-transport.md)
+  - research found at @claudine/docs/research/rendezvous/loro.md
+- **Mesh Networking:** [`web-transport`](../docs/research/rendezvous/web-transport.md)
   - backed natively by `quinn` for QUIC/UDP, 
   - providing a future-proof path to WebAssembly/Browser clients
-  - research found at @claudine/docs/research/remote-signal/web-transport.md
+  - research found at @claudine/docs/research/rendezvous/web-transport.md
 - **Inter-Process Communication (IPC):** 
   - **gRPC** via `tonic` over Unix Domain Sockets (UDS) or Named Pipes.
-  - research found at @claudine/docs/research/remote-signal/tonic.md
+  - research found at @claudine/docs/research/rendezvous/tonic.md
 - **Transactional Storage (OLTP):** `redb` 
   - Embedded, high-performance Key-Value store for CRDT binary snapshots and deltas).
-  - research found at @claudine/docs/research/remote-signal/redb.md
+  - research found at @claudine/docs/research/rendezvous/redb.md
 - **Analytical Storage (OLAP):** `duckdb` 
   - embedded columnar database for fast SQL queries on resolved document state
-  - research found at @claudine/docs/research/remote-signal/duckdb.md
+  - research found at @claudine/docs/research/rendezvous/duckdb.md
 - **Async Runtime:** `tokio`
   - we will use the `tokio` runtime
-  - research found at @claudine/docs/researchremote-signal//tokio.md
+  - research found at @claudine/docs/researchrendezvous//tokio.md
 - **Signaling / Bootstrap:** `axum`
   - HTTPS/WebSocket for initial peer discovery
-  - research found at @claudine/docs/research/remote-signal/axum.md
+  - research found at @claudine/docs/research/rendezvous/axum.md

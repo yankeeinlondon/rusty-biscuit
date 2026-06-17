@@ -20,39 +20,39 @@ BLUE := '\033[34m'
 MAGENTA := '\033[35m'
 CYAN := '\033[36m'
 
-CORE := "remote-signal-core"
-DAEMON := "remote-signal-daemon"
-CLIENT := "remote-signal-client"
+CORE := "rendezvous-core"
+DAEMON := "rendezvous-daemon"
+CLIENT := "rendezvous-client"
 
 default:
     #!/usr/bin/env bash
     set -euo pipefail
     echo
-    echo -e "{{ BOLD }}Remote Signal ({{ RESET }}core / daemon / test-client{{ BOLD }}){{ RESET }}"
+    echo -e "{{ BOLD }}Rendezvous ({{ RESET }}core / daemon / test-client{{ BOLD }}){{ RESET }}"
     echo "======================================================================================"
     echo ""
     just --list | grep -v 'default'
     echo
 
-# Build all three remote-signal crates.
+# Build all three rendezvous crates.
 build *args="":
-    @just _build {{ CORE }} "Remote-Signal Core" {{ args }}
-    @just _build {{ DAEMON }} "Remote-Signal Daemon" {{ args }}
-    @just _build {{ CLIENT }} "Remote-Signal Test Client" {{ args }}
+    @just _build {{ CORE }} "Rendezvous Core" {{ args }}
+    @just _build {{ DAEMON }} "Rendezvous Daemon" {{ args }}
+    @just _build {{ CLIENT }} "Rendezvous Test Client" {{ args }}
 
-# Test all three remote-signal crates.
+# Test all three rendezvous crates.
 test *args="":
     @just _test {{ CORE }} {{ args }}
     @just _test {{ DAEMON }} {{ args }}
     @just _test {{ CLIENT }} {{ args }}
 
-# Lint all three remote-signal crates.
+# Lint all three rendezvous crates.
 lint:
     @just _lint {{ CORE }}
     @just _lint {{ DAEMON }}
     @just _lint {{ CLIENT }}
 
-# Lint (and fix) all three remote-signal crates.
+# Lint (and fix) all three rendezvous crates.
 lint-fix:
     @just _lint {{ CORE }} || just _fix_lint {{ CORE }}
     @just _lint {{ DAEMON }} || just _fix_lint {{ DAEMON }}
@@ -65,8 +65,8 @@ check:
 # Install the daemon and test-client binaries.
 install:
     @just build --release
-    @just _install "./daemon" "Remote-Signal Daemon"
-    @just _install "./client" "Remote-Signal Test Client"
+    @just _install "./daemon" "Rendezvous Daemon"
+    @just _install "./client" "Rendezvous Test Client"
 
 # Run the Phase-6 POC demo script (multi-node pair + sync flow).
 poc-demo:

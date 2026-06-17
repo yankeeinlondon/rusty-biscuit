@@ -8,26 +8,26 @@
 # daemons and removes the temporary state.
 #
 # This script is intentionally dependency-free beyond the
-# `remote-signal-daemon` and `remote-signal-test-client` binaries — it
+# `rendezvous-daemon` and `rendezvous-test-client` binaries — it
 # uses bash + the test client only. Run it after `just build` from the
-# `claudine/remote-signal/` package area, or pass the binaries via
+# `claudine/rendezvous/` package area, or pass the binaries via
 # `RS_DAEMON_BIN` / `RS_CLIENT_BIN`.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." >/dev/null && pwd)"
 TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/../../target}"
-DAEMON_BIN="${RS_DAEMON_BIN:-$TARGET_DIR/debug/remote-signal-daemon}"
-CLIENT_BIN="${RS_CLIENT_BIN:-$TARGET_DIR/debug/remote-signal-test-client}"
+DAEMON_BIN="${RS_DAEMON_BIN:-$TARGET_DIR/debug/rendezvous-daemon}"
+CLIENT_BIN="${RS_CLIENT_BIN:-$TARGET_DIR/debug/rendezvous-test-client}"
 
 if [[ ! -x "$DAEMON_BIN" ]]; then
-    echo "remote-signal-daemon not found at $DAEMON_BIN" >&2
-    echo "Run 'just build' from the remote-signal/ package area first, or set RS_DAEMON_BIN." >&2
+    echo "rendezvous-daemon not found at $DAEMON_BIN" >&2
+    echo "Run 'just build' from the rendezvous/ package area first, or set RS_DAEMON_BIN." >&2
     exit 1
 fi
 if [[ ! -x "$CLIENT_BIN" ]]; then
-    echo "remote-signal-test-client not found at $CLIENT_BIN" >&2
-    echo "Run 'just build' from the remote-signal/ package area first, or set RS_CLIENT_BIN." >&2
+    echo "rendezvous-test-client not found at $CLIENT_BIN" >&2
+    echo "Run 'just build' from the rendezvous/ package area first, or set RS_CLIENT_BIN." >&2
     exit 1
 fi
 
