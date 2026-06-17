@@ -21,15 +21,50 @@
 
 pub mod approval;
 pub mod collect;
+pub mod lifecycle;
 
 pub use approval::approval_set;
 pub use collect::collect_shell_commands;
+pub use lifecycle::{ComposePreflightApprovals, PreflightApprovalStats};
 
 use crate::markdown::Markdown;
+use crate::markdown::compose::transclusion;
 use crate::markdown::compose::{ComposeOptions, ComposeWarning};
 use crate::markdown::compose::shell_expansion::types::{ShellCommandEntry, ShellExpansionError};
 use crate::markdown::types::MarkdownResult;
 use std::path::PathBuf;
+
+/// One edge in the preflight graph: a transclusion directive and the
+/// resolved target it points to, captured during the condition-blind
+/// pre-flight walk.
+///
+/// The edge carries the directive's parsed shape (span, line, options,
+/// kind) **and** the resolved target. The transclusion engine consumes this
+/// to skip its own directive parse + target-resolution pass for the
+/// directive this edge describes, then recurses into [`Self::child`] for
+/// the next level of the graph.
+#[derive(Debug, Clone)]
+pub struct PreflightGraphEdge {
+    /// The parsed directive that produced this edge.
+    pub directive: transclusion::BlockDirective,
+    /// Resolved target for the directive: a canonical local path or a
+    /// remote URL. The transclusion engine uses this directly to construct
+    /// a `PreparedTransclusion` without calling
+    /// `transclusion::resolve_target` a second time.
+    pub resolved_target: PreflightResolvedTarget,
+    /// The child document this edge points to. Reuse recurses through
+    /// `child.edges` for nested transclusions.
+    pub child: PreflightGraphNode,
+}
+
+/// Resolved target for a preflight graph edge.
+#[derive(Debug, Clone)]
+pub enum PreflightResolvedTarget {
+    /// Local file with canonicalized path.
+    File(PathBuf),
+    /// Remote URL.
+    Url(url::Url),
+}
 
 /// Reusable graph metadata for one document visited during pre-flight
 /// collection.
@@ -54,16 +89,27 @@ pub struct PreflightGraphNode {
     pub source: Option<PathBuf>,
     /// Shell entries first discovered *in this document*, in discovery order.
     /// Entries from nested children are not duplicated here — they live in
-    /// the child's [`Self::children`].
+    /// the child's [`Self::edges`].
     pub entries: Vec<ShellCommandEntry>,
-    /// Nested transclusion children, in the order they were discovered.
+    /// Outgoing transclusion edges, in directive order. Each edge carries the
+    /// directive that produced the child reference plus the resolved target,
+    /// so a consumer (e.g. [`TransclusionEngine`](crate::markdown::compose::transclusion::TransclusionEngine))
+    /// can build `PreparedTransclusion` items from this graph without
+    /// re-parsing directives or re-resolving targets.
+    ///
+    /// Empty when this document is a leaf or has no transclusion directives.
+    pub edges: Vec<PreflightGraphEdge>,
+    /// Flat view of the children, in the same order as [`Self::edges`].
+    /// Kept for callers that only want the per-document metadata without
+    /// the edge data. Each entry is the [`PreflightGraphEdge::child`]
+    /// of the corresponding edge.
     pub children: Vec<PreflightGraphNode>,
 }
 
 impl PreflightGraphNode {
-    /// Returns `true` when this node has no entries and no children.
+    /// Returns `true` when this node has no entries and no edges.
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty() && self.children.is_empty()
+        self.entries.is_empty() && self.edges.is_empty()
     }
 
     /// Walks this node and every descendant, yielding one entry per unique
@@ -85,8 +131,8 @@ impl PreflightGraphNode {
                 out.push(entry);
             }
         }
-        for child in &self.children {
-            child.collect_unique(out, seen);
+        for edge in &self.edges {
+            edge.child.collect_unique(out, seen);
         }
     }
 }
@@ -416,6 +462,100 @@ flag: a
         assert_eq!(report.shell_approvals_used, 0);
     }
 
+    /// Pre-flight validation covers `ComposeOperation::ShellBlocks` even when
+    /// frontmatter and body `::shell` are disabled: a first approved shell
+    /// block creates a sentinel, a later unapproved shell block's command is
+    /// missing from the pre-approved set, and the compose must fail with
+    /// `NotPreApproved` *before* the first block runs.
+    #[test]
+    fn preflight_blocks_shell_blocks_when_later_block_unapproved() {
+        let temp = TempDir::new().unwrap();
+        let sentinel = temp.path().join("sentinel");
+
+        // The first shell block would create the sentinel if it ran. The
+        // second shell block holds the unapproved command. The first block's
+        // `touch` is in the pre-approved set; the second block's `echo` is not.
+        let content = format!(
+            "::shell-block\ntouch {sentinel_str}\n::end-block\n\
+             ::shell-block\necho unapproved\n::end-block\n",
+            sentinel_str = sentinel.display()
+        );
+        let md: Markdown = content.into();
+
+        // Approve only the first block's command; the second block's command
+        // is unapproved. The order is intentional: the approved block comes
+        // first so the test would observe the sentinel *if* the gate did not
+        // catch the unapproved block before any shell block executed.
+        let approved: HashSet<String> = [format!("touch {}", sentinel.display())]
+            .into_iter()
+            .collect();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellBlocks])
+            .with_shell_policy_root(temp.path())
+            .with_pre_approved_commands(approved);
+
+        let result = md.compose_with(options);
+        assert!(
+            result.is_err(),
+            "compose should fail because the second shell block's command is unapproved"
+        );
+        assert!(
+            !sentinel.exists(),
+            "first shell block executed before pre-flight caught the unapproved later block"
+        );
+    }
+
+    /// Pre-flight validation walks transcluded children for shell blocks: a
+    /// first approved root shell block creates a sentinel, a child document
+    /// (transcluded unconditionally) holds an unapproved shell block, and the
+    /// compose must fail before the root block runs.
+    #[test]
+    fn preflight_blocks_shell_blocks_when_transcluded_child_unapproved() {
+        use std::io::Write;
+
+        let temp = TempDir::new().unwrap();
+        let sentinel = temp.path().join("sentinel");
+        let sentinel_str = sentinel.display().to_string();
+
+        let child_path = temp.path().join("child.md");
+        let mut child = std::fs::File::create(&child_path).unwrap();
+        writeln!(child, "::shell-block").unwrap();
+        writeln!(child, "echo unapproved-in-child").unwrap();
+        writeln!(child, "::end-block").unwrap();
+
+        let root_path = temp.path().join("root.md");
+        let mut root = std::fs::File::create(&root_path).unwrap();
+        writeln!(root, "::shell-block").unwrap();
+        writeln!(root, "touch {}", sentinel_str).unwrap();
+        writeln!(root, "::end-block").unwrap();
+        writeln!(root, "::file ./child.md").unwrap();
+
+        let root_content = std::fs::read_to_string(&root_path).unwrap();
+        let md: Markdown = root_content.into();
+
+        // Approve only the root block's `touch`. The child's `echo` is missing.
+        let approved: HashSet<String> = [format!("touch {}", sentinel_str)]
+            .into_iter()
+            .collect();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellBlocks, ComposeOperation::BlockTransclusion])
+            .with_shell_policy_root(temp.path())
+            .with_source_file(&root_path)
+            .with_pre_approved_commands(approved);
+
+        let result = md.compose_with(options);
+        assert!(
+            result.is_err(),
+            "compose should fail because the child shell block's command is unapproved"
+        );
+        assert!(
+            !sentinel.exists(),
+            "root shell block executed before pre-flight caught the unapproved child block"
+        );
+    }
+
     /// T3 (property): for a doc with N independent flags, the
     /// `execution_set ⊆ approval_set` invariant must hold across a battery of
     /// randomized flag combinations — not just the two-state flip the
@@ -500,5 +640,140 @@ flag: a
                 }
             }
         }
+    }
+
+    /// The preflight-collected graph is reusable by the transclusion engine:
+    /// composing with `with_preflight_graph(...)` produces the same composed
+    /// content as composing without it, proving the cached edges carry the
+    /// directive metadata and resolved target the engine would otherwise have
+    /// to re-derive.
+    #[test]
+    fn preflight_graph_seeds_block_transclusion() {
+        use std::io::Write;
+
+        let temp = TempDir::new().unwrap();
+        let child_path = temp.path().join("child.md");
+        let mut child = std::fs::File::create(&child_path).unwrap();
+        writeln!(child, "# Child").unwrap();
+        writeln!(child, "Child body content").unwrap();
+
+        let root_path = temp.path().join("root.md");
+        let mut root = std::fs::File::create(&root_path).unwrap();
+        writeln!(root, "# Root").unwrap();
+        writeln!(root, "::file ./child.md").unwrap();
+
+        let root_content = std::fs::read_to_string(&root_path).unwrap();
+        let md: Markdown = root_content.into();
+
+        // Collect a preflight report so we can attach the graph to a later
+        // compose. Approval set is empty here (no shell directives) so the
+        // pre-approved channel is unused.
+        let preflight = md
+            .compose_preflight(
+                &ComposeOptions::new().with_source_file(&root_path),
+            )
+            .unwrap();
+        assert_eq!(
+            preflight.preflight_graph.edges.len(),
+            1,
+            "preflight graph should have one body-transclusion edge: {:?}",
+            preflight.preflight_graph
+        );
+        let edge = &preflight.preflight_graph.edges[0];
+        let resolved_path = match &edge.resolved_target {
+            super::PreflightResolvedTarget::File(p) => p.clone(),
+            super::PreflightResolvedTarget::Url(_) => {
+                panic!("local child edge should resolve to a File target")
+            }
+        };
+        assert_eq!(
+            resolved_path.canonicalize().unwrap(),
+            child_path.canonicalize().unwrap(),
+            "preflight edge should carry the resolved child path"
+        );
+
+        // Compose WITHOUT the preflight graph — baseline output.
+        let baseline_options = ComposeOptions::new()
+            .only(&[ComposeOperation::BlockTransclusion])
+            .with_source_file(&root_path);
+        let (baseline, _) = md.compose_with(baseline_options.clone()).unwrap();
+        let baseline_text = baseline.content().to_string();
+        assert!(
+            baseline_text.contains("Child body content"),
+            "baseline compose did not transclude child: {baseline_text}"
+        );
+
+        // Compose WITH the preflight graph — must produce equivalent output.
+        let with_graph_options = baseline_options
+            .with_preflight_graph(preflight.preflight_graph.clone());
+        let (with_graph, _) = md.compose_with(with_graph_options).unwrap();
+        let with_graph_text = with_graph.content().to_string();
+        assert!(
+            with_graph_text.contains("Child body content"),
+            "preflight-graph-seeded compose did not transclude child: {with_graph_text}"
+        );
+        assert_eq!(
+            with_graph_text, baseline_text,
+            "preflight-graph-seeded compose must produce identical output to the baseline"
+        );
+    }
+
+    /// A `when=`-gated edge in the preflight graph is still evaluated
+    /// condition-aware by the transclusion engine: a false-condition
+    /// transclusion is replaced with empty content (skipped) when the
+    /// preflight graph is reused, matching the baseline behavior.
+    #[test]
+    fn preflight_graph_respects_when_condition() {
+        use std::io::Write;
+
+        let temp = TempDir::new().unwrap();
+        let child_path = temp.path().join("child.md");
+        let mut child = std::fs::File::create(&child_path).unwrap();
+        writeln!(child, "# Child").unwrap();
+        writeln!(child, "Child body content").unwrap();
+
+        let root_path = temp.path().join("root.md");
+        let mut root = std::fs::File::create(&root_path).unwrap();
+        writeln!(root, "# Root").unwrap();
+        writeln!(
+            root,
+            "::file ./child.md when=\"include_child == true\""
+        )
+        .unwrap();
+
+        let root_content = std::fs::read_to_string(&root_path).unwrap();
+        let md: Markdown = root_content.into();
+
+        // The preflight graph walks the edge regardless of `when=`, so the
+        // graph contains the edge. The condition-aware check happens later.
+        let preflight = md
+            .compose_preflight(
+                &ComposeOptions::new().with_source_file(&root_path),
+            )
+            .unwrap();
+        assert_eq!(preflight.preflight_graph.edges.len(), 1);
+
+        // Compose WITHOUT the preflight graph, with `include_child=false` —
+        // the child must NOT be transcluded.
+        let baseline_options = ComposeOptions::new()
+            .only(&[ComposeOperation::BlockTransclusion])
+            .with_source_file(&root_path)
+            .with_set_overrides(json!({ "include_child": false }));
+        let (baseline, _) = md.compose_with(baseline_options.clone()).unwrap();
+        assert!(
+            !baseline.content().contains("Child body content"),
+            "baseline compose unexpectedly transcluded the gated child: {}",
+            baseline.content()
+        );
+
+        // Compose WITH the preflight graph, same override — same result.
+        let with_graph_options = baseline_options
+            .with_preflight_graph(preflight.preflight_graph.clone());
+        let (with_graph, _) = md.compose_with(with_graph_options).unwrap();
+        assert!(
+            !with_graph.content().contains("Child body content"),
+            "preflight-graph compose unexpectedly transcluded the gated child: {}",
+            with_graph.content()
+        );
     }
 }

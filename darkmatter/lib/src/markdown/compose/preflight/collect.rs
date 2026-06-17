@@ -205,7 +205,7 @@ fn collect_recursive(
     // `entries` and `seen` are still updated so the flat list stays deduped
     // across the whole graph.
     let mut local_entries: Vec<ShellCommandEntry> = Vec::new();
-    let mut children: Vec<super::PreflightGraphNode> = Vec::new();
+    let mut edges: Vec<super::PreflightGraphEdge> = Vec::new();
 
     // ── Frontmatter commands ───────────────────────────────────────
     scan_one_frontmatter(markdown, options, &source_file, seen, entries, &mut local_entries)?;
@@ -331,18 +331,23 @@ fn collect_recursive(
             Err(e) => return Err(e.into()),
         };
 
-        let child = match resolved {
+        match resolved {
             transclusion::ResolvedTarget::File { path, .. } => {
                 let mut child = Markdown::try_from(path.as_path())?;
                 apply_child_overrides(&mut child, &directive.options);
-                collect_recursive(
+                let child = collect_recursive(
                     &child,
-                    &options.clone().with_source_file(path),
+                    &options.clone().with_source_file(path.clone()),
                     seen,
                     entries,
                     visited,
                     remote_fetch,
-                )?
+                )?;
+                edges.push(super::PreflightGraphEdge {
+                    directive: directive.clone(),
+                    resolved_target: super::PreflightResolvedTarget::File(path),
+                    child,
+                });
             }
             transclusion::ResolvedTarget::Url { url, .. } => {
                 let Some(body) = fetch_remote_child_body(&url, remote_fetch)? else {
@@ -350,21 +355,27 @@ fn collect_recursive(
                 };
                 let mut child = Markdown::from(body);
                 apply_child_overrides(&mut child, &directive.options);
-                collect_recursive(
+                let child = collect_recursive(
                     &child,
-                    &options.clone().with_source_url(url),
+                    &options.clone().with_source_url(url.clone()),
                     seen,
                     entries,
                     visited,
                     remote_fetch,
-                )?
+                )?;
+                edges.push(super::PreflightGraphEdge {
+                    directive: directive.clone(),
+                    resolved_target: super::PreflightResolvedTarget::Url(url),
+                    child,
+                });
             }
-        };
-        children.push(child);
+        }
     }
 
     let refs =
         transclusion::parse_frontmatter_refs(prepared.frontmatter().as_map(), prepared_ctx.clone())?;
+    let mut children: Vec<super::PreflightGraphNode> =
+        edges.iter().map(|e| e.child.clone()).collect();
     for reference in refs.prologue.iter().chain(refs.epilogue.iter()) {
         if !transclusion::is_url_like(reference) && !transclusion::is_file_like_reference(reference) {
             continue;
@@ -416,6 +427,12 @@ fn collect_recursive(
                 )?
             }
         };
+        // Frontmatter prologue/epilogue references have no parsed
+        // directive; they appear in the `children` view (so callers that
+        // want a flat list of referenced documents still get them) but are
+        // NOT added to `edges` — the transclusion engine treats them as
+        // section slots rather than replace-target directives, and
+        // resolving them a second time is cheap.
         children.push(child);
     }
 
@@ -428,6 +445,7 @@ fn collect_recursive(
     Ok(super::PreflightGraphNode {
         source,
         entries: local_entries,
+        edges,
         children,
     })
 }

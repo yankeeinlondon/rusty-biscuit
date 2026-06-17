@@ -111,7 +111,7 @@ pub use remote::{
     resolve_remote_concurrency,
 };
 pub use remote_fetch::RemoteFetchStats;
-pub use preflight::{ComposePreflightReport, collect_shell_commands};
+pub use preflight::{ComposePreflightApprovals, ComposePreflightReport, PreflightApprovalStats, collect_shell_commands};
 pub use shell_blocks::ShellBlockError;
 pub use shell_expansion::ShellCommandOrigin;
 pub use shell_expansion::ShellExpansionError;
