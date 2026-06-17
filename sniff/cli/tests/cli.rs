@@ -2153,6 +2153,44 @@ fn test_repo_test_runner_output_modes() {
 }
 
 #[test]
+fn test_repo_test_runner_detects_workspace_root_nextest() {
+    // nextest is configured once at the workspace root; the member crate carries
+    // no nextest marker of its own. The repo aggregate must still surface it.
+    let (_dir, path) = create_cargo_workspace_repo();
+    std::fs::create_dir_all(path.join(".config")).unwrap();
+    std::fs::write(
+        path.join(".config/nextest.toml"),
+        "[profile.default]\n",
+    )
+    .unwrap();
+
+    let output = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "test-runner",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output).expect("stdout is valid JSON");
+    let runners = json["test_runners"]
+        .as_array()
+        .expect("multiple runners => test_runners array");
+    assert!(
+        runners.iter().any(|r| r["runner"] == "Nextest"
+            && r["source"]["kind"] == "config"
+            && r["source"]["filename"] == ".config/nextest.toml"),
+        "workspace-root nextest config should surface in the aggregate, got {json}"
+    );
+}
+
+#[test]
 fn test_repo_package_manager_json_uses_shared_collapse() {
     let (_dir, path) = create_cargo_workspace_repo();
 
