@@ -14,7 +14,7 @@ use tracing::info_span;
 
 use crate::args::{
     BlastRadiusScopeArg, COMPLETIONS_HELP, Cli, Commands, DEFAULT_COMMIT_COUNT, DocsFilter,
-    FilesFilter, ServiceStateArg,
+    FilesFilter, ServiceStateArg, SoftwareSubcommand,
 };
 use crate::output::{self, OutputFilter, PathListFormat};
 use crate::perf::{CliPerf, handle_no_results};
@@ -25,8 +25,10 @@ mod repo;
 
 use remote::{handle_pr_command, handle_remote_url, handle_shorthand};
 use repo::{
-    RepoPackageAreasArgs, RepoPackagesArgs, handle_file_list_command, handle_repo_package_areas,
-    handle_repo_packages,
+    RepoPackageAreasArgs, RepoPackageManagerArgs, RepoPackagesArgs, RepoTestRunnerArgs,
+    handle_file_list_command, handle_repo_branches, handle_repo_dependencies,
+    handle_repo_package_areas, handle_repo_package_manager, handle_repo_packages,
+    handle_repo_test_runner,
 };
 
 /// Main CLI entrypoint.
@@ -102,7 +104,12 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Handle programs mode separately (doesn't use SniffResult)
     if let Some(ref cmd) = cli.command {
         // Handle notification-helpers before generic programs mode
-        if matches!(cmd, Commands::NotificationHelpers) {
+        if matches!(
+            cmd,
+            Commands::Software {
+                subcommand: Some(SoftwareSubcommand::NotificationHelpers),
+            }
+        ) {
             let programs = sniff::programs::ProgramsInfo::detect();
             if cli.json {
                 output::print_notification_helpers_json(
@@ -115,6 +122,34 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     cli.verbose,
                 );
                 output::emit_text(&rendered, cli.plain);
+                perf.emit_stdout(None);
+            }
+            return Ok(());
+        }
+
+        // Handle test-runners separately because they use a richer
+        // `Availability` discriminator than the bare `installed: bool` shape
+        // the other 8 categories produce.
+        if matches!(
+            cmd,
+            Commands::Software {
+                subcommand: Some(SoftwareSubcommand::TestRunners),
+            }
+        ) {
+            let programs = sniff::programs::ProgramsInfo::detect();
+            if cli.json {
+                let json = output::build_test_runners_json(&programs.test_runners)?;
+                output::print_json_value(json, perf.build_report().as_ref());
+            } else {
+                let rendered =
+                    output::render_test_runners_markdown(&programs.test_runners, cli.verbose);
+                output::emit_text(&rendered, cli.plain);
+                if !cli.plain {
+                    eprintln!(
+                        "{}",
+                        output::test_runners_search_hint(output::HintMode::Stderr)
+                    );
+                }
                 perf.emit_stdout(None);
             }
             return Ok(());
@@ -790,6 +825,47 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 perf.emit_stderr(None);
                 return Ok(());
             }
+            crate::args::RepoAction::PackageManager { csv, list, md } => {
+                return handle_repo_package_manager(
+                    base_dir.as_deref(),
+                    RepoPackageManagerArgs {
+                        csv: *csv,
+                        list: *list,
+                        md: *md,
+                    },
+                    cli.json,
+                    cli.plain,
+                    &perf,
+                );
+            }
+            crate::args::RepoAction::Branches { refresh_remotes } => {
+                return handle_repo_branches(
+                    base_dir.as_deref(),
+                    *refresh_remotes,
+                    cli.json,
+                    cli.plain,
+                    &perf,
+                );
+            }
+            crate::args::RepoAction::Dependencies {
+                dependencies,
+                dev_dependencies,
+                peer_dependencies,
+                optional_dependencies,
+            } => {
+                return handle_repo_dependencies(
+                    base_dir.as_deref(),
+                    sniff::filesystem::repo::ExternalDependencyFilter {
+                        dependencies: *dependencies,
+                        dev_dependencies: *dev_dependencies,
+                        peer_dependencies: *peer_dependencies,
+                        optional_dependencies: *optional_dependencies,
+                    },
+                    cli.json,
+                    cli.plain,
+                    &perf,
+                );
+            }
             crate::args::RepoAction::Version { no_error, on_error } => {
                 let dir = base_dir
                     .as_deref()
@@ -810,6 +886,20 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     return Ok(());
                 }
                 return handle_no_results(*no_error, on_error, cli.plain, &perf);
+            }
+            crate::args::RepoAction::TestRunner { csv, list, md } => {
+                return handle_repo_test_runner(
+                    base_dir.as_deref(),
+                    RepoTestRunnerArgs {
+                        csv: *csv,
+                        list: *list,
+                        md: *md,
+                    },
+                    cli.json,
+                    cli.plain,
+                    cli.verbose,
+                    &perf,
+                );
             }
             crate::args::RepoAction::Worktree { no_error, on_error } => {
                 let dir = base_dir
@@ -1199,6 +1289,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
         | OutputFilter::NotificationHelpers
+        | OutputFilter::TestRunners
         | OutputFilter::Services
         | OutputFilter::Just
         | OutputFilter::BlastRadius => {
@@ -1403,7 +1494,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             package_area,
             ..
         }
-        | crate::args::RepoAction::Deps {
+        | crate::args::RepoAction::PackageDependencies {
             package,
             package_area,
             ..
@@ -2020,7 +2111,7 @@ fn is_scriptable_repo_action(action: Option<&crate::args::RepoAction>) -> bool {
         Some(
             RepoAction::Structure { .. }
             | RepoAction::GitStatus { .. }
-            | RepoAction::Deps { .. }
+            | RepoAction::PackageDependencies { .. }
             | RepoAction::Remote { .. }
             | RepoAction::Hash { .. },
         ) => false,
