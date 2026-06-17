@@ -1,0 +1,15 @@
+{
+  "is_valid": false,
+  "issues": [
+    {
+      "code": "MissingLocalTarget",
+      "line": 3,
+      "message": "Missing local target: ./missing.md",
+      "reference_id": "2e468ac064ef9e98:3:10",
+      "severity": "error"
+    }
+  ],
+  "references_scanned": 1,
+  "references_valid": 0,
+  "warnings": []
+}

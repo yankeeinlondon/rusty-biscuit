@@ -114,36 +114,36 @@ error text (call out in PR with before/after captures).
 
 ### P1a — `Tailwind::from_kebab_name` (Leak 1, args.rs:1317–1572)
 
-- [ ] Add `pub fn from_kebab_name(name: &str) -> Option<Tailwind>` to `renderable::color::Tailwind` (in `renderable/src/color/tailwind.rs`) mirroring the inverse `kebab_name()`.
-- [ ] Add renderable unit tests: round-trip with `kebab_name()` for every palette entry; rejection of malformed inputs (`"red"`, `"red-9999"`, `"RED-500"`, empty string).
-- [ ] In `darkmatter/cli/src/args.rs`, replace the `tailwind_from_str` call site with `Tailwind::from_kebab_name`.
-- [ ] Delete `tailwind_from_str` from `args.rs` (~255-line drop).
+- [x] Add `pub fn from_kebab_name(name: &str) -> Option<Tailwind>` to `renderable::color::Tailwind` (in `renderable/src/color/tailwind.rs`) mirroring the inverse `kebab_name()`.
+- [x] Add renderable unit tests: round-trip with `kebab_name()` for every palette entry; rejection of malformed inputs (`"red"`, `"red-9999"`, `"RED-500"`, empty string).
+- [x] In `darkmatter/cli/src/args.rs`, replace the `tailwind_from_str` call site with `Tailwind::from_kebab_name`.
+- [x] Delete `tailwind_from_str` from `args.rs` (~255-line drop).
 
 ### P1b — `PaintColor::from_css_str` (Leak 2, args.rs:1213–1315)
 
-- [ ] Add `pub fn from_css_str(s: &str) -> Result<PaintColor, ParseColorError>` to `renderable::style::paint` (`renderable/src/style/paint.rs`). Grammar must accept byte-for-byte what the CLI parser accepts today: `#RGB`, `#RRGGBB`, `R,G,B` (decimal 0–255, no alpha), Tailwind kebab names (delegate to P1a), and CSS keywords `transparent`, `currentColor`, `inherit`.
-- [ ] Define a small `ParseColorError` in `renderable` (existing dependencies only) preserving the rejected input and a concise reason so clap's value-parser surfaces useful errors.
-- [ ] Optionally add an internal `Color::from_css_str` helper in `renderable::color` if the implementation benefits from parsing the underlying color first. It must not be the only public parser for paint values (the constructor lives on `PaintColor`).
-- [ ] Add renderable unit tests covering the full accepted grammar and each representative invalid input from the baseline color-error captures.
-- [ ] In `darkmatter/cli/src/args.rs`, replace `parse_page_bg_color` with a thin `value_parser = PaintColor::from_css_str` wrapper.
-- [ ] Delete `parse_page_bg_color`, `parse_hex_color`, `parse_rgb_triple` from `args.rs` (~100-line drop).
+- [x] Add `pub fn from_css_str(s: &str) -> Result<PaintColor, ParseColorError>` to `renderable::style::paint` (`renderable/src/style/paint.rs`). Grammar must accept byte-for-byte what the CLI parser accepts today: `#RGB`, `#RRGGBB`, `R,G,B` (decimal 0–255, no alpha), Tailwind kebab names (delegate to P1a), and CSS keywords `transparent`, `currentColor`, `inherit`.
+- [x] Define a small `ParseColorError` in `renderable` (existing dependencies only) preserving the rejected input and a concise reason so clap's value-parser surfaces useful errors.
+- [x] Optionally add an internal `Color::from_css_str` helper in `renderable::color` if the implementation benefits from parsing the underlying color first. It must not be the only public parser for paint values (the constructor lives on `PaintColor`).
+- [x] Add renderable unit tests covering the full accepted grammar and each representative invalid input from the baseline color-error captures.
+- [x] In `darkmatter/cli/src/args.rs`, replace `parse_page_bg_color` with a thin `value_parser = PaintColor::from_css_str` wrapper.
+- [x] Delete `parse_page_bg_color`, `parse_hex_color`, `parse_rgb_triple` from `args.rs` (~100-line drop).
 - [ ] If error text improved, attach explicit before/after captures to the PR and update affected tests.
 
 ### P1c — serde on reference types (Leak 3, commands.rs:730–974)
 
-- [ ] Add `#[derive(serde::Serialize)]` to `ReferenceKind`, `ReferenceTarget`, `ReferenceSyntax`, `ReferenceOrigin`, `ReferenceRecord`, `ReferenceInsertionContext`, `ReferenceInsertion`, `ReferenceGraphNode`, `ReferenceValidationIssue`, `ReferenceIssueCode`, `ReferenceSeverity`, `ReferenceValidationReport` in `darkmatter/lib/src/markdown/reference/types.rs`. Also impl `Serialize` for `ComposeSource` (already has a JSON shape).
-- [ ] Use `#[serde(tag = "type")]` and `#[serde(rename_all = "snake_case")]` where needed to match the current hand-rolled shapes. Use manual `Serialize` impls on individual enums where that is the smallest path to byte-for-byte compatibility.
-- [ ] Add library unit tests asserting derived JSON equals the baseline fixtures byte-for-byte (the case matrix captured above).
-- [ ] In `darkmatter/cli/src/commands.rs`, replace the nine hand-rolled helpers (`source_to_json`, `kind_to_json`, `target_to_json`, `syntax_to_json`, `directive_kind_to_json`, `reference_record_to_json`, `insertion_to_json`, `graph_node_to_json`, `validation_report_to_json`) with `serde_json::to_value(&library_type)`.
-- [ ] Delete the nine helpers from `commands.rs` (~240-line drop).
-- [ ] Confirm the `kind_to_json` "html_video" / `HtmlVideo` mapping is preserved by the derived shape (correctness improvement called out in the spec).
+- [x] Add `#[derive(serde::Serialize)]` to `ReferenceKind`, `ReferenceTarget`, `ReferenceSyntax`, `ReferenceOrigin`, `ReferenceRecord`, `ReferenceInsertionContext`, `ReferenceInsertion`, `ReferenceGraphNode`, `ReferenceValidationIssue`, `ReferenceIssueCode`, `ReferenceSeverity`, `ReferenceValidationReport` in `darkmatter/lib/src/markdown/reference/types.rs`. Also impl `Serialize` for `ComposeSource` (already has a JSON shape).
+- [x] Use `#[serde(tag = "type")]` and `#[serde(rename_all = "snake_case")]` where needed to match the current hand-rolled shapes. Use manual `Serialize` impls on individual enums where that is the smallest path to byte-for-byte compatibility.
+- [x] Add library unit tests asserting derived JSON equals the baseline fixtures byte-for-byte (the case matrix captured above).
+- [x] In `darkmatter/cli/src/commands.rs`, replace the nine hand-rolled helpers (`source_to_json`, `kind_to_json`, `target_to_json`, `syntax_to_json`, `directive_kind_to_json`, `reference_record_to_json`, `insertion_to_json`, `graph_node_to_json`, `validation_report_to_json`) with `serde_json::to_value(&library_type)`.
+- [x] Delete the nine helpers from `commands.rs` (~240-line drop).
+- [x] Confirm the `kind_to_json` "html_video" / `HtmlVideo` mapping is preserved by the derived shape (correctness improvement called out in the spec).
 
 ### P1d — `TocTree` TerminalRenderable (Leak 6a, output.rs:655–765)
 
-- [ ] Add `darkmatter::markdown::toc::TocTree` wrapping `MarkdownToc` with `impl TerminalRenderable`. (ADR-2: terminal-only.)
-- [ ] Add library unit tests asserting the rendered output matches the current CLI `print_toc_tree` output for representative TOC shapes (nested headings, empty TOC, single heading).
-- [ ] Update the `md toc` text path to call `print!("{}", toc_tree.render(&term))`.
-- [ ] Delete `print_toc_tree` and `print_toc_node` from `output.rs` (~80-line drop).
+- [x] Add `darkmatter::markdown::toc::TocTree` wrapping `MarkdownToc` with `impl TerminalRenderable`. (ADR-2: terminal-only.)
+- [x] Add library unit tests asserting the rendered output matches the current CLI `print_toc_tree` output for representative TOC shapes (nested headings, empty TOC, single heading).
+- [x] Update the `md toc` text path to call `print!("{}", toc_tree.render(&term))`.
+- [x] Delete `print_toc_tree` and `print_toc_node` from `output.rs` (~80-line drop).
 
 ### P1e — `DeltaReport` TerminalRenderable (Leak 6b, output.rs:767–1124)
 
@@ -154,9 +154,9 @@ error text (call out in PR with before/after captures).
 
 ### P1f — `ReferenceValidationReport` view (Leak 4, commands.rs:598–728)
 
-- [ ] Add `darkmatter::markdown::reference::validate::ReportView` (preferred) or `impl TerminalRenderable for ReferenceValidationReport` in `darkmatter/lib/src/markdown/reference/validate.rs`. Falls back to a small adapter in `biscuit-terminal` only if dependency direction forbids it in darkmatter proper.
-- [ ] Reuse the same `Prose` + `UnorderedList` shape the CLI uses today so the `md validate` and `md compose` error paths render identically.
-- [ ] Add library unit tests asserting rendered output matches the current `format_validation_issues` output for: empty report, single-issue report, multi-issue report spanning every `ReferenceKind`.
+- [x] Add `darkmatter::markdown::reference::validate::ReportView` (preferred) or `impl TerminalRenderable for ReferenceValidationReport` in `darkmatter/lib/src/markdown/reference/validate.rs`. Falls back to a small adapter in `biscuit-terminal` only if dependency direction forbids it in darkmatter proper.
+- [x] Reuse the same `Prose` + `UnorderedList` shape the CLI uses today so the `md validate` and `md compose` error paths render identically.
+- [x] Add library unit tests asserting rendered output matches the current `format_validation_issues` output for: empty report, single-issue report, multi-issue report spanning every `ReferenceKind`.
 - [ ] Update `md validate refs` and the `md compose` validation-error path to call the new view.
 - [ ] Delete `format_validation_issues` and `reference_kind_category_label` from `commands.rs` (~130-line drop).
 
