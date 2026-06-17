@@ -293,6 +293,49 @@ if report.has_changes() {
 }
 ```
 
+## Pre-Flight Shell Approval
+
+Shell approval and shell execution are separate concerns:
+
+- **Approval is condition-blind.** `Markdown::compose_preflight(&options)`
+  returns a `ComposePreflightReport`; its `approval_set()` is every command that
+  *could* run under any state — both `$(...)` ternary branches, `when=`-false
+  `::block` regions, and false-condition transclusions all contribute. Collection
+  never evaluates conditions, never runs transclusion's merge, and never executes
+  anything.
+- **Execution is condition-aware.** The inline shell stages run only the
+  commands whose branch is reached, gated by
+  `ComposeOptions::with_pre_approved_commands(set)`. The invariant
+  `execution_set ⊆ approval_set` makes the gate a pure membership check.
+- A body/`::shell-block` command embedding a frontmatter value still pending
+  frontmatter-shell expansion is rejected up front as
+  `ShellExpansionError::DynamicCommandShape` (never a late `NotPreApproved`).
+
+Orchestrators (Claudine) call `compose_preflight`, merge in their own harness
+commands, authorize the union once, and pass the merged set back via
+`with_pre_approved_commands`. `md compose --shell` reports the condition-blind
+candidates. The lower-level `collect_shell_commands(&md, &options)` returns the
+raw `ShellCommandEntry` list. See
+[`docs/inline/preflight-checks.md`](../../../darkmatter/docs/inline/preflight-checks.md).
+
+## Shell Command Caching
+
+Identical commands (same normalized command string) execute **once per compose
+run** by default; the memoized `stdout`/`stderr` is reused at every other call
+site, including across recursive transclusion (the cache lives in the shared
+`ShellExpansionRuntime`, not in `cache::RunLocalCache`). Opt out per directive to
+get a full cache bypass (fresh execution at each occurrence) using each family's
+own spelling:
+
+- Body `::shell --no-cache <cmd>`
+- Frontmatter `$(<cmd>)::no-cache` (combines with `::timeout:N` in either order)
+- `::shell-block no_cache=true` (the flag form `--no-cache` stays a parse error)
+
+A repeated command whose executable is on the built-in volatile allowlist
+(`uuidgen`, `date`, `openssl`) emits a one-time discoverability warning
+suggesting `--no-cache`. See
+[`docs/inline/shell-expansion.md`](../../../darkmatter/docs/inline/shell-expansion.md).
+
 ## Error Handling
 
 With `fail_fast: false` (default):
@@ -356,10 +399,23 @@ darkmatter/lib/src/
 │   ├── error.rs
 │   └── verbs.rs
 └── markdown/compose/
-    ├── mod.rs           # Public API, pipeline orchestration
-    ├── types.rs         # ComposeOperation, ComposeOptions, ComposeReport, etc.
+    ├── mod.rs           # Public API facade (compose/compose_with/compose_mut) + re-exports
+    ├── util.rs          # Shared non-stage helpers (git-root, path abbrev, target range, fm prep)
+    ├── pipeline/        # Driver spine + operation registry
+    │   ├── mod.rs       # run_compose_pipeline* driver
+    │   ├── phases.rs    # Inline-Pre/Transclusion/Inline-Post/Finalization dispatch
+    │   └── operations.rs # ComposeOperation, ComposePhase, descriptor table, default_order
     ├── schema_validation.rs # Always-on schema validation stage
-    ├── state.rs         # EffectiveState, merge logic
+    ├── preflight/       # Shell approval-set lifecycle (condition-blind)
+    │   ├── mod.rs       # ComposePreflightReport + Markdown::compose_preflight
+    │   ├── collect.rs   # Condition-blind graph walk → approval candidates
+    │   └── approval.rs  # Deduped normalized approval-set boundary export
+    ├── inline/          # Inline stage runners (free fns over &mut Markdown)
+    │   ├── replacement.rs    # run_stage → replacement engine
+    │   ├── interpolation.rs  # run_stage → {{ }} body interpolation
+    │   ├── page_blocks.rs    # run_stage → conditional ::block regions
+    │   ├── shell_expansion.rs # run_stage → condition-aware ::shell execution
+    │   └── normalize.rs      # run_stage → heading/structure normalization
     ├── replacement.rs   # Text replacement engine
     ├── link_resolve.rs  # Link resolution (absolute paths)
     ├── link_normalization.rs # Link normalization (portable paths)
@@ -367,8 +423,12 @@ darkmatter/lib/src/
     ├── conditions.rs    # Condition evaluation API
     ├── cache/           # Compose result caching
     │   └── hashing.rs   # Context-aware cache hashing
-    ├── context/         # Runtime context capture (demand-driven)
+    ├── context/         # Shared pipeline state + runtime context capture
     │   ├── mod.rs
+    │   ├── options.rs   # ComposeOptions, ComposeSource, TransclusionOptions
+    │   ├── runtime.rs   # ComposeContext (the ctx namespace)
+    │   ├── report.rs    # ComposeReport, ComposeWarning, SourceRange
+    │   ├── effective_state.rs # EffectiveState, builder, merge logic
     │   ├── capture.rs   # Raw fact capture from sniff, chrono, std::env
     │   ├── format.rs    # CSV, markdown list, byte, ordinal formatters
     │   ├── merge.rs     # User ctx + runtime ctx merge policy
