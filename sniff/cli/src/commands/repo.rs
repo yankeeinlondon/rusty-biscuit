@@ -1,7 +1,7 @@
 use sniff::filesystem::blast_radius::{
     ChangeScope, ChangedPathKind, ChangedPathQuery, collect_changed_paths,
 };
-use sniff::filesystem::repo::detect_repo_structure;
+use sniff::filesystem::repo::{detect_repo_structure, detect_repo_structure_or_root_package};
 
 use crate::args::{FileListArgs, PackagesFormat};
 use crate::output::{self, PathListFormat};
@@ -46,7 +46,12 @@ pub(super) fn handle_repo_packages(
         sniff::filesystem::repo_root(explicit)?.unwrap_or_else(|| explicit.to_path_buf())
     };
 
-    let info = match detect_repo_structure(&root)? {
+    // A standalone single-package project (a `Cargo.toml` with no `[workspace]`,
+    // a lone `package.json`, etc.) has no workspace structure but is still one
+    // package. Synthesize its root-package catalog so `repo packages` lists it
+    // instead of erroring, matching the repo-wide `package_manager` /
+    // `dependencies` facts.
+    let info = match detect_repo_structure_or_root_package(&root)? {
         Some(info) => info,
         None => {
             return Err("Not inside a recognized repository".into());
@@ -238,10 +243,11 @@ pub(super) fn handle_repo_branches(
             .as_deref()
             .map(|upstream| format!(" <dim>{upstream}</dim>"))
             .unwrap_or_default();
-        let sync = if branch.ahead > 0 || branch.behind > 0 {
-            format!(" <dim>ahead {} behind {}</dim>", branch.ahead, branch.behind)
-        } else {
-            String::new()
+        let sync = match (branch.ahead, branch.behind) {
+            (Some(ahead), Some(behind)) if ahead > 0 || behind > 0 => {
+                format!(" <dim>ahead {ahead} behind {behind}</dim>")
+            }
+            _ => String::new(),
         };
         let remote = if branch.remote_represented {
             " <dim>remote</dim>"
@@ -272,7 +278,8 @@ pub(super) fn handle_repo_dependencies(
     use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::terminal::Terminal;
     use sniff::filesystem::repo::{
-        AggregateScope, collect_external_dependencies, detect_repo_structure, resolve_scope,
+        AggregateScope, collect_external_dependencies, detect_repo_structure_or_root_package,
+        resolve_scope,
     };
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
@@ -282,7 +289,7 @@ pub(super) fn handle_repo_dependencies(
     } else {
         sniff::filesystem::repo_root(explicit)?.unwrap_or_else(|| explicit.to_path_buf())
     };
-    let Some(info) = detect_repo_structure(&root)? else {
+    let Some(info) = detect_repo_structure_or_root_package(&root)? else {
         return Err("Not inside a recognized repository".into());
     };
     let dir_for_scope = if base_dir.is_some() { explicit } else { &cwd };
@@ -338,8 +345,8 @@ pub(super) fn handle_repo_package_manager(
     use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::terminal::Terminal;
     use sniff::filesystem::repo::{
-        AggregateResult, AggregateScope, aggregate_package_values, detect_repo_structure,
-        resolve_scope,
+        AggregateResult, AggregateScope, aggregate_package_values,
+        detect_repo_structure_or_root_package, resolve_scope,
     };
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
@@ -350,7 +357,7 @@ pub(super) fn handle_repo_package_manager(
         sniff::filesystem::repo_root(explicit)?.unwrap_or_else(|| explicit.to_path_buf())
     };
 
-    let info = detect_repo_structure(&root)?;
+    let info = detect_repo_structure_or_root_package(&root)?;
     let dir_for_scope = if base_dir.is_some() { explicit } else { &cwd };
 
     let (result, scope_kind): (AggregateResult<String>, &'static str) = match &info {

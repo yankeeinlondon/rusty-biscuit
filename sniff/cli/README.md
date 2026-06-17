@@ -218,7 +218,7 @@ sniff software language-package-managers  # Language package managers (cargo, np
 sniff software os-package-managers        # OS package managers (homebrew, apt, etc.)
 sniff software tts-clients                # TTS clients (say, espeak, piper, etc.)
 sniff software terminal-apps              # Terminal apps (alacritty, wezterm, etc.)
-sniff software audio                      # Headless audio players (afplay, pacat, etc.)
+sniff software audio-players              # Headless audio players (afplay, pacat, etc.)
 sniff software notification-helpers       # Desktop notification helpers
 sniff software agents                     # AI agent/CLI tools (claude, kimi, etc.)
 sniff software test-runners               # Test runners with availability details

@@ -725,7 +725,23 @@ pub(crate) fn build_aggregate_value(
     identity: &RepoIdentity,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let dir = base_dir.unwrap_or_else(|| Path::new("."));
-    let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
+    // Single-package repos (a bare `Cargo.toml` / `package.json` / etc. with no
+    // workspace) yield no `RepoInfo` from the full detection pass, leaving the
+    // repo-wide facts empty. Recover the root package's facts through the
+    // library fallback so `package_manager`, `dependencies`,
+    // `package_dependencies`, and `structure` are populated for them too.
+    let repo_fallback = match result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref()) {
+        Some(_) => None,
+        None => {
+            let root = sniff::filesystem::repo_root(dir)?.unwrap_or_else(|| dir.to_path_buf());
+            sniff::filesystem::repo::detect_repo_structure_or_root_package(&root)?
+        }
+    };
+    let repo = result
+        .filesystem
+        .as_ref()
+        .and_then(|fs| fs.repo.as_ref())
+        .or(repo_fallback.as_ref());
     let packages = repo
         .map(|repo| {
             filesystem::collect_repo_package_names(repo, &[], None, None)
@@ -776,14 +792,20 @@ pub(crate) fn build_aggregate_value(
         version: identity.version.clone(),
         language: filesystem::primary_language_name(result),
         is_monorepo: identity.is_monorepo,
-        package_count: identity.package_count.unwrap_or(0),
+        // Count the canonical catalog, not `identity.package_count` (which is
+        // `None` for non-monorepos). A recognized standalone project counts as
+        // one package, keeping `package_count` consistent with `packages`.
+        package_count: packages.len(),
         root: filesystem::render_repo_root(result),
         structure,
         packages,
         package_areas,
         package_manager: aggregate_package_manager(repo),
         test_runner: aggregate_test_runner(repo),
-        package_dependencies: build_deps_value(result, &[], None, None),
+        package_dependencies: match repo {
+            Some(repo) => json!({ "packages": build_deps_entries(repo, &[], None, None) }),
+            None => json!({ "packages": [] }),
+        },
         dependencies: aggregate_external_dependencies(repo),
         git_status: aggregate_git_status(result),
         branches,

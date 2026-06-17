@@ -814,8 +814,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let dir = base_dir
                     .as_deref()
                     .unwrap_or_else(|| std::path::Path::new("."));
-                let identity = sniff::filesystem::repo::detect_repo_identity(dir)?;
-                let count = identity.package_count.unwrap_or(0);
+                // Count the canonical catalog so a recognized standalone project
+                // reports `1` rather than `0`. `RepoIdentity::package_count` is
+                // only populated for monorepos, so it cannot serve this path.
+                let root =
+                    sniff::filesystem::repo_root(dir)?.unwrap_or_else(|| dir.to_path_buf());
+                let count = sniff::filesystem::repo::detect_repo_structure_or_root_package(&root)?
+                    .and_then(|info| info.packages)
+                    .map_or(0, |packages| packages.len());
                 if cli.json {
                     let outcome = output::repo_json::package_count_outcome(count);
                     output::print_json_value(outcome.value, perf.build_report().as_ref());

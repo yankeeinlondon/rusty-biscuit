@@ -2478,14 +2478,176 @@ fn test_repo_branches_json_shape() {
         .find(|branch| branch["current"].as_bool() == Some(true))
         .expect("one current branch");
 
+    // Every contract key must be present, even when the value is null.
+    let obj = current.as_object().expect("branch is an object");
+    for key in [
+        "name",
+        "current",
+        "sha",
+        "remote_represented",
+        "upstream",
+        "ahead",
+        "behind",
+    ] {
+        assert!(obj.contains_key(key), "branch is missing key `{key}`: {json}");
+    }
+
     assert!(current["name"].is_string(), "branch has name: {json}");
     assert!(current["sha"].is_string(), "branch has sha: {json}");
     assert!(
         current["remote_represented"].is_boolean(),
         "branch has remote_represented: {json}"
     );
-    assert!(current["ahead"].is_number(), "branch has ahead: {json}");
-    assert!(current["behind"].is_number(), "branch has behind: {json}");
+
+    // A freshly created repo has no configured upstream, so the tracking fields
+    // serialize as null rather than collapsing to `0` / an omitted key.
+    assert!(
+        current["upstream"].is_null(),
+        "no-upstream branch serializes upstream as null: {json}"
+    );
+    assert!(
+        current["ahead"].is_null(),
+        "no-upstream branch serializes ahead as null: {json}"
+    );
+    assert!(
+        current["behind"].is_null(),
+        "no-upstream branch serializes behind as null: {json}"
+    );
+}
+
+/// Run `sniff <args>` against `path` and return parsed stdout JSON.
+fn repo_json_at(path: &Path, args: &[&str]) -> Value {
+    let mut full = vec!["--base", path.to_str().unwrap()];
+    full.extend_from_slice(args);
+    let output = cargo_bin_cmd!("sniff")
+        .args(&full)
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("valid JSON on stdout")
+}
+
+#[test]
+fn test_single_package_cargo_reports_root_facts() {
+    let (_dir, path) = create_test_repo();
+    std::fs::write(
+        path.join("Cargo.toml"),
+        "[package]\nname = \"solo\"\nversion = \"0.4.2\"\nedition = \"2021\"\n\n\
+         [dependencies]\nserde = \"1\"\n",
+    )
+    .unwrap();
+
+    // A plain Cargo package (no `[workspace]`) still reports its package manager.
+    let pm = repo_json_at(&path, &["repo", "package-manager", "--json"]);
+    assert_eq!(pm["package_manager"], "cargo");
+
+    // ... and its declared external dependencies.
+    let deps = repo_json_at(&path, &["repo", "dependencies", "--json"]);
+    let names: Vec<&str> = deps["dependencies"]
+        .as_array()
+        .expect("dependencies array")
+        .iter()
+        .map(|d| d["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"serde"), "single-package deps: {deps}");
+
+    // The bare aggregate carries the same root-package facts.
+    let agg = repo_json_at(&path, &["repo", "--json"]);
+    assert_eq!(agg["package_manager"], "cargo", "aggregate pm: {agg}");
+    assert!(
+        agg["dependencies"]["dependencies"]
+            .as_array()
+            .is_some_and(|d| !d.is_empty()),
+        "aggregate external deps populated: {agg}"
+    );
+    assert!(
+        agg["package_dependencies"]["packages"]
+            .as_array()
+            .is_some_and(|p| !p.is_empty()),
+        "aggregate package_dependencies populated: {agg}"
+    );
+
+    // The standalone package counts as one in the catalog: `package_count` and
+    // `packages` must describe the same single-package universe.
+    assert_eq!(agg["package_count"], 1, "aggregate package_count: {agg}");
+    assert_eq!(
+        agg["packages"],
+        serde_json::json!(["solo"]),
+        "aggregate packages: {agg}"
+    );
+
+    // Focused package commands agree with the aggregate.
+    let count = repo_json_at(&path, &["repo", "package-count", "--json"]);
+    assert_eq!(count["package-count"], 1, "focused package-count: {count}");
+    let packages = repo_json_at(&path, &["repo", "packages", "--json"]);
+    assert_eq!(
+        packages,
+        serde_json::json!(["solo"]),
+        "focused packages: {packages}"
+    );
+}
+
+#[test]
+fn test_single_package_node_reports_root_facts() {
+    let (_dir, path) = create_test_repo();
+    std::fs::write(
+        path.join("package.json"),
+        r#"{"name":"node-app","version":"1.0.0","dependencies":{"lodash":"^4"}}"#,
+    )
+    .unwrap();
+
+    let pm = repo_json_at(&path, &["repo", "package-manager", "--json"]);
+    assert_eq!(pm["package_manager"], "npm");
+
+    let deps = repo_json_at(&path, &["repo", "dependencies", "--json"]);
+    let names: Vec<&str> = deps["dependencies"]
+        .as_array()
+        .expect("dependencies array")
+        .iter()
+        .map(|d| d["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"lodash"), "single-package deps: {deps}");
+
+    let agg = repo_json_at(&path, &["repo", "--json"]);
+    assert_eq!(agg["package_manager"], "npm", "aggregate pm: {agg}");
+    assert_eq!(agg["package_count"], 1, "aggregate package_count: {agg}");
+    assert_eq!(
+        agg["packages"],
+        serde_json::json!(["node-app"]),
+        "aggregate packages: {agg}"
+    );
+}
+
+#[test]
+fn test_single_package_python_reports_root_facts() {
+    let (_dir, path) = create_test_repo();
+    std::fs::write(
+        path.join("pyproject.toml"),
+        "[project]\nname = \"py-app\"\nversion = \"2.1.0\"\ndependencies = [\"requests>=2\"]\n",
+    )
+    .unwrap();
+
+    let pm = repo_json_at(&path, &["repo", "package-manager", "--json"]);
+    assert_eq!(pm["package_manager"], "pip");
+
+    let deps = repo_json_at(&path, &["repo", "dependencies", "--json"]);
+    let names: Vec<&str> = deps["dependencies"]
+        .as_array()
+        .expect("dependencies array")
+        .iter()
+        .map(|d| d["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"requests"), "single-package deps: {deps}");
+
+    let agg = repo_json_at(&path, &["repo", "--json"]);
+    assert_eq!(agg["package_manager"], "pip", "aggregate pm: {agg}");
+    assert_eq!(agg["package_count"], 1, "aggregate package_count: {agg}");
+    assert_eq!(
+        agg["packages"],
+        serde_json::json!(["py-app"]),
+        "aggregate packages: {agg}"
+    );
 }
 
 #[test]

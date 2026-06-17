@@ -38,16 +38,17 @@ pub(crate) fn select_repo_packages<'a>(
 
 /// Collect package names matching the given filters and scope.
 ///
-/// Returns an empty vec when the repo is not a monorepo.
+/// Includes a single standalone root package: the canonical catalog
+/// ([`RepoInfo::packages`]) holds one entry for a recognized non-monorepo
+/// project, so `packages` / `package-count` describe the same package universe
+/// as the repo-wide `package_manager` and `dependencies` facts. Returns an
+/// empty vec only when no package catalog is present.
 pub fn collect_repo_package_names<'a>(
     repo: &'a RepoInfo,
     repo_filter: &[String],
     package: Option<&str>,
     package_area: Option<&str>,
 ) -> Vec<&'a str> {
-    if !repo.is_monorepo {
-        return Vec::new();
-    }
     let Some(packages) = repo.packages.as_ref() else {
         return Vec::new();
     };
@@ -84,12 +85,6 @@ pub fn render_repo_packages_formatted(
     format: PackagesFormat,
     verbose: u8,
 ) -> String {
-    if !repo.is_monorepo {
-        return String::from(
-            "- the \"packages\" subcommand is only intended to be used in a monorepo",
-        );
-    }
-
     let Some(packages) = repo.packages.as_ref() else {
         return String::new();
     };
