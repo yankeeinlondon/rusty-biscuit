@@ -353,10 +353,11 @@ pub fn run_compose(
     let build_options_dur = opts_start.map(|s| s.elapsed()).unwrap_or_default();
 
     if shell_report {
-        use darkmatter::markdown::compose::shell_expansion::collect_shell_commands;
-
-        let commands = collect_shell_commands(&md, &options)?;
-        print_shell_command_report(&commands);
+        // `--shell` reports condition-blind approval candidates: every command
+        // that *could* run under any document state, routed through the same
+        // pre-flight collector that authorization uses.
+        let preflight = md.compose_preflight(&options)?;
+        print_shell_command_report(&preflight.entries);
         drop(options_ctx_ref);
         return Ok(());
     }

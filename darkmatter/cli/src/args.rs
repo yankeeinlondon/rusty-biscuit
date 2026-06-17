@@ -193,7 +193,8 @@ pub enum Command {
         #[arg(long)]
         allow_shell_timeout: bool,
 
-        /// Report shell commands discovered in the compose tree without executing them
+        /// Report condition-blind shell approval candidates (every command that
+        /// could run under any state, including dead branches) without executing them
         #[arg(long)]
         shell: bool,
 
