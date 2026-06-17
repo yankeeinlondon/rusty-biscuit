@@ -36,7 +36,7 @@ fn test_help_mentions_subcommands() {
         .stdout(predicate::str::contains("sniff os"))
         .stdout(predicate::str::contains("sniff cpu"))
         .stdout(predicate::str::contains("sniff hardware"))
-        .stdout(predicate::str::contains("sniff agents"));
+        .stdout(predicate::str::contains("sniff software"));
 }
 
 // ============================================================================
@@ -351,40 +351,28 @@ fn repo_aggregate_json_not_partial() {
         "name",
         "version",
         "language",
-        "is-monorepo",
-        "package-count",
+        "is_monorepo",
+        "package_count",
+        "root",
         "structure",
         "packages",
-        "package-areas",
-        "deps",
+        "package_areas",
+        "package_manager",
+        "test_runner",
+        "package_dependencies",
+        "dependencies",
+        "git_status",
+        "branches",
         "worktrees",
-        "git-status",
-        "staged-files",
-        "unstaged-files",
-        "untracked-files",
-        "dirty-source-code",
-        "staged-source-code",
-        "unstaged-source-code",
-        "dirty-files",
-        "package",
-        "package-area",
-        "area",
-        "package-root",
-        "package-area-root",
-        "root",
-        "dirty-packages",
-        "dirty-package-areas",
-        "staged-packages",
-        "staged-package-areas",
-        "unstaged-packages",
-        "unstaged-package-areas",
-        "is-current-package-area-dirty",
-        "package-area-has-source-code-changes",
-        "has-merge-conflict",
-        "worktree",
-        "recent-commits",
-        "source-code-changes",
-        "documentation-changes",
+        "context",
+        "dirty",
+        "staged",
+        "unstaged",
+        "untracked",
+        "has_merge_conflict",
+        "recent_commits",
+        "source_code_changes",
+        "documentation_changes",
     ];
 
     for key in expected {
@@ -396,7 +384,7 @@ fn repo_aggregate_json_not_partial() {
 }
 
 #[test]
-fn repo_aggregate_json_keys_round_trip() {
+fn repo_aggregate_json_uses_snake_case_and_drops_old_kebab_keys() {
     let output = cargo_bin_cmd!("sniff")
         .args(["repo", "--json"])
         .output()
@@ -406,33 +394,45 @@ fn repo_aggregate_json_keys_round_trip() {
     let json: serde_json::Value = serde_json::from_str(json_str).expect("valid json");
     let obj = json.as_object().expect("aggregate object");
 
-    // Every top-level key must correspond to an invokable `sniff repo <key>`
-    // subcommand. Some leaves exit 1 on a false/empty value, so we only check
-    // that the parser accepts the subcommand.
     for key in obj.keys() {
-        let child = cargo_bin_cmd!("sniff")
-            .args(["repo", key, "--json"])
-            .output()
-            .unwrap_or_else(|e| panic!("failed to run `sniff repo {key} --json`: {e}"));
+        assert!(
+            !key.contains('-'),
+            "aggregate top-level key must be snake_case, got `{key}`: {json}"
+        );
+    }
 
-        let stderr = String::from_utf8_lossy(&child.stderr);
+    for old_key in [
+        "is-monorepo",
+        "package-count",
+        "package-areas",
+        "package-dependencies",
+        "git-status",
+        "staged-files",
+        "unstaged-files",
+        "untracked-files",
+        "dirty-source-code",
+        "staged-source-code",
+        "unstaged-source-code",
+        "dirty-files",
+        "package-area",
+        "package-root",
+        "package-area-root",
+        "is-current-package-area-dirty",
+        "package-area-has-source-code-changes",
+        "has-merge-conflict",
+        "recent-commits",
+        "source-code-changes",
+        "documentation-changes",
+    ] {
         assert!(
-            !stderr.contains("unrecognized subcommand"),
-            "`sniff repo {key} --json` was not recognized: {stderr}"
-        );
-        assert!(
-            !stderr.contains("Found argument"),
-            "`sniff repo {key} --json` got a parser error: {stderr}"
-        );
-        assert!(
-            !stderr.contains("unexpected argument"),
-            "`sniff repo {key} --json` got an unexpected argument: {stderr}"
+            !obj.contains_key(old_key),
+            "aggregate must not contain old kebab-case key `{old_key}`: {json}"
         );
     }
 }
 
 #[test]
-fn repo_aggregate_json_single_key_leaves_unwrapped() {
+fn repo_aggregate_json_context_groups_cwd_relative_facts() {
     let output = cargo_bin_cmd!("sniff")
         .args(["repo", "--json"])
         .output()
@@ -443,24 +443,24 @@ fn repo_aggregate_json_single_key_leaves_unwrapped() {
 
     // Identity leaves are unwrapped values, not nested objects.
     assert!(json["name"].is_string());
-    assert!(json["is-monorepo"].is_boolean());
+    assert!(json["is_monorepo"].is_boolean());
     assert!(
-        json["package-count"].is_number(),
-        "package-count must be unwrapped number: {json}"
+        json["package_count"].is_number(),
+        "package_count must be unwrapped number: {json}"
     );
 
-    // Locator leaves are unwrapped strings.
-    assert!(json["package"].is_string());
-    assert!(json["package-area"].is_string());
-    assert!(json["area"].is_string());
-    assert!(json["package-root"].is_string());
-    assert!(json["package-area-root"].is_string());
     assert!(json["root"].is_string());
 
-    // Boolean leaves are unwrapped booleans.
-    assert!(json["is-current-package-area-dirty"].is_boolean());
-    assert!(json["package-area-has-source-code-changes"].is_boolean());
-    assert!(json["has-merge-conflict"].is_boolean());
+    let context = json["context"].as_object().expect("context object");
+    assert!(context["package"].is_string());
+    assert!(context["package_area"].is_string());
+    assert!(context["area"].is_string());
+    assert!(context["package_root"].is_string());
+    assert!(context["package_area_root"].is_string());
+    assert!(context["worktree"].is_string() || context["worktree"].is_null());
+    assert!(context["is_current_package_area_dirty"].is_boolean());
+    assert!(context["package_area_has_source_code_changes"].is_boolean());
+    assert!(json["has_merge_conflict"].is_boolean());
 }
 
 #[test]
@@ -512,7 +512,7 @@ fn repo_structure_json_output_is_valid_json_on_stdout_with_clean_stderr() {
 }
 
 #[test]
-fn repo_aggregate_json_file_list_leaves_have_stable_shape() {
+fn repo_aggregate_json_scope_buckets_have_stable_shape() {
     let output = cargo_bin_cmd!("sniff")
         .args(["repo", "--json"])
         .output()
@@ -521,27 +521,65 @@ fn repo_aggregate_json_file_list_leaves_have_stable_shape() {
     let json_str = std::str::from_utf8(&output.stdout).expect("utf8");
     let json: serde_json::Value = serde_json::from_str(json_str).expect("valid json");
 
-    for key in [
-        "staged-files",
-        "unstaged-files",
-        "untracked-files",
-        "dirty-source-code",
-        "staged-source-code",
-        "unstaged-source-code",
-        "dirty-files",
-    ] {
+    for key in ["dirty", "staged", "unstaged", "untracked"] {
         let leaf = &json[key];
         assert!(
             leaf.is_object(),
             "{key} must be an object in aggregate: {json}"
         );
-        assert!(leaf["scope"].is_string(), "{key} missing scope: {leaf}");
-        assert!(leaf["kind"].is_string(), "{key} missing kind: {leaf}");
-        assert!(
-            leaf["paths"].is_array(),
-            "{key} paths must be an array: {leaf}"
-        );
+        for field in ["files", "source_code", "documentation", "packages", "package_areas"] {
+            assert!(
+                leaf[field].is_array(),
+                "{key}.{field} must be an array: {leaf}"
+            );
+        }
     }
+}
+
+#[test]
+fn repo_aggregate_json_does_not_duplicate_full_package_catalogs() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "--json"])
+        .output()
+        .expect("run sniff repo --json");
+
+    let json_str = std::str::from_utf8(&output.stdout).expect("utf8");
+    let json: serde_json::Value = serde_json::from_str(json_str).expect("valid json");
+
+    assert!(json["packages"].is_array(), "top-level packages: {json}");
+    assert!(
+        json["structure"].get("packages").is_none(),
+        "structure must not duplicate the full package catalog: {json}"
+    );
+    assert!(
+        json["recent_commits"].get("packages").is_none(),
+        "recent_commits must not duplicate the full package catalog: {json}"
+    );
+    assert!(
+        json["package_dependencies"]["packages"].is_array(),
+        "package_dependencies keeps only its narrow dependency projection: {json}"
+    );
+}
+
+#[test]
+fn repo_aggregate_json_is_materially_smaller_than_phase_1_baseline() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "--json"])
+        .output()
+        .expect("run sniff repo --json");
+
+    assert!(
+        output.status.success(),
+        "sniff repo --json must succeed: stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let baseline_bytes = 2_150_698usize;
+    assert!(
+        output.stdout.len() < baseline_bytes / 2,
+        "aggregate should be less than half the Phase 1 baseline ({baseline_bytes} bytes), got {} bytes",
+        output.stdout.len()
+    );
 }
 
 #[test]
@@ -1032,7 +1070,7 @@ fn test_repo_scoped_flags_parse_in_help() {
         .assert()
         .success()
         .stdout(predicate::str::contains("--latest-versions"))
-        .stdout(predicate::str::contains("deps"))
+        .stdout(predicate::str::contains("package-dependencies"))
         .stdout(predicate::str::contains("packages"))
         .stdout(predicate::str::contains("package-area"))
         .stdout(predicate::str::contains("dirty-packages"))
@@ -1048,7 +1086,8 @@ fn test_topics_subcommand_output() {
         .success()
         .stdout(predicate::str::contains("hardware"))
         .stdout(predicate::str::contains("filesystem"))
-        .stdout(predicate::str::contains("programs"));
+        .stdout(predicate::str::contains("software"))
+        .stdout(predicate::str::contains("test-runners"));
 }
 
 // ============================================================================
@@ -1688,18 +1727,17 @@ fn test_repo_help_lists_language_subcommand() {
 }
 
 // ============================================================================
-// Programs Subcommand Tests
-// programs, editors, utilities, language-package-managers, os-package-managers,
-// tts-clients, terminal-apps, audio
+// Software Subcommand Tests
+// sniff software and all reparented categories
 // ============================================================================
 
 #[test]
-fn test_programs_subcommand_text_output() {
+fn test_software_subcommand_text_output() {
     // In a non-TTY context, terminal width defaults to 80 columns which may be
     // too narrow for the programs table. Accept either the rendered table
     // or the graceful width error message.
     cargo_bin_cmd!("sniff")
-        .arg("programs")
+        .args(["software"])
         .assert()
         .success()
         .stdout(
@@ -1708,9 +1746,9 @@ fn test_programs_subcommand_text_output() {
 }
 
 #[test]
-fn test_programs_subcommand_json_output() {
+fn test_software_subcommand_json_output() {
     let output = cargo_bin_cmd!("sniff")
-        .args(["programs", "--json"])
+        .args(["software", "--json"])
         .assert()
         .success()
         .get_output()
@@ -1720,12 +1758,12 @@ fn test_programs_subcommand_json_output() {
     let json: Value = serde_json::from_slice(&output).unwrap();
     let entries = json
         .as_array()
-        .expect("programs --json should return an array");
-    assert!(!entries.is_empty(), "programs JSON should not be empty");
+        .expect("software --json should return an array");
+    assert!(!entries.is_empty(), "software JSON should not be empty");
 
     let first = entries[0]
         .as_object()
-        .expect("programs JSON entries should be objects");
+        .expect("software JSON entries should be objects");
     assert!(first.contains_key("name"));
     assert!(first.contains_key("binary_name"));
     assert!(first.contains_key("description"));
@@ -1733,9 +1771,9 @@ fn test_programs_subcommand_json_output() {
 }
 
 #[test]
-fn test_programs_subcommand_rejects_json_format_flag() {
+fn test_software_subcommand_rejects_json_format_flag() {
     cargo_bin_cmd!("sniff")
-        .args(["programs", "--json-format", "full"])
+        .args(["software", "--json-format", "full"])
         .assert()
         .failure()
         .stderr(predicate::str::contains(
@@ -1744,12 +1782,9 @@ fn test_programs_subcommand_rejects_json_format_flag() {
 }
 
 #[test]
-fn test_editors_subcommand_text_output() {
-    // In a non-TTY context, terminal width defaults to 80 columns which may be
-    // too narrow for the editors table. Accept either the rendered table
-    // or the graceful width error message.
+fn test_software_editors_subcommand_text_output() {
     cargo_bin_cmd!("sniff")
-        .arg("editors")
+        .args(["software", "editors"])
         .assert()
         .success()
         .stdout(
@@ -1758,20 +1793,17 @@ fn test_editors_subcommand_text_output() {
 }
 
 #[test]
-fn test_editors_subcommand_json_output() {
+fn test_software_editors_subcommand_json_output() {
     cargo_bin_cmd!("sniff")
-        .args(["editors", "--json"])
+        .args(["software", "editors", "--json"])
         .assert()
         .success();
 }
 
 #[test]
-fn test_utilities_subcommand_text_output() {
-    // In a non-TTY context, terminal width defaults to 80 columns which may be
-    // too narrow for the utilities table. Accept either the rendered table
-    // or the graceful width error message.
+fn test_software_utilities_subcommand_text_output() {
     cargo_bin_cmd!("sniff")
-        .arg("utilities")
+        .args(["software", "utilities"])
         .assert()
         .success()
         .stdout(
@@ -1780,20 +1812,17 @@ fn test_utilities_subcommand_text_output() {
 }
 
 #[test]
-fn test_utilities_subcommand_json_output() {
+fn test_software_utilities_subcommand_json_output() {
     cargo_bin_cmd!("sniff")
-        .args(["utilities", "--json"])
+        .args(["software", "utilities", "--json"])
         .assert()
         .success();
 }
 
 #[test]
-fn test_language_package_managers_subcommand_text_output() {
-    // In a non-TTY context, terminal width defaults to 80 columns which may be
-    // too narrow for the language-package-managers table. Accept either the
-    // rendered table or the graceful width error message.
+fn test_software_language_package_managers_subcommand_text_output() {
     cargo_bin_cmd!("sniff")
-        .arg("language-package-managers")
+        .args(["software", "language-package-managers"])
         .assert()
         .success()
         .stdout(
@@ -1802,17 +1831,17 @@ fn test_language_package_managers_subcommand_text_output() {
 }
 
 #[test]
-fn test_language_package_managers_subcommand_json_output() {
+fn test_software_language_package_managers_subcommand_json_output() {
     cargo_bin_cmd!("sniff")
-        .args(["language-package-managers", "--json"])
+        .args(["software", "language-package-managers", "--json"])
         .assert()
         .success();
 }
 
 #[test]
-fn test_os_package_managers_subcommand_text_output() {
+fn test_software_os_package_managers_subcommand_text_output() {
     cargo_bin_cmd!("sniff")
-        .arg("os-package-managers")
+        .args(["software", "os-package-managers"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Name"))
@@ -1820,77 +1849,480 @@ fn test_os_package_managers_subcommand_text_output() {
 }
 
 #[test]
-fn test_os_package_managers_subcommand_json_output() {
+fn test_software_os_package_managers_subcommand_json_output() {
     cargo_bin_cmd!("sniff")
-        .args(["os-package-managers", "--json"])
+        .args(["software", "os-package-managers", "--json"])
         .assert()
         .success();
 }
 
 #[test]
-fn test_tts_clients_subcommand_text_output() {
+fn test_software_tts_clients_subcommand_text_output() {
+    cargo_bin_cmd!("sniff")
+        .args(["software", "tts-clients"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Name").or(predicate::str::contains("could not be rendered")),
+        );
+}
+
+#[test]
+fn test_software_tts_clients_subcommand_json_output() {
+    cargo_bin_cmd!("sniff")
+        .args(["software", "tts-clients", "--json"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_software_terminal_apps_subcommand_text_output() {
+    cargo_bin_cmd!("sniff")
+        .args(["software", "terminal-apps"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Name").or(predicate::str::contains("could not be rendered")),
+        );
+}
+
+#[test]
+fn test_software_terminal_apps_subcommand_json_output() {
+    cargo_bin_cmd!("sniff")
+        .args(["software", "terminal-apps", "--json"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_software_audio_players_subcommand_text_output() {
+    cargo_bin_cmd!("sniff")
+        .args(["software", "audio-players"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Name").or(predicate::str::contains("could not be rendered")),
+        );
+}
+
+#[test]
+fn test_software_audio_players_subcommand_json_output() {
+    cargo_bin_cmd!("sniff")
+        .args(["software", "audio-players", "--json"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_software_agents_subcommand_text_output() {
+    cargo_bin_cmd!("sniff")
+        .args(["software", "agents"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Name").or(predicate::str::contains("could not be rendered")),
+        );
+}
+
+#[test]
+fn test_software_agents_subcommand_json_output() {
+    cargo_bin_cmd!("sniff")
+        .args(["software", "agents", "--json"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_software_notification_helpers_subcommand_text_output() {
+    cargo_bin_cmd!("sniff")
+        .args(["software", "notification-helpers"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_software_notification_helpers_subcommand_json_output() {
+    cargo_bin_cmd!("sniff")
+        .args(["software", "notification-helpers", "--json"])
+        .assert()
+        .success();
+}
+
+// ============================================================================
+// Test runner subcommand
+// ============================================================================
+
+#[test]
+fn test_software_test_runners_subcommand_text_output() {
     // In a non-TTY context, terminal width defaults to 80 columns which may be
-    // too narrow for the tts-clients table. Accept either the rendered table
+    // too narrow for the test-runner table. Accept either the rendered table
     // or the graceful width error message.
+    cargo_bin_cmd!("sniff")
+        .args(["software", "test-runners"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Name").or(predicate::str::contains("could not be rendered")),
+        );
+}
+
+#[test]
+fn test_software_test_runners_subcommand_json_output_shape() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["software", "test-runners", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output).expect("stdout is valid JSON");
+    let entries = json
+        .as_object()
+        .expect("software test-runners --json should return a map keyed by serde_key");
+    assert!(!entries.is_empty(), "test-runner map should not be empty");
+
+    // Every entry must carry an `availability` discriminator with one of the
+    // four documented values. The discriminator and per-variant fields
+    // (`path`, `root`, `parent`) live at the same level as the entry metadata.
+    let allowed = ["installed", "local", "via_parent", "not_found"];
+    for (_, entry) in entries {
+        let entry = entry.as_object().expect("test-runner entry is an object");
+        assert!(entry.contains_key("name"), "entry has a name: {:?}", entry);
+        assert!(entry.contains_key("binary_name"), "entry has a binary_name");
+        assert!(
+            entry.contains_key("ecosystem"),
+            "entry carries its ecosystem"
+        );
+        let availability = entry
+            .get("availability")
+            .and_then(Value::as_str)
+            .expect("entry has an availability discriminator");
+        assert!(
+            allowed.contains(&availability),
+            "availability {availability:?} is one of {allowed:?}"
+        );
+
+        // Per-variant fields must be present when the discriminator claims them.
+        match availability {
+            "installed" => assert!(entry.contains_key("path")),
+            "local" => {
+                assert!(entry.contains_key("path"));
+                assert!(entry.contains_key("root"));
+            }
+            "via_parent" => assert!(entry.contains_key("parent")),
+            _ => {}
+        }
+    }
+
+    // cargo_test is one of the catalog entries; it should be present.
+    assert!(
+        entries.contains_key("cargo_test"),
+        "cargo_test entry is present: keys = {:?}",
+        entries.keys().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_software_test_runners_json_stdout_is_parseable_without_stderr() {
+    // The search-context hint must go to stderr, not stdout, so stdout is
+    // valid JSON even when the hint is shown.
+    let output = cargo_bin_cmd!("sniff")
+        .args(["software", "test-runners", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let _: Value = serde_json::from_slice(&output.stdout).expect("stdout is valid JSON");
+    assert!(
+        output.stderr.is_empty(),
+        "software test-runners --json must not emit hints or legends to stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn test_software_test_runners_plain_suppresses_hint_and_ansi() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["software", "test-runners", "--plain"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("\x1b["),
+        "plain software test-runners stdout must not contain ANSI escapes: {stdout:?}"
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "plain software test-runners must not emit the styled search hint: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn create_cargo_workspace_repo() -> (tempfile::TempDir, PathBuf) {
+    let (dir, path) = create_test_repo();
+    std::fs::write(
+        path.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"crates/app\"]\nresolver = \"2\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(path.join("crates/app/src")).unwrap();
+    std::fs::write(
+        path.join("crates/app/Cargo.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .unwrap();
+    std::fs::write(path.join("crates/app/src/lib.rs"), "pub fn app() {}\n").unwrap();
+    (dir, path)
+}
+
+#[test]
+fn test_repo_test_runner_json_reports_package_usage() {
+    let (_dir, path) = create_cargo_workspace_repo();
+
+    let output = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "test-runner",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output).expect("stdout is valid JSON");
+    assert_eq!(json["test_runner"]["runner"], "CargoTest");
+    assert_eq!(
+        json["test_runner"]["source"]["kind"],
+        "ecosystem_default"
+    );
+}
+
+#[test]
+fn test_repo_test_runner_list_reports_library_values() {
+    let (_dir, path) = create_cargo_workspace_repo();
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "test-runner",
+            "--list",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("cargo test"));
+}
+
+#[test]
+fn test_repo_test_runner_output_modes() {
+    let (_dir, path) = create_cargo_workspace_repo();
+    let base = path.to_str().unwrap();
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", base, "repo", "test-runner", "--csv"])
+        .assert()
+        .success()
+        .stdout("cargo test\n");
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", base, "repo", "test-runner", "--md"])
+        .assert()
+        .success()
+        .stdout("- cargo test\n");
+
+    let output = cargo_bin_cmd!("sniff")
+        .args(["--base", base, "repo", "test-runner", "--plain"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("\x1b["),
+        "plain repo test-runner stdout must not contain ANSI escapes: {stdout:?}"
+    );
+}
+
+#[test]
+fn test_repo_package_manager_json_uses_shared_collapse() {
+    let (_dir, path) = create_cargo_workspace_repo();
+
+    let output = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-manager",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    assert!(
+        output.stderr.is_empty(),
+        "repo package-manager --json must not emit hints or legends to stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout).expect("stdout is valid JSON");
+    assert_eq!(json["package_manager"], "cargo");
+}
+
+#[test]
+fn test_repo_package_manager_variant_list_uses_unique_values() {
+    let (_dir, path) = create_cargo_workspace_repo();
+    std::fs::write(
+        path.join("crates/app/package.json"),
+        r#"{"name":"app-js","version":"0.1.0"}"#,
+    )
+    .unwrap();
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-manager",
+            "--list",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("cargo"))
+        .stdout(predicate::str::contains("npm"));
+}
+
+#[test]
+fn test_repo_package_manager_output_modes() {
+    let (_dir, path) = create_cargo_workspace_repo();
+    let base = path.to_str().unwrap();
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", base, "repo", "package-manager", "--csv"])
+        .assert()
+        .success()
+        .stdout("cargo\n");
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", base, "repo", "package-manager", "--md"])
+        .assert()
+        .success()
+        .stdout("- cargo\n");
+
+    let output = cargo_bin_cmd!("sniff")
+        .args(["--base", base, "repo", "package-manager", "--plain"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("\x1b["),
+        "plain repo package-manager stdout must not contain ANSI escapes: {stdout:?}"
+    );
+}
+
+// ============================================================================
+// Negative tests — old top-level program paths are rejected
+// ============================================================================
+
+#[test]
+fn test_old_programs_command_fails() {
+    cargo_bin_cmd!("sniff")
+        .arg("programs")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unrecognized subcommand"));
+}
+
+#[test]
+fn test_old_editors_command_fails() {
+    cargo_bin_cmd!("sniff")
+        .arg("editors")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unrecognized subcommand"));
+}
+
+#[test]
+fn test_old_utilities_command_fails() {
+    cargo_bin_cmd!("sniff")
+        .arg("utilities")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unrecognized subcommand"));
+}
+
+#[test]
+fn test_old_language_package_managers_command_fails() {
+    cargo_bin_cmd!("sniff")
+        .arg("language-package-managers")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unrecognized subcommand"));
+}
+
+#[test]
+fn test_old_os_package_managers_command_fails() {
+    cargo_bin_cmd!("sniff")
+        .arg("os-package-managers")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unrecognized subcommand"));
+}
+
+#[test]
+fn test_old_tts_clients_command_fails() {
     cargo_bin_cmd!("sniff")
         .arg("tts-clients")
         .assert()
-        .success()
-        .stdout(
-            predicate::str::contains("Name").or(predicate::str::contains("could not be rendered")),
-        );
+        .failure()
+        .stderr(predicate::str::contains("unrecognized subcommand"));
 }
 
 #[test]
-fn test_tts_clients_subcommand_json_output() {
-    cargo_bin_cmd!("sniff")
-        .args(["tts-clients", "--json"])
-        .assert()
-        .success();
-}
-
-#[test]
-fn test_terminal_apps_subcommand_text_output() {
-    // In a non-TTY context, terminal width defaults to 80 columns which may be
-    // too narrow for the terminal-apps table. Accept either the rendered table
-    // or the graceful width error message.
+fn test_old_terminal_apps_command_fails() {
     cargo_bin_cmd!("sniff")
         .arg("terminal-apps")
         .assert()
-        .success()
-        .stdout(
-            predicate::str::contains("Name").or(predicate::str::contains("could not be rendered")),
-        );
+        .failure()
+        .stderr(predicate::str::contains("unrecognized subcommand"));
 }
 
 #[test]
-fn test_terminal_apps_subcommand_json_output() {
-    cargo_bin_cmd!("sniff")
-        .args(["terminal-apps", "--json"])
-        .assert()
-        .success();
-}
-
-#[test]
-fn test_audio_subcommand_text_output() {
-    // In a non-TTY context, terminal width defaults to 80 columns which may be
-    // too narrow for the audio-players table. Accept either the rendered table
-    // or the graceful width error message.
+fn test_old_audio_players_command_fails() {
     cargo_bin_cmd!("sniff")
         .arg("audio-players")
         .assert()
-        .success()
-        .stdout(
-            predicate::str::contains("Name").or(predicate::str::contains("could not be rendered")),
-        );
+        .failure()
+        .stderr(predicate::str::contains("unrecognized subcommand"));
 }
 
 #[test]
-fn test_audio_subcommand_json_output() {
+fn test_old_agents_command_fails() {
     cargo_bin_cmd!("sniff")
-        .args(["audio-players", "--json"])
+        .arg("agents")
         .assert()
-        .success();
+        .failure()
+        .stderr(predicate::str::contains("unrecognized subcommand"));
+}
+
+#[test]
+fn test_old_notification_helpers_command_fails() {
+    cargo_bin_cmd!("sniff")
+        .arg("notification-helpers")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unrecognized subcommand"));
 }
 
 // ============================================================================
@@ -2005,12 +2437,164 @@ fn test_git_status_json_is_git_info() {
 }
 
 #[test]
-fn test_repo_deps_help_mentions_ui() {
+fn test_repo_package_dependencies_help_mentions_ui() {
     cargo_bin_cmd!("sniff")
-        .args(["repo", "deps", "--help"])
+        .args(["repo", "package-dependencies", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("--ui"));
+}
+
+#[test]
+fn test_repo_deps_is_not_an_alias() {
+    cargo_bin_cmd!("sniff")
+        .args(["repo", "deps"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unrecognized subcommand"));
+}
+
+#[test]
+fn test_repo_branches_json_shape() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let output = cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "branches", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    assert!(
+        output.stderr.is_empty(),
+        "repo branches --json must not emit hints or legends to stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("branches JSON is valid");
+    let branches = json.as_array().expect("branches JSON is an array");
+    let current = branches
+        .iter()
+        .find(|branch| branch["current"].as_bool() == Some(true))
+        .expect("one current branch");
+
+    assert!(current["name"].is_string(), "branch has name: {json}");
+    assert!(current["sha"].is_string(), "branch has sha: {json}");
+    assert!(
+        current["remote_represented"].is_boolean(),
+        "branch has remote_represented: {json}"
+    );
+    assert!(current["ahead"].is_number(), "branch has ahead: {json}");
+    assert!(current["behind"].is_number(), "branch has behind: {json}");
+}
+
+#[test]
+fn test_repo_dependencies_filters_dev_dependencies() {
+    let (_dir, path) = create_test_repo();
+    std::fs::write(
+        path.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"app\"]\nresolver = \"3\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(path.join("app")).unwrap();
+    std::fs::write(
+        path.join("app/Cargo.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
+         [dependencies]\nserde = \"1\"\n\n[dev-dependencies]\ninsta = \"1\"\n",
+    )
+    .unwrap();
+
+    let output = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "dependencies",
+            "--dev-dependencies",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    assert!(
+        output.stderr.is_empty(),
+        "repo dependencies --json must not emit hints or legends to stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("dependencies JSON is valid");
+    let deps = json["dependencies"]
+        .as_array()
+        .expect("dependencies key is an array");
+
+    assert_eq!(deps.len(), 1, "only dev dependencies should be emitted: {json}");
+    assert_eq!(deps[0]["name"], "insta");
+    assert_eq!(deps[0]["family"], "dev_dependencies");
+    assert_eq!(deps[0]["package"], "app");
+}
+
+#[test]
+fn test_repo_aggregate_dependencies_are_cwd_invariant() {
+    // The bare `repo --json` aggregate classifies `dependencies` as a repo-wide
+    // group-A fact: it must report the same set regardless of where in the tree
+    // the command runs. Two packages declare distinct external dependencies; the
+    // aggregate's `.dependencies.dependencies` must be byte-identical whether
+    // invoked at the repo root or inside one package directory.
+    let (_dir, path) = create_test_repo();
+    std::fs::write(
+        path.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"crates/app-a\", \"crates/app-b\"]\nresolver = \"2\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(path.join("crates/app-a/src")).unwrap();
+    std::fs::write(
+        path.join("crates/app-a/Cargo.toml"),
+        "[package]\nname = \"app-a\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
+         [dependencies]\nserde = \"1\"\n",
+    )
+    .unwrap();
+    std::fs::write(path.join("crates/app-a/src/lib.rs"), "pub fn a() {}\n").unwrap();
+    std::fs::create_dir_all(path.join("crates/app-b/src")).unwrap();
+    std::fs::write(
+        path.join("crates/app-b/Cargo.toml"),
+        "[package]\nname = \"app-b\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
+         [dependencies]\nrand = \"0.8\"\n",
+    )
+    .unwrap();
+    std::fs::write(path.join("crates/app-b/src/lib.rs"), "pub fn b() {}\n").unwrap();
+
+    let aggregate_deps = |base: &Path| -> Value {
+        let output = cargo_bin_cmd!("sniff")
+            .args(["--base", base.to_str().unwrap(), "repo", "--json"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let json: Value = serde_json::from_slice(&output).expect("aggregate JSON is valid");
+        json["dependencies"]["dependencies"].clone()
+    };
+
+    let from_root = aggregate_deps(&path);
+    let from_package = aggregate_deps(&path.join("crates/app-a"));
+
+    // Repo-wide set must include both packages' externals from either vantage.
+    let names: Vec<&str> = from_root
+        .as_array()
+        .expect("dependencies is an array")
+        .iter()
+        .filter_map(|d| d["name"].as_str())
+        .collect();
+    assert!(
+        names.contains(&"serde") && names.contains(&"rand"),
+        "repo-root aggregate must list both packages' externals: {from_root}"
+    );
+
+    assert_eq!(
+        from_root, from_package,
+        "aggregate `.dependencies.dependencies` must be identical at the repo root and inside a package"
+    );
 }
 
 #[test]
@@ -2028,12 +2612,12 @@ fn test_invalid_refresh_remotes_on_remote_subcommand_fails() {
 // ============================================================================
 
 #[test]
-fn test_verbose_with_programs_adds_columns() {
+fn test_verbose_with_software_adds_columns() {
     // In a non-TTY context, terminal width defaults to 80 columns which may be
     // too narrow for the verbose programs table. Accept either the rendered table
     // or the graceful width error message.
     cargo_bin_cmd!("sniff")
-        .args(["programs", "-v"])
+        .args(["software", "-v"])
         .assert()
         .success()
         .stdout(
@@ -2099,13 +2683,9 @@ fn test_help_mentions_remote_via_repo() {
 // ============================================================================
 
 #[test]
-fn test_editors_still_shows_table_without_install() {
-    // Backward compat: `sniff editors` still produces table output
-    // In a non-TTY context, terminal width defaults to 80 columns which may be
-    // too narrow for the editors table. Accept either the rendered table
-    // or the graceful width error message.
+fn test_software_editors_shows_table_without_install() {
     cargo_bin_cmd!("sniff")
-        .arg("editors")
+        .args(["software", "editors"])
         .assert()
         .success()
         .stdout(
@@ -2114,9 +2694,9 @@ fn test_editors_still_shows_table_without_install() {
 }
 
 #[test]
-fn test_editors_install_invalid_name_fails() {
+fn test_software_editors_install_invalid_name_fails() {
     cargo_bin_cmd!("sniff")
-        .args(["editors", "install", "nonexistent-editor-xyz"])
+        .args(["software", "editors", "install", "nonexistent-editor-xyz"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("Unknown editor"))
@@ -2124,9 +2704,9 @@ fn test_editors_install_invalid_name_fails() {
 }
 
 #[test]
-fn test_utilities_install_invalid_name_fails() {
+fn test_software_utilities_install_invalid_name_fails() {
     cargo_bin_cmd!("sniff")
-        .args(["utilities", "install", "nonexistent-util-xyz"])
+        .args(["software", "utilities", "install", "nonexistent-util-xyz"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("Unknown utility"))
@@ -2134,38 +2714,38 @@ fn test_utilities_install_invalid_name_fails() {
 }
 
 #[test]
-fn test_programs_install_invalid_name_fails() {
+fn test_software_install_invalid_name_fails() {
     cargo_bin_cmd!("sniff")
-        .args(["programs", "install", "nonexistent-program-xyz"])
+        .args(["software", "install", "nonexistent-program-xyz"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("Unknown program"));
 }
 
 #[test]
-fn test_editors_install_help_works() {
+fn test_software_editors_install_help_works() {
     cargo_bin_cmd!("sniff")
-        .args(["editors", "install", "--help"])
+        .args(["software", "editors", "install", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Install a program"));
 }
 
 #[test]
-fn test_help_mentions_install() {
-    // Top-level help mentions editors with install support
+fn test_help_mentions_software_install() {
+    // Top-level help mentions software editors with install support
     cargo_bin_cmd!("sniff")
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("sniff editors"));
+        .stdout(predicate::str::contains("sniff software"));
 }
 
 #[test]
-fn test_editors_json_still_works_with_install_subcommand() {
+fn test_software_editors_json_still_works_with_install_subcommand() {
     // --json flag should still work for listing (no install action)
     cargo_bin_cmd!("sniff")
-        .args(["editors", "--json"])
+        .args(["software", "editors", "--json"])
         .assert()
         .success();
 }
@@ -5059,10 +5639,10 @@ fn test_dirty_packages_json_does_not_emit_prose_error_for_non_monorepo() {
 }
 
 // ============================================================================
-// Phase 5 — `deps --json` builder
+// Phase 5 — `package-dependencies --json` builder
 // ============================================================================
 
-/// `sniff repo deps --json` must return a `{ packages: [...] }` object,
+/// `sniff repo package-dependencies --json` must return a `{ packages: [...] }` object,
 /// not the full `RepoInfo` blob.
 ///
 /// The created test repo is a non-monorepo so `packages` will be empty;
@@ -5074,7 +5654,13 @@ fn test_repo_deps_json_shape() {
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
     let output = cargo_bin_cmd!("sniff")
-        .args(["--base", path.to_str().unwrap(), "repo", "deps", "--json"])
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-dependencies",
+            "--json",
+        ])
         .assert()
         .get_output()
         .clone();
@@ -5084,16 +5670,16 @@ fn test_repo_deps_json_shape() {
 
     assert!(
         json.is_object(),
-        "deps --json must return an object, got: {json}"
+        "package-dependencies --json must return an object, got: {json}"
     );
     assert!(
         json["packages"].is_array(),
-        "deps --json must have `packages` array, got: {json}"
+        "package-dependencies --json must have `packages` array, got: {json}"
     );
     // Must NOT leak full RepoInfo blob fields.
     assert!(
         json.get("is_monorepo").is_none(),
-        "deps --json must not include `is_monorepo`: {json}"
+        "package-dependencies --json must not include `is_monorepo`: {json}"
     );
 }
 
@@ -5352,7 +5938,7 @@ edition = "2024"
 /// monorepo fixture.
 ///
 /// The matrix deliberately covers every subcommand whose JSON shape changed
-/// in Phases 2-6 (`git-status`, `deps`, the package/area family, the
+/// in Phases 2-6 (`git-status`, `package-dependencies`, the package/area family, the
 /// locator family, the boolean family, and the commit-family filtered
 /// variants). Bare `repo` and `repo structure` are intentionally excluded —
 /// they're meant to be identical (`structure` is the canonical alias).
@@ -5373,7 +5959,7 @@ fn test_repo_subcommand_json_shapes_are_distinct() {
     // is a tuple of (label, args after `repo`).
     let cases: &[(&str, &[&str])] = &[
         ("git-status", &["git-status"]),
-        ("deps", &["deps"]),
+        ("package-dependencies", &["package-dependencies"]),
         ("dirty-packages", &["dirty-packages"]),
         ("dirty-package-areas", &["dirty-package-areas"]),
         ("staged-packages", &["staged-packages"]),

@@ -1,7 +1,7 @@
 //! PTY regression test for the interactive install interview flow.
 //!
 //! This test is env-var-gated (`SNIFF_INTERACTIVE_PTY=1`) so it only runs
-//! when explicitly requested. It verifies that the `sniff utilities install
+//! when explicitly requested. It verifies that the `sniff software utilities install
 //! <name> --dry-run --plain` path emits the announcement and success status
 //! under a real PTY.
 //!

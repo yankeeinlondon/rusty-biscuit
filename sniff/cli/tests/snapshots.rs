@@ -488,7 +488,7 @@ fn degenerate_cargo_structure_text_is_empty() {
 fn degenerate_cargo_structure_json_has_no_topology_keys() {
     let (_dir, path) = create_degenerate_cargo_fixture();
     let json = run_repo_structure_json(&path);
-    assert!(json.as_object().map_or(true, |o| o.is_empty()));
+    assert!(json.as_object().is_none_or(|o| o.is_empty()));
     assert!(json.get("monorepo_standards").is_none());
     assert!(json.get("monorepo_layers").is_none());
     assert!(json.get("monorepo_tool").is_none());

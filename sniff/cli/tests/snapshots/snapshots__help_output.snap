@@ -38,12 +38,19 @@ Commands:
     sniff blast-radius    Find docs affected by changed source files
 
   Programs:
-    sniff programs                        Show all installed programs
-    sniff programs install-plan <name>    Explain how a program would be installed
-    sniff editors                         Show editors (supports 'install' and 'install-plan')
-    sniff utilities                       Show utilities
-    sniff agents                          Show AI agent CLI tools
-    sniff notification-helpers            Show desktop notification helpers
+    sniff software                                      Show all installed programs
+    sniff software install-plan <name>                  Explain how a program would be installed
+    sniff software editors                              Show editors (supports 'install' and
+    'install-plan')
+    sniff software utilities                            Show utilities
+    sniff software agents                               Show AI agent CLI tools
+    sniff software notification-helpers                 Show desktop notification helpers
+    sniff software language-package-managers            Show language package managers
+    sniff software os-package-managers                  Show OS package managers
+    sniff software tts-clients                          Show TTS clients
+    sniff software terminal-apps                        Show terminal apps
+    sniff software audio-players                        Show headless audio players
+    sniff software test-runners                         Show test runners
 
   Services:
     sniff services        Show running services
