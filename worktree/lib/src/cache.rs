@@ -163,7 +163,6 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), WorktreeError> {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs as unix_fs;
     use std::sync::Arc;
 
     use super::*;
@@ -233,8 +232,11 @@ mod tests {
         assert_eq!(fs::read(&path).expect("cache file remains"), bytes);
     }
 
+    #[cfg(unix)]
     #[test]
     fn cache_path_uses_canonical_repo_root() {
+        use std::os::unix::fs as unix_fs;
+
         let dir = tempfile::tempdir().expect("create temp dir");
         let repo = dir.path().join("repo");
         fs::create_dir(&repo).expect("create repo dir");

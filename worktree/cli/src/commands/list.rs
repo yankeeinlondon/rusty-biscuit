@@ -924,6 +924,13 @@ mod tests {
             .arg("list")
             .env_remove("TERM_PROGRAM")
             .env_remove("KITTY_WINDOW_ID")
+            // Pin color off so the byte-for-byte baseline is deterministic
+            // regardless of the host's COLORTERM / TERM (color_depth() reads
+            // both and has no TTY gate). NO_COLOR loses to FORCE_COLOR /
+            // CLICOLOR_FORCE, so clear those too.
+            .env("NO_COLOR", "1")
+            .env_remove("FORCE_COLOR")
+            .env_remove("CLICOLOR_FORCE")
             .output()
             .expect("wt list should run");
 
