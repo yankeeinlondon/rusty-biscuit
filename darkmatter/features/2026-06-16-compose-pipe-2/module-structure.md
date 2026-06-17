@@ -1,6 +1,6 @@
-# Compose Pipeline v2 — Module Structure (DRAFT)
+# Compose Pipeline v2 — Module Structure
 
-A working point of view on how to restructure the compose modules **while** implementing the pre-flight redesign (`tech-design.md`). This is a draft for brainstorming, not a finalized plan. It deliberately scopes to the areas v2 touches and flags god-file decomposition we can do opportunistically along the way.
+The structural counterpart to `tech-design.md`: how to restructure the compose modules **while** implementing the pre-flight redesign. Reviewed and agreed. It deliberately scopes to the areas v2 touches and flags god-file decomposition we can do opportunistically along the way. See `tech-design.md` § *Module Structure Alignment* for the behavioral constraints this structure must satisfy.
 
 ## Why now
 
@@ -64,7 +64,8 @@ Two rules govern this frame:
 - **Organize by nature, not by phase.** `file_links`/`toc_links` group under `inline` because of *what they are* (in-document link rewrites), even though they currently run in the Transclusion phase. Execution order lives in the `default_order`/phase table, never implied by the tree.
 - **Capability map ≠ implementation map.** Cross-cutting infrastructure (the shared expression/conditions core) and the orchestrator spine are *not* nodes on this map; they are captured below as the Pipeline Domain Pattern.
 
-Still to add to the frame: `frontmatter_transclusion` under `transclusion`.
+The implementation tree below represents frontmatter transclusion as
+`transclusion/frontmatter.rs`.
 
 ## Pipeline Domain Pattern
 
@@ -176,10 +177,25 @@ Incremental, interleaved with v2 — never a big-bang refactor. Ordered by value
 
 Each step is independently shippable and testable; v2 behavior lands as the modules take shape rather than after a monolithic rewrite.
 
+### Tech-design alignment
+
+This structure is the *where*; [`tech-design.md`](./tech-design.md) is the *what/why*. The join — every migration step paired with the functional requirements and acceptance tests it delivers, plus a behavior-preserving/changing flag — lives in [`plan.md`](./plan.md). Quick map:
+
+| Step | Tech-design payload | Behavior |
+|------|---------------------|----------|
+| 1 — `TransclusionEngine` | § Reusing the collection walk (graph metadata reuse) | preserving |
+| 2 — driver/context extraction | (none — pure refactor) | preserving |
+| 3 — `preflight/` collect | condition-blind approval, `DynamicCommandShape`, `compose_preflight` API, orchestrator boundary, doc reconciliation | changing |
+| 4 — `shell/` rename + execution + cache | membership-gated execution, cache-by-default + `--no-cache`/`::no-cache`/`no_cache=true`, Claudine import sweep | changing |
+| 5 — lift remaining stages | (none — pure refactor) | preserving |
+| 6 — slim `mod.rs` | (none — pure refactor) | preserving |
+
+The § *Module Structure Alignment* constraints in `tech-design.md` are binding on this structure; `plan.md` carries the full requirement/test traceability matrix.
+
 ## Explicitly out of scope
 
 - `expression/` (10.5k lines), `remote*`, `toc_linking/` / `file_links/` internals — large but their *internals* are untouched by v2 (they move homes, not guts). Leave the guts alone.
-- `compose/types.rs` (3233) — the `ComposeOptions`/`ComposeReport` split into `context/` is in scope (step 2); a further `ComposeOperation` extraction is deferred unless v2 forces it.
+- `compose/types.rs` (3233) — fully decomposed in step 2: `ComposeOptions`/`ComposeReport`/`ComposeContext` → `context/`; the `ComposeOperation`/`ComposePhase` registry → `pipeline/operations.rs`; perf types → existing `perf.rs`.
 
 ## Resolved follow-ups
 
