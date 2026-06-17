@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::RwLock;
-use remote_signal_core::{PeerConnectionState, PeerInfo, PeerSource};
+use rendezvous_core::{PeerConnectionState, PeerInfo, PeerSource};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -215,7 +215,7 @@ impl PeerRegistry {
         updated.state = PeerConnectionState::Connecting as i32;
         self.update_state(&node_id, PeerConnectionState::Connecting, None);
 
-        let connect_future = endpoint.connect(socket_addr, "remote-signal");
+        let connect_future = endpoint.connect(socket_addr, "rendezvous");
         let result = match connect_future {
             Ok(connecting) => {
                 tokio::time::timeout(Duration::from_secs(5), connecting)
@@ -246,7 +246,7 @@ impl PeerRegistry {
                         {
                             Ok(outcome) => {
                                 tracing::info!(
-                                    target: "remote_signal_daemon::peers",
+                                    target: "rendezvous_daemon::peers",
                                     peer = %node_for_sync,
                                     received_bytes = outcome.received_bytes,
                                     sent_bytes = outcome.sent_bytes,
@@ -255,7 +255,7 @@ impl PeerRegistry {
                             }
                             Err(error) => {
                                 tracing::debug!(
-                                    target: "remote_signal_daemon::peers",
+                                    target: "rendezvous_daemon::peers",
                                     peer = %node_for_sync,
                                     %error,
                                     "initial sync skipped or failed",
@@ -341,7 +341,7 @@ impl PeerRegistry {
                             tokio::spawn(async move {
                                 if let Err(error) = service.sync_responder(send, recv).await {
                                     tracing::debug!(
-                                        target: "remote_signal_daemon::peers",
+                                        target: "rendezvous_daemon::peers",
                                         %error,
                                         "inbound sync session ended with error",
                                     );
@@ -355,7 +355,7 @@ impl PeerRegistry {
                         }
                         Err(error) => {
                             tracing::debug!(
-                                target: "remote_signal_daemon::peers",
+                                target: "rendezvous_daemon::peers",
                                 %error,
                                 "QUIC accept_bi terminated",
                             );

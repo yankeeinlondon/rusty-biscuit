@@ -13,8 +13,8 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use remote_signal_core::{
-    ChunkConfig, NodeIdentity, NodeIdentityError, RemoteSignalServer, socket::SocketPathError,
+use rendezvous_core::{
+    ChunkConfig, NodeIdentity, NodeIdentityError, RendezvousServer, socket::SocketPathError,
 };
 use tokio::net::UnixListener;
 use tokio::sync::oneshot;
@@ -27,7 +27,7 @@ use crate::discovery::{self, DiscoveryError, DiscoveryHandle};
 use crate::peers::{PeerRegistry, PeerRegistryWorkers};
 use crate::projection::{Projection, ProjectionError};
 use crate::quic::{QuicEndpoint, QuicError};
-use crate::service::RemoteSignalService;
+use crate::service::RendezvousService;
 use crate::session_log::{SessionLogError, SessionLogManager};
 use crate::storage::{Storage, StorageError};
 use crate::sync::SyncService;
@@ -290,7 +290,7 @@ pub fn spawn_uds_server(
     socket_path: PathBuf,
     config: DaemonConfig,
 ) -> Result<ServerHandle, ServerError> {
-    remote_signal_core::socket::ensure_parent_dir(&socket_path)?;
+    rendezvous_core::socket::ensure_parent_dir(&socket_path)?;
 
     if socket_path.exists() {
         std::fs::remove_file(&socket_path).map_err(|source| ServerError::StaleSocket {
@@ -307,7 +307,7 @@ pub fn spawn_uds_server(
     let batcher = spawn_batcher(projection.clone(), config.batcher_config.clone());
     let identity = Arc::new(NodeIdentity::load_or_generate(&config.identity_path)?);
     tracing::info!(
-        target: "remote_signal_daemon::server",
+        target: "rendezvous_daemon::server",
         node_id = %identity.node_id(),
         identity_path = %config.identity_path.display(),
         "loaded node identity"
@@ -331,7 +331,7 @@ pub fn spawn_uds_server(
     })?;
     let incoming = UnixListenerStream::new(listener);
 
-    let mut service = RemoteSignalService::new(
+    let mut service = RendezvousService::new(
         session_log,
         projection.clone(),
         Arc::clone(&identity),
@@ -363,7 +363,7 @@ pub fn spawn_uds_server(
             registry.set_sync_service(sync_service.clone());
             service = service.with_peers(registry.clone(), quic_local_addr);
             tracing::info!(
-                target: "remote_signal_daemon::server",
+                target: "rendezvous_daemon::server",
                 quic_addr = %quic_local_addr,
                 mdns = net_config.mdns_enabled,
                 "Phase-4 networking ready",
@@ -373,7 +373,7 @@ pub fn spawn_uds_server(
         None => (None, None, None, None),
     };
 
-    let server = RemoteSignalServer::new(service);
+    let server = RendezvousServer::new(service);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
     let join_handle = tokio::spawn(async move {
@@ -403,7 +403,7 @@ fn remove_socket(path: &Path) {
         && let Err(error) = std::fs::remove_file(path)
     {
         tracing::warn!(
-            target: "remote_signal_daemon::server",
+            target: "rendezvous_daemon::server",
             path = %path.display(),
             %error,
             "failed to remove socket file"

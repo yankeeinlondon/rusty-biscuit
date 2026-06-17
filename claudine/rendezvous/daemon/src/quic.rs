@@ -150,7 +150,7 @@ impl QuicEndpoint {
     /// the permissive client config and accepts the remote certificate
     /// regardless of its CA chain.
     pub async fn connect(&self, addr: SocketAddr) -> Result<quinn::Connection, QuicError> {
-        let connecting = self.endpoint.connect(addr, "remote-signal")?;
+        let connecting = self.endpoint.connect(addr, "rendezvous")?;
         let connection = connecting.await?;
         Ok(connection)
     }
@@ -189,7 +189,7 @@ async fn run_accept_loop(endpoint: Endpoint, tx: mpsc::UnboundedSender<InboundCo
                     };
                     if tx.send(event).is_err() {
                         tracing::debug!(
-                            target: "remote_signal_daemon::quic",
+                            target: "rendezvous_daemon::quic",
                             %remote_addr,
                             "inbound connection accepted but receiver dropped",
                         );
@@ -197,7 +197,7 @@ async fn run_accept_loop(endpoint: Endpoint, tx: mpsc::UnboundedSender<InboundCo
                 }
                 Err(error) => {
                     tracing::warn!(
-                        target: "remote_signal_daemon::quic",
+                        target: "rendezvous_daemon::quic",
                         %remote_addr,
                         %error,
                         "inbound QUIC handshake failed",
@@ -209,7 +209,7 @@ async fn run_accept_loop(endpoint: Endpoint, tx: mpsc::UnboundedSender<InboundCo
 }
 
 fn build_quinn_configs() -> Result<(ServerConfig, ClientConfig), QuicError> {
-    let cert_key = rcgen::generate_simple_self_signed(vec!["remote-signal".to_string()])?;
+    let cert_key = rcgen::generate_simple_self_signed(vec!["rendezvous".to_string()])?;
     let cert_der = CertificateDer::from(cert_key.cert.der().to_vec());
     let key_der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
         cert_key.key_pair.serialize_der(),

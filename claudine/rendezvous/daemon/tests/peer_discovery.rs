@@ -11,13 +11,13 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use remote_signal_client::connect_uds;
-use remote_signal_core::{
+use rendezvous_client::connect_uds;
+use rendezvous_core::{
     AppendEntryRequest, ConnectToPeerRequest, CreateInvitationRequest, ListChunkEntriesRequest,
     ListPeersRequest, ListSessionChunksRequest, PeerConnectionState, PeerSource,
     SyncWithPeerRequest,
 };
-use remote_signal_daemon::server::{DaemonConfig, NetworkConfig, ServerHandle, spawn_uds_server};
+use rendezvous_daemon::server::{DaemonConfig, NetworkConfig, ServerHandle, spawn_uds_server};
 use tempfile::TempDir;
 use tokio::time::sleep;
 
@@ -101,8 +101,8 @@ async fn two_daemons_connect_via_manual_invitation() {
 
 #[tokio::test]
 async fn real_two_daemons_discover_each_other_via_mdns() {
-    if std::env::var("REMOTE_SIGNAL_REAL_MDNS").as_deref() != Ok("1") {
-        eprintln!("skipping real_ mDNS discovery test (set REMOTE_SIGNAL_REAL_MDNS=1 to run)");
+    if std::env::var("RENDEZVOUS_REAL_MDNS").as_deref() != Ok("1") {
+        eprintln!("skipping real_ mDNS discovery test (set RENDEZVOUS_REAL_MDNS=1 to run)");
         return;
     }
     let tmp = TempDir::new().expect("tempdir");
@@ -136,7 +136,7 @@ async fn real_two_daemons_discover_each_other_via_mdns() {
 }
 
 async fn wait_for_inbound(
-    bob_client: &mut remote_signal_core::RemoteSignalClient<tonic::transport::Channel>,
+    bob_client: &mut rendezvous_core::RendezvousClient<tonic::transport::Channel>,
 ) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
@@ -178,8 +178,8 @@ async fn wait_until_bound(path: &Path) {
 /// snapshot must remain unchanged. After approval, sync must succeed.
 #[tokio::test]
 async fn real_mdns_discovered_peer_cannot_sync_before_approval() {
-    if std::env::var("REMOTE_SIGNAL_REAL_MDNS").as_deref() != Ok("1") {
-        eprintln!("skipping real_ mDNS data-exchange boundary test (set REMOTE_SIGNAL_REAL_MDNS=1 to run)");
+    if std::env::var("RENDEZVOUS_REAL_MDNS").as_deref() != Ok("1") {
+        eprintln!("skipping real_ mDNS data-exchange boundary test (set RENDEZVOUS_REAL_MDNS=1 to run)");
         return;
     }
     let tmp = TempDir::new().expect("tempdir");
@@ -250,14 +250,14 @@ async fn real_mdns_discovered_peer_cannot_sync_before_approval() {
 
     // Now approve the pairing on both sides and verify sync works.
     alice_client
-        .approve_peer(remote_signal_core::ApprovePeerRequest {
+        .approve_peer(rendezvous_core::ApprovePeerRequest {
             node_id: bob_node.clone(),
             note: "bob".into(),
         })
         .await
         .expect("alice approves bob");
     bob_client
-        .approve_peer(remote_signal_core::ApprovePeerRequest {
+        .approve_peer(rendezvous_core::ApprovePeerRequest {
             node_id: alice_node.clone(),
             note: "alice".into(),
         })

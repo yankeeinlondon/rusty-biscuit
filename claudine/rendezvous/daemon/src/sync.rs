@@ -6,7 +6,7 @@
 //! before reading any responses — so a single round-trip is enough to
 //! converge.
 //!
-//! Frame layout is defined in [`remote_signal_core::sync`] (a
+//! Frame layout is defined in [`rendezvous_core::sync`] (a
 //! length-prefixed `SyncFrame` protobuf per message). Pairing is
 //! enforced at the start of every session: peers whose `node_id` is
 //! not present in the local pairings table are rejected before any
@@ -19,8 +19,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use parking_lot::Mutex;
 use prost::Message;
 use quinn::{Connection, RecvStream, SendStream};
-use remote_signal_core::sync::{SyncWireError, encode_frame};
-use remote_signal_core::{
+use rendezvous_core::sync::{SyncWireError, encode_frame};
+use rendezvous_core::{
     ChunkId, ChunkIdParseError, EnvelopeError, EnvelopeInbox, EnvelopeSealer, NodeIdentity,
     PayloadKind, SignedEnvelopeWire, SyncAdvertiseEnd, SyncChunkAdvertise,
     SyncDelta, SyncEnd, SyncFrame, SyncHello, identity::PUBLIC_KEY_LENGTH, sync_frame,
@@ -221,7 +221,7 @@ impl SyncService {
         peer_node_id_hex: &str,
         chunk: &ChunkId,
         delta_chunk_id: &str,
-        envelope: &remote_signal_core::SignedEnvelope,
+        envelope: &rendezvous_core::SignedEnvelope,
         is_snapshot: bool,
         inbox: &mut EnvelopeInbox,
     ) -> Result<bool, SyncError> {
@@ -568,7 +568,7 @@ async fn read_frame(recv: &mut RecvStream) -> Result<(SyncFrame, u64), SyncError
     let mut len_buf = [0u8; 4];
     recv.read_exact(&mut len_buf).await?;
     let len = u32::from_be_bytes(len_buf);
-    if len > remote_signal_core::sync::MAX_FRAME_LEN {
+    if len > rendezvous_core::sync::MAX_FRAME_LEN {
         return Err(SyncError::Wire(SyncWireError::FrameTooLarge(len)));
     }
     let mut buf = vec![0u8; len as usize];
@@ -593,7 +593,7 @@ mod tests {
     use crate::projection::Projection;
     use crate::session_log::Clock;
     use loro::{ExportMode, LoroDoc};
-    use remote_signal_core::{
+    use rendezvous_core::{
         ChunkConfig, ChunkId, EnvelopeSealer, Entry, NodeIdentity, PayloadKind,
     };
 

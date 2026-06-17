@@ -15,13 +15,13 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use remote_signal_client::connect_uds;
-use remote_signal_core::{
+use rendezvous_client::connect_uds;
+use rendezvous_core::{
     AppendEntryRequest, ApprovePeerRequest, ChunkConfig, ConnectToPeerRequest,
     CreateInvitationRequest, ListChunkEntriesRequest, ListSessionChunksRequest, PeerConnectionState,
-    QueryProjectionRequest, RemoteSignalClient, SyncWithPeerRequest,
+    QueryProjectionRequest, RendezvousClient, SyncWithPeerRequest,
 };
-use remote_signal_daemon::server::{DaemonConfig, NetworkConfig, ServerHandle, spawn_uds_server};
+use rendezvous_daemon::server::{DaemonConfig, NetworkConfig, ServerHandle, spawn_uds_server};
 use tempfile::TempDir;
 use tokio::time::sleep;
 use tonic::transport::Channel;
@@ -70,9 +70,9 @@ async fn wait_until_bound(path: &Path) {
 
 async fn pair_and_connect(
     alice: &ServerHandle,
-    alice_client: &mut RemoteSignalClient<Channel>,
+    alice_client: &mut RendezvousClient<Channel>,
     bob: &ServerHandle,
-    bob_client: &mut RemoteSignalClient<Channel>,
+    bob_client: &mut RendezvousClient<Channel>,
 ) {
     alice_client
         .approve_peer(ApprovePeerRequest {
@@ -109,7 +109,7 @@ async fn pair_and_connect(
 }
 
 async fn append(
-    client: &mut RemoteSignalClient<Channel>,
+    client: &mut RendezvousClient<Channel>,
     session: &str,
     source: &str,
     message: &str,
@@ -128,7 +128,7 @@ async fn append(
 }
 
 async fn collect_messages(
-    client: &mut RemoteSignalClient<Channel>,
+    client: &mut RendezvousClient<Channel>,
     owner: &str,
     session: &str,
 ) -> Vec<String> {
@@ -155,7 +155,7 @@ async fn collect_messages(
 }
 
 async fn collect_chunk_ids(
-    client: &mut RemoteSignalClient<Channel>,
+    client: &mut RendezvousClient<Channel>,
     owner: &str,
     session: &str,
 ) -> Vec<String> {
@@ -736,7 +736,7 @@ async fn invitation_pairing_deferred_until_identity_confirmed() {
 }
 
 async fn wait_for_messages(
-    client: &mut RemoteSignalClient<Channel>,
+    client: &mut RendezvousClient<Channel>,
     owner: &str,
     session: &str,
     expected: &[String],

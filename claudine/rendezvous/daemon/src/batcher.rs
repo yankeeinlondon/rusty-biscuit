@@ -112,7 +112,7 @@ impl BatcherWorker {
             && let Err(panic) = join.join()
         {
             tracing::warn!(
-                target: "remote_signal_daemon::batcher",
+                target: "rendezvous_daemon::batcher",
                 ?panic,
                 "batcher worker panicked"
             );
@@ -134,7 +134,7 @@ impl Drop for BatcherWorker {
 pub fn spawn(projection: Projection, config: BatcherConfig) -> BatcherWorker {
     let (sender, receiver) = flume::unbounded::<Message>();
     let join = thread::Builder::new()
-        .name("remote-signal-batcher".into())
+        .name("rendezvous-batcher".into())
         .spawn(move || drain_loop(receiver, projection, config))
         .expect("spawn batcher thread");
     BatcherWorker {
@@ -177,7 +177,7 @@ fn drain_loop(receiver: Receiver<Message>, projection: Projection, config: Batch
 fn flush(projection: &Projection, buffer: &mut Vec<ProjectionRow>) {
     if let Err(error) = projection.append_rows(buffer) {
         tracing::error!(
-            target: "remote_signal_daemon::batcher",
+            target: "rendezvous_daemon::batcher",
             %error,
             "failed to flush projection batch",
         );
@@ -188,7 +188,7 @@ fn flush(projection: &Projection, buffer: &mut Vec<ProjectionRow>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use remote_signal_core::ChunkId;
+    use rendezvous_core::ChunkId;
     use std::time::Instant;
 
     fn row(seq: u64) -> ProjectionRow {

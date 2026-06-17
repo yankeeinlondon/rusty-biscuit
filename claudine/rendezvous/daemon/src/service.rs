@@ -1,4 +1,4 @@
-//! The `RemoteSignal` gRPC service implementation.
+//! The `Rendezvous` gRPC service implementation.
 //!
 //! Phase 1 covered `Ping` and `Status`. Phase 2 layers on the
 //! session-log RPCs: `AppendEntry`, `ListChunkEntries`,
@@ -10,14 +10,14 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 
-use remote_signal_core::{
+use rendezvous_core::{
     AppendEntryRequest, AppendEntryResponse, ApprovePeerRequest, ApprovePeerResponse, ChunkId,
     ConnectToPeerRequest, ConnectToPeerResponse, CreateInvitationRequest,
     CreateInvitationResponse, DAEMON_VERSION, Invitation, ListChunkEntriesRequest,
     ListChunkEntriesResponse, ListPairingsRequest, ListPairingsResponse, ListPeersRequest,
     ListPeersResponse, ListSessionChunksRequest, ListSessionChunksResponse, NodeIdentity,
     PairingInfo, PeerSource, PingRequest, PingResponse, ProjectionRow as ProtoProjectionRow,
-    QueryProjectionRequest, QueryProjectionResponse, RemoteSignal, RevokePeerRequest,
+    QueryProjectionRequest, QueryProjectionResponse, Rendezvous, RevokePeerRequest,
     RevokePeerResponse, SessionEntry, StatusRequest, StatusResponse,
     SyncChunkOutcome as ProtoSyncChunkOutcome, SyncWithPeerRequest, SyncWithPeerResponse,
 };
@@ -30,7 +30,7 @@ use crate::storage::Storage;
 use crate::sync::{SyncError, SyncService};
 
 /// In-process gRPC service exposed by the daemon over its UDS transport.
-pub struct RemoteSignalService {
+pub struct RendezvousService {
     started_at: Instant,
     started_at_unix_ms: i64,
     session_log: SessionLogManager,
@@ -42,9 +42,9 @@ pub struct RemoteSignalService {
     quic_local_addr: Option<SocketAddr>,
 }
 
-impl std::fmt::Debug for RemoteSignalService {
+impl std::fmt::Debug for RendezvousService {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RemoteSignalService")
+        f.debug_struct("RendezvousService")
             .field("started_at_unix_ms", &self.started_at_unix_ms)
             .field("projection", &self.projection)
             .field("quic_local_addr", &self.quic_local_addr)
@@ -52,7 +52,7 @@ impl std::fmt::Debug for RemoteSignalService {
     }
 }
 
-impl RemoteSignalService {
+impl RendezvousService {
     /// Construct a service wired to the Phase-2 session-log persistence
     /// path. The service does not own the batcher worker — that lives
     /// inside the [`crate::server::ServerHandle`] so it can be shut down
@@ -94,7 +94,7 @@ impl RemoteSignalService {
 }
 
 #[tonic::async_trait]
-impl RemoteSignal for RemoteSignalService {
+impl Rendezvous for RendezvousService {
     async fn ping(
         &self,
         request: Request<PingRequest>,
@@ -156,7 +156,7 @@ impl RemoteSignal for RemoteSignalService {
         let chunk: ChunkId = body
             .chunk_id
             .parse()
-            .map_err(|err: remote_signal_core::ChunkIdParseError| {
+            .map_err(|err: rendezvous_core::ChunkIdParseError| {
                 Status::invalid_argument(err.to_string())
             })?;
         let entries = self
@@ -240,7 +240,7 @@ impl RemoteSignal for RemoteSignalService {
         let invitation: Invitation = body
             .invitation
             .parse()
-            .map_err(|err: remote_signal_core::InvitationError| {
+            .map_err(|err: rendezvous_core::InvitationError| {
                 Status::invalid_argument(err.to_string())
             })?;
         let node_id = invitation.node_id();
@@ -435,13 +435,13 @@ mod tests {
     use crate::projection::Projection;
     use crate::session_log::SessionLogManager;
     use crate::storage::Storage;
-    use remote_signal_core::{ChunkConfig, NodeIdentity};
+    use rendezvous_core::{ChunkConfig, NodeIdentity};
     use std::sync::Arc;
     use std::time::Duration;
     use tempfile::TempDir;
 
     struct Harness {
-        service: RemoteSignalService,
+        service: RendezvousService,
         _worker: BatcherWorker,
         _tmp: TempDir,
     }
@@ -468,7 +468,7 @@ mod tests {
             storage.clone(),
             Arc::clone(&identity),
         );
-        let service = RemoteSignalService::new(
+        let service = RendezvousService::new(
             session_log,
             projection,
             identity,

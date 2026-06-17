@@ -9,13 +9,13 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use remote_signal_client::connect_uds;
-use remote_signal_core::{
+use rendezvous_client::connect_uds;
+use rendezvous_core::{
     AppendEntryRequest, ApprovePeerRequest, ConnectToPeerRequest, CreateInvitationRequest,
     ListChunkEntriesRequest, ListPairingsRequest, ListSessionChunksRequest,
-    PeerConnectionState, RemoteSignalClient, RevokePeerRequest, SyncWithPeerRequest,
+    PeerConnectionState, RendezvousClient, RevokePeerRequest, SyncWithPeerRequest,
 };
-use remote_signal_daemon::server::{DaemonConfig, NetworkConfig, ServerHandle, spawn_uds_server};
+use rendezvous_daemon::server::{DaemonConfig, NetworkConfig, ServerHandle, spawn_uds_server};
 use tempfile::TempDir;
 use tokio::time::sleep;
 use tonic::transport::Channel;
@@ -241,7 +241,7 @@ async fn pairings_can_be_listed_and_revoked() {
 }
 
 async fn wait_for_messages(
-    client: &mut RemoteSignalClient<Channel>,
+    client: &mut RendezvousClient<Channel>,
     owner: &str,
     session: &str,
     expected: &[&str],
@@ -262,7 +262,7 @@ async fn wait_for_messages(
 }
 
 async fn wait_for_replica(
-    client: &mut RemoteSignalClient<Channel>,
+    client: &mut RendezvousClient<Channel>,
     owner: &str,
     session: &str,
     expected: &[&str],
@@ -271,7 +271,7 @@ async fn wait_for_replica(
 }
 
 async fn collect_messages_async(
-    client: &mut RemoteSignalClient<Channel>,
+    client: &mut RendezvousClient<Channel>,
     owner: &str,
     session: &str,
 ) -> Vec<String> {

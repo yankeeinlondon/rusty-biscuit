@@ -20,7 +20,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use loro::{ExportMode, LoroDoc, VersionVector};
 use parking_lot::Mutex;
-use remote_signal_core::{
+use rendezvous_core::{
     ChunkConfig, ChunkId, ChunkMetadata, EnvelopeSealer, Entry, NodeIdentity, PayloadKind,
     SignedEnvelope, ENVELOPE_HASH_LENGTH, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH,
 };
@@ -327,7 +327,7 @@ impl SessionLogManager {
     /// Used by the (forthcoming) network layer to push deltas to
     /// paired peers. The returned envelope can be transmitted as-is;
     /// receivers verify it with [`SignedEnvelope::verify`] or feed it
-    /// through an [`remote_signal_core::EnvelopeInbox`] for replay
+    /// through an [`rendezvous_core::EnvelopeInbox`] for replay
     /// protection.
     pub fn sign_chunk_snapshot(
         &self,
@@ -501,7 +501,7 @@ impl SessionLogManager {
             metadata_json,
         }) {
             tracing::warn!(
-                target: "remote_signal_daemon::session_log",
+                target: "rendezvous_daemon::session_log",
                 %err,
                 "projection enqueue failed after redb durability; entry is still authoritative in redb",
             );
@@ -922,7 +922,7 @@ impl SessionLogManager {
             }
             let Ok(chunk_id) = accepted.document_id.parse::<ChunkId>() else {
                 tracing::warn!(
-                    target: "remote_signal_daemon::session_log",
+                    target: "rendezvous_daemon::session_log",
                     document_id = %accepted.document_id,
                     "skipping accepted envelope with malformed document_id during replay",
                 );
@@ -931,7 +931,7 @@ impl SessionLogManager {
 
             let Some(signed) = reconstruct_signed_envelope(accepted) else {
                 tracing::warn!(
-                    target: "remote_signal_daemon::session_log",
+                    target: "rendezvous_daemon::session_log",
                     chunk_id = %chunk_id.as_path(),
                     "skipping accepted envelope with corrupt hex fields during replay",
                 );
@@ -940,7 +940,7 @@ impl SessionLogManager {
 
             if let Err(err) = signed.verify() {
                 tracing::warn!(
-                    target: "remote_signal_daemon::session_log",
+                    target: "rendezvous_daemon::session_log",
                     chunk_id = %chunk_id.as_path(),
                     %err,
                     "skipping accepted envelope that failed signature verification during replay",
@@ -952,7 +952,7 @@ impl SessionLogManager {
                 Ok(_) => {}
                 Err(SessionLogError::Loro(reason)) => {
                     tracing::warn!(
-                        target: "remote_signal_daemon::session_log",
+                        target: "rendezvous_daemon::session_log",
                         chunk_id = %chunk_id.as_path(),
                         %reason,
                         "skipping malformed accepted envelope during replay",
@@ -2404,7 +2404,7 @@ mod tests {
             flush_interval: std::time::Duration::from_millis(20),
             flush_size: 16,
         });
-        let mut inbox = remote_signal_core::EnvelopeInbox::new();
+        let mut inbox = rendezvous_core::EnvelopeInbox::new();
         let verified = inbox.accept(&envelope).expect("verify envelope again").to_vec();
         let accepted2 = AcceptedEnvelope {
             sender_hex: sender_hex.clone(),
@@ -2784,7 +2784,7 @@ mod tests {
         sender_identity: &NodeIdentity,
         chunk: &ChunkId,
         payload: Vec<u8>,
-    ) -> (AcceptedEnvelope, remote_signal_core::SignedEnvelope) {
+    ) -> (AcceptedEnvelope, rendezvous_core::SignedEnvelope) {
         let mut sealer = EnvelopeSealer::new(sender_identity.clone());
         let signed = sealer.seal(chunk.as_path(), PayloadKind::Snapshot, payload.clone());
         let accepted = AcceptedEnvelope {

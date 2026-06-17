@@ -1,4 +1,4 @@
-//! mDNS service discovery for the remote-signal mesh.
+//! mDNS service discovery for the rendezvous mesh.
 //!
 //! Daemons publish a `_agentgrid._udp.local` service record carrying
 //! their node ID (hex-encoded public key) plus QUIC port. Browsing
@@ -14,7 +14,7 @@ use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-/// mDNS service type advertised by every remote-signal daemon.
+/// mDNS service type advertised by every rendezvous daemon.
 pub const SERVICE_TYPE: &str = "_agentgrid._udp.local.";
 
 /// TXT-record key used to carry the node's hex-encoded public key.

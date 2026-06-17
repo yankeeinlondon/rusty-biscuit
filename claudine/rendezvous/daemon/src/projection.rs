@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use duckdb::Connection;
 use parking_lot::Mutex;
-use remote_signal_core::ChunkId;
+use rendezvous_core::ChunkId;
 
 /// SQL applied at startup to ensure the projection table exists.
 /// A UNIQUE constraint on `(chunk_id, sequence)` prevents duplicate

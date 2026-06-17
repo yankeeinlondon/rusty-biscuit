@@ -14,7 +14,7 @@
 use std::path::{Path, PathBuf};
 
 use redb::{Database, ReadableTable, ReadableTableMetadata, TableDefinition};
-use remote_signal_core::ChunkId;
+use rendezvous_core::ChunkId;
 
 /// Snapshot table: chunk-id path → Loro snapshot bytes.
 const SNAPSHOTS: TableDefinition<'_, &str, &[u8]> = TableDefinition::new("snapshots");
@@ -275,7 +275,7 @@ impl Storage {
             let (key, value) = entry?;
             let key_str = key.value();
             let Ok(chunk_id) = key_str.parse::<ChunkId>() else {
-                tracing::warn!(target: "remote_signal_daemon::storage", key = %key_str, "skipping snapshot with malformed key");
+                tracing::warn!(target: "rendezvous_daemon::storage", key = %key_str, "skipping snapshot with malformed key");
                 continue;
             };
             visit(chunk_id, value.value().to_vec())?;

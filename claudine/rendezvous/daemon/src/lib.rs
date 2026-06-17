@@ -1,4 +1,4 @@
-//! Library surface for the remote-signal daemon.
+//! Library surface for the rendezvous daemon.
 //!
 //! The daemon's only binary entry point is its `main` binary, but the
 //! gRPC service and persistence layers live in library modules so they
@@ -22,7 +22,7 @@ pub use peers::{PeerRecord, PeerRegistry, PeerRegistryWorkers};
 pub use projection::{Projection, ProjectionError, ProjectionRow};
 pub use quic::{ALPN_PROTOCOL, InboundConnection, QuicEndpoint, QuicError};
 pub use server::{DaemonConfig, ServerError, ServerHandle, spawn_uds_server};
-pub use service::RemoteSignalService;
+pub use service::RendezvousService;
 pub use session_log::{AppendOutcome, ExportedUpdate, SessionLogError, SessionLogManager};
 pub use storage::{PairingValue, Storage, StorageError};
 pub use sync::{
