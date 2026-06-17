@@ -201,7 +201,23 @@ impl Markdown {
         for operation in operations {
             match operation {
                 ComposeOperation::BlockTransclusion => {
-                    if let Some(directives) = parsed_directives.as_ref() {
+                    if let Some(graph) = options.preflight_graph() {
+                        // Reuse the preflight-collected graph: skip the
+                        // directive parse + target resolution and emit
+                        // `PreparedTransclusion` items from the cached
+                        // edges directly. The condition-aware gate
+                        // (`when=`, unknown options, deferred-set
+                        // warnings) still runs inside the engine.
+                        engine.prepare_block_transclusions_from_graph(
+                            graph,
+                            state,
+                            options,
+                            &runtime.remote_fetch,
+                            report,
+                            &mut prepared,
+                            &mut next_order,
+                        )?;
+                    } else if let Some(directives) = parsed_directives.as_ref() {
                         engine.prepare_block_transclusions(
                             directives,
                             transclusion::DirectiveKind::File,

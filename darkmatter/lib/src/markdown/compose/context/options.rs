@@ -3,10 +3,12 @@
 
 use super::super::cache::{CacheAccessMode, CacheFreshnessMode};
 use super::super::pipeline::operations::{ComposeOperation, ComposeOperationSet};
+use super::super::preflight::PreflightGraphNode;
 use super::super::remote::{RemoteFreshnessMode, RemoteReadConfig};
 use super::super::shell_expansion::types::ShellTimeoutBehavior;
 use super::runtime::ComposeContext;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 use url::Url;
 
@@ -268,6 +270,20 @@ pub struct ComposeOptions {
     /// applies a built-in default whitelist (`PROJECT_ROOT`, `DOCS_BASE`)
     /// when this field is empty.
     pub(crate) env_path_whitelist: Vec<String>,
+
+    // ── Pre-flight graph reuse ────────────────────────────────────
+    /// Optional pre-computed preflight graph to seed block transclusion.
+    ///
+    /// When the caller has already collected a
+    /// [`PreflightGraphNode`](super::super::preflight::PreflightGraphNode) via
+    /// [`Markdown::compose_preflight`](crate::markdown::Markdown::compose_preflight),
+    /// the transclusion engine can use it to skip its own directive parse and
+    /// target-resolution passes for body `::file` / `::url` directives. This
+    /// removes the duplicated discovery walk the v2 design calls for.
+    ///
+    /// Wrapped in `Arc` because `ComposeOptions` is cloned through recursive
+    /// child pipelines and the graph may be large.
+    pub(crate) preflight_graph: Option<Arc<PreflightGraphNode>>,
 }
 
 impl std::fmt::Debug for ComposeOptions {
@@ -392,6 +408,7 @@ impl ComposeOptions {
             baseline_schema: None,
             remote_read_config: RemoteReadConfig::default(),
             skip_schema_validation: false,
+            preflight_graph: None,
         }
     }
 
@@ -936,6 +953,33 @@ impl ComposeOptions {
     pub fn with_perf(mut self, enabled: bool) -> Self {
         self.perf_enabled = enabled;
         self
+    }
+
+    /// Attaches a pre-computed preflight graph to seed block transclusion.
+    ///
+    /// When set, the transclusion engine reuses the graph's
+    /// [`PreflightGraphEdge`](super::super::preflight::PreflightGraphEdge)
+    /// records to build its `PreparedTransclusion` items without re-parsing
+    /// `::file` / `::url` directives or re-resolving their targets. The
+    /// typical flow is:
+    ///
+    /// 1. Call `Markdown::compose_preflight(&options)` to collect the
+    ///    approval set and the graph.
+    /// 2. Authorize the approval set with the caller's policy/prompt.
+    /// 3. Call
+    ///    `Markdown::compose_with(options.with_pre_approved_commands(...).with_preflight_graph(report.preflight_graph))`.
+    ///
+    /// `None` (the default) preserves the legacy behavior: the transclusion
+    /// engine parses directives and resolves targets itself.
+    #[must_use]
+    pub fn with_preflight_graph(mut self, graph: PreflightGraphNode) -> Self {
+        self.preflight_graph = Some(Arc::new(graph));
+        self
+    }
+
+    /// Returns a reference to the attached preflight graph, if any.
+    pub fn preflight_graph(&self) -> Option<&PreflightGraphNode> {
+        self.preflight_graph.as_deref()
     }
 
     // ── Getters ────────────────────────────────────────────────────

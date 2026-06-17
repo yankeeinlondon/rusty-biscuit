@@ -327,7 +327,6 @@ impl<'a> TransclusionEngine<'a> {
     ) -> MarkdownResult<()> {
         let ignore_invalid = self.resolve_ignore_invalid(options);
         let transclusion_opts = options.transclusion_options();
-
         for directive in directives.iter().filter(|directive| match kind {
             transclusion::DirectiveKind::Code => {
                 directive.kind == transclusion::DirectiveKind::Code
@@ -543,6 +542,184 @@ impl<'a> TransclusionEngine<'a> {
             }
         }
 
+        Ok(())
+    }
+
+    /// Like [`prepare_block_transclusions`], but consumes a pre-computed
+    /// [`crate::markdown::compose::preflight::PreflightGraphEdge`] stream
+    /// instead of re-parsing directives and re-resolving targets.
+    ///
+    /// The v2 design calls for the preflight collection walk to cache the
+    /// graph shape it discovered (resolved child paths/URLs, per-edge
+    /// directive metadata) so the final transclusion stage does not
+    /// rediscover the graph a second time. This method is the consumer:
+    /// for every edge it runs the condition-aware gate (`when=`,
+    /// unknown-options, deferred-set warnings) and emits a
+    /// `PreparedTransclusion` whose target is the preflight-captured path
+    /// or URL.
+    ///
+    /// `Code` directives are intentionally not in the preflight graph
+    /// (they do not contribute shell entries), so this method only emits
+    /// `Markdown` / `RemoteFile` items. Callers should still pair it with
+    /// the legacy `prepare_block_transclusions(..., DirectiveKind::Code, ...)`
+    /// for the rare case where a single document mixes `::file` / `::url`
+    /// with `::code`.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn prepare_block_transclusions_from_graph(
+        &self,
+        graph: &crate::markdown::compose::preflight::PreflightGraphNode,
+        state: &EffectiveState,
+        options: &ComposeOptions,
+        remote_fetch: &remote_fetch::RemoteFetchRuntime,
+        report: &mut ComposeReport,
+        prepared: &mut Vec<PreparedTransclusion>,
+        next_order: &mut usize,
+    ) -> MarkdownResult<()> {
+        for edge in &graph.edges {
+            let directive = &edge.directive;
+
+            for unknown in &directive.options.unknown_options {
+                report.add_warning(
+                    ComposeWarning::new(
+                        "transclusion",
+                        format!(
+                            "Unknown option '{}' on ::{} directive; ignoring",
+                            unknown,
+                            directive.kind.as_str()
+                        ),
+                    )
+                    .at_line(directive.line),
+                );
+            }
+
+            for error in &directive.options.deferred_set_errors {
+                match error {
+                    transclusion::DeferredSetError::InvalidAssignment { raw, reason, line } => {
+                        if options.allow_invalid_frontmatter_assignment {
+                            report.add_warning(
+                                ComposeWarning::new(
+                                    "transclusion",
+                                    format!(
+                                        "Invalid frontmatter assignment on ::{} directive at line {}: {} (value: {})",
+                                        directive.kind.as_str(),
+                                        line,
+                                        reason,
+                                        raw
+                                    ),
+                                )
+                                .at_line(*line),
+                            );
+                        } else {
+                            return Err(
+                                transclusion::TransclusionError::InvalidFrontmatterAssignment {
+                                    ctx: Box::new(self.markdown.source_context_for_errors()),
+                                    line: *line,
+                                    raw: raw.clone(),
+                                    reason: reason.clone(),
+                                }
+                                .into(),
+                            );
+                        }
+                    }
+                    transclusion::DeferredSetError::ReassignedProperty { name } => {
+                        if options.allow_reassigned_frontmatter_property {
+                            report.add_warning(
+                                ComposeWarning::new(
+                                    "transclusion",
+                                    format!(
+                                        "Duplicate set property '{}' on ::{} directive at line {}; rightmost assignment wins",
+                                        name,
+                                        directive.kind.as_str(),
+                                        directive.line
+                                    ),
+                                )
+                                .at_line(directive.line),
+                            );
+                        } else {
+                            return Err(
+                                transclusion::TransclusionError::InvalidReassignedFrontmatterProperty {
+                                    ctx: Box::new(self.markdown.source_context_for_errors()),
+                                    line: directive.line,
+                                    name: name.clone(),
+                                }
+                                .into(),
+                            );
+                        }
+                    }
+                }
+            }
+
+            if let Some(expr) = &directive.options.when_expr {
+                let lookup = state::ResolvingLookup::new(
+                    state,
+                    options.expression_resolution_context(remote_fetch),
+                );
+                let should_include = transclusion::evaluate_condition(
+                    expr,
+                    &lookup,
+                    directive.line,
+                    self.markdown.source_context_for_errors(),
+                )?;
+                if !should_include {
+                    let mut fixed_report = ComposeReport::new();
+                    fixed_report.transclusions_skipped = 1;
+                    prepared.push(PreparedTransclusion::FixedReplace {
+                        order: *next_order,
+                        span: directive.span.clone(),
+                        replacement: String::new(),
+                        report: fixed_report,
+                    });
+                    *next_order += 1;
+                    continue;
+                }
+            }
+
+            match &edge.resolved_target {
+                crate::markdown::compose::preflight::PreflightResolvedTarget::File(path) => {
+                    prepared.push(PreparedTransclusion::Markdown {
+                        order: *next_order,
+                        target: ApplyTarget::Replace(directive.span.clone()),
+                        path: path.clone(),
+                        directive_options: directive.options.clone(),
+                        insertion_context: Some((directive.span.start, directive.line)),
+                    });
+                    *next_order += 1;
+                }
+                crate::markdown::compose::preflight::PreflightResolvedTarget::Url(url) => {
+                    if !options.allow_remote_transclusion {
+                        let mut fixed_report = ComposeReport::new();
+                        fixed_report.transclusions_skipped = 1;
+                        fixed_report.add_warning(
+                            ComposeWarning::new(
+                                "transclusion",
+                                format!(
+                                    "Skipping URL transclusion '{}': remote execution disabled",
+                                    url
+                                ),
+                            )
+                            .at_line(directive.line),
+                        );
+                        prepared.push(PreparedTransclusion::FixedReplace {
+                            order: *next_order,
+                            span: directive.span.clone(),
+                            replacement: String::new(),
+                            report: fixed_report,
+                        });
+                        *next_order += 1;
+                        continue;
+                    }
+                    remote_fetch.register_nested(url.clone());
+                    prepared.push(PreparedTransclusion::RemoteFile {
+                        order: *next_order,
+                        target: ApplyTarget::Replace(directive.span.clone()),
+                        url: url.clone(),
+                        directive_options: directive.options.clone(),
+                        insertion_context: Some((directive.span.start, directive.line)),
+                    });
+                    *next_order += 1;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1282,6 +1459,12 @@ impl<'a> TransclusionEngine<'a> {
                     .with_one_off_replace(one_off.clone());
                 child_options.external_state = Some(inherited.clone());
                 child_options.source = ComposeSource::File(path_buf.clone());
+                // The parent's preflight graph describes the parent's view
+                // of the transclusion tree; do not let the child reuse it,
+                // or the child would try to re-prepare the same edge that
+                // produced it (cycle detection trips on the first edge
+                // because the child path is already in the ancestry stack).
+                child_options.preflight_graph = None;
 
                 let mut compose_runtime = runtime.clone_for_child();
                 let mut child = compose_runtime.load_markdown(path)?;
