@@ -29,6 +29,91 @@ fn ahead_behind(
     ))
 }
 
+pub(crate) fn get_branch_info_fallible(
+    repo: &gix::Repository,
+    current_branch: Option<&str>,
+) -> crate::Result<Vec<BranchInfo>> {
+    let remote_tips = remote_tracking_tips(repo)?;
+    let config = repo.config_snapshot();
+    let mut branches = Vec::new();
+
+    let platform = repo
+        .references()
+        .map_err(|e| SniffError::git("references", e))?;
+    let iter = platform
+        .local_branches()
+        .map_err(|e| SniffError::git("local_branches", e))?;
+
+    for reference in iter {
+        let reference = reference.map_err(|e| SniffError::git("local_branches", e))?;
+        let full = reference.name().as_bstr().to_str_lossy().into_owned();
+        let Some(name) = full.strip_prefix("refs/heads/") else {
+            continue;
+        };
+        let name = name.to_string();
+        let tip = reference
+            .into_fully_peeled_id()
+            .map_err(|e| SniffError::git("peel", e))?
+            .detach();
+        let sha = tip.to_string();
+        let upstream = configured_upstream(&config, &name);
+        let (ahead, behind) = upstream
+            .as_deref()
+            .and_then(|upstream| remote_tips.get(upstream))
+            .map_or(Ok((0, 0)), |remote| ahead_behind(repo, tip, *remote))?;
+
+        branches.push(BranchInfo {
+            current: current_branch.is_some_and(|current| current == name),
+            remote_represented: remote_tips.values().any(|remote| *remote == tip),
+            name,
+            sha,
+            upstream,
+            ahead,
+            behind,
+        });
+    }
+
+    branches.sort_by(|a, b| b.current.cmp(&a.current).then_with(|| a.name.cmp(&b.name)));
+    Ok(branches)
+}
+
+fn configured_upstream(config: &gix::config::File<'_>, branch: &str) -> Option<String> {
+    let remote = config
+        .string(format!("branch.{branch}.remote").as_str())
+        .map(|value| value.to_string())?;
+    let merge = config
+        .string(format!("branch.{branch}.merge").as_str())
+        .map(|value| value.to_string())?;
+    let upstream_branch = merge.strip_prefix("refs/heads/").unwrap_or(&merge);
+    Some(format!("{remote}/{upstream_branch}"))
+}
+
+fn remote_tracking_tips(repo: &gix::Repository) -> crate::Result<HashMap<String, gix::ObjectId>> {
+    let platform = repo
+        .references()
+        .map_err(|e| SniffError::git("references", e))?;
+    let iter = platform
+        .prefixed("refs/remotes/")
+        .map_err(|e| SniffError::git("remote_branches", e))?;
+    let mut tips = HashMap::new();
+    for reference in iter {
+        let reference = reference.map_err(|e| SniffError::git("remote_branches", e))?;
+        let full = reference.name().as_bstr().to_str_lossy().into_owned();
+        let Some(name) = full.strip_prefix("refs/remotes/") else {
+            continue;
+        };
+        if name.ends_with("/HEAD") {
+            continue;
+        }
+        let tip = reference
+            .into_fully_peeled_id()
+            .map_err(|e| SniffError::git("peel", e))?
+            .detach();
+        tips.insert(name.to_string(), tip);
+    }
+    Ok(tips)
+}
+
 /// Count commits reachable from `tip` once everything reachable from `hide` is
 /// excluded — the building block for ahead/behind.
 fn count_reachable_excluding(

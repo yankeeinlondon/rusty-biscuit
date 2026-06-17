@@ -200,6 +200,31 @@ pub struct LocalBranchInfo {
     pub behind: usize,
 }
 
+/// Local branch projection for repo-level branch listing.
+///
+/// This is distinct from [`LocalBranchInfo`], whose ahead/behind counts are
+/// relative to the current `HEAD`. `BranchInfo` reports each branch against its
+/// configured upstream, using only locally known refs unless the caller
+/// explicitly refreshes remote-tracking refs before detection.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BranchInfo {
+    /// Branch name (e.g., "main", "feature/xyz").
+    pub name: String,
+    /// Whether this branch is currently checked out.
+    pub current: bool,
+    /// Full commit hash for the branch tip.
+    pub sha: String,
+    /// Whether a locally known remote-tracking ref points at this branch tip.
+    pub remote_represented: bool,
+    /// Configured upstream branch, such as "origin/main".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream: Option<String>,
+    /// Number of commits this branch is ahead of its configured upstream.
+    pub ahead: usize,
+    /// Number of commits this branch is behind its configured upstream.
+    pub behind: usize,
+}
+
 /// Git hosting provider types.
 ///
 /// Identifies the hosting platform for a Git repository based on its remote URL.
@@ -746,6 +771,20 @@ impl GitRepo {
         self.ensure_cache();
         let current = self.try_current_branch()?;
         super::remote_refresh::get_local_branches_fallible(&self.gix.borrow(), current.as_deref())
+    }
+
+    /// Branch projection for `sniff repo branches`.
+    ///
+    /// By default this uses only local refs and locally cached remote-tracking
+    /// refs. When `refresh_remotes` is true, remote-tracking refs are refreshed
+    /// first using the same non-interactive helper as deep git detection.
+    pub fn branch_info(&self, refresh_remotes: bool) -> Result<Vec<BranchInfo>> {
+        if refresh_remotes {
+            super::remote_refresh::refresh_remote_tracking_refs(&self.gix.borrow(), 2);
+        }
+        self.ensure_cache();
+        let current = self.try_current_branch()?;
+        super::remote_refresh::get_branch_info_fallible(&self.gix.borrow(), current.as_deref())
     }
 
     /// Per-remote tracking status (ahead/behind).
