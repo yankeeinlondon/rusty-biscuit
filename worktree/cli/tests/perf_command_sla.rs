@@ -5,6 +5,10 @@
 //! fast path. Rasterization never runs on the non-image path, so it is excluded
 //! by construction. This complements the in-process `perf_subprocess_counts_meet_sla`
 //! unit test, which covers the worktree-owned data-gather pieces.
+//!
+//! Cache-path SLA coverage lives in the sibling `cache_warm_path.rs` and
+//! `cache_cold_path.rs` integration tests. Their ratified targets are documented
+//! in `worktree/docs/performance-testing.md` under "Ratified SLA Targets".
 
 use std::process::Stdio;
 use std::time::{Duration, Instant};

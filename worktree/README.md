@@ -119,4 +119,10 @@ Run `wt list --perf` to emit a per-stage timing report to stderr after the comma
 
 Use `just bench-save` to capture a host-derived baseline before a change, then `just bench-compare` after the change to see the delta. The shared bench helpers run a preflight check (battery, memory, load) and use a host-derived baseline ID so comparisons stay on the same machine.
 
+### Ahead/Behind + Merge Result Cache
+
+`wt list` caches each branch's `(ahead, behind, is_clean)` result by default-branch tip SHA and worktree branch tip SHA. Cache files live under the user cache directory in a `worktree` subdirectory; the full path and invalidation rules are documented in [`docs/performance-testing.md`](./docs/performance-testing.md).
+
+The cache self-invalidates when either branch tip changes. `CACHE_FORMAT_VERSION` forces invalidation when the on-disk shape or semantics change, and working-tree dirtiness is still measured live on every run.
+
 See [`docs/performance-testing.md`](./docs/performance-testing.md) for the full performance contract.
