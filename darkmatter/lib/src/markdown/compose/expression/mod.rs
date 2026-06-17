@@ -29,15 +29,16 @@
 //! 4. Additive `+`, `-` (`+` doubles as string concatenation when either
 //!    operand is a string)
 //! 5. Comparison `==`, `!=`, `>`, `>=`, `<`, `<=`
-//! 6. Logical AND `&&` (condition mode)
+//! 6. Logical AND `&&`
 //! 7. Logical OR / Fallback `||`
 //! 8. Ternary `? :` (right-associative; all binary operators are
 //!    left-associative)
 //!
 //! ## Parser Modes
 //!
+//! `&&` is logical AND in both modes. Only `||` differs:
 //! - **Interpolation** (`ParseMode::Interpolation`) - `||` is fallback operator
-//! - **Condition** (`ParseMode::Condition`) - `||` is logical OR, `&&` is logical AND
+//! - **Condition** (`ParseMode::Condition`) - `||` is logical OR
 //!
 //! ## Truthiness
 //!

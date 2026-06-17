@@ -23,8 +23,9 @@
 //! `"true"` against a `boolean` field becomes a real JSON bool) via
 //! [`coerce_frontmatter_with_pending`] and writes the coerced top-level properties back into
 //! `markdown.frontmatter_mut()`, so the real types flow to every later stage and
-//! into the composed output. Values still holding a `$(...)` shell expression are
-//! left untouched here — their real type is resolved at post-shell re-validation.
+//! into the composed output. Values still composition-pending — holding a
+//! `$(...)` shell expression or an unresolved `{{ ... }}` template — are left
+//! untouched here; their real type is resolved at post-shell re-validation.
 
 use std::path::PathBuf;
 
@@ -45,10 +46,11 @@ use crate::markdown::types::{MarkdownError, MarkdownResult};
 ///    `ComposeOptions::baseline_schema` is set.
 /// 3. Resolves the effective schema, coerces the frontmatter against it via
 ///    [`coerce_frontmatter_with_pending`], and writes coerced top-level properties back into
-///    `markdown.frontmatter_mut()` (skipping any value still holding a `$(...)`
-///    shell expression). The pending-key set is passed through so a root-union
-///    arm can be committed when its only residual problems are shell-pending
-///    keys, letting non-shell siblings still coerce and write back.
+///    `markdown.frontmatter_mut()` (skipping any value still composition-pending
+///    — a `$(...)` shell expression or an unresolved `{{ ... }}` template). The
+///    pending-key set is passed through so a root-union arm can be committed when
+///    its only residual problems are composition-pending keys, letting resolved
+///    siblings still coerce and write back.
 /// 4. Calls `.validate(&markdown)` on the now-coerced frontmatter.
 /// 5. Converts schema-preparation `SchemaError` into
 ///    `MarkdownError::SchemaValidationFailed`, preserving the original error
@@ -101,10 +103,10 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
     })? {
         // Build the validation instance and the shell-pending key set while
         // holding only an immutable borrow; both are dropped before the write.
-        let (instance, shell_pending) = {
+        let (instance, composition_pending) = {
             let fm_map = markdown.frontmatter().as_map();
             let mut object = serde_json::Map::with_capacity(fm_map.len());
-            let mut shell_pending = std::collections::HashSet::new();
+            let mut composition_pending = std::collections::HashSet::new();
             for (key, value) in fm_map {
                 // `$schema` is a Darkmatter control key, not document data. This
                 // exclusion must match `schemas::frontmatter_as_json`, which
@@ -114,24 +116,26 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
                 if key == "$schema" {
                     continue;
                 }
-                if value_needs_shell_expansion(Some(value)) {
-                    shell_pending.insert(key.clone());
+                if value_pending_composition(Some(value)) {
+                    composition_pending.insert(key.clone());
                 }
                 object.insert(key.clone(), value.clone());
             }
-            (serde_json::Value::Object(object), shell_pending)
+            (serde_json::Value::Object(object), composition_pending)
         };
 
-        let outcome = coerce_frontmatter_with_pending(&effective.json_schema, &instance, &shell_pending);
+        let outcome =
+            coerce_frontmatter_with_pending(&effective.json_schema, &instance, &composition_pending);
         if outcome.changed
             && let serde_json::Value::Object(coerced) = outcome.value
         {
             let fm_map = markdown.frontmatter_mut().as_map_mut();
             for (key, value) in coerced {
-                // A value still holding `$(...)` is resolved (and coerced)
-                // later at post-shell re-validation; writing back here would
-                // clobber the literal form shell expansion must consume.
-                if shell_pending.contains(&key) {
+                // A value still holding `$(...)` or an unresolved `{{ ... }}`
+                // template is resolved (and coerced) later at post-shell
+                // re-validation; writing back here would clobber the literal
+                // form shell expansion and template re-evaluation must consume.
+                if composition_pending.contains(&key) {
                     continue;
                 }
                 fm_map.insert(key, value);
@@ -149,17 +153,19 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
         }
     })?;
 
-    // Defer problems whose value will be re-resolved by frontmatter shell
-    // expansion. The compose-time validator runs BEFORE shell expansion so
-    // values that depend on `$(...)` expressions still hold their literal
-    // form here. The downstream consumer (e.g. claudine's
-    // `prepare_*_with_schema`) re-validates the post-shell effective
-    // frontmatter and reports any residual problems. See the rationale at
+    // Defer problems whose value will be re-resolved later in composition. The
+    // compose-time validator runs after template interpolation but BEFORE shell
+    // expansion, so values that depend on `$(...)` expressions still hold their
+    // literal form here, and values whose `{{ ... }}` template could not resolve
+    // yet (because it transitively references such a `$(...)` value) still hold
+    // the unresolved template. The downstream consumer (e.g. claudine's
+    // `prepare_*_with_schema`) re-validates the post-shell effective frontmatter
+    // and reports any residual problems. See the rationale at
     // `compose::run::compose` where this stage is invoked.
     //
     // Deferral is only sound when shell expansion will actually run. When
     // `FrontmatterShellExpansion` is disabled, no later stage expands or
-    // re-validates `$(...)` values, so deferring would silently accept a
+    // re-validates these pending values, so deferring would silently accept a
     // schema violation. In that case every problem is final and must be
     // reported here.
     let shell_expansion_enabled =
@@ -175,7 +181,7 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
             let Some(name) = top_level_pointer_segment(&p.path) else {
                 return true;
             };
-            !value_needs_shell_expansion(fm_map.get(&name))
+            !value_pending_composition(fm_map.get(&name))
         })
         .cloned()
         .collect();
@@ -195,17 +201,24 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
     Ok(())
 }
 
-/// Returns `true` when `value` contains a frontmatter shell expression
-/// (`$(...)`) somewhere in any string descendant. Compose-time schema
-/// validation must not fail values that will be transformed by frontmatter
-/// shell expansion — the consumer re-validates the post-shell effective
-/// frontmatter.
-fn value_needs_shell_expansion(value: Option<&serde_json::Value>) -> bool {
+/// Returns `true` when `value` is still composition-pending — it holds a
+/// frontmatter shell expression (`$(...)`) or an unresolved Darkmatter
+/// template (`{{ ... }}`) somewhere in any string descendant.
+///
+/// This stage runs after template interpolation but before shell expansion.
+/// A value that survives interpolation still holding `{{ ... }}` could not be
+/// evaluated yet — typically because it transitively depends on a `$(...)`
+/// value, which interpolation leaves in literal form (e.g. `possible_spec:
+/// "{{dir}}/spec.md"` where `dir` is `$(...)`). Such templated values, like
+/// their `$(...)` counterparts, must not be failed here: the consumer
+/// re-validates the post-shell effective frontmatter once every expression
+/// has resolved.
+fn value_pending_composition(value: Option<&serde_json::Value>) -> bool {
     let Some(value) = value else { return false };
     match value {
-        serde_json::Value::String(s) => s.contains("$("),
-        serde_json::Value::Array(items) => items.iter().any(|v| value_needs_shell_expansion(Some(v))),
-        serde_json::Value::Object(map) => map.values().any(|v| value_needs_shell_expansion(Some(v))),
+        serde_json::Value::String(s) => s.contains("$(") || s.contains("{{"),
+        serde_json::Value::Array(items) => items.iter().any(|v| value_pending_composition(Some(v))),
+        serde_json::Value::Object(map) => map.values().any(|v| value_pending_composition(Some(v))),
         _ => false,
     }
 }
@@ -437,6 +450,24 @@ mod tests {
         assert_eq!(
             md.frontmatter().as_map().get("n"),
             Some(&serde_json::json!("$(echo 1)"))
+        );
+    }
+
+    #[test]
+    fn write_back_skips_template_pending_value() {
+        // A typed value still holding an unresolved `{{ ... }}` template is
+        // deferred (run returns Ok) AND left untouched, so the template survives
+        // to be resolved and re-validated after shell expansion. This mirrors a
+        // frontmatter expression that could not evaluate during the pre-shell
+        // interpolation pass because it transitively references a `$(...)` value
+        // — e.g. `spec: "{{ file_exists(possible_spec) ? possible_spec : '' }}"`
+        // where `possible_spec` resolves from a `$(dirname ...)` field.
+        let mut md = md_with_schema("$schema:\n  n: number\nn: \"{{ some_expr }}\"\n");
+        let options = ComposeOptions::new();
+        assert!(run(&mut md, &options).is_ok());
+        assert_eq!(
+            md.frontmatter().as_map().get("n"),
+            Some(&serde_json::json!("{{ some_expr }}"))
         );
     }
 
