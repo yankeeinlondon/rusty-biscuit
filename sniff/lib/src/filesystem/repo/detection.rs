@@ -1323,8 +1323,11 @@ pub(crate) fn create_package(
     let package_area = make_package_area(&relative);
     let ecosystem = detect_package_ecosystem(path);
     let package_managers = detect_package_managers(path);
-    let test_runners =
-        crate::filesystem::repo::test_runner_usage::detect_test_runners(path, &mut ctx.manifests);
+    let test_runners = crate::filesystem::repo::test_runner_usage::detect_test_runners(
+        path,
+        root,
+        &mut ctx.manifests,
+    );
     let name = resolve_package_name(&mut ctx, path, root);
     let version = resolve_package_version(&mut ctx, path, root);
 

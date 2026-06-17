@@ -81,8 +81,15 @@ impl TestRunnerUsage {
 /// default is reported with [`TestRunnerSource::EcosystemDefault`] so
 /// consumers can distinguish "explicitly configured" from "implicitly
 /// available".
+///
+/// `repo_root` is the enclosing repository (or Cargo workspace) root. A few
+/// runners keep a single config at that root that governs every member rather
+/// than one config per package dir — see [`root_scoped_config`]. For those, the
+/// config search extends to `repo_root` so a workspace-root marker is not
+/// missed when scanning an individual member directory.
 pub(crate) fn detect_test_runners(
     pkg_dir: &Path,
+    repo_root: &Path,
     cache: &mut ManifestCache,
 ) -> Vec<TestRunnerUsage> {
     let ecosystems = ecosystems_present(pkg_dir);
@@ -112,17 +119,27 @@ pub(crate) fn detect_test_runners(
             continue;
         }
         let runner = runner_at(*idx);
-        for glob in spec.config_globs {
-            if config_glob_matches(pkg_dir, runner, glob, cache) {
-                push_unique(
-                    &mut found,
-                    &mut seen,
-                    runner,
-                    TestRunnerSource::Config {
-                        filename: (*glob).to_string(),
-                    },
-                );
-                break;
+        // Most runners are configured per package dir; a few (e.g. nextest) keep
+        // one config at the workspace root that governs every member, so their
+        // search extends to `repo_root`.
+        let search_dirs: &[&Path] = if root_scoped_config(runner) && repo_root != pkg_dir {
+            &[pkg_dir, repo_root]
+        } else {
+            &[pkg_dir]
+        };
+        'globs: for glob in spec.config_globs {
+            for dir in search_dirs {
+                if config_glob_matches(dir, runner, glob, cache) {
+                    push_unique(
+                        &mut found,
+                        &mut seen,
+                        runner,
+                        TestRunnerSource::Config {
+                            filename: (*glob).to_string(),
+                        },
+                    );
+                    break 'globs;
+                }
             }
         }
     }
@@ -197,7 +214,18 @@ pub(crate) fn detect_test_runners(
 #[must_use]
 pub fn detect_test_runners_for_dir(dir: &Path) -> Vec<TestRunnerUsage> {
     let mut cache = ManifestCache::default();
-    detect_test_runners(dir, &mut cache)
+    detect_test_runners(dir, dir, &mut cache)
+}
+
+/// Returns `true` when `runner`'s config file lives once at the workspace/repo
+/// root and governs every member, rather than sitting in each package dir.
+///
+/// nextest reads a single `.config/nextest.toml` at the Cargo workspace root; it
+/// is never duplicated per crate. A package-dir-only scan therefore misses it
+/// and a workspace would report only the `cargo test` ecosystem default, so the
+/// config search for these runners extends to the repo root.
+fn root_scoped_config(runner: TestRunner) -> bool {
+    matches!(runner, TestRunner::Nextest)
 }
 
 /// Returns `true` when `glob` is present in `pkg_dir` and, for config files
@@ -853,7 +881,12 @@ mod tests {
 
     fn detect(dir: &Path) -> Vec<TestRunnerUsage> {
         let mut cache = ManifestCache::default();
-        detect_test_runners(dir, &mut cache)
+        detect_test_runners(dir, dir, &mut cache)
+    }
+
+    fn detect_in_workspace(pkg_dir: &Path, root: &Path) -> Vec<TestRunnerUsage> {
+        let mut cache = ManifestCache::default();
+        detect_test_runners(pkg_dir, root, &mut cache)
     }
 
     fn runners_of(usage: &[TestRunnerUsage]) -> Vec<TestRunner> {
@@ -895,6 +928,45 @@ mod tests {
         assert!(usage.iter().any(|u| u.runner == TestRunner::Nextest
             && matches!(u.source, TestRunnerSource::Config { .. })));
         // The default cargo test is still reported alongside nextest.
+        assert!(usage.iter().any(|u| u.runner == TestRunner::CargoTest));
+    }
+
+    #[test]
+    fn rust_nextest_config_at_workspace_root_is_detected_for_member_crate() {
+        // The Cargo workspace keeps a single `.config/nextest.toml` at the root;
+        // member crates do not duplicate it. Scanning a member dir must still
+        // surface nextest by extending the config search to the workspace root.
+        let root = tempdir().unwrap();
+        write(root.path(), ".config/nextest.toml", "[profile.default]\n");
+
+        let member = root.path().join("crates/lib");
+        fs::create_dir_all(&member).unwrap();
+        write(&member, "Cargo.toml", "[package]\nname = \"x\"\nversion = \"0.1\"\n");
+
+        let usage = detect_in_workspace(&member, root.path());
+        assert!(
+            usage.iter().any(|u| u.runner == TestRunner::Nextest
+                && matches!(u.source, TestRunnerSource::Config { .. })),
+            "nextest config at the workspace root should attribute to the member crate, got {usage:?}"
+        );
+        // The cargo test ecosystem default is still reported alongside nextest.
+        assert!(usage.iter().any(|u| u.runner == TestRunner::CargoTest));
+    }
+
+    #[test]
+    fn rust_no_nextest_config_anywhere_reports_only_cargo_test() {
+        // Without a nextest config in the member dir or the workspace root, the
+        // member must report only the cargo test ecosystem default.
+        let root = tempdir().unwrap();
+        let member = root.path().join("crates/lib");
+        fs::create_dir_all(&member).unwrap();
+        write(&member, "Cargo.toml", "[package]\nname = \"x\"\nversion = \"0.1\"\n");
+
+        let usage = detect_in_workspace(&member, root.path());
+        assert!(
+            !usage.iter().any(|u| u.runner == TestRunner::Nextest),
+            "nextest must not be reported without a config marker, got {usage:?}"
+        );
         assert!(usage.iter().any(|u| u.runner == TestRunner::CargoTest));
     }
 
