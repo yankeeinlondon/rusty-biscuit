@@ -19,7 +19,7 @@ use super::{
 };
 use super::{
     cache, context, frontmatter_interpolation, frontmatter_shell_expansion, perf, remote,
-    remote_fetch, schema_validation, shell_expansion, transclusion,
+    schema_validation, shell_expansion, transclusion,
 };
 use serde_json::{Map, Value};
 use tracing::{info, instrument, trace};
@@ -32,17 +32,10 @@ impl Markdown {
             cache::FileStore::resolve_cache_root(Some(root), options.cache_namespace.as_deref())
         });
 
-        // Share a persistent store with the remote-fetch runtime so remote
-        // artifacts are cached across runs alongside local compose artifacts.
-        let remote_store = persistent_root.as_ref().and_then(|root| {
-            cache::FileStore::new(root.clone())
-                .map(std::sync::Arc::new)
-                .ok()
-        });
-        let remote_fetch = remote_fetch::RemoteFetchRuntime::with_store(
-            &options.remote_read_config,
-            remote_store,
-        );
+        // Reuse the caller-supplied shared runtime when present (so a pre-flight
+        // walk and this pass fetch each URL once); otherwise build one whose
+        // persistent store is shared with the local compose artifact cache.
+        let remote_fetch = options.remote_fetch_runtime();
 
         let mut runtime = shell_expansion::types::PipelineRuntime::with_remote_fetch(
             options.max_transclusion_depth,
@@ -191,12 +184,13 @@ impl Markdown {
             // For frontmatter values that depend on shell-expanded inputs,
             // the second interpolation pass below will re-resolve them and
             // the prepare-time consumer (e.g. claudine's `prepare_*_with_schema`)
-            // can re-validate the post-shell effective frontmatter.
-            // Skipped by internal non-terminal passes (shell-command
-            // discovery) that strip FrontmatterShellExpansion: validating a
-            // still-literal `$(...)` value there would wrongly report it as a
-            // final violation. See `ComposeOptions::skip_schema_validation`.
-            if !options.skip_schema_validation {
+            // can re-validate the post-shell effective frontmatter. Internal
+            // non-terminal passes (shell-command discovery) that strip
+            // FrontmatterShellExpansion set
+            // `ComposeOptions::defer_shell_pending_schema_problems` so a
+            // still-literal `$(...)` value is deferred rather than reported as a
+            // final violation here.
+            {
                 let sv_start = perf.is_enabled().then(std::time::Instant::now);
                 schema_validation::run(self, &options)?;
                 if let Some(start) = sv_start {

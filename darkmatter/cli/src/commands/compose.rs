@@ -361,6 +361,11 @@ pub fn run_compose(
     if let Some(size) = indent {
         options = options.with_indent_size(size);
     }
+    // Share one single-flight remote-fetch runtime between the pre-flight
+    // approval walk and the compose pass so each remote URL is fetched once,
+    // not once per stage. Must follow the remote-read-config and cache-root
+    // wiring above so the shared runtime inherits both.
+    options = options.with_shared_remote_fetch();
     let build_options_dur = opts_start.map(|s| s.elapsed()).unwrap_or_default();
 
     if shell_report {
@@ -646,6 +651,11 @@ fn preflight_approval_error(
 ) -> color_eyre::eyre::Report {
     use darkmatter::markdown::compose::ShellExpansionError;
     match err {
+        // A rich error surfaced during pre-flight (transform parse, ctx merge,
+        // schema validation, remote fetch, …). Convert the inner MarkdownError
+        // straight to a report so `main`'s BlockError path renders its styled
+        // block, identical to the `compose_with` failure path.
+        ShellExpansionError::Preflight(inner) => (*inner).into(),
         ShellExpansionError::Blacklisted {
             command,
             reason,

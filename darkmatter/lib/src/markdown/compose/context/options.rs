@@ -1,10 +1,11 @@
 //! Compose pipeline configuration (`ComposeOptions`), its source context
 //! (`ComposeSource`), and the internal `TransclusionOptions` view.
 
-use super::super::cache::{CacheAccessMode, CacheFreshnessMode};
+use super::super::cache::{CacheAccessMode, CacheFreshnessMode, FileStore};
 use super::super::pipeline::operations::{ComposeOperation, ComposeOperationSet};
 use super::super::preflight::PreflightGraphNode;
 use super::super::remote::{RemoteFreshnessMode, RemoteReadConfig};
+use super::super::remote_fetch::RemoteFetchRuntime;
 use super::super::shell_expansion::types::ShellTimeoutBehavior;
 use super::runtime::ComposeContext;
 use std::path::{Path, PathBuf};
@@ -250,13 +251,15 @@ pub struct ComposeOptions {
     pub(crate) remote_read_config: RemoteReadConfig,
 
     // ── Schema validation ──────────────────────────────────────────
-    /// When `true`, the always-on schema validation stage is skipped
-    /// entirely. Used by internal non-terminal passes (e.g. shell-command
-    /// discovery) that strip `FrontmatterShellExpansion` to avoid executing
-    /// commands but where validating still-literal `$(...)` values would
-    /// wrongly report them as final schema violations. The terminal compose
-    /// pass validates the resolved frontmatter. Default: `false`.
-    pub(crate) skip_schema_validation: bool,
+    /// When `true`, the schema-validation stage defers problems on frontmatter
+    /// values still holding a `$(...)` shell expression even though
+    /// `FrontmatterShellExpansion` is not in the enabled set. Used by the
+    /// shell-command discovery pass: it strips shell expansion (to avoid running
+    /// commands) but a *later* terminal compose pass re-validates the resolved
+    /// frontmatter, so a still-literal `$(...)` value is not yet a final
+    /// violation — while a genuinely-bad non-`$(...)` value (e.g. an empty
+    /// required string) must still fail fast here. Default: `false`.
+    pub(crate) defer_shell_pending_schema_problems: bool,
 
     // ── Link normalization ────────────────────────────────────────
     /// Environment variables that may be used as path-prefix abstractions
@@ -284,6 +287,17 @@ pub struct ComposeOptions {
     /// Wrapped in `Arc` because `ComposeOptions` is cloned through recursive
     /// child pipelines and the graph may be large.
     pub(crate) preflight_graph: Option<Arc<PreflightGraphNode>>,
+
+    // ── Shared remote-fetch runtime ───────────────────────────────
+    /// Optional remote-fetch runtime shared across the pre-flight collection
+    /// walk and the terminal compose pass.
+    ///
+    /// When a caller (e.g. the CLI) runs `compose_preflight` before
+    /// `compose_with`, both stages otherwise build their own runtime and fetch
+    /// each remote URL twice. The runtime is single-flight (keyed by URL), so
+    /// sharing one instance collapses pre-flight + compose into a single network
+    /// request per URL. `None` means each stage builds its own.
+    pub(crate) remote_fetch: Option<RemoteFetchRuntime>,
 }
 
 impl std::fmt::Debug for ComposeOptions {
@@ -407,8 +421,9 @@ impl ComposeOptions {
             env_path_whitelist: Vec::new(),
             baseline_schema: None,
             remote_read_config: RemoteReadConfig::default(),
-            skip_schema_validation: false,
+            defer_shell_pending_schema_problems: false,
             preflight_graph: None,
+            remote_fetch: None,
         }
     }
 
@@ -983,6 +998,42 @@ impl ComposeOptions {
     /// Returns a reference to the attached preflight graph, if any.
     pub fn preflight_graph(&self) -> Option<&PreflightGraphNode> {
         self.preflight_graph.as_deref()
+    }
+
+    /// Attaches a single remote-fetch runtime shared by `compose_preflight` and
+    /// the subsequent `compose_with` pass.
+    ///
+    /// Callers that run pre-flight collection before composing (the CLI's
+    /// approval lifecycle) should call this once so both stages fetch each
+    /// remote URL exactly once instead of twice. The runtime is built with the
+    /// same persistent store resolution `compose_with` uses, honoring
+    /// `cache_root` / `cache_namespace`.
+    #[must_use]
+    pub fn with_shared_remote_fetch(mut self) -> Self {
+        self.remote_fetch = Some(self.build_remote_fetch_runtime());
+        self
+    }
+
+    /// Returns the shared remote-fetch runtime when one is attached, otherwise
+    /// builds a fresh one with the persistent store resolved from `cache_root`.
+    pub(crate) fn remote_fetch_runtime(&self) -> RemoteFetchRuntime {
+        self.remote_fetch
+            .clone()
+            .unwrap_or_else(|| self.build_remote_fetch_runtime())
+    }
+
+    /// Builds a remote-fetch runtime with the persistent store resolved from
+    /// `cache_root` / `cache_namespace` (absent → network-only, no cross-run
+    /// cache).
+    fn build_remote_fetch_runtime(&self) -> RemoteFetchRuntime {
+        let remote_store = self
+            .cache_root
+            .as_ref()
+            .map(|root| {
+                FileStore::resolve_cache_root(Some(root), self.cache_namespace.as_deref())
+            })
+            .and_then(|root| FileStore::new(root).map(Arc::new).ok());
+        RemoteFetchRuntime::with_store(&self.remote_read_config, remote_store)
     }
 
     // ── Getters ────────────────────────────────────────────────────

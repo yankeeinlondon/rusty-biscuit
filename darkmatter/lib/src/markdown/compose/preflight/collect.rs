@@ -150,10 +150,10 @@ pub fn collect_shell_commands_with_graph(
     let mut seen = HashSet::new();
     let mut entries = Vec::new();
     let mut visited = HashSet::new();
-    let remote_fetch = remote_fetch::RemoteFetchRuntime::with_store(
-        &options.remote_read_config,
-        None,
-    );
+    // Reuse the caller-supplied shared runtime when present so the terminal
+    // compose pass that follows fetches each remote URL once (single-flight),
+    // not twice. Absent a shared runtime, build a private one.
+    let remote_fetch = options.remote_fetch_runtime();
     let graph = collect_recursive(
         markdown,
         options,
@@ -224,11 +224,14 @@ fn collect_recursive(
     .collect();
 
     // Discovery is a non-terminal pass: it strips FrontmatterShellExpansion to
-    // avoid executing commands, so schema validation here would judge
-    // still-literal `$(...)` values as final violations. Skip it — the terminal
-    // compose pass validates the resolved frontmatter.
+    // avoid executing commands. Run schema validation so a genuinely-invalid
+    // frontmatter value (e.g. an empty required string) fails fast *before* the
+    // approval gate or any shell execution — matching the design's
+    // "schema validation → approval → shell" ordering. Defer problems on
+    // still-literal `$(...)` values: the terminal compose pass expands and
+    // re-validates them, so they are not yet final violations here.
     let mut inline_options = options.clone().only(&inline_ops);
-    inline_options.skip_schema_validation = true;
+    inline_options.defer_shell_pending_schema_problems = true;
     let (prepared, _) = markdown.compose_with(inline_options)?;
     let prepared_ctx = prepared.source_context_for_errors();
 
@@ -263,8 +266,13 @@ fn collect_recursive(
     }
 
     // ── Body `::shell-block` commands ──────────────────────────────
-    let pairs = block_pairs::scan_block_pairs(prepared.content())
-        .map_err(|e| crate::markdown::types::MarkdownError::Transform(e.to_string()))?;
+    // A malformed block (e.g. an unterminated `::block`) is surfaced richly by
+    // the terminal compose pass (page-blocks / shell-blocks stage) with a source
+    // link and excerpt. Pre-flight discovery must not pre-empt it with a
+    // flattened Transform string — and a document that fails to scan has no
+    // well-formed shell block to approve anyway. Skip discovery on a scan
+    // failure and let the compose pass produce the real, styled error.
+    let pairs = block_pairs::scan_block_pairs(prepared.content()).unwrap_or_default();
     for pair in pairs {
         if !matches!(pair.kind, block_pairs::BlockOpenKind::Shell) {
             continue;

@@ -95,10 +95,10 @@ impl Markdown {
     ) -> Result<ComposePreflightApprovals, ShellExpansionError> {
         let report = self.compose_preflight(options).map_err(|e| match e {
             crate::markdown::types::MarkdownError::ShellExpansion(inner) => *inner,
-            other => ShellExpansionError::PolicyIo {
-                path: std::path::PathBuf::from("<preflight>"),
-                source: std::io::Error::new(std::io::ErrorKind::Other, other.to_string()),
-            },
+            // Preserve the rich error (transform parse, ctx merge, schema
+            // validation, remote fetch, …) so the caller renders its styled
+            // block instead of an opaque policy-I/O string.
+            other => ShellExpansionError::Preflight(Box::new(other)),
         })?;
 
         let shell_opts = options.shell_options();

@@ -572,6 +572,14 @@ pub enum ShellExpansionError {
         path: PathBuf,
         source: std::io::Error,
     },
+
+    /// A non-shell pre-flight failure (transform parse, ctx merge, schema
+    /// validation, remote fetch, …) surfaced while the pre-flight walk built
+    /// the command graph. Carries the original rich [`MarkdownError`] so the
+    /// approval lifecycle's caller renders it identically to the `compose_with`
+    /// path rather than flattening it into an opaque policy error.
+    #[error(transparent)]
+    Preflight(Box<crate::markdown::types::MarkdownError>),
 }
 
 impl biscuit_terminal::errors::BlockError for ShellExpansionError {
@@ -752,6 +760,10 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                     source.kind()
                 ))
                 .hint("Verify the policy file exists and the process can read it."),
+
+            // Delegate to the wrapped rich error so its styled block (excerpt,
+            // gutter, OSC8 header, schema problems, …) is preserved verbatim.
+            ShellExpansionError::Preflight(inner) => inner.status_block(_term),
         }
     }
 }
