@@ -5,7 +5,7 @@ $schema:
     plan: file(required)
     spec: file
     spec_file: file
-phase: 1
+phase: "{{ frontmatter(plan, 'start_phase') || 1 }}"
 dir: "{{ dir(plan) }}"
 # spec: "{{ frontmatter( }}"
 area: "{{ ctx.area }}"
