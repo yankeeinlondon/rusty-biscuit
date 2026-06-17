@@ -50,6 +50,8 @@ pub enum ExecutableSource {
     /// Found via a shallow walk of a Windows install root
     /// (`%ProgramFiles%`, `%ProgramFiles(x86)%`, `%LocalAppData%\Programs`).
     WindowsInstallRoot,
+    /// Found in a project-local bin directory (e.g. `node_modules/.bin`).
+    ProjectLocal,
 }
 
 impl ExecutableSource {
@@ -93,6 +95,7 @@ impl std::fmt::Display for ExecutableSource {
             ExecutableSource::MacOsAppBundle => write!(f, "macOS App Bundle"),
             ExecutableSource::WindowsAppPaths => write!(f, "Windows App Paths"),
             ExecutableSource::WindowsInstallRoot => write!(f, "Windows Install Root"),
+            ExecutableSource::ProjectLocal => write!(f, "Project Local"),
         }
     }
 }
@@ -133,6 +136,10 @@ pub enum InstallationMethod {
     Nuget(&'static str),
     /// Package manager for the BEAM ecosystem. [Website](https://hex.pm)
     Hex(&'static str),
+    /// Package manager for the Java ecosystem. [Website](https://maven.apache.org)
+    Maven(&'static str),
+    /// Package manager for the Ruby ecosystem. [Website](https://rubygems.org)
+    Gem(&'static str),
     /// Traditional Python package installer. [Website](https://pip.pypa.io)
     Pip(&'static str),
     /// High-performance Python package manager. [Website](https://astral.sh/uv)
@@ -198,6 +205,8 @@ impl InstallationMethod {
             InstallationMethod::Conan(pkg) => pkg,
             InstallationMethod::Nuget(pkg) => pkg,
             InstallationMethod::Hex(pkg) => pkg,
+            InstallationMethod::Maven(pkg) => pkg,
+            InstallationMethod::Gem(pkg) => pkg,
             InstallationMethod::Pip(pkg) => pkg,
             InstallationMethod::Uv(pkg) => pkg,
             InstallationMethod::Poetry(pkg) => pkg,
@@ -236,6 +245,8 @@ impl InstallationMethod {
             InstallationMethod::Conan(_) => "conan",
             InstallationMethod::Nuget(_) => "nuget",
             InstallationMethod::Hex(_) => "mix",
+            InstallationMethod::Maven(_) => "maven",
+            InstallationMethod::Gem(_) => "gem",
             InstallationMethod::Pip(_) => "pip",
             InstallationMethod::Uv(_) => "uv",
             InstallationMethod::Poetry(_) => "poetry",
@@ -295,6 +306,8 @@ impl InstallationMethod {
             InstallationMethod::Conan(_) => "conan",
             InstallationMethod::Nuget(_) => "nuget",
             InstallationMethod::Hex(_) => "mix",
+            InstallationMethod::Maven(_) => "mvn",
+            InstallationMethod::Gem(_) => "gem",
             InstallationMethod::Pip(_) => "pip",
             InstallationMethod::Uv(_) => "uv",
             InstallationMethod::Poetry(_) => "poetry",

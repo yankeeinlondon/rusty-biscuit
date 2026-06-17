@@ -682,6 +682,7 @@ mod tests {
                 ExecutableSource::MacOsAppBundle => "bundle",
                 ExecutableSource::WindowsAppPaths => "app_paths",
                 ExecutableSource::WindowsInstallRoot => "install_root",
+                ExecutableSource::ProjectLocal => "project_local",
             }
         }
 
@@ -694,6 +695,10 @@ mod tests {
         assert_eq!(
             describe_source(ExecutableSource::WindowsInstallRoot),
             "install_root"
+        );
+        assert_eq!(
+            describe_source(ExecutableSource::ProjectLocal),
+            "project_local"
         );
     }
 
