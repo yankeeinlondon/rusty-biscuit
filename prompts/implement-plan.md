@@ -5,6 +5,7 @@ $schema:
     plan: file(required)
     spec: file
 phase: 1
+total_phases: "{{ plan ? file_exists(plan) ? frontmatter(plan, 'phases') || frontmatter(plan, 'total_phases') : -1 : 0 }}"
 dir: "$(dirname '{{plan}}')"
 # spec: "{{ frontmatter( }}"
 area: "{{ctx.current_package_area == 'root' ? ctx.current_package || '' : ctx.current_package_area}}"
