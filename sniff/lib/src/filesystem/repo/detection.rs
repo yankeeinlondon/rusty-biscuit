@@ -50,6 +50,35 @@ pub(crate) fn detect_repo_inner(
     detect_repo_inner_with_shared(root, structure_only, None, None)
 }
 
+/// Synthesize a single-package, non-monorepo [`RepoInfo`] from the manifest at
+/// `root`, or `None` when `root` declares no recognizable package.
+///
+/// [`detect_repo_inner_with_shared`] returns `None` for an ordinary
+/// single-package project — a `Cargo.toml` with `[package]` but no
+/// `[workspace]`, or a lone `package.json` / `pyproject.toml` / `go.mod` —
+/// because every workspace detector requires a membership marker. The
+/// package-manager, dependency, and aggregate reporting paths still need that
+/// root package's facts, so this builds the one-package catalog they consume.
+pub(crate) fn synthesize_root_package_repo(root: &Path) -> Option<RepoInfo> {
+    if detect_package_ecosystem(root) == PackageEcosystem::Unknown {
+        return None;
+    }
+    let lock_versions = CargoLockVersions::parse(&root.join("Cargo.lock"));
+    let package = create_package(
+        root,
+        root,
+        MonorepoStandard::Unknown,
+        PackageProvenance::ManifestScan,
+        &lock_versions,
+    );
+    Some(RepoInfo {
+        is_monorepo: false,
+        root: root.to_path_buf(),
+        packages: Some(vec![package]),
+        ..RepoInfo::default()
+    })
+}
+
 /// Cache for parsed manifest files to avoid redundant I/O during repo detection.
 ///
 /// Each manifest file is read and parsed at most once per `create_package`

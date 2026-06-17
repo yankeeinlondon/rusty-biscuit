@@ -35,7 +35,8 @@ pub use standard::{
 pub use test_runner_usage::{TestRunnerSource, TestRunnerUsage, detect_test_runners_for_dir};
 pub use types::{
     ExternalDependency, ExternalDependencyFamily, ExternalDependencyFilter, Package,
-    PackageEcosystem, RepoInfo, detect_repo, detect_repo_structure, detect_repo_with_inventory,
+    PackageEcosystem, RepoInfo, detect_repo, detect_repo_structure,
+    detect_repo_structure_or_root_package, detect_repo_with_inventory,
 };
 
 pub use crate::package::{DependencyEntry, DependencyKind};

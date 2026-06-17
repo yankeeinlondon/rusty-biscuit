@@ -446,6 +446,29 @@ pub fn detect_repo_structure(root: &Path) -> Result<Option<RepoInfo>> {
     super::detection::detect_repo_inner(root, true).map(|(info, _inventory)| info)
 }
 
+/// Like [`detect_repo_structure`], but synthesizes a single-package `RepoInfo`
+/// from the root manifest when no workspace structure is detected.
+///
+/// [`detect_repo_structure`] returns `Ok(None)` for an ordinary single-package
+/// project (a `Cargo.toml` with `[package]` but no `[workspace]`, or a lone
+/// `package.json`, `pyproject.toml`, or `go.mod`). Reporting paths such as
+/// `sniff repo package-manager`, `sniff repo dependencies`, and the bare
+/// `sniff repo --json` aggregate still need that root package's facts, so this
+/// fills the gap with a one-package, non-monorepo `RepoInfo`.
+///
+/// ## Returns
+///
+/// - The workspace `RepoInfo` from [`detect_repo_structure`] when one is found.
+/// - A single-package, non-monorepo `RepoInfo` when only a root manifest exists.
+/// - `Ok(None)` when `root` has no recognizable package manifest.
+#[instrument(skip_all, fields(root = %root.display()))]
+pub fn detect_repo_structure_or_root_package(root: &Path) -> Result<Option<RepoInfo>> {
+    if let Some(info) = detect_repo_structure(root)? {
+        return Ok(Some(info));
+    }
+    Ok(super::detection::synthesize_root_package_repo(root))
+}
+
 /// Full repo detection that also returns the shared file inventory.
 ///
 /// The returned inventory is the same one used internally to enrich
