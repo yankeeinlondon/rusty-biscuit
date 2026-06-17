@@ -1,7 +1,7 @@
 //! `md get` / `md set` / `md rm` / `md edit` frontmatter subcommand implementations.
 
 use crate::args::Cli;
-use crate::commands::{load_markdown, resolve_file_path};
+use crate::io::{load_markdown, resolve_file_path};
 use color_eyre::eyre::{Context, Result, eyre};
 use std::path::PathBuf;
 use tracing::instrument;

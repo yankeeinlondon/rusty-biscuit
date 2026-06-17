@@ -161,8 +161,12 @@
 
 pub mod approval;
 pub mod args;
+pub mod artifact;
 pub mod commands;
-pub mod output;
+pub mod delta;
+pub mod io;
+pub mod render;
+pub mod style_claims;
 
 // Re-export CLI types for programmatic access
 pub use args::{Cli, Command as CliCommand, OutputFormat};

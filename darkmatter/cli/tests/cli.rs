@@ -4637,11 +4637,11 @@ fn apply_style_for(raw: &str, args: &[&str]) -> DarkmatterPage {
 
 #[test]
 fn component_overrides_global_alignment_claims_every_bucket() {
-    use darkmatter::style::ComponentStyleOverrides;
-    use darkmatter_cli::output::component_style_overrides_from_cli;
+    use darkmatter::style::{ComponentStyleOverrides, component_style_overrides_from_claims};
+    use darkmatter_cli::style_claims::cli_style_claims;
 
     let cli = parse_cli(&["doc.md", "--alignment", "center"]);
-    let o = component_style_overrides_from_cli(&cli);
+    let o = component_style_overrides_from_claims(&cli_style_claims(&cli));
     assert_eq!(
         o,
         ComponentStyleOverrides {
@@ -4657,11 +4657,11 @@ fn component_overrides_global_alignment_claims_every_bucket() {
 
 #[test]
 fn component_overrides_global_fill_claims_every_bucket() {
-    use darkmatter::style::ComponentStyleOverrides;
-    use darkmatter_cli::output::component_style_overrides_from_cli;
+    use darkmatter::style::{ComponentStyleOverrides, component_style_overrides_from_claims};
+    use darkmatter_cli::style_claims::cli_style_claims;
 
     let cli = parse_cli(&["doc.md", "--fill", "max=60"]);
-    let o = component_style_overrides_from_cli(&cli);
+    let o = component_style_overrides_from_claims(&cli_style_claims(&cli));
     assert_eq!(
         o,
         ComponentStyleOverrides {
@@ -4677,10 +4677,11 @@ fn component_overrides_global_fill_claims_every_bucket() {
 
 #[test]
 fn component_overrides_component_specific_alignment_claims_one_bucket() {
-    use darkmatter_cli::output::component_style_overrides_from_cli;
+    use darkmatter::style::component_style_overrides_from_claims;
+    use darkmatter_cli::style_claims::cli_style_claims;
 
     let cli = parse_cli(&["doc.md", "--align-tables", "right"]);
-    let o = component_style_overrides_from_cli(&cli);
+    let o = component_style_overrides_from_claims(&cli_style_claims(&cli));
     assert!(o.tables_alignment);
     assert!(!o.images_alignment);
     assert!(!o.block_quotes_alignment);
@@ -4689,10 +4690,11 @@ fn component_overrides_component_specific_alignment_claims_one_bucket() {
 
 #[test]
 fn component_overrides_component_specific_fill_claims_one_bucket() {
-    use darkmatter_cli::output::component_style_overrides_from_cli;
+    use darkmatter::style::component_style_overrides_from_claims;
+    use darkmatter_cli::style_claims::cli_style_claims;
 
     let cli = parse_cli(&["doc.md", "--fill-images", "max=40"]);
-    let o = component_style_overrides_from_cli(&cli);
+    let o = component_style_overrides_from_claims(&cli_style_claims(&cli));
     assert!(o.images_fill);
     assert!(!o.tables_fill && !o.block_quotes_fill);
     assert!(!o.tables_alignment && !o.images_alignment && !o.block_quotes_alignment);

@@ -1,6 +1,6 @@
 //! `md hash` subcommand implementation.
 
-use crate::commands::{load_markdown, resolve_file_path};
+use crate::io::{load_markdown, resolve_file_path};
 use biscuit_hash::xx_hash;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::hash::{

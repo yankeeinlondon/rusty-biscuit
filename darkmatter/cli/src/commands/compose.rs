@@ -3,11 +3,11 @@
 //! performance report.
 
 use crate::args::{Cli, OutputFormat};
-use crate::commands::{load_markdown, resolve_file_path};
-use crate::output::{
+use crate::artifact::{
     OutputArtifact, emit_or_show_artifact, html_artifact, json_artifact, markdown_plus_artifact,
     open_output_artifact,
 };
+use crate::io::{load_markdown, resolve_file_path};
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::cleanup::ListSpacingMode;
