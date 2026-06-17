@@ -4,9 +4,9 @@
 
 use std::time::Duration;
 
-use remote_signal_client::connect_uds;
-use remote_signal_core::{DAEMON_VERSION, PingRequest, StatusRequest};
-use remote_signal_daemon::server::{DaemonConfig, spawn_uds_server};
+use rendezvous_client::connect_uds;
+use rendezvous_core::{DAEMON_VERSION, PingRequest, StatusRequest};
+use rendezvous_daemon::server::{DaemonConfig, spawn_uds_server};
 use tempfile::TempDir;
 use tokio::time::sleep;
 

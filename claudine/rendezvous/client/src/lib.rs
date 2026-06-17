@@ -1,4 +1,4 @@
-//! Library surface for the remote-signal test client.
+//! Library surface for the rendezvous test client.
 //!
 //! The test client's primary role is to exercise the daemon's gRPC IPC
 //! interface from integration tests and from CI smoke checks. Lifting the
@@ -10,7 +10,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use hyper_util::rt::TokioIo;
-use remote_signal_core::RemoteSignalClient;
+use rendezvous_core::RendezvousClient;
 use tokio::net::UnixStream;
 use tonic::transport::{Channel, Endpoint, Uri};
 use tower::service_fn;
@@ -24,7 +24,7 @@ pub enum ConnectError {
     Uri(#[from] tonic::transport::Error),
 }
 
-/// Build a connected [`RemoteSignalClient`] backed by a `UnixStream`
+/// Build a connected [`RendezvousClient`] backed by a `UnixStream`
 /// pointed at `socket_path`.
 ///
 /// The endpoint URI is a placeholder; tonic only uses the scheme to drive
@@ -32,7 +32,7 @@ pub enum ConnectError {
 /// over the Unix socket.
 pub async fn connect_uds(
     socket_path: impl Into<PathBuf>,
-) -> Result<RemoteSignalClient<Channel>, ConnectError> {
+) -> Result<RendezvousClient<Channel>, ConnectError> {
     let path = socket_path.into();
     let channel = Endpoint::try_from("http://[::]:0")?
         .connect_with_connector(service_fn(move |_: Uri| {
@@ -40,7 +40,7 @@ pub async fn connect_uds(
             async move { connect_unix(&path).await }
         }))
         .await?;
-    Ok(RemoteSignalClient::new(channel))
+    Ok(RendezvousClient::new(channel))
 }
 
 async fn connect_unix(path: &Path) -> Result<TokioIo<UnixStream>, io::Error> {

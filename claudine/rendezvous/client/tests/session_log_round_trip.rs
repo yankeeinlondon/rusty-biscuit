@@ -8,14 +8,14 @@
 
 use std::time::Duration;
 
-use remote_signal_client::connect_uds;
-use remote_signal_core::{
+use rendezvous_client::connect_uds;
+use rendezvous_core::{
     AppendEntryRequest, ChunkConfig, ListChunkEntriesRequest, ListSessionChunksRequest,
     QueryProjectionRequest,
 };
-use remote_signal_daemon::batcher::BatcherConfig;
-use remote_signal_daemon::server::{DaemonConfig, spawn_uds_server};
-use remote_signal_daemon::storage::Storage;
+use rendezvous_daemon::batcher::BatcherConfig;
+use rendezvous_daemon::server::{DaemonConfig, spawn_uds_server};
+use rendezvous_daemon::storage::Storage;
 use std::path::PathBuf;
 use tempfile::TempDir;
 use tokio::time::sleep;

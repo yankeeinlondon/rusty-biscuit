@@ -1,4 +1,4 @@
-//! `remote-signal-test-client` binary.
+//! `rendezvous-test-client` binary.
 //!
 //! A minimal command-line client that opens a gRPC channel over the
 //! daemon's Unix Domain Socket and exercises either the Phase 1
@@ -9,9 +9,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use remote_signal_client::connect_uds;
-use remote_signal_core::socket::default_socket_path;
-use remote_signal_core::{
+use rendezvous_client::connect_uds;
+use rendezvous_core::socket::default_socket_path;
+use rendezvous_core::{
     AppendEntryRequest, ApprovePeerRequest, ConnectToPeerRequest, CreateInvitationRequest,
     ListChunkEntriesRequest, ListPairingsRequest, ListPeersRequest, ListSessionChunksRequest,
     PingRequest, QueryProjectionRequest, RevokePeerRequest, StatusRequest, SyncWithPeerRequest,
@@ -20,14 +20,14 @@ use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "remote-signal-test-client",
-    about = "Phase 1/2 test client for remote-signal-daemon"
+    name = "rendezvous-test-client",
+    about = "Phase 1/2 test client for rendezvous-daemon"
 )]
 struct Cli {
     /// Override the Unix Domain Socket path. Defaults to the value
-    /// resolved by `remote_signal_core::socket::default_socket_path`
-    /// (also honouring `$REMOTE_SIGNAL_SOCKET`).
-    #[arg(long = "socket", env = "REMOTE_SIGNAL_SOCKET", global = true)]
+    /// resolved by `rendezvous_core::socket::default_socket_path`
+    /// (also honouring `$RENDEZVOUS_SOCKET`).
+    #[arg(long = "socket", env = "RENDEZVOUS_SOCKET", global = true)]
     socket: Option<PathBuf>,
 
     #[command(subcommand)]
@@ -128,7 +128,7 @@ enum Command {
 #[tokio::main]
 async fn main() -> ExitCode {
     if let Err(error) = run().await {
-        eprintln!("remote-signal-test-client: {error}");
+        eprintln!("rendezvous-test-client: {error}");
         let mut source = std::error::Error::source(&error);
         while let Some(inner) = source {
             eprintln!("  caused by: {inner}");
@@ -142,7 +142,7 @@ async fn main() -> ExitCode {
 #[derive(Debug, thiserror::Error)]
 enum ClientError {
     #[error(transparent)]
-    Connect(#[from] remote_signal_client::ConnectError),
+    Connect(#[from] rendezvous_client::ConnectError),
     #[error("gRPC call failed: {0}")]
     Rpc(#[from] tonic::Status),
 }
@@ -152,7 +152,7 @@ async fn run() -> Result<(), ClientError> {
 
     let cli = Cli::parse();
     let socket = cli.socket.unwrap_or_else(default_socket_path);
-    tracing::debug!(socket = %socket.display(), "connecting to remote-signal-daemon");
+    tracing::debug!(socket = %socket.display(), "connecting to rendezvous-daemon");
 
     let mut client = connect_uds(socket).await?;
 
@@ -356,7 +356,7 @@ async fn run() -> Result<(), ClientError> {
 
 fn init_tracing() {
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("warn,remote_signal_client=info"));
+        .unwrap_or_else(|_| EnvFilter::new("warn,rendezvous_client=info"));
     let _ = tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(false)
