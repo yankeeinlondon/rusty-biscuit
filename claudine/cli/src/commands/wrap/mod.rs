@@ -46,7 +46,7 @@ pub(crate) use overlay::{frontmatter_map_to_value, merge_frontmatter_overlay};
 pub(crate) use policy::{
     StreamSummaryContext, StructuredCodexOutput, StructuredSummaryDetails,
     WrapperHarnessPermissionProbe, build_structured_plumbing, emit_stream_summary,
-    emit_stream_summary_with_context, format_summary_prose, format_verbose_summary_details_prose,
+    format_summary_prose, format_verbose_summary_details_prose,
 };
 pub(crate) use prompt_source::{maybe_edit_prompt_source, maybe_edit_prompt_source_with};
 pub(crate) use resume::{
@@ -1157,7 +1157,7 @@ fn run_provider_wrapper_inner(
         };
         let default_lifecycle_emitter = claudine::composition::DefaultLifecycleEmitter;
 
-        let (harness_code, harness_perf) = harness_orch::run_harness_loop(
+        let (harness_code, harness_perf, _harness_signals) = harness_orch::run_harness_loop(
             provider,
             profile,
             binary_path.as_path(),

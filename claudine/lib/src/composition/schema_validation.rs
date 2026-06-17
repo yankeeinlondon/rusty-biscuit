@@ -78,6 +78,21 @@ pub struct InteractiveSchemaOptions {
 impl InteractiveSchemaOptions {
     /// Returns `true` when the four input flags permit prompting.
     ///
+    /// The decision to prompt depends **only** on the four documented
+    /// signals held in this struct:
+    ///
+    /// - `prompt_for_missing` (user-configurable default `true`)
+    /// - `stdin_is_tty`
+    /// - `stderr_is_tty`
+    /// - `!silent`
+    ///
+    /// It **must not** depend on the resolved session interactivity value
+    /// (`session_interactive`). Schema collection is a pre-session
+    /// preparation step: this function runs (and any interactive prompt
+    /// completes) before the provider child process is spawned, regardless
+    /// of whether the eventual session mode is interactive or
+    /// non-interactive. Callers must ensure that ordering.
+    ///
     /// The plan's full rule also requires that at least one required
     /// property be missing and that no required values be present-but-invalid.
     /// Those extra conditions are checked by the validation layer (which

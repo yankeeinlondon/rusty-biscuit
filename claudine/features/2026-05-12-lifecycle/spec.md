@@ -1,5 +1,18 @@
 # Lifecycle Formalization for Claudine Prompts & Late Binding Context
 
+## Late Binding Context
+
+Up to now we have relied on using the `doc` (aka, document frontmatter), `ctx`, and `env` global variables to react to the execution environment for Claudine. However, once we introduce the Lifecycle Model (in next section) we will have an interesting gap:
+
+- TODAY: all interpolation, shell expansion, etc. happens immediately upon the composition process starting
+- FUTURE STATE:
+    - The `initialize` event takes place immediately after pre-flight checks have completed (and BEFORE we route to `start` or `blocked`)
+        - from a timing perspective we're in a good position to "handle" a pre-flight check failing or a document's schema being invalid
+        - however, to do that, we would need to be able to receive both the preflight state and the schema validation state
+        - currently there is no way to get this
+    - The `failure` lifecycle event takes place when the prompt has failed
+
+
 ## The Prompt Lifecycle
 
 ![lifecycle](./lifecycle.png)
@@ -12,7 +25,7 @@ A Claudine prompt document moves through a fixed set of lifecycle events. Today 
 
 | Event | New? | Fires when |
 |---|---|---|
-| `initialize` | **new** | Prompt file has been identified, before any pre-flight checks have run |
+| `initialize` | **new** | Prompt file has been identified, immediately after pre-flight checks have completed |
 | `start` | existing | Pre-flight checks have all passed; about to invoke the agent |
 | `blocked` | existing | Pre-flight checks failed; agent will not be invoked |
 | `success` | existing | Agentic loop completed without error |
@@ -41,10 +54,18 @@ start:
 
     # The stack: ordered list of conditional actions
     stack:
+        # conditional action, using key/value action
         - when: "env.AGENT == 'claude'"
           action: say
           message: "Using Claude provider"
-        - "shell(git status --short)"
+        # conditional action, shorthand action
+        - when: "env.AGENT == 'codex'"
+          action: "say(using codex)"
+        # unconditional actions, using shorthand form
+        - action: "shell(git status --short)"
+        - action: "echo 'hi there'"
+        # conditional multi-action
+        - when: "file_exists('/path/to/file.md') && "
 ```
 
 ### Top-Level Communication Properties

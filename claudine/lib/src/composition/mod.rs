@@ -56,8 +56,8 @@ pub use loop_expression::{LoopAmbient, LoopExpressionLookup, evaluate_condition}
 pub use mismatch::{capture_frontmatter_yaml, is_inline_sequence_mismatch};
 pub use preflight::{PreFlightResult, resolve_shell_approvals};
 pub use prepare::{
-    PrepareOptions, bind_agent_workspace, parse_selection_hints_from_frontmatter, prepare_direct,
-    prepare_inline,
+    PrepareOptions, bind_agent_workspace, parse_interactive_hint,
+    parse_selection_hints_from_frontmatter, prepare_direct, prepare_inline,
 };
 pub use resolve::{resolve_composition_source, validate_file_permissions};
 pub use schema_validation::{
@@ -78,7 +78,8 @@ pub use types::{
     InstalledProviderSnapshot, LoopAction, LoopCondition, LoopConfig, ModelHint,
     ModelResolutionReason, OnRateLimit, OutputFormat, PickerInfluence, PreparedComposition,
     ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason, ResolutionMode,
-    ResolvedCompositionSource, ResolvedExecutionTarget, SelectedProvider, SelectionReason,
-    SequenceExecutionOptions, SequencePlan, SequenceRunSummary, SequenceSource, SequenceStep,
-    SequenceStepDraft, SequenceStepOverlay, SequenceStepResult, SharedApprovalCache,
+    ResolvedCompositionSource, ResolvedExecutionTarget, ResolvedSessionInteractivity,
+    SelectedProvider, SelectionReason, SessionInteractivitySource, SequenceExecutionOptions,
+    SequencePlan, SequenceRunSummary, SequenceSource, SequenceStep, SequenceStepDraft,
+    SequenceStepOverlay, SequenceStepResult, SharedApprovalCache,
 };

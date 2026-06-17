@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
 
-use super::types::ResolutionMode;
+use super::types::{ResolutionMode, SessionInteractivitySource};
 use crate::provider::Provider;
 use thiserror::Error;
 
@@ -146,6 +146,10 @@ pub enum CompositionError {
     #[error("frontmatter `model` must be a string or array of strings, got {0}")]
     ModelHintWrongType(String),
 
+    /// The `interactive` frontmatter property is not a boolean.
+    #[error("frontmatter `interactive` must be a boolean (true/false), got {0}")]
+    InteractiveHintWrongType(String),
+
     /// The `agent` frontmatter hint matches multiple providers.
     #[error("agent hint `{hint}` is ambiguous; matches: {matches}")]
     AgentHintAmbiguous {
@@ -177,12 +181,18 @@ pub enum CompositionError {
     )]
     InteractiveSelectionRequired,
 
-    /// Inline composition with `-i` is not supported for this provider
+    /// Inline composition in interactive mode is not supported for this provider
     /// because it cannot capture the final assistant message.
     #[error(
-        "inline-compose with --interactive is not supported for {0}; the provider cannot capture the final assistant message"
+        "inline-compose in interactive mode (from {source_kind}) is not supported for {provider}; \
+         the provider cannot capture the final assistant message"
     )]
-    InlineInteractiveUnsupported(String),
+    InlineInteractiveUnsupported {
+        /// Provider that does not support interactive inline closure.
+        provider: String,
+        /// Why the session resolved to interactive mode.
+        source_kind: SessionInteractivitySource,
+    },
 
     /// The provider returned an invalid response for inline composition.
     #[error("invalid inline composition response: {0}")]
@@ -301,6 +311,17 @@ pub enum CompositionError {
         /// Number of steps that reported missing properties.
         failure_count: usize,
     },
+
+    /// A `sequence` document authored `interactive: true` in its frontmatter.
+    ///
+    /// Sequences are serial automation; interactive mode must be requested
+    /// per-invocation with the `--interactive` flag instead.
+    #[error(
+        "`interactive: true` is not allowed in a sequence document ({0}); \
+         use `compose` or `inline-compose` for dialog-shaped prompts, \
+         or pass `--interactive` to override a single sequence run"
+    )]
+    SequenceInteractiveRejected(PathBuf),
 
     // -- Loop errors -----------------------------------------------------------
     /// The `loop` frontmatter value is invalid.
@@ -868,6 +889,23 @@ impl BlockError for CompositionError {
             ),
             CompositionError::SequenceMissingProperties { failures, .. } => {
                 render_sequence_missing_properties_block(failures)
+            }
+            CompositionError::SequenceInteractiveRejected(source_path) => {
+                let file_link = render_file_link(source_path);
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "interactive rejected for sequence",
+                    ))
+                    .body(format!(
+                        "The document {file_link} sets <cyan>`interactive: true`</cyan> in its \
+                         frontmatter, but a <cyan>`sequence`</cyan> is serial automation and does \
+                         not support interactive sessions.\n\n\
+                         Use <cyan>`claudine compose`</cyan> or <cyan>`claudine inline-compose`</cyan> \
+                         for dialog-shaped prompts. To run an individual sequence step \
+                         interactively, use the <cyan>`--interactive`</cyan> CLI flag — this remains \
+                         the only explicit override."
+                    ))
             }
             CompositionError::UnsupportedInteractiveSchema {
                 source_path,
