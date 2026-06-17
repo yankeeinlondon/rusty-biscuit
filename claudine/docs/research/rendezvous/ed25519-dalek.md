@@ -1,6 +1,6 @@
 ---
 prompt: |-
-    The 'ed25519-dalek' crate in Rust will be using in the "remote-signal" daemon.
+    The 'ed25519-dalek' crate in Rust will be using in the "rendezvous" daemon.
 
     Your task is to do a deep dive on the 'ed25519-dalek' crate and answer the following questions through thorough research:
 
@@ -11,7 +11,7 @@ prompt: |-
     - What do developers say about using this crate? What "gotchas" are there and how can they be worked around?
 last_updated: 2026-05-24
 ---
-The `ed25519-dalek` crate is the de facto standard pure-Rust implementation of the **Ed25519** digital signature algorithm (RFC 8032). It is designed for high performance, safety, and misuse resistance, making it an ideal choice for the `remote-signal` daemon.
+The `ed25519-dalek` crate is the de facto standard pure-Rust implementation of the **Ed25519** digital signature algorithm (RFC 8032). It is designed for high performance, safety, and misuse resistance, making it an ideal choice for the `rendezvous` daemon.
 
 ### Functional Footprint
 
@@ -51,7 +51,7 @@ The crate uses Cargo features to balance performance, binary size, and platform 
 
 #### 1. Secure Identity and Message Authentication
 
-This is the most common use case for `remote-signal`. A client signs a command, and the daemon verifies the identity using a pre-shared public key.
+This is the most common use case for `rendezvous`. A client signs a command, and the daemon verifies the identity using a pre-shared public key.
 
 ```rust
 use ed25519_dalek::{SigningKey, Signature, Signer, Verifier, VerifyingKey};

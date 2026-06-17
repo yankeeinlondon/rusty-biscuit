@@ -1,6 +1,6 @@
 ---
 prompt: |-
-    The 'plumtree' crate in Rust will be using in the "remote-signal" daemon.
+    The 'plumtree' crate in Rust will be using in the "rendezvous" daemon.
 
     Your task is to do a deep dive on the 'plumtree' crate and answer the following questions through thorough research:
 

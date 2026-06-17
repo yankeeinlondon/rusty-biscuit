@@ -1,6 +1,6 @@
 ---
 prompt: |-
-    The 'foca' crate in Rust will be using in the "remote-signal" daemon.
+    The 'foca' crate in Rust will be using in the "rendezvous" daemon.
 
     Your task is to do a deep dive on the 'foca' crate and answer the following questions through thorough research:
 

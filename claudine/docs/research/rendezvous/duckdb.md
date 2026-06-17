@@ -1,6 +1,6 @@
 ---
 prompt: |-
-    The 'duckdb' crate will be used in the "remote-signal" daemon.
+    The 'duckdb' crate will be used in the "rendezvous" daemon.
     
     Your task is to do a deep dive on the 'duckdb' crate and answer the following questions through thorough research:
     
@@ -138,7 +138,7 @@ fn bulk_load_telemetry(conn: &Connection, batch: Vec<(String, f64)>) -> Result<(
 
 #### 3. Client-Server Communication (Quack Protocol)
 
-In a daemon like `remote-signal`, connecting to a remote DuckDB instance or exposing a local one.
+In a daemon like `rendezvous`, connecting to a remote DuckDB instance or exposing a local one.
 
 ```rust
 use duckdb::{Connection, Result};

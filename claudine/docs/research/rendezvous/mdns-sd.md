@@ -1,6 +1,6 @@
 ---
 prompt: |-
-    The 'mdsn-sd' crate in Rust will be using in the "remote-signal" daemon.
+    The 'mdsn-sd' crate in Rust will be using in the "rendezvous" daemon.
 
     Your task is to do a deep dive on the 'mdsn-sd' crate and answer the following questions through thorough research:
 

@@ -1,6 +1,6 @@
 ---
 prompt: |-
-    The 'tonic' crate in Rust provides gRPC functionality which we will be using in the "remote-signal" daemon.
+    The 'tonic' crate in Rust provides gRPC functionality which we will be using in the "rendezvous" daemon.
     
     Your task is to do a deep dive on the 'tonic' crate and answer the following questions through thorough research:
     

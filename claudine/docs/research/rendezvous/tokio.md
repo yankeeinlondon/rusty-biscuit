@@ -1,6 +1,6 @@
 ---
 prompt: |-
-    The 'tokio' crate will be used in the "remote-signal" daemon.
+    The 'tokio' crate will be used in the "rendezvous" daemon.
     
     Your task is to do a deep dive on the 'tokio' crate and answer the following questions through thorough research:
     

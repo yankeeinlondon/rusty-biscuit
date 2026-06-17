@@ -1,6 +1,6 @@
 ---
 prompt: |-
-    The 'web-transport' crate will be used in the "remote-signal" daemon.
+    The 'web-transport' crate will be used in the "rendezvous" daemon.
     
     Your task is to do a deep dive on the 'web-transport' crate and answer the following questions through thorough research:
     

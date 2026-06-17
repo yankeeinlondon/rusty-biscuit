@@ -1,7 +1,7 @@
 ---
 prompt: |-
     The 'loro' crate in Rust provides a modern and highly performant CRTD library which
-    we will be using in the "remote-signal" daemon.
+    we will be using in the "rendezvous" daemon.
 
     Your task is to do a deep dive on the 'loro' crate and answer the following questions through thorough research:
 

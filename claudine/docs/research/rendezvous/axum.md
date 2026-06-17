@@ -1,6 +1,6 @@
 ---
 prompt: |-
-    The 'axum' crate will be used in the "remote-signal" daemon.
+    The 'axum' crate will be used in the "rendezvous" daemon.
     
     Your task is to do a deep dive on the 'axum' crate and answer the following questions through thorough research:
     
