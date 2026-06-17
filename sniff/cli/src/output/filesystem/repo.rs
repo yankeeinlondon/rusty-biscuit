@@ -155,8 +155,7 @@ pub(crate) fn format_monorepo_label(
     if orchestrators.is_empty() {
         return authority_label.to_string();
     }
-    let orchestrator_labels: Vec<&str> =
-        orchestrators.iter().map(|o| o.spec().label).collect();
+    let orchestrator_labels: Vec<&str> = orchestrators.iter().map(|o| o.spec().label).collect();
     format!(
         "{} (using {})",
         orchestrator_labels.join(" + "),

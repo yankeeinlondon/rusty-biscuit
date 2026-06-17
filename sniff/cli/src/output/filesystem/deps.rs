@@ -1,4 +1,4 @@
-//! Dependency-graph rendering for `sniff repo deps`.
+//! Dependency-graph rendering for `sniff repo package-dependencies`.
 
 use std::collections::HashSet;
 use std::fmt::Write;
@@ -18,7 +18,7 @@ use sniff::filesystem::repo::Package;
 
 use super::packages::select_repo_packages;
 
-/// Default rendered width for `sniff repo deps --ui`.
+/// Default rendered width for `sniff repo package-dependencies --ui`.
 ///
 /// Chosen to give the diagram noticeably more room than the
 /// biscuit-terminal 50% default so dependency graphs are legible.

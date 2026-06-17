@@ -17,6 +17,8 @@ mod remote;
 mod render;
 pub(crate) mod repo_json;
 mod services;
+pub(crate) mod test_runner_report;
+mod test_runners;
 mod topics;
 
 use sniff::{PerformanceReport, SniffResult};
@@ -42,6 +44,9 @@ pub use remote::{
     render_pull_requests_verbose, render_remote_text,
 };
 pub use services::{print_services_json, render_services_text};
+pub use test_runners::{
+    HintMode, build_test_runners_json, render_test_runners_markdown, test_runners_search_hint,
+};
 pub use topics::render_topics_table;
 
 // Re-export types needed by submodules
@@ -118,6 +123,10 @@ pub enum OutputFilter {
     AiClients,
     /// Show only desktop notification helpers (programs subsection)
     NotificationHelpers,
+    /// Show resolved test runners with availability discriminators
+    /// (programs subsection). Distinct from the other categories because
+    /// runners live in many places (PATH, project-local bin, parent binary).
+    TestRunners,
     /// Show only system services (init system and service list)
     Services,
     /// Show justfiles and their recipes
@@ -456,7 +465,7 @@ pub fn render_text(
                     out.push_str(&rendered);
                     out.push('\n');
                 }
-                Some(RepoAction::Deps {
+                Some(RepoAction::PackageDependencies {
                     ui,
                     svg,
                     filter,
@@ -648,6 +657,7 @@ pub fn render_text(
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
         | OutputFilter::NotificationHelpers
+        | OutputFilter::TestRunners
         | OutputFilter::Services
         | OutputFilter::Just
         | OutputFilter::BlastRadius => {
@@ -799,6 +809,7 @@ fn apply_filter_to_json(
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
         | OutputFilter::NotificationHelpers
+        | OutputFilter::TestRunners
         | OutputFilter::Services
         | OutputFilter::Just
         | OutputFilter::BlastRadius => {
