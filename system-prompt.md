@@ -22,13 +22,14 @@ scope: "{{ctx.current_package_area == 'root' ? 'package' : 'package area' }}"
 ## Best Practices
 
 - when rendering to the terminal always use `TerminalRenderable` (trait) components:
-    - these components are largely found in `biscuit-terminal` and `darkmatter` libraries
+    - these are largely found in `biscuit-terminal` and `darkmatter` libraries
     - [`Prose`](biscuit-terminal/docs/components/prose.md) component:
         - rich text (color, style), hyperlinks (OS8), word wrap, and more
     - [`UnorderedList`](biscuit-terminal/docs/components/list.md) component:
         - create markdown-like unordered lists with nested word wrap, ergonomic support for Prose content, and more
-    - many more including `OrderedList`, `Table`, `BlockQuote`, `MermaidDiagram`, `
-- when attempting to do host discovery -- hardware, software, os, file-system, repo/git -- you should use the `sniff` library (and associated **agent skill**)
+    - many more including `OrderedList`, `Table`, `BlockQuote`, `MermaidDiagram`, `TwoColumns`, `CodeBlock`, and many more
+- Note: many of the components which implement `TerminalRenderable` also implement `BrowserRenderable` meaning you can easily render to both terminal and browser.
+- when attempting to do host discovery -- hardware, software, os, file-system, repo -- you should use the `sniff` library (and associated `sniff` **agent skill**)
 - when doing file conversions between JSON, YAML, TOML always use the `biscuit-file` skill
 - whenever you are attempt to convert a file reference to a real file path in the filesystem you should use the `FileReference` struct from `biscuit-file` (use the `biscuit-file` agent skill for help with this)
 - when a package area has both a library and CLI (as many do) the naming convention is:
