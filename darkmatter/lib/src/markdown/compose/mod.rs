@@ -5101,11 +5101,11 @@ Rounded: {{ round(pi) }}"#;
         }
 
         #[test]
-        fn ternary_stringified_false_condition_selects_else_branch_in_pipeline() {
-            // Review finding 2 at compose level: when an earlier frontmatter
-            // interpolation rewrites `has_spec` from a boolean into the
-            // string `"false"`, the ternary condition must still resolve
-            // to the else-branch.
+        fn frontmatter_false_flows_to_shell_else_branch_in_pipeline() {
+            // Compose level: a whole-value `{{raw_false}}` keeps `has_spec` a
+            // real boolean `false` (type-preserving interpolation). Embedded
+            // into the `$(...)` shell value it stringifies to `false`, and the
+            // shell branch resolves to the empty string.
             let temp_dir = TempDir::new().unwrap();
             let content = concat!(
                 "---\n",
@@ -5128,11 +5128,11 @@ Rounded: {{ round(pi) }}"#;
                 });
 
             let (composed, _report) = md.compose_with(options).unwrap();
-            // has_spec is rendered to the string "false"; the ternary must
-            // see it as boolean-false and pick the empty branch.
+            // has_spec is preserved as a real boolean `false` (whole-value
+            // interpolation), and the shell branch resolves to empty.
             assert_eq!(
                 composed.frontmatter().as_map().get("has_spec"),
-                Some(&serde_json::json!("false"))
+                Some(&serde_json::json!(false))
             );
             assert_eq!(
                 composed.frontmatter().as_map().get("spec_file"),
