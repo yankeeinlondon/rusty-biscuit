@@ -18,6 +18,53 @@ source_code:
   - darkmatter/lib/src/markdown/reference/validate.rs
   - renderable/src/color/tailwind.rs
   - renderable/src/style/paint.rs
+source_files_during_phase_2:
+  - darkmatter/cli/src/args.rs
+  - darkmatter/cli/src/args/mod.rs
+  - darkmatter/cli/src/args/cli.rs
+  - darkmatter/cli/src/args/command.rs
+  - darkmatter/cli/src/args/target.rs
+  - darkmatter/cli/src/args/enums.rs
+  - darkmatter/cli/src/args/wrappers.rs
+  - darkmatter/cli/src/args/parsers.rs
+  - darkmatter/cli/src/args/completion.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+packages:
+  - darkmatter-cli
+source_files_during_phase_3:
+  - darkmatter/cli/src/io/mod.rs
+  - darkmatter/cli/src/commands/render.rs
+  - darkmatter/cli/src/commands/clean.rs
+  - darkmatter/cli/src/commands/validate.rs
+  - darkmatter/cli/src/commands/graph.rs
+  - darkmatter/cli/src/commands/mod.rs
+  - darkmatter/cli/src/commands.rs
+  - darkmatter/cli/src/lib.rs
+  - darkmatter/cli/src/main.rs
+  - darkmatter/cli/src/commands/compose.rs
+  - darkmatter/cli/src/commands/frontmatter.rs
+  - darkmatter/cli/src/commands/hash.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - darkmatter/lib/src/style/cli_claims.rs
+  - darkmatter/lib/src/style/mod.rs
+  - darkmatter/cli/src/style_claims.rs
+  - darkmatter/cli/src/output.rs
+  - darkmatter/cli/src/lib.rs
+  - darkmatter/cli/tests/cli.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4:
+  - darkmatter/features/2026-06-17-cli-atheist/log.md
+  - darkmatter/features/2026-06-17-cli-atheist/baseline/help.txt
+skills_files_updated_during_phase_4:
+  - .opencode/skill/darkmatter/SKILL.md
+packages:
+  - darkmatter
+  - darkmatter-cli
 ---
 
 # CLI Atheist — Execution Plan
@@ -184,25 +231,25 @@ Layout. Pure file-move; no behavior change. Lands as one PR because
 
 **Behavior:** preserving.
 
-- [ ] Create `darkmatter/cli/src/args/` with empty files: `mod.rs`, `cli.rs`, `command.rs`, `target.rs`, `enums.rs`, `wrappers.rs`, `parsers.rs`, `completion.rs`.
-- [ ] Move `OutputFormat`, `CodeBlockOutput`, `RemoteFreshness`, `ValidateOutputFormat`, `GraphFormat`, `HashKind`, `SchemaValidateFormat`, `SchemaDetectFormat`, and the `impl From<HashKind>` block (spec lines 1–56, 491–630) → `args/enums.rs`.
-- [ ] Move `enum Command` (spec lines 58–450) → `args/command.rs`.
-- [ ] Move `ValidateTarget` and `SchemaTarget` (spec lines 452–489 and the part of 491–617 not already in `enums.rs`) → `args/target.rs`.
-- [ ] Move `struct Cli` and its top-level flags (spec lines 632–876) → `args/cli.rs`.
-- [ ] Move completion helpers `complete_markdown_files[_from]`, `complete_compose_args[_from]`, `complete_indent_values`, `complete_theme_names` (spec lines 878–1015) → `args/completion.rs`.
-- [ ] Move parsers `parse_indent_size`, `parse_theme_name`, `parse_cli_fill`, `parse_cli_length`, `parse_max_width`, `reject_width_flag`, `parse_bool_str` (spec lines 1017–1202) → `args/parsers.rs`.
-- [ ] Move wrapper types `PageBackgroundArg`, `CodeBlockArg`, `PageAlignmentArg`, `CliFill` and their `From` impls → `args/wrappers.rs`.
-- [ ] Distribute each new file's `#[cfg(test)] mod tests` alongside the symbols it covers (ADR-4).
-- [ ] Author `args/mod.rs` with `pub use` re-exports so callers keep the same `use crate::args::{Cli, Command, …}` paths.
-- [ ] Delete `darkmatter/cli/src/args.rs`.
-- [ ] Update `lib.rs` and `main.rs` if they referenced `args.rs` directly (they should not need changes if `pub use` is complete).
+- [x] Create `darkmatter/cli/src/args/` with empty files: `mod.rs`, `cli.rs`, `command.rs`, `target.rs`, `enums.rs`, `wrappers.rs`, `parsers.rs`, `completion.rs`.
+- [x] Move `OutputFormat`, `CodeBlockOutput`, `RemoteFreshness`, `ValidateOutputFormat`, `GraphFormat`, `HashKind`, `SchemaValidateFormat`, `SchemaDetectFormat`, and the `impl From<HashKind>` block (spec lines 1–56, 491–630) → `args/enums.rs`.
+- [x] Move `enum Command` (spec lines 58–450) → `args/command.rs`.
+- [x] Move `ValidateTarget` and `SchemaTarget` (spec lines 452–489 and the part of 491–617 not already in `enums.rs`) → `args/target.rs`.
+- [x] Move `struct Cli` and its top-level flags (spec lines 632–876) → `args/cli.rs`.
+- [x] Move completion helpers `complete_markdown_files[_from]`, `complete_compose_args[_from]`, `complete_indent_values`, `complete_theme_names` (spec lines 878–1015) → `args/completion.rs`.
+- [x] Move parsers `parse_indent_size`, `parse_theme_name`, `parse_cli_fill`, `parse_cli_length`, `parse_max_width`, `reject_width_flag`, `parse_bool_str` (spec lines 1017–1202) → `args/parsers.rs`.
+- [x] Move wrapper types `PageBackgroundArg`, `CodeBlockArg`, `PageAlignmentArg`, `CliFill` and their `From` impls → `args/wrappers.rs`.
+- [x] Distribute each new file's `#[cfg(test)] mod tests` alongside the symbols it covers (ADR-4).
+- [x] Author `args/mod.rs` with `pub use` re-exports so callers keep the same `use crate::args::{Cli, Command, …}` paths.
+- [x] Delete `darkmatter/cli/src/args.rs`.
+- [x] Update `lib.rs` and `main.rs` if they referenced `args.rs` directly (they should not need changes if `pub use` is complete).
 
 ### Phase 2 validation checkpoint
 
-- [ ] `cargo test -p darkmatter-cli` green with no snapshot diffs.
-- [ ] `md --help` byte-for-byte equal to `baseline/help.txt`.
-- [ ] `args.rs` deleted; no file in `args/` over ~500 lines.
-- [ ] No `pub use` regressions: `rg 'use crate::args::' darkmatter/cli/src` returns the same symbol set.
+- [x] `cargo test -p darkmatter-cli` green with no snapshot diffs.
+- [x] `md --help` byte-for-byte equal to `baseline/help.txt`.
+- [x] `args.rs` deleted; no file in `args/` over ~500 lines.
+- [x] No `pub use` regressions: `rg 'use crate::args::' darkmatter/cli/src` returns the same symbol set.
 
 ---
 
@@ -214,21 +261,21 @@ file-move.
 
 **Behavior:** preserving.
 
-- [ ] Create `darkmatter/cli/src/io/mod.rs` and move `load_markdown`, `resolve_file_path`, `read_from_stdin` (spec lines 388–452) into it.
-- [ ] Create `darkmatter/cli/src/commands/render.rs` and move `run_render` (spec lines 330–386).
-- [ ] Create `darkmatter/cli/src/commands/clean.rs` and move `resolve_list_spacing`, `run_clean`, `apply_cleanup` (spec lines 271–328).
-- [ ] Create `darkmatter/cli/src/commands/validate.rs` and move `run_validate` plus the report text printers (spec lines 454–616), now calling `ReportView` from Phase 1f.
-- [ ] Create `darkmatter/cli/src/commands/graph.rs` and move `run_graph` (spec lines 976–1036) — already slimmed by the Phase 1c serde derives.
-- [ ] Move dispatch (`run_subcommand`, `validate_subcommand_usage`, submodule declarations, `use` of `run_*`) (spec lines 17–53, 55–269) → `commands/mod.rs`.
-- [ ] Delete `darkmatter/cli/src/commands.rs`.
-- [ ] Update every `use crate::commands::…` and `use crate::io::…` import in `main.rs`, `lib.rs`, and the new sibling command files.
+- [x] Create `darkmatter/cli/src/io/mod.rs` and move `load_markdown`, `resolve_file_path`, `read_from_stdin` (spec lines 388–452) into it.
+- [x] Create `darkmatter/cli/src/commands/render.rs` and move `run_render` (spec lines 330–386).
+- [x] Create `darkmatter/cli/src/commands/clean.rs` and move `resolve_list_spacing`, `run_clean`, `apply_cleanup` (spec lines 271–328).
+- [x] Create `darkmatter/cli/src/commands/validate.rs` and move `run_validate` plus the report text printers (spec lines 454–616), now calling `ReportView` from Phase 1f.
+- [x] Create `darkmatter/cli/src/commands/graph.rs` and move `run_graph` (spec lines 976–1036) — already slimmed by the Phase 1c serde derives.
+- [x] Move dispatch (`run_subcommand`, `validate_subcommand_usage`, submodule declarations, `use` of `run_*`) (spec lines 17–53, 55–269) → `commands/mod.rs`.
+- [x] Delete `darkmatter/cli/src/commands.rs`.
+- [x] Update every `use crate::commands::…` and `use crate::io::…` import in `main.rs`, `lib.rs`, and the new sibling command files.
 
 ### Phase 3 validation checkpoint
 
-- [ ] `just test` green; no behavior diff.
-- [ ] `md --help` byte-for-byte equal to `baseline/help.txt`.
-- [ ] `commands.rs` deleted; `commands/mod.rs` owns only dispatch; no new file over ~500 lines.
-- [ ] `cargo metadata --no-deps --format-version 1` reports the same package set.
+- [x] `just test` green; no behavior diff.
+- [x] `md --help` byte-for-byte equal to `baseline/help.txt`.
+- [x] `commands.rs` deleted; `commands/mod.rs` owns only dispatch; no new file over ~500 lines.
+- [x] `cargo metadata --no-deps --format-version 1` reports the same package set.
 
 ---
 
@@ -246,29 +293,29 @@ must tie both halves together.
 
 ### ADR-1 ratification
 
-- [ ] Record decision in `log.md`: `CliStyleClaims` lives on `darkmatter::style` because that is where `apply_*_style` already lives. It is a neutral data model over `PageComponent`, `Layout`, `PaintColor`, etc. — no clap, no CLI-only wrapper types. The CLI builder is the only code that knows about `Cli`, `CliFill`, and clap aliases.
+- [x] Record decision in `log.md`: `CliStyleClaims` lives on `darkmatter::style` because that is where `apply_*_style` already lives. It is a neutral data model over `PageComponent`, `Layout`, `PaintColor`, etc. — no clap, no CLI-only wrapper types. The CLI builder is the only code that knows about `Cli`, `CliFill`, and clap aliases.
 
 ### Library work
 
-- [ ] Define `pub struct CliStyleClaims { … }` in `darkmatter/lib/src/style/` (new module or extend existing — match where `PageStyleOverrides` lives).
-- [ ] Implement `pub fn apply_cli_claims(page: &mut DarkmatterPage, claims: &CliStyleClaims)` — the **value side** of layout precedence (`margin > mx > mt`, etc.).
-- [ ] Implement `pub fn style_overrides_from_claims(claims: &CliStyleClaims) -> PageStyleOverrides` and the equivalent list/component/hr/disclosure/bespoke builders — the **claim side**, so frontmatter does not stomp claimed fields.
-- [ ] Add library unit tests asserting the precedence rules: `--mx` claims both left + right; `--margin` wins over `--mx`; `--align-lists` claims ul + ol + li; etc. These tests tie the two halves together (they did not exist today).
+- [x] Define `pub struct CliStyleClaims { … }` in `darkmatter/lib/src/style/` (new module or extend existing — match where `PageStyleOverrides` lives).
+- [x] Implement `pub fn apply_cli_claims(page: DarkmatterPage, claims: &CliStyleClaims) -> DarkmatterPage` — the **value side** of layout precedence (`margin > mx > mt`, etc.).
+- [x] Implement `pub fn style_overrides_from_claims(claims: &CliStyleClaims) -> PageStyleOverrides` and the equivalent list/component/hr/disclosure/bespoke builders — the **claim side**, so frontmatter does not stomp claimed fields.
+- [x] Add library unit tests asserting the precedence rules: `--mx` claims both left + right; `--margin` wins over `--mx`; `--align-lists` claims ul + ol + li; etc. These tests tie the two halves together (they did not exist today).
 
 ### CLI work
 
-- [ ] Create `darkmatter/cli/src/style_claims.rs` as the single CLI site that builds `CliStyleClaims` from a `&Cli`.
-- [ ] Migrate `apply_cli_layout_flags` / `apply_component_alignment` / `apply_component_fill` (currently in `output.rs`) to consume `CliStyleClaims`.
-- [ ] Migrate `apply_style_frontmatter` / `log_style_warnings` (currently in `output.rs`) to call `darkmatter::style::apply_cli_claims` and `style_overrides_from_claims`.
-- [ ] Delete `page_style_overrides_from_cli`, `list_style_overrides_from_cli`, `component_style_overrides_from_cli`, `hr_style_overrides_from_cli`, `disclosure_style_overrides_from_cli`, `bespoke_style_overrides_from_cli` from `output.rs`.
+- [x] Create `darkmatter/cli/src/style_claims.rs` as the single CLI site that builds `CliStyleClaims` from a `&Cli`.
+- [x] Migrate `apply_cli_layout_flags` / `apply_component_alignment` / `apply_component_fill` (currently in `output.rs`) to consume `CliStyleClaims`.
+- [x] Migrate `apply_style_frontmatter` / `log_style_warnings` (currently in `output.rs`) to call `darkmatter::style::apply_cli_claims` and `style_overrides_from_claims`.
+- [x] Delete `page_style_overrides_from_cli`, `list_style_overrides_from_cli`, `component_style_overrides_from_cli`, `hr_style_overrides_from_cli`, `disclosure_style_overrides_from_cli`, `bespoke_style_overrides_from_cli` from `output.rs`.
 
 ### Phase 4 validation checkpoint
 
-- [ ] `just test` + `just lint` green.
-- [ ] All existing layout-flag L2 tests pass unchanged — they encode the precedence contract.
-- [ ] New claim-precedence unit tests in `darkmatter/lib` all green.
-- [ ] `md --help` byte-for-byte equal to `baseline/help.txt`.
-- [ ] Only one source location encodes the precedence rules (verify with `rg 'fn .*_style_overrides_from_cli' darkmatter/cli` returns nothing).
+- [x] `just test` + `just lint` green.
+- [x] All existing layout-flag L2 tests pass unchanged — they encode the precedence contract.
+- [x] New claim-precedence unit tests in `darkmatter/lib` all green.
+- [x] `md --help` byte-for-byte equal to `baseline/help.txt`.
+- [x] Only one source location encodes the precedence rules (verify with `rg 'fn .*_style_overrides_from_cli' darkmatter/cli` returns nothing).
 
 ---
 
