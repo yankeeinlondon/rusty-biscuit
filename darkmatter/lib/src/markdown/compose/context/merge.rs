@@ -83,7 +83,7 @@ pub fn merge_ctx(
                 .collect();
 
             // Deep merge: start with user ctx as base, overlay runtime
-            let merged = crate::markdown::compose::state::deep_merge(
+            let merged = crate::markdown::compose::context::effective_state::deep_merge(
                 &Value::Object(user_obj.clone()),
                 &Value::Object(runtime_obj),
             );

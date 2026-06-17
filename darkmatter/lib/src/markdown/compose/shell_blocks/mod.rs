@@ -17,7 +17,7 @@ use super::shell_expansion::{
     apply_replacements_in_reverse, execute_prepared_directive, prepare_directive,
     resolve_policy_paths,
 };
-use super::types::ComposeReport;
+use super::ComposeReport;
 use crate::markdown::MarkdownResult;
 use std::path::PathBuf;
 use types::{ShellBlockCommandResult, SourceExcerpt};
@@ -118,6 +118,7 @@ pub(crate) fn run_shell_blocks_stage(
                 },
                 error_handling: region.options.clone(),
                 timeout_override: region.timeout_override,
+                no_cache: region.no_cache,
                 pipeline: Some(command.pipeline.clone()),
                 ctx: ctx.clone(),
             };
@@ -146,7 +147,7 @@ pub(crate) fn run_shell_blocks_stage(
         let mut results = Vec::new();
 
         for (prep, command) in prepared {
-            match execute_prepared_directive(&prep, options) {
+            match execute_prepared_directive(&prep, options, runtime) {
                 Ok(execution) => {
                     results.push(ShellBlockCommandResult {
                         output: execution.combined_output(),
@@ -294,6 +295,39 @@ mod tests {
             run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
         assert_eq!(result, content);
         assert_eq!(report.shell_blocks_applied, 0);
+    }
+
+    /// T7 — `::shell-block no_cache=true` runs every command fresh: two
+    /// `uuidgen` lines in one block yield distinct values.
+    #[test]
+    fn shell_block_no_cache_executes_fresh() {
+        if which::which("uuidgen").is_err() {
+            return;
+        }
+        let content = "::shell-block no_cache=true\nuuidgen\nuuidgen\n::end-block\n";
+        let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
+        let mut runtime = ShellExpansionRuntime::new();
+        let (result, _report) =
+            run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
+        let ids: Vec<&str> = result.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+        assert_eq!(ids.len(), 2, "expected two output lines: {result:?}");
+        assert_ne!(ids[0], ids[1], "no_cache=true must yield distinct values");
+    }
+
+    /// Default caching collapses identical commands across a shell block.
+    #[test]
+    fn shell_block_caches_by_default() {
+        if which::which("uuidgen").is_err() {
+            return;
+        }
+        let content = "::shell-block\nuuidgen\nuuidgen\n::end-block\n";
+        let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
+        let mut runtime = ShellExpansionRuntime::new();
+        let (result, _report) =
+            run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
+        let ids: Vec<&str> = result.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+        assert_eq!(ids.len(), 2, "expected two output lines: {result:?}");
+        assert_eq!(ids[0], ids[1], "cached command must share one value");
     }
 
     #[test]

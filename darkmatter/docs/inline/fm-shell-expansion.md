@@ -20,6 +20,7 @@ A top-level frontmatter property whose entire string value matches one of these 
 ```text
 $(<command and args>)
 $(<command and args>)::timeout:<seconds>
+$(<command and args>)::no-cache
 ```
 
 Examples:
@@ -28,6 +29,7 @@ Examples:
 ---
 files: "$(sniff repo dirty-files)"
 cwd: "$(pwd)::timeout:1"
+build_id: "$(uuidgen)::no-cache"
 ---
 ```
 
@@ -36,7 +38,8 @@ cwd: "$(pwd)::timeout:1"
 - The **entire** frontmatter value must be the shell expression -- embedded expressions like `"prefix $(cmd) suffix"` are not supported.
 - Only top-level string-valued frontmatter properties are scanned. Nested objects and array elements are ignored.
 - The optional `::timeout:<N>` suffix overrides the global shell timeout for that specific command. `N` must be a positive integer of seconds.
-- Once a value matches the `$(` shape, malformed syntax is a hard compose error. Invalid timeout suffixes, tokenizer failures, and rejected executable interpolation are not silently ignored.
+- The optional `::no-cache` suffix bypasses the per-compose command cache so the command executes fresh at each occurrence. It combines with `::timeout:<N>` in either order (e.g. `$(uuidgen)::no-cache::timeout:5`).
+- Once a value matches the `$(` shape, malformed syntax is a hard compose error. Invalid timeout suffixes, an unrecognized suffix, tokenizer failures, and rejected executable interpolation are not silently ignored.
 - Closing `)` characters inside quoted arguments are supported, so values like `$(printf ')')` parse correctly.
 
 ## Token Resolution

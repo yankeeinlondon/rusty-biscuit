@@ -1,3 +1,8 @@
+---
+reviewed: true
+status: "ready for planning and implementation"
+---
+
 # Compose Pipeline v2 — Pre-Flight Tech Design
 
 This document defines an implementation-ready redesign of how Darkmatter discovers, approves, and executes shell commands during composition. It supersedes the implicit behavior currently spread across:
@@ -9,6 +14,13 @@ This document defines an implementation-ready redesign of how Darkmatter discove
 - `darkmatter/docs/darkmatter-compose-pipeline.md` and `darkmatter/docs/inline/preflight-checks.md`
 
 The goal is to make pre-flight a first-class, well-defined stage with two clearly separated responsibilities — **approval** and **execution** — and to reconcile a spec/code drift discovered while reviewing the current implementation.
+
+Reader's note: this review treats the companion
+[`module-structure.md`](./module-structure.md) as part of the design surface.
+The implementation contract below therefore names the same split that the module
+structure defines: `compose/preflight` owns collection and validation,
+shared shell primitives move toward `compose/shell`, and condition-aware
+execution remains an inline stage with a run-local cache.
 
 ## Summary
 
@@ -22,7 +34,7 @@ The current code derives all three from a single condition-aware walk and interl
 
 The v2 design separates the concerns:
 
-- **Approval set** — condition-**blind**, computed once, up front, validated against the whitelist with a single batched prompt.
+- **Approval set** — condition-**blind**, computed once, up front, validated against blacklist/whitelist policy with a single batched prompt.
 - **Execution set** — condition-**aware**, resolved lazily in-stage; a command runs only when its branch is actually reached.
 - **Caching** — identical commands execute **once per compose by default**, with a `--no-cache` opt-out for volatile commands.
 
@@ -42,8 +54,10 @@ The governing invariant is `execution_set ⊆ approval_set`, so the execution-ti
 1. Changing the shell tokenizer, blacklist contents, or whitelist file formats.
 2. Persisting cache results across compose runs (cache is per-compose only).
 3. Cross-run or shared approval stores.
-4. Solving dynamic command generation whose cardinality depends on runtime/shell state (see Open Questions).
+4. Solving dynamic command generation whose cardinality depends on runtime/shell state.
 5. OS sandboxing or isolation.
+6. Replacing the current shell directive grammar beyond the minimum option
+   additions specified here.
 
 ## Background — The Drift
 
@@ -62,7 +76,14 @@ This drift has a concrete failure mode beyond philosophy: discovery strips shell
 
 ### Approval set (condition-blind)
 
-Every command that *could* execute under *any* state. Built by walking frontmatter, body, and the transclusion graph **without** evaluating any `when:` or page-block condition. Both sides of every ternary, every page block, and every conditionally-transcluded document contribute their commands. The set is deduped by normalized command string and validated against the blacklist/whitelist; unknowns trigger a single batched approval prompt (or a fast fail in non-interactive contexts).
+Every command that *could* execute under *any* state. Built by walking
+frontmatter, body, shell blocks, and the transclusion graph **without**
+evaluating any `when:` or page-block condition. Both sides of every frontmatter
+`$(...)` ternary, every `::block`, and every conditionally-transcluded document
+contribute their commands. The set is deduped by normalized command string and
+validated against the builtin blacklist, user blacklist, and whitelist; unknowns
+trigger a single batched approval prompt (or a fast fail in non-interactive
+contexts).
 
 ### Execution set (condition-aware)
 
@@ -99,6 +120,13 @@ Key change: approval (step 4) is a single, condition-blind, up-front stage. Exec
 
 Collection (4a) walks the transclusion graph. The discovered child set and their resolved-at-pass-1 frontmatter should be cached and reused to seed graph composition (step 9), so the graph is traversed for structure once rather than re-discovered. This removes the separate discovery compose that exists today.
 
+The reusable artifact is graph metadata, not fully rendered child Markdown:
+resolved child paths/URLs, overlay state, pass-1 frontmatter snapshots, source
+provenance, and any discovered shell entries. The final transclusion stage still
+renders condition-aware content at the normal point in the pipeline. This matches
+the module-structure decision to introduce a `TransclusionEngine` while avoiding
+a second compose pass that can drift from the execution path.
+
 ## Caching
 
 Identical commands (same normalized string) execute **once per compose**; the result is memoized and reused at every other call site. Caching is the **default**.
@@ -118,7 +146,8 @@ Identical commands (same normalized string) execute **once per compose**; the re
 
 ### Opt-out syntax
 
-Body and block directives use the existing `--flag` option style; frontmatter uses the existing `::key:value` style (mirrors `::timeout:`).
+The syntax intentionally follows each existing directive family rather than
+forcing one spelling everywhere:
 
 ```md
 ::shell uuidgen                 # cached (default)
@@ -134,13 +163,19 @@ version:  $(cat VERSION)            # cached
 ```
 
 ```md
-::shell-block --no-cache
+::shell-block no_cache=true
 date +%s
 uuidgen
 ::end-block
 ```
 
-`--no-cache` is the chosen keyword. (`--fresh` / `--volatile` were considered; `--no-cache` is the most conventional.)
+`--no-cache` is the chosen body-directive keyword. Frontmatter adds a boolean
+`::no-cache` suffix alongside the existing `::timeout:N` suffix. Shell blocks
+keep their documented key-value parameter grammar and use `no_cache=true`;
+`::shell-block --no-cache` must remain a parse error with the same targeted
+"shell blocks use key-value parameters" hint as other flag-style mistakes.
+`--fresh` / `--volatile` were considered; `no-cache` is the most conventional
+term and maps directly to the behavior.
 
 ### Discoverability guard
 
@@ -154,13 +189,13 @@ When the cache collapses a command whose executable is on a small known-volatile
 ---
 env: production
 ---
-::page when="env == 'production'"
+::block when="env == 'production'"
 ::shell ./deploy.sh --prod
-::end-page
+::end-block
 
-::page when="env == 'staging'"
+::block when="env == 'staging'"
 ::shell ./deploy.sh --staging
-::end-page
+::end-block
 ```
 
 - `approval_set` = `{ ./deploy.sh --prod, ./deploy.sh --staging }`
@@ -174,12 +209,12 @@ A later compose with `env=staging` runs the staging command with no new prompt �
 ---
 iteration: "{{ ctx.iteration }}"
 ---
-::page when="iteration % 2 == 0"
+::block when="iteration % 2 == 0"
 ::shell ./even-task.sh
-::end-page
-::page when="iteration % 2 == 1"
+::end-block
+::block when="iteration % 2 == 1"
 ::shell ./odd-task.sh
-::end-page
+::end-block
 ```
 
 - `approval_set` (once) = `{ ./even-task.sh, ./odd-task.sh }`
@@ -193,9 +228,9 @@ Condition-blind approval front-loads both branches, so no iteration interrupts t
 ---
 cleanup: false
 ---
-::page when="cleanup == true"
+::block when="cleanup == true"
 ::shell ./purge.sh ./build-artifacts
-::end-page
+::end-block
 ```
 
 - `approval_set` = `{ ./purge.sh ./build-artifacts }`
@@ -213,6 +248,23 @@ Pre-flight inside the pipeline sees only the document's commands. Claudine addit
 
 This preserves the existing "Darkmatter discovers, Claudine authorizes" separation while making the document-side collection condition-blind.
 
+### Public API shape
+
+Darkmatter should expose the document-side pre-flight result without forcing
+callers through the full compose execution path:
+
+- Add a library entry point equivalent to `Markdown::compose_preflight(options)`
+  returning a `ComposePreflightReport` with the deduped approval set, source
+  entries, warnings, and reusable transclusion graph metadata.
+- Keep `ComposeOptions::with_pre_approved_commands(...)` as the execution
+  membership channel.
+- Add an internal execution mode that accepts a previously collected pre-flight
+  report so `compose_with()` can avoid re-collecting after Claudine merges and
+  returns the approved set.
+- Keep the CLI's existing `md compose --shell` behavior, but route it through the
+  same pre-flight collector so `--shell` reports condition-blind approval
+  candidates rather than condition-aware execution candidates.
+
 ## Chicken-and-Egg Handling
 
 A body command whose parameters interpolate a shell-produced frontmatter value is collected at pass-1 state in unresolved form:
@@ -221,26 +273,71 @@ A body command whose parameters interpolate a shell-produced frontmatter value i
 ---
 branch: $(git branch --show-current)
 ---
-::shell git log {{ fm.branch }} -1
+::shell git log {{ doc.branch }} -1
 ```
 
-Collection sees `git log {{ fm.branch }}`; execution (post pass-2) sees `git log main`. The two differ, so the execution gate misses `approval_set` → `NotPreApproved`.
+Collection sees `git log {{ doc.branch }}`; execution (post pass-2) sees
+`git log main`. The two differ, so the execution gate would miss
+`approval_set` → `NotPreApproved`.
 
-v2 does not silently resolve this. Options, to be decided in the spec:
+v2 rejects this earlier instead of silently resolving it. The pre-flight
+collector must detect any body `::shell` or `::shell-block` command whose
+normalized command text depends on a frontmatter key still pending
+frontmatter-shell expansion after pass 1. That diagnostic is a hard pre-flight
+error and should explain the supported alternatives:
 
-1. **Document as unsupported** — frontmatter-shell-dependent command parameters are rejected at collection with a clear diagnostic.
-2. **Two-phase collection** — collect+approve+execute frontmatter commands, run pass 2, then collect+approve body commands. This restores correctness at the cost of a second approval round (still up front, before any body execution).
+- Move the dynamic value fully into the frontmatter command and reference its
+  output as document content rather than as a shell command argument.
+- Use a stable command shape whose dynamic value is not part of the executable
+  or argument vector being approved.
+- Split the document into two explicit compose runs if the second run really
+  must approve commands generated by the first run.
 
-Recommendation: ship option 1 with a precise error, evaluate option 2 if real documents need it.
+Two-phase collection was considered and rejected for v2. It restores correctness
+for this case, but it creates a second approval point after frontmatter commands
+have already executed, which conflicts with the single batched pre-flight
+contract and complicates Claudine's harness-command merge.
 
 ## Error Model
 
-Reuse existing `ShellExpansionError` variants. The execution-time membership check produces `NotPreApproved` (already defined). Pre-flight surfaces:
+Reuse existing `ShellExpansionError` variants where they already match the
+failure. The execution-time membership check produces `NotPreApproved` (already
+defined). Add only narrowly-scoped variants for new pre-flight-only failures.
+Pre-flight surfaces:
 
 - `Blacklisted` — builtin or user blacklist match during collection/validation.
 - `Denied` / blacklist-persist — interactive approval outcomes.
 - `ApprovalRequired` — non-interactive context with un-approved commands.
-- `PreFlightDiscoveryFailed` — collection walk (interpolation/transclusion) failed.
+- `PreFlightDiscoveryFailed` — collection walk (interpolation/transclusion)
+  failed; wraps the underlying Markdown or shell parse error with source
+  context.
+- `DynamicCommandShape` — a body command or shell-block command depends on a
+  frontmatter-shell-expanded value and therefore cannot be approved in the
+  condition-blind pass.
+
+`NotPreApproved` should remain a bug sentinel after the collector rejects
+dynamic command shapes. New tests should assert that user-authored dynamic
+shapes fail as `DynamicCommandShape`, not as a late `NotPreApproved`.
+
+## Module Structure Alignment
+
+The companion [`module-structure.md`](./module-structure.md) is the agreed structural
+target and is part of this feature's implementation plan (`plan.md`), with these constraints:
+
+- Implement `compose/preflight` as the home of collect → validate → approve.
+  It may reuse shell primitives, but it must not evaluate page-block or
+  transclusion `when=` conditions.
+- Move shared parser/tokenizer/policy/store code toward `compose/shell`, while
+  keeping condition-aware execution under `compose/inline/shell_expansion`.
+- Keep cache implementation local to shell execution for v2
+  (`inline/shell_cache.rs`). Do not merge it with the existing
+  content-hash transclusion cache unless implementation proves the shapes are
+  actually the same.
+- Extracting `TransclusionEngine` is useful because pre-flight and final
+  transclusion need the same graph traversal rules. The extraction must be
+  behavior-preserving before the condition-blind collection change lands.
+- The module move must update Claudine imports in the same change; the
+  no-shim decision is acceptable because these are monorepo-internal paths.
 
 ## Testing Strategy
 
@@ -250,18 +347,41 @@ Reuse existing `ShellExpansionError` variants. The execution-time membership che
 4. **Loop stability** — re-compose across flipping conditions issues zero new prompts after the first.
 5. **Cache default** — a pure command repeated N times executes once; output identical at all sites.
 6. **Cache opt-out** — `--no-cache uuidgen` repeated yields distinct values; document-order preserved.
-7. **Discoverability warning** — repeated volatile command without `--no-cache` emits the warning.
-8. **Chicken-and-egg** — frontmatter-shell-dependent body parameter produces the chosen diagnostic, not a silent mismatch.
-9. **Orchestrator merge** — harness commands plus document commands approve in one batch; execution membership-checks against the merged set.
+7. **Shell-block cache opt-out** — `::shell-block no_cache=true` repeats execute
+   fresh, while `::shell-block --no-cache` remains a targeted parse error.
+8. **Frontmatter cache opt-out** — `$(uuidgen)::no-cache` works alongside
+   `$(cmd)::timeout:N`; invalid suffix combinations receive a precise parse
+   error.
+9. **Discoverability warning** — repeated volatile command without `--no-cache`
+   emits the warning.
+10. **Dynamic command shape** — frontmatter-shell-dependent body parameters
+    produce `DynamicCommandShape`, not a silent mismatch or late
+    `NotPreApproved`.
+11. **Orchestrator merge** — harness commands plus document commands approve in
+    one batch; execution membership-checks against the merged set.
+12. **CLI shell listing** — `md compose --shell` reports commands from false
+    `::block when=...` regions and false `::file when=...` transclusions.
 
 ## Documentation Updates
 
 - Rewrite `darkmatter/docs/inline/preflight-checks.md` around the approval/execution split and cache-by-default.
 - Update `darkmatter/docs/darkmatter-compose-pipeline.md`: pre-flight becomes step 4 (collect → validate → approve); execution stays in-stage; remove the contradictory line-103 note and replace it with the condition-blind-approval / condition-aware-execution statement.
-- Add `--no-cache` to the `::shell`, frontmatter `$(...)`, and `::shell-block` references.
+- Update `darkmatter/docs/inline/shell-blocks.md` with `no_cache=true` and keep
+  the warning that shell blocks do not accept flag-style parameters.
+- Update CLI help for `md compose --shell` so "discovered" means
+  condition-blind approval candidates.
+- Add cache opt-out docs to the `::shell`, frontmatter `$(...)`, and
+  `::shell-block` references, using each surface's syntax.
 
-## Open Questions
+## Resolved Review Decisions
 
-1. Dynamic loops whose command cardinality depends on runtime/shell state cannot be fully enumerated at pre-flight. Document the boundary; decide whether a runtime approval fallback is acceptable.
-2. Chicken-and-egg: ship the diagnostic (option 1) or the two-phase collection (option 2)?
-3. Should the known-volatile allowlist for the discoverability warning be configurable, or a fixed builtin set?
+1. Dynamic loops whose command cardinality depends on runtime/shell state are
+   explicitly unsupported for v2. Do not add a runtime approval fallback; it
+   would violate the `execution_set ⊆ approval_set` invariant. Surface these as
+   `DynamicCommandShape` or `NotPreApproved` bug sentinels, depending on where
+   they are detected.
+2. Chicken-and-egg body command parameters use the diagnostic path, not
+   two-phase collection.
+3. The known-volatile allowlist for the discoverability warning is a fixed
+   builtin set for v2. Make it configurable only after real usage shows the
+   builtin list creates noise.

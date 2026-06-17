@@ -31,7 +31,7 @@ use std::path::PathBuf;
 
 use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeOptions;
-use crate::markdown::compose::types::{ComposeOperation, ComposeSource};
+use crate::markdown::compose::{ComposeOperation, ComposeSource};
 use crate::markdown::schemas::DarkmatterSchemas;
 use crate::markdown::schemas::coerce::coerce_frontmatter_with_pending;
 use crate::markdown::types::{MarkdownError, MarkdownResult};
@@ -168,14 +168,18 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
     // re-validates these pending values, so deferring would silently accept a
     // schema violation. In that case every problem is final and must be
     // reported here.
-    let shell_expansion_enabled =
-        options.is_enabled(ComposeOperation::FrontmatterShellExpansion);
+    // Deferral is sound when a later stage will expand and re-validate the
+    // `$(...)` value: either this pass runs frontmatter shell expansion, or the
+    // caller is a discovery pass that strips it but promises a terminal compose
+    // pass will re-validate (`defer_shell_pending_schema_problems`).
+    let defer_shell_pending = options.is_enabled(ComposeOperation::FrontmatterShellExpansion)
+        || options.defer_shell_pending_schema_problems;
     let fm_map = markdown.frontmatter().as_map();
     let composition_independent: Vec<_> = report
         .problems
         .iter()
         .filter(|p| {
-            if !shell_expansion_enabled {
+            if !defer_shell_pending {
                 return true;
             }
             let Some(name) = top_level_pointer_segment(&p.path) else {

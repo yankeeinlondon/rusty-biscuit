@@ -9,7 +9,6 @@ use std::collections::HashSet;
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeOptions;
-use darkmatter::markdown::compose::shell_expansion::discovery::collect_shell_commands;
 use darkmatter::markdown::compose::shell_expansion::policy::normalize_command;
 
 use crate::composition::error::CompositionError;
@@ -52,10 +51,14 @@ pub fn resolve_shell_approvals(
     let mut all_commands: Vec<(String, std::path::PathBuf, usize)> = Vec::new();
 
     // -- Source 1: Template ::shell directives ---------------------------------
+    // Darkmatter discovers condition-blind: every command that could run under
+    // any document state (including dead branches). Claudine authorizes the
+    // union of these plus harness commands below.
     if let (Some(md), Some(opts)) = (markdown, compose_options) {
-        let entries =
-            collect_shell_commands(md, opts).map_err(CompositionError::PreFlightDiscoveryFailed)?;
-        for entry in &entries {
+        let preflight = md
+            .compose_preflight(opts)
+            .map_err(CompositionError::PreFlightDiscoveryFailed)?;
+        for entry in &preflight.entries {
             all_commands.push((
                 entry.normalized.clone(),
                 entry.source_file.clone(),

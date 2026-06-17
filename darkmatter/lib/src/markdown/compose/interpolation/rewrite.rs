@@ -7,7 +7,7 @@
 
 use super::{EvalResult, Evaluator, ExpressionFinder, ExpressionLocation, parse};
 use crate::markdown::compose::expression::{EvaluationLookup, UNKNOWN_FUNCTION_PREFIX};
-use crate::markdown::compose::types::ComposeWarning;
+use crate::markdown::compose::ComposeWarning;
 use crate::markdown::types::MarkdownError;
 use serde_json::Value;
 
@@ -222,8 +222,8 @@ fn whole_value_scalar<L: EvaluationLookup>(input: &str, evaluator: &Evaluator<L>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::compose::state::EffectiveStateBuilder;
-    use crate::markdown::compose::types::ComposeContext;
+    use crate::markdown::compose::EffectiveStateBuilder;
+    use crate::markdown::compose::ComposeContext;
     use serde_json::json;
     use std::collections::HashMap;
 
