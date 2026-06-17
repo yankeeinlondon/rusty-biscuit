@@ -916,6 +916,66 @@ mod integration_tests {
         assert_ne!(ids[0], ids[1], "--no-cache must yield distinct values");
     }
 
+    /// Cache keys must preserve chain operators. `false || echo fallback` and
+    /// `false && echo fallback` normalize to the same per-action commands
+    /// (`false`, `echo fallback`) but have different execution semantics. The
+    /// `&&` chain must not be served from the `||` chain's cache entry.
+    #[test]
+    fn cache_key_preserves_chain_operators() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell false || echo fallback\n\n::shell false && echo fallback\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let result = md.compose_with(options);
+        let err = result.expect_err(
+            "the `&&` chain must fail (exit 1) instead of reusing the `||` chain's cached success",
+        );
+        assert!(
+            err.to_string().contains("exit 1"),
+            "expected ExecutionFailed exit 1, got: {err}"
+        );
+    }
+
+    /// Cache keys must preserve redirection. `echo a` and `echo a > /dev/null`
+    /// differ only in redirection and must produce distinct cache entries.
+    #[test]
+    fn cache_key_preserves_redirection() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell echo visible > /dev/null && echo cached\n\n::shell echo cached\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        let body = composed.content();
+        // The first directive suppresses `echo visible` (> /dev/null) and only
+        // emits `echo cached`. The second directive emits `echo cached` too.
+        // If redirection were dropped from the key, the second directive would
+        // reuse the first's cache entry (still "cached") — same output, so
+        // assert the suppressed command never leaks into the body instead.
+        assert!(
+            !body.contains("visible"),
+            "redirection must suppress output; got: {body:?}"
+        );
+        assert_eq!(body.matches("cached").count(), 2, "got: {body:?}");
+    }
+
     /// T9 — a repeated volatile command without `--no-cache` emits a single
     /// discoverability warning.
     #[test]
