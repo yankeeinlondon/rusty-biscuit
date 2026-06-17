@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-b4ff566298eef5fc
-last_updated: 2026-06-15
+hash: 87f17662fa397abe-8f3baf954d17f806
+last_updated: 2026-06-17
 ---
 
 # darkmatter
@@ -99,8 +99,29 @@ Implemented:
 No valid v1 schema keys remain unwired.
 
 CLI flags win over frontmatter field-by-field. For implementation details, read
-`darkmatter/lib/src/style/{parse.rs,apply.rs}` and
+`darkmatter/lib/src/style/{parse.rs,apply.rs,cli_claims.rs}` and
 `renderable/features/2026-05-23-style-property/`.
+
+## CLI-Neutral Style Claims (`CliStyleClaims`)
+
+`darkmatter::style::CliStyleClaims` is a neutral data model that captures every
+layout/style flag a CLI (or any other caller) may claim. It uses only
+library/layout types — no clap or CLI-only wrappers:
+
+- `apply_cli_claims(page, claims)` applies the **value side** of CLI layout
+  precedence (`margin > mx > mt`, `alignment > align-lists > align-ul`, etc.).
+- `page_style_overrides_from_claims`, `component_style_overrides_from_claims`,
+  `list_style_overrides_from_claims`, `hr_style_overrides_from_claims`,
+  `disclosure_style_overrides_from_claims`, and
+  `bespoke_style_overrides_from_claims` return the **claim-side** override bits
+  consumed by `apply_page_style`, `apply_component_style`, `apply_list_style`,
+  `apply_hr_style`, `apply_disclosure_style`, and `apply_bespoke_style` so
+  frontmatter does not overwrite CLI-claimed fields.
+
+`darkmatter-cli` lowers its parsed `Cli` into `CliStyleClaims` in exactly one
+place: `darkmatter/cli/src/style_claims.rs`. This collapses the previous
+duplication where value application and override-bit construction were both
+implemented in `output.rs`.
 
 ## Common Entry Points
 
