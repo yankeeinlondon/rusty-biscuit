@@ -129,7 +129,7 @@ deps:
     set -euo pipefail
 
     echo
-    sniff repo deps "$(sniff repo package-area)"
+    sniff repo package-dependencies "$(sniff repo package-area)"
 
 # Run tests with `cargo test` or `cargo nextest run`
 _test pkg *args="":
