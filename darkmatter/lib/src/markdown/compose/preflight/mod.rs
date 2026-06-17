@@ -141,6 +141,22 @@ impl PreflightGraphNode {
         })
     }
 
+    /// Returns the child node this document transcluded from `url`, if any.
+    ///
+    /// The remote analogue of [`Self::child_for_source`]. A fetched Markdown
+    /// child is recorded during the walk with its source stored as the URL
+    /// string (see [`PreflightGraphNode::source`] and the `Url` arm of the
+    /// collector). Threading the matching sub-node into a remote child compose
+    /// lets grandchild URL resolution be reused too — the recursive half of the
+    /// graph reuse the v2 design calls for, now closed for URL children as well
+    /// as local files.
+    pub(crate) fn child_for_url(&self, url: &url::Url) -> Option<&PreflightGraphNode> {
+        let want = PathBuf::from(url.to_string());
+        self.children
+            .iter()
+            .find(|child| child.source.as_deref() == Some(want.as_path()))
+    }
+
     /// Walks this node and every descendant, yielding one entry per unique
     /// normalized command in discovery order.
     pub fn flattened_entries(&self) -> Vec<&ShellCommandEntry> {

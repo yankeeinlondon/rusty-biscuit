@@ -3431,6 +3431,102 @@ mod remote_transclusion_tests {
         assert_eq!(rf.fetched, 2, "Both parent and nested child fetched once");
     }
 
+    /// Recursive preflight graph reuse for **remote** children (review-6
+    /// Medium): the preflight walk discovers root → remote child → remote
+    /// grandchild, and reusing the graph must thread each remote child its own
+    /// sub-node so the grandchild URL resolution is reused too — the remote
+    /// analogue of `preflight_graph_reuse_recurses_to_grandchild`. The
+    /// graph-seeded compose must match the no-graph baseline and still reach the
+    /// grandchild body.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn preflight_graph_reuse_recurses_to_remote_grandchild() {
+        use crate::markdown::compose::preflight::PreflightResolvedTarget;
+
+        let server = MockServer::start().await;
+        let grandchild_url = format!("{}/grandchild.md", server.uri());
+        let child_url = format!("{}/child.md", server.uri());
+
+        Mock::given(method("GET"))
+            .and(path("/child.md"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(format!("# Child\n\n::file {grandchild_url}\n")),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/grandchild.md"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("GRANDCHILD-CONTENT-MARKER"))
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let content = format!("# Local\n\n::file {child_url}\n");
+        std::fs::write(&root, &content).unwrap();
+
+        let md: Markdown = content.as_str().into();
+        let config = RemoteReadConfig {
+            allowed_hosts: vec!["127.0.0.1".into()],
+            ..Default::default()
+        };
+        let base_options = ComposeOptions::new()
+            .with_source_file(&root)
+            .with_allow_remote_transclusion(true)
+            .with_remote_read_config(config)
+            .disable(ComposeOperation::Cleanup)
+            .disable(ComposeOperation::Normalization);
+
+        // The walked graph is recursive across the URL edges: the root's single
+        // edge points at the remote child, whose own single edge points at the
+        // remote grandchild.
+        let preflight = md.compose_preflight(&base_options).unwrap();
+        assert_eq!(
+            preflight.preflight_graph.edges.len(),
+            1,
+            "root should have one remote edge: {:?}",
+            preflight.preflight_graph
+        );
+        let child_node = &preflight.preflight_graph.edges[0].child;
+        assert_eq!(
+            child_node.edges.len(),
+            1,
+            "remote child node should carry one grandchild edge: {child_node:?}"
+        );
+        match &child_node.edges[0].resolved_target {
+            PreflightResolvedTarget::Url(u) => assert_eq!(
+                u.as_str(),
+                grandchild_url,
+                "child node's edge should carry the resolved grandchild URL"
+            ),
+            other => panic!("grandchild edge should resolve to a Url target, got {other:?}"),
+        }
+
+        // Compose WITHOUT the preflight graph — baseline output.
+        let (baseline, _) = md.compose_with(base_options.clone()).unwrap();
+        assert!(
+            baseline.content().contains("GRANDCHILD-CONTENT-MARKER"),
+            "baseline did not transclude remote grandchild: {}",
+            baseline.content()
+        );
+
+        // Compose WITH the preflight graph — must reach the grandchild via the
+        // threaded remote sub-node and stay byte-identical to the baseline.
+        let with_graph_options =
+            base_options.with_preflight_graph(preflight.preflight_graph.clone());
+        let (with_graph, _) = md.compose_with(with_graph_options).unwrap();
+        assert!(
+            with_graph.content().contains("GRANDCHILD-CONTENT-MARKER"),
+            "graph-seeded compose did not transclude remote grandchild: {}",
+            with_graph.content()
+        );
+        assert_eq!(
+            with_graph.content(),
+            baseline.content(),
+            "recursive remote preflight-graph reuse must produce byte-identical output to the baseline"
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn interpolated_directive_creates_fetchable_remote_file() {
         let server = MockServer::start().await;

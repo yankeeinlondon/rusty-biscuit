@@ -970,6 +970,14 @@ impl<'a> TransclusionEngine<'a> {
                 };
                 let mut child_options = options.clone();
                 child_options.source = child_source;
+                // Recursive graph reuse for remote children: hand the child its
+                // OWN preflight sub-node (whose edges point at grandchildren) so
+                // its transclusion stage reuses grandchild URL/path resolution
+                // too. Mirrors the local-file path; a miss falls back to None.
+                child_options.preflight_graph = options
+                    .preflight_graph()
+                    .and_then(|graph| graph.child_for_url(&url).cloned())
+                    .map(std::sync::Arc::new);
 
                 let child_report = child
                     .run_compose_pipeline_internal(child_options, &mut child_runtime)?;
