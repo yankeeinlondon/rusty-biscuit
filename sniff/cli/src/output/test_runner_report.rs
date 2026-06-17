@@ -89,29 +89,18 @@ pub fn entry_names(entries: &[TestRunnerAttribution]) -> Vec<&'static str> {
     names
 }
 
-/// Plain-text (un-styled) rendering of one entry for the machine formats under
-/// `--verbose`: the runner name plus its evidence source and, in a multi-runner
-/// list, the attributing package. The same provenance the styled CSV shows,
-/// without ANSI or hyperlinks so it stays pipe-friendly.
-pub fn entry_plain(entry: &TestRunnerAttribution, multi: bool) -> String {
-    let name = entry.usage.runner.info().display_name;
-    let mut detail = vec![source_detail_plain(&entry.usage.source)];
-    if multi && entry.packages.len() == 1 {
-        detail.push(format!("{} package", entry.packages[0]));
-    }
-    format!("{name} ({})", detail.join(", "))
-}
-
-/// Plain-text counterpart to [`source_detail_markup`] (no styling or link).
-fn source_detail_plain(source: &TestRunnerSource) -> String {
-    match source {
-        TestRunnerSource::Config { path, .. } => {
-            format!("configuration located at: {path}")
-        }
-        TestRunnerSource::Manifest { key } => format!("declared as dependency: {key}"),
-        TestRunnerSource::EcosystemDefault => "ecosystem default".to_string(),
-        TestRunnerSource::Convention => "by convention".to_string(),
-    }
+/// Styled rendering of a single entry (name + verbose detail + attribution),
+/// for the `--list` / `--md` / `--csv` formats under `--verbose`. Identical
+/// styling to the default CSV; only the join delimiter differs at the call
+/// site. `--plain` strips the styling as usual.
+pub fn render_one(
+    entry: &TestRunnerAttribution,
+    verbose: u8,
+    multi: bool,
+    repo_root: &Path,
+    term: &Terminal,
+) -> String {
+    Prose::new(entry_markup(entry, verbose, multi, repo_root)).render(term)
 }
 
 /// Markup for one entry: the bold runner name, plus a parenthetical with the

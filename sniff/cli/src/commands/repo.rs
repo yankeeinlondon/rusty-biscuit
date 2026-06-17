@@ -570,14 +570,19 @@ pub(super) fn handle_repo_test_runner(
     }
 
     let rendered = if args.csv || args.list || args.md {
-        // Machine formats (plain text). Without -v: distinct runner names only.
-        // With -v: each item keeps the evidence/attribution the styled CSV
-        // shows, rendered as plain text in the chosen delimiter.
+        // `--csv`/`--list`/`--md` select the delimiter. Without -v: distinct
+        // runner names only. With -v: each item keeps the same styled
+        // evidence/attribution the default CSV shows (`--plain` strips styling).
         let items: Vec<String> = if verbose > 0 {
             let multi = entries.len() > 1;
+            let term = Terminal::default();
             entries
                 .iter()
-                .map(|entry| crate::output::test_runner_report::entry_plain(entry, multi))
+                .map(|entry| {
+                    crate::output::test_runner_report::render_one(
+                        entry, verbose, multi, &root, &term,
+                    )
+                })
                 .collect()
         } else {
             crate::output::test_runner_report::entry_names(&entries)

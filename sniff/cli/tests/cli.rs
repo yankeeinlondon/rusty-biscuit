@@ -2159,24 +2159,36 @@ fn test_repo_test_runner_output_modes() {
 
 #[test]
 fn test_repo_test_runner_verbose_machine_formats_keep_evidence() {
-    // `--list`/`--md`/`--csv` with `-v` carry the same provenance the styled
-    // CSV shows, formatted per their delimiter, as pipe-friendly plain text.
+    // `--list`/`--md`/`--csv` with `-v` carry the same styled provenance the
+    // default CSV shows, formatted per their delimiter (`--plain` strips ANSI;
+    // the config link degrades to a Markdown link in plain mode).
     let (_dir, path) = create_cargo_workspace_repo();
     std::fs::create_dir_all(path.join(".config")).unwrap();
     std::fs::write(path.join(".config/nextest.toml"), "[profile.default]\n").unwrap();
     let base = path.to_str().unwrap();
 
-    cargo_bin_cmd!("sniff")
-        .args(["--base", base, "repo", "test-runner", "-v", "--list"])
+    let list = cargo_bin_cmd!("sniff")
+        .args(["--base", base, "repo", "test-runner", "-v", "--list", "--plain"])
         .assert()
         .success()
-        .stdout("cargo-nextest (configuration located at: .config/nextest.toml)\n");
+        .get_output()
+        .stdout
+        .clone();
+    let list = String::from_utf8_lossy(&list);
+    assert!(
+        list.starts_with("cargo-nextest (configuration located at:")
+            && list.contains(".config/nextest.toml"),
+        "--list -v should keep the evidence, got {list:?}"
+    );
 
     cargo_bin_cmd!("sniff")
-        .args(["--base", base, "repo", "test-runner", "-v", "--md"])
+        .args(["--base", base, "repo", "test-runner", "-v", "--md", "--plain"])
         .assert()
         .success()
-        .stdout("- cargo-nextest (configuration located at: .config/nextest.toml)\n");
+        .stdout(
+            predicate::str::starts_with("- cargo-nextest (configuration located at:")
+                .and(predicate::str::contains(".config/nextest.toml")),
+        );
 
     // Without -v the machine formats stay names-only.
     cargo_bin_cmd!("sniff")

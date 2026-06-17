@@ -126,20 +126,23 @@ directory directly (no package attribution to carry).
 | `--json` | Emit the structured report (see below). |
 | `-v/--verbose` | Add each runner's evidence source (and, in a list, its package). |
 
-The default output is a styled CSV that adds evidence under `-v` and package
-attribution in a multi-runner list. `--csv`/`--list`/`--md` are **machine
-formats** (plain text, no styling/hyperlinks), mutually exclusive:
+`--csv`/`--list`/`--md` select the **delimiter** (comma, newline, `- ` list);
+styling is governed by the terminal and `--plain`, and detail by `-v`. They are
+mutually exclusive. The default (no format flag) is a CSV.
 
 - without `-v` — distinct runner names only.
-- with `-v` — each item keeps the same provenance the styled CSV shows
-  (`configuration located at: …`, `declared as dependency: …`, plus the package
-  in a multi-runner list), as plain text in the chosen delimiter. For example
-  `--list -v`:
+- with `-v` — each item keeps the same styled provenance the default CSV shows
+  (`configuration located at: …` with a clickable link, `declared as
+  dependency: …`, plus the package in a multi-runner list), in the chosen
+  delimiter. For example `--list -v`:
 
   ```
   cargo-nextest (configuration located at: .config/nextest.toml)
   vitest (declared as dependency: vitest, sniff-cli package)
   ```
+
+Add `--plain` to strip styling for scripting; the config link then degrades to a
+Markdown link.
 
 ## Exit Codes
 
