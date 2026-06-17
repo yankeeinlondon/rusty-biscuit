@@ -68,6 +68,7 @@ Determines what test runner is declared by the current repo/package context. Hos
 The design decisions in `test-runner-strategy.md` are accepted for v1:
 
 - `sniff software test-runners` searches project-local bins as well as global `PATH`, and reports `availability` (`installed`, `local`, `via_parent`, `not_found`) instead of a bare boolean.
+- `sniff software test-runners` is **report-only**: unlike the other eight software categories it has no `install` / `install-plan` action. Test runners do not fit the host-install model — class B/C runners are subcommands of a parent tool (`cargo test`, `go test`, `dotnet test`) with nothing to install on their own, and class D runners are vendored per-project (`node_modules/.bin`, `vendor/bin`) rather than installed globally. The leaf reports availability only.
 - package-manager global bin directories that are not on `PATH` are deferred to a follow-up.
 - built-in ecosystem defaults are reported with `source: EcosystemDefault`.
 - orchestrators such as `tox` and `nox` are reported with `kind: orchestrator`.
@@ -154,7 +155,7 @@ Implement version detection in the library, not in the CLI. The command should i
 - Go: `null` unless the repo has an explicit version source already modeled by Sniff
 - JVM/.NET/PHP/Ruby/Elixir: use the ecosystem manifest version when the parser added for this feature can read it safely; otherwise return `null`
 
-`sniff repo version --json` keeps the focused leaf shape `{ "version": string | null }`. A missing version is not an error.
+`sniff repo version --json` keeps the focused leaf shape `{ "version": string | null }`. A missing version **is** an error: the command exits with a nonzero status when no version is found (text mode prints nothing; `--json` still emits `{ "version": null }` on stdout). A `--no-error` flag removes the nonzero exit code while still returning `null` (JSON) / empty output (text) on stdout, for callers that treat absence as a normal outcome.
 
 ### Fix Base JSON payload for `sniff repo --json`
 

@@ -86,7 +86,7 @@ Follow the established 9th-category pattern (the `Editor`/`Utility` blueprint):
 2. `impl CategoryEnum for TestRunner` (`category_name() = "test-runners"`, `serde_key`, `variant_index`).
 3. `pub type InstalledTestRunners = CategoryDetector<TestRunner>;`
 4. Add `test_runners` field to `ProgramsInfo`; detect in parallel via the shared `Arc<ExecutableIndex>` in `ProgramsInfo::detect()`.
-5. CLI: `define_program_action!(TestRunnerAction, …)`, add `SoftwareTestRunners` to the `Commands`/`OutputFilter` enums, render via `render_programs_markdown` / `build_programs_json`.
+5. CLI: add `SoftwareSubcommand::TestRunners` (a **report-only leaf** — no `install` / `install-plan` action, unlike the other eight categories) and `OutputFilter::TestRunners`, render via `render_programs_markdown` / `build_programs_json`. Test runners do not fit the host-install model (class B/C are parent-tool subcommands; class D are vendored per-project), so the `define_program_action!(TestRunnerAction, …)` install machinery is intentionally **not** wired for this category.
 
 ### Local-install detection (capturing project-local variants)
 
@@ -292,7 +292,7 @@ Verified June 2026. `dep key` = exact manifest dependency name; `config` = exact
 - New `TestRunnerSpec` table keyed by `TestRunner` ordinal (the §4 signals).
 
 **CLI:**
-- `args/mod.rs` — `Commands::SoftwareTestRunners`, `OutputFilter::TestRunners`, `define_program_action!`.
+- `args/mod.rs` — `SoftwareSubcommand::TestRunners` (report-only leaf, no `define_program_action!`), `OutputFilter::TestRunners`.
 - `args/repo.rs` — `RepoSubcommand::TestRunner` + `RepoAction::TestRunner`.
 - `args/mod.rs:683` — map in `to_repo_action()`.
 - `commands/repo.rs` — `handle_repo_test_runner()` modeled on `handle_repo_packages()`, using the shared `aggregate_distinct` helper (also back-fits `package-manager`).
