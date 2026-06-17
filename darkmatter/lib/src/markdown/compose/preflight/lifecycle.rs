@@ -50,10 +50,17 @@ pub struct PreflightApprovalStats {
 /// input for `ComposeOptions::with_pre_approved_commands(...)`. The
 /// caller passes it to `compose_with(...)` so the execution path is a
 /// pure membership check against an already-batched approval set.
+///
+/// The [`preflight_graph`](Self::preflight_graph) is the transclusion graph
+/// the collection walk already discovered. The caller hands it back through
+/// `ComposeOptions::with_preflight_graph(...)` so the final transclusion stage
+/// reuses the resolved targets instead of resolving them a third time — the v2
+/// design's "reuse the collection walk" goal on the primary user-facing path.
 #[derive(Debug, Clone, Default)]
 pub struct ComposePreflightApprovals {
     pub pre_approved_commands: HashSet<String>,
     pub stats: PreflightApprovalStats,
+    pub preflight_graph: super::PreflightGraphNode,
 }
 
 impl Markdown {
@@ -189,6 +196,7 @@ impl Markdown {
                 already_whitelisted,
                 user_approved,
             },
+            preflight_graph: report.preflight_graph,
         })
     }
 }
@@ -522,5 +530,78 @@ mod lifecycle_tests {
             .collect();
         assert_eq!(seen, vec!["echo a", "echo b", "echo c"]);
         assert_eq!(approvals.pre_approved_commands.len(), 3);
+    }
+
+    /// Review-4 Medium: the approval lifecycle returns the transclusion graph
+    /// it already walked, and the CLI-shaped flow attaches it to the compose
+    /// options so the Transclusion phase reuses it. The `::file` sits after a
+    /// pruned page block, so a graph that reuses stale spans would corrupt
+    /// output — proving the attached graph is actually exercised. The
+    /// graph-seeded compose must match the no-graph baseline byte-for-byte.
+    #[test]
+    fn preflight_lifecycle_carries_graph_into_transclusion() {
+        use std::io::Write;
+
+        let temp = TempDir::new().unwrap();
+        let child_path = temp.path().join("child.md");
+        let mut child = std::fs::File::create(&child_path).unwrap();
+        writeln!(child, "CHILD-FROM-LIFECYCLE-GRAPH").unwrap();
+
+        let root_path = temp.path().join("root.md");
+        let mut root = std::fs::File::create(&root_path).unwrap();
+        writeln!(root, "---").unwrap();
+        writeln!(root, "flag: false").unwrap();
+        writeln!(root, "---").unwrap();
+        writeln!(root, "::shell echo hello").unwrap();
+        writeln!(root, "::block when=\"flag\"").unwrap();
+        writeln!(root, "Padding that is pruned and shifts the ::file offset.").unwrap();
+        writeln!(root, "::end-block").unwrap();
+        writeln!(root, "::file ./child.md").unwrap();
+
+        let root_content = std::fs::read_to_string(&root_path).unwrap();
+        let md: Markdown = root_content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[
+                ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::PageBlocks,
+                ComposeOperation::ShellExpansion,
+                ComposeOperation::BlockTransclusion,
+            ])
+            .with_shell_policy_root(temp.path())
+            .with_source_file(&root_path);
+
+        let handler = Arc::new(RecordingHandler::new(ShellApprovalDecision::AllowOnce));
+        let approvals = md
+            .compose_preflight_approvals(&options, Some(handler.clone()))
+            .unwrap();
+
+        // The lifecycle surfaced the graph with the child edge.
+        assert_eq!(
+            approvals.preflight_graph.edges.len(),
+            1,
+            "lifecycle must return the walked graph: {:?}",
+            approvals.preflight_graph
+        );
+
+        // CLI-shaped flow: attach BOTH the approval set and the graph.
+        let graph_options = options
+            .clone()
+            .with_pre_approved_commands(approvals.pre_approved_commands.clone())
+            .with_preflight_graph(approvals.preflight_graph.clone());
+        let (with_graph, _) = md.compose_with(graph_options).unwrap();
+
+        // Baseline: same approvals, no graph.
+        let baseline_options =
+            options.with_pre_approved_commands(approvals.pre_approved_commands);
+        let (baseline, _) = md.compose_with(baseline_options).unwrap();
+
+        assert_eq!(
+            with_graph.content(),
+            baseline.content(),
+            "graph-seeded compose must match the no-graph baseline byte-for-byte"
+        );
+        assert!(with_graph.content().contains("CHILD-FROM-LIFECYCLE-GRAPH"));
+        assert!(!with_graph.content().contains("Padding that is pruned"));
     }
 }

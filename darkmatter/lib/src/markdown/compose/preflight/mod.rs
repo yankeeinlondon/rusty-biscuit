@@ -32,25 +32,27 @@ use crate::markdown::compose::transclusion;
 use crate::markdown::compose::{ComposeOptions, ComposeWarning};
 use crate::markdown::compose::shell_expansion::types::{ShellCommandEntry, ShellExpansionError};
 use crate::markdown::types::MarkdownResult;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// One edge in the preflight graph: a transclusion directive and the
 /// resolved target it points to, captured during the condition-blind
 /// pre-flight walk.
 ///
 /// The edge carries the directive's parsed shape (span, line, options,
-/// kind) **and** the resolved target. The transclusion engine consumes this
-/// to skip its own directive parse + target-resolution pass for the
-/// directive this edge describes, then recurses into [`Self::child`] for
-/// the next level of the graph.
+/// kind) **and** the resolved target. The transclusion engine reuses the
+/// resolved target to skip a second `resolve_target` pass, but re-parses the
+/// directive against the current content for the replacement span (the
+/// preflight span predates frontmatter shell expansion and other
+/// offset-shifting stages). It then recurses into [`Self::child`] for the next
+/// level of the graph.
 #[derive(Debug, Clone)]
 pub struct PreflightGraphEdge {
-    /// The parsed directive that produced this edge.
+    /// The parsed directive that produced this edge. Its `raw_target` keys the
+    /// resolution cache; its span is **not** reused for replacement.
     pub directive: transclusion::BlockDirective,
     /// Resolved target for the directive: a canonical local path or a
-    /// remote URL. The transclusion engine uses this directly to construct
-    /// a `PreparedTransclusion` without calling
-    /// `transclusion::resolve_target` a second time.
+    /// remote URL. The transclusion engine uses this as a resolution cache to
+    /// avoid calling `transclusion::resolve_target` a second time.
     pub resolved_target: PreflightResolvedTarget,
     /// The child document this edge points to. Reuse recurses through
     /// `child.edges` for nested transclusions.
@@ -94,8 +96,9 @@ pub struct PreflightGraphNode {
     /// Outgoing transclusion edges, in directive order. Each edge carries the
     /// directive that produced the child reference plus the resolved target,
     /// so a consumer (e.g. [`TransclusionEngine`](crate::markdown::compose::transclusion::TransclusionEngine))
-    /// can build `PreparedTransclusion` items from this graph without
-    /// re-parsing directives or re-resolving targets.
+    /// can reuse the resolved targets as a resolution cache and skip a second
+    /// `resolve_target` pass. Replacement spans are taken from a fresh parse of
+    /// the current content, not from these cached directives.
     ///
     /// Empty when this document is a leaf or has no transclusion directives.
     pub edges: Vec<PreflightGraphEdge>,
@@ -106,10 +109,36 @@ pub struct PreflightGraphNode {
     pub children: Vec<PreflightGraphNode>,
 }
 
+/// Best-effort canonical form of a path for source-equality comparison.
+///
+/// Falls back to the path as-given when it does not exist on disk (e.g. a
+/// remote source recorded as its URL string), so comparison still works.
+fn canonical_key(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
 impl PreflightGraphNode {
     /// Returns `true` when this node has no entries and no edges.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty() && self.edges.is_empty()
+    }
+
+    /// Returns the child node this document transcluded from `path`, if any.
+    ///
+    /// Used by the transclusion engine to thread the matching sub-graph into a
+    /// recursive child compose, so grandchild target resolution is reused too
+    /// (the recursive half of the graph reuse the v2 design calls for). Sources
+    /// are compared after a best-effort canonicalization so a relative directive
+    /// target and the stored absolute source still match. Both body-edge
+    /// children and frontmatter prologue/epilogue children are searched.
+    pub(crate) fn child_for_source(&self, path: &Path) -> Option<&PreflightGraphNode> {
+        let want = canonical_key(path);
+        self.children.iter().find(|child| {
+            child
+                .source
+                .as_deref()
+                .is_some_and(|src| canonical_key(src) == want)
+        })
     }
 
     /// Walks this node and every descendant, yielding one entry per unique
@@ -774,6 +803,197 @@ flag: a
             !with_graph.content().contains("Child body content"),
             "preflight-graph compose unexpectedly transcluded the gated child: {}",
             with_graph.content()
+        );
+    }
+
+    /// Regression (review-4 High): the preflight walk captures a directive span
+    /// *before* page-block pruning, but the Transclusion phase runs *after*
+    /// pruning has shifted every following byte offset. Reusing the preflight
+    /// graph must therefore re-anchor the replacement span against the current
+    /// content; trusting the cached span splices the child at the wrong region.
+    /// The graph-seeded compose must be byte-identical to the baseline.
+    #[test]
+    fn preflight_graph_reanchors_spans_after_offset_shifting_stage() {
+        use std::io::Write;
+
+        let temp = TempDir::new().unwrap();
+        let child_path = temp.path().join("child.md");
+        let mut child = std::fs::File::create(&child_path).unwrap();
+        writeln!(child, "CHILD-CONTENT-MARKER").unwrap();
+
+        // A `when=`-false page block precedes the `::file` directive. Page
+        // blocks run during the normal pipeline (after the condition-blind
+        // preflight walk), so pruning the block moves the `::file` directive
+        // many bytes earlier than its preflight-captured offset.
+        let root_path = temp.path().join("root.md");
+        let mut root = std::fs::File::create(&root_path).unwrap();
+        writeln!(root, "---").unwrap();
+        writeln!(root, "flag: false").unwrap();
+        writeln!(root, "---").unwrap();
+        writeln!(root, "::block when=\"flag\"").unwrap();
+        writeln!(root, "This pruned block shifts every following byte offset.").unwrap();
+        writeln!(root, "More padding so the shift is large and unmistakable.").unwrap();
+        writeln!(root, "::end-block").unwrap();
+        writeln!(root, "::file ./child.md").unwrap();
+
+        let root_content = std::fs::read_to_string(&root_path).unwrap();
+        let md: Markdown = root_content.into();
+
+        // The preflight graph captures the `::file` edge with its pre-pruning
+        // span (page blocks are not evaluated during the condition-blind walk).
+        let preflight = md
+            .compose_preflight(&ComposeOptions::new().with_source_file(&root_path))
+            .unwrap();
+        assert_eq!(preflight.preflight_graph.edges.len(), 1);
+
+        let baseline_options = ComposeOptions::new()
+            .only(&[
+                ComposeOperation::PageBlocks,
+                ComposeOperation::BlockTransclusion,
+            ])
+            .with_source_file(&root_path);
+        let (baseline, _) = md.compose_with(baseline_options.clone()).unwrap();
+        assert!(
+            baseline.content().contains("CHILD-CONTENT-MARKER"),
+            "baseline did not transclude child: {}",
+            baseline.content()
+        );
+        assert!(!baseline.content().contains("pruned block"));
+
+        let with_graph_options =
+            baseline_options.with_preflight_graph(preflight.preflight_graph.clone());
+        let (with_graph, _) = md.compose_with(with_graph_options).unwrap();
+
+        assert_eq!(
+            with_graph.content(),
+            baseline.content(),
+            "preflight-graph reuse must produce byte-identical output to the no-graph baseline"
+        );
+    }
+
+    /// Recursive graph reuse (review-5 Medium): the preflight walk discovers the
+    /// full root → child → grandchild tree, and reusing it must reach every
+    /// level — the child compose threads its own sub-node so the grandchild edge
+    /// is reused too. The graph-seeded compose must be byte-identical to the
+    /// no-graph baseline, proving the threaded sub-graph does not corrupt the
+    /// deeper transclusions.
+    #[test]
+    fn preflight_graph_reuse_recurses_to_grandchild() {
+        use std::io::Write;
+
+        let temp = TempDir::new().unwrap();
+
+        let grandchild_path = temp.path().join("grandchild.md");
+        let mut grandchild = std::fs::File::create(&grandchild_path).unwrap();
+        writeln!(grandchild, "GRANDCHILD-CONTENT-MARKER").unwrap();
+
+        let child_path = temp.path().join("child.md");
+        let mut child = std::fs::File::create(&child_path).unwrap();
+        writeln!(child, "# Child").unwrap();
+        writeln!(child, "::file ./grandchild.md").unwrap();
+
+        let root_path = temp.path().join("root.md");
+        let mut root = std::fs::File::create(&root_path).unwrap();
+        writeln!(root, "# Root").unwrap();
+        writeln!(root, "::file ./child.md").unwrap();
+
+        let root_content = std::fs::read_to_string(&root_path).unwrap();
+        let md: Markdown = root_content.into();
+
+        let preflight = md
+            .compose_preflight(&ComposeOptions::new().with_source_file(&root_path))
+            .unwrap();
+
+        // The walked graph is recursive: the root's single edge points at the
+        // child, whose own single edge points at the grandchild.
+        assert_eq!(
+            preflight.preflight_graph.edges.len(),
+            1,
+            "root should have one edge: {:?}",
+            preflight.preflight_graph
+        );
+        let child_node = &preflight.preflight_graph.edges[0].child;
+        assert_eq!(
+            child_node.edges.len(),
+            1,
+            "child node should carry one grandchild edge: {child_node:?}"
+        );
+        let grandchild_target = match &child_node.edges[0].resolved_target {
+            super::PreflightResolvedTarget::File(p) => p.clone(),
+            super::PreflightResolvedTarget::Url(_) => panic!("grandchild should resolve to a File"),
+        };
+        assert_eq!(
+            grandchild_target.canonicalize().unwrap(),
+            grandchild_path.canonicalize().unwrap(),
+            "child node's edge should carry the resolved grandchild path"
+        );
+
+        let baseline_options = ComposeOptions::new()
+            .only(&[ComposeOperation::BlockTransclusion])
+            .with_source_file(&root_path);
+        let (baseline, _) = md.compose_with(baseline_options.clone()).unwrap();
+        assert!(
+            baseline.content().contains("GRANDCHILD-CONTENT-MARKER"),
+            "baseline did not transclude grandchild: {}",
+            baseline.content()
+        );
+
+        let with_graph_options =
+            baseline_options.with_preflight_graph(preflight.preflight_graph.clone());
+        let (with_graph, _) = md.compose_with(with_graph_options).unwrap();
+        assert!(
+            with_graph.content().contains("GRANDCHILD-CONTENT-MARKER"),
+            "graph-seeded compose did not transclude grandchild: {}",
+            with_graph.content()
+        );
+        assert_eq!(
+            with_graph.content(),
+            baseline.content(),
+            "recursive preflight-graph reuse must produce byte-identical output to the baseline"
+        );
+    }
+
+    /// Unit: the lookup the engine relies on to thread the matching sub-graph
+    /// into a child compose returns the child whose resolved source matches the
+    /// requested path, and `None` for an unrelated path.
+    #[test]
+    fn child_for_source_matches_resolved_child() {
+        use std::io::Write;
+
+        let temp = TempDir::new().unwrap();
+
+        let child_path = temp.path().join("child.md");
+        let mut child = std::fs::File::create(&child_path).unwrap();
+        writeln!(child, "# Child").unwrap();
+        writeln!(child, "::shell echo from-child").unwrap();
+
+        let root_path = temp.path().join("root.md");
+        let mut root = std::fs::File::create(&root_path).unwrap();
+        writeln!(root, "::file ./child.md").unwrap();
+
+        let root_content = std::fs::read_to_string(&root_path).unwrap();
+        let md: Markdown = root_content.into();
+
+        let preflight = md
+            .compose_preflight(&ComposeOptions::new().with_source_file(&root_path))
+            .unwrap();
+        let graph = &preflight.preflight_graph;
+
+        let matched = graph
+            .child_for_source(&child_path)
+            .expect("child_for_source should find the transcluded child");
+        let matched_raw: Vec<&str> =
+            matched.entries.iter().map(|e| e.raw_command.as_str()).collect();
+        assert!(
+            matched_raw.contains(&"echo from-child"),
+            "matched node should be the child: {matched_raw:?}"
+        );
+
+        assert!(
+            graph
+                .child_for_source(&temp.path().join("nope.md"))
+                .is_none(),
+            "an unrelated path must not match any child"
         );
     }
 }

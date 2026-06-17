@@ -959,9 +959,12 @@ impl ComposeOptions {
     ///
     /// When set, the transclusion engine reuses the graph's
     /// [`PreflightGraphEdge`](super::super::preflight::PreflightGraphEdge)
-    /// records to build its `PreparedTransclusion` items without re-parsing
-    /// `::file` / `::url` directives or re-resolving their targets. The
-    /// typical flow is:
+    /// resolved targets as a resolution cache, skipping a second
+    /// target-resolution pass for `::file` / `::url` directives the preflight
+    /// walk already resolved. Directives are still parsed from the current
+    /// content so replacement spans are never reused from the preflight walk
+    /// (which runs before frontmatter shell expansion and other offset-shifting
+    /// stages). The typical flow is:
     ///
     /// 1. Call `Markdown::compose_preflight(&options)` to collect the
     ///    approval set and the graph.

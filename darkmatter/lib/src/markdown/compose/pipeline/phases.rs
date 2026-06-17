@@ -201,23 +201,16 @@ impl Markdown {
         for operation in operations {
             match operation {
                 ComposeOperation::BlockTransclusion => {
-                    if let Some(graph) = options.preflight_graph() {
-                        // Reuse the preflight-collected graph: skip the
-                        // directive parse + target resolution and emit
-                        // `PreparedTransclusion` items from the cached
-                        // edges directly. The condition-aware gate
-                        // (`when=`, unknown options, deferred-set
-                        // warnings) still runs inside the engine.
-                        engine.prepare_block_transclusions_from_graph(
-                            graph,
-                            state,
-                            options,
-                            &runtime.remote_fetch,
-                            report,
-                            &mut prepared,
-                            &mut next_order,
-                        )?;
-                    } else if let Some(directives) = parsed_directives.as_ref() {
+                    if let Some(directives) = parsed_directives.as_ref() {
+                        // When a preflight graph is attached, reuse its
+                        // resolved targets as a resolution cache so the engine
+                        // skips a second `resolve_target` pass. Spans still
+                        // come from `directives` (parsed from the current
+                        // content), so the cache cannot reintroduce stale
+                        // preflight offsets.
+                        let resolved_cache = options
+                            .preflight_graph()
+                            .map(transclusion::build_resolution_cache);
                         engine.prepare_block_transclusions(
                             directives,
                             transclusion::DirectiveKind::File,
@@ -227,6 +220,7 @@ impl Markdown {
                             report,
                             &mut prepared,
                             &mut next_order,
+                            resolved_cache.as_ref(),
                         )?;
                     }
                 }
@@ -245,6 +239,9 @@ impl Markdown {
                 }
                 ComposeOperation::CodeTransclusion => {
                     if let Some(directives) = parsed_directives.as_ref() {
+                        // `::code` directives are never in the preflight graph
+                        // (they contribute no shell entries), so there is no
+                        // resolution cache to reuse here.
                         engine.prepare_block_transclusions(
                             directives,
                             transclusion::DirectiveKind::Code,
@@ -254,6 +251,7 @@ impl Markdown {
                             report,
                             &mut prepared,
                             &mut next_order,
+                            None,
                         )?;
                     }
                 }

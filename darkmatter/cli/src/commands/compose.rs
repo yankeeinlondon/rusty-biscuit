@@ -398,7 +398,12 @@ pub fn run_compose(
                         approvals.stats.user_approved
                     );
                 }
-                options = options.with_pre_approved_commands(approvals.pre_approved_commands);
+                // Reuse the graph the preflight walk already resolved so the
+                // transclusion stage skips a redundant target-resolution pass
+                // (v2 design "reuse the collection walk").
+                options = options
+                    .with_pre_approved_commands(approvals.pre_approved_commands)
+                    .with_preflight_graph(approvals.preflight_graph);
             }
             Err(e) => {
                 return Err(preflight_approval_error(e));
