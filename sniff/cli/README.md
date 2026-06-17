@@ -147,8 +147,12 @@ sniff repo pr                        # List open pull requests
 sniff repo pr --status merged        # List merged pull requests
 sniff repo pr --status draft --json  # Draft PRs as JSON
 sniff repo pr -v                     # Verbose PR block output
-sniff repo deps                      # Text dependency list
-sniff repo deps --ui                 # Mermaid dependency diagram
+sniff repo branches                  # Local branches from known refs
+sniff repo branches --refresh-remotes # Refresh remotes before branch projection
+sniff repo package-dependencies      # Internal workspace dependency list
+sniff repo package-dependencies --ui # Mermaid dependency diagram
+sniff repo dependencies              # External dependency list
+sniff repo dependencies --dev-dependencies # External dev dependencies only
 sniff repo packages                  # List all package names (CSV)
 sniff repo packages --md             # Markdown unordered list
 sniff repo packages --list           # Raw list (one per line)
@@ -204,18 +208,20 @@ File-listing commands (`dirty-source-code`, `staged-files`, `blast-radius`, etc.
 --package-area A # Scope to a specific package area
 ```
 
-**Programs Subcommands:**
+**Software Subcommands:**
 
 ```bash
-sniff programs                   # All installed programs
-sniff editors                    # Editors (vim, VS Code, etc.)
-sniff utilities                  # CLI utilities (ripgrep, fzf, etc.)
-sniff language-package-managers  # Language package managers (cargo, npm, pip)
-sniff os-package-managers        # OS package managers (homebrew, apt, etc.)
-sniff tts-clients                # TTS clients (say, espeak, piper, etc.)
-sniff terminal-apps              # Terminal apps (alacritty, wezterm, etc.)
-sniff audio                      # Headless audio players (afplay, pacat, etc.)
-sniff agents                     # AI agent/CLI tools (claude, kimi, etc.)
+sniff software                            # All installed software
+sniff software editors                    # Editors (vim, VS Code, etc.)
+sniff software utilities                  # CLI utilities (ripgrep, fzf, etc.)
+sniff software language-package-managers  # Language package managers (cargo, npm, pip)
+sniff software os-package-managers        # OS package managers (homebrew, apt, etc.)
+sniff software tts-clients                # TTS clients (say, espeak, piper, etc.)
+sniff software terminal-apps              # Terminal apps (alacritty, wezterm, etc.)
+sniff software audio                      # Headless audio players (afplay, pacat, etc.)
+sniff software notification-helpers       # Desktop notification helpers
+sniff software agents                     # AI agent/CLI tools (claude, kimi, etc.)
+sniff software test-runners               # Test runners with availability details
 ```
 
 **Program Installation:**
@@ -223,18 +229,18 @@ sniff agents                     # AI agent/CLI tools (claude, kimi, etc.)
 Each program category supports an `install` subcommand:
 
 ```bash
-sniff editors install          # Interactive picker
-sniff editors install nvim     # Install a specific program
-sniff programs install         # Pick from all categories
+sniff software editors install          # Interactive picker
+sniff software editors install nvim     # Install a specific program
+sniff software install                  # Pick from all categories
 ```
 
-**Programs Output:**
+**Software Output:**
 
 ```bash
 # Text output (default)
-sniff programs
+sniff software
 # JSON output with full metadata
-sniff programs --json
+sniff software --json
 ```
 
 **Services Subcommand:**
@@ -281,7 +287,7 @@ The `--perf` flag appends structured performance timings to any command:
 
 ```bash
 # Rich terminal output: perf appended to stdout
-sniff programs --perf
+sniff software --perf
 sniff repo --perf
 
 # Scriptable text output: perf emitted to stderr (stdout stays clean)
@@ -406,10 +412,10 @@ Returns a structured JSON object with all detection results:
 }
 ```
 
-### Programs Output
+### Software Output
 
 ```bash
-sniff programs --json | jq .
+sniff software --json | jq .
 ```
 
 Returns rich program entries (including metadata and detection status):
@@ -455,7 +461,7 @@ table summarises the contract; see the per-subcommand docs under
 
 | Subcommand | JSON shape |
 |---|---|
-| `repo` (bare, `--json`) | Scope-complete aggregate of participating child subcommands, keyed by subcommand name; see [`sniff/docs/topics/json-output.md`](../../docs/topics/json-output.md) |
+| `repo` (bare, `--json`) | Consolidated `SniffRepo` aggregate with snake_case keys, grouped `context`, top-level `branches`/`worktrees`, and `dirty`/`staged`/`unstaged`/`untracked` scope buckets; see [`sniff/docs/topics/json-output.md`](../../docs/topics/json-output.md) |
 | `repo structure` | Full `RepoInfo` blob (`is_monorepo`, `packages`, `dependencies`, ...). Includes `monorepo_standards` and `monorepo_layers` when the repo is a monorepo. |
 | `repo name` | `{ "name": "..." }` |
 | `repo language` | `{ "language": "..." \| null }` (or full language breakdown with `--breakdown`) |
@@ -463,7 +469,9 @@ table summarises the contract; see the per-subcommand docs under
 | `repo package-count` | `{ "package-count": N }` |
 | `repo version` | `{ "version": "..." \| null }` |
 | `repo git-status` | `GitInfo` object directly (`repo_root`, `status`, `recent`, `branches`, ...) |
-| `repo deps` | `{ packages: [{ name, depends_on, used_by, dependencies, dev_dependencies, ... }] }` |
+| `repo package-dependencies` | `{ packages: [{ name, depends_on, used_by, dependencies, dev_dependencies, ... }] }` |
+| `repo dependencies` | `{ dependencies: [{ package, family, name, targeted_version, actual_version }] }` |
+| `repo branches` | `[{ name, current, sha, remote_represented, upstream, ahead, behind }]` |
 | `repo dirty-packages` | `{ scope: "dirty", kind: "packages", names: [...] }` |
 | `repo dirty-package-areas` | `{ scope: "dirty", kind: "package_areas", names: [...] }` |
 | `repo staged-packages` | `{ scope: "staged", kind: "packages", names: [...] }` |
@@ -578,7 +586,7 @@ The library provides modular detection across six domains:
 
 **Programs Module:**
 
-Detects installed programs across 8 categories with parallel execution:
+Detects installed programs across 9 categories with parallel execution:
 
 - **Editors**: vim, VS Code, Cursor, IntelliJ, Sublime, etc.
 - **Utilities**: ripgrep, fzf, bat, jq, fd, delta, etc.
@@ -588,6 +596,7 @@ Detects installed programs across 8 categories with parallel execution:
 - **Terminal Apps**: alacritty, wezterm, kitty, iTerm2, etc.
 - **Headless Audio**: afplay, pacat, aplay, etc.
 - **AI CLI Tools**: claude, aider, goose, etc.
+- **Test Runners**: cargo test, vitest, pytest, go test, etc.
 
 Features:
 - macOS app bundle detection (checks `/Applications` when PATH fails)
@@ -826,7 +835,7 @@ sniff/
 │   │   │   ├── file_types/   # Broad file type classification
 │   │   │   └── ...           # languages, docs, formatting, blast_radius, just
 │   │   ├── package/          # Package manager abstraction (110+)
-│   │   ├── programs/         # Program detection and install (8 categories)
+│   │   ├── programs/         # Program detection and install (9 categories)
 │   │   ├── remote/           # Remote repo inspection (GitHub, GitLab, Gitea, Bitbucket)
 │   │   └── services/         # Init system and service detection
 │   └── Cargo.toml
@@ -870,8 +879,8 @@ if sniff repo is-monorepo --no-error | grep -q '^cargo$'; then
     echo "Detected cargo monorepo"
 fi
 
-# The bare aggregate still exposes the legacy unwrapped bool
-if sniff repo --json | jq -e '."is-monorepo"'; then
+# The bare aggregate uses the new snake_case key
+if sniff repo --json | jq -e '.is_monorepo'; then
     echo "Detected monorepo via aggregate"
 fi
 ```

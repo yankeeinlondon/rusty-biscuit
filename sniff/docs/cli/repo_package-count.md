@@ -49,7 +49,7 @@ sniff repo package-count -b /path/to/repo
 sniff repo package-count --json
 ```
 
-Returns a single-key `{ "package-count": N }` object. The key is kebab-case, matching the bare `sniff repo --json` aggregate.
+Returns a single-key `{ "package-count": N }` object. This focused leaf keeps its historical kebab-case key; the bare `sniff repo --json` aggregate exposes the same value as `package_count`.
 
 ```json
 { "package-count": 65 }

@@ -115,12 +115,13 @@ Outside a monorepo:
 The object is printed to STDOUT first, then the process exits with the predicate
 status. STDOUT stays valid JSON even when the exit code is non-zero.
 
-## Aggregate `sniff repo --json` Exception
+## Bare `sniff repo --json`
 
-Bare `sniff repo --json` keeps the legacy unwrapped `"is-monorepo": bool` member
-under its hyphenated subcommand key for compatibility. Only the focused
-`sniff repo is-monorepo --json` leaf uses the snake_case object shape documented
-above.
+Bare `sniff repo --json` exposes the same predicate as the top-level
+`is_monorepo` boolean in its consolidated aggregate. The focused
+`sniff repo is-monorepo --json` leaf uses the object shape documented above so
+it can include authority and orchestrator details when the repository is a
+monorepo.
 
 ## Related Subcommands
 

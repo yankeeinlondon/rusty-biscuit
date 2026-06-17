@@ -45,22 +45,33 @@ sniff repo --json
 #   "name": "rusty-biscuit",
 #   "version": "1.2.3",
 #   "language": "Rust",
-#   "is-monorepo": true,
-#   "package-count": 8,
-#   "structure": { ... },
-#   "deps": { "packages": [ ... ] },
+#   "is_monorepo": true,
+#   "package_count": 8,
+#   "root": "/path/to/repo",
+#   "context": {
+#     "package": "sniff-cli",
+#     "package_area": "sniff",
+#     "package_root": "/path/to/repo/sniff/cli",
+#     "package_area_root": "/path/to/repo/sniff",
+#     "worktree": null,
+#     "is_current_package_area_dirty": true,
+#     "package_area_has_source_code_changes": true
+#   },
 #   "packages": [ "pkg-a", "pkg-b", ... ],
-#   "package-areas": [ "area-a", "area-b", ... ],
-#   "git-status": { ... },
-#   "worktrees": { "worktrees": [ ... ] },
-#   "staged-files": { "scope": "staged", "kind": "all_files", "paths": [] },
-#   "recent-commits": { "commits": [], "period_label": "last 3 days", ... },
+#   "package_areas": [ "area-a", "area-b", ... ],
+#   "branches": [ { "name": "main", "current": true, ... } ],
+#   "worktrees": [ { "name": "feature", "branch": "feature", ... } ],
+#   "git_status": { "current_branch": "main", "is_dirty": true, ... },
+#   "dirty": { "files": [], "source_code": [], "documentation": [], "packages": [], "package_areas": [] },
+#   "staged": { "files": [], "source_code": [], "documentation": [], "packages": [], "package_areas": [] },
+#   "unstaged": { "files": [], "source_code": [], "documentation": [], "packages": [], "package_areas": [] },
+#   "untracked": { "files": [], "source_code": [], "documentation": [], "packages": [], "package_areas": [] },
+#   "recent_commits": { "commits": [], "period": { ... }, ... },
 #   ...
 # }
-# aggregate of every participating child scope, keyed by subcommand name
-# single-key leaves contribute their unwrapped value; multi-field children
-# contribute their whole scope object. Network-primary children (`remote`,
-# `pr`) and parameterized children (`hash`) are excluded from the aggregate.
+# consolidated aggregate with snake_case keys. Focused child commands keep
+# their own richer shapes, while this aggregate avoids duplicated full package
+# catalogs and groups change data into ScopeBucket objects.
 #
 # Note: the focused `sniff repo is-monorepo --json` leaf uses a different
 # snake_case object shape (`{ "is_monorepo": ... }`); see its subcommand docs.
