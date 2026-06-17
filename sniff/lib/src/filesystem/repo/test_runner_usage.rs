@@ -10,14 +10,15 @@
 //! the detection algorithm and signal priority.
 
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use biscuit_file::toml_crate;
 use serde::{Deserialize, Serialize};
 
 use crate::filesystem::repo::detection::ManifestCache;
 use crate::programs::contract::CategoryEnum;
 use crate::programs::enums::TestRunner;
-use crate::programs::test_runner_spec::{TestRunnerEcosystem, TEST_RUNNER_SPEC};
+use crate::programs::test_runner_spec::{TEST_RUNNER_SPEC, TestRunnerEcosystem};
 
 /// Evidence source for a detected test runner.
 ///
@@ -80,28 +81,30 @@ impl TestRunnerUsage {
 /// default is reported with [`TestRunnerSource::EcosystemDefault`] so
 /// consumers can distinguish "explicitly configured" from "implicitly
 /// available".
-pub(crate) fn detect_test_runners(pkg_dir: &Path, cache: &mut ManifestCache) -> Vec<TestRunnerUsage> {
+pub(crate) fn detect_test_runners(
+    pkg_dir: &Path,
+    cache: &mut ManifestCache,
+) -> Vec<TestRunnerUsage> {
     let ecosystems = ecosystems_present(pkg_dir);
     if ecosystems.is_empty() {
         return Vec::new();
     }
 
-    // Read the raw text of every manifest the package might declare a runner
-    // in. Substring search over the raw text is robust across manifest
-    // formats (TOML / JSON / XML / Gradle DSL / Elixir / Ruby) and avoids
-    // bespoke parsers for v1; config-file presence is the stronger signal
-    // and disambiguates the common cases. We collect owned strings because
-    // each `raw_text` call mutably borrows the cache.
-    let manifest_blobs: Vec<String> = collect_manifest_text(pkg_dir, cache);
-    let manifest_refs: Vec<&str> = manifest_blobs.iter().map(String::as_str).collect();
+    // Collect the package's declared dependencies per ecosystem so manifest
+    // matching is exact: a runner is attributed only when its dependency key
+    // appears as an actual dependency declaration, never as an incidental
+    // substring of a package name, test script, or comment.
+    let declared = collect_declared_deps(pkg_dir, &ecosystems, cache);
 
     let mut found: Vec<TestRunnerUsage> = Vec::new();
     let mut seen: HashSet<TestRunner> = HashSet::new();
 
     // The static catalog is keyed by TestRunner variant ordinal, so the
     // enumerated iteration maps spec index -> runner variant exactly.
-    let indexed: Vec<(usize, &'static crate::programs::test_runner_spec::TestRunnerSpec)> =
-        TEST_RUNNER_SPEC.iter().enumerate().collect();
+    let indexed: Vec<(
+        usize,
+        &'static crate::programs::test_runner_spec::TestRunnerSpec,
+    )> = TEST_RUNNER_SPEC.iter().enumerate().collect();
 
     // Pass 1: config files (strongest signal).
     for (idx, spec) in &indexed {
@@ -134,7 +137,7 @@ pub(crate) fn detect_test_runners(pkg_dir: &Path, cache: &mut ManifestCache) -> 
             continue;
         }
         for key in spec.manifest_dep_keys {
-            if manifest_key_present(&manifest_refs, key) {
+            if key_declared(&declared, key) {
                 push_unique(
                     &mut found,
                     &mut seen,
@@ -175,12 +178,7 @@ pub(crate) fn detect_test_runners(pkg_dir: &Path, cache: &mut ManifestCache) -> 
                 TestRunner::Unittest | TestRunner::Minitest | TestRunner::NodeTest
             ) && !seen.contains(&runner)
             {
-                push_unique(
-                    &mut found,
-                    &mut seen,
-                    runner,
-                    TestRunnerSource::Convention,
-                );
+                push_unique(&mut found, &mut seen, runner, TestRunnerSource::Convention);
             }
         }
     }
@@ -205,18 +203,27 @@ pub fn detect_test_runners_for_dir(dir: &Path) -> Vec<TestRunnerUsage> {
 /// Returns `true` when `glob` is present in `pkg_dir` and, for config files
 /// shared by more than one runner, the runner-specific INI section is present.
 ///
+/// Wildcard patterns (`*.suite.yml`, `features/*.feature`, `spec/**/*_spec.rb`)
+/// are resolved by [`glob_file_exists`]; literal patterns use a direct
+/// `exists()` check.
+///
 /// `tox.ini` and `setup.cfg` are each claimed by several Python runners
 /// (`tox.ini` by both pytest and tox; `setup.cfg` by both pytest and nose2).
 /// Bare file presence would mis-attribute a `tox.ini` containing only `[tox]`
 /// to pytest, or a nose2 `setup.cfg` to pytest. For those shared files we
 /// require the section header named in `test-runner-strategy.md` §5; every
 /// other config glob is runner-exclusive and matches on existence alone.
+/// Wildcard patterns are always runner-exclusive, so they never need a section
+/// check.
 fn config_glob_matches(
     pkg_dir: &Path,
     runner: TestRunner,
     glob: &str,
     cache: &mut ManifestCache,
 ) -> bool {
+    if is_glob_pattern(glob) {
+        return glob_file_exists(pkg_dir, glob);
+    }
     let path = pkg_dir.join(glob);
     if !path.exists() {
         return false;
@@ -227,6 +234,90 @@ fn config_glob_matches(
             .is_some_and(|text| ini_has_section(text, section)),
         None => true,
     }
+}
+
+/// Maximum directory depth descended when resolving a recursive (`**`) config
+/// glob, so a pathological tree cannot turn config detection into a deep walk.
+const GLOB_MAX_DEPTH: usize = 16;
+
+/// Returns `true` when `glob` contains a glob metacharacter.
+fn is_glob_pattern(glob: &str) -> bool {
+    glob.bytes().any(|b| matches!(b, b'*' | b'?' | b'['))
+}
+
+/// Returns `true` when a file under `pkg_dir` matches the glob `pattern`.
+///
+/// The walk is rooted at the pattern's literal directory prefix and bounded in
+/// depth (non-recursive patterns descend only as far as their segment count
+/// requires; `**` patterns are capped at [`GLOB_MAX_DEPTH`]), so a glob never
+/// triggers an unbounded scan of the package tree.
+fn glob_file_exists(pkg_dir: &Path, pattern: &str) -> bool {
+    let matcher = match globset::GlobBuilder::new(pattern)
+        .literal_separator(true)
+        .build()
+    {
+        Ok(glob) => glob.compile_matcher(),
+        Err(_) => return false,
+    };
+
+    let segments: Vec<&str> = pattern.split('/').collect();
+    let mut root = pkg_dir.to_path_buf();
+    let mut literal_segments = 0;
+    for segment in &segments {
+        if is_glob_pattern(segment) {
+            break;
+        }
+        root.push(segment);
+        literal_segments += 1;
+    }
+    if !root.exists() {
+        return false;
+    }
+
+    let descent = if pattern.contains("**") {
+        GLOB_MAX_DEPTH
+    } else {
+        // The final wildcard segment is the file name, so directory descent
+        // below the literal prefix is one less than the remaining segments.
+        segments.len().saturating_sub(literal_segments + 1)
+    };
+    glob_walk(&root, pkg_dir, &matcher, descent)
+}
+
+/// Depth-bounded search for a file whose `base`-relative path matches
+/// `matcher`. Descends at most `max_descent` directory levels below `dir`.
+fn glob_walk(dir: &Path, base: &Path, matcher: &globset::GlobMatcher, max_descent: usize) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        let path = entry.path();
+        if file_type.is_file() {
+            if let Ok(relative) = path.strip_prefix(base)
+                && matcher.is_match(relative_slashes(relative))
+            {
+                return true;
+            }
+        } else if file_type.is_dir()
+            && max_descent > 0
+            && glob_walk(&path, base, matcher, max_descent - 1)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Render a relative path with `/` separators so glob matching behaves the same
+/// on Windows as on Unix.
+fn relative_slashes(path: &Path) -> String {
+    path.components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// The INI section that must be present for `runner` to claim a config file
@@ -298,72 +389,384 @@ fn ecosystems_present(pkg_dir: &Path) -> HashSet<TestRunnerEcosystem> {
     set
 }
 
-/// Collect the raw text of every manifest the package might declare a runner
-/// in, using the shared cache to avoid re-reading files. Returns owned
-/// strings because each `raw_text` call mutably borrows the cache and the
-/// returned references cannot outlive a subsequent call.
-fn collect_manifest_text(pkg_dir: &Path, cache: &mut ManifestCache) -> Vec<String> {
-    let mut blobs: Vec<String> = Vec::new();
-    let candidates = [
-        "Cargo.toml",
-        "package.json",
-        "pyproject.toml",
-        "requirements.txt",
-        "go.mod",
-        "composer.json",
-        "Gemfile",
-        "pom.xml",
-        "build.gradle",
-        "build.gradle.kts",
-        "mix.exs",
-    ];
-    for name in candidates {
-        let path = pkg_dir.join(name);
-        if let Some(text) = cache.raw_text(&path) {
-            blobs.push(text.to_string());
+/// A package's declared dependencies, partitioned by match style.
+#[derive(Default)]
+struct DeclaredDeps {
+    /// Plain dependency names: npm packages, PyPI distributions, Ruby gems,
+    /// Composer packages, Go module paths, .NET package ids, Elixir dep atoms.
+    names: HashSet<String>,
+    /// Maven/Gradle `groupId:artifactId` coordinates.
+    coordinates: HashSet<String>,
+}
+
+/// Returns `true` when `key` is declared as a dependency of the package.
+///
+/// Keys carrying a `:` are Maven/Gradle coordinates and match the coordinate
+/// set; all other keys match the plain-name set. Either way the test is exact
+/// set membership — what separates a real `devDependencies.jest` from a package
+/// merely *named* `jest-helper`.
+fn key_declared(deps: &DeclaredDeps, key: &str) -> bool {
+    if key.contains(':') {
+        deps.coordinates.contains(key)
+    } else {
+        deps.names.contains(key)
+    }
+}
+
+/// Collect the package's declared dependencies from every manifest of every
+/// ecosystem present. Structured manifests (JSON/TOML) are parsed; the
+/// line/markup formats (go.mod, Gemfile, pom.xml, Gradle DSL, .csproj, mix.exs)
+/// are scanned for their dependency-declaration syntax. The shared cache reads
+/// each file at most once.
+fn collect_declared_deps(
+    pkg_dir: &Path,
+    ecosystems: &HashSet<TestRunnerEcosystem>,
+    cache: &mut ManifestCache,
+) -> DeclaredDeps {
+    let mut deps = DeclaredDeps::default();
+    if ecosystems.contains(&TestRunnerEcosystem::Node) {
+        collect_node_deps(pkg_dir, cache, &mut deps.names);
+    }
+    if ecosystems.contains(&TestRunnerEcosystem::Php) {
+        collect_php_deps(pkg_dir, cache, &mut deps.names);
+    }
+    if ecosystems.contains(&TestRunnerEcosystem::Python) {
+        collect_python_deps(pkg_dir, cache, &mut deps.names);
+    }
+    if ecosystems.contains(&TestRunnerEcosystem::Go) {
+        collect_go_deps(pkg_dir, cache, &mut deps.names);
+    }
+    if ecosystems.contains(&TestRunnerEcosystem::Ruby) {
+        collect_ruby_deps(pkg_dir, cache, &mut deps.names);
+    }
+    if ecosystems.contains(&TestRunnerEcosystem::Jvm) {
+        collect_jvm_coordinates(pkg_dir, cache, &mut deps.coordinates);
+    }
+    if ecosystems.contains(&TestRunnerEcosystem::DotNet) {
+        collect_dotnet_deps(pkg_dir, cache, &mut deps.names);
+    }
+    if ecosystems.contains(&TestRunnerEcosystem::Elixir) {
+        collect_elixir_deps(pkg_dir, cache, &mut deps.names);
+    }
+    deps
+}
+
+/// Insert every npm dependency key (across the four standard sections) into
+/// `out`.
+fn collect_node_deps(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut HashSet<String>) {
+    let Some(val) = cache.npm(&pkg_dir.join("package.json")) else {
+        return;
+    };
+    for section in [
+        "dependencies",
+        "devDependencies",
+        "peerDependencies",
+        "optionalDependencies",
+    ] {
+        if let Some(obj) = val.get(section).and_then(serde_json::Value::as_object) {
+            out.extend(obj.keys().cloned());
         }
     }
-    // Ruby gemspec and .NET .csproj have arbitrary names — scan the package
-    // dir for them. The package dir scan is shallow (no recursion) so it is
-    // cheap and bounded.
-    if let Ok(entries) = std::fs::read_dir(pkg_dir) {
-        for entry in entries.flatten() {
-            if let Some(name) = entry.file_name().to_str()
-                && (name.ends_with(".gemspec") || name.ends_with(".csproj"))
+}
+
+/// Insert every Composer `require` / `require-dev` package name into `out`.
+fn collect_php_deps(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut HashSet<String>) {
+    let parsed = cache
+        .raw_text(&pkg_dir.join("composer.json"))
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok());
+    let Some(val) = parsed else {
+        return;
+    };
+    for section in ["require", "require-dev"] {
+        if let Some(obj) = val.get(section).and_then(serde_json::Value::as_object) {
+            out.extend(obj.keys().cloned());
+        }
+    }
+}
+
+/// Insert every declared PyPI distribution name (lowercased) from
+/// `pyproject.toml` (PEP 621, PEP 735, and Poetry layouts) and any top-level
+/// `requirements*.txt` into `out`.
+fn collect_python_deps(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut HashSet<String>) {
+    if let Some(val) = cache.pyproject(&pkg_dir.join("pyproject.toml")) {
+        // PEP 621 [project].dependencies + [project.optional-dependencies]
+        if let Some(project) = val.get("project") {
+            if let Some(arr) = project
+                .get("dependencies")
+                .and_then(toml_crate::Value::as_array)
             {
-                let path = entry.path();
-                if let Some(text) = cache.raw_text(&path) {
-                    blobs.push(text.to_string());
+                insert_python_specs(arr, out);
+            }
+            if let Some(tbl) = project
+                .get("optional-dependencies")
+                .and_then(toml_crate::Value::as_table)
+            {
+                for group in tbl.values() {
+                    if let Some(arr) = group.as_array() {
+                        insert_python_specs(arr, out);
+                    }
+                }
+            }
+        }
+        // PEP 735 [dependency-groups]
+        if let Some(tbl) = val
+            .get("dependency-groups")
+            .and_then(toml_crate::Value::as_table)
+        {
+            for group in tbl.values() {
+                if let Some(arr) = group.as_array() {
+                    insert_python_specs(arr, out);
+                }
+            }
+        }
+        // Poetry [tool.poetry.dependencies | dev-dependencies | group.*.dependencies]
+        if let Some(poetry) = val.get("tool").and_then(|tool| tool.get("poetry")) {
+            for key in ["dependencies", "dev-dependencies"] {
+                if let Some(tbl) = poetry.get(key).and_then(toml_crate::Value::as_table) {
+                    insert_poetry_names(tbl, out);
+                }
+            }
+            if let Some(groups) = poetry.get("group").and_then(toml_crate::Value::as_table) {
+                for group in groups.values() {
+                    if let Some(tbl) = group
+                        .get("dependencies")
+                        .and_then(toml_crate::Value::as_table)
+                    {
+                        insert_poetry_names(tbl, out);
+                    }
                 }
             }
         }
     }
-    blobs
+    for path in files_matching(pkg_dir, |name| {
+        name.starts_with("requirements") && name.ends_with(".txt")
+    }) {
+        if let Some(text) = cache.raw_text(&path) {
+            for line in text.lines() {
+                if let Some(name) = python_requirement_name(line) {
+                    out.insert(name);
+                }
+            }
+        }
+    }
 }
 
-/// Returns `true` when `key` appears as a dependency declaration in any of the
-/// manifest blobs.
-///
-/// Substring search is intentionally lenient: it matches Gradle DSL
-/// (`testImplementation("org.junit.jupiter:junit-jupiter")`), Elixir
-/// (`{:espec, …}`), and Ruby (`gem "rspec"`) uniformly. For Maven coordinates
-/// of the form `groupId:artifactId` (e.g. `org.junit.jupiter:junit-jupiter`),
-/// the blob may carry the two halves in separate XML elements
-/// (`<groupId>…</groupId><artifactId>…</artifactId>`), so a colon key matches
-/// when **both** halves appear as substrings; a plain key matches on a single
-/// substring hit. The stronger config-file signal disambiguates the common
-/// ambiguous cases.
-fn manifest_key_present(blobs: &[&str], key: &str) -> bool {
-    if key.contains(':') {
-        let halves: Vec<&str> = key.split(':').filter(|s| !s.is_empty()).collect();
-        blobs.iter().any(|blob| {
-            halves
-                .iter()
-                .all(|half| blob.contains(half))
-        })
-    } else {
-        blobs.iter().any(|blob| blob.contains(key))
+/// Insert the distribution name of every PEP 508 spec string in `arr`.
+fn insert_python_specs(arr: &[toml_crate::Value], out: &mut HashSet<String>) {
+    for item in arr {
+        if let Some(name) = item.as_str().and_then(python_dist_name) {
+            out.insert(name);
+        }
     }
+}
+
+/// Insert every Poetry dependency-table key (excluding the `python` constraint)
+/// into `out`, lowercased.
+fn insert_poetry_names(table: &toml_crate::value::Table, out: &mut HashSet<String>) {
+    out.extend(
+        table
+            .keys()
+            .filter(|key| *key != "python")
+            .map(|key| key.to_ascii_lowercase()),
+    );
+}
+
+/// Insert every Go module path declared in a `require` directive into `out`.
+fn collect_go_deps(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut HashSet<String>) {
+    let Some(text) = cache.go_mod(&pkg_dir.join("go.mod")) else {
+        return;
+    };
+    let mut in_block = false;
+    for raw in text.lines() {
+        let line = raw.split("//").next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        if in_block {
+            if line == ")" {
+                in_block = false;
+            } else if let Some(module) = line.split_whitespace().next() {
+                out.insert(module.to_string());
+            }
+        } else if line == "require (" || line == "require(" {
+            in_block = true;
+        } else if let Some(rest) = line.strip_prefix("require ")
+            && let Some(module) = rest.split_whitespace().next()
+        {
+            out.insert(module.to_string());
+        }
+    }
+}
+
+/// Insert every gem named by a `gem "..."` line (Gemfile) or an
+/// `add_*dependency "..."` call (gemspec) into `out`.
+fn collect_ruby_deps(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut HashSet<String>) {
+    let mut paths = vec![pkg_dir.join("Gemfile")];
+    paths.extend(files_matching(pkg_dir, |name| name.ends_with(".gemspec")));
+    for path in paths {
+        let Some(text) = cache.raw_text(&path) else {
+            continue;
+        };
+        for raw in text.lines() {
+            let line = raw.split('#').next().unwrap_or("").trim();
+            let is_dependency = line.starts_with("gem ")
+                || line.contains("add_dependency")
+                || line.contains("add_development_dependency")
+                || line.contains("add_runtime_dependency");
+            if is_dependency && let Some(name) = first_quoted(line) {
+                out.insert(name);
+            }
+        }
+    }
+}
+
+/// Insert every Maven/Gradle `groupId:artifactId` coordinate into `out`.
+fn collect_jvm_coordinates(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut HashSet<String>) {
+    if let Some(text) = cache.raw_text(&pkg_dir.join("pom.xml")) {
+        for block in text.split("<dependency>").skip(1) {
+            let block = &block[..block.find("</dependency>").unwrap_or(block.len())];
+            if let (Some(group), Some(artifact)) = (
+                xml_tag_text(block, "groupId"),
+                xml_tag_text(block, "artifactId"),
+            ) {
+                out.insert(format!("{group}:{artifact}"));
+            }
+        }
+    }
+    for name in ["build.gradle", "build.gradle.kts"] {
+        let Some(text) = cache.raw_text(&pkg_dir.join(name)) else {
+            continue;
+        };
+        for literal in quoted_strings(text) {
+            let mut parts = literal.splitn(3, ':');
+            if let (Some(group), Some(artifact)) = (parts.next(), parts.next())
+                && is_coordinate_token(group)
+                && is_coordinate_token(artifact)
+            {
+                out.insert(format!("{group}:{artifact}"));
+            }
+        }
+    }
+}
+
+/// Insert every `<PackageReference Include="...">` package id from each
+/// `.csproj` in the package dir into `out`.
+fn collect_dotnet_deps(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut HashSet<String>) {
+    for path in files_matching(pkg_dir, |name| name.ends_with(".csproj")) {
+        let Some(text) = cache.raw_text(&path) else {
+            continue;
+        };
+        for element in text.split("PackageReference").skip(1) {
+            if let Some(after) = element
+                .find("Include=")
+                .map(|i| &element[i + "Include=".len()..])
+                && let Some(name) = first_quoted(after)
+            {
+                out.insert(name);
+            }
+        }
+    }
+}
+
+/// Insert every Mix dependency atom (`{:dep, ...}`) into `out`.
+fn collect_elixir_deps(pkg_dir: &Path, cache: &mut ManifestCache, out: &mut HashSet<String>) {
+    let Some(text) = cache.raw_text(&pkg_dir.join("mix.exs")) else {
+        return;
+    };
+    let mut rest = text;
+    while let Some(pos) = rest.find("{:") {
+        let after = &rest[pos + 2..];
+        let end = after
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .unwrap_or(after.len());
+        if end > 0 {
+            out.insert(after[..end].to_string());
+        }
+        rest = &after[end..];
+    }
+}
+
+/// Return the package-dir entries whose file name satisfies `pred`. The scan is
+/// shallow (no recursion), so it is cheap and bounded.
+fn files_matching(pkg_dir: &Path, pred: impl Fn(&str) -> bool) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(pkg_dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            pred(name.to_str()?).then(|| entry.path())
+        })
+        .collect()
+}
+
+/// Extract the leading distribution name from a PEP 508 requirement string,
+/// lowercased; `None` when the string does not start with a name character.
+fn python_dist_name(spec: &str) -> Option<String> {
+    let spec = spec.trim();
+    let end = spec
+        .find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')))
+        .unwrap_or(spec.len());
+    (end > 0).then(|| spec[..end].to_ascii_lowercase())
+}
+
+/// Extract the distribution name from one `requirements.txt` line, skipping
+/// comments, blank lines, and `-`-prefixed options (`-r`, `-e`, `--hash`, …).
+fn python_requirement_name(line: &str) -> Option<String> {
+    let line = line.split('#').next().unwrap_or("").trim();
+    if line.is_empty() || line.starts_with('-') {
+        return None;
+    }
+    python_dist_name(line)
+}
+
+/// Return the contents of the first single- or double-quoted string in `s`.
+fn first_quoted(s: &str) -> Option<String> {
+    for (i, b) in s.bytes().enumerate() {
+        if b == b'"' || b == b'\'' {
+            let rest = &s[i + 1..];
+            return rest.find(b as char).map(|end| rest[..end].to_string());
+        }
+    }
+    None
+}
+
+/// Collect the contents of every single- or double-quoted string in `text`.
+fn quoted_strings(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if (b == b'"' || b == b'\'')
+            && let Some(rel) = text[i + 1..].find(b as char)
+        {
+            out.push(text[i + 1..i + 1 + rel].to_string());
+            i += rel + 2;
+            continue;
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Return the trimmed text content of the first `<tag>…</tag>` in `chunk`.
+fn xml_tag_text(chunk: &str, tag: &str) -> Option<String> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = chunk.find(&open)? + open.len();
+    let end = chunk[start..].find(&close)? + start;
+    Some(chunk[start..end].trim().to_string())
+}
+
+/// Returns `true` when `token` looks like a Maven coordinate component
+/// (non-empty; only alphanumerics and `.`/`-`/`_`).
+fn is_coordinate_token(token: &str) -> bool {
+    !token.is_empty()
+        && token
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
 }
 
 /// Returns `true` when the package dir contains a `.gemspec` file.
@@ -464,7 +867,11 @@ mod tests {
     #[test]
     fn rust_cargo_reports_cargo_test_default() {
         let dir = tempdir().unwrap();
-        write(dir.path(), "Cargo.toml", "[package]\nname = \"x\"\nversion = \"0.1\"\n");
+        write(
+            dir.path(),
+            "Cargo.toml",
+            "[package]\nname = \"x\"\nversion = \"0.1\"\n",
+        );
 
         let usage = detect(dir.path());
         assert!(
@@ -477,7 +884,11 @@ mod tests {
     #[test]
     fn rust_nextest_config_wins_over_default() {
         let dir = tempdir().unwrap();
-        write(dir.path(), "Cargo.toml", "[package]\nname = \"x\"\nversion = \"0.1\"\n");
+        write(
+            dir.path(),
+            "Cargo.toml",
+            "[package]\nname = \"x\"\nversion = \"0.1\"\n",
+        );
         write(dir.path(), ".config/nextest.toml", "[profile.default]\n");
 
         let usage = detect(dir.path());
@@ -497,8 +908,10 @@ mod tests {
         write(dir.path(), "go.mod", "module example.com/x\ngo 1.21\n");
 
         let usage = detect(dir.path());
-        assert!(usage.iter().any(|u| u.runner == TestRunner::GoTest
-            && u.source == TestRunnerSource::EcosystemDefault));
+        assert!(
+            usage.iter().any(|u| u.runner == TestRunner::GoTest
+                && u.source == TestRunnerSource::EcosystemDefault)
+        );
     }
 
     #[test]
@@ -556,8 +969,10 @@ mod tests {
 
         let usage = detect(dir.path());
         // node --test is the ecosystem default.
-        assert!(usage.iter().any(|u| u.runner == TestRunner::NodeTest
-            && u.source == TestRunnerSource::EcosystemDefault));
+        assert!(
+            usage.iter().any(|u| u.runner == TestRunner::NodeTest
+                && u.source == TestRunnerSource::EcosystemDefault)
+        );
     }
 
     // ------------------------------------------------------------------------
@@ -584,8 +999,10 @@ mod tests {
         write(dir.path(), "tox.ini", "[tox]\n");
 
         let usage = detect(dir.path());
-        assert!(usage.iter().any(|u| u.runner == TestRunner::Tox
-            && matches!(u.source, TestRunnerSource::Config { .. })));
+        assert!(
+            usage.iter().any(|u| u.runner == TestRunner::Tox
+                && matches!(u.source, TestRunnerSource::Config { .. }))
+        );
     }
 
     #[test]
@@ -638,7 +1055,11 @@ mod tests {
         // (`[unittest]`). A nose2 setup.cfg must not be read as pytest.
         let dir = tempdir().unwrap();
         write(dir.path(), "pyproject.toml", "[project]\nname = \"x\"\n");
-        write(dir.path(), "setup.cfg", "[unittest]\nplugins = nose2.plugins\n");
+        write(
+            dir.path(),
+            "setup.cfg",
+            "[unittest]\nplugins = nose2.plugins\n",
+        );
 
         let usage = detect(dir.path());
         assert!(
@@ -676,8 +1097,10 @@ mod tests {
         write(dir.path(), "pyproject.toml", "[project]\nname = \"x\"\n");
 
         let usage = detect(dir.path());
-        assert!(usage.iter().any(|u| u.runner == TestRunner::Unittest
-            && u.source == TestRunnerSource::EcosystemDefault));
+        assert!(
+            usage.iter().any(|u| u.runner == TestRunner::Unittest
+                && u.source == TestRunnerSource::EcosystemDefault)
+        );
     }
 
     // ------------------------------------------------------------------------
@@ -713,8 +1136,10 @@ mod tests {
         write(dir.path(), "tests/Pest.php", "<?php\n");
 
         let usage = detect(dir.path());
-        assert!(usage.iter().any(|u| u.runner == TestRunner::Pest
-            && matches!(u.source, TestRunnerSource::Config { .. })));
+        assert!(
+            usage.iter().any(|u| u.runner == TestRunner::Pest
+                && matches!(u.source, TestRunnerSource::Config { .. }))
+        );
     }
 
     // ------------------------------------------------------------------------
@@ -724,7 +1149,11 @@ mod tests {
     #[test]
     fn ruby_rspec_dep_and_minitest_default() {
         let dir = tempdir().unwrap();
-        write(dir.path(), "Gemfile", "source 'https://rubygems.org'\ngem 'rspec'\n");
+        write(
+            dir.path(),
+            "Gemfile",
+            "source 'https://rubygems.org'\ngem 'rspec'\n",
+        );
 
         let usage = detect(dir.path());
         assert!(usage.iter().any(|u| u.runner == TestRunner::RSpec
@@ -801,8 +1230,10 @@ mod tests {
         );
 
         let usage = detect(dir.path());
-        assert!(usage.iter().any(|u| u.runner == TestRunner::ExUnit
-            && u.source == TestRunnerSource::EcosystemDefault));
+        assert!(
+            usage.iter().any(|u| u.runner == TestRunner::ExUnit
+                && u.source == TestRunnerSource::EcosystemDefault)
+        );
     }
 
     #[test]
@@ -827,7 +1258,10 @@ mod tests {
     fn empty_package_has_no_runners() {
         let dir = tempdir().unwrap();
         let usage = detect(dir.path());
-        assert!(usage.is_empty(), "no ecosystem => no runners, got {usage:?}");
+        assert!(
+            usage.is_empty(),
+            "no ecosystem => no runners, got {usage:?}"
+        );
     }
 
     // ------------------------------------------------------------------------
@@ -856,10 +1290,223 @@ mod tests {
         );
     }
 
+    // ------------------------------------------------------------------------
+    // Exact dependency matching (no substring false positives)
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn node_package_name_containing_runner_is_not_a_dependency() {
+        // A package merely *named* `jest-helper` declares no jest dependency.
+        let dir = tempdir().unwrap();
+        write(dir.path(), "package.json", r#"{"name":"jest-helper"}"#);
+
+        let usage = detect(dir.path());
+        assert!(
+            !usage.iter().any(|u| u.runner == TestRunner::Jest),
+            "a package named jest-helper must not register Jest, got {usage:?}"
+        );
+        assert!(
+            usage.iter().any(|u| u.runner == TestRunner::NodeTest
+                && u.source == TestRunnerSource::EcosystemDefault),
+            "node --test default should still be reported, got {usage:?}"
+        );
+    }
+
+    #[test]
+    fn node_test_script_invoking_runner_is_not_a_dependency() {
+        // A `test` script that shells out to jest is not a dependency key.
+        let dir = tempdir().unwrap();
+        write(
+            dir.path(),
+            "package.json",
+            r#"{"name":"x","scripts":{"test":"jest --ci"}}"#,
+        );
+
+        let usage = detect(dir.path());
+        assert!(
+            !usage.iter().any(|u| u.runner == TestRunner::Jest),
+            "a test script invoking jest is not a dependency declaration, got {usage:?}"
+        );
+    }
+
+    #[test]
+    fn node_dependency_with_runner_prefix_does_not_match() {
+        // `vitest-environment-jsdom` must not satisfy the exact key `vitest`.
+        let dir = tempdir().unwrap();
+        write(
+            dir.path(),
+            "package.json",
+            r#"{"name":"x","devDependencies":{"vitest-environment-jsdom":"^1.0.0"}}"#,
+        );
+
+        let usage = detect(dir.path());
+        assert!(
+            !usage.iter().any(|u| u.runner == TestRunner::Vitest),
+            "vitest-environment-jsdom must not register Vitest, got {usage:?}"
+        );
+    }
+
+    #[test]
+    fn python_runner_via_requirements_txt() {
+        let dir = tempdir().unwrap();
+        write(
+            dir.path(),
+            "requirements.txt",
+            "pytest==7.4.0\nrequests>=2\n",
+        );
+
+        let usage = detect(dir.path());
+        assert!(
+            usage.iter().any(|u| u.runner == TestRunner::Pytest
+                && matches!(u.source, TestRunnerSource::Manifest { .. })),
+            "pytest in requirements.txt should be detected, got {usage:?}"
+        );
+    }
+
+    #[test]
+    fn python_plugin_distribution_does_not_match_runner() {
+        // `pytest-cov` is a plugin, not pytest itself.
+        let dir = tempdir().unwrap();
+        write(dir.path(), "requirements.txt", "pytest-cov==4.1.0\n");
+
+        let usage = detect(dir.path());
+        assert!(
+            !usage.iter().any(|u| u.runner == TestRunner::Pytest),
+            "pytest-cov must not register pytest, got {usage:?}"
+        );
+    }
+
+    #[test]
+    fn jvm_jupiter_pom_does_not_match_junit4_coordinate() {
+        // org.junit.jupiter:junit-jupiter must not satisfy junit:junit.
+        let dir = tempdir().unwrap();
+        write(
+            dir.path(),
+            "pom.xml",
+            "<project>\n<dependencies>\n<dependency>\n<groupId>org.junit.jupiter</groupId>\n\
+             <artifactId>junit-jupiter</artifactId>\n</dependency>\n</dependencies>\n</project>\n",
+        );
+
+        let usage = detect(dir.path());
+        assert!(
+            usage.iter().any(|u| u.runner == TestRunner::JUnit5),
+            "JUnit 5 should be detected, got {usage:?}"
+        );
+        assert!(
+            !usage.iter().any(|u| u.runner == TestRunner::JUnit4),
+            "junit:junit must not match an org.junit.jupiter coordinate, got {usage:?}"
+        );
+    }
+
+    #[test]
+    fn jvm_junit4_via_gradle_coordinate() {
+        let dir = tempdir().unwrap();
+        write(
+            dir.path(),
+            "build.gradle",
+            "dependencies { testImplementation 'junit:junit:4.13.2' }\n",
+        );
+
+        let usage = detect(dir.path());
+        assert!(
+            usage.iter().any(|u| u.runner == TestRunner::JUnit4
+                && matches!(u.source, TestRunnerSource::Manifest { .. })),
+            "junit:junit coordinate should detect JUnit 4, got {usage:?}"
+        );
+    }
+
+    #[test]
+    fn dotnet_unrelated_package_does_not_match_runner() {
+        // Include="MyXunitHelpers" must not satisfy the exact key `xunit`.
+        let dir = tempdir().unwrap();
+        write(
+            dir.path(),
+            "Tests.csproj",
+            "<Project Sdk=\"Microsoft.NET.Sdk\">\n<ItemGroup>\n\
+             <PackageReference Include=\"MyXunitHelpers\" Version=\"1.0.0\" />\n\
+             </ItemGroup>\n</Project>\n",
+        );
+
+        let usage = detect(dir.path());
+        assert!(
+            !usage.iter().any(|u| u.runner == TestRunner::XUnit),
+            "Include=MyXunitHelpers must not register xUnit, got {usage:?}"
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Glob / convention config signals
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn php_codeception_suite_glob_matches() {
+        // `*.suite.yml` is a glob; literal-only matching missed it entirely.
+        let dir = tempdir().unwrap();
+        write(dir.path(), "composer.json", r#"{"name":"x/x"}"#);
+        write(dir.path(), "api.suite.yml", "actor: ApiTester\n");
+
+        let usage = detect(dir.path());
+        assert!(
+            usage.iter().any(|u| u.runner == TestRunner::Codeception
+                && matches!(u.source, TestRunnerSource::Config { .. })),
+            "*.suite.yml should signal Codeception, got {usage:?}"
+        );
+    }
+
+    #[test]
+    fn php_unrelated_yaml_does_not_match_suite_glob() {
+        let dir = tempdir().unwrap();
+        write(dir.path(), "composer.json", r#"{"name":"x/x"}"#);
+        write(dir.path(), "config.yml", "x: 1\n");
+
+        let usage = detect(dir.path());
+        assert!(
+            !usage.iter().any(|u| u.runner == TestRunner::Codeception),
+            "config.yml must not match *.suite.yml, got {usage:?}"
+        );
+    }
+
+    #[test]
+    fn php_behat_feature_glob_matches() {
+        let dir = tempdir().unwrap();
+        write(dir.path(), "composer.json", r#"{"name":"x/x"}"#);
+        write(dir.path(), "features/login.feature", "Feature: login\n");
+
+        let usage = detect(dir.path());
+        assert!(
+            usage.iter().any(|u| u.runner == TestRunner::Behat
+                && matches!(u.source, TestRunnerSource::Config { .. })),
+            "features/*.feature should signal Behat, got {usage:?}"
+        );
+    }
+
+    #[test]
+    fn ruby_rspec_recursive_spec_glob_matches() {
+        // `spec/**/*_spec.rb` requires a recursive, depth-bounded walk.
+        let dir = tempdir().unwrap();
+        write(dir.path(), "Gemfile", "source 'https://rubygems.org'\n");
+        write(
+            dir.path(),
+            "spec/models/user_spec.rb",
+            "RSpec.describe User do\nend\n",
+        );
+
+        let usage = detect(dir.path());
+        assert!(
+            usage.iter().any(|u| u.runner == TestRunner::RSpec
+                && matches!(u.source, TestRunnerSource::Config { .. })),
+            "spec/**/*_spec.rb should signal RSpec, got {usage:?}"
+        );
+    }
+
     #[test]
     fn each_runner_appears_at_most_once() {
         let dir = tempdir().unwrap();
-        write(dir.path(), "Cargo.toml", "[package]\nname = \"x\"\nversion = \"0.1\"\n");
+        write(
+            dir.path(),
+            "Cargo.toml",
+            "[package]\nname = \"x\"\nversion = \"0.1\"\n",
+        );
         write(dir.path(), ".config/nextest.toml", "[profile.default]\n");
 
         let usage = detect(dir.path());

@@ -291,9 +291,9 @@ fn collect_repo_root_dependency_family(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::filesystem::repo::types::PackageEcosystem;
     use crate::filesystem::repo::PackageProvenance;
     use crate::filesystem::repo::standard::MonorepoStandard;
+    use crate::filesystem::repo::types::PackageEcosystem;
     use std::path::PathBuf;
 
     fn pkg(name: &str, area: &str, pms: &[&str]) -> Package {
@@ -330,10 +330,7 @@ mod tests {
 
     #[test]
     fn package_area_uniform_collapses_to_singular() {
-        let packages = vec![
-            pkg("a", "sniff", &["cargo"]),
-            pkg("b", "sniff", &["cargo"]),
-        ];
+        let packages = vec![pkg("a", "sniff", &["cargo"]), pkg("b", "sniff", &["cargo"])];
         let scope = AggregateScope::PackageArea("sniff".to_string());
         let result = aggregate_package_values(
             &packages,
@@ -365,10 +362,7 @@ mod tests {
 
     #[test]
     fn repo_scope_unions_all_packages() {
-        let packages = vec![
-            pkg("a", "sniff", &["cargo"]),
-            pkg("b", "tools", &["npm"]),
-        ];
+        let packages = vec![pkg("a", "sniff", &["cargo"]), pkg("b", "tools", &["npm"])];
         let scope = AggregateScope::Repo;
         let result = aggregate_package_values(
             &packages,

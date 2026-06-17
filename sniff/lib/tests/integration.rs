@@ -355,7 +355,7 @@ fn test_nested_pnpm_under_cargo_is_discovered_as_its_own_layer() {
     // Layer packages use the same repo-root-relative framing as the canonical
     // `RepoInfo.packages` catalog, so nested packages carry their `web/`
     // prefix.
-    let layer_rels: Vec<String> = pnpm_layer.packages.iter().map(|p| p.clone()).collect();
+    let layer_rels: Vec<String> = pnpm_layer.packages.to_vec();
     assert!(layer_rels.contains(&"web/packages/app".to_string()));
     assert!(
         !layer_rels.contains(&"packages/app".to_string()),
@@ -444,7 +444,7 @@ fn test_nested_cargo_under_pnpm_is_discovered_as_its_own_layer() {
     // Layer packages use the same repo-root-relative framing as the canonical
     // `RepoInfo.packages` catalog, so nested packages carry their `crates/`
     // prefix.
-    let layer_rels: Vec<String> = cargo_layer.packages.iter().map(|p| p.clone()).collect();
+    let layer_rels: Vec<String> = cargo_layer.packages.to_vec();
     assert!(layer_rels.contains(&"crates/alpha".to_string()));
     assert!(
         !layer_rels.contains(&"alpha".to_string()),
@@ -1124,7 +1124,7 @@ fn test_go_workspace_resolves_explicit_use_paths() {
     let layer = &repo.monorepo_layers[0];
     assert_eq!(layer.authority, MonorepoStandard::GoWorkspace);
 
-    let mut relatives: Vec<String> = layer.packages.iter().map(|p| p.clone()).collect();
+    let mut relatives: Vec<String> = layer.packages.to_vec();
     relatives.sort();
     assert_eq!(relatives, vec!["svc-a".to_string(), "svc-b".to_string()]);
 }
@@ -1160,7 +1160,7 @@ fn test_gradle_workspace_authority_is_gradle() {
     let layer = &repo.monorepo_layers[0];
     assert_eq!(layer.authority, MonorepoStandard::GradleMultiProject);
 
-    let mut relatives: Vec<String> = layer.packages.iter().map(|p| p.clone()).collect();
+    let mut relatives: Vec<String> = layer.packages.to_vec();
     relatives.sort();
     assert_eq!(relatives, vec!["app".to_string(), "core".to_string()]);
     // The repo-local `gradlew` wrapper presence is recorded for Phase 7 to act on.
@@ -1194,7 +1194,7 @@ fn test_maven_workspace_authority_is_maven() {
     let layer = &repo.monorepo_layers[0];
     assert_eq!(layer.authority, MonorepoStandard::MavenMultiModule);
 
-    let mut relatives: Vec<String> = layer.packages.iter().map(|p| p.clone()).collect();
+    let mut relatives: Vec<String> = layer.packages.to_vec();
     relatives.sort();
     assert_eq!(relatives, vec!["core".to_string(), "web".to_string()]);
 }
@@ -1226,7 +1226,7 @@ fn test_dotnet_solution_authority_is_dotnet() {
     let layer = &repo.monorepo_layers[0];
     assert_eq!(layer.authority, MonorepoStandard::DotNetSolution);
 
-    let mut relatives: Vec<String> = layer.packages.iter().map(|p| p.clone()).collect();
+    let mut relatives: Vec<String> = layer.packages.to_vec();
     relatives.sort();
     // Each project's directory (the `.csproj` parent) becomes a package.
     assert_eq!(
@@ -1273,7 +1273,7 @@ fn test_bazel_workspace_segments_nested_workspace_into_its_own_layer() {
         .iter()
         .find(|l| l.root == path)
         .expect("parent layer rooted at repo root");
-    let mut parent_rels: Vec<String> = parent.packages.iter().map(|p| p.clone()).collect();
+    let mut parent_rels: Vec<String> = parent.packages.to_vec();
     parent_rels.sort();
     // The nested subtree must be excluded from the parent's package list.
     assert_eq!(parent_rels, vec!["a".to_string(), "b".to_string()]);
@@ -1283,7 +1283,7 @@ fn test_bazel_workspace_segments_nested_workspace_into_its_own_layer() {
         .iter()
         .find(|l| l.root == path.join("nested"))
         .expect("nested layer rooted at nested/");
-    let nested_rels: Vec<String> = nested.packages.iter().map(|p| p.clone()).collect();
+    let nested_rels: Vec<String> = nested.packages.to_vec();
     // Layer packages are repo-root-relative, so the nested workspace root is
     // represented as `nested`.
     assert_eq!(nested_rels, vec!["nested".to_string()]);
@@ -1387,7 +1387,7 @@ fn test_rush_workspace_authority_is_rush() {
     let layer = &repo.monorepo_layers[0];
     assert_eq!(layer.authority, MonorepoStandard::RushStack);
 
-    let mut relatives: Vec<String> = layer.packages.iter().map(|p| p.clone()).collect();
+    let mut relatives: Vec<String> = layer.packages.to_vec();
     relatives.sort();
     assert_eq!(
         relatives,

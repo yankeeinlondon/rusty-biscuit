@@ -1371,6 +1371,7 @@ mod tests {
             editor_config: None,
             command_runner: vec![],
             package_managers: vec![],
+            test_runners: vec![],
             version: None,
             features: vec![],
             depends_on: depends_on.iter().map(|s| s.to_string()).collect(),
@@ -3088,10 +3089,8 @@ mod tests {
 
         #[test]
         fn label_wraps_single_orchestrator_with_authority() {
-            let label = format_monorepo_label(
-                MonorepoStandard::PnpmWorkspaces,
-                &[MonorepoStandard::Nx],
-            );
+            let label =
+                format_monorepo_label(MonorepoStandard::PnpmWorkspaces, &[MonorepoStandard::Nx]);
             assert_eq!(label, "Nx (using pnpm workspaces)");
         }
 

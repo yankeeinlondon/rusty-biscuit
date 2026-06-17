@@ -1,6 +1,6 @@
+pub mod aggregate;
 pub mod area;
 pub mod cargo;
-pub mod aggregate;
 pub mod detection;
 pub mod dotnet;
 pub mod glob;
@@ -32,9 +32,7 @@ pub use standard::{
     MonorepoStandard, MonorepoStandardSpec, NestingPolicy, PackageProvenance, ResolvedBinary, Role,
     RootMembership, Token, WorkspaceMultiplicity, WrapperScript,
 };
-pub use test_runner_usage::{
-    TestRunnerSource, TestRunnerUsage, detect_test_runners_for_dir,
-};
+pub use test_runner_usage::{TestRunnerSource, TestRunnerUsage, detect_test_runners_for_dir};
 pub use types::{
     ExternalDependency, ExternalDependencyFamily, ExternalDependencyFilter, Package,
     PackageEcosystem, RepoInfo, detect_repo, detect_repo_structure, detect_repo_with_inventory,

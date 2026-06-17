@@ -314,7 +314,13 @@ pub static TEST_RUNNER_SPEC: &[TestRunnerSpec] = &[
         kind: RunnerKind::Bdd,
         parent_binary: None,
         manifest_dep_keys: &["behat/behat"],
-        config_globs: &["behat.yml", "behat.yml.dist", "behat.dist.yml", "behat.php"],
+        config_globs: &[
+            "behat.yml",
+            "behat.yml.dist",
+            "behat.dist.yml",
+            "behat.php",
+            "features/*.feature",
+        ],
         is_ecosystem_default: false,
     },
     TestRunnerSpec {
@@ -333,7 +339,7 @@ pub static TEST_RUNNER_SPEC: &[TestRunnerSpec] = &[
         kind: RunnerKind::Runner,
         parent_binary: None,
         manifest_dep_keys: &["rspec"],
-        config_globs: &[".rspec", "spec/spec_helper.rb"],
+        config_globs: &[".rspec", "spec/spec_helper.rb", "spec/**/*_spec.rb"],
         is_ecosystem_default: false,
     },
     TestRunnerSpec {
