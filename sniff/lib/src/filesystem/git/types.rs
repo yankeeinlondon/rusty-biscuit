@@ -217,12 +217,19 @@ pub struct BranchInfo {
     /// Whether a locally known remote-tracking ref points at this branch tip.
     pub remote_represented: bool,
     /// Configured upstream branch, such as "origin/main".
-    #[serde(skip_serializing_if = "Option::is_none")]
+    ///
+    /// Serializes as `null` when the branch has no configured upstream, so
+    /// consumers can distinguish "no tracking configured" from a present value.
     pub upstream: Option<String>,
     /// Number of commits this branch is ahead of its configured upstream.
-    pub ahead: usize,
+    ///
+    /// `None` when no upstream is configured or its tip is not locally known —
+    /// distinguishing "no tracking data" from an even `Some(0)`.
+    pub ahead: Option<usize>,
     /// Number of commits this branch is behind its configured upstream.
-    pub behind: usize,
+    ///
+    /// `None` under the same conditions as [`ahead`](Self::ahead).
+    pub behind: Option<usize>,
 }
 
 /// Git hosting provider types.

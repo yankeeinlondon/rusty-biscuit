@@ -57,10 +57,20 @@ pub(crate) fn get_branch_info_fallible(
             .detach();
         let sha = tip.to_string();
         let upstream = configured_upstream(&config, &name);
-        let (ahead, behind) = upstream
+        // ahead/behind are only meaningful against a known upstream tip. With no
+        // configured upstream (or one whose tip is not locally known), report
+        // `None` so a fresh branch is distinguishable from one that is exactly
+        // even with its upstream.
+        let (ahead, behind) = match upstream
             .as_deref()
             .and_then(|upstream| remote_tips.get(upstream))
-            .map_or(Ok((0, 0)), |remote| ahead_behind(repo, tip, *remote))?;
+        {
+            Some(remote) => {
+                let (ahead, behind) = ahead_behind(repo, tip, *remote)?;
+                (Some(ahead), Some(behind))
+            }
+            None => (None, None),
+        };
 
         branches.push(BranchInfo {
             current: current_branch.is_some_and(|current| current == name),
@@ -1965,5 +1975,71 @@ mod tests {
             other.ahead, 0,
             "linked worktree must skip ahead when main is current"
         );
+    }
+
+    #[test]
+    fn branch_info_reports_some_ahead_behind_with_configured_upstream() {
+        let (dir, repo) = setup_repo();
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        let base = repo.head().unwrap().peel_to_commit().unwrap().id();
+
+        // origin/<branch> stays at the base commit.
+        add_fake_remote(&repo, "origin", &branch, base);
+
+        // Advance the local branch one commit past origin.
+        std::fs::write(dir.path().join("test.txt"), "second\n").unwrap();
+        stage_path(&repo, "test.txt");
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            let parent = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "second", &tree, &[&parent])
+                .unwrap();
+        }
+
+        // Configure the upstream so the branch tracks origin/<branch>.
+        let mut config = repo.config().unwrap();
+        config
+            .set_str(&format!("branch.{branch}.remote"), "origin")
+            .unwrap();
+        config
+            .set_str(
+                &format!("branch.{branch}.merge"),
+                &format!("refs/heads/{branch}"),
+            )
+            .unwrap();
+
+        let gix_repo = open_gix(&dir);
+        let branches = get_branch_info_fallible(&gix_repo, Some(&branch)).unwrap();
+        let info = branches
+            .iter()
+            .find(|b| b.name == branch)
+            .expect("branch present");
+
+        assert_eq!(
+            info.upstream.as_deref(),
+            Some(format!("origin/{branch}").as_str())
+        );
+        assert_eq!(info.ahead, Some(1), "one commit ahead of origin");
+        assert_eq!(info.behind, Some(0), "zero behind origin");
+    }
+
+    #[test]
+    fn branch_info_reports_null_tracking_without_upstream() {
+        let (dir, repo) = setup_repo();
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+
+        let gix_repo = open_gix(&dir);
+        let branches = get_branch_info_fallible(&gix_repo, Some(&branch)).unwrap();
+        let info = branches
+            .iter()
+            .find(|b| b.name == branch)
+            .expect("branch present");
+
+        // No configured upstream: tracking facts are absent, not zeroed.
+        assert_eq!(info.upstream, None);
+        assert_eq!(info.ahead, None);
+        assert_eq!(info.behind, None);
     }
 }

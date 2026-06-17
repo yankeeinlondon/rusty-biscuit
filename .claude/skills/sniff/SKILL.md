@@ -1,7 +1,7 @@
 ---
 name: sniff
 description: Expert knowledge for sniff-lib and sniff-cli, a cross-platform system detection library and CLI for Rust. Use when detecting OS/hardware/network/filesystem info, program detection, service detection, adding new detection capabilities, or optimizing detection performance.
-hash: 3cd50ffff2b8b5db-7af913e154cff22e
+hash: 3cd50ffff2b8b5db-07a77a2a7523fdf0
 last_updated: 2026-06-17
 ---
 
@@ -104,7 +104,7 @@ let result = detect_with_config(config)?;
 | `ServicesInfo` | Init system + service list (via `ServiceManager::detect()`) |
 | `Package` | Package path, languages, managers, dependencies |
 | `GitRepo` | `gix::Repository` handle from trusted discovery. All git access (status, diff, history, refs, remotes, config, worktrees) is pure-Rust gix; git2/libgit2 is gone from production and retained only as a dev-dependency for test/bench fixtures. |
-| `BranchInfo` | Local branch projection with branch name, current flag, tip SHA, upstream, ahead/behind counts, and whether any locally known remote-tracking ref points at the branch tip. Default branch detection uses known refs only; refresh requires explicit opt-in. |
+| `BranchInfo` | Local branch projection with branch name, current flag, tip SHA, upstream, ahead/behind counts, and whether any locally known remote-tracking ref points at the branch tip. `upstream`/`ahead`/`behind` serialize as `null` when no upstream is configured (distinguishing "no tracking data" from an even `0`). Default branch detection uses known refs only; refresh requires explicit opt-in. |
 | `get_current_worktree_name` | Early-return helper: returns the basename of the linked worktree directory, or `None` if in the main worktree |
 | `MonorepoStandard` | Standard-based monorepo descriptor (Cargo, pnpm, Nx, Bazel, etc.) with `BinarySpec` and advisory `InvocationTemplate`s |
 | `DetectedStandard` | Detected instance of a `MonorepoStandard`, including a `ResolvedBinary` (`Path`, `Wrapper`, or missing) and version satisfaction |
