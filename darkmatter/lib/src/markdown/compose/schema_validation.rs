@@ -30,7 +30,7 @@ use std::path::PathBuf;
 
 use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeOptions;
-use crate::markdown::compose::types::{ComposeOperation, ComposeSource};
+use crate::markdown::compose::{ComposeOperation, ComposeSource};
 use crate::markdown::schemas::DarkmatterSchemas;
 use crate::markdown::schemas::coerce::coerce_frontmatter_with_pending;
 use crate::markdown::types::{MarkdownError, MarkdownResult};

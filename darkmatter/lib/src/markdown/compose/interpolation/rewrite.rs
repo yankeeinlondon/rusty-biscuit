@@ -7,7 +7,7 @@
 
 use super::{EvalResult, Evaluator, ExpressionFinder, ExpressionLocation, parse};
 use crate::markdown::compose::expression::{EvaluationLookup, UNKNOWN_FUNCTION_PREFIX};
-use crate::markdown::compose::types::ComposeWarning;
+use crate::markdown::compose::ComposeWarning;
 use crate::markdown::types::MarkdownError;
 
 /// Whether an evaluation error is fatal even in non-fail-fast mode.
@@ -168,8 +168,8 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::compose::state::EffectiveStateBuilder;
-    use crate::markdown::compose::types::ComposeContext;
+    use crate::markdown::compose::EffectiveStateBuilder;
+    use crate::markdown::compose::ComposeContext;
     use serde_json::json;
     use std::collections::HashMap;
 

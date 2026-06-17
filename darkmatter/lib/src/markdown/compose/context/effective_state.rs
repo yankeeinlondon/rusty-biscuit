@@ -1,12 +1,12 @@
-//! Effective state resolution for compose pipeline.
+//! Effective state resolution for the compose pipeline.
 //!
-//! This module provides helpers for merging frontmatter with external state
-//! to produce the effective state used by replacement and interpolation stages.
+//! Merges frontmatter with external state to produce the effective state used
+//! by replacement, interpolation, and condition stages.
 
-use super::super::frontmatter::MergeStrategy;
-use super::context::ContextMergeDiagnostic;
-use super::context::merge::CtxMergeError;
-use super::types::ComposeContext;
+use super::runtime::ComposeContext;
+use super::ContextMergeDiagnostic;
+use super::merge::CtxMergeError;
+use crate::markdown::frontmatter::MergeStrategy;
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -178,9 +178,9 @@ impl EffectiveState {
         // Reserved `doc` namespace — intercepted before normal key lookup and
         // before the bare-name `ctx.*` fallback, so a missing `doc.*` never
         // collapses into `ctx.*`.
-        if super::expression::doc_namespace::is_doc_namespace(path) {
+        if super::super::expression::doc_namespace::is_doc_namespace(path) {
             let root = Value::Object(self.data.clone().into_iter().collect());
-            return super::expression::doc_namespace::resolve_doc_namespace(path, &root);
+            return super::super::expression::doc_namespace::resolve_doc_namespace(path, &root);
         }
 
         // Handle special prefixes
@@ -302,7 +302,7 @@ impl EffectiveState {
     }
 }
 
-impl super::expression::EvaluationLookup for EffectiveState {
+impl super::super::expression::EvaluationLookup for EffectiveState {
     fn get(&self, path: &str) -> Option<Value> {
         self.get(path)
     }
@@ -328,13 +328,13 @@ impl super::expression::EvaluationLookup for EffectiveState {
 /// the base directory but never touch the network.
 pub(crate) struct ResolvingLookup<'a> {
     state: &'a EffectiveState,
-    resolution_context: super::expression::ResolutionContext,
+    resolution_context: super::super::expression::ResolutionContext,
 }
 
 impl<'a> ResolvingLookup<'a> {
     pub(crate) fn new(
         state: &'a EffectiveState,
-        resolution_context: super::expression::ResolutionContext,
+        resolution_context: super::super::expression::ResolutionContext,
     ) -> Self {
         Self {
             state,
@@ -343,7 +343,7 @@ impl<'a> ResolvingLookup<'a> {
     }
 }
 
-impl super::expression::EvaluationLookup for ResolvingLookup<'_> {
+impl super::super::expression::EvaluationLookup for ResolvingLookup<'_> {
     fn get(&self, path: &str) -> Option<Value> {
         self.state.get(path)
     }
@@ -352,7 +352,7 @@ impl super::expression::EvaluationLookup for ResolvingLookup<'_> {
         self.state.get_string(path)
     }
 
-    fn resolution_context(&self) -> Option<super::expression::ResolutionContext> {
+    fn resolution_context(&self) -> Option<super::super::expression::ResolutionContext> {
         Some(self.resolution_context.clone())
     }
 }
@@ -481,7 +481,7 @@ impl EffectiveStateBuilder {
         let runtime_ctx = context.as_object();
 
         let merge_result =
-            super::context::merge_ctx(user_ctx, runtime_ctx, self.allow_ctx_override)?;
+            super::merge_ctx(user_ctx, runtime_ctx, self.allow_ctx_override)?;
         data.insert("ctx".to_string(), merge_result.merged_ctx);
         ctx_diagnostics.extend(merge_result.diagnostics);
 
@@ -498,6 +498,7 @@ impl Default for EffectiveStateBuilder {
         Self::new()
     }
 }
+
 
 #[cfg(test)]
 mod tests {

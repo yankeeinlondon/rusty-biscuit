@@ -29,7 +29,7 @@
 
 use super::expression::{EvaluationLookup, Expr, ExpressionFinder, ResolutionContext, doc_namespace, parse};
 use super::interpolation::{Evaluator, ScanMode, interpolate_text};
-use super::types::{ComposeContext, ComposeWarning};
+use super::{ComposeContext, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
 use crate::markdown::types::MarkdownError;
 use serde_json::Value;
@@ -547,7 +547,7 @@ mod tests {
 
     mod seed_state_tests {
         use super::*;
-        use crate::markdown::compose::types::ComposeContext;
+        use crate::markdown::compose::ComposeContext;
 
         fn test_context() -> ComposeContext {
             ComposeContext::fixed_for_testing()
@@ -643,7 +643,7 @@ mod tests {
 
     mod interpolate_frontmatter_tests {
         use super::*;
-        use crate::markdown::compose::types::ComposeContext;
+        use crate::markdown::compose::ComposeContext;
         use crate::markdown::frontmatter::Frontmatter;
 
         fn test_context() -> ComposeContext {

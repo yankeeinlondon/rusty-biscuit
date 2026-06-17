@@ -5,7 +5,7 @@ use std::ops::Range;
 use super::types::{PageBlockError, PageBlockRegion};
 use crate::markdown::compose::conditions;
 use crate::markdown::compose::expression::EvaluationLookup;
-use crate::markdown::compose::types::ComposeReport;
+use crate::markdown::compose::ComposeReport;
 use biscuit_terminal::errors::SourceContext;
 use tracing::debug;
 

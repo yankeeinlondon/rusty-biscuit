@@ -36,7 +36,7 @@ use super::shell_expansion::types::{
     ShellExpansionError, ShellPipeline, ShellPolicyPaths,
 };
 use super::shell_expansion::{PreparedShellDirective, execute_prepared_directive, prepare_directive};
-use super::types::{ComposeOptions, ComposeWarning};
+use super::{ComposeOptions, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
 use crate::markdown::types::MarkdownResult;
 use biscuit_terminal::errors::SourceContext;
@@ -154,6 +154,9 @@ pub(crate) struct FrontmatterShellDirective {
     #[allow(dead_code)] // Inspected by parser tests; production reads `ast`.
     pub args: Vec<String>,
     pub timeout_override: Option<std::time::Duration>,
+    /// When `true` (from the `::no-cache` suffix), the directive bypasses the
+    /// per-compose command cache and executes fresh at every occurrence.
+    pub no_cache: bool,
     #[allow(dead_code)] // Inspected by parser tests; production uses `directive_reachable_pipelines`.
     pub pipeline: Option<ShellPipeline>,
     pub ast: FrontmatterShellAst,
@@ -206,32 +209,58 @@ pub(crate) fn parse_shell_value(
     let inner_command = &rest[..close_pos];
     let after_close = &rest[close_pos + 1..];
 
-    // Check for ::timeout:N suffix
-    let timeout_override = if let Some(timeout_str) = after_close.strip_prefix("::timeout:") {
-        let timeout_val: u64 = timeout_str.parse().map_err(|_| {
-            frontmatter_parse_error(
-                key,
-                ctx,
-                "Invalid ::timeout value in frontmatter shell expression; expected a positive integer number of seconds",
-            )
-        })?;
-        if timeout_val == 0 {
+    // Parse the suffixes after the closing paren. Two are recognized —
+    // `::timeout:N` and the `::no-cache` cache opt-out — in any order. Each may
+    // appear at most once; anything else is a hard parse error.
+    let mut timeout_override = None;
+    let mut no_cache = false;
+    let mut suffix = after_close;
+    while !suffix.is_empty() {
+        if let Some(rest) = suffix.strip_prefix("::no-cache") {
+            if no_cache {
+                return Err(frontmatter_parse_error(
+                    key,
+                    ctx,
+                    "Duplicate ::no-cache suffix in frontmatter shell expression",
+                ));
+            }
+            no_cache = true;
+            suffix = rest;
+        } else if let Some(rest) = suffix.strip_prefix("::timeout:") {
+            if timeout_override.is_some() {
+                return Err(frontmatter_parse_error(
+                    key,
+                    ctx,
+                    "Duplicate ::timeout suffix in frontmatter shell expression",
+                ));
+            }
+            // The timeout digits run up to the next `::` suffix or end of string.
+            let digits_end = rest.find("::").unwrap_or(rest.len());
+            let (digits, tail) = rest.split_at(digits_end);
+            let timeout_val: u64 = digits.parse().map_err(|_| {
+                frontmatter_parse_error(
+                    key,
+                    ctx,
+                    "Invalid ::timeout value in frontmatter shell expression; expected a positive integer number of seconds",
+                )
+            })?;
+            if timeout_val == 0 {
+                return Err(frontmatter_parse_error(
+                    key,
+                    ctx,
+                    "Frontmatter shell timeout must be greater than zero",
+                ));
+            }
+            timeout_override = Some(std::time::Duration::from_secs(timeout_val));
+            suffix = tail;
+        } else {
             return Err(frontmatter_parse_error(
                 key,
                 ctx,
-                "Frontmatter shell timeout must be greater than zero",
+                "Unexpected trailing content after frontmatter shell expression",
             ));
         }
-        Some(std::time::Duration::from_secs(timeout_val))
-    } else if !after_close.is_empty() {
-        return Err(frontmatter_parse_error(
-            key,
-            ctx,
-            "Unexpected trailing content after frontmatter shell expression",
-        ));
-    } else {
-        None
-    };
+    }
 
     // The original (pre-interpolation) inner text drives ternary structure
     // detection and per-branch executable-interpolation validation. If no
@@ -279,6 +308,7 @@ pub(crate) fn parse_shell_value(
             executable: String::new(),
             args: Vec::new(),
             timeout_override,
+            no_cache,
             pipeline: None,
             ast: FrontmatterShellAst::Ternary {
                 condition_source,
@@ -341,6 +371,7 @@ pub(crate) fn parse_shell_value(
         executable,
         args,
         timeout_override,
+        no_cache,
         pipeline: Some(pipeline.clone()),
         ast: FrontmatterShellAst::Pipeline(pipeline),
     }))
@@ -1081,13 +1112,17 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     }
 
     // Run executable preparations in parallel; short-circuit branches contribute
-    // an empty string and skip the shell runtime entirely.
+    // an empty string and skip the shell runtime entirely. The cache lives behind
+    // the runtime's shared mutex, so a shared borrow suffices here.
+    let shell_runtime = &runtime.shell;
     let mut executions: Vec<_> = pending
         .into_par_iter()
         .map(|(index, key, item)| {
             let result = match item {
-                Pending::Execute(prepared) => execute_prepared_directive(&prepared, options)
-                    .map(|res| (res.stdout, res.warnings)),
+                Pending::Execute(prepared) => {
+                    execute_prepared_directive(&prepared, options, shell_runtime)
+                        .map(|res| (res.stdout, res.warnings))
+                }
                 Pending::Value(value) => Ok((value, Vec::new())),
             };
             (index, key, result)
@@ -1283,6 +1318,7 @@ fn prepare_branch_pipeline(
         },
         error_handling: ErrorHandling::default(),
         timeout_override: candidate.timeout_override,
+        no_cache: candidate.no_cache,
         pipeline: Some(pipeline),
         ctx: ctx.clone(),
     };
@@ -1582,7 +1618,7 @@ mod tests {
     fn ternary_condition_uses_read_side_functions_with_context() {
         // A `$()` ternary condition evaluated at the real run carries the
         // resolution context, so `file_exists(...)` resolves against base_dir.
-        use crate::markdown::compose::types::ComposeContext;
+        use crate::markdown::compose::ComposeContext;
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
         let rc = super::super::expression::ResolutionContext::new(dir.path().to_path_buf());
@@ -1607,7 +1643,7 @@ mod tests {
         // The context-free seed state (preflight-style) cannot evaluate a
         // read-side function and surfaces a parse/eval error rather than
         // silently selecting a branch.
-        use crate::markdown::compose::types::ComposeContext;
+        use crate::markdown::compose::ComposeContext;
         let state = FrontmatterSeedState::new(
             std::collections::HashMap::new(),
             ComposeContext::fixed_for_testing(),
@@ -1693,6 +1729,57 @@ mod tests {
     #[test]
     fn rejects_non_integer_timeout() {
         let result = parse_shell_value("$(echo)::timeout:abc", "key", None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn detects_no_cache_suffix() {
+        let directive = parse_shell_value("$(uuidgen)::no-cache", "key", None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(directive.executable, "uuidgen");
+        assert!(directive.no_cache);
+        assert!(directive.timeout_override.is_none());
+    }
+
+    #[test]
+    fn no_cache_defaults_false_without_suffix() {
+        let directive = parse_shell_value("$(uuidgen)", "key", None)
+            .unwrap()
+            .unwrap();
+        assert!(!directive.no_cache);
+    }
+
+    #[test]
+    fn no_cache_combines_with_timeout_either_order() {
+        let a = parse_shell_value("$(uuidgen)::no-cache::timeout:5", "key", None)
+            .unwrap()
+            .unwrap();
+        assert!(a.no_cache);
+        assert_eq!(a.timeout_override, Some(std::time::Duration::from_secs(5)));
+
+        let b = parse_shell_value("$(uuidgen)::timeout:5::no-cache", "key", None)
+            .unwrap()
+            .unwrap();
+        assert!(b.no_cache);
+        assert_eq!(b.timeout_override, Some(std::time::Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn rejects_invalid_suffix_after_expression() {
+        let result = parse_shell_value("$(uuidgen)::bogus", "key", None);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Unexpected trailing content")
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_no_cache_suffix() {
+        let result = parse_shell_value("$(uuidgen)::no-cache::no-cache", "key", None);
         assert!(result.is_err());
     }
 
@@ -2381,7 +2468,7 @@ mod execution_tests {
         PipelineRuntime, ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest,
         ShellExpansionError, ShellExpansionOptions,
     };
-    use crate::markdown::compose::types::ComposeOptions;
+    use crate::markdown::compose::ComposeOptions;
     use crate::markdown::frontmatter::Frontmatter;
     use serde_json::json;
     use serial_test::serial;

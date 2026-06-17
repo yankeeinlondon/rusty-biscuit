@@ -277,8 +277,8 @@ mod tests {
     use super::*;
     use crate::markdown::compose::EffectiveState;
     use crate::markdown::compose::interpolation::parse;
-    use crate::markdown::compose::state::EffectiveStateBuilder;
-    use crate::markdown::compose::types::ComposeContext;
+    use crate::markdown::compose::EffectiveStateBuilder;
+    use crate::markdown::compose::ComposeContext;
     use serde_json::json;
     use std::collections::HashMap;
 

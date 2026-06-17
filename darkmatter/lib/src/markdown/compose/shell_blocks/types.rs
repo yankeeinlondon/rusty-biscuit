@@ -15,6 +15,9 @@ pub(crate) struct ShellBlockRegion {
     pub options: ErrorHandling,
     /// Optional timeout override for all commands in this block.
     pub timeout_override: Option<Duration>,
+    /// When `true` (from the `no_cache=true` opener parameter), every command in
+    /// the block bypasses the per-compose command cache and executes fresh.
+    pub no_cache: bool,
     /// Exact leading whitespace of the `::shell-block` opener line, applied as
     /// the indent prefix to the rendered block output so generated lines stay
     /// nested under the container the directive appeared in. Empty for a
