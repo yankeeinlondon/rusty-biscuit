@@ -1,11 +1,11 @@
 //! Shared protobuf schema, generated gRPC stubs, and IPC helpers for the
-//! remote-signal daemon and its clients.
+//! rendezvous daemon and its clients.
 //!
 //! Phase 1 wired the `Ping` / `Status` round-trip over a Unix Domain
 //! Socket. Phase 2 adds the session-log document model
 //! ([`session_log`]) plus the append/read RPC surface that exercises
 //! the daemon's redb-backed Loro persistence and the DuckDB analytical
-//! projection. Later phases will extend the `RemoteSignal` service with
+//! projection. Later phases will extend the `Rendezvous` service with
 //! pairing and sync operations.
 
 pub mod envelope;
@@ -15,17 +15,17 @@ pub mod session_log;
 pub mod socket;
 pub mod sync;
 
-/// Generated protobuf types and gRPC stubs for the `remote_signal` package.
+/// Generated protobuf types and gRPC stubs for the `rendezvous` package.
 ///
 /// Re-exported from the build-script output so consumers can refer to a
-/// stable module path (`remote_signal_core::proto`) instead of the raw
+/// stable module path (`rendezvous_core::proto`) instead of the raw
 /// `tonic::include_proto!` macro call site.
 pub mod proto {
-    tonic::include_proto!("remote_signal");
+    tonic::include_proto!("rendezvous");
 }
 
-pub use proto::remote_signal_client::RemoteSignalClient;
-pub use proto::remote_signal_server::{RemoteSignal, RemoteSignalServer};
+pub use proto::rendezvous_client::RendezvousClient;
+pub use proto::rendezvous_server::{Rendezvous, RendezvousServer};
 pub use proto::{
     AppendEntryRequest, AppendEntryResponse, ApprovePeerRequest, ApprovePeerResponse,
     ConnectToPeerRequest, ConnectToPeerResponse, CreateInvitationRequest,
@@ -53,6 +53,6 @@ pub use session_log::{
     DEFAULT_MAX_ENTRIES_PER_CHUNK, Entry,
 };
 
-/// Semver string of the `remote-signal-core` crate, surfaced so the daemon
+/// Semver string of the `rendezvous-core` crate, surfaced so the daemon
 /// and clients can report a single shared version in protocol responses.
 pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");

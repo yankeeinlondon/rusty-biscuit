@@ -1,13 +1,13 @@
 syntax = "proto3";
 
-package remote_signal;
+package rendezvous;
 
-// Control-plane gRPC service exposed by the remote-signal daemon over a
+// Control-plane gRPC service exposed by the rendezvous daemon over a
 // Unix Domain Socket. Phase 1 covers liveness (`Ping`) and a minimal
 // `Status` snapshot used by the test client to verify IPC end-to-end.
 // Phase 2 adds the session-log append/read surface backed by Loro
 // documents persisted in redb plus a DuckDB analytical projection.
-service RemoteSignal {
+service Rendezvous {
     rpc Ping(PingRequest) returns (PingResponse);
     rpc Status(StatusRequest) returns (StatusResponse);
 
@@ -90,7 +90,7 @@ message StatusResponse {
     int64 started_at_unix_ms = 3;
 }
 
-// Generic session-log entry. Mirrors `remote_signal_core::session_log::Entry`.
+// Generic session-log entry. Mirrors `rendezvous_core::session_log::Entry`.
 message SessionEntry {
     // Per-session monotonic counter assigned by the daemon when the entry
     // is appended. Stable across restarts.
@@ -332,7 +332,7 @@ message SyncWithPeerResponse {
 // length-prefixed with a big-endian u32 per frame).
 // ---------------------------------------------------------------------
 
-// Wire-level analogue of `remote_signal_core::SignedEnvelope`. Serialised
+// Wire-level analogue of `rendezvous_core::SignedEnvelope`. Serialised
 // as protobuf so receivers can verify the Ed25519 signature without
 // trusting transport metadata.
 message SignedEnvelopeWire {

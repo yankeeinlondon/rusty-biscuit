@@ -1,4 +1,4 @@
-//! Node identity for the remote-signal mesh.
+//! Node identity for the rendezvous mesh.
 //!
 //! Each daemon owns a long-lived [`NodeIdentity`] backed by an
 //! ed25519 keypair. The public component is used to derive a stable
@@ -51,7 +51,7 @@ pub enum NodeIdentityError {
     },
 }
 
-/// Long-lived signing identity for a remote-signal node.
+/// Long-lived signing identity for a rendezvous node.
 ///
 /// The struct owns the raw ed25519 secret seed and a pre-built
 /// [`SigningKey`]. The public key is exposed both as a 32-byte array
@@ -243,7 +243,7 @@ mod tests {
     #[test]
     fn sign_and_verify_round_trip() {
         let identity = NodeIdentity::generate();
-        let payload = b"hello-remote-signal";
+        let payload = b"hello-rendezvous";
         let signature = identity.sign(payload);
         assert!(verify_signature(
             &identity.public_key_bytes(),

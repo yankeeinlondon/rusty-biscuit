@@ -1,12 +1,12 @@
 //! Helpers for resolving the Unix Domain Socket path used for IPC between
-//! the remote-signal daemon and its local clients.
+//! the rendezvous daemon and its local clients.
 //!
 //! Resolution order (first match wins):
 //!
-//! 1. The `REMOTE_SIGNAL_SOCKET` environment variable, if set and non-empty.
-//! 2. `$XDG_RUNTIME_DIR/remote-signal/daemon.sock`, when `XDG_RUNTIME_DIR`
+//! 1. The `RENDEZVOUS_SOCKET` environment variable, if set and non-empty.
+//! 2. `$XDG_RUNTIME_DIR/rendezvous/daemon.sock`, when `XDG_RUNTIME_DIR`
 //!    is set (typical on Linux).
-//! 3. `$TMPDIR/remote-signal-<uid-or-user>/daemon.sock`, falling back to
+//! 3. `$TMPDIR/rendezvous-<uid-or-user>/daemon.sock`, falling back to
 //!    `/tmp/...` when `TMPDIR` is unset (typical on macOS and other Unix).
 //!
 //! Tests and the test client can override the path with the env var to
@@ -16,7 +16,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 /// Environment variable that overrides the IPC socket path.
-pub const SOCKET_ENV_VAR: &str = "REMOTE_SIGNAL_SOCKET";
+pub const SOCKET_ENV_VAR: &str = "RENDEZVOUS_SOCKET";
 
 /// Default socket file name within the resolved parent directory.
 pub const SOCKET_FILE_NAME: &str = "daemon.sock";
@@ -50,7 +50,7 @@ pub fn default_socket_path() -> PathBuf {
         && !runtime.is_empty()
     {
         return PathBuf::from(runtime)
-            .join("remote-signal")
+            .join("rendezvous")
             .join(SOCKET_FILE_NAME);
     }
 
@@ -61,7 +61,7 @@ pub fn default_socket_path() -> PathBuf {
         .ok()
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "default".to_string());
-    tmp.join(format!("remote-signal-{user_segment}"))
+    tmp.join(format!("rendezvous-{user_segment}"))
         .join(SOCKET_FILE_NAME)
 }
 
@@ -162,7 +162,7 @@ mod tests {
         }
         assert_eq!(
             default_socket_path(),
-            PathBuf::from("/run/user/1000/remote-signal/daemon.sock"),
+            PathBuf::from("/run/user/1000/rendezvous/daemon.sock"),
         );
     }
 
@@ -176,14 +176,14 @@ mod tests {
         }
         assert_eq!(
             default_socket_path(),
-            PathBuf::from("/var/folders/abc/remote-signal-alice/daemon.sock"),
+            PathBuf::from("/var/folders/abc/rendezvous-alice/daemon.sock"),
         );
     }
 
     #[test]
     fn ensure_parent_dir_creates_nested_directories() {
         let tmp = std::env::temp_dir().join(format!(
-            "remote-signal-test-{}-{}",
+            "rendezvous-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

@@ -1,12 +1,12 @@
 [package]
-name = "remote-signal-core"
+name = "rendezvous-core"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
-description = "Shared protobuf schema, gRPC stubs, and IPC helpers for the remote-signal daemon and clients."
+description = "Shared protobuf schema, gRPC stubs, and IPC helpers for the rendezvous daemon and clients."
 
 [lib]
-name = "remote_signal_core"
+name = "rendezvous_core"
 path = "src/lib.rs"
 
 [dependencies]
