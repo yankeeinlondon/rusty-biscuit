@@ -65,6 +65,22 @@ skills_files_updated_during_phase_4:
 packages:
   - darkmatter
   - darkmatter-cli
+source_files_during_phase_5:
+  - darkmatter/cli/src/artifact.rs
+  - darkmatter/cli/src/render.rs
+  - darkmatter/cli/src/delta.rs
+  - darkmatter/cli/src/lib.rs
+  - darkmatter/cli/src/commands/mod.rs
+  - darkmatter/cli/src/commands/clean.rs
+  - darkmatter/cli/src/commands/render.rs
+  - darkmatter/cli/src/commands/compose.rs
+  - darkmatter/cli/src/commands/code_block.rs
+  - darkmatter/cli/tests/cli.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+packages:
+  - darkmatter-cli
 ---
 
 # CLI Atheist — Execution Plan
@@ -329,18 +345,19 @@ application) and `artifact.rs` (output-artifact plumbing). Delete
 
 **Behavior:** preserving.
 
-- [ ] Create `darkmatter/cli/src/render.rs` and move `render_terminal_output`, `ResolvedTheme`, `apply_cli_layout_flags` (now `CliStyleClaims`-based from Phase 4), `apply_component_alignment`, `apply_component_fill`, `apply_style_frontmatter`, `log_style_warnings`.
-- [ ] Create `darkmatter/cli/src/artifact.rs` and move `OutputArtifact`, `emit_or_show_artifact`, `open_output_artifact`, `write_output_artifact_file`, `terminal_image_mode_from_env` (spec lines 20–51 and 512–653 of the original `output.rs`).
-- [ ] Distribute the in-file `#[cfg(test)] mod tests` to the appropriate new home.
-- [ ] Decide whether to add `darkmatter/cli/src/output_dispatch.rs` (~80 lines, thin dispatcher picking artifact by `OutputFormat`), or fold the dispatch into `render.rs`. Default: fold into `render.rs` unless the maintainer wants the extra file.
-- [ ] Delete `darkmatter/cli/src/output.rs`.
-- [ ] Update `lib.rs`, `main.rs`, and `commands/*` imports.
+- [x] Create `darkmatter/cli/src/render.rs` and move `render_terminal_output`, `ResolvedTheme`, `apply_cli_layout_flags` (now `CliStyleClaims`-based from Phase 4), `apply_style_frontmatter`, `log_style_warnings`. (`apply_component_alignment` and `apply_component_fill` no longer exist; they were removed in earlier phases.)
+- [x] Create `darkmatter/cli/src/artifact.rs` and move `OutputArtifact`, `markdown_artifact`, `html_artifact`, `markdown_plus_artifact`, `json_artifact`, `emit_or_show_artifact`, `open_output_artifact`, `write_output_artifact_file`, `terminal_image_mode_from_env`.
+- [x] Create `darkmatter/cli/src/delta.rs` and move the delta rendering helpers (`format_code_block_change`, `print_delta`) that were still in `output.rs` because Phase 1e was not completed; this keeps `render.rs` under the ~500-line soft cap.
+- [x] Distribute the in-file `#[cfg(test)] mod tests` to the appropriate new home.
+- [x] Decide whether to add `darkmatter/cli/src/output_dispatch.rs` (~80 lines, thin dispatcher picking artifact by `OutputFormat`), or fold the dispatch into `render.rs`. Default: fold into `render.rs` unless the maintainer wants the extra file. (Decision: no extra file needed; dispatch already lives in `commands/render.rs`.)
+- [x] Delete `darkmatter/cli/src/output.rs`.
+- [x] Update `lib.rs`, `main.rs`, and `commands/*` imports.
 
 ### Phase 5 validation checkpoint
 
-- [ ] `just test` + `just lint` green; no snapshot diffs.
-- [ ] `output.rs` deleted; no file in `src/` over ~500 lines (except `commands/compose.rs`, which is an explicit non-goal).
-- [ ] `md --help` byte-for-byte equal to `baseline/help.txt`.
+- [x] `just test` + `just lint` green; no snapshot diffs.
+- [x] `output.rs` deleted; no file in `src/` over ~500 lines (except `commands/compose.rs`, which is an explicit non-goal).
+- [x] `md --help` byte-for-byte equal to `baseline/help.txt` (help content only; cargo wrapper lines are environment-specific).
 
 ---
 
