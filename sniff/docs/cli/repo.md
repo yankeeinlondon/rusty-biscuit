@@ -33,6 +33,7 @@ These flags apply to all `sniff repo` subcommands:
 | Subcommand | Description |
 |------------|-------------|
 | [`structure`](./repo_structure.md) | Display hierarchical repo/monorepo package overview |
+| [`test-runner`](./repo_test-runner.md) | Declared test runner(s) for the current context, with evidence (`--csv`, `--list`, `--md`, `--json`) |
 | `branches` | List local branches from known refs; `--refresh-remotes` opts into a non-interactive remote refresh |
 | [`package-dependencies`](./repo_deps.md) | Show internal package dependency graph (text or `--ui` Mermaid diagram) |
 | `dependencies` | Show external package dependencies with dependency-family filters |

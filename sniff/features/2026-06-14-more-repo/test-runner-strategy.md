@@ -159,7 +159,7 @@ pub struct TestRunnerUsage {
 
 For the package's ecosystem, evaluate signals in priority order:
 
-1. **Config file present** in the package dir → strongest, disambiguates (e.g. `tests/Pest.php` distinguishes Pest from bare PHPUnit even though both carry `phpunit/phpunit`).
+1. **Config file present** in the package dir → strongest, disambiguates (e.g. `tests/Pest.php` distinguishes Pest from bare PHPUnit even though both carry `phpunit/phpunit`). A few runners keep a single config at the **workspace/repo root** that governs every member rather than one config per package dir — nextest's `.config/nextest.toml` is the canonical case. For those (`root_scoped_config` in `test_runner_usage.rs`), the config search extends from the package dir up to the repo root, so scanning a member crate still surfaces the runner instead of reporting only the `cargo test` ecosystem default.
 2. **Manifest dependency key** present (dev-deps preferred) → strong.
 3. **Ecosystem default** (`is_ecosystem_default`) → fallback when no explicit runner found but the ecosystem always ships one (`cargo test`, `go test`, `mix test`, `unittest`, `node --test`).
 4. **Convention only** (`tests/` + `*_test.*` naming, no config/dep) → weakest; emit for stdlib runners (unittest, Minitest) that have no dedicated marker.
