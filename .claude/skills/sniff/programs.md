@@ -70,27 +70,29 @@ Combined Windows scan cost: 40–80 ms warm cache, built once inside
 ## CLI Subcommands
 
 ```bash
-sniff programs                   # All categories (text output)
-sniff editors                    # Just editors
-sniff utilities                  # CLI utilities
-sniff language-package-managers  # Language package managers
-sniff os-package-managers        # OS package managers
-sniff tts-clients                # TTS programs
-sniff terminal-apps              # Terminal emulators
-sniff audio                      # Headless audio players
-sniff agents                     # AI agent/CLI tools
+sniff software                          # All categories (text output)
+sniff software editors                  # Just editors
+sniff software utilities                # CLI utilities
+sniff software language-package-managers  # Language package managers
+sniff software os-package-managers      # OS package managers
+sniff software tts-clients              # TTS programs
+sniff software terminal-apps            # Terminal emulators
+sniff software audio-players            # Headless audio players
+sniff software notification-helpers     # Desktop notification helpers
+sniff software agents                   # AI agent/CLI tools
+sniff software test-runners             # Host test-runner availability
 ```
 
 **JSON output:**
 ```bash
-sniff programs --json            # JSON with full metadata
+sniff software --json                   # JSON with full metadata
 ```
 
 **Install subcommand (per category or all):**
 ```bash
-sniff editors install            # Interactive picker
-sniff editors install nvim       # Install specific program
-sniff programs install           # Pick from all categories
+sniff software editors install          # Interactive picker
+sniff software editors install nvim     # Install specific program
+sniff software install                  # Pick from all categories
 ```
 
 ## Adding a Program Category
