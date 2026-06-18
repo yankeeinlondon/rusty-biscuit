@@ -561,6 +561,65 @@ fn repo_aggregate_json_does_not_duplicate_full_package_catalogs() {
     );
 }
 
+/// Generalized form of [`repo_aggregate_json_does_not_duplicate_full_package_catalogs`]:
+/// the full package catalog may live only in its designated homes; no other
+/// section anywhere in the tree may re-embed it. Walks the whole document
+/// rather than two named keys, so a *new* section that starts serializing full
+/// `Package` objects is caught. Replaces the former absolute-byte size check,
+/// which tracked git-history growth rather than catalog duplication.
+#[test]
+fn repo_aggregate_json_never_re_embeds_the_full_package_catalog() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "--json"])
+        .output()
+        .expect("run sniff repo --json");
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("valid json");
+
+    // Dotted paths permitted to carry full-catalog entries. Every other section
+    // must reference packages by a slim summary or a narrow projection.
+    const ALLOWED: &[&str] = &["packages", "package_dependencies.packages"];
+
+    // The heavy structural field `package_area` is emitted only by full
+    // `Package` serialization — the slim top-level summary (strings), the narrow
+    // dependency projection, and the git-status change buckets all omit it.
+    fn is_full_catalog_entry(v: &serde_json::Value) -> bool {
+        v.get("package_area").is_some()
+    }
+
+    fn walk(v: &serde_json::Value, path: &str, offenders: &mut Vec<String>) {
+        match v {
+            serde_json::Value::Array(items) => {
+                if items.iter().any(is_full_catalog_entry) && !ALLOWED.contains(&path) {
+                    offenders.push(path.to_string());
+                }
+                for item in items {
+                    walk(item, path, offenders);
+                }
+            }
+            serde_json::Value::Object(map) => {
+                for (k, child) in map {
+                    let next = if path.is_empty() {
+                        k.clone()
+                    } else {
+                        format!("{path}.{k}")
+                    };
+                    walk(child, &next, offenders);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut offenders = Vec::new();
+    walk(&json, "", &mut offenders);
+    assert!(
+        offenders.is_empty(),
+        "sections re-embed the full package catalog (entries carrying `package_area`); \
+         the catalog belongs only at {ALLOWED:?}, found at: {offenders:?}"
+    );
+}
+
 #[test]
 fn repo_aggregate_json_is_offline() {
     // The aggregate must not trigger a network call. We verify this indirectly
