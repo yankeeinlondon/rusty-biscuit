@@ -4,6 +4,14 @@ phases: 6
 created: 2026-06-12
 start_phase: 1
 yolo: true
+source_files_during_phase_1:
+  - darkmatter/lib/src/catalog/mod.rs
+  - darkmatter/lib/src/lib.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+  - darkmatter
 ---
 
 # Catalog Drift Control & Runtime-Accessible Descriptions — Execution Plan
@@ -12,19 +20,19 @@ yolo: true
 
 Build the shared descriptor module with no runtime coupling to the evaluator or `EffectEngine`.
 
-- [ ] Create `darkmatter/lib/src/catalog/mod.rs` containing:
+- [x] Create `darkmatter/lib/src/catalog/mod.rs` containing:
   - `Described` trait with `key`, `description`, `category`, `order`, and `example` methods.
   - `Example` struct with `invocation` and `result` static strings.
   - `describe(catalog, key)` exact lookup.
   - `suggest(catalog, key, max)` fuzzy nearest-match lookup.
   - `describe_for_error(d)` plain-text formatter.
-- [ ] Implement in-crate Levenshtein distance in `catalog/mod.rs` (~30 lines, no new dependencies).
-- [ ] Add unit tests for `describe` exact matches and misses across a small test catalog.
-- [ ] Add unit tests for `suggest` ranking, tie-breaking, `max == 0`, parenthesis stripping, and `ctx.` prefix stripping.
-- [ ] Add unit tests for `describe_for_error` output shape.
-- [ ] Wire `catalog` module into `darkmatter/lib/src/lib.rs`.
-- [ ] Run `cargo test` for `darkmatter/lib` and confirm all new tests pass.
-- [ ] Run `cargo check` for the workspace and confirm no new warnings from the module.
+- [x] Implement in-crate Levenshtein distance in `catalog/mod.rs` (~30 lines, no new dependencies).
+- [x] Add unit tests for `describe` exact matches and misses across a small test catalog.
+- [x] Add unit tests for `suggest` ranking, tie-breaking, `max == 0`, parenthesis stripping, and `ctx.` prefix stripping.
+- [x] Add unit tests for `describe_for_error` output shape.
+- [x] Wire `catalog` module into `darkmatter/lib/src/lib.rs`.
+- [x] Run `cargo test` for `darkmatter/lib` and confirm all new tests pass.
+- [x] Run `cargo check` for the workspace and confirm no new warnings from the module.
 
 **Validation checkpoint:** `cargo test -p darkmatter-lib catalog` passes with 100% of the new unit tests green.
 
