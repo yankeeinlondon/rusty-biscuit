@@ -27,6 +27,17 @@ pub const MAX_REPORT_WIDTH: u32 = 140;
 #[allow(dead_code)]
 pub const MIN_SUPPORTED_REPORT_WIDTH: u32 = 53;
 
+/// Minimum terminal width, in visible cells, at which the metadata reports keep
+/// their optional `Example` column.
+///
+/// The `Example` column is the widest optional content in the expression and
+/// side-effect reports. At narrow widths the four-column layout cannot satisfy
+/// the table planner without overflow, so the reports drop `Example` (the
+/// documented "where layout permits" contract) and render the remaining columns
+/// only. At or above this width the column is shown.
+#[allow(dead_code)]
+pub const EXAMPLE_COLUMN_MIN_WIDTH: u32 = 70;
+
 /// Break characters for report table cells.
 ///
 /// Catalog tokens — `ctx.`-prefixed property names, function/capability
