@@ -261,10 +261,7 @@ impl SectionReport {
                 heading,
                 prev,
                 next,
-            } => format!(
-                "\"{heading}\" section was removed{}",
-                removed_position(prev, next)
-            ),
+            } => format!("\"{heading}\" section was removed{}", removed_position(prev, next)),
         }
     }
 }
@@ -340,7 +337,9 @@ impl ExplanationBody {
                 (true, false) => {
                     "Frontmatter has changed, body remains unchanged semantically".to_string()
                 }
-                (false, true) => "Frontmatter remains unchanged, but body has changed".to_string(),
+                (false, true) => {
+                    "Frontmatter remains unchanged, but body has changed".to_string()
+                }
                 (true, true) => "Both the Frontmatter and body have changed".to_string(),
             },
             ExplanationBody::Fm { changed } => if *changed {
@@ -460,19 +459,13 @@ impl Markdown {
                 fm_keys_changed,
                 body_structure_changed,
             } => ExplanationBody::Structured {
-                frontmatter: FmConcern::from_signals(
-                    comparison.frontmatter_changed,
-                    fm_keys_changed,
-                ),
+                frontmatter: FmConcern::from_signals(comparison.frontmatter_changed, fm_keys_changed),
                 body: StructuredBody::from_signals(comparison.body_changed, body_structure_changed),
             },
             ComparisonDetail::Detailed {
                 fm_keys_changed, ..
             } => ExplanationBody::Detailed {
-                frontmatter: FmConcern::from_signals(
-                    comparison.frontmatter_changed,
-                    fm_keys_changed,
-                ),
+                frontmatter: FmConcern::from_signals(comparison.frontmatter_changed, fm_keys_changed),
                 body: self.detailed_body(stored, options)?,
             },
         };
@@ -504,8 +497,7 @@ impl Markdown {
             forced_kind: None,
             strict: options.strict,
         };
-        let ComputedHash::Detailed(current) =
-            self.compute_hash(MdHashKind::Detailed, &compare_opts)
+        let ComputedHash::Detailed(current) = self.compute_hash(MdHashKind::Detailed, &compare_opts)
         else {
             unreachable!("compute_hash(Detailed, …) always yields ComputedHash::Detailed");
         };
@@ -742,9 +734,7 @@ fn reorder_target(
 fn parent_headings(sections: &[SectionTuple]) -> Vec<Option<usize>> {
     let mut parents = vec![None; sections.len()];
     for i in 0..sections.len() {
-        parents[i] = (0..i)
-            .rev()
-            .find(|&j| sections[j].level < sections[i].level);
+        parents[i] = (0..i).rev().find(|&j| sections[j].level < sections[i].level);
     }
     parents
 }
@@ -801,17 +791,10 @@ mod tests {
     #[test]
     fn fm_reports_only_the_frontmatter_concern() {
         let opts = MdHashOptions::default();
-        let stored = stored_at(
-            &md("---\ntitle: T\n---\n# H\n\nBody."),
-            MdHashKind::Fm,
-            &opts,
-        );
+        let stored = stored_at(&md("---\ntitle: T\n---\n# H\n\nBody."), MdHashKind::Fm, &opts);
 
         assert_eq!(
-            explain(
-                &md("---\ntitle: T\n---\n# H\n\nWildly different body."),
-                &stored
-            ),
+            explain(&md("---\ntitle: T\n---\n# H\n\nWildly different body."), &stored),
             "Frontmatter remains unchanged",
         );
         assert_eq!(
@@ -823,17 +806,10 @@ mod tests {
     #[test]
     fn body_reports_only_the_body_concern() {
         let opts = MdHashOptions::default();
-        let stored = stored_at(
-            &md("---\ntitle: T\n---\n# H\n\nBody."),
-            MdHashKind::Body,
-            &opts,
-        );
+        let stored = stored_at(&md("---\ntitle: T\n---\n# H\n\nBody."), MdHashKind::Body, &opts);
 
         assert_eq!(
-            explain(
-                &md("---\ntitle: Wildly different\n---\n# H\n\nBody."),
-                &stored
-            ),
+            explain(&md("---\ntitle: Wildly different\n---\n# H\n\nBody."), &stored),
             "Body remains unchanged",
         );
         assert_eq!(

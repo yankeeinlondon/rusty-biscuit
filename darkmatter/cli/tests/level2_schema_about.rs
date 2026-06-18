@@ -170,8 +170,8 @@ fn raw_line_anywhere(frame: &CapturedFrame, needle: &str) -> Option<String> {
 fn level2_schema_about_constraint_table_renders_striped_row() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard =
-        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     let frame = capture_schema_about(harness, "15;0");
 
@@ -196,7 +196,7 @@ fn level2_schema_about_constraint_table_renders_striped_row() {
 }
 
 fn assert_schema_about_yaml_uses_theme(frame: &CapturedFrame, expected_mode: ColorMode) {
-    let code_line = raw_line_anywhere(&frame, "bar: string[]").unwrap_or_else(|| {
+    let code_line = raw_line_anywhere(frame, "bar: string[]").unwrap_or_else(|| {
         panic!(
             "could not locate schema-about YAML example line.\nplain:\n{}\nraw:\n{}",
             frame.plain, frame.raw,
@@ -240,8 +240,8 @@ fn assert_schema_about_yaml_uses_theme(frame: &CapturedFrame, expected_mode: Col
 fn level2_schema_about_dark_terminal_uses_light_code_theme() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard =
-        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     let frame = capture_schema_about(harness, "15;0");
 
@@ -253,8 +253,8 @@ fn level2_schema_about_dark_terminal_uses_light_code_theme() {
 fn level2_schema_about_light_terminal_uses_dark_code_theme() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard =
-        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     let frame = capture_schema_about(harness, "0;15");
 

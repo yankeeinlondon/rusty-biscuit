@@ -6,11 +6,13 @@
 
 use std::path::PathBuf;
 
+use biscuit_test_harness::{
+    CapturedFrame, TerminalHarness, wait_for_prompt,
+};
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::tmux::TmuxHarness;
 #[cfg(feature = "image")]
 use biscuit_test_harness::wezterm::WezTermHarness;
-use biscuit_test_harness::{CapturedFrame, TerminalHarness, wait_for_prompt};
 #[cfg(feature = "image")]
 use image::GenericImageView;
 use serial_test::serial;
@@ -60,14 +62,14 @@ fn run_icon(harness: &mut TmuxHarness, args: &str) -> CapturedFrame {
 fn level2_unicode_glyph_renders_in_terminal() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard =
-        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     harness.send_text(b"clear\n").expect("clear failed");
     harness.settle();
 
     // "grinning" matches the built-in Emoji::Happy icon.
-    let frame = run_icon(harness, "icons grinning");
+    let frame = run_icon(harness, "show grinning --list");
     assert!(
         frame.plain.contains('\u{1F600}'),
         "expected Unicode grinning face in visible output; got:\n{}",
@@ -89,14 +91,14 @@ fn level2_unicode_glyph_renders_in_terminal() {
 fn level2_nerd_font_glyph_renders_with_flag() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard =
-        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     harness.send_text(b"clear\n").expect("clear failed");
     harness.settle();
 
     // DevOps::Github maps to "uil:github" and defines a Nerd Font glyph.
-    let frame = run_icon(harness, "--nerd icons github");
+    let frame = run_icon(harness, "--nerd show github --list");
     assert!(
         frame.plain.contains('\u{f09b}'),
         "expected Nerd Font github glyph in visible output; got:\n{}",
@@ -118,14 +120,14 @@ fn level2_nerd_font_glyph_renders_with_flag() {
 fn level2_text_fallback_shows_identifier() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard =
-        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     harness.send_text(b"clear\n").expect("clear failed");
     harness.settle();
 
     // Os::Apple has no glyph, so it must fall back to its Iconify id.
-    let frame = run_icon(harness, "icons apple");
+    let frame = run_icon(harness, "show os:apple");
     assert!(
         frame.plain.contains("ic:baseline-apple"),
         "expected icon identifier as text fallback; got:\n{}",
@@ -168,28 +170,18 @@ fn level2_image_protocol_fallback_renders_graphics() {
             .put(
                 "test",
                 "red-witness",
-                &biscuit_icon::IconBody::new(
-                    r#"<rect width="24" height="24" fill="red"/>"#,
-                    24,
-                    24,
-                ),
+                &biscuit_icon::IconBody::new(r#"<rect width="24" height="24" fill="red"/>"#, 24, 24),
             )
             .unwrap();
     }
 
-    let baseline_result = harness
-        .capture_window_png()
-        .expect("png capture call failed");
+    let baseline_result = harness.capture_window_png().expect("png capture call failed");
     let capture_available = baseline_result.is_some();
-    require_level!(
-        Level::L2,
-        capture_available,
-        "window capture (screen recording permission)"
-    );
+    require_level!(Level::L2, capture_available, "window capture (screen recording permission)");
     let baseline_png = baseline_result.unwrap();
 
     let cmd = format!(
-        "HOME='{}' PATH='{}' icon icons test:red-witness\n",
+        "HOME='{}' PATH='{}' icon show test:red-witness\n",
         home.path().display(),
         path_with_icon_bin(),
     );
@@ -218,8 +210,9 @@ fn level2_image_protocol_fallback_renders_graphics() {
                 } else {
                     after_pixel
                 };
-                let baseline_red =
-                    baseline_pixel[0] > 200 && baseline_pixel[1] < 50 && baseline_pixel[2] < 50;
+                let baseline_red = baseline_pixel[0] > 200
+                    && baseline_pixel[1] < 50
+                    && baseline_pixel[2] < 50;
                 if !baseline_red {
                     new_red[y as usize][x as usize] = true;
                 }
@@ -244,11 +237,16 @@ fn level2_image_protocol_fallback_renders_graphics() {
                 for (dx, dy) in [(0i32, 1i32), (0, -1), (1, 0), (-1, 0)] {
                     let nx = cx as i32 + dx;
                     let ny = cy as i32 + dy;
-                    if nx >= 0 && nx < after.width() as i32 && ny >= 0 && ny < after.height() as i32
+                    if nx >= 0
+                        && nx < after.width() as i32
+                        && ny >= 0
+                        && ny < after.height() as i32
                     {
                         let nx = nx as u32;
                         let ny = ny as u32;
-                        if new_red[ny as usize][nx as usize] && !visited[ny as usize][nx as usize] {
+                        if new_red[ny as usize][nx as usize]
+                            && !visited[ny as usize][nx as usize]
+                        {
                             visited[ny as usize][nx as usize] = true;
                             stack.push((nx, ny));
                         }
@@ -281,13 +279,13 @@ fn level2_image_protocol_fallback_renders_graphics() {
 fn level2_listing_includes_multiple_names() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard =
-        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     harness.send_text(b"clear\n").expect("clear failed");
     harness.settle();
 
-    let frame = run_icon(harness, "icons arrow");
+    let frame = run_icon(harness, "show arrow --list");
     assert!(
         frame.plain.contains("mdi:arrow-left-circle"),
         "expected arrow-left-circle in listing; got:\n{}",
@@ -296,6 +294,29 @@ fn level2_listing_includes_multiple_names() {
     assert!(
         frame.plain.contains("mdi:arrow-right-circle"),
         "expected arrow-right-circle in listing; got:\n{}",
+        frame.plain
+    );
+}
+
+// ------------------------------------------------------------------
+// Phase 4: show command in a real terminal
+// ------------------------------------------------------------------
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_show_grinning_renders_unicode_glyph() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("shared tmux harness present");
+    harness.send_text(b"clear\n").expect("clear failed");
+    harness.settle();
+
+    let frame = run_icon(harness, "show grinning --list");
+    assert!(
+        frame.plain.contains('\u{1F600}'),
+        "expected Unicode grinning face from show command; got:\n{}",
         frame.plain
     );
 }
@@ -324,17 +345,17 @@ fn seed_sets(
                 license_title: None,
                 license_url: None,
                 total: *total,
+                author_name: None,
+                author_url: None,
+                tags: None,
+                category: None,
             })
             .unwrap();
     }
     for (prefix, count) in cached {
         for i in 0..*count {
             cache
-                .put(
-                    prefix,
-                    &format!("icon{i}"),
-                    &biscuit_icon::IconBody::new("<path/>", 24, 24),
-                )
+                .put(prefix, &format!("icon{i}"), &biscuit_icon::IconBody::new("<path/>", 24, 24))
                 .unwrap();
         }
     }
@@ -367,8 +388,8 @@ fn run_sets(
 fn level2_sets_single_table_renders() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard =
-        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     harness.send_text(b"clear\n").expect("clear failed");
     harness.settle();
@@ -437,8 +458,8 @@ fn level2_sets_single_table_renders() {
 fn level2_sets_split_table_renders() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard =
-        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     harness.send_text(b"clear\n").expect("clear failed");
     harness.settle();
@@ -459,10 +480,7 @@ fn level2_sets_split_table_renders() {
     // Two tables side by side: a header-rule line carries both an inner-right
     // tee (end of the left table) and an inner-left tee (start of the right).
     assert!(
-        frame
-            .plain
-            .lines()
-            .any(|l| l.contains('┤') && l.contains('├')),
+        frame.plain.lines().any(|l| l.contains('┤') && l.contains('├')),
         "expected side-by-side split layout; got:\n{}",
         frame.plain
     );
@@ -491,7 +509,11 @@ fn level2_sets_split_table_renders() {
 /// Runs `icon sets <filter>` against an isolated, offline cache **without**
 /// dimension overrides, so the binary detects the live tmux pane size via
 /// `TIOCGWINSZ`. Clears the pane first so the capture reflects only this run.
-fn run_sets_live(harness: &mut TmuxHarness, home: &std::path::Path, filter: &str) -> CapturedFrame {
+fn run_sets_live(
+    harness: &mut TmuxHarness,
+    home: &std::path::Path,
+    filter: &str,
+) -> CapturedFrame {
     harness.send_text(b"clear\n").expect("clear failed");
     harness.settle();
     let cmd = format!(
@@ -553,10 +575,7 @@ fn level2_sets_layout_adapts_to_live_terminal_size() {
         .lines()
         .find(|l| l.contains("zz0") && l.contains("zz3"))
         .unwrap_or_else(|| {
-            panic!(
-                "expected zz0 and zz3 on one row in wide output:\n{}",
-                wide.plain
-            )
+            panic!("expected zz0 and zz3 on one row in wide output:\n{}", wide.plain)
         });
     assert!(
         wide_first.find("zz0").unwrap() < wide_first.find("zz3").unwrap(),
@@ -593,8 +612,8 @@ fn cell_right_gap(chars: &[char], left: usize, right: usize) -> usize {
 fn level2_sets_right_alignment_and_wrapping() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard =
-        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     harness.send_text(b"clear\n").expect("clear failed");
     harness.settle();
@@ -609,11 +628,7 @@ fn level2_sets_right_alignment_and_wrapping() {
         &[
             ("zzbig", "Big", Some(9_999_999)),
             ("zzshort", "Short", Some(5)),
-            (
-                "zzwrap",
-                "Alphabetagamma Deltaepsilonzeta Etathetaiota",
-                Some(42),
-            ),
+            ("zzwrap", "Alphabetagamma Deltaepsilonzeta Etathetaiota", Some(42)),
             ("zzwideprefix-continues", "Wide", Some(7_654_321)),
         ],
         &[("zzbig", 123), ("zzshort", 1)],
@@ -726,7 +741,9 @@ fn level2_sets_right_alignment_and_wrapping() {
     let cont_bars = vbar_positions(pfx_continuation);
     let cont_tail = pfx_continuation.find("continues").unwrap();
     assert!(
-        cont_bars.len() >= 5 && cont_tail > cont_bars[1] && cont_tail < cont_bars[2],
+        cont_bars.len() >= 5
+            && cont_tail > cont_bars[1]
+            && cont_tail < cont_bars[2],
         "prefix continuation must stay inside the Prefix cell: {pfx_continuation:?}"
     );
     // The primary prefix row keeps all four columns and its full Total.
@@ -746,15 +763,15 @@ fn level2_sets_right_alignment_and_wrapping() {
 fn level2_styled_error_emits_sgr_red() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard =
-        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     harness.send_text(b"clear\n").expect("clear failed");
     harness.settle();
 
     // An extra colon is rejected by the identifier parser and rendered as a
     // Prose-styled error.
-    let frame = run_icon(harness, "icons mdi:home:extra");
+    let frame = run_icon(harness, "show mdi:home:extra");
     assert!(
         frame.raw.contains("\x1b[31m") || frame.raw.contains("\x1b[91m"),
         "expected SGR red in styled error output; raw:\n{}",

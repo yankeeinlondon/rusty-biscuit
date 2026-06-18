@@ -711,7 +711,8 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         if self.last_step_per_session.get(&session_id) == Some(&step) {
             return StderrIngestOutcome::Consumed;
         }
-        self.last_step_per_session.insert(session_id.clone(), step);
+        self.last_step_per_session
+            .insert(session_id.clone(), step);
 
         let mut extra_map = base_extra(record, "step_loop");
         extra_map.insert("session_id".into(), Value::String(session_id.clone()));
@@ -1197,6 +1198,7 @@ mod tests {
                 assert_eq!(*kind, SemanticErrorKind::ApiRemote);
                 assert!(message.to_lowercase().contains("usage limit"));
                 assert_string(extra, "classification", "rate_limit");
+                assert_string(extra, "kind", "UsageCap");
             }
             other => panic!("expected Error, got {other:?}"),
         }
@@ -1745,10 +1747,7 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, SemanticEvent::Info { message, .. } if message.starts_with("step_loop ")))
             .count();
-        assert_eq!(
-            step_loops, 2,
-            "exit should reset dedup so the next step=0 emits again"
-        );
+        assert_eq!(step_loops, 2, "exit should reset dedup so the next step=0 emits again");
     }
 
     #[test]
@@ -2235,8 +2234,7 @@ mod tests {
     #[test]
     fn cap_phrase_without_error_tag_emits_advisory_warning_no_terminate() {
         let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
-        let line =
-            "ERROR 2026-05-15T19:26:02 +100ms service=llm dummy={} Usage limit reached for k2p6";
+        let line = "ERROR 2026-05-15T19:26:02 +100ms service=llm dummy={} Usage limit reached for k2p6";
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         assert_eq!(bridge.sink.events.len(), 1);
         match &bridge.sink.events[0] {

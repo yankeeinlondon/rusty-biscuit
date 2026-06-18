@@ -17,8 +17,8 @@ pub mod types;
 pub use convert::{DRAFT_2020_12, to_json_schema};
 pub use serialize::serialize_property_atom;
 pub use types::{
-    Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema,
-    SimplifiedType, TypeExpr,
+    Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, SimplifiedType,
+    TypeExpr,
 };
 
 use indexmap::IndexMap;

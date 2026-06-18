@@ -121,12 +121,18 @@ fn terminal_named_background_color() {
 
 #[test]
 fn terminal_rgb_foreground_color() {
-    assert_eq!(term("<rgb 1,2,3>c</rgb>"), "\x1b[38;2;1;2;3mc\x1b[0m");
+    assert_eq!(
+        term("<rgb 1,2,3>c</rgb>"),
+        "\x1b[38;2;1;2;3mc\x1b[0m"
+    );
 }
 
 #[test]
 fn terminal_rgb_background_color() {
-    assert_eq!(term("<bg-rgb 1,2,3>c</bg-rgb>"), "\x1b[48;2;1;2;3mc\x1b[0m");
+    assert_eq!(
+        term("<bg-rgb 1,2,3>c</bg-rgb>"),
+        "\x1b[48;2;1;2;3mc\x1b[0m"
+    );
 }
 
 // ── Terminal: underline variants ──────────────────────────────────────────
@@ -180,7 +186,10 @@ fn terminal_double_underline_degrades_to_straight() {
             colored: false,
         })
         .build();
-    assert_eq!(term_caps("<uu>x</uu>", &terminal), "\x1b[4mx\x1b[0m");
+    assert_eq!(
+        term_caps("<uu>x</uu>", &terminal),
+        "\x1b[4mx\x1b[0m"
+    );
 }
 
 #[test]
@@ -309,15 +318,21 @@ fn terminal_escaped_angle_brackets_are_literal() {
 // ── Terminal: fenced code blocks ─────────────────────────────────────────
 
 #[test]
-fn terminal_code_fence_is_dim_and_indented() {
-    assert_eq!(term("```\ncode\n```"), "\x1b[2m    code\x1b[0m");
+fn terminal_code_fence_is_dim_with_literal_fences() {
+    // Fence markers are shown literally and the body is not indented; each
+    // segment is its own dim (`2`) pair.
+    assert_eq!(
+        term("```\ncode\n```"),
+        "\x1b[2m```\x1b[0m\n\x1b[2mcode\x1b[0m\n\x1b[2m```\x1b[0m"
+    );
 }
 
 #[test]
 fn terminal_code_fence_preserves_literal_markup() {
+    // Markdown inside a fence is not interpreted: `**not bold**` stays literal.
     assert_eq!(
         term("```\n**not bold**\n```"),
-        "\x1b[2m    **not bold**\x1b[0m"
+        "\x1b[2m```\x1b[0m\n\x1b[2m**not bold**\x1b[0m\n\x1b[2m```\x1b[0m"
     );
 }
 
@@ -325,12 +340,12 @@ fn terminal_code_fence_preserves_literal_markup() {
 fn terminal_styled_fenced_code_splits_around_block() {
     // A fenced code block nested inside a styled span splits the span around
     // the block child: the surrounding text keeps the enclosing red (`31`)
-    // foreground and the code renders as its own dim (`2`) block. (Before the
-    // split the block-in-phrasing shape tripped tree validation and the whole
-    // span rendered empty.)
+    // foreground while the fence markers and body each render as their own
+    // dim (`2`) segment. (Before the split the block-in-phrasing shape tripped
+    // tree validation and the whole span rendered empty.)
     assert_eq!(
         term("<red>before\n```\ncode\n```\nafter</red>"),
-        "\x1b[31mbefore\n\x1b[0m\n\n\x1b[2m    code\x1b[0m\n\n\x1b[31m\nafter\x1b[0m"
+        "\x1b[31mbefore\n\x1b[0m\n\n\x1b[2m```\x1b[0m\n\x1b[2mcode\x1b[0m\n\x1b[2m```\x1b[0m\n\n\x1b[31m\nafter\x1b[0m"
     );
 }
 
@@ -350,10 +365,7 @@ fn terminal_word_wrap_breaks_long_line() {
         Prose::new("one two three four five").with_word_wrap(WordWrap::WrapProse(None, None));
     // At width 10, "one two" (7) fits, "three" (5) fits on its own line,
     // and "four five" (9) fits on the last line.
-    assert_eq!(
-        prose.render_optimistic(Some(10)),
-        "one two\nthree\nfour five"
-    );
+    assert_eq!(prose.render_optimistic(Some(10)), "one two\nthree\nfour five");
 }
 
 // ── Browser ──────────────────────────────────────────────────────────────
@@ -411,8 +423,9 @@ fn browser_href_is_attribute_escaped() {
 #[test]
 fn browser_code_block_body_is_escaped() {
     assert!(
-        html("```\n</code-block><red>x</red>\n```")
-            .contains("<pre><code>&lt;/code-block&gt;&lt;red&gt;x&lt;/red&gt;</code></pre>"),
+        html("```\n</code-block><red>x</red>\n```").contains(
+            "<pre><code>&lt;/code-block&gt;&lt;red&gt;x&lt;/red&gt;</code></pre>"
+        ),
         "got: {}",
         html("```\n</code-block><red>x</red>\n```")
     );

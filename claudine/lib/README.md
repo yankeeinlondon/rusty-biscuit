@@ -273,7 +273,7 @@ Sub-modules:
 - `guardrails` — inline composition guardrails appended to prompts to constrain output shape
 - `types` — shared types including `PreparedComposition`, `SelectedProvider`, `SequencePlan`, `SequenceStep`, `SharedApprovalCache`, `CompositionMode`, and `SystemPromptInput`
 
-Execution parity note (2026-04-16): the CLI-side non-harness execution of `compose` and `inline-compose` flows through a single `execute_without_harness` function parameterized by `CompositionExecutionMode::{Direct, Inline}`, with a shared `run_structured_composition` helper that produces a `CompositionStreamResult` and a shared `emit_composition_summary` function that selects section-stream routing via a `defer_section_separator` flag. The Goose-only legacy (non-structured) path renders through `emit_minimal_composition_summary` so it emits the same stderr summary block as structured runs instead of the previous JSONL-only silence.
+Execution parity note (2026-06-16): the CLI-side execution of `compose` and `inline-compose` now flows through a single `run_harness_loop` path with `HarnessPromptMode::Compose` or `HarnessPromptMode::Inline`. Bare documents (no harness frontmatter) yield the empty plan; inline documents get the system-owned writability pre-check injected once by `finalize_effective_plan`. The loop handles structured streaming, captured/non-structured fallback, inline closure, summary emission, and handler-driven recovery in one place.
 
 ### Badges (`badges`)
 

@@ -230,10 +230,7 @@ mod tests {
     #[test]
     fn deeper_negation_overrides_shallower_ignore() {
         // The repo ignores every `*.log`; `docs/.gitignore` re-includes one.
-        let repo = repo_with(&[
-            (".gitignore", "*.log\n"),
-            ("docs/.gitignore", "!keep.log\n"),
-        ]);
+        let repo = repo_with(&[(".gitignore", "*.log\n"), ("docs/.gitignore", "!keep.log\n")]);
         let matcher = GitignoreMatcher::for_root(repo.path());
 
         assert!(

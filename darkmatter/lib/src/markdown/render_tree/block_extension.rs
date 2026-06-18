@@ -33,10 +33,13 @@
 use std::collections::VecDeque;
 use std::ops::Range;
 
-use pulldown_cmark::{Event, Tag, TagEnd};
+use pulldown_cmark::{CowStr, Event, Tag, TagEnd};
 
 use crate::markdown::block::{matches_horizontal_rule_pattern, parse_hr_attribute_block};
 use crate::markdown::inline::HorizontalRuleAttrs;
+use crate::markdown::render_tree::disclosure_style::parse_disclosure_opener_style;
+use crate::markdown::MarkdownError;
+use crate::style::schema::CommonStyle;
 
 /// Single item produced by [`BlockExtensionProcessor`].
 ///
@@ -55,6 +58,18 @@ pub(crate) enum BlockExtensionEvent<'a> {
         attrs: HorizontalRuleAttrs,
         /// Byte range of the paragraph body that produced this event.
         body_range: Range<usize>,
+    },
+    /// Synthetic disclosure block lifted from a
+    /// `::disclosure / ::details / ::end-disclosure` triple.
+    Disclosure {
+        /// Events forming the summary region (phrasing content only).
+        summary_events: Vec<(Event<'a>, Range<usize>)>,
+        /// Events forming the disclosed body region.
+        body_events: Vec<(Event<'a>, Range<usize>)>,
+        /// Inline style parsed from `::disclosure key=value ...` tokens.
+        inline_style: Option<CommonStyle>,
+        /// Byte range spanning the entire disclosure block.
+        range: Range<usize>,
     },
 }
 
@@ -76,6 +91,54 @@ enum State<'a> {
         /// flag from the now-deleted legacy `RuleProcessor` iterator adapter.
         simple: bool,
     },
+    /// Collecting events between `::disclosure` and the matching
+    /// `::end-disclosure`.
+    CollectingDisclosure {
+        /// Byte range of the paragraph that opened the disclosure block.
+        start: Range<usize>,
+        /// Events belonging to the summary region.
+        summary_events: Vec<(Event<'a>, Range<usize>)>,
+        /// Events belonging to the disclosed body region.
+        body_events: Vec<(Event<'a>, Range<usize>)>,
+        /// Inline style parsed from the opener line.
+        inline_style: Option<CommonStyle>,
+        /// `true` until `::details` is seen.
+        in_summary: bool,
+        /// `true` once the summary has received non-whitespace inline content.
+        summary_has_content: bool,
+        /// Number of nested `::disclosure` openers seen in the body. The body
+        /// closer only matches when this is zero.
+        body_depth: usize,
+    },
+    /// The `::end-disclosure` marker has been seen; the next `End(Paragraph)`
+    /// finalizes the block.
+    ClosingDisclosure {
+        /// Byte range of the paragraph that opened the disclosure block.
+        start: Range<usize>,
+        /// Events belonging to the summary region.
+        summary_events: Vec<(Event<'a>, Range<usize>)>,
+        /// Events belonging to the disclosed body region.
+        body_events: Vec<(Event<'a>, Range<usize>)>,
+        /// Inline style parsed from the opener line.
+        inline_style: Option<CommonStyle>,
+        /// `true` once the summary has received non-whitespace inline content.
+        summary_has_content: bool,
+    },
+}
+
+/// Opening marker for a render-time disclosure block.
+const DISCLOSURE_OPENER: &str = "::disclosure";
+/// Separator between summary and body in a disclosure block.
+const DISCLOSURE_DETAILS: &str = "::details";
+/// Closing marker for a render-time disclosure block.
+const DISCLOSURE_CLOSER: &str = "::end-disclosure";
+
+/// Builds a [`MarkdownError::MalformedDisclosure`] with a stable range.
+fn malformed_disclosure(reason: impl Into<String>, range: Range<usize>) -> MarkdownError {
+    MarkdownError::MalformedDisclosure {
+        reason: reason.into(),
+        range,
+    }
 }
 
 /// Iterator adapter that consumes `pulldown_cmark`'s offset-event stream and
@@ -104,6 +167,9 @@ where
     inner: I,
     pending: VecDeque<BlockExtensionEvent<'a>>,
     state: State<'a>,
+    /// Tracks nested fenced/indented code-block depth so directive lines inside
+    /// code blocks are never interpreted as disclosure markers.
+    code_block_depth: usize,
 }
 
 impl<'a, I> BlockExtensionProcessor<'a, I>
@@ -117,6 +183,30 @@ where
             inner,
             pending: VecDeque::new(),
             state: State::Idle,
+            code_block_depth: 0,
+        }
+    }
+
+    // ── disclosure keyword matching ────────────────────────────────────────
+
+    /// `true` if `text` is the `::end-disclosure` closer (ignoring trailing
+    /// ASCII whitespace) with no other non-whitespace content.
+    fn is_closer(text: &str) -> bool {
+        text.trim_end() == DISCLOSURE_CLOSER
+    }
+
+    /// Matches a directive keyword at the start of `text` followed by ASCII
+    /// whitespace or end-of-line. Returns the remainder of the line after the
+    /// keyword and its trailing whitespace, if any.
+    fn match_keyword<'b>(text: &'b str, keyword: &str) -> Option<&'b str> {
+        let rest = text.strip_prefix(keyword)?;
+        if rest.is_empty() {
+            return Some(rest);
+        }
+        let mut chars = rest.chars();
+        match chars.next() {
+            Some(c) if c.is_ascii_whitespace() => Some(chars.as_str()),
+            _ => None,
         }
     }
 
@@ -148,8 +238,10 @@ where
             // warnings are surfaced by the `scan_inline_hr_warnings` preflight,
             // which parses through the same `parse_hr_attribute_block` helper.
             let attrs = parse_hr_attribute_block(&attribute_str).attrs;
-            self.pending
-                .push_back(BlockExtensionEvent::HorizontalRule { attrs, body_range });
+            self.pending.push_back(BlockExtensionEvent::HorizontalRule {
+                attrs,
+                body_range,
+            });
             return;
         }
 
@@ -173,59 +265,344 @@ impl<'a, I> Iterator for BlockExtensionProcessor<'a, I>
 where
     I: Iterator<Item = (Event<'a>, Range<usize>)>,
 {
-    type Item = BlockExtensionEvent<'a>;
+    type Item = Result<BlockExtensionEvent<'a>, MarkdownError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if let Some(event) = self.pending.pop_front() {
-                return Some(event);
+                return Some(Ok(event));
             }
 
             let Some((event, range)) = self.inner.next() else {
-                // Underlying stream is exhausted. If we are still buffering a
-                // paragraph (unbalanced parser output), flush it verbatim so
-                // no events are lost.
-                if let State::BufferingParagraph {
-                    paragraph_start,
-                    buffer,
-                    ..
-                } = std::mem::replace(&mut self.state, State::Idle)
-                {
-                    self.pending.push_back(BlockExtensionEvent::Standard(
-                        Event::Start(Tag::Paragraph),
+                match std::mem::replace(&mut self.state, State::Idle) {
+                    State::BufferingParagraph {
                         paragraph_start,
-                    ));
-                    for (event, range) in buffer {
-                        self.pending
-                            .push_back(BlockExtensionEvent::Standard(event, range));
+                        buffer,
+                        ..
+                    } => {
+                        self.pending.push_back(BlockExtensionEvent::Standard(
+                            Event::Start(Tag::Paragraph),
+                            paragraph_start,
+                        ));
+                        for (event, range) in buffer {
+                            self.pending
+                                .push_back(BlockExtensionEvent::Standard(event, range));
+                        }
+                        continue;
                     }
-                    continue;
+                    State::CollectingDisclosure { start, .. }
+                    | State::ClosingDisclosure { start, .. } => {
+                        return Some(Err(malformed_disclosure(
+                            "disclosure block is missing `::end-disclosure`",
+                            start.start..start.end,
+                        )));
+                    }
+                    State::Idle => return None,
                 }
-                return None;
             };
 
-            match (&mut self.state, &event) {
-                (State::Idle, Event::Start(Tag::Paragraph)) => {
-                    self.state = State::BufferingParagraph {
-                        paragraph_start: range,
-                        buffer: Vec::new(),
-                        simple: true,
-                    };
+            // Track fenced/indented code blocks so directive lines inside them
+            // are treated as literal content.
+            match &event {
+                Event::Start(Tag::CodeBlock(_)) => self.code_block_depth += 1,
+                Event::End(TagEnd::CodeBlock) if self.code_block_depth > 0 => {
+                    self.code_block_depth -= 1;
                 }
-                (State::BufferingParagraph { .. }, Event::End(TagEnd::Paragraph)) => {
-                    self.close_paragraph(range);
-                }
-                (State::BufferingParagraph { buffer, simple, .. }, _) => {
-                    if !matches!(event, Event::Text(_)) {
-                        *simple = false;
+                _ => {}
+            }
+
+            match std::mem::replace(&mut self.state, State::Idle) {
+                State::Idle => match &event {
+                    Event::Start(Tag::Paragraph) => {
+                        self.state = State::BufferingParagraph {
+                            paragraph_start: range,
+                            buffer: Vec::new(),
+                            simple: true,
+                        };
                     }
-                    buffer.push((event, range));
+                    _ => return Some(Ok(BlockExtensionEvent::Standard(event, range))),
+                },
+                State::BufferingParagraph {
+                    paragraph_start,
+                    mut buffer,
+                    mut simple,
+                } => match &event {
+                    Event::End(TagEnd::Paragraph) => {
+                        self.state = State::BufferingParagraph {
+                            paragraph_start,
+                            buffer,
+                            simple,
+                        };
+                        self.close_paragraph(range);
+                    }
+                    Event::Text(text)
+                        if self.code_block_depth == 0
+                            && buffer.is_empty()
+                            && let Some(rest) = Self::match_keyword(text.as_ref(), DISCLOSURE_OPENER) =>
+                    {
+                        let (inline_style, summary_text) = parse_disclosure_opener_style(rest);
+                        let mut summary_events = Vec::new();
+                        let mut summary_has_content = false;
+                        if let Some(summary) = summary_text {
+                            let prefix_len = text.len() - rest.len();
+                            let summary_start = range.start + prefix_len
+                                + rest.len().saturating_sub(summary.len());
+                            summary_events.push((
+                                Event::Text(CowStr::from(summary)),
+                                summary_start..range.end,
+                            ));
+                            summary_has_content = true;
+                        }
+                        self.state = State::CollectingDisclosure {
+                            start: paragraph_start,
+                            summary_events,
+                            body_events: Vec::new(),
+                            inline_style,
+                            in_summary: true,
+                            summary_has_content,
+                            body_depth: 0,
+                        };
+                    }
+                    _ => {
+                        if !matches!(event, Event::Text(_)) {
+                            simple = false;
+                        }
+                        buffer.push((event, range));
+                        self.state = State::BufferingParagraph {
+                            paragraph_start,
+                            buffer,
+                            simple,
+                        };
+                    }
+                },
+                State::CollectingDisclosure {
+                    start,
+                    mut summary_events,
+                    mut body_events,
+                    inline_style,
+                    in_summary,
+                    mut summary_has_content,
+                    mut body_depth,
+                } => {
+                    if self.code_block_depth > 0 {
+                        if in_summary {
+                            summary_has_content |= is_summary_content(&event);
+                            summary_events.push((event, range));
+                        } else {
+                            body_events.push((event, range));
+                        }
+                        self.state = State::CollectingDisclosure {
+                            start,
+                            summary_events,
+                            body_events,
+                            inline_style,
+                            in_summary,
+                            summary_has_content,
+                            body_depth,
+                        };
+                        continue;
+                    }
+
+                    if in_summary {
+                        match &event {
+                            Event::HardBreak => {
+                                return Some(Err(malformed_disclosure(
+                                    "summary region contains a hard line break",
+                                    start.start..range.end,
+                                )));
+                            }
+                            Event::End(TagEnd::Paragraph) => {
+                                return Some(Err(malformed_disclosure(
+                                    "summary region contains a paragraph break or block-level element",
+                                    start.start..range.end,
+                                )));
+                            }
+                            Event::Start(
+                                Tag::Heading { .. }
+                                | Tag::BlockQuote(_)
+                                | Tag::CodeBlock(_)
+                                | Tag::List(_)
+                                | Tag::Item
+                                | Tag::Table(_)
+                                | Tag::HtmlBlock
+                                | Tag::FootnoteDefinition(_)
+                                | Tag::DefinitionList
+                                | Tag::DefinitionListTitle
+                                | Tag::DefinitionListDefinition
+                                | Tag::MetadataBlock(_),
+                            )
+                            | Event::Rule
+                            | Event::TaskListMarker(_) => {
+                                return Some(Err(malformed_disclosure(
+                                    "summary region contains a block-level element",
+                                    start.start..range.end,
+                                )));
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    match &event {
+                        Event::Text(text) if in_summary => {
+                            if let Some(rest) = Self::match_keyword(text.as_ref(), DISCLOSURE_DETAILS) {
+                                if !rest.is_empty() {
+                                    let prefix_len = text.len() - rest.len();
+                                    body_events.push((
+                                        Event::Text(CowStr::from(rest.to_string())),
+                                        (range.start + prefix_len)..range.end,
+                                    ));
+                                }
+                                self.state = State::CollectingDisclosure {
+                                    start,
+                                    summary_events,
+                                    body_events,
+                                    inline_style,
+                                    in_summary: false,
+                                    summary_has_content,
+                                    body_depth: 0,
+                                };
+                            } else if Self::is_closer(text.as_ref()) {
+                                return Some(Err(malformed_disclosure(
+                                    "disclosure block is missing `::details` before `::end-disclosure`",
+                                    start.start..range.end,
+                                )));
+                            } else if Self::match_keyword(text.as_ref(), DISCLOSURE_OPENER)
+                                .is_some()
+                            {
+                                return Some(Err(malformed_disclosure(
+                                    "summary region contains a nested disclosure opener",
+                                    start.start..range.end,
+                                )));
+                            } else {
+                                summary_has_content |= is_summary_content(&event);
+                                summary_events.push((event, range));
+                                self.state = State::CollectingDisclosure {
+                                    start,
+                                    summary_events,
+                                    body_events,
+                                    inline_style,
+                                    in_summary,
+                                    summary_has_content,
+                                    body_depth,
+                                };
+                            }
+                        }
+                        Event::Text(text) if !in_summary => {
+                            if Self::match_keyword(text.as_ref(), DISCLOSURE_OPENER).is_some() {
+                                body_depth += 1;
+                                body_events.push((event, range));
+                                self.state = State::CollectingDisclosure {
+                                    start,
+                                    summary_events,
+                                    body_events,
+                                    inline_style,
+                                    in_summary,
+                                    summary_has_content,
+                                    body_depth,
+                                };
+                            } else if Self::is_closer(text.as_ref()) {
+                                if body_depth == 0 {
+                                    self.state = State::ClosingDisclosure {
+                                        start,
+                                        summary_events,
+                                        body_events,
+                                        inline_style,
+                                        summary_has_content,
+                                    };
+                                } else {
+                                    body_depth -= 1;
+                                    body_events.push((event, range));
+                                    self.state = State::CollectingDisclosure {
+                                        start,
+                                        summary_events,
+                                        body_events,
+                                        inline_style,
+                                        in_summary,
+                                        summary_has_content,
+                                        body_depth,
+                                    };
+                                }
+                            } else {
+                                body_events.push((event, range));
+                                self.state = State::CollectingDisclosure {
+                                    start,
+                                    summary_events,
+                                    body_events,
+                                    inline_style,
+                                    in_summary,
+                                    summary_has_content,
+                                    body_depth,
+                                };
+                            }
+                        }
+                        _ => {
+                            if in_summary {
+                                summary_has_content |= is_summary_content(&event);
+                                summary_events.push((event, range));
+                            } else {
+                                body_events.push((event, range));
+                            }
+                            self.state = State::CollectingDisclosure {
+                                start,
+                                summary_events,
+                                body_events,
+                                inline_style,
+                                in_summary,
+                                summary_has_content,
+                                body_depth,
+                            };
+                        }
+                    }
                 }
-                (State::Idle, _) => {
-                    return Some(BlockExtensionEvent::Standard(event, range));
-                }
+                State::ClosingDisclosure {
+                    start,
+                    summary_events,
+                    body_events,
+                    inline_style,
+                    summary_has_content,
+                } => match &event {
+                    Event::End(TagEnd::Paragraph) => {
+                        if !summary_has_content {
+                            return Some(Err(malformed_disclosure(
+                                "disclosure summary region is empty",
+                                start.start..range.end,
+                            )));
+                        }
+                        return Some(Ok(BlockExtensionEvent::Disclosure {
+                            summary_events,
+                            body_events,
+                            inline_style,
+                            range: start.start..range.end,
+                        }));
+                    }
+                    Event::Text(text) if text.trim().is_empty() => {
+                        // Trailing whitespace after the closer is ignored.
+                        self.state = State::ClosingDisclosure {
+                            start,
+                            summary_events,
+                            body_events,
+                            inline_style,
+                            summary_has_content,
+                        };
+                    }
+                    _ => {
+                        return Some(Err(malformed_disclosure(
+                            "disclosure closer must end the paragraph",
+                            start.start..range.end,
+                        )));
+                    }
+                },
             }
         }
+    }
+}
+
+/// Returns `true` for inline events that count as non-empty summary content.
+fn is_summary_content(event: &Event<'_>) -> bool {
+    match event {
+        Event::Text(t) => !t.trim().is_empty(),
+        Event::Code(_) | Event::InlineHtml(_) => true,
+        _ => false,
     }
 }
 
@@ -234,8 +611,15 @@ mod tests {
     use super::*;
     use pulldown_cmark::{Options, Parser};
 
-    /// Drains the processor over `markdown` into a flat vector.
+    /// Drains the processor over `markdown` into a flat vector, panicking on
+    /// the first malformed disclosure. Use [`run_result`] when the test expects
+    /// an error.
     fn run(markdown: &str) -> Vec<BlockExtensionEvent<'_>> {
+        run_result(markdown).unwrap_or_else(|e| panic!("unexpected error: {e:?}"))
+    }
+
+    /// Drains the processor over `markdown` and returns the first error, if any.
+    fn run_result(markdown: &str) -> Result<Vec<BlockExtensionEvent<'_>>, MarkdownError> {
         let parser = Parser::new_ext(
             markdown,
             Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH,
@@ -258,6 +642,32 @@ mod tests {
             BlockExtensionEvent::HorizontalRule { attrs, body_range } => Some((attrs, body_range)),
             _ => None,
         })
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn first_disclosure<'a>(
+        events: &'a [BlockExtensionEvent<'a>],
+    ) -> Option<(Vec<(Event<'a>, Range<usize>)>, Vec<(Event<'a>, Range<usize>)>, Option<CommonStyle>, Range<usize>)> {
+        events.iter().find_map(|e| match e {
+            BlockExtensionEvent::Disclosure {
+                summary_events,
+                body_events,
+                inline_style,
+                range,
+            } => Some((summary_events.clone(), body_events.clone(), inline_style.clone(), range.clone())),
+            _ => None,
+        })
+    }
+
+    fn collect_text_from_events(events: &[(Event<'_>, Range<usize>)]) -> String {
+        events
+            .iter()
+            .filter_map(|(e, _)| match e {
+                Event::Text(t) => Some(t.as_ref()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("")
     }
 
     #[test]
@@ -479,22 +889,127 @@ mod tests {
         }
     }
 
-    #[test]
-    fn legacy_style_attr_parsed_and_surfaced_by_preflight() {
-        // The block-extension processor carries only the parsed attributes —
-        // it does not surface style warnings. Deprecation/style warnings reach
-        // callers through the `scan_inline_hr_warnings` preflight, which parses
-        // through the same `parse_hr_attribute_block` helper. This test pins
-        // that parser parity: the legacy `style` key lands on
-        // `attrs.legacy_style` here, and the preflight reports its deprecation
-        // for the same source.
-        let events = run("--- { style: waves }");
-        assert_eq!(count_hr(&events), 1);
-        let (attrs, _) = first_hr(&events).unwrap();
-        assert_eq!(attrs.legacy_style, Some("waves".to_string()));
+    // -------------------------------------------------------------------
+    // Disclosure block recognition.
+    // -------------------------------------------------------------------
 
-        let warnings = crate::markdown::block::scan_inline_hr_warnings("--- { style: waves }");
-        assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].path, "hr.inline.style");
+    #[test]
+    fn valid_disclosure_emits_single_synthetic_event() {
+        let input = "::disclosure\nLicense Agreement\n::details\nKeep your hands off.\n::end-disclosure\n";
+        let events = run(input);
+        let disclosures: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, BlockExtensionEvent::Disclosure { .. }))
+            .collect();
+        assert_eq!(disclosures.len(), 1, "expected one Disclosure event: {events:?}");
+        let (summary, body, _inline_style, range) = first_disclosure(&events).expect("disclosure event");
+        assert!(!summary.is_empty(), "summary events must not be empty");
+        assert!(!body.is_empty(), "body events must not be empty");
+        let summary_text = collect_text_from_events(&summary);
+        let body_text = collect_text_from_events(&body);
+        assert_eq!(summary_text, "License Agreement");
+        assert_eq!(body_text, "Keep your hands off.");
+        assert!(range.start < range.end);
+    }
+
+    #[test]
+    fn empty_summary_is_rejected() {
+        let input = "::disclosure\n::details\nbody\n::end-disclosure\n";
+        let err = run_result(input).expect_err("empty summary must be rejected");
+        assert!(
+            matches!(err, MarkdownError::MalformedDisclosure { ref reason, .. } if reason.contains("empty")),
+            "expected empty-summary error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn hard_line_break_in_summary_is_rejected() {
+        let input = "::disclosure\nline one\\\nline two\n::details\nbody\n::end-disclosure\n";
+        let err = run_result(input).expect_err("hard break in summary must be rejected");
+        assert!(
+            matches!(err, MarkdownError::MalformedDisclosure { ref reason, .. } if reason.contains("hard line break")),
+            "expected hard-break error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn block_element_in_summary_is_rejected() {
+        let input = "::disclosure\n# Heading\n::details\nbody\n::end-disclosure\n";
+        let err = run_result(input).expect_err("block element in summary must be rejected");
+        assert!(
+            matches!(err, MarkdownError::MalformedDisclosure { .. }),
+            "expected malformed-disclosure error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn missing_details_is_rejected() {
+        let input = "::disclosure\nSummary\n::end-disclosure\n";
+        let err = run_result(input).expect_err("missing details must be rejected");
+        assert!(
+            matches!(err, MarkdownError::MalformedDisclosure { ref reason, .. } if reason.contains("details")),
+            "expected missing-details error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn missing_end_disclosure_is_rejected() {
+        let input = "::disclosure\nSummary\n::details\nbody\n";
+        let err = run_result(input).expect_err("missing closer must be rejected");
+        assert!(
+            matches!(err, MarkdownError::MalformedDisclosure { ref reason, .. } if reason.contains("end-disclosure")),
+            "expected missing-closer error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn details_without_closer_is_rejected() {
+        let input = "::disclosure\nSummary\n::details\nbody\n";
+        let err = run_result(input).expect_err("details without closer must be rejected");
+        assert!(
+            matches!(err, MarkdownError::MalformedDisclosure { .. }),
+            "expected malformed-disclosure error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn near_miss_keywords_are_literal_text() {
+        let input = "::disclosure-extra\nSummary\n::details\nBody\n::end-disclosure\n";
+        let events = run(input);
+        assert!(
+            events
+                .iter()
+                .all(|e| !matches!(e, BlockExtensionEvent::Disclosure { .. })),
+            "near-miss keywords must not form a disclosure: {events:?}"
+        );
+        let text: String = events
+            .iter()
+            .filter_map(|e| match e {
+                BlockExtensionEvent::Standard(Event::Text(t), _) => Some(t.as_ref()),
+                _ => None,
+            })
+            .collect();
+        assert!(text.contains("::disclosure-extra"));
+    }
+
+    #[test]
+    fn directives_inside_fenced_code_blocks_are_ignored() {
+        let input = "```\n::disclosure\n::details\n::end-disclosure\n```\n";
+        let events = run(input);
+        assert!(
+            events
+                .iter()
+                .all(|e| !matches!(e, BlockExtensionEvent::Disclosure { .. })),
+            "directives inside a fenced code block must be ignored: {events:?}"
+        );
+        let text: String = events
+            .iter()
+            .filter_map(|e| match e {
+                BlockExtensionEvent::Standard(Event::Text(t), _) => Some(t.as_ref()),
+                _ => None,
+            })
+            .collect();
+        assert!(text.contains("::disclosure"));
     }
 }
+

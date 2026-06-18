@@ -192,9 +192,7 @@ fn context_side_effects_exits_zero_and_produces_stdout() {
         "--side-effects should show capability catalog on stdout; got: {stdout}"
     );
     assert!(
-        stdout.contains("FilesystemWrite")
-            || stdout.contains("Network")
-            || stdout.contains("MarkdownMutation"),
+        stdout.contains("FilesystemWrite") || stdout.contains("Network") || stdout.contains("MarkdownMutation"),
         "--side-effects should show safety classifications; got: {stdout}"
     );
     assert!(
@@ -425,16 +423,8 @@ fn assert_one_row_each(kind: &str, expected: &[String], actual: &[String]) {
         .iter()
         .filter_map(|(&id, &count)| (count > 1).then_some(id))
         .collect();
-    let missing: Vec<&str> = want
-        .keys()
-        .filter(|id| !got.contains_key(*id))
-        .copied()
-        .collect();
-    let extra: Vec<&str> = got
-        .keys()
-        .filter(|id| !want.contains_key(*id))
-        .copied()
-        .collect();
+    let missing: Vec<&str> = want.keys().filter(|id| !got.contains_key(*id)).copied().collect();
+    let extra: Vec<&str> = got.keys().filter(|id| !want.contains_key(*id)).copied().collect();
 
     assert!(
         duplicates.is_empty() && missing.is_empty() && extra.is_empty(),
@@ -463,10 +453,7 @@ fn context_first_column_cells(args: &[&str]) -> Vec<String> {
 #[test]
 fn context_default_includes_every_descriptor() {
     let descriptors = darkmatter::markdown::compose::context::context_variable_descriptors();
-    let expected: Vec<String> = descriptors
-        .iter()
-        .map(|d| format!("ctx.{}", d.name))
-        .collect();
+    let expected: Vec<String> = descriptors.iter().map(|d| format!("ctx.{}", d.name)).collect();
 
     let actual: Vec<String> = context_first_column_cells(&["context"])
         .into_iter()
@@ -481,10 +468,7 @@ fn context_default_includes_every_descriptor() {
 #[test]
 fn context_values_includes_every_descriptor() {
     let descriptors = darkmatter::markdown::compose::context::context_variable_descriptors();
-    let expected: Vec<String> = descriptors
-        .iter()
-        .map(|d| format!("ctx.{}", d.name))
-        .collect();
+    let expected: Vec<String> = descriptors.iter().map(|d| format!("ctx.{}", d.name)).collect();
 
     let actual: Vec<String> = context_first_column_cells(&["context", "--values"])
         .into_iter()
@@ -519,7 +503,8 @@ fn context_expressions_includes_every_function() {
 fn context_side_effects_includes_every_capability() {
     let effects = darkmatter::effects::effect_descriptors();
     let expected: Vec<String> = effects.iter().map(|e| e.signature.to_string()).collect();
-    let signatures: std::collections::HashSet<&str> = effects.iter().map(|e| e.signature).collect();
+    let signatures: std::collections::HashSet<&str> =
+        effects.iter().map(|e| e.signature).collect();
 
     let actual: Vec<String> = context_first_column_cells(&["context", "--side-effects"])
         .into_iter()
@@ -553,12 +538,7 @@ fn context_deterministic_output() {
 /// No report may depend on Markdown parsing — guard against Markdown artifacts.
 #[test]
 fn context_no_markdown_parsing_artifacts() {
-    for args in [
-        vec!["context"],
-        vec!["context", "--values"],
-        vec!["context", "--expressions"],
-        vec!["context", "--side-effects"],
-    ] {
+    for args in [vec!["context"], vec!["context", "--values"], vec!["context", "--expressions"], vec!["context", "--side-effects"]] {
         let assert = cargo_bin_cmd!("claudine")
             .env("NO_COLOR", "1")
             .current_dir(repo_root())
@@ -647,11 +627,7 @@ fn context_side_effects_makes_no_filesystem_changes() {
                 if path.is_dir() {
                     stack.push(path);
                 } else if let Ok(bytes) = fs::read(&path) {
-                    let rel = path
-                        .strip_prefix(root)
-                        .unwrap()
-                        .to_string_lossy()
-                        .into_owned();
+                    let rel = path.strip_prefix(root).unwrap().to_string_lossy().into_owned();
                     out.insert(rel, bytes);
                 }
             }
@@ -714,12 +690,7 @@ fn context_side_effects_uses_capability_language() {
 /// Footer hints must not claim side effects are enabled, allowlist-exempt, or config-free.
 #[test]
 fn context_footer_no_availability_claims() {
-    for args in [
-        vec!["context"],
-        vec!["context", "--values"],
-        vec!["context", "--expressions"],
-        vec!["context", "--side-effects"],
-    ] {
+    for args in [vec!["context"], vec!["context", "--values"], vec!["context", "--expressions"], vec!["context", "--side-effects"]] {
         let assert = cargo_bin_cmd!("claudine")
             .env("NO_COLOR", "1")
             .current_dir(repo_root())
@@ -764,21 +735,9 @@ fn context_footer_no_availability_claims() {
 fn context_reports_preserve_all_columns_at_minimum_supported_width() {
     // (args, required headers, representative content sentinel)
     let cases: &[(&[&str], &[&str], &str)] = &[
-        (
-            &["context"],
-            &["Property", "Type", "Description"],
-            "ctx.today",
-        ),
-        (
-            &["context", "--values"],
-            &["Property", "Type", "Value"],
-            "ctx.today",
-        ),
-        (
-            &["context", "--expressions"],
-            &["Function", "Description"],
-            "min(a, b)",
-        ),
+        (&["context"], &["Property", "Type", "Description"], "ctx.today"),
+        (&["context", "--values"], &["Property", "Type", "Value"], "ctx.today"),
+        (&["context", "--expressions"], &["Function", "Description"], "min(a, b)"),
         (
             &["context", "--side-effects"],
             &["Capability", "Description", "Safety"],

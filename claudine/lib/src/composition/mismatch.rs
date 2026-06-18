@@ -243,6 +243,9 @@ alias: *seq";
     #[test]
     fn capture_accepts_both_padded_delimiters() {
         let text = " --- \nprompt: x\n --- \nbody\n";
-        assert_eq!(capture_frontmatter_yaml(text).as_deref(), Some("prompt: x"),);
+        assert_eq!(
+            capture_frontmatter_yaml(text).as_deref(),
+            Some("prompt: x"),
+        );
     }
 }

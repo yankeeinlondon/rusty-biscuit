@@ -72,7 +72,12 @@ fn bench_xx_hash_variant(c: &mut Criterion) {
     let mut group = c.benchmark_group("xx_hash_variant");
     group.throughput(Throughput::Bytes(text.len() as u64));
     group.bench_function("medium_4_variants", |b| {
-        b.iter(|| biscuit_hash::xx_hash_variant(black_box(&text), black_box(variants.clone())))
+        b.iter(|| {
+            biscuit_hash::xx_hash_variant(
+                black_box(&text),
+                black_box(variants.clone()),
+            )
+        })
     });
     group.finish();
 }

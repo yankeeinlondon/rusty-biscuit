@@ -9,6 +9,10 @@
 //! cargo bench -p darkmatter --bench render_pipeline_steps
 //! ```
 
+// Whitebox: wires the deprecated `TerminalCodeRenderer` adapter directly to
+// benchmark the render-tree code path.
+#![allow(deprecated)]
+
 use std::hint::black_box;
 use std::rc::Rc;
 
@@ -19,11 +23,11 @@ use biscuit_terminal::render_tree::{
 use biscuit_terminal::terminal::Terminal;
 use criterion::{Criterion, criterion_group, criterion_main};
 use darkmatter::layout::DarkmatterPage;
+use darkmatter::markdown::CodeBlock;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::render_tree::{
     TerminalCodeRenderer, fold_markdown_spanned_with_frontmatter,
 };
-use darkmatter::markdown::yaml_block::YamlBlock;
 use renderable::tree::{
     BrowserMermaidMode, BrowserRenderOptions, RawHtmlPolicy, RenderStrictness, SourceDescriptor,
     render_browser_document_html,
@@ -44,9 +48,7 @@ fn corpus() -> String {
 }
 
 fn source() -> SourceDescriptor {
-    SourceDescriptor::Virtual {
-        name: "pipeline_corpus".into(),
-    }
+    SourceDescriptor::Virtual { name: "pipeline_corpus".into() }
 }
 
 fn tree_terminal_options() -> TerminalRenderOptions {
@@ -84,19 +86,20 @@ fn bench_render_pipeline_terminal(c: &mut Criterion) {
     group.bench_function("fold", |b| {
         let md: Markdown = input.as_str().into();
         b.iter(|| {
-            let (doc, diags) = fold_markdown_spanned_with_frontmatter(source(), black_box(&md));
+            let (doc, diags) = fold_markdown_spanned_with_frontmatter(source(), black_box(&md))
+                .expect("fold must succeed");
             black_box((doc, diags))
         })
     });
     group.bench_function("render", |b| {
         let md: Markdown = input.as_str().into();
-        let (doc, _d) = fold_markdown_spanned_with_frontmatter(source(), &md);
+        let (doc, _d) = fold_markdown_spanned_with_frontmatter(source(), &md).expect("fold must succeed");
         b.iter(|| render_terminal_document(black_box(&doc), &term_opts).expect("terminal render"))
     });
     group.bench_function("full", |b| {
         b.iter(|| {
             let md: Markdown = black_box(input.as_str()).into();
-            let (doc, _d) = fold_markdown_spanned_with_frontmatter(source(), &md);
+            let (doc, _d) = fold_markdown_spanned_with_frontmatter(source(), &md).expect("fold must succeed");
             render_terminal_document(&doc, &term_opts).expect("terminal render")
         })
     });
@@ -118,7 +121,8 @@ fn bench_render_pipeline_browser(c: &mut Criterion) {
     group.bench_function("fold", |b| {
         let md: Markdown = input.as_str().into();
         b.iter(|| {
-            let (doc, diags) = fold_markdown_spanned_with_frontmatter(source(), black_box(&md));
+            let (doc, diags) = fold_markdown_spanned_with_frontmatter(source(), black_box(&md))
+                .expect("fold must succeed");
             black_box((doc, diags))
         })
     });
@@ -128,7 +132,7 @@ fn bench_render_pipeline_browser(c: &mut Criterion) {
     // attributes cost to the path production actually pays.
     group.bench_function("render", |b| {
         let md: Markdown = input.as_str().into();
-        let (doc, _d) = fold_markdown_spanned_with_frontmatter(source(), &md);
+        let (doc, _d) = fold_markdown_spanned_with_frontmatter(source(), &md).expect("fold must succeed");
         b.iter(|| {
             render_browser_document_html(black_box(&doc), &browser_opts).expect("browser render")
         })
@@ -136,7 +140,7 @@ fn bench_render_pipeline_browser(c: &mut Criterion) {
     group.bench_function("full", |b| {
         b.iter(|| {
             let md: Markdown = black_box(input.as_str()).into();
-            let (doc, _d) = fold_markdown_spanned_with_frontmatter(source(), &md);
+            let (doc, _d) = fold_markdown_spanned_with_frontmatter(source(), &md).expect("fold must succeed");
             render_browser_document_html(&doc, &browser_opts).expect("browser render")
         })
     });
@@ -144,9 +148,7 @@ fn bench_render_pipeline_browser(c: &mut Criterion) {
 }
 
 fn bench_darkmatter_components(c: &mut Criterion) {
-    let yaml =
-        YamlBlock::new("name: example\nvalues:\n  - a\n  - b\n  - c\ncount: 3\nactive: true")
-            .expect("valid yaml");
+    let yaml = CodeBlock::yaml("name: example\nvalues:\n  - a\n  - b\n  - c\ncount: 3\nactive: true");
     let term = Terminal::new_optimistic(120);
     let page_md: Markdown =
         "# Page\n\nParagraph with *emphasis* and a list:\n\n- one\n- two\n\n```rust\nfn x() {}\n```\n".into();
@@ -154,10 +156,10 @@ fn bench_darkmatter_components(c: &mut Criterion) {
     let mut group = c.benchmark_group("darkmatter_components");
     group.sample_size(20);
 
-    group.bench_function("yaml_block/terminal", |b| {
+    group.bench_function("code_block/terminal", |b| {
         b.iter(|| TerminalRenderable::render(black_box(&yaml), &term))
     });
-    group.bench_function("yaml_block/browser", |b| {
+    group.bench_function("code_block/browser", |b| {
         b.iter(|| BrowserRenderable::render_html_fragment(black_box(&yaml)).render())
     });
     group.bench_function("darkmatter_page/terminal", |b| {
@@ -245,8 +247,7 @@ fn apply_styles(page: DarkmatterPage, md: &Markdown) -> DarkmatterPage {
     let page = apply_list_style(page, &style, ListStyleOverrides::default()).expect("list style");
     let page = apply_hr_style(page, &style, HrStyleOverrides::default()).expect("hr style");
     let page = apply_color_style(page, &style).expect("color style");
-    apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-        .expect("bespoke style")
+    apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).expect("bespoke style")
 }
 
 /// Benchmarks the **real styled production entry points** —

@@ -57,11 +57,7 @@ mod tests {
     fn display_string_round_trips_every_variant() {
         for variant in Hardware::iter() {
             let s = variant.to_string();
-            assert_eq!(
-                Hardware::from_str(&s).unwrap(),
-                variant,
-                "round trip for {s}"
-            );
+            assert_eq!(Hardware::from_str(&s).unwrap(), variant, "round trip for {s}");
         }
     }
 

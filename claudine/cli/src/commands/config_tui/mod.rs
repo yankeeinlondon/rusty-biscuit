@@ -78,7 +78,9 @@ async fn run_setter(command: ConfigCommand) -> color_eyre::Result<()> {
     match command {
         ConfigCommand::Set { target } => match target {
             ConfigSetTarget::FavoriteAgent { value } => run_set_favorite_agent(&value).await,
-            ConfigSetTarget::PromptForMissing { value } => run_set_prompt_for_missing(&value).await,
+            ConfigSetTarget::PromptForMissing { value } => {
+                run_set_prompt_for_missing(&value).await
+            }
         },
     }
 }

@@ -7,7 +7,7 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::utils::color::{Color, Tailwind};
-use biscuit_terminal::utils::layout::{Edges, Length, TargetValue, WordWrap};
+use biscuit_terminal::utils::layout::{Length, Edges, TargetValue, WordWrap};
 use claudine::stream::semantic::SemanticEvent;
 use claudine::stream::tool_display::{ToolCallDisplay, ToolDirection, ToolStatus};
 use serde_json::Value;

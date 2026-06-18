@@ -78,8 +78,9 @@ pub fn parse_directives(
                     });
                 }
 
-                // Separate error handling options and timeout from shell tokens
-                let (error_handling, shell_tokens, timeout_override) =
+                // Separate error handling options, timeout, and the cache opt-out
+                // from shell tokens
+                let (error_handling, shell_tokens, timeout_override, no_cache) =
                     extract_options_from_tokens(&tokens, line_num, &ctx)?;
 
                 if shell_tokens.is_empty() {
@@ -115,6 +116,7 @@ pub fn parse_directives(
                     origin: ShellCommandOrigin::Body { line: line_num },
                     error_handling,
                     timeout_override,
+                    no_cache,
                     pipeline: Some(pipeline),
                     ctx: ctx.clone(),
                 });
@@ -148,17 +150,19 @@ fn option_arg_count(option: &str) -> usize {
     }
 }
 
-/// Extracts error handling options and timeout from a mixed token list,
-/// returning the remaining shell tokens.
+/// Extracts error handling options, the timeout suffix, and the `--no-cache`
+/// cache opt-out from a mixed token list, returning the remaining shell tokens.
 fn extract_options_from_tokens(
     tokens: &[ShellToken],
     line: usize,
     ctx: &SourceContext,
-) -> Result<(ErrorHandling, Vec<ShellToken>, Option<std::time::Duration>), ShellExpansionError> {
+) -> Result<(ErrorHandling, Vec<ShellToken>, Option<std::time::Duration>, bool), ShellExpansionError>
+{
     let mut handling = ErrorHandling::default();
     let mut shell_tokens = Vec::new();
     let mut i = 0;
     let mut timeout_override = None;
+    let mut no_cache = false;
 
     while i < tokens.len() {
         match &tokens[i] {
@@ -221,6 +225,9 @@ fn extract_options_from_tokens(
                     }
 
                     i = j;
+                } else if w == "--no-cache" {
+                    no_cache = true;
+                    i += 1;
                 } else if let Some(value_str) = w.strip_prefix("::timeout:") {
                     let seconds: u64 = value_str.parse().map_err(|_| {
                         ShellExpansionError::ParseDirective {
@@ -262,7 +269,7 @@ fn extract_options_from_tokens(
         }
     }
 
-    Ok((handling, shell_tokens, timeout_override))
+    Ok((handling, shell_tokens, timeout_override, no_cache))
 }
 
 /// Parses an exit code string into an i32.
@@ -706,6 +713,38 @@ And `::shell echo inline` should also be ignored.
         let content = "::shell echo hello\n";
         let directives = parse_directives(content, dummy_ctx(content)).unwrap();
         assert!(directives[0].timeout_override.is_none());
+    }
+
+    #[test]
+    fn parse_no_cache_flag() {
+        let content = "::shell --no-cache uuidgen\n";
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].executable, "uuidgen");
+        assert!(directives[0].no_cache);
+    }
+
+    #[test]
+    fn parse_no_cache_defaults_false() {
+        let content = "::shell uuidgen\n";
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+        assert!(!directives[0].no_cache);
+    }
+
+    #[test]
+    fn parse_no_cache_alongside_error_handling_and_timeout() {
+        let content = "::shell --no-cache --when-error empty uuidgen ::timeout:3\n";
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+        assert_eq!(directives[0].executable, "uuidgen");
+        assert!(directives[0].no_cache);
+        assert_eq!(
+            directives[0].error_handling.when_error,
+            Some("empty".to_string())
+        );
+        assert_eq!(
+            directives[0].timeout_override,
+            Some(std::time::Duration::from_secs(3))
+        );
     }
 
     #[test]

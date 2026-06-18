@@ -1611,9 +1611,8 @@ fn test_god_files_json_top_level_excludes_locals() {
     );
     let hints = arr[0]["refactor_hints"].as_array().expect("hints array");
     assert!(
-        hints
-            .iter()
-            .any(|h| h["kind"] == "many_unrelated_top_level" && h["count"].as_u64() == Some(10)),
+        hints.iter().any(|h| h["kind"] == "many_unrelated_top_level"
+            && h["count"].as_u64() == Some(10)),
         "ManyUnrelatedTopLevel hint count must be 10, got {hints:?}"
     );
 }
@@ -1921,10 +1920,7 @@ fn test_god_files_osc8_links_to_scan_root() {
 
     let stdout = String::from_utf8_lossy(&output);
     // An OSC8 file hyperlink is emitted, targeting the scan root.
-    assert!(
-        stdout.contains("\x1b]8;;file://"),
-        "expected an OSC8 file link"
-    );
+    assert!(stdout.contains("\x1b]8;;file://"), "expected an OSC8 file link");
     assert!(
         stdout.contains(scan_suffix),
         "OSC8 target should point at the scan root, got: {stdout:?}"
@@ -1969,9 +1965,7 @@ fn test_god_files_unparseable_note() {
     let arr = json.as_array().expect("json array");
     assert_eq!(arr.len(), 1);
     assert!(
-        arr[0]["note"]
-            .as_str()
-            .is_some_and(|s| s.contains("could not parse")),
+        arr[0]["note"].as_str().is_some_and(|s| s.contains("could not parse")),
         "json should carry the diagnostic note"
     );
 }

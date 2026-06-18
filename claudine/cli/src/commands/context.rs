@@ -5,19 +5,19 @@ use biscuit_terminal::components::table::table::{Table, TableCellContent};
 use biscuit_terminal::terminal::Terminal;
 use clap::Args;
 use color_eyre::eyre::Result;
-use darkmatter::effects::{EffectDescriptor, EffectSafety, effect_descriptors};
-use darkmatter::markdown::compose::ComposeContext;
+use darkmatter::effects::{effect_descriptors, EffectDescriptor, EffectSafety};
 use darkmatter::markdown::compose::context::{
-    ContextValueType, ContextVariableDescriptor, context_variable_descriptors,
+    context_variable_descriptors, ContextValueType, ContextVariableDescriptor,
 };
 use darkmatter::markdown::compose::expression::{
-    ExpressionFunctionDescriptor, expression_function_descriptors,
+    expression_function_descriptors, ExpressionFunctionDescriptor,
 };
+use darkmatter::markdown::compose::ComposeContext;
 
 use crate::commands::context_render::{
-    TableLayout, configure_shared_table, context_column_widths, function_first_column_width,
-    inline_code_text, prose_with_inline_code, render_context_section, render_table_resilient,
-    render_table_within_contract, render_unordered_list, report_column,
+    configure_shared_table, context_column_widths, function_first_column_width, inline_code_text,
+    prose_with_inline_code, render_context_section, render_table_resilient,
+    render_table_within_contract, report_column, render_unordered_list, TableLayout,
 };
 use crate::log;
 
@@ -42,14 +42,10 @@ pub struct ContextArgs {
 // Grouping helpers
 // ------------------------------------------------------------------
 
-fn group_context_descriptors() -> Vec<(
-    (&'static str, &'static str),
-    Vec<&'static ContextVariableDescriptor>,
-)> {
-    let mut groups: Vec<(
-        (&'static str, &'static str),
-        Vec<&'static ContextVariableDescriptor>,
-    )> = Vec::new();
+fn group_context_descriptors(
+) -> Vec<((&'static str, &'static str), Vec<&'static ContextVariableDescriptor>)> {
+    let mut groups: Vec<((&'static str, &'static str), Vec<&'static ContextVariableDescriptor>)> =
+        Vec::new();
     let mut current_key: Option<(&'static str, &'static str)> = None;
 
     for desc in context_variable_descriptors() {
@@ -63,8 +59,8 @@ fn group_context_descriptors() -> Vec<(
     groups
 }
 
-fn group_expression_descriptors() -> Vec<(&'static str, Vec<&'static ExpressionFunctionDescriptor>)>
-{
+fn group_expression_descriptors(
+) -> Vec<(&'static str, Vec<&'static ExpressionFunctionDescriptor>)> {
     // The catalog is physically laid out by implementation grouping, so a
     // single category (e.g. `Math`, `Collection`) can appear in non-adjacent
     // runs. Consolidate every category into one group, ordered by first
@@ -232,14 +228,17 @@ fn render_default_report() {
             let heading = Prose::new(format!("<blue><b>{category}</b></blue>"));
             log::data(&heading.render(&term));
         } else {
-            let heading = Prose::new(format!(
-                "<blue><b>{category}</b></blue> — <b>{subsection}</b>"
-            ));
+            let heading =
+                Prose::new(format!("<blue><b>{category}</b></blue> — <b>{subsection}</b>"));
             log::data(&heading.render(&term));
         }
 
-        let rendered =
-            render_context_section(&term, property_width, type_width, "Description", |table| {
+        let rendered = render_context_section(
+            &term,
+            property_width,
+            type_width,
+            "Description",
+            |table| {
                 for desc in descriptors {
                     let row: Vec<TableCellContent> = vec![
                         display_property(desc.name).into(),
@@ -248,7 +247,8 @@ fn render_default_report() {
                     ];
                     table.add_row(row);
                 }
-            });
+            },
+        );
         log::data(&rendered);
         log::data("");
     }
@@ -295,14 +295,17 @@ fn render_values_report_with(capture: impl FnOnce() -> ComposeContext) {
             let heading = Prose::new(format!("<blue><b>{category}</b></blue>"));
             log::data(&heading.render(&term));
         } else {
-            let heading = Prose::new(format!(
-                "<blue><b>{category}</b></blue> — <b>{subsection}</b>"
-            ));
+            let heading =
+                Prose::new(format!("<blue><b>{category}</b></blue> — <b>{subsection}</b>"));
             log::data(&heading.render(&term));
         }
 
-        let rendered =
-            render_context_section(&term, property_width, type_width, "Value", |table| {
+        let rendered = render_context_section(
+            &term,
+            property_width,
+            type_width,
+            "Value",
+            |table| {
                 for desc in descriptors {
                     let value = values.get(desc.name).unwrap_or(&serde_json::Value::Null);
                     let value_str = if value.is_null() {
@@ -318,7 +321,8 @@ fn render_values_report_with(capture: impl FnOnce() -> ComposeContext) {
                     ];
                     table.add_row(row);
                 }
-            });
+            },
+        );
         log::data(&rendered);
         log::data("");
     }
@@ -379,10 +383,7 @@ fn render_expressions_precedence(term: &Terminal) {
     log::data("");
 
     let items = [
-        (
-            "Primary / member access",
-            "literals, variables, function calls, `foo.bar`, `foo[0]`, `(expr)`",
-        ),
+        ("Primary / member access", "literals, variables, function calls, `foo.bar`, `foo[0]`, `(expr)`"),
         ("Unary", "`!`, `-`"),
         ("Multiplicative", "`*`, `/`, `%`"),
         ("Additive", "`+`, `-`"),
@@ -429,7 +430,10 @@ fn render_expressions_truthiness(term: &Terminal) {
     ];
 
     for (value, falsy) in rows {
-        let row: Vec<TableCellContent> = vec![inline_code_text(value, term).into(), falsy.into()];
+        let row: Vec<TableCellContent> = vec![
+            inline_code_text(value, term).into(),
+            falsy.into(),
+        ];
         table.add_row(row);
     }
 
@@ -447,14 +451,8 @@ fn render_expressions_unary(term: &Terminal) {
     configure_shared_table(&mut table);
 
     let items = vec![
-        (
-            "`!x`",
-            "boolean negation (`!truthy ⇒ false`, `!falsy ⇒ true`)",
-        ),
-        (
-            "`-x`",
-            "numeric negation; `-null` is `null`; `-\"hi\"` is an error",
-        ),
+        ("`!x`", "boolean negation (`!truthy ⇒ false`, `!falsy ⇒ true`)"),
+        ("`-x`", "numeric negation; `-null` is `null`; `-\"hi\"` is an error"),
     ];
 
     for (op, desc) in items {
@@ -512,14 +510,12 @@ fn render_expressions_variable_access(term: &Terminal) {
         "context variables: `ctx.today`, `ctx.repo`, `ctx.current_package`",
         "environment keys: `env.AGENT`, `env.HOME`",
     ];
-    log::data(&prose_with_inline_code("Supported variable forms:", term).render(term));
-    log::data(&render_unordered_list(
-        &access_items
-            .iter()
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>(),
+    log::data(&prose_with_inline_code(
+        "Supported variable forms:",
         term,
-    ));
+    )
+    .render(term));
+    log::data(&render_unordered_list(&access_items.iter().map(|s| s.to_string()).collect::<Vec<_>>(), term));
 
     let dot_items = [
         "a non-existent path resolves to `null` (no error)",
@@ -527,10 +523,7 @@ fn render_expressions_variable_access(term: &Terminal) {
         "numeric dot access (`foo.0`) is not supported — use bracket syntax",
     ];
     log::data(&Prose::new("<b>Dot Access</b>").render(term));
-    log::data(&render_unordered_list(
-        &dot_items.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
-        term,
-    ));
+    log::data(&render_unordered_list(&dot_items.iter().map(|s| s.to_string()).collect::<Vec<_>>(), term));
 
     let bracket_items = [
         "arrays: `foo[0]`, `foo[-1]` (negative indexes count from the end)",
@@ -538,13 +531,7 @@ fn render_expressions_variable_access(term: &Terminal) {
         "chained: `items[-1].name`, `config[\"key\"][0]`",
     ];
     log::data(&Prose::new("<b>Bracket Access</b>").render(term));
-    log::data(&render_unordered_list(
-        &bracket_items
-            .iter()
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>(),
-        term,
-    ));
+    log::data(&render_unordered_list(&bracket_items.iter().map(|s| s.to_string()).collect::<Vec<_>>(), term));
 }
 
 fn render_expressions_modes(term: &Terminal) {
@@ -552,7 +539,9 @@ fn render_expressions_modes(term: &Terminal) {
     log::data(&heading.render(term));
     log::data("");
 
-    let intro = Prose::new("The parser supports two modes with different operator behavior:");
+    let intro = Prose::new(
+        "The parser supports two modes with different operator behavior:",
+    );
     log::data(&intro.render(term));
     log::data("");
 
@@ -575,8 +564,10 @@ fn render_expressions_modes(term: &Terminal) {
     ];
 
     for (surface, meaning) in rows {
-        let row: Vec<TableCellContent> =
-            vec![inline_code_text(surface, term).into(), meaning.into()];
+        let row: Vec<TableCellContent> = vec![
+            inline_code_text(surface, term).into(),
+            meaning.into(),
+        ];
         table.add_row(row);
     }
 
@@ -613,10 +604,7 @@ fn render_expressions_null_propagation(term: &Terminal) {
         ("Bracket out-of-bounds", "`null`"),
         ("Bracket on `null` base", "`null`"),
         ("Bracket key on non-collection", "`null`"),
-        (
-            "Negative index from the end",
-            "element or `null` if outside range",
-        ),
+        ("Negative index from the end", "element or `null` if outside range"),
     ];
 
     for (op, behavior) in rows {
@@ -652,11 +640,10 @@ fn render_expressions_functions(term: &Terminal) {
         let rendered = render_table_resilient(term, |layout| {
             let mut function = report_column("Function");
             if layout == TableLayout::Pinned {
-                function = function
-                    .with_min_width(func_width)
-                    .with_max_width(func_width);
+                function = function.with_min_width(func_width).with_max_width(func_width);
             }
-            let mut table = Table::new().with_columns(vec![function, report_column("Description")]);
+            let mut table =
+                Table::new().with_columns(vec![function, report_column("Description")]);
             configure_shared_table(&mut table);
             for func in functions {
                 let row: Vec<TableCellContent> = vec![
@@ -720,9 +707,7 @@ fn render_side_effects_report() {
         let rendered = render_table_resilient(&term, |layout| {
             let mut capability = report_column("Capability");
             if layout == TableLayout::Pinned {
-                capability = capability
-                    .with_min_width(cap_width)
-                    .with_max_width(cap_width);
+                capability = capability.with_min_width(cap_width).with_max_width(cap_width);
             }
             let mut table = Table::new().with_columns(vec![
                 capability,
@@ -875,8 +860,12 @@ mod tests {
         let type_width = "NestedMarkdownList".len();
         let term = Terminal::new_optimistic(MIN_SUPPORTED_REPORT_WIDTH);
 
-        let output =
-            render_context_section(&term, property_width, type_width, "Description", |table| {
+        let output = render_context_section(
+            &term,
+            property_width,
+            type_width,
+            "Description",
+            |table| {
                 table.add_row(vec![
                     "ctx.current_package_area_has_staged_files".into(),
                     "Boolean".into(),
@@ -887,7 +876,8 @@ mod tests {
                     "NestedMarkdownList".into(),
                     "Nested outline of the in-scope docs.".into(),
                 ]);
-            });
+            },
+        );
 
         assert!(
             !output.contains("could not be rendered"),
@@ -942,7 +932,8 @@ mod tests {
 
         let property_labels: Vec<&str> = all_properties.iter().map(|s| s.as_str()).collect();
         let type_labels: Vec<&str> = all_types.iter().map(|s| s.as_str()).collect();
-        let (property_width, type_width) = context_column_widths(&property_labels, &type_labels);
+        let (property_width, type_width) =
+            context_column_widths(&property_labels, &type_labels);
 
         // Widths must be positive and independently computed.
         assert!(
@@ -1066,11 +1057,7 @@ mod tests {
             }
 
             let out = render_table_within_contract(&table, &term);
-            let max = out
-                .lines()
-                .map(|l| visible_width(l) as usize)
-                .max()
-                .unwrap_or(0);
+            let max = out.lines().map(|l| visible_width(l) as usize).max().unwrap_or(0);
             assert!(
                 max <= 140,
                 "expression table for '{category}' exceeded 140ch (max={max})"
@@ -1106,11 +1093,7 @@ mod tests {
             }
 
             let out = render_table_within_contract(&table, &term);
-            let max = out
-                .lines()
-                .map(|l| visible_width(l) as usize)
-                .max()
-                .unwrap_or(0);
+            let max = out.lines().map(|l| visible_width(l) as usize).max().unwrap_or(0);
             assert!(
                 max <= 140,
                 "side-effect table for '{category}' exceeded 140ch (max={max})"

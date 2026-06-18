@@ -575,7 +575,11 @@ mod tests {
                     false
                 ),
                 ("count", TypeExpr::Primitive(SimplifiedType::Number), true),
-                ("rating", TypeExpr::Primitive(SimplifiedType::Number), false),
+                (
+                    "rating",
+                    TypeExpr::Primitive(SimplifiedType::Number),
+                    false
+                ),
             ]
         );
     }

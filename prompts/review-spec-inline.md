@@ -7,10 +7,10 @@ basename: "$(basename '{{ spec }}')"
 dir: "$(dirname '{{ spec }}')"
 
 start:
-    message: "👀 reviewing the specification file: {{spec}}"
+    message: "👀 reviewing the specification file: `{{spec}}`"
 success:
     say: "The review of the draft specification file has completed"
-    message: "✅ review of the draft specification '{{spec}}' has completed"
+    message: "✅ review of the draft specification `{{spec}}` has completed"
 ---
 You are expected to review a draft specification document located at {{spec}}. This will be an "inline review" so instead of just writing a review file your task includes updating the underlying specification file with your suggestions.
 

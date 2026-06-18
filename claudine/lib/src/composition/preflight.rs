@@ -9,7 +9,6 @@ use std::collections::HashSet;
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeOptions;
-use darkmatter::markdown::compose::shell_expansion::discovery::collect_shell_commands;
 use darkmatter::markdown::compose::shell_expansion::policy::normalize_command;
 
 use crate::composition::error::CompositionError;
@@ -52,10 +51,14 @@ pub fn resolve_shell_approvals(
     let mut all_commands: Vec<(String, std::path::PathBuf, usize)> = Vec::new();
 
     // -- Source 1: Template ::shell directives ---------------------------------
+    // Darkmatter discovers condition-blind: every command that could run under
+    // any document state (including dead branches). Claudine authorizes the
+    // union of these plus harness commands below.
     if let (Some(md), Some(opts)) = (markdown, compose_options) {
-        let entries =
-            collect_shell_commands(md, opts).map_err(CompositionError::PreFlightDiscoveryFailed)?;
-        for entry in &entries {
+        let preflight = md
+            .compose_preflight(opts)
+            .map_err(CompositionError::PreFlightDiscoveryFailed)?;
+        for entry in &preflight.entries {
             all_commands.push((
                 entry.normalized.clone(),
                 entry.source_file.clone(),
@@ -303,20 +306,15 @@ mod tests {
             ..Default::default()
         };
 
-        let err =
-            resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options).unwrap_err();
+        let err = resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options)
+            .unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains(
-                "Cannot dry-run: shell command 'curl https://example.com' requires \
-                          interactive approval."
-            ),
+            msg.contains("Cannot dry-run: shell command 'curl https://example.com' requires \
+                          interactive approval."),
             "expected dry-run gate message naming the command; got: {msg}"
         );
-        assert!(
-            msg.contains("--yolo"),
-            "message should mention --yolo; got: {msg}"
-        );
+        assert!(msg.contains("--yolo"), "message should mention --yolo; got: {msg}");
     }
 
     #[test]
@@ -327,8 +325,8 @@ mod tests {
         let compose_options = ComposeOptions::new();
         let (_dir, options) = approval_options_with_whitelist(&[]);
 
-        let err =
-            resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options).unwrap_err();
+        let err = resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options)
+            .unwrap_err();
         let msg = err.to_string();
         assert!(
             msg.contains("no approval handler"),

@@ -68,7 +68,9 @@ async fn fetch_304_not_modified_preserves_headers() {
         if_none_match: Some("\"old\"".to_string()),
         if_modified_since: None,
     };
-    let resp = fetch(&client, &url, &policy, &conditional).await.unwrap();
+    let resp = fetch(&client, &url, &policy, &conditional)
+        .await
+        .unwrap();
 
     assert_eq!(resp.status, 304);
     assert!(resp.is_not_modified());
@@ -167,7 +169,9 @@ async fn fetch_conditional_if_modified_since() {
         if_none_match: None,
         if_modified_since: Some("Tue, 01 Jan 2025 00:00:00 GMT".to_string()),
     };
-    let resp = fetch(&client, &url, &policy, &conditional).await.unwrap();
+    let resp = fetch(&client, &url, &policy, &conditional)
+        .await
+        .unwrap();
 
     assert_eq!(resp.status, 200);
     assert_eq!(resp.body.as_ref(), b"fresh content");
@@ -203,8 +207,7 @@ async fn policy_client_blocks_redirect_to_unallowed_host() {
     Mock::given(method("GET"))
         .and(path("/redirect"))
         .respond_with(
-            ResponseTemplate::new(302)
-                .insert_header("location", "http://blocked-host.example/secret"),
+            ResponseTemplate::new(302).insert_header("location", "http://blocked-host.example/secret"),
         )
         .mount(&server)
         .await;

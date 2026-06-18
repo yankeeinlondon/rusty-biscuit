@@ -17,7 +17,9 @@ mod types;
 mod user_prompt;
 
 pub use frontmatter::parse_frontmatter_verbosity;
-pub use precedence::{resolve_agent_prompt_report_mode, resolve_system_prompt_report_mode};
+pub use precedence::{
+    resolve_agent_prompt_report_mode, resolve_system_prompt_report_mode,
+};
 pub use system_prompt::SystemPromptReport;
 pub use types::{ReportMode, TruncationMode};
 pub use user_prompt::AgentPromptReport;

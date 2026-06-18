@@ -6,11 +6,11 @@
 
 use std::io::{self, Write};
 
+use clap::Args;
 use biscuit_tui::{
     ABORTED_KIND, BooleanSwitch, BooleanSwitchState, CANCELLED_KIND, FrameChromeConfig, HeightSpec,
     Label, run_standalone_with_chrome,
 };
-use clap::Args;
 
 use crate::commands::text_input::LabelPositionArg;
 use crate::output::{OutputMode, write_bool};

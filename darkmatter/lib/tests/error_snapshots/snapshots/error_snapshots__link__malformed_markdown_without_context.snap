@@ -9,5 +9,6 @@ expression: out
 ┃ Link parsing failed here:
 ┃ 
 ┃ ```md
+┃ ```
 ┃ 
 ┃ Use the pattern display with balanced brackets.

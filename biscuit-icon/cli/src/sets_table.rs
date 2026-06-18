@@ -1,7 +1,7 @@
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
-use biscuit_terminal::components::table::types::ColumnType;
 use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
+use biscuit_terminal::components::table::types::ColumnType;
 use biscuit_terminal::components::two_column::TwoColumn;
 use biscuit_terminal::terminal::Terminal;
 
@@ -64,14 +64,12 @@ pub fn build_table(rows: &[SetRow], term: &Terminal) -> Table {
 
     Table::new()
         .with_columns(vec![
-            TableColumn::new("Set").with_max_width(30).with_word_wrap(
-                biscuit_terminal::utils::wrap_policy::WordWrap::WrapProse(None, None),
-            ),
+            TableColumn::new("Set")
+                .with_max_width(30)
+                .with_word_wrap(biscuit_terminal::utils::wrap_policy::WordWrap::WrapProse(None, None)),
             TableColumn::new("Prefix")
                 .with_max_width(20)
-                .with_word_wrap(biscuit_terminal::utils::wrap_policy::WordWrap::WrapProse(
-                    None, None,
-                )),
+                .with_word_wrap(biscuit_terminal::utils::wrap_policy::WordWrap::WrapProse(None, None)),
             TableColumn::new("Total").with_type(ColumnType::Integer),
             TableColumn::new("Cached").with_type(ColumnType::Integer),
         ])
@@ -111,10 +109,12 @@ pub fn choose_layout(rows: &[SetRow], term: &Terminal) -> Layout {
 pub fn render_sets(rows: &[SetRow], term: &Terminal) -> String {
     match choose_layout(rows, term) {
         Layout::Single(table) => table.render(term),
-        Layout::Split(left, right) => TwoColumn::new(left, right)
-            .with_left_percent(0.5)
-            .with_gap(SPLIT_GAP)
-            .render(term),
+        Layout::Split(left, right) => {
+            TwoColumn::new(left, right)
+                .with_left_percent(0.5)
+                .with_gap(SPLIT_GAP)
+                .render(term)
+        }
     }
 }
 
@@ -134,7 +134,10 @@ mod tests {
     }
 
     fn term(width: u32, height: u32) -> Terminal {
-        Terminal::builder().width(width).height(height).build()
+        Terminal::builder()
+            .width(width)
+            .height(height)
+            .build()
     }
 
     #[test]
@@ -230,10 +233,7 @@ mod tests {
                     assert!(
                         diff <= 1,
                         "count={}: left={} right={} diff={}",
-                        count,
-                        left_count,
-                        right_count,
-                        diff
+                        count, left_count, right_count, diff
                     );
                     assert_eq!(left_count + right_count, count);
                 }
@@ -280,11 +280,7 @@ mod tests {
         }];
         let t = term(80, 10);
         let output = render_sets(&rows, &t);
-        assert!(
-            output.contains("1,234,567"),
-            "expected thousands separator; got: {}",
-            output
-        );
+        assert!(output.contains("1,234,567"), "expected thousands separator; got: {}", output);
     }
 
     #[test]
@@ -313,7 +309,9 @@ mod tests {
         let continuation = lines
             .iter()
             .find(|l| l.contains("emojibits") && !l.contains("streamlineplump"))
-            .unwrap_or_else(|| panic!("prefix did not wrap onto a continuation line:\n{output}"));
+            .unwrap_or_else(|| {
+                panic!("prefix did not wrap onto a continuation line:\n{output}")
+            });
         assert!(
             !continuation.contains("Stream"),
             "continuation line must not repeat the title: {continuation:?}"
@@ -377,6 +375,70 @@ mod tests {
         assert!(
             !output.contains("<blue>") && !output.contains("<a href"),
             "output must not contain raw Prose markup; got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn title_with_special_chars_is_escaped_through_prose() {
+        // Prose grammar treats `<` and `>` as tag delimiters and `&`/`"` as
+        // markup-friendly text — a title containing any of them must be
+        // escape-quoted by `Prose::escape_text`/`Prose::quoted_attr` so the
+        // render tree never sees them as raw markup. The hyperlink itself
+        // still wraps the (now-escaped) label.
+        let rows = vec![SetRow {
+            prefix: "mdi".into(),
+            title: "Set <with> & \"special\" chars".into(),
+            total: Some(7447),
+            cached: 0,
+        }];
+        let t = Terminal::builder()
+            .width(120)
+            .height(20)
+            .is_tty(true)
+            .osc_link_support(true)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::TrueColor)
+            .build();
+        let output = render_sets(&rows, &t);
+
+        assert!(
+            !output.contains("<blue>") && !output.contains("<a href"),
+            "raw Prose tags must not leak; got:\n{output}"
+        );
+
+        assert!(
+            output.contains("https://icon-sets.iconify.design/mdi"),
+            "OSC8 link to the set's Iconify page must still be emitted; got:\n{output}"
+        );
+
+        assert!(
+            output.contains("Set <with> & \"special\" chars"),
+            "title text must survive the escape pipeline unaltered; got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn set_title_emits_blue_sgr_in_osc8_output() {
+        // The spec calls for `<blue><a href=…>{set-name}</a></blue>`, which
+        // lowers to SGR 34 around the link. This pins the wiring — if the
+        // Prose pipeline ever drops the blue wrapper, the assertion catches
+        // it before a user does.
+        let rows = vec![SetRow {
+            prefix: "mdi".into(),
+            title: "Material Design Icons".into(),
+            total: Some(7447),
+            cached: 0,
+        }];
+        let t = Terminal::builder()
+            .width(120)
+            .height(20)
+            .is_tty(true)
+            .osc_link_support(true)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::TrueColor)
+            .build();
+        let output = render_sets(&rows, &t);
+        assert!(
+            output.contains("\x1b[34m"),
+            "expected the blue basic SGR (ESC[34m) in the OSC8 path; got:\n{output}"
         );
     }
 

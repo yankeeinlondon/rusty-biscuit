@@ -570,7 +570,10 @@ impl<'a> Parser<'a> {
                 }
                 None => {
                     let span = self.lex.pos..self.lex.pos;
-                    return self.err("unterminated inline object (missing `}`)", span);
+                    return self.err(
+                        "unterminated inline object (missing `}`)",
+                        span,
+                    );
                 }
             }
         }
@@ -673,8 +676,10 @@ impl<'a> Parser<'a> {
                 b'(' => paren_depth += 1,
                 b')' => {
                     if paren_depth == 0 {
-                        return self
-                            .err("unbalanced `)` in inline object description", pos..pos + 1);
+                        return self.err(
+                            "unbalanced `)` in inline object description",
+                            pos..pos + 1,
+                        );
                     }
                     paren_depth -= 1;
                 }
@@ -686,7 +691,10 @@ impl<'a> Parser<'a> {
         let raw = &self.src[start..pos];
         let trimmed = raw.trim();
         if trimmed.is_empty() {
-            return self.err("`->` must be followed by a description", start..pos);
+            return self.err(
+                "`->` must be followed by a description",
+                start..pos,
+            );
         }
         self.lex.pos = pos;
         Ok(trimmed.to_string())
@@ -1600,14 +1608,8 @@ mod tests {
         let atom = parse("{ foo: string, bar: number }");
         let shape = inline_shape(&atom);
         assert_eq!(shape.properties.len(), 2);
-        assert_eq!(
-            prop(shape, "foo").ty,
-            TypeExpr::Primitive(SimplifiedType::String)
-        );
-        assert_eq!(
-            prop(shape, "bar").ty,
-            TypeExpr::Primitive(SimplifiedType::Number)
-        );
+        assert_eq!(prop(shape, "foo").ty, TypeExpr::Primitive(SimplifiedType::String));
+        assert_eq!(prop(shape, "bar").ty, TypeExpr::Primitive(SimplifiedType::Number));
         assert!(!atom.is_array);
     }
 
@@ -1615,10 +1617,7 @@ mod tests {
     fn parses_inline_object_array() {
         let atom = parse("{ foo: string }[]");
         let shape = inline_shape(&atom);
-        assert_eq!(
-            prop(shape, "foo").ty,
-            TypeExpr::Primitive(SimplifiedType::String)
-        );
+        assert_eq!(prop(shape, "foo").ty, TypeExpr::Primitive(SimplifiedType::String));
         assert!(atom.is_array);
     }
 
@@ -1626,10 +1625,7 @@ mod tests {
     fn parses_required_single_inline_object() {
         let atom = parse("{ host: string }(required)");
         let shape = inline_shape(&atom);
-        assert_eq!(
-            prop(shape, "host").ty,
-            TypeExpr::Primitive(SimplifiedType::String)
-        );
+        assert_eq!(prop(shape, "host").ty, TypeExpr::Primitive(SimplifiedType::String));
         assert!(!atom.is_array);
         assert_eq!(atom.constraints, vec![Constraint::Required]);
     }
@@ -1639,10 +1635,7 @@ mod tests {
         let atom = parse("{ name: string }[](min(1); required)");
         assert!(atom.is_array);
         let shape = inline_shape(&atom);
-        assert_eq!(
-            prop(shape, "name").ty,
-            TypeExpr::Primitive(SimplifiedType::String)
-        );
+        assert_eq!(prop(shape, "name").ty, TypeExpr::Primitive(SimplifiedType::String));
         assert_eq!(
             atom.array_constraints,
             vec![Constraint::MinItems(1), Constraint::Required]
@@ -1747,18 +1740,9 @@ mod tests {
         assert!(atom.is_array);
         let shape = inline_shape(&atom);
         assert_eq!(shape.properties.len(), 3);
-        assert_eq!(
-            prop(shape, "url").ty,
-            TypeExpr::Primitive(SimplifiedType::Url)
-        );
-        assert_eq!(
-            prop(shape, "method").ty,
-            TypeExpr::Primitive(SimplifiedType::Enum)
-        );
-        assert_eq!(
-            prop(shape, "timeout").ty,
-            TypeExpr::Primitive(SimplifiedType::Number)
-        );
+        assert_eq!(prop(shape, "url").ty, TypeExpr::Primitive(SimplifiedType::Url));
+        assert_eq!(prop(shape, "method").ty, TypeExpr::Primitive(SimplifiedType::Enum));
+        assert_eq!(prop(shape, "timeout").ty, TypeExpr::Primitive(SimplifiedType::Number));
     }
 
     #[test]

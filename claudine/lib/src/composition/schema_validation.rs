@@ -78,6 +78,21 @@ pub struct InteractiveSchemaOptions {
 impl InteractiveSchemaOptions {
     /// Returns `true` when the four input flags permit prompting.
     ///
+    /// The decision to prompt depends **only** on the four documented
+    /// signals held in this struct:
+    ///
+    /// - `prompt_for_missing` (user-configurable default `true`)
+    /// - `stdin_is_tty`
+    /// - `stderr_is_tty`
+    /// - `!silent`
+    ///
+    /// It **must not** depend on the resolved session interactivity value
+    /// (`session_interactive`). Schema collection is a pre-session
+    /// preparation step: this function runs (and any interactive prompt
+    /// completes) before the provider child process is spawned, regardless
+    /// of whether the eventual session mode is interactive or
+    /// non-interactive. Callers must ensure that ordering.
+    ///
     /// The plan's full rule also requires that at least one required
     /// property be missing and that no required values be present-but-invalid.
     /// Those extra conditions are checked by the validation layer (which
@@ -831,8 +846,10 @@ pub fn build_schema_status_report(
     // composition. Flagging `runtime_agent: '{{ env.AGENT }}'` as Invalid
     // here would contradict the (correct) successful execution that
     // follows. See `features/2026-05-15-schemas/review-4.md`.
-    let mut missing_by_name: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    let mut invalid_by_name: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut missing_by_name: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    let mut invalid_by_name: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
     for problem in &report.problems {
         match problem.kind {
             ValidationProblemKind::Missing => {
@@ -887,7 +904,10 @@ pub fn build_schema_status_report(
 
         let (type_label, description) = match def {
             PropertyDef::Single(atom) => (type_label_for_atom(atom), atom.description.clone()),
-            PropertyDef::Union(_) => ("<union>".to_string(), None),
+            PropertyDef::Union(_) => (
+                "<union>".to_string(),
+                None,
+            ),
         };
 
         let entry = PropertyStatus {
@@ -1632,10 +1652,7 @@ mod tests {
         let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
         match err {
             CompositionError::MissingProperties { missing, .. } => {
-                assert_eq!(
-                    missing[0].interactive_shape,
-                    Some(InteractiveShape::Boolean)
-                );
+                assert_eq!(missing[0].interactive_shape, Some(InteractiveShape::Boolean));
             }
             other => panic!("expected MissingProperties, got {other:?}"),
         }
@@ -1650,16 +1667,16 @@ mod tests {
         );
         let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
         match err {
-            CompositionError::MissingProperties { missing, .. } => {
-                match &missing[0].interactive_shape {
-                    Some(InteractiveShape::EnumOne { members }) => {
-                        assert_eq!(members.len(), 3);
-                        assert!(members.iter().any(|m| m == "small"));
-                        assert!(members.iter().any(|m| m == "large"));
-                    }
-                    other => panic!("expected EnumOne shape, got {other:?}"),
+            CompositionError::MissingProperties { missing, .. } => match &missing[0]
+                .interactive_shape
+            {
+                Some(InteractiveShape::EnumOne { members }) => {
+                    assert_eq!(members.len(), 3);
+                    assert!(members.iter().any(|m| m == "small"));
+                    assert!(members.iter().any(|m| m == "large"));
                 }
-            }
+                other => panic!("expected EnumOne shape, got {other:?}"),
+            },
             other => panic!("expected MissingProperties, got {other:?}"),
         }
     }

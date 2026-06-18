@@ -31,9 +31,7 @@ impl DomainIcon for Control {
             Control::CircularCheck => "material-symbols:check-circle-rounded",
             Control::CircularCheckUnread => "material-symbols:check-circle-unread",
             Control::CircularCheckOutline => "material-symbols:check-circle-outline-rounded",
-            Control::CircularCheckOutlineUnread => {
-                "material-symbols:check-circle-unread-outline-rounded"
-            }
+            Control::CircularCheckOutlineUnread => "material-symbols:check-circle-unread-outline-rounded",
             Control::SquareUnchecked => "material-symbols:check-box-outline-blank",
             Control::SquareChecked => "material-symbols:check-box-outline-rounded",
             Control::SquareCheckedFill => "material-symbols:check-box-rounded",
@@ -55,11 +53,7 @@ mod tests {
     fn display_string_round_trips_every_variant() {
         for variant in Control::iter() {
             let s = variant.to_string();
-            assert_eq!(
-                Control::from_str(&s).unwrap(),
-                variant,
-                "round trip for {s}"
-            );
+            assert_eq!(Control::from_str(&s).unwrap(), variant, "round trip for {s}");
         }
     }
 

@@ -26,8 +26,8 @@
 use serde_json::{Map, Value, json};
 
 use super::types::{
-    Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema,
-    SimplifiedType, TypeExpr,
+    Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, SimplifiedType,
+    TypeExpr,
 };
 use crate::markdown::schemas::errors::SchemaError;
 
@@ -196,12 +196,23 @@ fn atom_to_schema(name: &str, atom: &PropertyAtom) -> Result<(Value, bool), Sche
         TypeExpr::InlineObject(shape) => inline_object_fragment(name, shape, &atom.constraints)?,
     };
 
+    // Decision A: a non-`required` scalar `file` field treats an empty string
+    // as "absent" so a ternary like `spec: "{{ ... ? path : '' }}"` validates
+    // when the optional file is missing. The empty arm wraps the unchanged
+    // `darkmatter-file` fragment, so file typing (and SimplifiedSchema-driven
+    // completions, which read `atom.ty`, not this JSON Schema) are preserved.
+    // Required file fields keep the strict fragment and still reject empty.
+    let optional_empty_file =
+        matches!(&atom.ty, TypeExpr::Primitive(SimplifiedType::File)) && !atom.is_array && !required;
+
     let mut schema = if atom.is_array {
         let mut arr = Map::new();
         arr.insert("type".into(), Value::String("array".into()));
         arr.insert("items".into(), inner);
         apply_array_constraints(name, &mut arr, &atom.array_constraints)?;
         Value::Object(arr)
+    } else if optional_empty_file {
+        json!({ "anyOf": [ { "const": "" }, inner ] })
     } else {
         inner
     };
@@ -660,12 +671,51 @@ mod tests {
 
     #[test]
     fn file_emits_format_and_match_extension() {
+        // An optional `file` field wraps the `darkmatter-file` fragment in an
+        // `anyOf` with an empty-string arm (Decision A); the file shape lives
+        // in the second arm.
         let v = atom_value("file(match('*.md', '!_*.md'))");
-        assert_eq!(v["type"], "string");
-        assert_eq!(v["format"], "darkmatter-file");
-        let globs = v["x-darkmatter-match"].as_array().unwrap();
+        let file_arm = &v["anyOf"][1];
+        assert_eq!(file_arm["type"], "string");
+        assert_eq!(file_arm["format"], "darkmatter-file");
+        let globs = file_arm["x-darkmatter-match"].as_array().unwrap();
         assert_eq!(globs[0], "*.md");
         assert_eq!(globs[1], "!_*.md");
+    }
+
+    #[test]
+    fn optional_file_wraps_empty_string_arm() {
+        let v = atom_value("file");
+        // Arm 0 admits the empty string ("absent"); arm 1 is the file shape.
+        assert_eq!(v["anyOf"][0]["const"], "");
+        assert_eq!(v["anyOf"][1]["format"], "darkmatter-file");
+    }
+
+    #[test]
+    fn required_file_is_not_empty_wrapped() {
+        // A required `file` field keeps the strict, unwrapped fragment so an
+        // empty string is still rejected.
+        let v = atom_value("file(required)");
+        assert_eq!(v["type"], "string");
+        assert_eq!(v["format"], "darkmatter-file");
+        assert!(v.get("anyOf").is_none(), "required file must not be empty-wrapped");
+    }
+
+    #[test]
+    fn optional_file_accepts_empty_string_as_absent() {
+        // End-to-end: the converted schema validates an empty-string optional
+        // `file` value as absent, and an omitted key is likewise valid.
+        let schema = convert("spec: file");
+        let v = crate::markdown::schemas::validate::build_validator(&schema).unwrap();
+        assert!(v.is_valid(&json!({ "spec": "" })), "empty optional file must validate");
+        assert!(v.is_valid(&json!({})), "absent optional file must validate");
+    }
+
+    #[test]
+    fn required_file_rejects_empty_string() {
+        let schema = convert("plan: 'file(required)'");
+        let v = crate::markdown::schemas::validate::build_validator(&schema).unwrap();
+        assert!(!v.is_valid(&json!({ "plan": "" })), "empty required file must fail");
     }
 
     #[test]

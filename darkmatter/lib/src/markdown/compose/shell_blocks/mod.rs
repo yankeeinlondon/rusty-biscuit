@@ -17,7 +17,7 @@ use super::shell_expansion::{
     apply_replacements_in_reverse, execute_prepared_directive, prepare_directive,
     resolve_policy_paths,
 };
-use super::types::ComposeReport;
+use super::ComposeReport;
 use crate::markdown::MarkdownResult;
 use std::path::PathBuf;
 use types::{ShellBlockCommandResult, SourceExcerpt};
@@ -118,6 +118,7 @@ pub(crate) fn run_shell_blocks_stage(
                 },
                 error_handling: region.options.clone(),
                 timeout_override: region.timeout_override,
+                no_cache: region.no_cache,
                 pipeline: Some(command.pipeline.clone()),
                 ctx: ctx.clone(),
             };
@@ -146,7 +147,7 @@ pub(crate) fn run_shell_blocks_stage(
         let mut results = Vec::new();
 
         for (prep, command) in prepared {
-            match execute_prepared_directive(&prep, options) {
+            match execute_prepared_directive(&prep, options, runtime) {
                 Ok(execution) => {
                     results.push(ShellBlockCommandResult {
                         output: execution.combined_output(),
@@ -294,6 +295,39 @@ mod tests {
             run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
         assert_eq!(result, content);
         assert_eq!(report.shell_blocks_applied, 0);
+    }
+
+    /// T7 — `::shell-block no_cache=true` runs every command fresh: two
+    /// `uuidgen` lines in one block yield distinct values.
+    #[test]
+    fn shell_block_no_cache_executes_fresh() {
+        if which::which("uuidgen").is_err() {
+            return;
+        }
+        let content = "::shell-block no_cache=true\nuuidgen\nuuidgen\n::end-block\n";
+        let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
+        let mut runtime = ShellExpansionRuntime::new();
+        let (result, _report) =
+            run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
+        let ids: Vec<&str> = result.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+        assert_eq!(ids.len(), 2, "expected two output lines: {result:?}");
+        assert_ne!(ids[0], ids[1], "no_cache=true must yield distinct values");
+    }
+
+    /// Default caching collapses identical commands across a shell block.
+    #[test]
+    fn shell_block_caches_by_default() {
+        if which::which("uuidgen").is_err() {
+            return;
+        }
+        let content = "::shell-block\nuuidgen\nuuidgen\n::end-block\n";
+        let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
+        let mut runtime = ShellExpansionRuntime::new();
+        let (result, _report) =
+            run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
+        let ids: Vec<&str> = result.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+        assert_eq!(ids.len(), 2, "expected two output lines: {result:?}");
+        assert_eq!(ids[0], ids[1], "cached command must share one value");
     }
 
     #[test]
@@ -563,7 +597,8 @@ mod tests {
 
     #[test]
     fn indented_block_output_under_list_item_is_reindented() {
-        let content = "- intro\n\n    ::shell-block\n    echo hello\n    echo world\n    ::end-block\n\n- next\n";
+        let content =
+            "- intro\n\n    ::shell-block\n    echo hello\n    echo world\n    ::end-block\n\n- next\n";
         let (result, report) = run_block_stage(content);
         assert_eq!(report.shell_blocks_applied, 1);
         // Every output line keeps the opener's 4-space indent so the lines stay
@@ -612,8 +647,7 @@ mod tests {
         // verbatim, so after re-indenting the block ends in a bare newline —
         // never an indentation-only `"    "` line. Mirrors the `::shell`
         // trailing-newline guarantee.
-        let content =
-            "- intro\n\n    ::shell-block\n    printf 'one\\n'\n    ::end-block\n\n- next\n";
+        let content = "- intro\n\n    ::shell-block\n    printf 'one\\n'\n    ::end-block\n\n- next\n";
         let (result, report) = run_block_stage(content);
         assert_eq!(report.shell_blocks_applied, 1);
         assert!(result.contains("    one\n\n- next"), "got: {result:?}");
@@ -645,7 +679,8 @@ mod tests {
         // Re-indented block output is a continuation of the first list item, so
         // the document stays a single list with two items — the generated lines
         // are children of the parent <li>, not siblings of the outer list.
-        let content = "- intro\n\n    ::shell-block\n    echo hello\n    echo world\n    ::end-block\n\n- next\n";
+        let content =
+            "- intro\n\n    ::shell-block\n    echo hello\n    echo world\n    ::end-block\n\n- next\n";
         let html = run_block_stage_to_html(content);
         assert_eq!(html.matches("<ul>").count(), 1, "got: {html}");
         assert_eq!(html.matches("<li>").count(), 2, "got: {html}");
@@ -655,7 +690,8 @@ mod tests {
     fn root_level_block_output_is_a_sibling_block_in_commonmark() {
         // The column-1 baseline is intentionally a top-level sibling: the spliced
         // output splits the surrounding list into two separate <ul> blocks.
-        let content = "- intro\n\n::shell-block\necho hello\necho world\n::end-block\n\n- next\n";
+        let content =
+            "- intro\n\n::shell-block\necho hello\necho world\n::end-block\n\n- next\n";
         let html = run_block_stage_to_html(content);
         assert_eq!(html.matches("<ul>").count(), 2, "got: {html}");
     }
@@ -692,7 +728,10 @@ mod tests {
         let content = "> > ::shell-block\n> > echo hello\n> > echo world\n> > ::end-block\n";
         let (result, report) = run_block_stage(content);
         assert_eq!(report.shell_blocks_applied, 1);
-        assert!(result.contains("> > hello\n> > world\n"), "got: {result:?}");
+        assert!(
+            result.contains("> > hello\n> > world\n"),
+            "got: {result:?}"
+        );
         assert!(!result.contains("\nhello\n"), "got: {result:?}");
     }
 

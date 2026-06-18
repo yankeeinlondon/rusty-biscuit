@@ -3,7 +3,7 @@
 //! When `ComposeOptions::perf_enabled` is `true`, a `PerfCollector`
 //! records per-stage timings. When disabled, all methods are no-ops.
 
-use super::types::{ComposePerfMetric, ComposePerfReport, ComposeStage, ShellCommandSpan};
+use super::pipeline::operations::{ComposeOperationPerfMetric, ComposePhase};
 use std::time::{Duration, Instant};
 
 /// Metric kinds corresponding to compose pipeline stages.
@@ -76,6 +76,25 @@ impl PerfMetricKind {
             Self::Normalization,
             Self::LinkNormalization,
         ]
+    }
+}
+
+impl ComposeOperationPerfMetric {
+    /// Convert the operation-level metric to the runner's `PerfMetricKind`.
+    pub(crate) fn to_perf_metric_kind(self) -> PerfMetricKind {
+        match self {
+            Self::FrontmatterInterpolation => PerfMetricKind::FrontmatterInterpolation,
+            Self::FrontmatterShellExpansion => PerfMetricKind::FrontmatterShellExpansion,
+            Self::TextReplacement => PerfMetricKind::TextReplacement,
+            Self::PageBlocks => PerfMetricKind::PageBlocks,
+            Self::Interpolation => PerfMetricKind::Interpolation,
+            Self::ShellExpansion => PerfMetricKind::ShellExpansion,
+            Self::ShellBlocks => PerfMetricKind::ShellBlocks,
+            Self::LinkResolve => PerfMetricKind::LinkResolve,
+            Self::Cleanup => PerfMetricKind::Cleanup,
+            Self::Normalization => PerfMetricKind::Normalization,
+            Self::LinkNormalization => PerfMetricKind::LinkNormalization,
+        }
     }
 }
 
@@ -297,10 +316,7 @@ mod tests {
             .iter()
             .position(|s| *s == ComposeStage::FrontmatterShellExpansion)
             .unwrap();
-        assert!(
-            fi < sv,
-            "FrontmatterInterpolation must precede SchemaValidation"
-        );
+        assert!(fi < sv, "FrontmatterInterpolation must precede SchemaValidation");
         assert!(
             sv < fse,
             "SchemaValidation must precede FrontmatterShellExpansion"
@@ -326,5 +342,259 @@ mod tests {
             .iter()
             .position(|s| *s == ComposeStage::Normalization);
         assert!(esb_idx < norm_idx);
+    }
+}
+
+// ── Compose perf report types (moved from types.rs) ──────────────────
+/// A timing span for a single executed `::shell` directive (DM-3).
+///
+/// `command_display` is redacted, whitespace-normalized, and length-capped
+/// (OQ-2 Option B); `command_hash` is a stable non-crypto xxHash of the raw
+/// command for local correlation without exposing the full text.
+///
+/// ## Notes
+///
+/// Only the timing fields are carried. A span is recorded only on the
+/// success path (the executor returns `Err` for a non-zero exit, which
+/// propagates before the span is taken), and shell results are not cached,
+/// so neither an exit status nor a cache flag would carry signal here.
+/// Surfacing them accurately would require widening the directive executor's
+/// return type — deliberately out of scope (NG-1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellCommandSpan {
+    /// Redacted, whitespace-normalized, length-capped command text.
+    pub command_display: String,
+    /// Lowercase hex xxHash of the raw (un-redacted) command.
+    pub command_hash: String,
+    /// Wall-clock time spent executing this directive.
+    pub elapsed: Duration,
+}
+
+/// Redact, whitespace-normalize, and length-cap a raw shell command for
+/// display (OQ-2 Option B).
+///
+/// Collapses whitespace, masks common secret/credential patterns with `***`,
+/// and truncates the final string to 80 display characters (appending `…`).
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::compose::redact_shell_command;
+///
+/// let out = redact_shell_command("curl -H 'Authorization: Bearer abc123'");
+/// assert!(out.contains("Bearer ***"));
+/// ```
+pub fn redact_shell_command(raw: &str) -> String {
+    use std::sync::LazyLock;
+
+    // Authorization headers / bearer tokens.
+    static BEARER_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"(?i)bearer\s+[^\s'\x22]+").expect("valid bearer regex")
+    });
+    // Secret-carrying flags in `--flag=VALUE` form.
+    static FLAG_EQ_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"(?i)(--(?:token|password|api-?key|secret))=\S+")
+            .expect("valid flag-eq regex")
+    });
+    // Secret-carrying flags in `--flag VALUE` (space-separated) form.
+    static FLAG_SP_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"(?i)(--(?:token|password|api-?key|secret))(\s+)\S+")
+            .expect("valid flag-space regex")
+    });
+    // URL credentials: scheme://user:pass@host.
+    static URL_CRED_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"([a-zA-Z][a-zA-Z0-9+.\-]*://)[^/\s:@]+:[^/\s@]+@")
+            .expect("valid url-cred regex")
+    });
+    // Query-string secrets: ?token=… / &access_token=… / &password=… / &key=….
+    static QUERY_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"(?i)([?&](?:access_token|token|password|api-?key|secret|key)=)[^&\s'\x22]+")
+            .expect("valid query regex")
+    });
+    // Long opaque token-like blobs (JWT / base64): mixes letters and digits,
+    // no slash, length >= 40.
+    static BLOB_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"[A-Za-z0-9_\-.+=]{40,}").expect("valid blob regex")
+    });
+
+    // Collapse all whitespace runs to single spaces and trim.
+    let normalized = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    let mut out = normalized;
+    out = BEARER_RE.replace_all(&out, "Bearer ***").into_owned();
+    out = FLAG_EQ_RE.replace_all(&out, "$1=***").into_owned();
+    out = FLAG_SP_RE.replace_all(&out, "$1$2***").into_owned();
+    out = URL_CRED_RE.replace_all(&out, "$1***@").into_owned();
+    out = QUERY_RE.replace_all(&out, "$1***").into_owned();
+    // Only redact blobs that look token-like: contain both a letter and a
+    // digit. This avoids masking ordinary long words while catching JWTs and
+    // base64 secrets. (Blobs containing `/` are already excluded by the class.)
+    out = BLOB_RE
+        .replace_all(&out, |caps: &regex::Captures<'_>| {
+            let m = &caps[0];
+            let has_alpha = m.bytes().any(|b| b.is_ascii_alphabetic());
+            let has_digit = m.bytes().any(|b| b.is_ascii_digit());
+            if has_alpha && has_digit {
+                "***".to_string()
+            } else {
+                m.to_string()
+            }
+        })
+        .into_owned();
+
+    // Length-cap the final redacted string to 80 display chars.
+    const MAX_CHARS: usize = 80;
+    if out.chars().count() > MAX_CHARS {
+        let truncated: String = out.chars().take(MAX_CHARS).collect();
+        format!("{truncated}…")
+    } else {
+        out
+    }
+}
+
+/// A single timing metric from the compose pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ComposePerfMetric {
+    /// Pipeline stage this metric represents.
+    pub stage: ComposeStage,
+    /// Accumulated elapsed time for this metric.
+    pub elapsed: Duration,
+    /// Number of times this metric was recorded.
+    pub calls: usize,
+}
+
+/// Aggregated performance timings from the compose pipeline.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComposePerfReport {
+    /// Total compose pipeline time.
+    pub total: Duration,
+    /// Per-stage metrics in deterministic order.
+    pub metrics: Vec<ComposePerfMetric>,
+    /// Per-`::shell`-directive timing spans (DM-3). Populated only when
+    /// perf collection is enabled.
+    pub shell_spans: Vec<ShellCommandSpan>,
+    /// Per-group context-capture timings (DM-4), as `(group_name, elapsed)`.
+    /// Populated only when perf collection is enabled.
+    pub capture_timings: Vec<(String, Duration)>,
+}
+
+/// Named compose pipeline stages for type-safe metric identification.
+///
+/// Variants are listed in pipeline execution order so reports have
+/// a deterministic, intuitive ordering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ComposeStage {
+    FrontmatterInterpolation,
+    SchemaValidation,
+    FrontmatterShellExpansion,
+    EffectiveStateBuild,
+    TextReplacement,
+    PageBlocks,
+    Interpolation,
+    ShellExpansion,
+    ShellBlocks,
+    TransclusionParse,
+    TransclusionPrepare,
+    TransclusionResolve,
+    TransclusionApply,
+    LinkResolve,
+    LinkNormalization,
+    Cleanup,
+    Normalization,
+}
+
+impl std::fmt::Display for ComposeStage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::FrontmatterInterpolation => "frontmatter interpolation",
+            Self::SchemaValidation => "schema validation",
+            Self::FrontmatterShellExpansion => "frontmatter shell expansion",
+            Self::EffectiveStateBuild => "effective state build",
+            Self::TextReplacement => "text replacement",
+            Self::PageBlocks => "page blocks",
+            Self::Interpolation => "interpolation",
+            Self::ShellExpansion => "shell expansion",
+            Self::ShellBlocks => "shell blocks",
+            Self::TransclusionParse => "transclusion parse",
+            Self::TransclusionPrepare => "transclusion prepare",
+            Self::TransclusionResolve => "transclusion resolve",
+            Self::TransclusionApply => "transclusion apply",
+            Self::LinkResolve => "link resolve",
+            Self::LinkNormalization => "link normalization",
+            Self::Cleanup => "cleanup",
+            Self::Normalization => "normalization",
+        })
+    }
+}
+
+impl ComposeStage {
+    /// Returns the `ComposePhase` this stage belongs to (DM-2).
+    ///
+    /// Feeds the claudine perf tree, where the 17 flat stages nest under
+    /// their four phases.
+    pub fn phase(&self) -> ComposePhase {
+        match self {
+            Self::FrontmatterInterpolation
+            | Self::SchemaValidation
+            | Self::FrontmatterShellExpansion
+            | Self::EffectiveStateBuild
+            | Self::TextReplacement
+            | Self::PageBlocks
+            | Self::Interpolation
+            | Self::ShellExpansion
+            | Self::ShellBlocks
+            | Self::LinkResolve => ComposePhase::InlinePre,
+
+            Self::TransclusionParse
+            | Self::TransclusionPrepare
+            | Self::TransclusionResolve
+            | Self::TransclusionApply => ComposePhase::Transclusion,
+
+            Self::Cleanup | Self::Normalization => ComposePhase::InlinePost,
+
+            Self::LinkNormalization => ComposePhase::Finalization,
+        }
+    }
+}
+
+impl ComposePerfReport {
+    /// Creates an empty perf report.
+    pub fn new() -> Self {
+        Self {
+            total: Duration::ZERO,
+            metrics: Vec::new(),
+            shell_spans: Vec::new(),
+            capture_timings: Vec::new(),
+        }
+    }
+
+    /// Merges another perf report into this one by summing matching
+    /// metric durations and call counts.
+    pub fn merge(&mut self, other: &ComposePerfReport) {
+        self.total += other.total;
+
+        for other_metric in &other.metrics {
+            if let Some(existing) = self
+                .metrics
+                .iter_mut()
+                .find(|m| m.stage == other_metric.stage)
+            {
+                existing.elapsed += other_metric.elapsed;
+                existing.calls += other_metric.calls;
+            } else {
+                self.metrics.push(*other_metric);
+            }
+        }
+
+        self.shell_spans
+            .extend(other.shell_spans.iter().cloned());
+        self.capture_timings
+            .extend(other.capture_timings.iter().cloned());
+    }
+}
+
+impl Default for ComposePerfReport {
+    fn default() -> Self {
+        Self::new()
     }
 }

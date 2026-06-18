@@ -7,8 +7,8 @@
 //! preserved; string sources fall back to the legacy prefix/delimiter
 //! parsing.
 
-use biscuit_tui::{ChoiceOption, HotkeySpec};
 use heck::{ToKebabCase, ToLowerCamelCase, ToSnakeCase, ToTitleCase, ToUpperCamelCase};
+use biscuit_tui::{ChoiceOption, HotkeySpec};
 
 use crate::option_sources::RawOption;
 

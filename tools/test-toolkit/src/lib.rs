@@ -137,10 +137,7 @@ pub fn evaluate_level(level: Level, available: bool, harness_label: &str) -> Lev
 
 fn read_level_env(key: &str) -> Option<u8> {
     let raw = env::var(key).ok()?;
-    raw.trim()
-        .parse::<u8>()
-        .ok()
-        .filter(|n| (1..=3).contains(n))
+    raw.trim().parse::<u8>().ok().filter(|n| (1..=3).contains(n))
 }
 
 fn is_truthy(value: Option<&str>) -> bool {
@@ -415,8 +412,8 @@ fn previous_value(key: &OsStr) -> PreviousEnvValue {
 #[cfg(test)]
 mod tests {
     use super::{
-        BISCUIT_TEST_LEVEL, BISCUIT_TEST_LEVEL_REQUIRED, EnvGuard, Level, LevelDecision,
-        RUN_LEVEL3, evaluate_level, init_test_tracing,
+        BISCUIT_TEST_LEVEL, BISCUIT_TEST_LEVEL_REQUIRED, EnvGuard, Level, LevelDecision, RUN_LEVEL3,
+        evaluate_level, init_test_tracing,
     };
     use std::env;
     use std::sync::{Arc, Mutex};

@@ -29,6 +29,7 @@
 
 pub mod block;
 pub mod cleanup;
+pub mod code_block;
 pub mod compose;
 pub mod delta;
 pub mod dsl;
@@ -39,6 +40,7 @@ pub mod hash;
 pub mod highlighting;
 pub mod inline;
 mod inline_html;
+pub mod language_grammar;
 pub mod normalize;
 pub mod output;
 pub mod reference;
@@ -52,11 +54,13 @@ pub use delta::{
     BrokenLink, ChangeAction, CodeBlockChange, ContentChange, DeltaStatistics, DocumentChange,
     FrontmatterChange, MarkdownDelta, MovedSection, SectionId, SectionPath,
 };
+pub use code_block::{CodeBlock, CodeBlockError};
 pub use frontmatter::{Frontmatter, MergeStrategy};
 pub use hash::{
     ComputedHash, DetailedValue, FmHashPair, MdHashKind, MdHashOptions, ParseMdHashKindError,
     SectionTuple,
 };
+pub use language_grammar::{LanguageGrammar, LanguageGrammarError};
 pub use normalize::{
     HeadingAdjustment, HeadingLevel, NormalizationError, NormalizationReport, StructureIssue,
     StructureIssueKind, StructureValidation, ViolationCorrection,
@@ -66,9 +70,11 @@ pub use reference::{
     ReferenceError, ReferenceGraph, ReferenceGraphOptions, ReferenceKind, ReferenceRecord,
     ReferenceSet, TransclusionRef,
 };
+#[allow(deprecated)]
 pub use render_tree::TerminalCodeRenderer;
 pub use toc::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode};
 pub use types::{FrontmatterMap, MarkdownError, MarkdownResult};
+#[allow(deprecated)]
 pub use yaml_block::{YamlBlock, YamlBlockError};
 
 use std::path::Path;
@@ -573,6 +579,34 @@ impl Markdown {
         output::as_ast(self)
     }
 
+    /// Folds the markdown document into the canonical renderable [`Document`].
+    ///
+    /// This is the target-agnostic intermediate representation used by the
+    /// terminal, HTML, and Markdown renderers. Serializing the returned
+    /// document to JSON produces a lossless tree that includes darkmatter
+    /// extensions such as disclosure blocks as native [`NodeKind::Disclosure`].
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::Markdown;
+    ///
+    /// let md = Markdown::new("# Hello\n\nWorld".to_string());
+    /// let document = md.as_document().unwrap();
+    ///
+    /// let json = serde_json::to_string_pretty(&document).unwrap();
+    /// assert!(json.contains("heading"));
+    /// ```
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`MarkdownError::RenderTree`](crate::markdown::MarkdownError::RenderTree)
+    /// when the render tree fold fails (for example, a malformed disclosure
+    /// block).
+    pub fn as_document(&self) -> MarkdownResult<renderable::tree::Document> {
+        Ok(render_tree::entrypoints::to_render_document(self)?.0)
+    }
+
     /// Converts the markdown document to HTML with syntax highlighting.
     ///
     /// Routes through the render-tree browser pipeline
@@ -1026,15 +1060,9 @@ title: Test
             .as_html(output::HtmlOptions::default())
             .expect("structured link must render");
 
-        assert!(
-            html.contains(r#"href="https://example.com""#),
-            "html={html}"
-        );
+        assert!(html.contains(r#"href="https://example.com""#), "html={html}");
         assert!(html.contains(r#"class="btn""#), "class lost; html={html}");
-        assert!(
-            html.contains(r#"target="_blank""#),
-            "target lost; html={html}"
-        );
+        assert!(html.contains(r#"target="_blank""#), "target lost; html={html}");
         assert!(
             html.contains(r#"data-prompt="Read docs""#),
             "prompt lost; html={html}"
@@ -1506,6 +1534,7 @@ title: Test
             mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
             hyperlink_mode: crate::markdown::output::terminal::HyperlinkMode::Always,
             hr_defaults: None,
+            code_block_mode: crate::markdown::highlighting::CodeBlockMode::default(),
         };
         let output = md.as_terminal(options).unwrap();
 
@@ -1554,8 +1583,8 @@ title: Test
     #[test]
     fn test_dim_cross_format_consistency() {
         use crate::markdown::highlighting::{ColorMode, ThemePair};
-        use crate::markdown::output::HtmlOptions;
         use crate::markdown::output::terminal::{ColorDepth, DimMode, TerminalOptions};
+        use crate::markdown::output::HtmlOptions;
         use crate::testing::strip_ansi_codes;
 
         let md: Markdown = "The ⌄dimmed text⌄ here.".into();
@@ -1575,6 +1604,7 @@ title: Test
             mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
             hyperlink_mode: crate::markdown::output::terminal::HyperlinkMode::Always,
             hr_defaults: None,
+            code_block_mode: crate::markdown::highlighting::CodeBlockMode::default(),
         };
         let terminal_output = md.as_terminal(terminal_options).unwrap();
         let terminal_plain = strip_ansi_codes(&terminal_output);

@@ -138,8 +138,8 @@ fn level2_block_quote_style_border_in_kitty() {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard =
-        SHARED_KITTY.get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -151,8 +151,8 @@ fn level2_block_quote_style_border_in_kitty() {
 fn level2_block_quote_style_border_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard =
-        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -273,8 +273,8 @@ fn level2_block_quote_styled_inline_content_in_kitty() {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard =
-        SHARED_KITTY.get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -689,10 +689,7 @@ fn box_width_for(frame: &CapturedFrame, needle: &str) -> usize {
         .find(|l| !l.contains("bt block") && l.contains('│') && l.contains(needle))
         .and_then(boxed_row_width)
         .unwrap_or_else(|| {
-            panic!(
-                "no bordered content row for {needle:?}.\nplain:\n{}",
-                frame.plain
-            )
+            panic!("no bordered content row for {needle:?}.\nplain:\n{}", frame.plain)
         })
 }
 
@@ -949,16 +946,10 @@ fn assert_block_fit_alignment<H: TerminalHarness>(harness: &mut H, available: u3
     let left = capture_bt(harness, "bt block \"fitleftward\" --width fit --align left");
     let (left_lead, _) = row_lead_and_width(&left, "bt block", "fitleftward")
         .unwrap_or_else(|| panic!("fit left row missing.\nplain:\n{}", left.plain));
-    let center = capture_bt(
-        harness,
-        "bt block \"fitcenterward\" --width fit --align center",
-    );
+    let center = capture_bt(harness, "bt block \"fitcenterward\" --width fit --align center");
     let (center_lead, center_w) = row_lead_and_width(&center, "bt block", "fitcenterward")
         .unwrap_or_else(|| panic!("fit center row missing.\nplain:\n{}", center.plain));
-    let right = capture_bt(
-        harness,
-        "bt block \"fitrightward\" --width fit --align right",
-    );
+    let right = capture_bt(harness, "bt block \"fitrightward\" --width fit --align right");
     let (right_lead, right_w) = row_lead_and_width(&right, "bt block", "fitrightward")
         .unwrap_or_else(|| panic!("fit right row missing.\nplain:\n{}", right.plain));
 
@@ -991,22 +982,13 @@ fn assert_block_fit_alignment<H: TerminalHarness>(harness: &mut H, available: u3
 fn assert_block_capped_alignment<H: TerminalHarness>(harness: &mut H, available: u32) {
     // Auto capped to `max-width 20`: box = 20 content + no padding + no border.
     let slack = (available - 20) as usize;
-    let left = capture_bt(
-        harness,
-        "bt block \"capleftward\" --max-width 20 --align left",
-    );
+    let left = capture_bt(harness, "bt block \"capleftward\" --max-width 20 --align left");
     let left_lead = row_leading_spaces(&left, "bt block", "capleftward")
         .unwrap_or_else(|| panic!("capped left row missing.\nplain:\n{}", left.plain));
-    let center = capture_bt(
-        harness,
-        "bt block \"capcenterward\" --max-width 20 --align center",
-    );
+    let center = capture_bt(harness, "bt block \"capcenterward\" --max-width 20 --align center");
     let center_lead = row_leading_spaces(&center, "bt block", "capcenterward")
         .unwrap_or_else(|| panic!("capped center row missing.\nplain:\n{}", center.plain));
-    let right = capture_bt(
-        harness,
-        "bt block \"caprightward\" --max-width 20 --align right",
-    );
+    let right = capture_bt(harness, "bt block \"caprightward\" --max-width 20 --align right");
     let right_lead = row_leading_spaces(&right, "bt block", "caprightward")
         .unwrap_or_else(|| panic!("capped right row missing.\nplain:\n{}", right.plain));
     assert!(
@@ -1119,8 +1101,8 @@ fn level2_render_tree_style_in_kitty() {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard =
-        SHARED_KITTY.get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -1150,8 +1132,8 @@ fn level2_render_tree_style_in_kitty() {
 fn level2_render_tree_style_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard =
-        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -1189,7 +1171,7 @@ fn level2_render_tree_style_in_tmux() {
     );
 
     // The progress bar and striped table glyphs must also relay through tmux.
-    let frame = capture_bt(harness, "bt progress 50 --label Loading");
+    let frame = capture_bt(harness,"bt progress 50 --label Loading");
     assert!(
         frame.plain.contains("50%") && frame.plain.contains("Loading"),
         "expected the progress bar text in tmux. plain:\n{}",

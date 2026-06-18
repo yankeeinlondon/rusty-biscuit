@@ -1,6 +1,6 @@
 //! Type definitions for shell expansion.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -72,6 +72,11 @@ pub struct ShellDirective {
     pub error_handling: ErrorHandling,
     /// Per-command timeout override. When Some, takes precedence over the global timeout.
     pub timeout_override: Option<std::time::Duration>,
+    /// When `true`, this directive bypasses the per-compose command cache: it
+    /// neither reads a memoized result nor stores its own, executing fresh at
+    /// every occurrence. Set by `--no-cache` (body), `::no-cache` (frontmatter),
+    /// or `no_cache=true` (shell block).
+    pub no_cache: bool,
     /// Parsed pipeline (supports chaining with && and ||).
     pub pipeline: Option<ShellPipeline>,
     /// Source context used for diagnostic rendering when execution fails.
@@ -207,7 +212,7 @@ pub enum StdoutTarget {
 
 /// Renders a [`RedirectionConfig`] as the trailing redirection tokens that
 /// would appear after a command (with a leading space when non-empty).
-fn render_redirection(redir: &RedirectionConfig) -> String {
+pub(crate) fn render_redirection(redir: &RedirectionConfig) -> String {
     let mut out = String::new();
     match redir.stdout {
         StdoutTarget::Capture => {}
@@ -532,6 +537,18 @@ pub enum ShellExpansionError {
         source_desc: String,
     },
 
+    #[error(
+        "Command '{command}' at {origin} depends on frontmatter key '{key}', which is \
+         resolved by frontmatter shell expansion. A condition-blind pre-flight cannot \
+         approve a command whose shape is not yet known."
+    )]
+    DynamicCommandShape {
+        ctx: Box<SourceContext>,
+        command: String,
+        key: String,
+        origin: ShellCommandOrigin,
+    },
+
     #[error("Command timed out after {timeout:?}: '{command}' at {origin}")]
     Timeout {
         ctx: Box<SourceContext>,
@@ -555,6 +572,14 @@ pub enum ShellExpansionError {
         path: PathBuf,
         source: std::io::Error,
     },
+
+    /// A non-shell pre-flight failure (transform parse, ctx merge, schema
+    /// validation, remote fetch, …) surfaced while the pre-flight walk built
+    /// the command graph. Carries the original rich [`MarkdownError`] so the
+    /// approval lifecycle's caller renders it identically to the `compose_with`
+    /// path rather than flattening it into an opaque policy error.
+    #[error(transparent)]
+    Preflight(Box<crate::markdown::types::MarkdownError>),
 }
 
 impl biscuit_terminal::errors::BlockError for ShellExpansionError {
@@ -662,6 +687,27 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                 ])
                 .hint("This is a bug in the pre-flight scanner — please report it."),
 
+            ShellExpansionError::DynamicCommandShape {
+                ctx,
+                command,
+                key,
+                origin,
+            } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "ShellExpansionError",
+                    "dynamic command shape",
+                ))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Depends on:</dim> frontmatter.{key}"
+                    )),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
+                .hint(
+                    "Move the dynamic value into the frontmatter command and reference its output \
+                     as content, use a stable command shape, or split into two compose runs.",
+                ),
+
             ShellExpansionError::Timeout {
                 ctx,
                 command,
@@ -714,6 +760,10 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                     source.kind()
                 ))
                 .hint("Verify the policy file exists and the process can read it."),
+
+            // Delegate to the wrapped rich error so its styled block (excerpt,
+            // gutter, OSC8 header, schema problems, …) is preserved verbatim.
+            ShellExpansionError::Preflight(inner) => inner.status_block(_term),
         }
     }
 }
@@ -807,6 +857,21 @@ struct SharedShellExpansionRuntime {
     whitelist: ShellRuleSet,
     user_blacklist: ShellRuleSet,
     policy_paths: Option<ShellPolicyPaths>,
+    /// Per-compose memoization of shell command output, keyed by the normalized
+    /// command string. Shared across recursive transclusion (same `Arc`), so an
+    /// identical command in a child document reuses the root's result — "execute
+    /// once per compose."
+    command_cache: HashMap<String, CachedCommandOutput>,
+    /// Normalized commands for which a volatile-command discoverability warning
+    /// has already been emitted, so the warning fires at most once per command.
+    volatile_warned: HashSet<String>,
+}
+
+/// Memoized stdout/stderr for one normalized command in [`SharedShellExpansionRuntime::command_cache`].
+#[derive(Debug, Clone)]
+struct CachedCommandOutput {
+    stdout: String,
+    stderr: String,
 }
 
 #[derive(Debug, Clone)]
@@ -904,11 +969,7 @@ impl ShellExpansionRuntime {
     ///   this exact command and the caller either passed `may_wait = false` or
     ///   the wait timed out. The caller MUST NOT implicitly approve other
     ///   un-reserved commands in the same chain.
-    pub(crate) fn reserve_allow_once(
-        &mut self,
-        normalized: &str,
-        may_wait: bool,
-    ) -> ReserveOutcome {
+    pub(crate) fn reserve_allow_once(&mut self, normalized: &str, may_wait: bool) -> ReserveOutcome {
         let mut shared = self.shared.lock().unwrap();
         loop {
             if shared.allow_once.contains(normalized) {
@@ -978,6 +1039,41 @@ impl ShellExpansionRuntime {
             .user_blacklist
             .entries
             .push(ShellRuleEntry::Exact(normalized));
+    }
+
+    /// Returns the memoized `(stdout, stderr)` for `normalized`, if present.
+    ///
+    /// Takes `&self`: the cache lives behind the shared `Mutex`, so concurrent
+    /// frontmatter branches (executed via rayon) can consult it without a
+    /// mutable borrow of the runtime.
+    pub(crate) fn cache_lookup(&self, normalized: &str) -> Option<(String, String)> {
+        let shared = self.shared.lock().unwrap();
+        shared
+            .command_cache
+            .get(normalized)
+            .map(|c| (c.stdout.clone(), c.stderr.clone()))
+    }
+
+    /// Memoizes `stdout`/`stderr` for `normalized`, keeping the first result if a
+    /// concurrent peer already stored one.
+    pub(crate) fn cache_store(&self, normalized: &str, stdout: &str, stderr: &str) {
+        let mut shared = self.shared.lock().unwrap();
+        shared
+            .command_cache
+            .entry(normalized.to_string())
+            .or_insert_with(|| CachedCommandOutput {
+                stdout: stdout.to_string(),
+                stderr: stderr.to_string(),
+            });
+    }
+
+    /// Records that a volatile command was just served from cache.
+    ///
+    /// Returns `true` the first time for a given `normalized` command so the
+    /// caller emits the discoverability warning exactly once per command.
+    pub(crate) fn note_volatile_cache_hit(&self, normalized: &str) -> bool {
+        let mut shared = self.shared.lock().unwrap();
+        shared.volatile_warned.insert(normalized.to_string())
     }
 }
 

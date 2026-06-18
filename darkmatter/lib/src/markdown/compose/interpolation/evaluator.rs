@@ -270,6 +270,18 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
             Err(_) => EvalValue::Null,
         }
     }
+
+    /// Evaluates an expression to its raw JSON `Value`, preserving type.
+    ///
+    /// Unlike [`Self::eval`], which stringifies the result via `scalar_string`,
+    /// this returns the typed `serde_json::Value` (so `false` stays a boolean,
+    /// `2` stays a number, `null` stays null). Whole-value frontmatter
+    /// interpolation uses it to keep a single `{{ expr }}` value typed instead
+    /// of collapsing it to a string. The `Err` is the evaluator's message, so
+    /// callers can fall back to the string path on failure.
+    pub fn eval_json(&self, expr: &Expr) -> Result<Value, String> {
+        evaluate(expr, self.state)
+    }
 }
 
 #[cfg(test)]
@@ -277,8 +289,8 @@ mod tests {
     use super::*;
     use crate::markdown::compose::EffectiveState;
     use crate::markdown::compose::interpolation::parse;
-    use crate::markdown::compose::state::EffectiveStateBuilder;
-    use crate::markdown::compose::types::ComposeContext;
+    use crate::markdown::compose::EffectiveStateBuilder;
+    use crate::markdown::compose::ComposeContext;
     use serde_json::json;
     use std::collections::HashMap;
 

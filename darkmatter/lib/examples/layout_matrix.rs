@@ -1,6 +1,6 @@
 //! Layout visual-test harness for darkmatter's render-tree components.
 //!
-//! Renders `YamlBlock` under the layout scenario matrix, bespoke vs tree,
+//! Renders `CodeBlock::yaml` under the layout scenario matrix, bespoke vs tree,
 //! side by side. See the design spec:
 //! `docs/superpowers/specs/2026-05-16-layout-visual-tests-design.md`.
 //!

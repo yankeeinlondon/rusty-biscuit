@@ -6,11 +6,11 @@
 
 use std::io::{self, Write};
 
+use clap::Args;
 use biscuit_tui::{
     ChoiceInput, ChooseMany, ChooseManyState, HeightSpec, Label, SelectionMode,
     run_standalone_with_chrome,
 };
-use clap::Args;
 
 use crate::commands::common_choose::{
     ChooseChromeArgs, ChooseSourceArgs, build_choice_input as build_common_choice_input,

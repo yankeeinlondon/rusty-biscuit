@@ -46,8 +46,7 @@ use super::scopes::{self, ScopeContext};
 pub(crate) fn load_effective_schema(file_arg: &str, ctx: &ScopeContext) -> Option<EffectiveSchema> {
     let path = resolve_prompt_path(file_arg, ctx)?;
     let text = std::fs::read_to_string(&path).ok()?;
-    let markdown: Markdown =
-        Markdown::from(text).with_source(ComposeSource::infer_from_path(&path));
+    let markdown: Markdown = Markdown::from(text).with_source(ComposeSource::infer_from_path(&path));
     DarkmatterSchemas::new().effective_for(&markdown).ok()?
 }
 
@@ -206,9 +205,10 @@ pub(crate) fn declared_property_order(file_arg: &str, ctx: &ScopeContext) -> Vec
 /// block is present or the block is unterminated.
 fn extract_frontmatter_yaml(text: &str) -> Option<&str> {
     let body = text.strip_prefix("---\n")?;
-    let end = body
-        .find("\n---\n")
-        .or_else(|| body.strip_suffix("\n---").map(|trimmed| trimmed.len()))?;
+    let end = body.find("\n---\n").or_else(|| {
+        body.strip_suffix("\n---")
+            .map(|trimmed| trimmed.len())
+    })?;
     Some(&body[..end])
 }
 
@@ -315,7 +315,9 @@ pub(crate) fn property_value(
         return Vec::new();
     };
     match &suggestion.kind {
-        CompletionKind::Enum { members } => enum_candidates(property, members, value_partial),
+        CompletionKind::Enum { members } => {
+            enum_candidates(property, members, value_partial)
+        }
         CompletionKind::File { patterns } => {
             file_candidates(property, patterns, value_partial, ctx)
         }
@@ -388,11 +390,7 @@ fn enum_candidates(property: &str, members: &[String], value_partial: &str) -> V
     let trimmed = value_partial.trim_matches(['"', '\'']);
     members
         .iter()
-        .filter(|m| {
-            trimmed.is_empty()
-                || m.to_ascii_lowercase()
-                    .starts_with(&trimmed.to_ascii_lowercase())
-        })
+        .filter(|m| trimmed.is_empty() || m.to_ascii_lowercase().starts_with(&trimmed.to_ascii_lowercase()))
         .map(|m| format!("{property}='{m}'"))
         .collect()
 }
@@ -436,7 +434,10 @@ fn file_candidates(
         let Some(rel_str) = rel.to_str() else {
             continue;
         };
-        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or(rel_str);
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(rel_str);
         if !matcher.is_match(rel_str, file_name) {
             continue;
         }
@@ -899,7 +900,8 @@ mod tests {
 
     #[test]
     fn match_globs_honors_negation_against_basename() {
-        let matcher = MatchGlobs::compile(&["*.md".to_string(), "!_*.md".to_string()]).unwrap();
+        let matcher =
+            MatchGlobs::compile(&["*.md".to_string(), "!_*.md".to_string()]).unwrap();
         assert!(matcher.is_match("plan.md", "plan.md"));
         assert!(matcher.is_match("docs/plan.md", "plan.md"));
         assert!(!matcher.is_match("_draft.md", "_draft.md"));
@@ -920,9 +922,11 @@ mod tests {
 
     #[test]
     fn match_globs_path_qualified_negation_filters_subset() {
-        let matcher =
-            MatchGlobs::compile(&["src/**/*.rs".to_string(), "!src/**/test_*.rs".to_string()])
-                .unwrap();
+        let matcher = MatchGlobs::compile(&[
+            "src/**/*.rs".to_string(),
+            "!src/**/test_*.rs".to_string(),
+        ])
+        .unwrap();
         assert!(matcher.is_match("src/lib.rs", "lib.rs"));
         assert!(matcher.is_match("src/inner/mod.rs", "mod.rs"));
         assert!(!matcher.is_match("src/test_helpers.rs", "test_helpers.rs"));

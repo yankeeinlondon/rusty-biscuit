@@ -693,7 +693,7 @@ mod tests {
 
     #[test]
     fn progress_render_tree_node_carries_layout_when_margins_set() {
-        use crate::utils::layout::{Edges, Length};
+        use crate::utils::layout::{Length, Edges};
         let mut bar = Progress::new(0.5);
         bar.layout_mut().margin = Edges::x(Length::ch(2));
         let node = bar.render_tree_node().unwrap();

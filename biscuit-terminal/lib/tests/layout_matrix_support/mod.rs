@@ -4,7 +4,7 @@
 //! `layout_matrix` snapshot test so they render through identical code.
 #![allow(dead_code)]
 
-use renderable::layout::{Alignment, Edges, Layout, Length, TargetValue, WordWrap};
+use renderable::layout::{Alignment, Layout, Length, Edges, TargetValue, WordWrap};
 
 /// One cell of the matrix: a layout configuration applied at a width.
 #[derive(Clone)]

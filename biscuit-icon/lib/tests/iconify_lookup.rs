@@ -23,13 +23,9 @@ async fn miss_fetches_then_hit_uses_cache() {
     let cache = IconCache::open_at(dir.path().join("c.db")).unwrap();
     let client = IconifyClient::with_base(server.uri());
 
-    let first = Icon::iconify_with("mdi:home", &cache, &client)
-        .await
-        .unwrap();
+    let first = Icon::iconify_with("mdi:home", &cache, &client).await.unwrap();
     assert!(first.svg().contains("M1 1"));
-    let second = Icon::iconify_with("mdi:home", &cache, &client)
-        .await
-        .unwrap();
+    let second = Icon::iconify_with("mdi:home", &cache, &client).await.unwrap();
     assert!(second.svg().contains("M1 1"));
     // `expect(1)` is verified on server drop: exactly one network call occurred.
 }

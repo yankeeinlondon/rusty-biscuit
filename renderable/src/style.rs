@@ -515,9 +515,7 @@ mod tests {
     fn background_pronounced_matches_former_fill_tints() {
         use crate::color::{BasicColor, Color, ColorMode, RgbColor};
 
-        let per_mode = *Background::pronounced()
-            .resolve(RenderTarget::Terminal)
-            .unwrap();
+        let per_mode = *Background::pronounced().resolve(RenderTarget::Terminal).unwrap();
         assert_eq!(
             per_mode.resolve(ColorMode::Dark).color,
             Color::Rgb(RgbColor::new(50, 50, 56, BasicColor::Black))

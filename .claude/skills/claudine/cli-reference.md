@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-e316cdb49ab5f3e3
-last_updated: 2026-06-08
+hash: ef46db3751d8e999-98a03d15d3a9a515
+last_updated: 2026-06-14
 ---
 # Claudine CLI Reference
 
@@ -288,12 +288,23 @@ Runs the full composition pipeline **up to but not including provider launch**, 
 
 - Schema validation, shell-command execution (real side effects), and harness pre-checks all run normally.
 - The provider is never launched; `inline-compose --dry-run` therefore **does not mutate** the source file.
-- **stdout** = composed body; **stderr** = highlighted YAML frontmatter + a metadata table (Document as a blue OSC8 link, Description, Agent, Model, YOLO, and Area when inside a monorepo). So `compose --dry-run doc.md > body.md` captures only the body.
+- **stdout** = composed body; **stderr** = highlighted YAML frontmatter + a metadata table (Document as a blue OSC8 link, Description, Agent, Model, YOLO, Session mode/source, and Area when inside a monorepo). So `compose --dry-run doc.md > body.md` captures only the body.
 - `--quiet` / `--silent` have **no effect** under `--dry-run`.
 - **Non-TTY shell gate:** an unapproved shell command in a non-TTY environment exits non-zero with `Cannot dry-run: shell command 'X' requires interactive approval. Run with --yolo to auto-approve, or pre-approve the command in your configuration.` In a TTY the normal interactive approval prompt fires. Bypass with `--yolo`.
 - **`sequence --dry-run`** concatenates all step bodies to stdout in order, prints each step's metadata to stderr separated by a `=== Document N of M ===` divider (before every document after the first), and fails fast on the first composition error.
 
 See [Composition — Dry Run](../../../claudine/docs/topics/composition.md#dry-run) for the full reference.
+
+### Session interactivity
+
+Composition commands resolve session interactivity from (highest to lowest precedence):
+
+1. `--no-interactive` CLI flag
+2. `-i` / `--interactive` CLI flag
+3. `interactive` frontmatter property (`true` / `false`)
+4. Default: non-interactive
+
+`--interactive` and `--no-interactive` are mutually exclusive; clap rejects `-i --no-interactive` at parse time. The `interactive` frontmatter property is honored by `compose` and `inline-compose`; `claudine sequence` rejects `interactive: true` because a sequence is serial automation and must be driven by the explicit `--interactive` override when needed.
 
 ### `--perf`
 
@@ -306,6 +317,7 @@ Opt-in flag (composition commands and the provider wrappers) that prints a **rec
 **Common Flags:**
 - `--claude`, `--codex`, `--gemini`, `--opencode`, etc.
 - `-i, --interactive`
+- `--no-interactive`
 - `-m, --model <MODEL>`
 - `-s, --system-prompt <PROMPT|FILE>`
 - `-t, --timeout <DURATION>`

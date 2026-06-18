@@ -127,15 +127,15 @@ fn compose_and_schema_validate_agree_on_same_document() {
         .arg(&doc)
         .assert()
         .failure();
-    let validate_stdout =
-        String::from_utf8_lossy(&validate_failure.get_output().stdout).to_string();
+    let validate_stdout = String::from_utf8_lossy(&validate_failure.get_output().stdout).to_string();
     assert!(
         validate_stdout.contains("title"),
         "schema validate should mention failing property `title`, got:\n{validate_stdout}",
     );
 
     let compose_failure = md_cmd().args(["compose"]).arg(&doc).assert().failure();
-    let compose_stderr = String::from_utf8_lossy(&compose_failure.get_output().stderr).to_string();
+    let compose_stderr =
+        String::from_utf8_lossy(&compose_failure.get_output().stderr).to_string();
     assert!(
         compose_stderr.contains("title"),
         "compose should mention failing property `title`, got:\n{compose_stderr}",
@@ -184,9 +184,7 @@ fn compose_renders_summary_for_schema_preparation_failure() {
     );
     // The underlying diagnostic must be visible — not just the path.
     assert!(
-        stderr
-            .to_lowercase()
-            .contains("schema could not be prepared")
+        stderr.to_lowercase().contains("schema could not be prepared")
             || stderr.to_lowercase().contains("could not")
             || stderr.to_lowercase().contains("resolve")
             || stderr.to_lowercase().contains("not found"),

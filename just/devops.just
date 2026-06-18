@@ -618,10 +618,10 @@ _bench_id:
     os_json="$(sniff os --json)"
     mem_json="$(sniff memory --json)"
 
-    arch="$(jq -r .arch          <<< "$cpu_json")"
-    cores="$(jq -r .physical_cores <<< "$cpu_json")"
-    os="$(jq -r .distribution    <<< "$os_json")"
-    mem_gb="$(jq -r '.total_bytes / 1073741824 | floor' <<< "$mem_json")"
+    arch="$(echo "$cpu_json"   | jq -r .arch)"
+    cores="$(echo "$cpu_json"  | jq -r .physical_cores)"
+    os="$(echo "$os_json"      | jq -r .distribution)"
+    mem_gb="$(echo "$mem_json" | jq -r '.total_bytes / 1073741824 | floor')"
 
     echo "${host8}--${arch}--${os}--${cores}c--${mem_gb}g"
 

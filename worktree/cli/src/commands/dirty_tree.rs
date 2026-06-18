@@ -96,11 +96,7 @@ fn render_children(node: &Node, out: &mut String, prefix: &str, base: &Path) {
             tree_chars::BRANCH
         };
         let child_path = base.join(name);
-        let label = format_label(
-            name,
-            child.is_file && child.children.is_empty(),
-            &child_path,
-        );
+        let label = format_label(name, child.is_file && child.children.is_empty(), &child_path);
         out.push_str(prefix);
         out.push_str(connector);
         out.push_str(&label);
@@ -109,11 +105,7 @@ fn render_children(node: &Node, out: &mut String, prefix: &str, base: &Path) {
         let next_prefix = format!(
             "{}{}",
             prefix,
-            if is_last {
-                tree_chars::INDENT
-            } else {
-                tree_chars::VERTICAL
-            }
+            if is_last { tree_chars::INDENT } else { tree_chars::VERTICAL }
         );
         render_children(child, out, &next_prefix, &child_path);
     }
@@ -166,7 +158,10 @@ mod tests {
 
     #[test]
     fn deep_nesting_uses_vertical_continuation() {
-        let paths = vec![PathBuf::from("a/b/c.rs"), PathBuf::from("a/d.rs")];
+        let paths = vec![
+            PathBuf::from("a/b/c.rs"),
+            PathBuf::from("a/d.rs"),
+        ];
         let out = render_markup(&paths);
         // Expect a vertical continuation under `a/` for the non-last child line.
         assert!(out.contains("│   "));

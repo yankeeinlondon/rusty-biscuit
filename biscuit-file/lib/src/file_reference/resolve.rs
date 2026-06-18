@@ -62,8 +62,8 @@ pub(crate) fn resolve_target(
 ) -> Result<Option<Resolved>, FileReferenceError> {
     if let ReferenceKind::Url(_) = &parsed.kind {
         let raw = interpolated_url_string(&parsed.kind)?;
-        let url =
-            ::url::Url::parse(&raw).map_err(|e| FileReferenceError::InvalidUrl(e.to_string()))?;
+        let url = ::url::Url::parse(&raw)
+            .map_err(|e| FileReferenceError::InvalidUrl(e.to_string()))?;
         let scheme = url.scheme();
         if scheme != "http" && scheme != "https" {
             return Err(FileReferenceError::InvalidUrl(format!(

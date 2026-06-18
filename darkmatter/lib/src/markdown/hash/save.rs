@@ -185,7 +185,9 @@ mod tests {
     #[test]
     fn no_stored_hash_writes_first_baseline_without_bump() {
         let doc = md("---\ntitle: T\n---\n# H\n\nBody.");
-        let decision = doc.plan_hash_save(None, &MdHashOptions::default()).unwrap();
+        let decision = doc
+            .plan_hash_save(None, &MdHashOptions::default())
+            .unwrap();
         let new_stored = decision.new_stored.expect("baseline written");
         assert_eq!(new_stored.kind, MdHashKind::Simple);
         assert!(!decision.bump_last_updated);

@@ -34,8 +34,8 @@ pub use agent_message::{agent_state_breakdown, invalid_agent_message};
 pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
 pub use error::{
     CompositionError, DroppedOptional, DroppedOptionalSource, DroppedOptionalStage,
-    InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE, MissingProperty, SequenceMissingPropertiesStep,
-    SequenceSelectionFailure, TextFormat,
+    InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE, MissingProperty,
+    SequenceMissingPropertiesStep, SequenceSelectionFailure, TextFormat,
 };
 pub use launch_workspace::{LaunchWorkspaceContext, PackageContext};
 #[allow(deprecated)]
@@ -56,14 +56,14 @@ pub use loop_expression::{LoopAmbient, LoopExpressionLookup, evaluate_condition}
 pub use mismatch::{capture_frontmatter_yaml, is_inline_sequence_mismatch};
 pub use preflight::{PreFlightResult, resolve_shell_approvals};
 pub use prepare::{
-    PrepareOptions, bind_agent_workspace, parse_selection_hints_from_frontmatter, prepare_direct,
-    prepare_inline,
+    PrepareOptions, bind_agent_workspace, parse_interactive_hint,
+    parse_selection_hints_from_frontmatter, prepare_direct, prepare_inline,
 };
 pub use resolve::{resolve_composition_source, validate_file_permissions};
 pub use schema_validation::{
     InteractiveSchemaOptions, PreValidatedSchema, PropertyState, PropertyStatus,
-    SchemaStatusReport, build_schema_status_report, drop_invalid_optionals, pre_validate_schema,
-    prepare_direct_with_schema, prepare_inline_with_schema,
+    SchemaStatusReport, build_schema_status_report, drop_invalid_optionals,
+    pre_validate_schema, prepare_direct_with_schema, prepare_inline_with_schema,
 };
 pub use select::{
     build_candidate_set, build_installed_snapshot, build_picker_plan, build_picker_plan_with_hints,
@@ -78,7 +78,8 @@ pub use types::{
     InstalledProviderSnapshot, LoopAction, LoopCondition, LoopConfig, ModelHint,
     ModelResolutionReason, OnRateLimit, OutputFormat, PickerInfluence, PreparedComposition,
     ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason, ResolutionMode,
-    ResolvedCompositionSource, ResolvedExecutionTarget, SelectedProvider, SelectionReason,
-    SequenceExecutionOptions, SequencePlan, SequenceRunSummary, SequenceSource, SequenceStep,
-    SequenceStepDraft, SequenceStepOverlay, SequenceStepResult, SharedApprovalCache,
+    ResolvedCompositionSource, ResolvedExecutionTarget, ResolvedSessionInteractivity,
+    SelectedProvider, SelectionReason, SessionInteractivitySource, SequenceExecutionOptions,
+    SequencePlan, SequenceRunSummary, SequenceSource, SequenceStep, SequenceStepDraft,
+    SequenceStepOverlay, SequenceStepResult, SharedApprovalCache,
 };

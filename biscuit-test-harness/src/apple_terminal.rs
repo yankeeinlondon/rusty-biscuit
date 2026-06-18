@@ -245,9 +245,7 @@ impl RegistryLock {
     /// then skips the prune (best-effort). A stale lock is reclaimed.
     fn acquire(path: &Path) -> Option<Self> {
         match OpenOptions::new().create_new(true).write(true).open(path) {
-            Ok(_) => Some(Self {
-                path: path.to_path_buf(),
-            }),
+            Ok(_) => Some(Self { path: path.to_path_buf() }),
             Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
                 if !lock_is_stale(path) {
                     return None;
@@ -259,9 +257,7 @@ impl RegistryLock {
                     .write(true)
                     .open(path)
                     .ok()
-                    .map(|_| Self {
-                        path: path.to_path_buf(),
-                    })
+                    .map(|_| Self { path: path.to_path_buf() })
             }
             Err(_) => None,
         }
@@ -856,10 +852,7 @@ fn looks_like_harness_window(window_id: i64) -> bool {
         id = window_id,
         prefix = WINDOW_TITLE_PREFIX,
     );
-    matches!(
-        AppleTerminalHarness::run_script(&script).as_deref(),
-        Ok("idle")
-    )
+    matches!(AppleTerminalHarness::run_script(&script).as_deref(), Ok("idle"))
 }
 
 /// Sweep for Terminal.app windows that the registry pass cannot see —
@@ -1365,21 +1358,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(REGISTRY_FILE_NAME);
         let entries = [
-            RegistryEntry {
-                window_id: 10,
-                owner_pid: 1,
-                seq: 0,
-            },
-            RegistryEntry {
-                window_id: 20,
-                owner_pid: 1,
-                seq: 1,
-            },
-            RegistryEntry {
-                window_id: 30,
-                owner_pid: 2,
-                seq: 2,
-            },
+            RegistryEntry { window_id: 10, owner_pid: 1, seq: 0 },
+            RegistryEntry { window_id: 20, owner_pid: 1, seq: 1 },
+            RegistryEntry { window_id: 30, owner_pid: 2, seq: 2 },
         ];
         for entry in entries {
             append_registry_entry(&path, entry);
@@ -1398,11 +1379,7 @@ mod tests {
     fn read_registry_skips_malformed_lines() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(REGISTRY_FILE_NAME);
-        let valid = RegistryEntry {
-            window_id: 42,
-            owner_pid: 7,
-            seq: 0,
-        };
+        let valid = RegistryEntry { window_id: 42, owner_pid: 7, seq: 0 };
         let mut content = String::new();
         content.push_str("garbage line\n");
         content.push_str(&valid.to_json_line());
@@ -1418,21 +1395,9 @@ mod tests {
     fn remove_registry_entry_drops_only_matching_window() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(REGISTRY_FILE_NAME);
-        let keep_a = RegistryEntry {
-            window_id: 10,
-            owner_pid: 1,
-            seq: 0,
-        };
-        let drop_it = RegistryEntry {
-            window_id: 20,
-            owner_pid: 1,
-            seq: 1,
-        };
-        let keep_b = RegistryEntry {
-            window_id: 30,
-            owner_pid: 2,
-            seq: 2,
-        };
+        let keep_a = RegistryEntry { window_id: 10, owner_pid: 1, seq: 0 };
+        let drop_it = RegistryEntry { window_id: 20, owner_pid: 1, seq: 1 };
+        let keep_b = RegistryEntry { window_id: 30, owner_pid: 2, seq: 2 };
         for entry in [keep_a, drop_it, keep_b] {
             append_registry_entry(&path, entry);
         }
@@ -1487,26 +1452,10 @@ mod tests {
     fn reap_candidates_selects_dead_owners_excluding_self() {
         let me = 100;
         let entries = [
-            RegistryEntry {
-                window_id: 1,
-                owner_pid: me,
-                seq: 0,
-            }, // self → skip
-            RegistryEntry {
-                window_id: 2,
-                owner_pid: 200,
-                seq: 1,
-            }, // dead → reap
-            RegistryEntry {
-                window_id: 3,
-                owner_pid: 300,
-                seq: 2,
-            }, // alive → skip
-            RegistryEntry {
-                window_id: 4,
-                owner_pid: 400,
-                seq: 3,
-            }, // dead → reap
+            RegistryEntry { window_id: 1, owner_pid: me, seq: 0 }, // self → skip
+            RegistryEntry { window_id: 2, owner_pid: 200, seq: 1 }, // dead → reap
+            RegistryEntry { window_id: 3, owner_pid: 300, seq: 2 }, // alive → skip
+            RegistryEntry { window_id: 4, owner_pid: 400, seq: 3 }, // dead → reap
         ];
         let alive = |pid: u32| pid == me || pid == 300;
         assert_eq!(reap_candidates(&entries, me, alive), vec![2, 4]);
@@ -1515,21 +1464,9 @@ mod tests {
     #[test]
     fn entries_to_keep_requires_alive_owner_and_live_window() {
         let entries = [
-            RegistryEntry {
-                window_id: 10,
-                owner_pid: 1,
-                seq: 0,
-            }, // alive + exists → keep
-            RegistryEntry {
-                window_id: 20,
-                owner_pid: 2,
-                seq: 1,
-            }, // dead owner → drop
-            RegistryEntry {
-                window_id: 30,
-                owner_pid: 1,
-                seq: 2,
-            }, // alive but window gone → drop
+            RegistryEntry { window_id: 10, owner_pid: 1, seq: 0 }, // alive + exists → keep
+            RegistryEntry { window_id: 20, owner_pid: 2, seq: 1 }, // dead owner → drop
+            RegistryEntry { window_id: 30, owner_pid: 1, seq: 2 }, // alive but window gone → drop
         ];
         let existing = [10, 99];
         let alive = |pid: u32| pid == 1;
@@ -1567,10 +1504,7 @@ mod tests {
     fn unique_window_tag_includes_harness_prefix_and_pid() {
         let tag = unique_window_tag();
         assert!(tag.starts_with(WINDOW_TITLE_PREFIX));
-        assert_eq!(
-            pid_from_tag(&tag, WINDOW_TITLE_PREFIX),
-            Some(current_process_id())
-        );
+        assert_eq!(pid_from_tag(&tag, WINDOW_TITLE_PREFIX), Some(current_process_id()));
     }
 
     /// On non-macOS hosts `available()` must be false unconditionally so

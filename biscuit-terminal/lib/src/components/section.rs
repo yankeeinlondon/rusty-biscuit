@@ -445,7 +445,7 @@ mod tests {
 
     #[test]
     fn section_render_tree_node_carries_layout_when_margins_set() {
-        use crate::utils::layout::{Edges, Length};
+        use crate::utils::layout::{Length, Edges};
         let mut section = Section::new(HeadingLevel::h1, "Title");
         section.layout.margin = Edges::x(Length::ch(2));
         let node = section.render_tree_node().unwrap();

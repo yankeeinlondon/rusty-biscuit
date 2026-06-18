@@ -28,6 +28,6 @@ Transcluded code blocks are defined with:
 ::code ./mod.rs
 ```
 
-The `::code <filename>` command behaves identically to `::file <filename>` in terms of file referencing strategy and it too provides exactly the same options as is defined in [block transclusion](./block-transclusion.md).
+The `::code <filename>` command behaves identically to `::file <filename>` in terms of file referencing strategy and it too provides exactly the same options as is defined in [block transclusion](./block-transclusion.md), including the `disclosure` option which wraps the transcluded source in a render-time disclosure block.
 
 

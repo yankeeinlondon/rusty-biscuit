@@ -69,7 +69,11 @@ static SHARED_APPLE: SharedHarness<AppleTerminalHarness> = SharedHarness::new();
 #[test]
 #[serial(level2_terminal)]
 fn level2_apple_terminal_link_fallback_visible() {
-    require_level!(Level::L2, AppleTerminalHarness::available(), "Terminal.app",);
+    require_level!(
+        Level::L2,
+        AppleTerminalHarness::available(),
+        "Terminal.app",
+    );
 
     let mut guard = SHARED_APPLE.get_or_init(|| {
         AppleTerminalHarness::shared_or_else(|| {
@@ -80,9 +84,7 @@ fn level2_apple_terminal_link_fallback_visible() {
         })
         .expect("attach/spawn Apple Terminal")
     });
-    let harness = guard
-        .as_mut()
-        .expect("shared Apple Terminal harness present");
+    let harness = guard.as_mut().expect("shared Apple Terminal harness present");
     // Reset the window so prior tests' rendered output cannot leak into
     // this run's capture window.
     harness.send_text(b"clear\n").expect("send_text failed");
@@ -157,7 +159,11 @@ fn level2_apple_terminal_link_fallback_visible() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_apple_terminal_styled_link_fallback_escapes_bracket() {
-    require_level!(Level::L2, AppleTerminalHarness::available(), "Terminal.app",);
+    require_level!(
+        Level::L2,
+        AppleTerminalHarness::available(),
+        "Terminal.app",
+    );
 
     let mut guard = SHARED_APPLE.get_or_init(|| {
         AppleTerminalHarness::shared_or_else(|| {
@@ -168,9 +174,7 @@ fn level2_apple_terminal_styled_link_fallback_escapes_bracket() {
         })
         .expect("attach/spawn Apple Terminal")
     });
-    let harness = guard
-        .as_mut()
-        .expect("shared Apple Terminal harness present");
+    let harness = guard.as_mut().expect("shared Apple Terminal harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
 
@@ -238,7 +242,11 @@ fn level2_apple_terminal_styled_link_fallback_escapes_bracket() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_apple_terminal_double_underline_plain_text_visible() {
-    require_level!(Level::L2, AppleTerminalHarness::available(), "Terminal.app",);
+    require_level!(
+        Level::L2,
+        AppleTerminalHarness::available(),
+        "Terminal.app",
+    );
 
     let mut guard = SHARED_APPLE.get_or_init(|| {
         AppleTerminalHarness::shared_or_else(|| {
@@ -249,9 +257,7 @@ fn level2_apple_terminal_double_underline_plain_text_visible() {
         })
         .expect("attach/spawn Apple Terminal")
     });
-    let harness = guard
-        .as_mut()
-        .expect("shared Apple Terminal harness present");
+    let harness = guard.as_mut().expect("shared Apple Terminal harness present");
     // Reset the window so prior tests' rendered output cannot leak into
     // this run's capture window.
     harness.send_text(b"clear\n").expect("send_text failed");
@@ -327,7 +333,11 @@ fn level2_apple_terminal_harness_lifecycle() {
     // AC-6: clean skip path. No osascript invocations, no window
     // ever opened. Test exits OK without touching the host
     // application state.
-    require_level!(Level::L2, AppleTerminalHarness::available(), "Terminal.app",);
+    require_level!(
+        Level::L2,
+        AppleTerminalHarness::available(),
+        "Terminal.app",
+    );
 
     // Skip under a shared broker window. This is the only Apple-Terminal
     // test that spawns its *own* window (to exercise Drop cleanup), and

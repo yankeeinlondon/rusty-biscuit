@@ -9,7 +9,7 @@
 //! and are baked into the render tree during the fold.
 
 use super::PageRenderError;
-use super::page::length_to_cells;
+use super::page::{length_to_cells};
 use super::types::PageBackground;
 use crate::markdown::highlighting::ColorMode;
 
@@ -108,7 +108,7 @@ fn edges_is_zero(edges: &renderable::layout::Edges) -> bool {
         && length_is_zero(&edges.left)
 }
 
-use super::page::length_is_zero;
+use super::page::{length_is_zero};
 
 impl LayoutContext {
     /// Build a layout context from page state.
@@ -143,10 +143,7 @@ impl LayoutContext {
 
         let content_width = terminal_width.saturating_sub(required);
         // A percentage `max-width` resolves against the content width.
-        let effective_width = match page_max_width
-            .as_ref()
-            .map(|tv| length_to_cells(tv, content_width))
-        {
+        let effective_width = match page_max_width.as_ref().map(|tv| length_to_cells(tv, content_width)) {
             Some(0) => return Err(PageRenderError::MaxWidthZero),
             Some(mw) => content_width.min(mw),
             None => content_width,
@@ -171,7 +168,11 @@ impl LayoutContext {
 
         // Resolve background color and render color mode.
         let (background_color, render_color_mode) = match page_background {
-            PageBackground::Transparent => (None, options_color_mode),
+            // Decision #4: even without a painted surface, the code panel must
+            // invert against the terminal mode, not an independently-detected
+            // option mode. `surface_mode` is terminal-derived (Unknown falls back
+            // to the option mode), so a real terminal is the source of truth.
+            PageBackground::Transparent => (None, surface_mode),
             PageBackground::Subtle => {
                 let bg = match surface_mode {
                     ColorMode::Dark | ColorMode::Unknown => PAGE_BG_SUBTLE_DARK,
@@ -186,9 +187,7 @@ impl LayoutContext {
             }
             PageBackground::Pronounced => {
                 let (bg, inverted) = match surface_mode {
-                    ColorMode::Dark | ColorMode::Unknown => {
-                        (PAGE_BG_PRONOUNCED_DARK, ColorMode::Light)
-                    }
+                    ColorMode::Dark | ColorMode::Unknown => (PAGE_BG_PRONOUNCED_DARK, ColorMode::Light),
                     ColorMode::Light => (PAGE_BG_PRONOUNCED_LIGHT, ColorMode::Dark),
                 };
                 (Some(bg), inverted)

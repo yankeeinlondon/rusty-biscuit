@@ -113,6 +113,7 @@ fn is_block(kind: &NodeKind) -> bool {
             | NodeKind::TableRow { .. }
             | NodeKind::TableCell { .. }
             | NodeKind::FootnoteDefinition { .. }
+            | NodeKind::Disclosure { .. }
     )
 }
 
@@ -165,6 +166,7 @@ fn kind_name(kind: &NodeKind) -> &'static str {
         NodeKind::TableRow { .. } => "TableRow",
         NodeKind::TableCell { .. } => "TableCell",
         NodeKind::FootnoteDefinition { .. } => "FootnoteDefinition",
+        NodeKind::Disclosure { .. } => "Disclosure",
         NodeKind::Text { .. } => "Text",
         NodeKind::Emphasis { .. } => "Emphasis",
         NodeKind::Strong { .. } => "Strong",
@@ -425,7 +427,9 @@ fn check_node(
 
     // Thematic-break styling is supported only on a ThematicBreak node; the
     // terminal and browser renderers read it only when folding that kind.
-    if node.attrs.thematic_break_ref().is_some() && !matches!(node.kind, NodeKind::ThematicBreak) {
+    if node.attrs.thematic_break_ref().is_some()
+        && !matches!(node.kind, NodeKind::ThematicBreak)
+    {
         report.findings.push(error(
             format!(
                 "thematic-break attributes are permitted only on a ThematicBreak node, found on {}",
@@ -698,7 +702,9 @@ mod tests {
             "layout on an inline Text node must be an error: Layout is block-only"
         );
         assert!(
-            report.errors().any(|f| f.message.contains("block-level")),
+            report
+                .errors()
+                .any(|f| f.message.contains("block-level")),
             "should contain an error about block-level"
         );
         assert!(ensure_valid(&root).is_err());
@@ -965,8 +971,9 @@ mod tests {
     #[test]
     fn columns_hints_on_block_quote_is_valid() {
         use crate::tree::ColumnsHints;
-        let mut bq =
-            RenderNode::block_quote(vec![RenderNode::paragraph(vec![RenderNode::text("left")])]);
+        let mut bq = RenderNode::block_quote(vec![RenderNode::paragraph(vec![RenderNode::text(
+            "left",
+        )])]);
         bq.attrs.set_columns_hints(&ColumnsHints::default());
         let root = RenderNode::root(vec![bq]);
         assert!(ensure_valid(&root).is_ok());
@@ -1060,7 +1067,9 @@ mod tests {
         let root = RenderNode::root(vec![para]);
         let report = validate(&root, ValidationMode::Full);
         assert!(
-            report.errors().any(|f| f.message.contains("renderable.")),
+            report
+                .errors()
+                .any(|f| f.message.contains("renderable.")),
             "a stale renderable.* data key must be an error"
         );
     }
@@ -1141,9 +1150,9 @@ mod tests {
         let root = RenderNode::root(vec![para]);
         let report = validate(&root, ValidationMode::Full);
         assert!(
-            report.errors().any(|f| f
-                .message
-                .contains("thematic-break attributes are permitted only")),
+            report
+                .errors()
+                .any(|f| f.message.contains("thematic-break attributes are permitted only")),
             "thematic-break attributes on a Paragraph must be an error",
         );
     }
@@ -1176,10 +1185,11 @@ mod tests {
         });
         let root = RenderNode::root(vec![para]);
         let report = validate(&root, ValidationMode::Full);
-        assert!(report.errors().any(|f| {
-            f.message
-                .contains("link browser attributes are permitted only")
-        }),);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("link browser attributes are permitted only")),
+        );
     }
 
     #[test]
@@ -1195,10 +1205,11 @@ mod tests {
         });
         let root = RenderNode::root(vec![RenderNode::paragraph(vec![link])]);
         let report = validate(&root, ValidationMode::Full);
-        assert!(report.errors().any(|f| {
-            f.message
-                .contains("image browser attributes are permitted only")
-        }),);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("image browser attributes are permitted only")),
+        );
     }
 
     #[test]

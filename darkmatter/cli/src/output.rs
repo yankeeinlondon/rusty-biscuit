@@ -2,16 +2,16 @@ use crate::args::{Cli, CliFill};
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::layout::{DarkmatterPage, PageComponent};
-use darkmatter::markdown::block::scan_inline_hr_warnings;
-use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
+use darkmatter::markdown::highlighting::{ColorMode, ThemePair, detect_code_theme, detect_prose_theme};
 use darkmatter::markdown::output::MermaidMode;
 use darkmatter::markdown::output::terminal::TerminalImageMode;
 use darkmatter::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode};
+use darkmatter::markdown::block::scan_inline_hr_warnings;
 use darkmatter::style::{
-    BespokeStyleOverrides, ComponentStyleOverrides, HrStyleOverrides, ListStyleOverrides,
-    PageStyleOverrides, StyleWarning, StyleWarningKind, apply_bespoke_style, apply_color_style,
-    apply_component_style, apply_hr_style, apply_list_style, apply_page_style, from_frontmatter,
-    into_strict,
+    BespokeStyleOverrides, ComponentStyleOverrides, DisclosureStyleOverrides, HrStyleOverrides,
+    ListStyleOverrides, PageStyleOverrides, StyleWarning, StyleWarningKind, apply_bespoke_style,
+    apply_color_style, apply_component_style, apply_disclosure_style, apply_hr_style,
+    apply_list_style, apply_page_style, from_frontmatter, into_strict,
 };
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -24,19 +24,48 @@ pub struct OutputArtifact {
     pub label: &'static str,
 }
 
+/// Resolved theme configuration for an output path that needs one.
+///
+/// The page surface and the nested code-block panel must share a single
+/// source of truth. The `color_mode` is always taken from the [`Terminal`]
+/// that will actually render the page, so the prose/code themes and the
+/// layout context cannot drift.
+#[derive(Debug)]
+struct ResolvedTheme {
+    prose: ThemePair,
+    code: ThemePair,
+    color_mode: ColorMode,
+}
+
+impl ResolvedTheme {
+    fn from_cli(cli: &Cli, terminal: &Terminal) -> Self {
+        let prose = cli.theme.unwrap_or_else(detect_prose_theme);
+        let code = cli.code_theme.unwrap_or_else(|| detect_code_theme(prose));
+        let color_mode = terminal.color_mode();
+        Self {
+            prose,
+            code,
+            color_mode,
+        }
+    }
+}
+
 pub fn render_terminal_output(
     md: &Markdown,
     input_path: Option<&PathBuf>,
     cli: &Cli,
-    prose_theme: ThemePair,
-    code_theme: ThemePair,
-    color_mode: ColorMode,
+    term: Terminal,
 ) -> Result<()> {
-    let term = Terminal::new();
+    // Resolve the theme from the same `Terminal` that will render the page.
+    // This keeps the page surface and the nested code-block panel aligned on
+    // a single `color_mode` source of truth.
+    let theme = ResolvedTheme::from_cli(cli, &term);
+
     let mut page = DarkmatterPage::new(&term)
-        .with_prose_theme(prose_theme.kebab_name())
-        .with_code_theme(code_theme.kebab_name())
-        .with_color_mode(color_mode)
+        .with_prose_theme(theme.prose.kebab_name())
+        .with_code_theme(theme.code.kebab_name())
+        .with_color_mode(theme.color_mode)
+        .with_code_block_mode(cli.code_block.into())
         .with_image_mode(terminal_image_mode_from_env())
         .with_mermaid_mode(if cli.mermaid {
             MermaidMode::Image
@@ -134,6 +163,11 @@ pub fn apply_cli_layout_flags(page: DarkmatterPage, cli: &Cli) -> DarkmatterPage
         page = page.with_page_background(bg.into());
     }
 
+    // Explicit page background color (overrides the computed `PageBackground`).
+    if let Some(color) = cli.page_bg_color {
+        page = page.with_page_bg_color(color);
+    }
+
     // Max width
     if let Some(n) = cli.max_width {
         page = page.with_max_width(n);
@@ -214,10 +248,7 @@ fn apply_component_alignment(
     component: PageComponent,
     alignment: renderable::layout::Alignment,
 ) -> DarkmatterPage {
-    let mut policy = page
-        .component_policy(component)
-        .cloned()
-        .unwrap_or_default();
+    let mut policy = page.component_policy(component).cloned().unwrap_or_default();
     policy.layout.alignment = alignment;
     page.with_component_policy(component, policy)
 }
@@ -230,10 +261,7 @@ fn apply_component_fill(
 ) -> DarkmatterPage {
     use renderable::layout::{Edges, TargetValue, Width};
 
-    let mut policy = page
-        .component_policy(component)
-        .cloned()
-        .unwrap_or_default();
+    let mut policy = page.component_policy(component).cloned().unwrap_or_default();
     match fill {
         CliFill::Full => {
             policy.layout.width = Width::Auto;
@@ -296,6 +324,7 @@ pub fn page_style_overrides_from_cli(cli: &Cli) -> PageStyleOverrides {
         padding_left: padding_all || px || cli.pl.is_some(),
         max_width: cli.max_width.is_some(),
         background: cli.page_bg.is_some(),
+        background_color: cli.page_bg_color.is_some(),
         alignment: cli.alignment.is_some(),
         align_images: cli.align_images.is_some(),
         align_lists: cli.align_lists.is_some(),
@@ -367,6 +396,16 @@ pub fn hr_style_overrides_from_cli(_cli: &Cli) -> HrStyleOverrides {
     HrStyleOverrides::default()
 }
 
+/// Build a [`DisclosureStyleOverrides`] reflecting which disclosure frontmatter
+/// fields the CLI has already claimed.
+///
+/// There are currently no disclosure-specific CLI flags, so this always returns
+/// the default (no overrides). It exists for symmetry with the other override
+/// helpers and to make adding disclosure CLI flags a one-line change.
+pub fn disclosure_style_overrides_from_cli(_cli: &Cli) -> DisclosureStyleOverrides {
+    DisclosureStyleOverrides::default()
+}
+
 /// Build a [`BespokeStyleOverrides`] reflecting which bespoke frontmatter
 /// fields the CLI has already claimed.
 ///
@@ -427,6 +466,10 @@ pub fn apply_style_frontmatter(
     let page = apply_hr_style(page, &style, hr_overrides)
         .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))?;
 
+    let disclosure_overrides = disclosure_style_overrides_from_cli(cli);
+    let page = apply_disclosure_style(page, &style, disclosure_overrides)
+        .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))?;
+
     let page = apply_color_style(page, &style)
         .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))?;
 
@@ -476,18 +519,16 @@ pub fn markdown_artifact(md: &Markdown) -> OutputArtifact {
 
 pub fn html_artifact(
     md: &Markdown,
-    prose_theme: ThemePair,
-    code_theme: ThemePair,
-    color_mode: ColorMode,
     cli: &Cli,
     input_path: Option<&PathBuf>,
 ) -> Result<OutputArtifact> {
     let term = Terminal::new_optimistic(120);
+    let theme = ResolvedTheme::from_cli(cli, &term);
     let mut page = apply_cli_layout_flags(
         DarkmatterPage::new(&term)
-            .with_prose_theme(prose_theme.kebab_name())
-            .with_code_theme(code_theme.kebab_name())
-            .with_color_mode(color_mode),
+            .with_prose_theme(theme.prose.kebab_name())
+            .with_code_theme(theme.code.kebab_name())
+            .with_color_mode(theme.color_mode),
         cli,
     );
 
@@ -504,9 +545,37 @@ pub fn html_artifact(
     })
 }
 
+pub fn markdown_plus_artifact(
+    md: &Markdown,
+    cli: &Cli,
+    input_path: Option<&PathBuf>,
+) -> Result<OutputArtifact> {
+    let term = Terminal::new_optimistic(120);
+    let theme = ResolvedTheme::from_cli(cli, &term);
+    let mut page = apply_cli_layout_flags(
+        DarkmatterPage::new(&term)
+            .with_prose_theme(theme.prose.kebab_name())
+            .with_code_theme(theme.code.kebab_name())
+            .with_color_mode(theme.color_mode),
+        cli,
+    );
+
+    page = apply_style_frontmatter(page, md, cli, input_path)?;
+
+    let content = page
+        .render_to_markdown_plus(md)
+        .context("Failed to convert to MarkdownPlus")?;
+
+    Ok(OutputArtifact {
+        content,
+        extension: "md",
+        label: "markdown-plus",
+    })
+}
+
 pub fn json_artifact(md: &Markdown) -> Result<OutputArtifact> {
-    let ast = md.as_ast().context("Failed to generate AST")?;
-    let content = serde_json::to_string_pretty(&ast)?;
+    let document = md.as_document().context("Failed to fold to render tree document")?;
+    let content = serde_json::to_string_pretty(&document)?;
     Ok(OutputArtifact {
         content,
         extension: "json",
@@ -1283,9 +1352,6 @@ style:\n\
         let md = Markdown::try_from_content(raw).unwrap();
         let cli = cli_from(&["md", "doc.md"]);
         let page = apply_style_frontmatter(test_page(), &md, &cli, None).expect("apply");
-        assert!(
-            page.stylesheet().is_some(),
-            "sub-spec #7 key should be applied"
-        );
+        assert!(page.stylesheet().is_some(), "sub-spec #7 key should be applied");
     }
 }

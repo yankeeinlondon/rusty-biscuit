@@ -10,7 +10,6 @@ use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::status::{Status, StatusState};
@@ -22,8 +21,9 @@ use claudine::composition::lifecycle::{
 use claudine::composition::{
     AgentResolutionState, CompositionClosurePlan, CompositionError, CompositionExecutionRequest,
     CompositionMode, InlineClosurePlan, ModelResolutionReason, ResolvedExecutionTarget,
-    SelectionReason, agent_state_breakdown, build_installed_snapshot, build_picker_plan,
-    classify_agent_resolution, invalid_agent_message, resolve_target_non_tty_with_catalog,
+    SelectionReason, SessionInteractivitySource, agent_state_breakdown, build_installed_snapshot,
+    build_picker_plan, classify_agent_resolution, invalid_agent_message,
+    resolve_target_non_tty_with_catalog,
 };
 use claudine::config::claudine_config::ProviderModelOverride;
 use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
@@ -33,31 +33,22 @@ use inquire::Select;
 use sniff::programs::InstalledAiClients;
 
 use super::env;
-use super::exec;
-use super::live_semantic_sink::LiveSemanticSink;
 use super::profile::{self, WrapperProfile};
 use super::{
-    HarnessPromptMode, HarnessPromptState, StreamSummaryContext, StructuredCodexOutput,
-    StructuredSummaryDetails, WrapperHarnessPermissionProbe, apply_composition_shell_overrides,
-    build_harness_shell_options_with_cache, emit_stream_summary_with_context, format_summary_prose,
-    format_verbose_summary_details_prose, materialized_harness_prompt_from_prepared,
+    HarnessPromptMode, HarnessPromptState, StructuredCodexOutput, apply_composition_shell_overrides,
+    build_harness_shell_options_with_cache, materialized_harness_prompt_from_prepared,
     resolve_binary_path_direct, run_harness_loop, structured_verbosity, switch_process_cwd,
     wrap_terminal,
 };
 use crate::log;
 
 pub(crate) mod dry_run;
-pub(crate) mod inline_guards;
-pub(crate) mod legacy_goose;
+pub(crate) mod inline_cleanup;
 pub(crate) mod prep_context;
-pub(crate) mod structured;
-pub(crate) mod summary;
 
-// Re-export the public API so existing callers don't break.
-pub(crate) use inline_guards::{cleanup_inline_output, split_frontmatter_and_body};
+// Re-export helpers still used by inline.rs and other callers.
+pub(crate) use inline_cleanup::{cleanup_inline_output, split_frontmatter_and_body};
 pub(crate) use prep_context::CompositionPrepContext;
-pub(crate) use structured::run_structured_composition;
-pub(crate) use summary::{emit_composition_summary, emit_minimal_composition_summary};
 
 /// W0 instrumentation counter: increments every time
 /// [`select_launch_workspace`] falls back to the legacy
@@ -140,10 +131,10 @@ pub(crate) struct SingleCompositionOutcome {
     /// Iteration-level summary signals lifted from the structured stream
     /// for consumption by the `compose --loop` orchestrator.
     ///
-    /// Populated for the non-harness structured-stream path (the only
-    /// path that can carry a rate-limit trailer or a watchdog
-    /// `error_kind`). `None` for the dry-run, harness, and legacy paths
-    /// where these signals aren't available at this layer.
+    /// Non-dry-run composition carries the harness loop's terminal-attempt
+    /// structured summary signals when available (the rate-limit trailer or
+    /// watchdog `error_kind`). `None` for the dry-run path, which never
+    /// launches a provider.
     pub iteration_signals: Option<IterationSummarySignals>,
 }
 
@@ -189,46 +180,6 @@ impl IterationSummarySignals {
             model_id: summary.model.clone(),
         }
     }
-}
-
-/// Result of running a structured composition stream.
-///
-/// Produced by [`run_structured_composition`] and consumed by both the
-/// compose and inline-compose callers. The shared function does not emit
-/// the summary; callers decide the timing and routing.
-pub(crate) struct CompositionStreamResult {
-    exit_code: i32,
-    assistant_text: String,
-    summary: claudine::stream::summary::StreamExecutionSummary,
-    details: StructuredSummaryDetails,
-    had_streamed_assistant: bool,
-    /// Shares a `SectionTracker` with the live sink so post-stream trailer
-    /// emitters see consistent section state. Only the compose caller uses
-    /// this; inline-compose ignores it.
-    section_stream: super::section::SectionStream,
-    /// Child-process telemetry for perf reporting.
-    telemetry: exec::ProcessTelemetry,
-    /// Immediate child PID captured by the spawn operation, threaded
-    /// through to the synthetic summary event so `EventMeta.agent_pid`
-    /// carries the spawned child PID.
-    agent_pid: Option<u32>,
-}
-
-/// Mode-specific inputs for [`execute_without_harness`].
-///
-/// Carries the inline-only parameters (closure plan, target path,
-/// interactivity, stderr verbosity) so the merged function can branch its
-/// post-execution logic without dragging optional parameters through every
-/// call.
-#[derive(Clone, Copy)]
-pub(crate) enum CompositionExecutionMode<'a> {
-    Direct,
-    Inline {
-        closure_plan: &'a InlineClosurePlan,
-        resolved_path: &'a std::path::Path,
-        session_interactive: bool,
-        show_checks: bool,
-    },
 }
 
 /// Build a [`PromptTimingContext`] from a resolved prompt path, the
@@ -469,12 +420,8 @@ pub(crate) fn eagerly_resolve_target(
             refresh_for_model_validation(&catalog, provider, hints, Some(&probe_reason));
         }
         let catalog_ref = if dry_run { None } else { Some(&catalog) };
-        let (model, model_reason) = claudine::composition::resolve_model_with_hints(
-            provider,
-            hints,
-            cli_model,
-            catalog_ref,
-        );
+        let (model, model_reason) =
+            claudine::composition::resolve_model_with_hints(provider, hints, cli_model, catalog_ref);
         return Ok(Some(ResolvedExecutionTarget {
             provider,
             provider_reason: claudine::composition::ProviderResolutionReason::ExplicitFlag,
@@ -509,16 +456,8 @@ pub(crate) fn eagerly_resolve_target(
         }));
     }
 
-    resolve_live_target(
-        state,
-        hints,
-        snapshot,
-        favorite,
-        cli_model,
-        &catalog,
-        source_path,
-    )
-    .map(Some)
+    resolve_live_target(state, hints, snapshot, favorite, cli_model, &catalog, source_path)
+        .map(Some)
 }
 
 /// Resolve a classified agent state for a live (non-dry-run) run.
@@ -572,12 +511,8 @@ fn resolve_live_target_with_tty(
         let (_, probe_reason) =
             claudine::composition::resolve_model_with_hints(provider, hints, cli_model, None);
         refresh_for_model_validation(catalog, provider, hints, Some(&probe_reason));
-        let (model, model_reason) = claudine::composition::resolve_model_with_hints(
-            provider,
-            hints,
-            cli_model,
-            Some(catalog),
-        );
+        let (model, model_reason) =
+            claudine::composition::resolve_model_with_hints(provider, hints, cli_model, Some(catalog));
         let provider_reason = match state {
             AgentResolutionState::Selected { .. } => ProviderResolutionReason::FrontmatterSingle,
             _ => ProviderResolutionReason::FrontmatterList,
@@ -591,16 +526,13 @@ fn resolve_live_target_with_tty(
     }
 
     if is_tty {
-        let provider = prompt_for_agent_state(&state, hints, snapshot, favorite, source_path)?;
+        let provider =
+            prompt_for_agent_state(&state, hints, snapshot, favorite, source_path)?;
         let (_, probe_reason) =
             claudine::composition::resolve_model_with_hints(provider, hints, cli_model, None);
         refresh_for_model_validation(catalog, provider, hints, Some(&probe_reason));
-        let (model, model_reason) = claudine::composition::resolve_model_with_hints(
-            provider,
-            hints,
-            cli_model,
-            Some(catalog),
-        );
+        let (model, model_reason) =
+            claudine::composition::resolve_model_with_hints(provider, hints, cli_model, Some(catalog));
         Ok(ResolvedExecutionTarget {
             provider,
             provider_reason: ProviderResolutionReason::InteractivePicker,
@@ -703,7 +635,8 @@ fn build_scoped_picker_plan(
     favorite: Option<Provider>,
     scope: Option<&[Provider]>,
 ) -> Result<claudine::composition::ProviderPickerPlan, CompositionError> {
-    let mut plan = claudine::composition::build_picker_plan_with_hints(hints, snapshot, favorite)?;
+    let mut plan =
+        claudine::composition::build_picker_plan_with_hints(hints, snapshot, favorite)?;
 
     if let Some(scope) = scope {
         let scope_set: std::collections::BTreeSet<Provider> = scope.iter().copied().collect();
@@ -837,6 +770,37 @@ pub(crate) fn emit_execution_header(
         term,
     );
     true
+}
+
+/// Format the timeout-conflict error message, attributing the resolved
+/// interactive mode to its source so users can tell a frontmatter-driven
+/// conflict from a flag-driven one, and naming the conflicting timeout flag
+/// (`--timeout` or `--step-timeout`).
+fn format_interactive_timeout_conflict(
+    source: SessionInteractivitySource,
+    flag: &str,
+) -> String {
+    format!("interactive mode (from {source}) cannot be used with {flag}")
+}
+
+/// Extract a top-level frontmatter timeout duration (`timeout` /
+/// `step_timeout`) for the resolved-interactive conflict check.
+///
+/// Returns `None` when the key is absent or its value is not a parseable
+/// duration string. A malformed value is surfaced later by
+/// [`claudine::harness::parse_harness_plan`], so swallowing the parse error
+/// here is intentional — the syntax diagnostic takes precedence over the
+/// interactive conflict.
+fn frontmatter_timeout_duration(
+    frontmatter: &serde_json::Value,
+    key: &str,
+    source_path: &std::path::Path,
+) -> Option<std::time::Duration> {
+    frontmatter
+        .as_object()
+        .and_then(|obj| obj.get(key))
+        .and_then(|v| v.as_str())
+        .and_then(|raw| claudine::harness::parse_timeout(raw, source_path).ok())
 }
 
 /// Execute a composition request through the wrapper-grade pipeline.
@@ -1118,7 +1082,11 @@ pub(crate) fn execute_composition_request_inner(
     // -- Inline + interactive check ---------------------------------------
 
     if request.session_interactive && is_inline && !profile.supports_interactive_inline_closure() {
-        return Err(CompositionError::InlineInteractiveUnsupported(provider.to_string()).into());
+        return Err(CompositionError::InlineInteractiveUnsupported {
+            provider: provider.to_string(),
+            source_kind: request.session_interactive_source,
+        }
+        .into());
     }
 
     let effective_non_interactive = !request.session_interactive;
@@ -1533,9 +1501,43 @@ pub(crate) fn execute_composition_request_inner(
 
     record_substage(&mut perf_collector, &mut last_checkpoint, "system prompt");
 
-    // Timeout validation
-    if request.timeout.is_some() && request.session_interactive {
-        return Err(eyre!("--timeout cannot be used with --interactive mode"));
+    // Timeout/interactive conflict, evaluated against the RESOLVED session
+    // mode and the RESOLVED timeout plan. Interactive sessions never honor a
+    // wall-clock or step-silence deadline, so an explicitly requested timeout
+    // from any source — CLI flag, composed frontmatter, or env var — conflicts
+    // with a resolved-interactive session. The built-in 30m step_timeout
+    // default is excluded (`built_in: None` below): it is always present and
+    // is simply ignored in interactive mode, so it must not trip the conflict.
+    // The early CLI-only guards in the command entry points stay as fast
+    // syntax feedback; this is the authoritative check now that frontmatter
+    // (`interactive: true`) can also select interactive mode.
+    if request.session_interactive {
+        let fm = &request.prepared.effective_frontmatter;
+        let sp = request.prepared.resolved_path.as_path();
+        let explicit_timeout = resolve_single_timeout(TimeoutResolutionInput {
+            cli: request.timeout.clone(),
+            frontmatter: frontmatter_timeout_duration(fm, "timeout", sp),
+            env_var: "CLAUDINE_TIMEOUT",
+            built_in: None,
+        });
+        let explicit_step_timeout = resolve_single_timeout(TimeoutResolutionInput {
+            cli: request.step_timeout.clone(),
+            frontmatter: frontmatter_timeout_duration(fm, "step_timeout", sp),
+            env_var: "CLAUDINE_STEP_TIMEOUT",
+            built_in: None,
+        });
+        if explicit_timeout.is_some() {
+            return Err(eyre!(format_interactive_timeout_conflict(
+                request.session_interactive_source,
+                "--timeout",
+            )));
+        }
+        if explicit_step_timeout.is_some() {
+            return Err(eyre!(format_interactive_timeout_conflict(
+                request.session_interactive_source,
+                "--step-timeout",
+            )));
+        }
     }
 
     child_args.extend(mcp_extra_args);
@@ -1584,8 +1586,11 @@ pub(crate) fn execute_composition_request_inner(
     let prompt_source = super::profile::PromptSource::Inline(effective_prompt.clone());
     let delivery =
         profile.prompt_delivery(&child_args, &effective_prompt, effective_non_interactive)?;
-    let wire_prompt = delivery.as_wire_rpc().map(str::to_string);
-    let stdin_seed = delivery.apply_to(&mut child_args);
+    // The harness loop rebuilds prompt delivery from the materialized prompt,
+    // so the returned wire/stdin seed values are not needed here. We still
+    // apply the delivery to `child_args` so the argv validation below sees the
+    // final provider argv.
+    delivery.apply_to(&mut child_args);
 
     let effective_repo_root = source_repo_root.or(env_plan.repo_root.as_deref());
     let child_cwd = env_plan.child_cwd.as_path();
@@ -1631,12 +1636,12 @@ pub(crate) fn execute_composition_request_inner(
         crate::log::message(&status.render(&term));
     }
 
-    // -- Harness detection from effective frontmatter ---------------------
-    // THE key architectural fix: harness properties are read from the
-    // composed frontmatter, not from raw source state.
-
-    let harness_enabled =
-        claudine::harness::has_harness_properties(&request.prepared.effective_frontmatter);
+    // -- Harness plan preflight -------------------------------------------
+    // Every non-dry-run document is parsed into a harness plan. Documents
+    // lacking harness frontmatter yield the bare (all-empty) plan; the loop
+    // re-parses from the materialized frontmatter on retry attempts. Inline
+    // composition gets a system-owned writability pre-check injected here
+    // so handler recovery paths can respond to permission failures.
 
     let shell_options = apply_composition_shell_overrides(
         build_harness_shell_options_with_cache(
@@ -1687,63 +1692,45 @@ pub(crate) fn execute_composition_request_inner(
 
     let mut guard = LifecycleRunGuard::new(lifecycle, &lifecycle_ctx, &emitter);
 
-    if harness_enabled {
-        let resolve_ctx = claudine::harness::HarnessResolutionContext {
-            source_path: &request.prepared.resolved_path,
-            repo_root: effective_repo_root,
-        };
-        // Validate that the harness plan can be parsed before proceeding.
-        let mut plan = claudine::harness::parse_harness_plan(
-            &request.prepared.effective_frontmatter,
-            &request.prepared.resolved_path,
-            &resolve_ctx,
-        )
-        .map_err(|e| {
-            guard.emit_blocked_or_failure();
-            eyre!("{e}")
-        })?;
+    let resolve_ctx = claudine::harness::HarnessResolutionContext {
+        source_path: &request.prepared.resolved_path,
+        repo_root: effective_repo_root,
+    };
+    // Validate that the harness plan can be parsed before proceeding.
+    let plan = claudine::harness::parse_harness_plan(
+        &request.prepared.effective_frontmatter,
+        &request.prepared.resolved_path,
+        &resolve_ctx,
+    )
+    .map_err(|e| {
+        guard.emit_blocked_or_failure();
+        eyre!("{e}")
+    })?;
 
-        // For inline composition, prepend a system-owned writability check
-        // so that handler recovery paths can respond to permission failures
-        // instead of hard-failing before the handler system exists.
+    // Finalize the parsed plan into the effective plan. For inline
+    // composition this prepends a system-owned writability pre-check so
+    // handler recovery paths can respond to permission failures.
+    let plan = claudine::harness::finalize_effective_plan(
+        plan,
         if is_inline {
-            plan.pre_checks.insert(
-                0,
-                claudine::harness::inline_writability_pre_check(&request.prepared.resolved_path),
-            );
-        }
+            claudine::harness::EffectivePlanMode::Inline
+        } else {
+            claudine::harness::EffectivePlanMode::Direct
+        },
+        &request.prepared.resolved_path,
+    );
 
-        // ── Pre-flight shell approval for harness commands ───────────
-        let _harness_preflight = claudine::composition::resolve_shell_approvals(
-            None, // template commands already approved during compose
-            None,
-            Some(&plan),
-            &shell_options,
-        )
-        .map_err(|e| {
-            guard.emit_blocked_or_failure();
-            eyre!("{e}")
-        })?;
-
-        // Plan is validated; the harness loop will re-parse if needed.
-        drop(plan);
-    } else if is_inline {
-        // Non-harness inline: validate writability using the same OS +
-        // provider-policy check that the harness path uses. Without harness
-        // frontmatter there is no handler system to recover, so a failure
-        // here is fatal.
-        let permission_probe =
-            WrapperHarnessPermissionProbe::new(provider, child_args.clone(), effective_repo_root);
-        claudine::harness::check_write_permission(
-            &request.prepared.resolved_path,
-            &request.prepared.resolved_path,
-            Some(&permission_probe),
-        )
-        .map_err(|reason| {
-            guard.emit_blocked_or_failure();
-            eyre!("{reason}")
-        })?;
-    }
+    // ── Pre-flight shell approval for harness commands ───────────
+    let _harness_preflight = claudine::composition::resolve_shell_approvals(
+        None, // template commands already approved during compose
+        None,
+        Some(&plan),
+        &shell_options,
+    )
+    .map_err(|e| {
+        guard.emit_blocked_or_failure();
+        eyre!("{e}")
+    })?;
 
     // Emit the preflight-complete indicator for direct compose and
     // inline-compose runs. This must sit *before* the dry-run seam below:
@@ -1774,6 +1761,35 @@ pub(crate) fn execute_composition_request_inner(
     // `--quiet` / `--silent` do not suppress this render: the dry-run output
     // *is* the command's purpose.
     if request.dry_run {
+        // Dry-run never launches the provider or mutates the source, but it
+        // must still surface pre-check failures — chiefly the system-owned
+        // inline `has_write_permission` rule injected by
+        // `finalize_effective_plan`. Otherwise a read-only (`0444`) inline
+        // source would render a clean dry-run and exit 0, masking a write
+        // failure the live run would hit. Evaluate the finalized effective
+        // plan's pre-checks with the same `WrapperHarnessPermissionProbe`
+        // the harness loop uses, then hard-fail on any failure: there is no
+        // handler-resolution step here because no provider will run.
+        let permission_probe = super::policy::WrapperHarnessPermissionProbe::new(
+            provider,
+            args_before_prompt.clone(),
+            effective_repo_root,
+        );
+        let pre_report = claudine::harness::evaluate_pre_checks(&plan, Some(&permission_probe));
+        if !pre_report.all_passed() {
+            let failures = pre_report.failures();
+            guard.emit_blocked_or_failure();
+            return Err(eyre!(
+                "pre-check validation failed ({} {})",
+                failures.len(),
+                if failures.len() == 1 {
+                    "failure"
+                } else {
+                    "failures"
+                }
+            ));
+        }
+
         let render = dry_run::DryRunRender::from_request(&request);
 
         crate::log::data(&render.body);
@@ -1800,6 +1816,10 @@ pub(crate) fn execute_composition_request_inner(
         }
         return Ok(outcome);
     }
+
+    // Plan is validated; the harness loop re-parses from the materialized
+    // frontmatter, so the live path no longer needs this copy.
+    drop(plan);
 
     // -- Preflight output (env details + prompt block) ---------------------
     // The execution header was already emitted (up front by compose /
@@ -1909,331 +1929,81 @@ pub(crate) fn execute_composition_request_inner(
 
     let dispatch_context = composition_dispatch_context(&request, &target);
 
-    if harness_enabled {
-        let harness_mode = if is_inline {
-            HarnessPromptMode::Inline
-        } else {
-            HarnessPromptMode::Compose
-        };
-
-        let mut prompt_state = HarnessPromptState {
-            mode: harness_mode,
-            source_path: request.prepared.resolved_path.clone(),
-            original_ref: request.file_ref.clone(),
-            base_prompt: None,
-            overlay: indexmap::IndexMap::new(),
-            prompt_tail: Vec::new(),
-            next_prompt_override: None,
-            next_resume_session_id: None,
-        };
-
-        let mut harness_base_args = args_before_prompt.clone();
-        if !use_structured {
-            profile.prepare_captured_output(&mut harness_base_args);
-        }
-
-        // Harness loop manages the guard internally; defuse ours.
-        guard.defuse();
-        let (exit_code, harness_perf) = run_harness_loop(
-            provider,
-            profile,
-            binary_path.as_path(),
-            child_cwd,
-            effective_non_interactive,
-            request.timeout.clone(),
-            request.step_timeout.clone(),
-            &harness_base_args,
-            &env_plan.env,
-            &mut prompt_state,
-            effective_repo_root,
-            shell_options.clone(),
-            use_structured,
-            structured_codex_output.as_ref(),
-            stdout_noise,
-            stderr_noise,
-            profile.suppress_structured_stderr_on_success(),
-            show_checks,
-            stream_verbosity,
-            detail_requested,
-            &env_context,
-            &dispatch_context,
-            Some(materialized_harness_prompt_from_prepared(&request.prepared)),
-            &term,
-            lifecycle,
-            &lifecycle_ctx,
-            &emitter,
-            true,
-        )?;
-        if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {
-            collector.set_agent_perf(perf);
-        }
-        let outcome = SingleCompositionOutcome {
-            exit_code,
-            provider,
-            agent_perf: perf_collector
-                .as_ref()
-                .and_then(|c| c.agent_perf())
-                .or(harness_perf),
-            // The harness loop manages its own per-step summaries
-            // internally; surfacing them through this outer struct is a
-            // future enhancement. For now `compose --loop` against a
-            // harness-enabled provider falls back to the legacy
-            // behavior (no rate-limit-aware pause and no `exit_reason`
-            // pickup at the loop boundary).
-            iteration_signals: None,
-        };
-        // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
-        // The perf report is always emitted to stderr when requested.
-        if let Some(collector) = perf_collector {
-            crate::perf::emit_report(&collector.into_report());
-        }
-        Ok(outcome)
+    let harness_mode = if is_inline {
+        HarnessPromptMode::Inline
     } else {
-        guard.emit_start_once();
-
-        let mode = if is_inline {
-            let closure_plan = match &request.prepared.closure {
-                CompositionClosurePlan::Inline(plan) => plan,
-                _ => unreachable!("is_inline is true but closure is not Inline"),
-            };
-            CompositionExecutionMode::Inline {
-                closure_plan,
-                resolved_path: &request.prepared.resolved_path,
-                session_interactive: request.session_interactive,
-                show_checks,
-            }
-        } else {
-            CompositionExecutionMode::Direct
-        };
-
-        // Non-harness compose: no `*_warn` thresholds are parseable from
-        // frontmatter (no harness block), but we still anchor the
-        // periodic `t=0` / `t=10m` timing header on this prompt so users
-        // see their composition running.
-        let prompt_timing = Some(build_prompt_timing_context(
-            &request.prepared.resolved_path,
-            effective_repo_root,
-            None,
-            None,
-        ));
-
-        let timeout_config = resolve_timeouts(
-            request.timeout.clone(),
-            None,
-            request.step_timeout.clone(),
-            None,
-        )
-        .with_provider(provider);
-
-        let mut child_spawned = false;
-        let mut agent_perf: Option<crate::perf::AgentExecutionPerf> = None;
-        let mut iteration_signals: Option<IterationSummarySignals> = None;
-        let exit_result = execute_without_harness(
-            mode,
-            provider,
-            profile,
-            &binary_path,
-            &child_args,
-            &env_plan.env,
-            child_cwd,
-            stdin_seed.as_deref(),
-            wire_prompt.as_deref(),
-            use_structured,
-            structured_codex_output.as_ref(),
-            stdout_noise,
-            stderr_noise,
-            stream_verbosity,
-            detail_requested,
-            &env_context,
-            &dispatch_context,
-            &term,
-            &mut child_spawned,
-            prompt_timing,
-            &mut agent_perf,
-            &mut iteration_signals,
-            timeout_config,
-        );
-
-        // Mark launched as soon as spawn succeeded — before propagating
-        // any post-spawn error — so the guard correctly classifies
-        // subsequent failures as `Failure` rather than `Blocked`.
-        if child_spawned {
-            guard.mark_provider_launched();
-        }
-        let exit_code = exit_result?;
-
-        if exit_code == 0 {
-            guard.emit_terminal(LifecycleSignal::Success);
-        } else {
-            guard.emit_terminal(LifecycleSignal::Failure);
-        }
-
-        if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), agent_perf) {
-            collector.set_agent_perf(perf);
-        }
-        let outcome = SingleCompositionOutcome {
-            exit_code,
-            provider,
-            agent_perf: perf_collector
-                .as_ref()
-                .and_then(|c| c.agent_perf())
-                .or(agent_perf),
-            iteration_signals,
-        };
-        // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
-        // The perf report is always emitted to stderr when requested.
-        if let Some(collector) = perf_collector {
-            crate::perf::emit_report(&collector.into_report());
-        }
-        Ok(outcome)
-    }
-}
-
-// -- Composition execution (non-harness) ----------------------------------
-
-/// Execute a composition request without the harness loop.
-///
-/// Shared implementation for both `compose` (Direct) and `inline-compose`
-/// (Inline). Mode-specific behavior is gated by [`CompositionExecutionMode`]:
-///
-/// - **Direct (compose)**: post-hoc assistant text is routed through the live
-///   sink's section stream so the trailer summary sees consistent state, and
-///   the summary is emitted immediately after the run.
-/// - **Inline (inline-compose)**: assistant text is written straight to
-///   stdout (the body is also captured for closure write-back), the agent
-///   response is validated against the configured closure plan, the target
-///   file is rewritten and cleaned, and the summary is deferred until after
-///   closure validation messages so the section separator does not split
-///   that block.
-#[allow(clippy::too_many_arguments)]
-fn execute_without_harness(
-    mode: CompositionExecutionMode<'_>,
-    provider: Provider,
-    profile: &dyn WrapperProfile,
-    binary_path: &std::path::Path,
-    child_args: &[String],
-    child_env: &std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>,
-    child_cwd: &std::path::Path,
-    stdin_seed: Option<&str>,
-    wire_prompt: Option<&str>,
-    use_structured: bool,
-    structured_codex_output: Option<&StructuredCodexOutput>,
-    stdout_noise: &[&str],
-    stderr_noise: &[&str],
-    stream_verbosity: Verbosity,
-    detail_requested: bool,
-    env_context: &claudine::events::EnvironmentContext,
-    dispatch_context: &HashMap<String, serde_json::Value>,
-    term: &Terminal,
-    child_spawned: &mut bool,
-    prompt_timing: Option<claudine::stream::prompt_timing::PromptTimingContext>,
-    agent_perf_out: &mut Option<crate::perf::AgentExecutionPerf>,
-    iteration_signals_out: &mut Option<IterationSummarySignals>,
-    timeout_config: super::subagent_watchdog::TimeoutConfig,
-) -> Result<i32> {
-    let is_inline = matches!(mode, CompositionExecutionMode::Inline { .. });
-
-    let (agent_exit, final_response, deferred_summary) = if use_structured {
-        structured::run_structured_branch(
-            provider,
-            profile,
-            binary_path,
-            child_args,
-            child_env,
-            child_cwd,
-            stdin_seed,
-            wire_prompt,
-            structured_codex_output,
-            stderr_noise,
-            stream_verbosity,
-            env_context,
-            dispatch_context,
-            child_spawned,
-            prompt_timing,
-            timeout_config,
-            is_inline,
-            agent_perf_out,
-            term,
-        )?
-    } else {
-        legacy_goose::run_legacy_branch(
-            mode,
-            provider,
-            profile,
-            binary_path,
-            child_args,
-            child_env,
-            child_cwd,
-            stdin_seed,
-            stdout_noise,
-            stderr_noise,
-            structured_codex_output,
-            child_spawned,
-            agent_perf_out,
-            term,
-        )?
+        HarnessPromptMode::Compose
     };
 
-    let _span = tracing::info_span!("composition_postprocess").entered();
+    let mut prompt_state = HarnessPromptState {
+        mode: harness_mode,
+        source_path: request.prepared.resolved_path.clone(),
+        original_ref: request.file_ref.clone(),
+        base_prompt: None,
+        overlay: indexmap::IndexMap::new(),
+        prompt_tail: Vec::new(),
+        next_prompt_override: None,
+        next_resume_session_id: None,
+    };
 
-    // Lift loop-relevant signals from the per-iteration summary before
-    // the summary is consumed by the renderer below. The `compose --loop`
-    // orchestrator reads these to apply the rate-limit policy and to
-    // build an honest `LoopIterationFailed` error.
-    if let Some(result) = deferred_summary.as_ref() {
-        *iteration_signals_out = Some(IterationSummarySignals::from_summary(&result.summary));
+    let mut harness_base_args = args_before_prompt.clone();
+    if !use_structured {
+        profile.prepare_captured_output(&mut harness_base_args);
     }
 
-    match mode {
-        CompositionExecutionMode::Direct => {
-            if let Some(result) = deferred_summary {
-                summary::emit_composition_summary(
-                    &result.summary,
-                    &result.details,
-                    profile,
-                    env_context,
-                    stream_verbosity,
-                    detail_requested,
-                    dispatch_context,
-                    Some(&result.section_stream),
-                    false,
-                    result.agent_pid,
-                );
-            } else {
-                summary::emit_minimal_composition_summary(
-                    provider,
-                    agent_exit,
-                    profile,
-                    env_context,
-                    dispatch_context,
-                    None,
-                );
-            }
-            Ok(agent_exit)
-        }
-        CompositionExecutionMode::Inline {
-            closure_plan,
-            resolved_path,
-            session_interactive,
-            show_checks,
-        } => inline_guards::apply_inline_closure(
-            agent_exit,
-            final_response,
-            deferred_summary,
-            closure_plan,
-            resolved_path,
-            session_interactive,
-            show_checks,
-            provider,
-            profile,
-            env_context,
-            stream_verbosity,
-            detail_requested,
-            dispatch_context,
-            term,
-            child_cwd,
-        ),
+    // Harness loop manages the guard internally; defuse ours.
+    guard.defuse();
+    let (exit_code, harness_perf, harness_signals) = run_harness_loop(
+        provider,
+        profile,
+        binary_path.as_path(),
+        child_cwd,
+        effective_non_interactive,
+        request.timeout.clone(),
+        request.step_timeout.clone(),
+        &harness_base_args,
+        &env_plan.env,
+        &mut prompt_state,
+        effective_repo_root,
+        shell_options.clone(),
+        use_structured,
+        structured_codex_output.as_ref(),
+        stdout_noise,
+        stderr_noise,
+        profile.suppress_structured_stderr_on_success(),
+        show_checks,
+        stream_verbosity,
+        detail_requested,
+        &env_context,
+        &dispatch_context,
+        Some(materialized_harness_prompt_from_prepared(&request.prepared)),
+        &term,
+        lifecycle,
+        &lifecycle_ctx,
+        &emitter,
+        true,
+    )?;
+    if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {
+        collector.set_agent_perf(perf);
     }
+    let outcome = SingleCompositionOutcome {
+        exit_code,
+        provider,
+        agent_perf: perf_collector
+            .as_ref()
+            .and_then(|c| c.agent_perf())
+            .or(harness_perf),
+        // The harness loop now surfaces the terminal attempt's iteration
+        // signals, so `compose --loop` receives the same rate-limit /
+        // exit_reason pickup for every composition document.
+        iteration_signals: harness_signals,
+    };
+    // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
+    // The perf report is always emitted to stderr when requested.
+    if let Some(collector) = perf_collector {
+        crate::perf::emit_report(&collector.into_report());
+    }
+    Ok(outcome)
 }
 
 // -- Config loading -------------------------------------------------------
@@ -2415,8 +2185,12 @@ mod tests {
     fn load_selection_config_handles_missing_config() {
         let dir = tempfile::tempdir().unwrap();
         let nonexistent = dir.path().join("no-such-config.json");
-        let result = claudine::dispatch::loader::load_claudine_config(Some(&nonexistent), None);
-        assert!(result.is_err(), "expected error for missing config file");
+        let result =
+            claudine::dispatch::loader::load_claudine_config(Some(&nonexistent), None);
+        assert!(
+            result.is_err(),
+            "expected error for missing config file"
+        );
     }
 
     #[test]
@@ -3054,10 +2828,7 @@ mod tests {
         };
         let msg = agent_prompt_message(&state, Path::new("/tmp/doc.md"))
             .expect("single-invalid has a pre-prompt message");
-        assert!(
-            msg.contains("<red><b>Invalid Agent:</b></red>"),
-            "got: {msg}"
-        );
+        assert!(msg.contains("<red><b>Invalid Agent:</b></red>"), "got: {msg}");
         assert!(msg.contains("totally-bogus"), "got: {msg}");
         assert!(msg.contains("/tmp/doc.md"), "got: {msg}");
         // The TTY pre-prompt and the no-TTY abort body share this exact text.
@@ -3099,5 +2870,123 @@ mod tests {
                 "state {state:?} should not show a pre-prompt message"
             );
         }
+    }
+
+    // -- Interactive timeout conflict (Phase 3) -------------------------------
+
+    #[test]
+    fn timeout_conflict_message_names_source_and_flag() {
+        assert_eq!(
+            format_interactive_timeout_conflict(
+                SessionInteractivitySource::Frontmatter,
+                "--timeout"
+            ),
+            "interactive mode (from frontmatter) cannot be used with --timeout"
+        );
+        assert_eq!(
+            format_interactive_timeout_conflict(
+                SessionInteractivitySource::InteractiveFlag,
+                "--timeout"
+            ),
+            "interactive mode (from --interactive) cannot be used with --timeout"
+        );
+        assert_eq!(
+            format_interactive_timeout_conflict(
+                SessionInteractivitySource::Default,
+                "--timeout"
+            ),
+            "interactive mode (from default) cannot be used with --timeout"
+        );
+        // The step-silence flag is named distinctly so a `--step-timeout`
+        // conflict does not mis-report as `--timeout`.
+        assert_eq!(
+            format_interactive_timeout_conflict(
+                SessionInteractivitySource::Frontmatter,
+                "--step-timeout"
+            ),
+            "interactive mode (from frontmatter) cannot be used with --step-timeout"
+        );
+    }
+
+    /// The conflict check resolves both timeouts against CLI + frontmatter +
+    /// env sources, excluding the built-in `step_timeout` default. This mirrors
+    /// the executor guard's source resolution so the unit test catches a
+    /// regression that drops the `step_timeout` (or frontmatter) source.
+    fn explicit_timeouts_for(
+        cli_timeout: Option<&str>,
+        cli_step_timeout: Option<&str>,
+        fm: &serde_json::Value,
+    ) -> (Option<std::time::Duration>, Option<std::time::Duration>) {
+        let sp = std::path::Path::new("<test>");
+        let timeout = resolve_single_timeout(TimeoutResolutionInput {
+            cli: cli_timeout.map(str::to_string),
+            frontmatter: frontmatter_timeout_duration(fm, "timeout", sp),
+            env_var: "CLAUDINE_TIMEOUT_TEST_UNSET",
+            built_in: None,
+        });
+        let step_timeout = resolve_single_timeout(TimeoutResolutionInput {
+            cli: cli_step_timeout.map(str::to_string),
+            frontmatter: frontmatter_timeout_duration(fm, "step_timeout", sp),
+            env_var: "CLAUDINE_STEP_TIMEOUT_TEST_UNSET",
+            built_in: None,
+        });
+        (timeout, step_timeout)
+    }
+
+    #[test]
+    fn step_timeout_alone_is_an_explicit_conflict_source() {
+        // `--step-timeout` with no `--timeout` must still register as an
+        // explicit timeout, so a resolved-interactive session rejects it.
+        let empty = serde_json::json!({});
+        let (timeout, step_timeout) = explicit_timeouts_for(None, Some("30s"), &empty);
+        assert!(timeout.is_none(), "no wall-clock timeout was requested");
+        assert!(
+            step_timeout.is_some(),
+            "an explicit --step-timeout must count as a conflict source"
+        );
+    }
+
+    #[test]
+    fn frontmatter_timeout_is_an_explicit_conflict_source() {
+        // A composed-frontmatter `timeout` (the harness wall-clock key) must
+        // register as an explicit timeout even without any CLI flag.
+        let fm = serde_json::json!({ "timeout": "5m" });
+        let (timeout, step_timeout) = explicit_timeouts_for(None, None, &fm);
+        assert_eq!(timeout, Some(std::time::Duration::from_secs(300)));
+        assert!(step_timeout.is_none());
+    }
+
+    #[test]
+    fn no_explicit_timeout_when_all_sources_empty() {
+        // With no CLI flags, no frontmatter timeouts, and the built-in
+        // step_timeout default excluded, an interactive session has nothing to
+        // conflict with.
+        let empty = serde_json::json!({});
+        let (timeout, step_timeout) = explicit_timeouts_for(None, None, &empty);
+        assert!(timeout.is_none() && step_timeout.is_none());
+    }
+
+    // -- Inline interactive unsupported source (Phase 3) ----------------------
+
+    #[test]
+    fn inline_interactive_unsupported_names_frontmatter_source() {
+        let err = CompositionError::InlineInteractiveUnsupported {
+            provider: Provider::Claude.to_string(),
+            source_kind: SessionInteractivitySource::Frontmatter,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("Claude"), "{msg}");
+        assert!(msg.contains("frontmatter"), "{msg}");
+    }
+
+    #[test]
+    fn inline_interactive_unsupported_names_flag_source() {
+        let err = CompositionError::InlineInteractiveUnsupported {
+            provider: Provider::Claude.to_string(),
+            source_kind: SessionInteractivitySource::InteractiveFlag,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("Claude"), "{msg}");
+        assert!(msg.contains("--interactive"), "{msg}");
     }
 }

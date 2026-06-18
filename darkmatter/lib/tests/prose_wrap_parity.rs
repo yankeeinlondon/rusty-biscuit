@@ -44,9 +44,7 @@ fn long_top_level_paragraph_wraps_to_content_width_through_tree() {
     opts.max_width = Some(40);
     opts.color_depth = Some(ColorDepth::TrueColor);
 
-    let tree = render_tree_terminal(&md, &opts)
-        .expect("tree render")
-        .output;
+    let tree = render_tree_terminal(&md, &opts).expect("tree render").output;
     let plain = strip_ansi(&tree);
 
     let lines: Vec<&str> = plain.lines().filter(|l| !l.trim().is_empty()).collect();
@@ -54,7 +52,11 @@ fn long_top_level_paragraph_wraps_to_content_width_through_tree() {
         lines.len() > 1,
         "long paragraph must wrap onto multiple lines through the tree; got:\n{plain}",
     );
-    let max_len = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+    let max_len = lines
+        .iter()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0);
     assert!(
         max_len <= 40,
         "wrapped lines must be capped to the 40-col content width; got max={max_len}:\n{plain}",
@@ -79,19 +81,12 @@ fn tree_prose_wrap_matches_public_entry_within_width_and_lossless() {
     opts.max_width = Some(40);
     opts.color_depth = Some(ColorDepth::TrueColor);
 
-    let tree = render_tree_terminal(&md, &opts)
-        .expect("tree render")
-        .output;
+    let tree = render_tree_terminal(&md, &opts).expect("tree render").output;
     let public = md.as_terminal(opts).expect("public render");
 
-    let tree_words: Vec<String> = strip_ansi(&tree)
-        .split_whitespace()
-        .map(String::from)
-        .collect();
-    let public_words: Vec<String> = strip_ansi(&public)
-        .split_whitespace()
-        .map(String::from)
-        .collect();
+    let tree_words: Vec<String> = strip_ansi(&tree).split_whitespace().map(String::from).collect();
+    let public_words: Vec<String> =
+        strip_ansi(&public).split_whitespace().map(String::from).collect();
     assert_eq!(
         tree_words, public_words,
         "direct and public entry points must preserve the same words in order",
@@ -102,10 +97,7 @@ fn tree_prose_wrap_matches_public_entry_within_width_and_lossless() {
         .map(|l| l.trim_end().chars().count())
         .max()
         .unwrap_or(0);
-    assert!(
-        max_len <= 40,
-        "every wrapped line must stay within 40 cols; got {max_len}"
-    );
+    assert!(max_len <= 40, "every wrapped line must stay within 40 cols; got {max_len}");
 
     // Both renderers wrap (more than one visible line) for this 123-col input.
     let tree_visible = strip_ansi(&tree)
@@ -129,9 +121,7 @@ fn tree_blockquote_uses_legacy_quarter_block_bar() {
     opts.max_width = Some(40);
     opts.color_depth = Some(ColorDepth::TrueColor);
 
-    let tree = render_tree_terminal(&md, &opts)
-        .expect("tree render")
-        .output;
+    let tree = render_tree_terminal(&md, &opts).expect("tree render").output;
     let plain = strip_ansi(&tree);
 
     let bar_lines: Vec<&str> = plain.lines().filter(|l| l.contains('▐')).collect();
@@ -148,8 +138,5 @@ fn tree_blockquote_uses_legacy_quarter_block_bar() {
         .map(|l| l.trim_end().chars().count())
         .max()
         .unwrap_or(0);
-    assert!(
-        max_len <= 40,
-        "blockquote lines must stay within 40 cols; got {max_len}"
-    );
+    assert!(max_len <= 40, "blockquote lines must stay within 40 cols; got {max_len}");
 }

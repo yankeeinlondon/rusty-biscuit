@@ -23,7 +23,7 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Length, TargetValue};
 use claudine::composition::{
     AgentResolutionState, CompositionExecutionRequest, ProviderResolutionReason,
-    agent_state_breakdown, classify_agent_resolution,
+    SessionInteractivitySource, agent_state_breakdown, classify_agent_resolution,
 };
 use darkmatter::markdown::highlighting::{
     ColorMode as DmColorMode, ThemePair, detect_prose_theme, highlight_yaml_lines_with_theme,
@@ -52,6 +52,10 @@ pub(crate) struct DryRunRender {
     pub model: Option<String>,
     /// Whether YOLO / auto-approval mode is active.
     pub yolo: bool,
+    /// Whether the provider session is interactive.
+    pub session_interactive: bool,
+    /// Why the session is interactive or non-interactive.
+    pub session_source: SessionInteractivitySource,
     /// Focused monorepo area (`ctx.area`), present only inside a monorepo.
     pub area: Option<String>,
     /// Absolute path to the source document, used for the OSC8 link.
@@ -67,6 +71,8 @@ impl DryRunRender {
     /// - `name` / `description` ← frontmatter string fields
     /// - `agent` / `model` ← `resolved_target` (None ⇒ interactive / default)
     /// - `yolo` ← `request.yolo`
+    /// - `session_interactive` / `session_source` ← `request.session_interactive` /
+    ///   `request.session_interactive_source`
     /// - `area` ← `prep_launch_workspace.package_context.package_area`
     /// - `document_path` ← `prepared.resolved_path`
     pub(crate) fn from_request(request: &CompositionExecutionRequest) -> Self {
@@ -79,10 +85,9 @@ impl DryRunRender {
         // auto-select), reclassify from the snapshot so the cell carries the
         // full breakdown — otherwise an auto-selected one-installed list would
         // collapse to a bare provider name and lose its auto-select header.
-        let explicit_flag = request
-            .resolved_target
-            .as_ref()
-            .is_some_and(|t| matches!(t.provider_reason, ProviderResolutionReason::ExplicitFlag));
+        let explicit_flag = request.resolved_target.as_ref().is_some_and(|t| {
+            matches!(t.provider_reason, ProviderResolutionReason::ExplicitFlag)
+        });
         let agent = if explicit_flag {
             AgentResolutionState::Selected {
                 provider: request.resolved_target.as_ref().unwrap().provider,
@@ -115,6 +120,8 @@ impl DryRunRender {
             agent,
             model,
             yolo: request.yolo,
+            session_interactive: request.session_interactive,
+            session_source: request.session_interactive_source,
             area,
             document_path: request.prepared.resolved_path.clone(),
         }
@@ -160,7 +167,8 @@ pub(crate) fn render_frontmatter(frontmatter: &Value, term: &Terminal) -> String
         biscuit_terminal::discovery::detection::ColorMode::Light => DmColorMode::Dark,
         _ => DmColorMode::Light,
     };
-    let highlighted = highlight_yaml_lines_with_theme(yaml.trim_end(), theme_pair, color_mode);
+    let highlighted =
+        highlight_yaml_lines_with_theme(yaml.trim_end(), theme_pair, color_mode);
     // 1ch left margin on every line.
     highlighted
         .into_iter()
@@ -203,7 +211,8 @@ fn render_agent_cell(state: &AgentResolutionState, term: &Terminal) -> String {
 /// Render the dry-run metadata table to a terminal string.
 ///
 /// Rows, in order: Document (blue OSC8 link), Description (only when set),
-/// Agent, Model, YOLO, Area (only inside a monorepo). Output targets stderr.
+/// Agent, Model, YOLO, Session (interactive/non-interactive with source),
+/// Area (only inside a monorepo). Output targets stderr.
 /// The table has a `1ch` top margin to separate it from the YAML block above.
 pub(crate) fn render_metadata_table(render: &DryRunRender, term: &Terminal) -> String {
     let mut table = base_table(vec![TableColumn::new("Field"), TableColumn::new("Value")]);
@@ -220,10 +229,8 @@ pub(crate) fn render_metadata_table(render: &DryRunRender, term: &Terminal) -> S
             .unwrap_or_else(|| relative_or_abs(&render.document_path))
     });
     let href = format!("file://{}", render.document_path.display());
-    let document_cell = Prose::new(format!(
-        "<blue><a href=\"{href}\">{document_label}</a></blue>"
-    ))
-    .render(term);
+    let document_cell =
+        Prose::new(format!("<blue><a href=\"{href}\">{document_label}</a></blue>")).render(term);
     table.add_row(vec!["Document".into(), document_cell.into()]);
 
     // Description: only when present, italic + dim.
@@ -251,6 +258,19 @@ pub(crate) fn render_metadata_table(render: &DryRunRender, term: &Terminal) -> S
     };
     table.add_row(vec!["YOLO".into(), yolo_cell.into()]);
 
+    // Session: interactive / non-interactive with resolved source.
+    let session_label = if render.session_interactive {
+        "interactive"
+    } else {
+        "non-interactive"
+    };
+    let session_cell = Prose::new(format!(
+        "{session_label} ({source})",
+        source = render.session_source
+    ))
+    .render(term);
+    table.add_row(vec!["Session".into(), session_cell.into()]);
+
     // Area: only inside a monorepo (Decision 3).
     if let Some(area) = &render.area {
         table.add_row(vec!["Area".into(), area.clone().into()]);
@@ -275,6 +295,30 @@ mod tests {
         yolo: bool,
         area: Option<&str>,
     ) -> DryRunRender {
+        render_with_session(
+            name,
+            description,
+            agent,
+            model,
+            yolo,
+            false,
+            SessionInteractivitySource::Default,
+            area,
+        )
+    }
+
+    /// Build a `DryRunRender` with explicit session interactivity state.
+    #[allow(clippy::too_many_arguments)]
+    fn render_with_session(
+        name: Option<&str>,
+        description: Option<&str>,
+        agent: AgentResolutionState,
+        model: Option<&str>,
+        yolo: bool,
+        session_interactive: bool,
+        session_source: SessionInteractivitySource,
+        area: Option<&str>,
+    ) -> DryRunRender {
         DryRunRender {
             body: "body".to_string(),
             frontmatter: json!({}),
@@ -283,6 +327,8 @@ mod tests {
             agent,
             model: model.map(str::to_string),
             yolo,
+            session_interactive,
+            session_source,
             area: area.map(str::to_string),
             document_path: PathBuf::from("/tmp/doc.md"),
         }
@@ -302,16 +348,21 @@ mod tests {
         strip_escape_codes(render_agent_cell(state, &term))
     }
 
+    /// Extract the trimmed value cell for a single-row label from the plain
+    /// metadata table. Returns `None` if the label is not found.
+    fn plain_row_value(plain: &str, label: &str) -> Option<String> {
+        for line in plain.lines() {
+            let cells: Vec<&str> = line.split('│').collect();
+            if cells.len() >= 3 && cells[1].trim() == label {
+                return Some(cells[2].trim().to_string());
+            }
+        }
+        None
+    }
+
     #[test]
     fn table_omits_description_when_absent() {
-        let render = render_with(
-            Some("doc"),
-            None,
-            AgentResolutionState::NoAgent,
-            None,
-            false,
-            None,
-        );
+        let render = render_with(Some("doc"), None, AgentResolutionState::NoAgent, None, false, None);
         let plain = plain_table(&render);
         assert!(!plain.contains("Description"));
     }
@@ -362,14 +413,7 @@ mod tests {
 
     #[test]
     fn agent_falls_back_to_interactive() {
-        let render = render_with(
-            Some("doc"),
-            None,
-            AgentResolutionState::NoAgent,
-            None,
-            false,
-            None,
-        );
+        let render = render_with(Some("doc"), None, AgentResolutionState::NoAgent, None, false, None);
         let plain = plain_table(&render);
         assert!(plain.contains("interactive"));
     }
@@ -387,8 +431,9 @@ mod tests {
             None,
         );
         let plain = plain_table(&render);
-        assert!(plain.contains(&Provider::Claude.to_string()));
-        assert!(!plain.contains("interactive"));
+        let agent_value = plain_row_value(&plain, "Agent").expect("Agent row should exist");
+        assert!(agent_value.contains(&Provider::Claude.to_string()));
+        assert!(!agent_value.contains("interactive"));
     }
 
     #[test]
@@ -402,7 +447,8 @@ mod tests {
             None,
         );
         let plain = plain_table(&render);
-        assert!(plain.contains("default"));
+        let model_value = plain_row_value(&plain, "Model").expect("Model row should exist");
+        assert!(model_value.contains("default"));
     }
 
     #[test]
@@ -416,8 +462,9 @@ mod tests {
             None,
         );
         let plain = plain_table(&render);
-        assert!(plain.contains("opus-4.8"));
-        assert!(!plain.contains("default"));
+        let model_value = plain_row_value(&plain, "Model").expect("Model row should exist");
+        assert!(model_value.contains("opus-4.8"));
+        assert!(!model_value.contains("default"));
     }
 
     #[test]
@@ -443,6 +490,53 @@ mod tests {
     }
 
     #[test]
+    fn session_row_renders_for_each_source() {
+        for (interactive, source, expected) in [
+            (true, SessionInteractivitySource::InteractiveFlag, "interactive (--interactive)"),
+            (true, SessionInteractivitySource::Frontmatter, "interactive (frontmatter)"),
+            (false, SessionInteractivitySource::NoInteractiveFlag, "non-interactive (--no-interactive)"),
+            (false, SessionInteractivitySource::Default, "non-interactive (default)"),
+        ] {
+            let render = render_with_session(
+                Some("doc"),
+                None,
+                AgentResolutionState::NoAgent,
+                None,
+                false,
+                interactive,
+                source,
+                None,
+            );
+            let plain = plain_table(&render);
+            assert!(
+                plain.contains("Session"),
+                "Session row should appear for source {source}"
+            );
+            assert!(
+                plain.contains(expected),
+                "expected '{expected}' for source {source}; got:\n{plain}"
+            );
+        }
+    }
+
+    #[test]
+    fn session_row_no_interactive_overrides_frontmatter_true() {
+        let render = render_with_session(
+            Some("doc"),
+            None,
+            AgentResolutionState::NoAgent,
+            None,
+            false,
+            false,
+            SessionInteractivitySource::NoInteractiveFlag,
+            None,
+        );
+        let plain = plain_table(&render);
+        assert!(plain.contains("Session"));
+        assert!(plain.contains("non-interactive (--no-interactive)"));
+    }
+
+    #[test]
     fn document_uses_name_when_set() {
         let render = render_with(
             Some("My Document"),
@@ -458,7 +552,14 @@ mod tests {
 
     #[test]
     fn document_uses_path_when_name_absent() {
-        let render = render_with(None, None, AgentResolutionState::NoAgent, None, false, None);
+        let render = render_with(
+            None,
+            None,
+            AgentResolutionState::NoAgent,
+            None,
+            false,
+            None,
+        );
         let plain = plain_table(&render);
         // No `name` ⇒ the document label is derived from the path.
         assert!(plain.contains("doc.md"));
@@ -495,14 +596,8 @@ mod tests {
         let term = Terminal::default();
         let rendered = render_frontmatter_heading(&term);
         let plain = strip_escape_codes(&rendered);
-        assert!(
-            plain.contains("Frontmatter"),
-            "heading should contain 'Frontmatter': {plain}"
-        );
-        assert!(
-            plain.contains("resolved"),
-            "heading should contain 'resolved': {plain}"
-        );
+        assert!(plain.contains("Frontmatter"), "heading should contain 'Frontmatter': {plain}");
+        assert!(plain.contains("resolved"), "heading should contain 'resolved': {plain}");
     }
 
     #[test]
@@ -510,10 +605,7 @@ mod tests {
         let term = Terminal::default();
         let rendered = render_hr(&term);
         let plain = strip_escape_codes(&rendered);
-        assert!(
-            !plain.trim().is_empty(),
-            "horizontal rule should not be empty"
-        );
+        assert!(!plain.trim().is_empty(), "horizontal rule should not be empty");
     }
 
     #[test]

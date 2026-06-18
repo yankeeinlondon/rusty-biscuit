@@ -264,7 +264,11 @@ fn mermaid_rich_without_opt_in_falls_through_to_code_renderer() {
 fn mermaid_off_mode_falls_through_to_code_renderer() {
     use renderable::tree::GraphicsMode;
 
-    let mermaid_node = RenderNode::code(Some("mermaid".to_string()), None, "graph TD; A to B");
+    let mermaid_node = RenderNode::code(
+        Some("mermaid".to_string()),
+        None,
+        "graph TD; A to B",
+    );
 
     let term = Terminal::new_optimistic(80);
     let mut context = TerminalRenderContext::from_terminal(&term);

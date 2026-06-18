@@ -136,9 +136,7 @@ mod tests {
             ctx,
             source: yaml_err,
         };
-        let report: Report = eyre!(claudine::composition::CompositionError::FrontmatterParse(
-            md
-        ));
+        let report: Report = eyre!(claudine::composition::CompositionError::FrontmatterParse(md));
 
         let rendered = try_render_block_report(&report, &width80()).expect("block error found");
         let plain = strip_escape_codes(&rendered);

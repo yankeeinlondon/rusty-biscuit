@@ -100,9 +100,13 @@ struct RemoteFetchInner {
     policy: FetchPolicy,
     stats: Mutex<RemoteFetchStats>,
     /// Shared redirect-disabled HTTP client reused for every fetch in a compose
-    /// run. `None` means the client build failed; every fetch is then reported
-    /// as a failure rather than falling back to a redirect-following client.
-    client: Option<PolicyClient>,
+    /// run. Built lazily on first fetch so construction happens *inside* the
+    /// shared runtime (reqwest binds its IO/timer driver to the ambient runtime
+    /// at build time; a client built on a non-runtime thread — e.g. the sync CLI
+    /// `main` — fails every send with "error sending request"). `None` (after
+    /// init) means the client build failed; every fetch is then reported as a
+    /// failure rather than falling back to a redirect-following client.
+    client: OnceLock<Option<PolicyClient>>,
     /// Caps concurrent in-flight network requests. Acquired inside each
     /// spawned fetch task, so the slot map may hold more entries than there
     /// are permits without all requests being issued at once.
@@ -142,6 +146,19 @@ impl RemoteFetchInner {
                     .build()
                     .ok()
             })
+            .as_ref()
+    }
+
+    /// Returns the shared HTTP client, building it on first use.
+    ///
+    /// Must be called from a thread with an active Tokio runtime (every fetch
+    /// task is, since it runs on [`runtime`](Self::runtime)). Building here
+    /// rather than in [`build`](RemoteFetchRuntime::build) guarantees reqwest
+    /// binds to the runtime that will issue the request. Returns `None` only if
+    /// the client build failed.
+    fn client(&self) -> Option<&PolicyClient> {
+        self.client
+            .get_or_init(|| PolicyClient::new().ok())
             .as_ref()
     }
 }
@@ -226,7 +243,7 @@ impl RemoteFetchRuntime {
                 slots: DashMap::new(),
                 policy,
                 stats: Mutex::new(RemoteFetchStats::default()),
-                client: PolicyClient::new().ok(),
+                client: OnceLock::new(),
                 // A zero cap would deadlock every fetch; clamp to at least one.
                 semaphore: Arc::new(tokio::sync::Semaphore::new(concurrency.max(1))),
                 runtime: OnceLock::new(),
@@ -242,10 +259,12 @@ impl RemoteFetchRuntime {
     /// Checks whether a URL is allowed by policy, returning a
     /// `RemoteReadError::DeniedByPolicy` if not.
     pub fn check_allowed(&self, url: &Url) -> Result<(), RemoteReadError> {
-        let host = url.host_str().ok_or_else(|| RemoteReadError::InvalidUrl {
-            url: url.to_string(),
-            reason: "missing host".to_string(),
-        })?;
+        let host = url
+            .host_str()
+            .ok_or_else(|| RemoteReadError::InvalidUrl {
+                url: url.to_string(),
+                reason: "missing host".to_string(),
+            })?;
         if self.inner.policy.is_allowed(host) {
             Ok(())
         } else {
@@ -308,10 +327,8 @@ impl RemoteFetchRuntime {
                     // Count in-flight only past the semaphore so the peak
                     // reflects requests actually issued, bounded by the cap.
                     let current = task_inner.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
-                    task_inner
-                        .peak_in_flight
-                        .fetch_max(current, Ordering::SeqCst);
-                    let result = match task_inner.client.as_ref() {
+                    task_inner.peak_in_flight.fetch_max(current, Ordering::SeqCst);
+                    let result = match task_inner.client() {
                         Some(client) => {
                             fetch_with_cache(
                                 task_inner.store.as_deref(),
@@ -512,8 +529,8 @@ mod tests {
 #[cfg(test)]
 mod integration_tests {
     use super::*;
-    use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+    use wiremock::matchers::{method, path};
 
     #[tokio::test]
     async fn mock_server_fetch_succeeds() {
@@ -782,11 +799,7 @@ mod persistent_cache_tests {
         let dir = tempfile::tempdir().unwrap();
         let store = temp_store(&dir);
         let url = Url::parse(&format!("{}/doc.md", server.uri())).unwrap();
-        let cfg = config(
-            Some(Duration::from_secs(3600)),
-            false,
-            RemoteFreshnessMode::Strict,
-        );
+        let cfg = config(Some(Duration::from_secs(3600)), false, RemoteFreshnessMode::Strict);
 
         // First run: populates the cache from the network.
         let rt1 = runtime(Arc::clone(&store), cfg);
@@ -822,18 +835,11 @@ mod persistent_cache_tests {
             let url = Url::parse(&format!("{}/doc.md", server.uri())).unwrap();
             let rt = runtime(
                 Arc::clone(&store),
-                config(
-                    Some(Duration::from_secs(3600)),
-                    false,
-                    RemoteFreshnessMode::Optimistic,
-                ),
+                config(Some(Duration::from_secs(3600)), false, RemoteFreshnessMode::Optimistic),
             );
             rt.register_and_fetch(url.clone());
             tokio::time::sleep(SETTLE).await;
-            assert_eq!(
-                rt.get_content(&url).unwrap().as_deref(),
-                Some("cached-body")
-            );
+            assert_eq!(rt.get_content(&url).unwrap().as_deref(), Some("cached-body"));
             url
             // Server shuts down here.
         };
@@ -846,10 +852,7 @@ mod persistent_cache_tests {
         );
         rt.register_and_fetch(url.clone());
         tokio::time::sleep(SETTLE).await;
-        assert_eq!(
-            rt.get_content(&url).unwrap().as_deref(),
-            Some("cached-body")
-        );
+        assert_eq!(rt.get_content(&url).unwrap().as_deref(), Some("cached-body"));
         assert_eq!(rt.stats().cache_hits, 1);
         assert_eq!(rt.stats().failures, 0);
     }
@@ -954,11 +957,7 @@ mod persistent_cache_tests {
         // Populate cache with a long TTL (would otherwise be served from disk).
         let rt1 = runtime(
             Arc::clone(&store),
-            config(
-                Some(Duration::from_secs(3600)),
-                false,
-                RemoteFreshnessMode::Strict,
-            ),
+            config(Some(Duration::from_secs(3600)), false, RemoteFreshnessMode::Strict),
         );
         rt1.register_and_fetch(url.clone());
         tokio::time::sleep(SETTLE).await;
@@ -967,11 +966,7 @@ mod persistent_cache_tests {
         // refresh = true must revalidate even though the entry is fresh.
         let rt2 = runtime(
             Arc::clone(&store),
-            config(
-                Some(Duration::from_secs(3600)),
-                true,
-                RemoteFreshnessMode::Strict,
-            ),
+            config(Some(Duration::from_secs(3600)), true, RemoteFreshnessMode::Strict),
         );
         rt2.register_and_fetch(url.clone());
         tokio::time::sleep(SETTLE).await;
@@ -1020,19 +1015,13 @@ mod persistent_cache_tests {
         let rt1 = runtime(Arc::clone(&store), cfg);
         rt1.register_and_fetch(url.clone());
         tokio::time::sleep(SETTLE).await;
-        assert_eq!(
-            rt1.get_content(&url).unwrap().as_deref(),
-            Some("stale-but-usable")
-        );
+        assert_eq!(rt1.get_content(&url).unwrap().as_deref(), Some("stale-but-usable"));
 
         // Revalidation returns 500; Fallback serves the stale cached body.
         let rt2 = runtime(Arc::clone(&store), cfg);
         rt2.register_and_fetch(url.clone());
         tokio::time::sleep(SETTLE).await;
-        assert_eq!(
-            rt2.get_content(&url).unwrap().as_deref(),
-            Some("stale-but-usable")
-        );
+        assert_eq!(rt2.get_content(&url).unwrap().as_deref(), Some("stale-but-usable"));
         assert_eq!(rt2.stats().stale_served, 1);
     }
 
@@ -1042,10 +1031,7 @@ mod persistent_cache_tests {
         // This test pins that contract through `RemoteFreshnessMode::default()`
         // rather than a hard-coded `Fallback`, so a future default flip fails
         // here loudly instead of silently regressing offline/CI resilience.
-        assert_eq!(
-            RemoteFreshnessMode::default(),
-            RemoteFreshnessMode::Fallback
-        );
+        assert_eq!(RemoteFreshnessMode::default(), RemoteFreshnessMode::Fallback);
 
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -1066,19 +1052,13 @@ mod persistent_cache_tests {
         let rt1 = runtime(Arc::clone(&store), cfg);
         rt1.register_and_fetch(url.clone());
         tokio::time::sleep(SETTLE).await;
-        assert_eq!(
-            rt1.get_content(&url).unwrap().as_deref(),
-            Some("stale-but-usable")
-        );
+        assert_eq!(rt1.get_content(&url).unwrap().as_deref(), Some("stale-but-usable"));
 
         // Revalidation returns 500; the default mode serves the stale body.
         let rt2 = runtime(Arc::clone(&store), cfg);
         rt2.register_and_fetch(url.clone());
         tokio::time::sleep(SETTLE).await;
-        assert_eq!(
-            rt2.get_content(&url).unwrap().as_deref(),
-            Some("stale-but-usable")
-        );
+        assert_eq!(rt2.get_content(&url).unwrap().as_deref(), Some("stale-but-usable"));
         assert_eq!(rt2.stats().stale_served, 1);
     }
 

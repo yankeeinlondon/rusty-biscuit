@@ -205,12 +205,13 @@ pub fn needs_shadow_home(
     effective_root: Option<&Path>,
 ) -> bool {
     repo_only
-        || matches!(provider, Provider::Codex) && {
-            let repo_root = effective_root
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|| resolve_repo_root(cwd));
-            codex_repo_prompts_source(&repo_root).is_some()
-        }
+        || matches!(provider, Provider::Codex)
+            && {
+                let repo_root = effective_root
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| resolve_repo_root(cwd));
+                codex_repo_prompts_source(&repo_root).is_some()
+            }
 }
 
 /// Measured breakdown of [`build_repo_home_env`], for `--perf`.
@@ -686,24 +687,14 @@ mod tests {
         // When the supplied effective root contains prompts, Codex needs a
         // shadow home even if cwd lives somewhere without prompts.
         assert!(
-            needs_shadow_home(
-                Provider::Codex,
-                &without_prompts,
-                false,
-                Some(&with_prompts)
-            ),
+            needs_shadow_home(Provider::Codex, &without_prompts, false, Some(&with_prompts)),
             "expected true when effective_root has codex prompts"
         );
 
         // When the supplied effective root lacks prompts, Codex does not need
         // a shadow home (repo_only is false).
         assert!(
-            !needs_shadow_home(
-                Provider::Codex,
-                &with_prompts,
-                false,
-                Some(&without_prompts)
-            ),
+            !needs_shadow_home(Provider::Codex, &with_prompts, false, Some(&without_prompts)),
             "expected false when effective_root has no codex prompts"
         );
 
@@ -721,18 +712,8 @@ mod tests {
         fs::create_dir_all(&empty).unwrap();
 
         // repo_only=true forces shadow home for every provider.
-        assert!(needs_shadow_home(
-            Provider::Codex,
-            &empty,
-            true,
-            Some(&empty)
-        ));
-        assert!(needs_shadow_home(
-            Provider::Claude,
-            &empty,
-            true,
-            Some(&empty)
-        ));
+        assert!(needs_shadow_home(Provider::Codex, &empty, true, Some(&empty)));
+        assert!(needs_shadow_home(Provider::Claude, &empty, true, Some(&empty)));
         assert!(needs_shadow_home(Provider::OpenCode, &empty, true, None));
     }
 

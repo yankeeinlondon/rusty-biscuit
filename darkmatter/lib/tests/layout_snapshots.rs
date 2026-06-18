@@ -5,8 +5,8 @@
 
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::layout::{ComponentPolicy, DarkmatterPage, PageBackground, PageComponent};
-use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::terminal::{ColorDepth, TerminalOptions};
+use darkmatter::markdown::Markdown;
 
 struct ColorSnapshotEnv {
     no_color: Option<String>,

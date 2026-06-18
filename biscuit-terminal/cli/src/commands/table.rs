@@ -34,9 +34,7 @@ fn color_style_value(
 /// declaration, so an unrecognized token is a user mistake, not header text.
 fn parse_column_type(token: &str) -> color_eyre::Result<ColumnType> {
     let token = token.trim();
-    if token.is_empty()
-        || token.eq_ignore_ascii_case("string")
-        || token.eq_ignore_ascii_case("text")
+    if token.is_empty() || token.eq_ignore_ascii_case("string") || token.eq_ignore_ascii_case("text")
     {
         return Ok(ColumnType::String);
     }

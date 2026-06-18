@@ -60,10 +60,8 @@ fn styled_corpus_document() -> Document {
     };
 
     // Heading carrying layout + an inheritable style.
-    let mut heading = RenderNode::heading(
-        HeadingDepth::new(2).unwrap(),
-        vec![RenderNode::text("Title")],
-    );
+    let mut heading =
+        RenderNode::heading(HeadingDepth::new(2).unwrap(), vec![RenderNode::text("Title")]);
     heading.attrs.set_layout(&Layout::default());
     heading.attrs.set_style(&red);
 
@@ -102,11 +100,9 @@ fn styled_corpus_document() -> Document {
     task_item.attrs.set_task_hints(&TaskHints {
         state: TaskState::InProgress,
     });
-    task_item.attrs.set_hint(
-        HintNamespace("myapp.custom"),
-        "kind",
-        serde_json::json!("solid"),
-    );
+    task_item
+        .attrs
+        .set_hint(HintNamespace("myapp.custom"), "kind", serde_json::json!("solid"));
     let mut list = RenderNode::list(false, None, vec![task_item]);
     list.attrs.set_list_marker_policy(ListMarkerPolicy::None);
     list.attrs.set_list_hints(&ListRenderHints {
@@ -155,8 +151,9 @@ fn styled_corpus_document() -> Document {
         PaintColor::new(Color::Tailwind(Tailwind::Slate200)).with_opacity(Opacity::new(128));
     let alpha_bg =
         PaintColor::new(Color::Tailwind(Tailwind::Red500)).with_opacity(Opacity::new(64));
-    let mut boxed =
-        RenderNode::block_quote(vec![RenderNode::paragraph(vec![RenderNode::text("boxed")])]);
+    let mut boxed = RenderNode::block_quote(vec![RenderNode::paragraph(vec![RenderNode::text(
+        "boxed",
+    )])]);
     boxed.attrs.set_layout(&Layout {
         margin: Edges::all(Length::ch(1)),
         padding: Edges::all(Length::ch(2)),
@@ -213,16 +210,7 @@ fn styled_corpus_document() -> Document {
         sources: SourceRegistry::default(),
         metadata: DocumentMetadata::default(),
         root: RenderNode::root(vec![
-            heading,
-            styled_para,
-            progress,
-            columns,
-            list,
-            table,
-            code,
-            boxed,
-            fit,
-            ordered,
+            heading, styled_para, progress, columns, list, table, code, boxed, fit, ordered,
             link_para,
         ]),
     }
@@ -237,8 +225,8 @@ fn terminal_fold_does_zero_renderable_owned_hint_roundtrips() {
     let doc = styled_corpus_document();
 
     reset_hint_accesses();
-    let _ =
-        render_terminal_document(&doc, &TerminalRenderOptions::default()).expect("terminal fold");
+    let _ = render_terminal_document(&doc, &TerminalRenderOptions::default())
+        .expect("terminal fold");
     let (renderable_owned, _extension) = hint_accesses();
 
     assert_eq!(

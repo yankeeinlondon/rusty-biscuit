@@ -19,7 +19,7 @@ use crate::style::warning::{StyleWarning, StyleWarningKind};
 /// `sub_spec` is `<=` this constant are considered wired and stay silent.
 ///
 /// Advance this constant whenever a future sub-spec wires its keys.
-pub const ACTIVE_STYLE_WIRING_SUB_SPEC: u8 = 7;
+pub const ACTIVE_STYLE_WIRING_SUB_SPEC: u8 = 8;
 
 /// Parse a `serde_json::Value` representing the value at the `style:` key.
 ///
@@ -755,11 +755,7 @@ mod tests {
             .iter()
             .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
             .collect();
-        assert!(
-            inactive.is_empty(),
-            "expected zero KnownButInactive warnings; got: {:?}",
-            inactive
-        );
+        assert!(inactive.is_empty(), "expected zero KnownButInactive warnings; got: {:?}", inactive);
     }
 
     #[test]
@@ -886,12 +882,7 @@ mod tests {
             .iter()
             .filter(|w| matches!(w.kind, StyleWarningKind::Deprecated { .. }))
             .collect();
-        assert_eq!(
-            deprecated.len(),
-            2,
-            "expected 2 deprecated warnings: {:?}",
-            w
-        );
+        assert_eq!(deprecated.len(), 2, "expected 2 deprecated warnings: {:?}", w);
         assert!(deprecated.iter().any(|w| w.path == "hr.style"));
         assert!(deprecated.iter().any(|w| w.path == "hr.color"));
     }
@@ -914,11 +905,8 @@ mod tests {
         let mut fm = Frontmatter::new();
         fm.insert("style", json!({"hr": {"kind": "waves", "weight": "thick"}}))
             .unwrap();
-        fm.insert(
-            "hr",
-            json!({"style": "dots", "weight": "thin", "color": "red"}),
-        )
-        .unwrap();
+        fm.insert("hr", json!({"style": "dots", "weight": "thin", "color": "red"}))
+            .unwrap();
         let (s, w) = from_frontmatter(&fm).unwrap();
         let hr = s.hr.expect("hr should exist");
         // style.hr values win.
@@ -1019,10 +1007,8 @@ mod tests {
         match into_strict(parsed) {
             Err(StyleParseError::Strict { warnings }) => {
                 assert!(
-                    warnings
-                        .iter()
-                        .any(|w| w.path == "hr"
-                            && matches!(w.kind, StyleWarningKind::Deprecated { .. })),
+                    warnings.iter().any(|w| w.path == "hr"
+                        && matches!(w.kind, StyleWarningKind::Deprecated { .. })),
                     "expected hr deprecation, got {:?}",
                     warnings
                 );
@@ -1041,10 +1027,8 @@ mod tests {
         match into_strict(parsed) {
             Err(StyleParseError::Strict { warnings }) => {
                 assert!(
-                    warnings
-                        .iter()
-                        .any(|w| w.path == "hr"
-                            && matches!(w.kind, StyleWarningKind::Deprecated { .. })),
+                    warnings.iter().any(|w| w.path == "hr"
+                        && matches!(w.kind, StyleWarningKind::Deprecated { .. })),
                     "expected hr deprecation, got {:?}",
                     warnings
                 );
@@ -1119,11 +1103,13 @@ mod tests {
         match into_strict(parsed) {
             Err(StyleParseError::Strict { warnings }) => {
                 assert!(
-                    warnings.iter().any(|w| w.path == "style.hr.alignment"
-                        && matches!(
-                            &w.kind,
-                            StyleWarningKind::Deprecated { replacement } if replacement == "center"
-                        )),
+                    warnings
+                        .iter()
+                        .any(|w| w.path == "style.hr.alignment"
+                            && matches!(
+                                &w.kind,
+                                StyleWarningKind::Deprecated { replacement } if replacement == "center"
+                            )),
                     "expected style.hr.alignment deprecation with replacement=center, got {:?}",
                     warnings
                 );
@@ -1191,6 +1177,64 @@ mod tests {
                 path,
                 inactive
             );
+        }
+    }
+
+    #[test]
+    fn into_strict_passes_clean_disclosure_style() {
+        let parsed = from_json_value(
+            &json!({
+                "disclosure": {
+                    "width": "40ch",
+                    "max-width": "50%",
+                    "alignment": "left",
+                    "color": "red-500",
+                    "bg-color": "blue-500"
+                }
+            }),
+        )
+        .unwrap();
+        let s = into_strict(parsed).unwrap();
+        assert!(s.disclosure.is_some());
+    }
+
+    #[test]
+    fn into_strict_fails_on_unknown_disclosure_key() {
+        let parsed = from_json_value(&json!({"disclosure": {"unknown_key": "x"}})).unwrap();
+        match into_strict(parsed) {
+            Err(StyleParseError::Strict { warnings }) => {
+                assert_eq!(warnings.len(), 1);
+                assert_eq!(warnings[0].path, "style.disclosure.unknown_key");
+            }
+            other => panic!("expected Strict error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn into_strict_fails_on_disclosure_snake_case_aliases() {
+        let parsed = from_json_value(
+            &json!({
+                "disclosure": {
+                    "max_width": "50%",
+                    "bg_color": "blue-500"
+                }
+            }),
+        )
+        .unwrap();
+        match into_strict(parsed) {
+            Err(StyleParseError::Strict { warnings }) => {
+                assert!(
+                    warnings.iter().any(|w| w.path == "style.disclosure.max_width"),
+                    "expected style.disclosure.max_width deprecation, got {:?}",
+                    warnings
+                );
+                assert!(
+                    warnings.iter().any(|w| w.path == "style.disclosure.bg_color"),
+                    "expected style.disclosure.bg_color deprecation, got {:?}",
+                    warnings
+                );
+            }
+            other => panic!("expected Strict error, got {:?}", other),
         }
     }
 }

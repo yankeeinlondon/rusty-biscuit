@@ -98,6 +98,69 @@ Plan for {{topic}}.
 
 #[cfg(unix)]
 #[test]
+fn compose_frontmatter_interactive_true_still_reports_missing_on_non_tty() {
+    // A document with `interactive: true` frontmatter selects interactive
+    // session mode by default, but schema collection depends on TTY signals,
+    // not on the resolved session interactivity. When stdin/stderr are piped,
+    // the missing required property must surface as a typed MissingProperties
+    // report without hanging or prompting.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let count_path = workspace.path().join("call-count.txt");
+
+    let md_file = workspace.path().join("plan.md");
+    fs::write(
+        &md_file,
+        r#"---
+$schema:
+  topic: 'string(required)'
+interactive: true
+---
+Plan for {{topic}}.
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\necho touched >> {count}\nexit 0\n",
+            count = count_path.display()
+        ),
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["compose", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("CompositionError"),
+        "expected typed CompositionError surface (not raw MarkdownError); stderr:\n{plain}"
+    );
+    assert!(
+        plain.to_lowercase().contains("missing properties"),
+        "expected a missing-properties report; stderr:\n{plain}"
+    );
+    assert!(
+        plain.contains("topic"),
+        "expected the `topic` property name; stderr:\n{plain}"
+    );
+    assert!(
+        !count_path.exists(),
+        "no provider session should have been launched; stub recorded a call"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn compose_set_override_satisfies_required_schema() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
@@ -935,7 +998,10 @@ fn completion_inline_compose_enum_values_from_schema() {
         ),
     );
 
-    let got = run_complete(ws.path(), &["inline-compose", "prompts/inline.md", "tier="]);
+    let got = run_complete(
+        ws.path(),
+        &["inline-compose", "prompts/inline.md", "tier="],
+    );
     assert!(
         got.iter().any(|c| c == "tier='small'"),
         "expected tier='small' from inline-compose schema completer: {got:?}"
@@ -1016,7 +1082,10 @@ fn completion_sequence_enum_values_from_schema() {
         ),
     );
 
-    let got = run_complete(ws.path(), &["sequence", "sequences/plan.seq.md", "tier="]);
+    let got = run_complete(
+        ws.path(),
+        &["sequence", "sequences/plan.seq.md", "tier="],
+    );
     assert!(
         got.iter().any(|c| c == "tier='small'"),
         "expected tier='small' from sequence schema completer: {got:?}"
@@ -1092,13 +1161,13 @@ fn completion_file_match_emits_path_qualified_glob_matches() {
     // Seed files inside and outside `src/` — only files under `src/`
     // should appear in the candidate set.
     write_file(&ws.path().join("src").join("lib.rs"), "// lib");
-    write_file(
-        &ws.path().join("src").join("inner").join("mod.rs"),
-        "// mod",
-    );
+    write_file(&ws.path().join("src").join("inner").join("mod.rs"), "// mod");
     write_file(&ws.path().join("tests").join("integration.rs"), "// test");
 
-    let got = run_complete(ws.path(), &["compose", "prompts/plan.md", "source_code="]);
+    let got = run_complete(
+        ws.path(),
+        &["compose", "prompts/plan.md", "source_code="],
+    );
     assert!(
         got.iter().any(|c| c == "source_code='src/lib.rs'"),
         "expected source_code='src/lib.rs' from path-qualified glob: {got:?}"
@@ -1138,7 +1207,10 @@ fn completion_file_match_honors_negated_path_qualified_glob() {
         "// inner test",
     );
 
-    let got = run_complete(ws.path(), &["compose", "prompts/plan.md", "source_code="]);
+    let got = run_complete(
+        ws.path(),
+        &["compose", "prompts/plan.md", "source_code="],
+    );
     assert!(
         got.iter().any(|c| c == "source_code='src/lib.rs'"),
         "expected source_code='src/lib.rs' to survive negation: {got:?}"

@@ -213,9 +213,6 @@ mod tests {
             .iter()
             .position(|a| a == "--model")
             .expect("--model flag must be pushed for interactive OpenCode");
-        assert_eq!(
-            args.get(model_idx + 1).map(String::as_str),
-            Some("kimi-for-coding/k2p6")
-        );
+        assert_eq!(args.get(model_idx + 1).map(String::as_str), Some("kimi-for-coding/k2p6"));
     }
 }

@@ -224,8 +224,11 @@ pub fn render_context_section(
             property = property.with_min_width(property_width);
             ty = ty.with_min_width(type_width);
         }
-        let mut table =
-            Table::new().with_columns(vec![property, ty, report_column(final_header.to_string())]);
+        let mut table = Table::new().with_columns(vec![
+            property,
+            ty,
+            report_column(final_header.to_string()),
+        ]);
         configure_shared_table(&mut table);
         add_rows(&mut table);
         table
@@ -238,7 +241,10 @@ pub fn render_context_section(
 /// The two widths are computed independently and are **not** forced equal.
 /// Headers (`"Property"` and `"Type"`) are included in the measurement.
 #[allow(dead_code)]
-pub fn context_column_widths(property_labels: &[&str], type_labels: &[&str]) -> (usize, usize) {
+pub fn context_column_widths(
+    property_labels: &[&str],
+    type_labels: &[&str],
+) -> (usize, usize) {
     let property_width = max_visible_width(property_labels.iter().copied(), "Property");
     let type_width = max_visible_width(type_labels.iter().copied(), "Type");
     (property_width, type_width)
@@ -378,9 +384,8 @@ mod tests {
             "list items must carry inverse styling; got {list_out:?}"
         );
 
-        let cell: TableCellContent = Prose::new(render_inline_code("use `ctx.foo`", &term))
-            .render(&term)
-            .into();
+        let cell: TableCellContent =
+            Prose::new(render_inline_code("use `ctx.foo`", &term)).render(&term).into();
         let mut table = Table::new().with_columns(vec![TableColumn::new("Hint")]);
         table.add_row(vec![cell]);
         let table_out = table.render(&term);
@@ -413,9 +418,7 @@ mod tests {
         );
 
         let lines: Vec<&str> = out.lines().collect();
-        let first_line = lines
-            .iter()
-            .find(|l| l.trim_start().starts_with("- First"))
+        let first_line = lines.iter().find(|l| l.trim_start().starts_with("- First"))
             .expect("first item must render with '- ' bullet");
         assert!(first_line.contains("- First item"));
 
@@ -548,10 +551,7 @@ mod tests {
             prop_w > type_w,
             "property width should exceed type width in this fixture; prop={prop_w}, type={type_w}"
         );
-        assert_eq!(
-            prop_w,
-            visible_width("ctx.very_long_property_name") as usize
-        );
+        assert_eq!(prop_w, visible_width("ctx.very_long_property_name") as usize);
     }
 
     #[test]
@@ -604,7 +604,10 @@ mod tests {
             TableColumn::new("Description"),
         ]);
         configure_shared_table(&mut table);
-        table.add_row(vec![long_sig.into(), "Does something useful".into()]);
+        table.add_row(vec![
+            long_sig.into(),
+            "Does something useful".into(),
+        ]);
 
         let term = styled_term(200);
         let out = render_table_within_contract(&table, &term);

@@ -820,6 +820,23 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 6,
     },
+    // ── Agent ───────────────────────────────────────────────────────
+    ContextVariableDescriptor {
+        name: "agent",
+        display_type: ContextValueType::String,
+        description: "Name of the executing agentic CLI, trimmed from the AGENT env var; defaults to \"unknown\".",
+        category: "Agent",
+        subsection: "",
+        order: 1,
+    },
+    ContextVariableDescriptor {
+        name: "model",
+        display_type: ContextValueType::String,
+        description: "Active model identifier, trimmed from the MODEL env var; defaults to \"default\".",
+        category: "Agent",
+        subsection: "",
+        order: 2,
+    },
 ];
 
 /// Returns all context variable descriptors in display order.
@@ -849,10 +866,13 @@ mod tests {
             .collect();
 
         let ctx = ComposeContext::capture_for_dir(&std::env::temp_dir());
-        let runtime_names: HashSet<&str> = ctx.values().keys().map(|k| k.as_str()).collect();
+        let runtime_names: HashSet<&str> =
+            ctx.values().keys().map(|k| k.as_str()).collect();
 
-        let missing_descriptors: Vec<_> = runtime_names.difference(&descriptor_names).collect();
-        let extra_descriptors: Vec<_> = descriptor_names.difference(&runtime_names).collect();
+        let missing_descriptors: Vec<_> =
+            runtime_names.difference(&descriptor_names).collect();
+        let extra_descriptors: Vec<_> =
+            descriptor_names.difference(&runtime_names).collect();
 
         assert!(
             missing_descriptors.is_empty(),
@@ -881,7 +901,11 @@ mod tests {
     fn descriptor_names_are_unique() {
         let mut seen = HashSet::new();
         for d in CONTEXT_VARIABLE_DESCRIPTORS {
-            assert!(seen.insert(d.name), "Duplicate descriptor name: {}", d.name);
+            assert!(
+                seen.insert(d.name),
+                "Duplicate descriptor name: {}",
+                d.name
+            );
         }
     }
 

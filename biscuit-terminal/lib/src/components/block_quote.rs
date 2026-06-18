@@ -1529,7 +1529,8 @@ mod tests {
 
     /// `true` if a block-level `Code` node appears anywhere in the tree.
     fn has_code(node: &RenderNode) -> bool {
-        matches!(node.kind, NodeKind::Code { .. }) || node.children().iter().any(has_code)
+        matches!(node.kind, NodeKind::Code { .. })
+            || node.children().iter().any(has_code)
     }
 
     /// Regression: a `Prose` body carrying a fenced code block embedded in a
@@ -1549,10 +1550,7 @@ mod tests {
         // swallows a validation failure into an empty string.
         assert!(!rendered.is_empty(), "expected non-empty render");
         let stripped = strip_ansi(&rendered);
-        assert!(
-            stripped.contains("before"),
-            "missing `before`: {stripped:?}"
-        );
+        assert!(stripped.contains("before"), "missing `before`: {stripped:?}");
         assert!(stripped.contains("code"), "missing `code`: {stripped:?}");
         assert!(stripped.contains("after"), "missing `after`: {stripped:?}");
     }
@@ -1568,9 +1566,6 @@ mod tests {
             !paragraph_contains_code(&node),
             "a block-level Code node must not nest inside a Paragraph"
         );
-        assert!(
-            has_code(&node),
-            "expected a block-level Code node in the tree"
-        );
+        assert!(has_code(&node), "expected a block-level Code node in the tree");
     }
 }

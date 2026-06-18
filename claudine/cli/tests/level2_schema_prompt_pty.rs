@@ -35,8 +35,8 @@
 
 #[allow(deprecated)]
 use assert_cmd::cargo::cargo_bin;
-use expectrl::Session;
 use expectrl::session::OsSession;
+use expectrl::Session;
 use std::fs;
 use std::io::Write;
 use std::process::Command;
@@ -92,16 +92,17 @@ fn wait_for_marker(session: &mut OsSession, marker: &str, deadline: Duration) ->
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e)
-                if e.kind() == std::io::ErrorKind::WouldBlock
-                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock
+                || e.kind() == std::io::ErrorKind::TimedOut =>
             {
                 std::thread::sleep(Duration::from_millis(20));
             }
             Err(_) => break,
         }
     }
-    panic!("marker {marker:?} did not appear within {deadline:?}; transcript:\n{transcript}");
+    panic!(
+        "marker {marker:?} did not appear within {deadline:?}; transcript:\n{transcript}"
+    );
 }
 
 /// Alternate-screen enter sequence crossterm emits via `EnterAlternateScreen`.
@@ -144,9 +145,8 @@ fn wait_for_raw_mode(session: &mut OsSession, seed: String, deadline: Duration) 
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e)
-                if e.kind() == std::io::ErrorKind::WouldBlock
-                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock
+                || e.kind() == std::io::ErrorKind::TimedOut =>
             {
                 std::thread::sleep(Duration::from_millis(20));
             }
@@ -177,11 +177,7 @@ fn stage_default_config(home_dir: &std::path::Path) {
 /// with the workspace's `bin` dir on PATH and HOME set to the workspace so
 /// `prompt_for_missing` reads the default (`true`) instead of any real
 /// user config.
-fn compose_command(
-    workspace_dir: &std::path::Path,
-    bin_dir: &std::path::Path,
-    md_file: &std::path::Path,
-) -> Command {
+fn compose_command(workspace_dir: &std::path::Path, bin_dir: &std::path::Path, md_file: &std::path::Path) -> Command {
     stage_default_config(workspace_dir);
     let mut cmd = Command::new(cargo_bin!("claudine"));
     cmd.args(["compose", "--goose", md_file.to_str().unwrap()]);
@@ -297,9 +293,7 @@ fn level2_pty_schema_prompt_collects_enum_selection() {
 
     // ChooseOne defaults to the first option highlighted. Pressing Enter
     // submits the current selection (`small`).
-    session
-        .write_all(b"\r")
-        .expect("submit default enum choice");
+    session.write_all(b"\r").expect("submit default enum choice");
     session.flush().ok();
 
     let stop = Instant::now() + Duration::from_secs(15);
@@ -391,9 +385,7 @@ fn level2_pty_schema_prompt_number_retries_on_invalid_input() {
     // and keep the previous buffer. (The retry's submission waits on the
     // widget-rendered validation error below, which already implies raw
     // mode for the second prompt iteration.)
-    session
-        .write_all(b"not-a-number\r")
-        .expect("write bad value");
+    session.write_all(b"not-a-number\r").expect("write bad value");
     session.flush().ok();
 
     // Wait for the re-prompt to render the validation error. The error
@@ -451,7 +443,12 @@ fn level2_pty_schema_silent_suppresses_prompt_under_tty() {
     // instead.
     stage_default_config(workspace.path());
     let mut cmd = Command::new(cargo_bin!("claudine"));
-    cmd.args(["compose", "--goose", "--silent", md_file.to_str().unwrap()]);
+    cmd.args([
+        "compose",
+        "--goose",
+        "--silent",
+        md_file.to_str().unwrap(),
+    ]);
     cmd.env("HOME", workspace.path());
     cmd.env("PATH", augmented_path(&bin_dir));
     cmd.env("TERM", "xterm-256color");
@@ -560,6 +557,238 @@ fn level2_pty_schema_status_does_not_report_templated_enum_as_invalid() {
         !mentions_runtime_agent_as_invalid,
         "status report must not mark templated `runtime_agent` as Invalid; \
          transcript:\n{plain}"
+    );
+}
+
+// ============================================================================
+// Session-interactivity independence (2026-06-14-interactive Phase 4)
+// ============================================================================
+//
+// The schema collection gate depends only on the four `InteractiveSchemaOptions`
+// signals and must run before the provider session launches, regardless of how
+// the resolved session interactivity value is derived.
+
+#[test]
+#[serial_test::serial(pty)]
+fn level2_pty_schema_prompt_precedes_provider_launch_with_interactive_flag() {
+    // `compose -i` requests an interactive session via CLI flag. The missing
+    // required property must still be collected before the provider stub
+    // launches.
+    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+
+    let workspace = tempdir().unwrap();
+    let bin_dir = workspace.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    let marker = workspace.path().join("launched.flag");
+
+    stage_goose_stub(&bin_dir, &marker);
+
+    let md_file = workspace.path().join("plan.md");
+    fs::write(
+        &md_file,
+        "---\n$schema:\n  topic: 'string(required)'\n---\nPlan for {{topic}}.\n",
+    )
+    .unwrap();
+
+    stage_default_config(workspace.path());
+    let mut cmd = Command::new(cargo_bin!("claudine"));
+    cmd.args(["compose", "-i", "--goose", md_file.to_str().unwrap()]);
+    cmd.env("HOME", workspace.path());
+    cmd.env("PATH", augmented_path(&bin_dir));
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
+    cmd.env_remove("NO_COLOR");
+    cmd.env_remove("CLAUDINE_PLAIN");
+    cmd.env_remove("CI");
+    cmd.current_dir(workspace.path());
+
+    let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
+
+    let pre = wait_for_marker(&mut session, "topic", Duration::from_secs(10));
+
+    // Ordering guarantee: the prompt has rendered but no input has been sent,
+    // so the provider session must NOT have started yet. This is the assertion
+    // that proves schema collection precedes provider launch — without it a
+    // regression that launched immediately after rendering would still pass.
+    assert!(
+        !marker.exists(),
+        "provider launched before the `-i` schema prompt was satisfied; \
+         transcript so far:\n{}",
+        common::strip_ansi(&pre)
+    );
+
+    let pre = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
+
+    session.write_all(b"async\r").expect("write topic value");
+    session.flush().ok();
+
+    let stop = Instant::now() + Duration::from_secs(15);
+    let mut transcript = pre;
+    while Instant::now() < stop {
+        if marker.exists() {
+            break;
+        }
+        transcript.push_str(&read_for(&mut session, Duration::from_millis(200)));
+    }
+
+    assert!(
+        marker.exists(),
+        "provider stub should have launched after the `-i` prompt submitted; \
+         transcript:\n{}",
+        common::strip_ansi(&transcript)
+    );
+}
+
+#[test]
+#[serial_test::serial(pty)]
+fn level2_pty_schema_prompt_precedes_provider_launch_with_frontmatter_interactive() {
+    // A document with `interactive: true` in frontmatter selects interactive
+    // session mode without a CLI flag. Schema collection must still complete
+    // before the provider session starts.
+    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+
+    let workspace = tempdir().unwrap();
+    let bin_dir = workspace.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    let marker = workspace.path().join("launched.flag");
+
+    stage_goose_stub(&bin_dir, &marker);
+
+    let md_file = workspace.path().join("plan.md");
+    fs::write(
+        &md_file,
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  topic: 'string(required)'\n",
+            "interactive: true\n",
+            "---\n",
+            "Plan for {{topic}}.\n",
+        ),
+    )
+    .unwrap();
+
+    let cmd = compose_command(workspace.path(), &bin_dir, &md_file);
+    let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
+
+    let pre = wait_for_marker(&mut session, "topic", Duration::from_secs(10));
+
+    // Ordering guarantee: the prompt has rendered but no input has been sent,
+    // so the frontmatter-driven interactive session must NOT have launched the
+    // provider yet. This proves schema collection precedes provider launch.
+    assert!(
+        !marker.exists(),
+        "provider launched before the frontmatter-interactive schema prompt was \
+         satisfied; transcript so far:\n{}",
+        common::strip_ansi(&pre)
+    );
+
+    let pre = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
+
+    session.write_all(b"async\r").expect("write topic value");
+    session.flush().ok();
+
+    let stop = Instant::now() + Duration::from_secs(15);
+    let mut transcript = pre;
+    while Instant::now() < stop {
+        if marker.exists() {
+            break;
+        }
+        transcript.push_str(&read_for(&mut session, Duration::from_millis(200)));
+    }
+
+    assert!(
+        marker.exists(),
+        "provider stub should have launched after frontmatter-driven interactive \
+         prompt submitted; transcript:\n{}",
+        common::strip_ansi(&transcript)
+    );
+}
+
+#[test]
+#[serial_test::serial(pty)]
+fn level2_pty_schema_prompt_appears_even_when_no_interactive_overrides_frontmatter() {
+    // `--no-interactive` overrides a document's `interactive: true` frontmatter,
+    // so the resolved session mode is non-interactive. The schema collection
+    // prompt must still appear under a TTY because the collection gate is
+    // independent of the resolved session mode. Adding `--timeout` proves the
+    // resolved mode is non-interactive (it would be rejected in interactive mode).
+    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+
+    let workspace = tempdir().unwrap();
+    let bin_dir = workspace.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    let marker = workspace.path().join("launched.flag");
+
+    stage_goose_stub(&bin_dir, &marker);
+
+    let md_file = workspace.path().join("plan.md");
+    fs::write(
+        &md_file,
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  topic: 'string(required)'\n",
+            "interactive: true\n",
+            "---\n",
+            "Plan for {{topic}}.\n",
+        ),
+    )
+    .unwrap();
+
+    stage_default_config(workspace.path());
+    let mut cmd = Command::new(cargo_bin!("claudine"));
+    cmd.args([
+        "compose",
+        "--no-interactive",
+        "--timeout",
+        "30s",
+        "--goose",
+        md_file.to_str().unwrap(),
+    ]);
+    cmd.env("HOME", workspace.path());
+    cmd.env("PATH", augmented_path(&bin_dir));
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
+    cmd.env_remove("NO_COLOR");
+    cmd.env_remove("CLAUDINE_PLAIN");
+    cmd.env_remove("CI");
+    cmd.current_dir(workspace.path());
+
+    let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
+
+    let pre = wait_for_marker(&mut session, "topic", Duration::from_secs(10));
+
+    // Ordering guarantee: the prompt has rendered but no input has been sent,
+    // so the provider must NOT have launched yet — even though the resolved
+    // session mode is non-interactive, collection still precedes launch.
+    assert!(
+        !marker.exists(),
+        "provider launched before the `--no-interactive` schema prompt was \
+         satisfied; transcript so far:\n{}",
+        common::strip_ansi(&pre)
+    );
+
+    let pre = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
+
+    session.write_all(b"async\r").expect("write topic value");
+    session.flush().ok();
+
+    let stop = Instant::now() + Duration::from_secs(15);
+    let mut transcript = pre;
+    while Instant::now() < stop {
+        if marker.exists() {
+            break;
+        }
+        transcript.push_str(&read_for(&mut session, Duration::from_millis(200)));
+    }
+
+    assert!(
+        marker.exists(),
+        "provider stub should have launched after `--no-interactive` prompt \
+         submitted; the schema prompt must fire even when the resolved session \
+         mode is non-interactive.\ntranscript:\n{}",
+        common::strip_ansi(&transcript)
     );
 }
 
@@ -801,9 +1030,7 @@ exit 0
     // Drive the prompt to completion. The deduper should fire `topic`
     // exactly once and reuse the answer for both steps.
     let pre = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
-    session
-        .write_all(b"collected\r")
-        .expect("write topic value");
+    session.write_all(b"collected\r").expect("write topic value");
     session.flush().ok();
 
     let stop = Instant::now() + Duration::from_secs(20);
@@ -1033,9 +1260,7 @@ fn level2_pty_sequence_invalid_agent_shows_preprompt_before_review() {
     // Cancel the review screen (Esc) so the child exits instead of blocking
     // on the picker. Gate the keystroke on raw mode like the schema tests.
     let _ = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
-    session
-        .write_all(b"\x1b")
-        .expect("send Esc to cancel review");
+    session.write_all(b"\x1b").expect("send Esc to cancel review");
     session.flush().ok();
 
     let _ = read_for(&mut session, Duration::from_secs(5));
@@ -1094,9 +1319,7 @@ fn level2_pty_sequence_zero_installed_list_shows_preprompt_before_review() {
     );
 
     let _ = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
-    session
-        .write_all(b"\x1b")
-        .expect("send Esc to cancel review");
+    session.write_all(b"\x1b").expect("send Esc to cancel review");
     session.flush().ok();
 
     let _ = read_for(&mut session, Duration::from_secs(5));
@@ -1177,9 +1400,7 @@ fn level2_pty_sequence_stderr_tty_with_stdout_redirected_prompts() {
     );
 
     let _ = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
-    session
-        .write_all(b"\x1b")
-        .expect("send Esc to cancel review");
+    session.write_all(b"\x1b").expect("send Esc to cancel review");
     session.flush().ok();
 
     let _ = read_for(&mut session, Duration::from_secs(5));
@@ -1250,4 +1471,177 @@ fn level2_pty_sequence_auto_selectable_skips_review_and_launches() {
          alternate-screen enter must never appear; transcript:\n{}",
         common::strip_ansi(&transcript)
     );
+}
+
+// ============================================================================
+// `claudine inline-compose` interactive schema collection
+// (2026-06-14-interactive, review-1 High finding)
+// ============================================================================
+//
+// `inline-compose` has its own preparation path (`prepare_inline_with_schema`)
+// and an extra interactive-closure gate that rejects providers which cannot
+// capture the final assistant message. The schema-collection invariant —
+// missing required values are collected BEFORE any provider session starts or
+// the inline-unsupported diagnostic is reached — must therefore be verified
+// for `inline-compose` specifically, not just `compose`.
+//
+// These tests use Codex, the one provider that supports interactive inline
+// closure (`supports_interactive_inline_closure() == true`), so the run
+// proceeds to a real provider launch after collection rather than the
+// unsupported diagnostic. The stub captures Claudine's
+// `--output-last-message <file>` write-back path exactly like the non-PTY
+// `inline_compose_interactive_codex_uses_captured_last_message` test.
+
+/// Stage a Codex stub for interactive inline composition. It records its
+/// launch by writing `marker_file`, then satisfies Claudine's
+/// `--output-last-message <path>` capture by writing a replacement body
+/// there. Recording the launch first lets the test observe it even though
+/// the wrapper keeps the PTY stdin attached.
+fn stage_codex_inline_stub(bin_dir: &std::path::Path, marker_file: &std::path::Path) {
+    write_executable(
+        &bin_dir.join("codex"),
+        &format!(
+            "#!/bin/sh\necho 'launched' > {marker}\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = \"--output-last-message\" ]; then\n    shift\n    printf 'Inline body from codex\\n' > \"$1\"\n    exit 0\n  fi\n  shift\ndone\nexit 0\n",
+            marker = marker_file.display()
+        ),
+    );
+}
+
+/// Drive a single `inline-compose` interactive run through the PTY: wait for
+/// the schema prompt, assert collection has not yet launched the provider nor
+/// emitted the inline-unsupported diagnostic, submit the value, and confirm
+/// the provider launches afterward.
+fn drive_inline_compose_collection(cmd: Command, marker: &std::path::Path) {
+    let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
+
+    // The schema prompt renders the property name before raw mode is entered.
+    let pre = wait_for_marker(&mut session, "topic", Duration::from_secs(10));
+
+    // Collection must precede BOTH the provider launch and the inline-compose
+    // interactive-unsupported diagnostic. Neither may have happened yet.
+    assert!(
+        !marker.exists(),
+        "provider launched before the schema prompt was satisfied; \
+         transcript so far:\n{}",
+        common::strip_ansi(&pre)
+    );
+    assert!(
+        !common::strip_ansi(&pre)
+            .to_lowercase()
+            .contains("not supported"),
+        "inline-unsupported diagnostic appeared before schema collection completed; \
+         transcript so far:\n{}",
+        common::strip_ansi(&pre)
+    );
+
+    let pre = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
+    session.write_all(b"async\r").expect("write topic value");
+    session.flush().ok();
+
+    let stop = Instant::now() + Duration::from_secs(15);
+    let mut transcript = pre;
+    while Instant::now() < stop {
+        if marker.exists() {
+            break;
+        }
+        transcript.push_str(&read_for(&mut session, Duration::from_millis(200)));
+    }
+
+    assert!(
+        marker.exists(),
+        "Codex inline-compose provider should have launched after the schema \
+         prompt submitted; collection must complete before launch.\ntranscript:\n{}",
+        common::strip_ansi(&transcript)
+    );
+}
+
+#[test]
+#[serial_test::serial(pty)]
+fn level2_pty_inline_compose_interactive_flag_collects_before_launch() {
+    // `inline-compose -i --codex` requests an interactive session via flag.
+    // The missing required `topic` must be collected before Codex launches.
+    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+
+    let workspace = tempdir().unwrap();
+    let bin_dir = workspace.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    let marker = workspace.path().join("launched.flag");
+    stage_codex_inline_stub(&bin_dir, &marker);
+
+    let md_file = workspace.path().join("plan.md");
+    fs::write(
+        &md_file,
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  topic: 'string(required)'\n",
+            "prompt: Generate notes about {{topic}}.\n",
+            "---\n",
+            "Original body.\n",
+        ),
+    )
+    .unwrap();
+
+    stage_default_config(workspace.path());
+    let mut cmd = Command::new(cargo_bin!("claudine"));
+    cmd.args([
+        "inline-compose",
+        "-i",
+        "--codex",
+        md_file.to_str().unwrap(),
+    ]);
+    cmd.env("HOME", workspace.path());
+    cmd.env("PATH", augmented_path(&bin_dir));
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
+    cmd.env_remove("NO_COLOR");
+    cmd.env_remove("CLAUDINE_PLAIN");
+    cmd.env_remove("CI");
+    cmd.current_dir(workspace.path());
+
+    drive_inline_compose_collection(cmd, &marker);
+}
+
+#[test]
+#[serial_test::serial(pty)]
+fn level2_pty_inline_compose_frontmatter_interactive_collects_before_launch() {
+    // `interactive: true` frontmatter selects an interactive session for
+    // `inline-compose` with no CLI flag. The missing required `topic` must
+    // still be collected before Codex launches.
+    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+
+    let workspace = tempdir().unwrap();
+    let bin_dir = workspace.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    let marker = workspace.path().join("launched.flag");
+    stage_codex_inline_stub(&bin_dir, &marker);
+
+    let md_file = workspace.path().join("plan.md");
+    fs::write(
+        &md_file,
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  topic: 'string(required)'\n",
+            "interactive: true\n",
+            "prompt: Generate notes about {{topic}}.\n",
+            "---\n",
+            "Original body.\n",
+        ),
+    )
+    .unwrap();
+
+    stage_default_config(workspace.path());
+    let mut cmd = Command::new(cargo_bin!("claudine"));
+    cmd.args(["inline-compose", "--codex", md_file.to_str().unwrap()]);
+    cmd.env("HOME", workspace.path());
+    cmd.env("PATH", augmented_path(&bin_dir));
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
+    cmd.env_remove("NO_COLOR");
+    cmd.env_remove("CLAUDINE_PLAIN");
+    cmd.env_remove("CI");
+    cmd.current_dir(workspace.path());
+
+    drive_inline_compose_collection(cmd, &marker);
 }

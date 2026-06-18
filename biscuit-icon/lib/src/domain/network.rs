@@ -52,11 +52,7 @@ mod tests {
     fn display_string_round_trips_every_variant() {
         for variant in Network::iter() {
             let s = variant.to_string();
-            assert_eq!(
-                Network::from_str(&s).unwrap(),
-                variant,
-                "round trip for {s}"
-            );
+            assert_eq!(Network::from_str(&s).unwrap(), variant, "round trip for {s}");
         }
     }
 

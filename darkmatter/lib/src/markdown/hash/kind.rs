@@ -178,10 +178,7 @@ mod tests {
 
     #[test]
     fn from_str_trims_whitespace() {
-        assert_eq!(
-            MdHashKind::from_str("  structured "),
-            Ok(MdHashKind::Structured)
-        );
+        assert_eq!(MdHashKind::from_str("  structured "), Ok(MdHashKind::Structured));
     }
 
     #[test]
@@ -204,10 +201,7 @@ mod tests {
         use MdHashKind::{Detailed, Simple, Structured};
         assert_eq!(MdHashKind::relate(Simple, Structured), KindRelation::Higher);
         assert_eq!(MdHashKind::relate(Simple, Detailed), KindRelation::Higher);
-        assert_eq!(
-            MdHashKind::relate(Structured, Detailed),
-            KindRelation::Higher
-        );
+        assert_eq!(MdHashKind::relate(Structured, Detailed), KindRelation::Higher);
         assert_eq!(MdHashKind::relate(Detailed, Simple), KindRelation::Lower);
         assert_eq!(MdHashKind::relate(Structured, Simple), KindRelation::Lower);
         assert_eq!(MdHashKind::relate(Simple, Simple), KindRelation::Same);

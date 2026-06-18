@@ -305,11 +305,8 @@ fn build_perf_tree(report: &CommandPerfReport, placement: CompositionPlacement) 
     // reconciling Structural child (RC-2); sequence leaves prep bare.
     let mut prep = PerfNode::leaf("prep phase", cli.prep_phase, NodeRole::Structural);
     for unit in &cli.prep_substages {
-        prep.children.push(PerfNode::leaf(
-            unit.name,
-            unit.elapsed,
-            NodeRole::Structural,
-        ));
+        prep.children
+            .push(PerfNode::leaf(unit.name, unit.elapsed, NodeRole::Structural));
     }
     if placement == CompositionPlacement::UnderPrep
         && let Some((total, children)) = &composition
@@ -318,11 +315,7 @@ fn build_perf_tree(report: &CommandPerfReport, placement: CompositionPlacement) 
         // window — attach it under `prep phase`, not `composition` (OQ-3
         // Option C). It is a `Breakdown` node (parallel per-group timings whose
         // sum overstates the wall-clock), so it does not enter reconciliation.
-        if let Some(capture) = report
-            .composition
-            .as_ref()
-            .and_then(build_context_capture_node)
-        {
+        if let Some(capture) = report.composition.as_ref().and_then(build_context_capture_node) {
             prep.children.push(capture);
         }
         prep.children.push(PerfNode::branch(
@@ -371,7 +364,9 @@ fn build_perf_tree(report: &CommandPerfReport, placement: CompositionPlacement) 
     // a `steps → step N → composition` nesting reintroduced. Breakdown, so it is
     // displayed and percentaged without entering reconciliation — the env-setup
     // remainder keeps the authoritative total.
-    if is_sequence && let Some(step_prep) = build_step_preparation_node(&report.sequence_steps) {
+    if is_sequence
+        && let Some(step_prep) = build_step_preparation_node(&report.sequence_steps)
+    {
         env_setup_node.children.push(step_prep);
     }
     let env_setup = finalize_reconciling(env_setup_node);
@@ -391,11 +386,7 @@ fn build_perf_tree(report: &CommandPerfReport, placement: CompositionPlacement) 
         // the P-5 `—` leaf is a Phase 5 rendering concern).
         let mut children = Vec::new();
         if let Some(latency) = agent.first_response_latency {
-            children.push(PerfNode::leaf(
-                "first response",
-                latency,
-                NodeRole::Breakdown,
-            ));
+            children.push(PerfNode::leaf("first response", latency, NodeRole::Breakdown));
         }
         if let Some(api) = agent.provider_api_duration {
             children.push(PerfNode::leaf(
@@ -442,11 +433,8 @@ fn build_steps_node(steps: &[SequenceStepPerf]) -> PerfNode {
             if let Some(agent) = &step.agent_perf {
                 let mut agent_children = Vec::new();
                 if let Some(latency) = agent.first_response_latency {
-                    agent_children.push(PerfNode::leaf(
-                        "first response",
-                        latency,
-                        NodeRole::Breakdown,
-                    ));
+                    agent_children
+                        .push(PerfNode::leaf("first response", latency, NodeRole::Breakdown));
                 }
                 if let Some(api) = agent.provider_api_duration {
                     agent_children.push(PerfNode::leaf(
@@ -657,7 +645,10 @@ fn stage_leaf(
 /// Nodes with only `Breakdown` children keep their authoritative total and
 /// gain no remainder (their children may overlap or under-cover by design).
 fn finalize_reconciling(mut node: PerfNode) -> PerfNode {
-    let has_structural = node.children.iter().any(|c| c.role == NodeRole::Structural);
+    let has_structural = node
+        .children
+        .iter()
+        .any(|c| c.role == NodeRole::Structural);
     if !has_structural {
         return node;
     }
@@ -668,11 +659,8 @@ fn finalize_reconciling(mut node: PerfNode) -> PerfNode {
         .map(|c| c.total)
         .sum();
     let remainder = node.total.saturating_sub(structural_sum);
-    node.children.push(PerfNode::leaf(
-        "unattributed",
-        remainder,
-        NodeRole::Unattributed,
-    ));
+    node.children
+        .push(PerfNode::leaf("unattributed", remainder, NodeRole::Unattributed));
     node
 }
 
@@ -681,7 +669,8 @@ fn finalize_reconciling(mut node: PerfNode) -> PerfNode {
 /// children plus `Unattributed` remainder drift from its `total` beyond
 /// `tolerance` — the `78.6ms`-headline-vs-`1.57s`-body bug class.
 fn tree_reconciles(node: &PerfNode, tolerance: Duration) -> bool {
-    node_reconciles(node, tolerance) && node.children.iter().all(|c| tree_reconciles(c, tolerance))
+    node_reconciles(node, tolerance)
+        && node.children.iter().all(|c| tree_reconciles(c, tolerance))
 }
 
 /// Check TR-1 at a single node. Nodes with no `Structural` children are
@@ -1403,10 +1392,7 @@ mod tests {
             assert!(rendered.contains(label), "missing {label}: {rendered}");
         }
         // Box-drawing connectors (P-1) and the wall-clock share column (P-2).
-        assert!(
-            rendered.contains("├─"),
-            "missing tree connectors: {rendered}"
-        );
+        assert!(rendered.contains("├─"), "missing tree connectors: {rendered}");
         assert!(rendered.contains("100%"), "missing root share: {rendered}");
     }
 
@@ -2001,24 +1987,12 @@ mod tests {
         assert_eq!(tree.total, Duration::from_secs(2));
 
         // Top-level Structural buckets are present.
-        for label in [
-            "pre-dispatch",
-            "prep phase",
-            "environment setup",
-            "agent execution",
-        ] {
+        for label in ["pre-dispatch", "prep phase", "environment setup", "agent execution"] {
             let node = child(&tree, label).unwrap_or_else(|| panic!("missing {label}"));
-            assert_eq!(
-                node.role,
-                NodeRole::Structural,
-                "{label} should be Structural"
-            );
+            assert_eq!(node.role, NodeRole::Structural, "{label} should be Structural");
         }
         // Root reconciles with a synthetic remainder.
-        assert!(
-            child(&tree, "unattributed").is_some(),
-            "root needs unattributed"
-        );
+        assert!(child(&tree, "unattributed").is_some(), "root needs unattributed");
 
         // pre-dispatch sub-buckets are Breakdown (RC-4: nesting is the signal).
         let pre = child(&tree, "pre-dispatch").unwrap();
@@ -2036,10 +2010,7 @@ mod tests {
         let composition = child(prep, "composition").expect("composition under prep");
         assert_eq!(composition.role, NodeRole::Structural);
         assert_eq!(composition.total, Duration::from_millis(300));
-        assert!(
-            child(prep, "unattributed").is_some(),
-            "prep needs unattributed"
-        );
+        assert!(child(prep, "unattributed").is_some(), "prep needs unattributed");
 
         // DM-2: stages are grouped under their ComposePhase; both stages here
         // are Inline-Pre, so they nest one level below `composition`.
@@ -2269,10 +2240,7 @@ mod tests {
             Duration::from_millis(20),
             Duration::ZERO,
             Duration::from_millis(150),
-            vec![SubstageTiming::new(
-                "system prompt",
-                Duration::from_millis(64),
-            )],
+            vec![SubstageTiming::new("system prompt", Duration::from_millis(64))],
             None,
             Some(AgentExecutionPerf {
                 launches: 1,
@@ -2405,13 +2373,7 @@ mod tests {
                     Some(compose.clone()),
                     Some(agent),
                 ),
-                step_perf(
-                    1,
-                    "beta",
-                    Duration::from_millis(800),
-                    Some(compose),
-                    Some(agent),
-                ),
+                step_perf(1, "beta", Duration::from_millis(800), Some(compose), Some(agent)),
             ],
         );
 
@@ -2538,13 +2500,7 @@ mod tests {
             Duration::from_secs(1),
             Duration::from_millis(10),
             Duration::from_millis(50),
-            vec![step_perf(
-                0,
-                "alpha",
-                Duration::from_millis(400),
-                None,
-                None,
-            )],
+            vec![step_perf(0, "alpha", Duration::from_millis(400), None, None)],
         );
         let tree = build_perf_tree(&report, CompositionPlacement::UnderEnvSetup);
         assert!(tree_reconciles(&tree, Duration::from_millis(1)));

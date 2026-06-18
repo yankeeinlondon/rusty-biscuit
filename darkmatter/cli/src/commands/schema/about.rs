@@ -16,8 +16,9 @@ use biscuit_terminal::discovery::detection::ColorMode as TerminalColorMode;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::WordWrap;
 use color_eyre::eyre::Result;
-use darkmatter::markdown::Markdown;
+use darkmatter::markdown::highlighting::CodeBlockMode;
 use darkmatter::markdown::highlighting::ColorMode as MarkdownColorMode;
+use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::TerminalOptions;
 use darkmatter::markdown::schemas::{
     CoercionRuleDescriptor, InlineObjectRuleDescriptor, SchemaConstraintDescriptor,
@@ -38,9 +39,9 @@ fn markdown_color_mode_from_terminal(mode: TerminalColorMode) -> MarkdownColorMo
 }
 
 /// Run `md schema about`.
-pub fn run_about(verbose: bool) -> Result<()> {
+pub fn run_about(verbose: bool, code_block_mode: CodeBlockMode) -> Result<()> {
     let terminal = Terminal::default();
-    let mut report = SchemaAboutReport::new(&terminal);
+    let mut report = SchemaAboutReport::new(&terminal, code_block_mode);
 
     report.header()?;
     report.shapes(schema_shape_descriptors())?;
@@ -61,19 +62,18 @@ struct SchemaAboutReport<'a> {
     terminal: &'a Terminal,
     width: u32,
     previous_blank: bool,
+    code_block_mode: CodeBlockMode,
 }
 
 impl<'a> SchemaAboutReport<'a> {
-    fn new(terminal: &'a Terminal) -> Self {
+    fn new(terminal: &'a Terminal, code_block_mode: CodeBlockMode) -> Self {
         let margin_width = LEFT_MARGIN_CH + RIGHT_MARGIN_CH;
-        let width = terminal
-            .width()
-            .saturating_sub(margin_width)
-            .max(MIN_REPORT_WIDTH);
+        let width = terminal.width().saturating_sub(margin_width).max(MIN_REPORT_WIDTH);
         Self {
             terminal,
             width,
             previous_blank: true,
+            code_block_mode,
         }
     }
 
@@ -251,7 +251,9 @@ In this example, constraints are added to a string, a number, and an array of st
 
     fn validation_behavior(&mut self, behaviors: &[ValidationBehaviorDescriptor]) -> Result<()> {
         self.heading("Validation Notes");
-        self.markdown("These notes explain how Darkmatter applies schemas in real documents.")?;
+        self.markdown(
+            "These notes explain how Darkmatter applies schemas in real documents.",
+        )?;
         self.detail_list(
             behaviors.iter().map(|b| (&b.name, &b.rule, &b.description)),
             "Details",
@@ -283,6 +285,7 @@ In this example, constraints are added to a string, a number, and an array of st
         let mut options = TerminalOptions::default();
         options.max_width = Some(self.width.min(u16::MAX as u32) as u16);
         options.color_mode = markdown_color_mode_from_terminal(self.terminal.color_mode());
+        options.code_block_mode = self.code_block_mode;
         options
     }
 
@@ -308,7 +311,10 @@ In this example, constraints are added to a string, a number, and an array of st
                     escape_prose(&plain_markdown_text(detail))
                 )
             };
-            list.add(Prose::new(item).with_word_wrap(WordWrap::WrapProse(Some(8), Some(2))));
+            list.add(
+                Prose::new(item)
+                    .with_word_wrap(WordWrap::WrapProse(Some(8), Some(2))),
+            );
         }
         self.block(&list.render_in_width(self.terminal, self.width));
         self.blank();
@@ -372,16 +378,20 @@ fn format_constraint_use(constraint: &SchemaConstraintDescriptor) -> String {
 
 fn format_constraint_meaning(constraint: &SchemaConstraintDescriptor) -> String {
     match constraint.keyword {
-        "min" => "Sets a lower bound.\n\
+        "min" => {
+            "Sets a lower bound.\n\
              - <b>string</b>: minimum length\n\
              - <b>number</b>: minimum value\n\
              - <b>array</b>: minimum item count"
-            .to_string(),
-        "max" => "Sets an upper bound.\n\
+                .to_string()
+        }
+        "max" => {
+            "Sets an upper bound.\n\
              - <b>string</b>: maximum length\n\
              - <b>number</b>: maximum value\n\
              - <b>array</b>: maximum item count"
-            .to_string(),
+                .to_string()
+        }
         _ => markdown_inline_to_prose(constraint.description),
     }
 }
@@ -506,9 +516,8 @@ mod tests {
 
     fn one_half_yaml_color(mode: MarkdownColorMode, line: &str, token: &str) -> Color {
         let highlighter = CodeHighlighter::new(ThemePair::OneHalf, mode);
-        let syntax = highlighter
-            .syntax_set()
-            .find_syntax_by_extension("yaml")
+        let syntax = darkmatter::markdown::language_grammar::LanguageGrammar::yaml()
+            .resolve(highlighter.syntax_set())
             .expect("yaml syntax");
         let mut hl = HighlightLines::new(syntax, highlighter.theme());
         let token_start = line
@@ -537,13 +546,15 @@ mod tests {
 
     fn render_schema_about_markdown(mode: TerminalColorMode) -> String {
         let terminal = terminal_for_mode(mode);
-        let report = SchemaAboutReport::new(&terminal);
+        let report = SchemaAboutReport::new(&terminal, CodeBlockMode::default());
         let mut options = report.markdown_options();
         options.code_theme = ThemePair::OneHalf;
         options.prose_theme = ThemePair::OneHalf;
-        Markdown::from("```yaml\n$schema:\n    # a string type\n    bar: string[]\n```\n")
-            .as_terminal(options)
-            .expect("schema-about markdown render")
+        Markdown::from(
+            "```yaml\n$schema:\n    # a string type\n    bar: string[]\n```\n",
+        )
+        .as_terminal(options)
+        .expect("schema-about markdown render")
     }
 
     fn assert_yaml_uses_exact_theme(output: &str, expected_mode: MarkdownColorMode) {
@@ -595,7 +606,7 @@ mod tests {
             (TerminalColorMode::Unknown, MarkdownColorMode::Dark),
         ] {
             let terminal = terminal_for_mode(terminal_mode);
-            let report = SchemaAboutReport::new(&terminal);
+            let report = SchemaAboutReport::new(&terminal, CodeBlockMode::default());
             let options = report.markdown_options();
 
             assert_eq!(options.color_mode, markdown_mode);

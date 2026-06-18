@@ -84,14 +84,14 @@ model: ""
 cargo test -p biscuit-test-harness
 cargo test -p biscuit-terminal --test level1_osc_queries --test level1_clipboard --test level1_mode_2027 --test level1_cursor --test level1_terminal_init
 cargo test -p biscuit-terminal-cli --test level2_prose_styling --test level2_image --test level2_diagrams --test level2_cursor_and_hygiene
-cargo check -p tui-chrome-cli --tests
+cargo check -p biscuit-tui-cli --tests
 ```
 
 Results:
 
 - `biscuit-test-harness`: passed.
 - Level-1 biscuit-terminal tests: passed.
-- `tui-chrome-cli --tests`: passed.
+- `biscuit-tui-cli --tests`: passed.
 - Level-2 biscuit-terminal CLI tests: failed in `level2_prose_emits_sgr_in_real_terminal`.
 
 ## Recommendations

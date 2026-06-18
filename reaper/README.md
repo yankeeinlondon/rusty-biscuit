@@ -28,4 +28,9 @@ reaper https://somewhere.com --deep
     let page = WebPage::from("https://somewhere.com").use_adaptor(adaptor);
     ```
 
-    This adapter pattern allows Claudine to inject it's own Agent usage patterns into the _non-deterministic_ operations while at the same time allowing the `unchained-ai` library to inject it's LLM aware connector.
+    The `InferenceAdapter` trait is provided in the **biscuit-contract** library which is a lightweight
+    library that allows any package which wants to provide inference capabilities to pass in an adapter
+    which implements this trait.
+
+
+## Monorepo Dependencies

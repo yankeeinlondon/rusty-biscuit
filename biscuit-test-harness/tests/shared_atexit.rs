@@ -52,10 +52,7 @@ fn shared_harness_atexit_drops_at_process_exit() {
     // contains the sentinel written by `DropFlag::drop`.
     let tmp = tempfile::tempdir().expect("create tempdir");
     let flag_path = tmp.path().join("drop_flag");
-    assert!(
-        !flag_path.exists(),
-        "flag file must not exist before child run"
-    );
+    assert!(!flag_path.exists(), "flag file must not exist before child run");
 
     let exe = std::env::current_exe().expect("locate current test executable");
     let status = Command::new(&exe)

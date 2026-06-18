@@ -1356,8 +1356,9 @@ fn render_output_channels(
     }
     output.push('\n');
 
-    let audio_legend =
-        Prose::new("<i> <b><yellow>*</yellow></b> <dim>is the default audio output</dim></i>");
+    let audio_legend = Prose::new(
+        "<i> <b><yellow>*</yellow></b> <dim>is the default audio output</dim></i>",
+    );
     output.push_str(&audio_legend.display(terminal).to_string());
     if !output.ends_with('\n') {
         output.push('\n');
@@ -1661,7 +1662,8 @@ mod tests {
         let sfx_flags = vec![true];
         let terminal = Terminal::new_optimistic(160);
 
-        let rendered = strip_ansi_codes(&render_output_channels(&devices, &sfx_flags, &terminal));
+        let rendered =
+            strip_ansi_codes(&render_output_channels(&devices, &sfx_flags, &terminal));
 
         assert!(rendered.contains("Audio Devices"), "{rendered}");
         assert!(rendered.contains("- Output"), "{rendered}");
@@ -1711,7 +1713,8 @@ mod tests {
         let sfx_flags = vec![false, true];
         let terminal = Terminal::new_optimistic(160);
 
-        let rendered = strip_ansi_codes(&render_output_channels(&devices, &sfx_flags, &terminal));
+        let rendered =
+            strip_ansi_codes(&render_output_channels(&devices, &sfx_flags, &terminal));
 
         assert!(
             rendered.contains("- Schiit Bifrost 2 Unison USB (USB, 44.1k 48k) *"),

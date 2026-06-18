@@ -108,7 +108,11 @@ Builder methods:
 
 Validation: `validate()` performs async HEAD requests on external URLs.
 
-**Not yet implemented**: `execute()` returns a fatal `StepError` ("LLM execution not yet implemented").
+`execute()` resolves the prompt's `ModelCapability` to a runnable `ProviderModel`
+(using the `models::selection` resolver and the process environment) and runs a
+single-turn completion through the `execution/` surface (`complete_blocking`).
+`execute_readonly()` uses the same path and is safe for read-only parallel
+execution.
 
 ### OpenCodeDelegation (`agent_delegation.rs`)
 

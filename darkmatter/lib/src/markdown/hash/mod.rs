@@ -28,8 +28,8 @@ pub use options::{DEFAULT_HASH_PROPERTY, LAST_UPDATED_KEY, MdHashOptions};
 pub use save::SaveDecision;
 pub use stored::{StoredHash, StoredHashValue};
 
-use crate::markdown::FrontmatterMap;
 use crate::markdown::Markdown;
+use crate::markdown::FrontmatterMap;
 use biscuit_file::serde_yaml_ng;
 use biscuit_hash::{HashVariant, xx_hash, xx_hash_variant};
 

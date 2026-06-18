@@ -480,6 +480,7 @@ mod tests {
         );
     }
 
+
     #[test]
     fn test_terminal_image_mode_never_disables_hr_image_tier() {
         let markdown = "--- { style: waves, alignment: centered, color: \"red\" }";
@@ -538,30 +539,22 @@ mod tests {
         let (style, _warnings) =
             from_frontmatter(md.frontmatter()).expect("parse style frontmatter");
         let term = Terminal::new_optimistic(80);
-        apply_hr_style(
-            DarkmatterPage::new(&term),
-            &style,
-            HrStyleOverrides::default(),
-        )
-        .expect("apply hr style")
+        apply_hr_style(DarkmatterPage::new(&term), &style, HrStyleOverrides::default())
+            .expect("apply hr style")
     }
 
     #[test]
     fn bare_rule_uses_style_hr_frontmatter_defaults_in_html() {
         // `style.hr.*` defaults must style a bare `---` on the browser path.
-        let markdown = "---\nstyle:\n  hr:\n    kind: waves\n    weight: thick\n    width: \"50%\"\n---\n\n---\n";
+        let markdown =
+            "---\nstyle:\n  hr:\n    kind: waves\n    weight: thick\n    width: \"50%\"\n---\n\n---\n";
         let md: Markdown = markdown.into();
-        let html = page_with_frontmatter_hr(&md)
-            .render_to_browser(&md)
-            .unwrap();
+        let html = page_with_frontmatter_hr(&md).render_to_browser(&md).unwrap();
         assert!(
             html.contains(r#"width="50%""#),
             "frontmatter width must apply to the bare rule: {html}"
         );
-        assert!(
-            html.contains("--hr-weight: 8"),
-            "thick default ⇒ 8px: {html}"
-        );
+        assert!(html.contains("--hr-weight: 8"), "thick default ⇒ 8px: {html}");
         assert!(html.contains("<path"), "waves default ⇒ <path> svg: {html}");
     }
 
@@ -571,9 +564,7 @@ mod tests {
         // migrates into `style.hr.*` and still styles a bare `---`.
         let markdown = "---\nhr:\n  style: waves\n  weight: thick\n  width: \"50%\"\n---\n\n---\n";
         let md: Markdown = markdown.into();
-        let html = page_with_frontmatter_hr(&md)
-            .render_to_browser(&md)
-            .unwrap();
+        let html = page_with_frontmatter_hr(&md).render_to_browser(&md).unwrap();
         assert!(html.contains(r#"width="50%""#), "{html}");
         assert!(html.contains("--hr-weight: 8"), "{html}");
         assert!(html.contains("<path"), "{html}");
@@ -583,11 +574,10 @@ mod tests {
     fn rule_attributes_override_frontmatter_defaults_partially_in_html() {
         // Inline rule attributes win per-property; unset properties fall back
         // to the `style.hr.*` defaults.
-        let markdown = "---\nstyle:\n  hr:\n    kind: waves\n    weight: thick\n    width: \"80%\"\n---\n\n--- { width: \"25%\" }\n";
+        let markdown =
+            "---\nstyle:\n  hr:\n    kind: waves\n    weight: thick\n    width: \"80%\"\n---\n\n--- { width: \"25%\" }\n";
         let md: Markdown = markdown.into();
-        let html = page_with_frontmatter_hr(&md)
-            .render_to_browser(&md)
-            .unwrap();
+        let html = page_with_frontmatter_hr(&md).render_to_browser(&md).unwrap();
         assert!(
             html.contains(r#"width="25%""#),
             "inline width must win over the frontmatter default: {html}"
@@ -653,7 +643,8 @@ mod tests {
     fn direct_as_html_inline_attribute_overrides_top_level_hr_defaults_partially() {
         // Inline rule attributes win per-property; unset properties fall back
         // to the top-level `hr:` defaults.
-        let markdown = "---\nhr:\n  style: waves\n  weight: thick\n  width: \"80%\"\n---\n\n--- { width: \"25%\" }\n";
+        let markdown =
+            "---\nhr:\n  style: waves\n  weight: thick\n  width: \"80%\"\n---\n\n--- { width: \"25%\" }\n";
         let md: Markdown = markdown.into();
         let html = md.as_html(Default::default()).unwrap();
         assert!(
@@ -675,26 +666,18 @@ mod tests {
         // YAML numeric width (`20`, no quotes) and bool alignment coerce to
         // strings; recognized sibling keys still apply. A numeric width is
         // emitted verbatim as the CSS `width="20"`.
-        let markdown =
-            "---\nhr:\n  style: dots\n  width: 20\n  alignment: true\n  color: red\n---\n\n---\n";
+        let markdown = "---\nhr:\n  style: dots\n  width: 20\n  alignment: true\n  color: red\n---\n\n---\n";
         let md: Markdown = markdown.into();
         let html = md.as_html(Default::default()).unwrap();
-        assert!(
-            html.contains(r#"width="20""#),
-            "numeric width ⇒ width=\"20\": {html}"
-        );
-        assert!(
-            html.contains("--hr-color: red"),
-            "color sibling must apply: {html}"
-        );
+        assert!(html.contains(r#"width="20""#), "numeric width ⇒ width=\"20\": {html}");
+        assert!(html.contains("--hr-color: red"), "color sibling must apply: {html}");
     }
 
     #[test]
     fn direct_as_html_top_level_hr_defaults_apply_to_blockquote_contained_bare_rule() {
         // A bare `---` nested in a blockquote must also pick up the top-level
         // `hr:` defaults on the direct path.
-        let markdown =
-            "---\nhr:\n  style: waves\n  width: \"50%\"\n---\n\n> before\n>\n> ---\n>\n> after\n";
+        let markdown = "---\nhr:\n  style: waves\n  width: \"50%\"\n---\n\n> before\n>\n> ---\n>\n> after\n";
         let md: Markdown = markdown.into();
         let html = md.as_html(Default::default()).unwrap();
         assert!(html.contains(r#"width="50%""#), "{html}");

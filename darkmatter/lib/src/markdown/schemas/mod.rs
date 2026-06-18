@@ -65,10 +65,10 @@ use serde_json::Value;
 use crate::markdown::{Markdown, compose::ComposeSource};
 
 pub use about::{
-    CoercionRuleDescriptor, InlineObjectRuleDescriptor, SchemaConstraintDescriptor,
-    SchemaShapeDescriptor, SchemaTypeDescriptor, ValidationBehaviorDescriptor,
-    coercion_rule_descriptors, inline_object_rule_descriptors, schema_constraint_descriptors,
-    schema_shape_descriptors, schema_type_descriptors, validation_behavior_descriptors,
+    CoercionRuleDescriptor, InlineObjectRuleDescriptor, SchemaConstraintDescriptor, SchemaShapeDescriptor,
+    SchemaTypeDescriptor, ValidationBehaviorDescriptor, coercion_rule_descriptors,
+    inline_object_rule_descriptors, schema_constraint_descriptors, schema_shape_descriptors,
+    schema_type_descriptors, validation_behavior_descriptors,
 };
 pub use completion::{CompletionKind, CompletionSuggestion};
 pub use detect::{DetectOptions, detect_from_document, detect_schema, schema_to_yaml};

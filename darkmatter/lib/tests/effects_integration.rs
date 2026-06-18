@@ -25,7 +25,9 @@ fn file_and_dir_verbs() {
     assert_eq!(std::fs::read_to_string(&p).unwrap(), "preexisting");
 
     // ensure_file with content only writes when creating
-    let c = eng.ensure_file_with_content("out/seed.md", "seed").unwrap();
+    let c = eng
+        .ensure_file_with_content("out/seed.md", "seed")
+        .unwrap();
     assert_eq!(std::fs::read_to_string(&c).unwrap(), "seed");
 
     // append_line
@@ -60,7 +62,9 @@ fn http_post_uses_allowed_host_policy() {
         stream.write_all(response.as_bytes()).unwrap();
     });
 
-    let eng = EffectEngine::builder().allowed_hosts(["127.0.0.1"]).build();
+    let eng = EffectEngine::builder()
+        .allowed_hosts(["127.0.0.1"])
+        .build();
 
     let response = eng
         .http_post(&format!("http://{addr}/hook"), b"{\"ok\":true}")

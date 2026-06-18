@@ -75,13 +75,14 @@ fn indent(text: &str, spaces: usize) -> String {
 fn apply_all_styles(page: DarkmatterPage, md: &Markdown) -> DarkmatterPage {
     let (style, _warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
 
-    let page =
-        apply_page_style(page, &style, PageStyleOverrides::default()).expect("apply_page_style");
+    let page = apply_page_style(page, &style, PageStyleOverrides::default())
+        .expect("apply_page_style");
     let page = apply_component_style(page, &style, ComponentStyleOverrides::default())
         .expect("apply_component_style");
-    let page =
-        apply_list_style(page, &style, ListStyleOverrides::default()).expect("apply_list_style");
-    let page = apply_hr_style(page, &style, HrStyleOverrides::default()).expect("apply_hr_style");
+    let page = apply_list_style(page, &style, ListStyleOverrides::default())
+        .expect("apply_list_style");
+    let page = apply_hr_style(page, &style, HrStyleOverrides::default())
+        .expect("apply_hr_style");
     let page = apply_color_style(page, &style).expect("apply_color_style");
     apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
         .expect("apply_bespoke_style")
@@ -167,5 +168,8 @@ fn reference_page_margin_and_padding() {
         "ref_page_margin_and_padding_terminal",
         render_terminal(&md, 80)
     );
-    insta::assert_snapshot!("ref_page_margin_and_padding_browser", render_browser(&md));
+    insta::assert_snapshot!(
+        "ref_page_margin_and_padding_browser",
+        render_browser(&md)
+    );
 }

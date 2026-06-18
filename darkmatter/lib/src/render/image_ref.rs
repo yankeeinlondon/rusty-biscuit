@@ -2084,16 +2084,9 @@ mod tests {
         // as a literal `title` that leaks the raw directive into the HTML.
         let image = ImageRef::try_from("![A](./local.png \"style='color: blue;'\")")
             .expect("parse markdown image");
-        let css = image
-            .style()
-            .expect("inline style parsed from title")
-            .to_css();
+        let css = image.style().expect("inline style parsed from title").to_css();
         assert!(css.contains("color"), "style not parsed: {css}");
-        assert_eq!(
-            image.title(),
-            None,
-            "raw directive must not remain as title"
-        );
+        assert_eq!(image.title(), None, "raw directive must not remain as title");
     }
 
     #[test]

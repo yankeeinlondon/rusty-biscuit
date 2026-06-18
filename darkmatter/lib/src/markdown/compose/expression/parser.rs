@@ -10,7 +10,7 @@
 //!                | logical_or                     (condition mode)
 //! logical_or     = logical_and ("||" logical_and)*
 //! fallback       = logical_and ("||" logical_and)*
-//! logical_and    = comparison ("&&" comparison)*  (condition mode only)
+//! logical_and    = comparison ("&&" comparison)*  (both modes)
 //! comparison     = additive (comp_op additive)?
 //! additive       = multiplicative (("+" | "-") multiplicative)*
 //! multiplicative = unary (("*" | "/" | "%") unary)*
@@ -30,7 +30,7 @@
 //! 3. **Multiplicative** - `*`, `/`, `%`
 //! 4. **Additive** - `+`, `-`
 //! 5. **Comparison** - `==`, `!=`, `>`, `>=`, `<`, `<=`
-//! 6. **Logical AND** - `&&` (condition mode)
+//! 6. **Logical AND** - `&&`
 //! 7. **Logical OR / Fallback** - `||`
 //! 8. **Ternary** - `? :` (right-associative)
 //!
@@ -133,9 +133,9 @@ impl<'a> Parser<'a> {
 
     /// Creates a new parser for the given expression with a specific parse mode.
     ///
-    /// Condition mode enables `&&` and `||` as logical operators following the
-    /// condition-mode precedence ladder. Interpolation mode keeps the default
-    /// interpolation grammar.
+    /// `&&` is logical AND in both modes. Condition mode additionally enables
+    /// `||` as logical OR; interpolation mode keeps `||` as the fallback
+    /// operator.
     ///
     /// ## Errors
     ///
@@ -261,11 +261,12 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    /// Parses a logical AND expression (condition mode only):
-    /// `comparison ("&&" comparison)*`.
+    /// Parses a logical AND expression: `comparison ("&&" comparison)*`.
     ///
-    /// Infix `a && b` is lowered into the existing function-call AST as
-    /// `and(a, b)`.
+    /// Reached in both parse modes — condition mode via `logical_or`, and
+    /// interpolation mode via the `fallback` ladder — so `&&` is available
+    /// wherever expressions are parsed. Infix `a && b` is lowered into the
+    /// existing function-call AST as `and(a, b)`.
     fn parse_logical_and(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.parse_comparison()?;
 
@@ -1818,9 +1819,28 @@ mod tests {
         }
 
         #[test]
-        fn interpolation_rejects_infix_and() {
-            let result = parse("a && b");
-            assert!(result.is_err(), "&& must be rejected in interpolation mode");
+        fn interpolation_parses_infix_and() {
+            // `&&` is valid in interpolation mode and lowers to `and(a, b)`,
+            // just like condition mode.
+            let expr = parse("a && b").unwrap();
+            let (name, args) = extract_call(&expr);
+            assert_eq!(name, "and");
+            assert_eq!(args.len(), 2);
+            assert!(matches!(&args[0], Expr::Variable(n) if n == "a"));
+            assert!(matches!(&args[1], Expr::Variable(n) if n == "b"));
+        }
+
+        #[test]
+        fn interpolation_and_binds_tighter_than_ternary() {
+            // Mirrors the real `ready` frontmatter shape `x && y ? a : b`:
+            // `&&` binds tighter than `?:`, so the condition is `and(x, y)`.
+            let expr = parse("x && y ? a : b").unwrap();
+            let Expr::Ternary { condition, .. } = expr else {
+                panic!("expected ternary, got {expr:?}");
+            };
+            let (name, args) = extract_call(&condition);
+            assert_eq!(name, "and");
+            assert_eq!(args.len(), 2);
         }
 
         #[test]

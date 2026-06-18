@@ -345,65 +345,67 @@ pub(crate) fn execute_sequence(
             && shared_state
                 .as_ref()
                 .is_some_and(|state| !is_auto_selectable_state(state));
-        let live_targets: Vec<claudine::composition::ResolvedExecutionTarget> = if needs_review {
-            // Emit the state-specific pre-prompt message before the review
-            // table renders, mirroring direct compose's
-            // `prompt_for_agent_state`: a styled `Invalid Agent:` line for
-            // a scalar invalid hint, the zero-installed-list breakdown for
-            // an all-uninstallable list. Auto-selectable and plain picker
-            // states never reach this arm (they take the `else` branch), so
-            // every state here returns a message or `None` for a plain
-            // picker. The message shares its source of truth with the
-            // dry-run table cell and the no-TTY abort body, so the three
-            // surfaces cannot drift. `shared_state` is always `Some` here
-            // because `needs_review` requires it.
-            if let Some(state) = shared_state.as_ref()
-                && let Some(markup) =
-                    super::composition::agent_prompt_message(state, &source.resolved_path)
-            {
-                log::message(&Prose::new(markup).render(&log::terminal()));
-            }
-            // TTY review screen. The --dry-run arm above returns before
-            // this point, so the dry-run seam never invokes a picker.
-            match super::selection_ui::review_sequence(drafts, &catalog) {
-                Ok(targets) => targets,
-                Err(e) => {
-                    if e.kind() == std::io::ErrorKind::Other && e.to_string().contains("cancelled")
-                    {
-                        return Ok(130); // Treat as interrupt
-                    }
-                    return Err(e.into());
+        let live_targets: Vec<claudine::composition::ResolvedExecutionTarget> =
+            if needs_review {
+                // Emit the state-specific pre-prompt message before the review
+                // table renders, mirroring direct compose's
+                // `prompt_for_agent_state`: a styled `Invalid Agent:` line for
+                // a scalar invalid hint, the zero-installed-list breakdown for
+                // an all-uninstallable list. Auto-selectable and plain picker
+                // states never reach this arm (they take the `else` branch), so
+                // every state here returns a message or `None` for a plain
+                // picker. The message shares its source of truth with the
+                // dry-run table cell and the no-TTY abort body, so the three
+                // surfaces cannot drift. `shared_state` is always `Some` here
+                // because `needs_review` requires it.
+                if let Some(state) = shared_state.as_ref()
+                    && let Some(markup) =
+                        super::composition::agent_prompt_message(state, &source.resolved_path)
+                {
+                    log::message(&Prose::new(markup).render(&log::terminal()));
                 }
-            }
-        } else {
-            // Auto-selectable, explicit flag, or non-TTY: each step's
-            // provider was resolved deterministically onto the draft.
-            let list_one = matches!(
-                shared_state.as_ref(),
-                Some(claudine::composition::AgentResolutionState::ListOneInstalled { .. })
-            );
-            drafts
-                .into_iter()
-                .map(|draft| {
-                    let provider = draft
-                        .resolved_provider
-                        .unwrap_or(claudine::provider::Provider::Claude);
-                    let provider_reason = if explicit_provider.is_some() {
-                        claudine::composition::ProviderResolutionReason::ExplicitFlag
-                    } else if list_one {
-                        claudine::composition::ProviderResolutionReason::FrontmatterList
-                    } else {
-                        claudine::composition::ProviderResolutionReason::FrontmatterSingle
-                    };
-                    claudine::composition::ResolvedExecutionTarget {
-                        provider,
-                        provider_reason,
-                        model: draft.proposed_model,
-                        model_reason: draft.model_reason,
+                // TTY review screen. The --dry-run arm above returns before
+                // this point, so the dry-run seam never invokes a picker.
+                match super::selection_ui::review_sequence(drafts, &catalog) {
+                    Ok(targets) => targets,
+                    Err(e) => {
+                        if e.kind() == std::io::ErrorKind::Other
+                            && e.to_string().contains("cancelled")
+                        {
+                            return Ok(130); // Treat as interrupt
+                        }
+                        return Err(e.into());
                     }
-                })
-                .collect()
-        };
+                }
+            } else {
+                // Auto-selectable, explicit flag, or non-TTY: each step's
+                // provider was resolved deterministically onto the draft.
+                let list_one = matches!(
+                    shared_state.as_ref(),
+                    Some(claudine::composition::AgentResolutionState::ListOneInstalled { .. })
+                );
+                drafts
+                    .into_iter()
+                    .map(|draft| {
+                        let provider = draft
+                            .resolved_provider
+                            .unwrap_or(claudine::provider::Provider::Claude);
+                        let provider_reason = if explicit_provider.is_some() {
+                            claudine::composition::ProviderResolutionReason::ExplicitFlag
+                        } else if list_one {
+                            claudine::composition::ProviderResolutionReason::FrontmatterList
+                        } else {
+                            claudine::composition::ProviderResolutionReason::FrontmatterSingle
+                        };
+                        claudine::composition::ResolvedExecutionTarget {
+                            provider,
+                            provider_reason,
+                            model: draft.proposed_model,
+                            model_reason: draft.model_reason,
+                        }
+                    })
+                    .collect()
+            };
         live_targets.into_iter().map(Some).collect()
     };
 
@@ -531,45 +533,49 @@ pub(crate) fn execute_sequence(
             replace_file: shared.replace_system_prompt.clone(),
         };
 
-        let request = CompositionExecutionRequest {
-            mode: if inline_mode {
-                CompositionMode::InlineFrontmatterPrompt
-            } else {
-                CompositionMode::ChainedDocument
-            },
-            file_ref: source.original_ref.clone(),
-            prepared,
-            resolved_target,
-            explicit_provider: shared.explicit_provider(),
-            excluded: shared.excluded(),
-            sequence: true,
-            yolo: shared.yolo,
-            include: shared.include.clone(),
-            model: shared.model.clone(),
-            output: shared.output,
-            system_prompt_args,
-            timeout: shared.timeout.clone(),
-            step_timeout: shared.step_timeout.clone(),
-            operation: shared.operation.clone(),
-            sandbox: shared.sandbox,
-            repo: shared.repo,
-            dry_run: shared.dry_run,
-            mcp: shared.mcp,
-            mcp_use: shared.mcp_use.clone(),
-            strict: shared.strict,
-            session_interactive: shared.interactive,
-            quiet: shared.quiet,
-            silent: shared.silent,
-            env_overrides: step_ctx.env_overrides.clone(),
-            shared_approval_cache: Some(Arc::clone(&shared_approval_cache)),
-            installed_snapshot: Some(prep_context.installed_snapshot.clone()),
-            prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
-            prep_launch_context: Some(prep_context.launch_context.clone()),
-            prep_env_context: Some(prep_context.env_context.clone()),
-            prep_launch_detection_error: prep_context.launch_detection_error.clone(),
-            // Sequence steps render their header in-pipeline: per-step
-            // prep already ran up front, so the executor's emit is timely.
-            header_emitted: false,
+        let request = {
+            let resolved = shared.resolve_session_interactivity(prepared.selection_hints.interactive);
+            CompositionExecutionRequest {
+                mode: if inline_mode {
+                    CompositionMode::InlineFrontmatterPrompt
+                } else {
+                    CompositionMode::ChainedDocument
+                },
+                file_ref: source.original_ref.clone(),
+                prepared,
+                resolved_target,
+                explicit_provider: shared.explicit_provider(),
+                excluded: shared.excluded(),
+                sequence: true,
+                yolo: shared.yolo,
+                include: shared.include.clone(),
+                model: shared.model.clone(),
+                output: shared.output,
+                system_prompt_args,
+                timeout: shared.timeout.clone(),
+                step_timeout: shared.step_timeout.clone(),
+                operation: shared.operation.clone(),
+                sandbox: shared.sandbox,
+                repo: shared.repo,
+                dry_run: shared.dry_run,
+                mcp: shared.mcp,
+                mcp_use: shared.mcp_use.clone(),
+                strict: shared.strict,
+                session_interactive: resolved.value,
+                session_interactive_source: resolved.source,
+                quiet: shared.quiet,
+                silent: shared.silent,
+                env_overrides: step_ctx.env_overrides.clone(),
+                shared_approval_cache: Some(Arc::clone(&shared_approval_cache)),
+                installed_snapshot: Some(prep_context.installed_snapshot.clone()),
+                prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
+                prep_launch_context: Some(prep_context.launch_context.clone()),
+                prep_env_context: Some(prep_context.env_context.clone()),
+                prep_launch_detection_error: prep_context.launch_detection_error.clone(),
+                // Sequence steps render their header in-pipeline: per-step
+                // prep already ran up front, so the executor's emit is timely.
+                header_emitted: false,
+            }
         };
 
         let step_result = super::composition::execute_composition_request_inner(
@@ -1314,7 +1320,11 @@ mod tests {
     use claudine::composition::{InteractiveShape, TextFormat};
     use std::path::PathBuf;
 
-    fn step(n: usize, path: &str, props: Vec<MissingProperty>) -> SequenceMissingPropertiesStep {
+    fn step(
+        n: usize,
+        path: &str,
+        props: Vec<MissingProperty>,
+    ) -> SequenceMissingPropertiesStep {
         SequenceMissingPropertiesStep {
             step: n,
             step_name: format!("step-{n}"),
@@ -1420,8 +1430,13 @@ mod tests {
 
     #[test]
     fn find_first_unsupported_falls_back_to_unknown_label() {
-        let failures = vec![step(1, "/tmp/a.md", vec![prop_unsupported("raw", None)])];
+        let failures = vec![step(
+            1,
+            "/tmp/a.md",
+            vec![prop_unsupported("raw", None)],
+        )];
         let (_, _, shape) = find_first_unsupported(&failures).unwrap();
         assert_eq!(shape, "(unknown)");
     }
 }
+

@@ -1,7 +1,7 @@
 //! Integration tests: the terminal tree renderer applies node-level `Layout`.
 
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
-use renderable::layout::{Edges, Layout, Length};
+use renderable::layout::{Layout, Length, Edges};
 use renderable::tree::RenderNode;
 
 #[test]

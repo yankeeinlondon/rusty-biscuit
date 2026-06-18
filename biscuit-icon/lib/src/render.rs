@@ -62,18 +62,16 @@ mod tests {
     use crate::domain::DomainIcon;
     use renderable::tree::RenderStrictness;
     use renderable::tree::render::{
-        BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, RawHtmlPolicy,
-        render_browser_node, render_markdown_node,
+        render_browser_node, render_markdown_node, BrowserRenderOptions, MarkdownDialect,
+        MarkdownRenderOptions, RawHtmlPolicy,
     };
 
     #[test]
     fn browser_target_emits_inline_svg_verbatim() {
         let icon = crate::domain::Os::Apple.icon();
         let node = icon.render_tree();
-        let opts = BrowserRenderOptions {
-            raw_html: RawHtmlPolicy::Allow,
-            ..Default::default()
-        };
+        let opts =
+            BrowserRenderOptions { raw_html: RawHtmlPolicy::Allow, ..Default::default() };
         let rendered = render_browser_node(&node, &opts).unwrap();
         let html = rendered.output.render();
         assert!(html.contains("<svg"));
@@ -225,10 +223,7 @@ mod tests {
             _ => panic!("expected extended node"),
         };
         let payload = ext.as_ref().expect("expected payload");
-        assert!(
-            !payload.contains("svg"),
-            "expected no SVG field in payload without image feature"
-        );
+        assert!(!payload.contains("svg"), "expected no SVG field in payload without image feature");
         assert!(
             payload.contains("ic:baseline-apple"),
             "expected text identifier in payload"

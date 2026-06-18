@@ -530,30 +530,12 @@ fn fixture_extension_filter_content_matches() {
     let bespoke = strip_ansi(&fs_obj.render(&term));
     let via_tree = strip_ansi(&render_via_tree(&fs_obj, &term));
 
-    assert!(
-        bespoke.contains("readme.md"),
-        "bespoke missing readme.md: {bespoke:?}"
-    );
-    assert!(
-        via_tree.contains("readme.md"),
-        "tree missing readme.md: {via_tree:?}"
-    );
-    assert!(
-        !bespoke.contains("notes.txt"),
-        "bespoke should prune notes.txt: {bespoke:?}"
-    );
-    assert!(
-        !via_tree.contains("notes.txt"),
-        "tree should prune notes.txt: {via_tree:?}"
-    );
-    assert!(
-        !bespoke.contains("report.pdf"),
-        "bespoke should prune report.pdf: {bespoke:?}"
-    );
-    assert!(
-        !via_tree.contains("report.pdf"),
-        "tree should prune report.pdf: {via_tree:?}"
-    );
+    assert!(bespoke.contains("readme.md"), "bespoke missing readme.md: {bespoke:?}");
+    assert!(via_tree.contains("readme.md"), "tree missing readme.md: {via_tree:?}");
+    assert!(!bespoke.contains("notes.txt"), "bespoke should prune notes.txt: {bespoke:?}");
+    assert!(!via_tree.contains("notes.txt"), "tree should prune notes.txt: {via_tree:?}");
+    assert!(!bespoke.contains("report.pdf"), "bespoke should prune report.pdf: {bespoke:?}");
+    assert!(!via_tree.contains("report.pdf"), "tree should prune report.pdf: {via_tree:?}");
 }
 
 /// `document_extensions()` convenience filter should accept .md, .txt, .pdf,
@@ -576,22 +558,10 @@ fn fixture_document_extensions_filter_content_matches() {
     let bespoke = strip_ansi(&fs_obj.render(&term));
     let via_tree = strip_ansi(&render_via_tree(&fs_obj, &term));
 
-    assert!(
-        bespoke.contains("doc.md"),
-        "bespoke missing doc.md: {bespoke:?}"
-    );
-    assert!(
-        via_tree.contains("doc.md"),
-        "tree missing doc.md: {via_tree:?}"
-    );
-    assert!(
-        !bespoke.contains("img.png"),
-        "bespoke should prune img.png: {bespoke:?}"
-    );
-    assert!(
-        !via_tree.contains("img.png"),
-        "tree should prune img.png: {via_tree:?}"
-    );
+    assert!(bespoke.contains("doc.md"), "bespoke missing doc.md: {bespoke:?}");
+    assert!(via_tree.contains("doc.md"), "tree missing doc.md: {via_tree:?}");
+    assert!(!bespoke.contains("img.png"), "bespoke should prune img.png: {bespoke:?}");
+    assert!(!via_tree.contains("img.png"), "tree should prune img.png: {via_tree:?}");
 }
 
 /// Included paths: only files under the specified relative path should appear.
@@ -614,30 +584,12 @@ fn fixture_included_paths_content_matches() {
     let bespoke = strip_ansi(&fs_obj.render(&term));
     let via_tree = strip_ansi(&render_via_tree(&fs_obj, &term));
 
-    assert!(
-        bespoke.contains("alpha.md"),
-        "bespoke missing alpha.md: {bespoke:?}"
-    );
-    assert!(
-        via_tree.contains("alpha.md"),
-        "tree missing alpha.md: {via_tree:?}"
-    );
-    assert!(
-        !bespoke.contains("beta.md"),
-        "bespoke should prune beta.md: {bespoke:?}"
-    );
-    assert!(
-        !via_tree.contains("beta.md"),
-        "tree should prune beta.md: {via_tree:?}"
-    );
-    assert!(
-        !bespoke.contains("other.md"),
-        "bespoke should prune other.md: {bespoke:?}"
-    );
-    assert!(
-        !via_tree.contains("other.md"),
-        "tree should prune other.md: {via_tree:?}"
-    );
+    assert!(bespoke.contains("alpha.md"), "bespoke missing alpha.md: {bespoke:?}");
+    assert!(via_tree.contains("alpha.md"), "tree missing alpha.md: {via_tree:?}");
+    assert!(!bespoke.contains("beta.md"), "bespoke should prune beta.md: {bespoke:?}");
+    assert!(!via_tree.contains("beta.md"), "tree should prune beta.md: {via_tree:?}");
+    assert!(!bespoke.contains("other.md"), "bespoke should prune other.md: {bespoke:?}");
+    assert!(!via_tree.contains("other.md"), "tree should prune other.md: {via_tree:?}");
 }
 
 /// Dimmed root prefix: both renderers should emit the display name, and the
@@ -664,14 +616,8 @@ fn fixture_dimmed_root_prefix_content_matches() {
     // Both paths should show the display name in the root line.
     let bespoke_root = bespoke.lines().next().unwrap_or_default();
     let tree_root = via_tree.lines().next().unwrap_or_default();
-    assert!(
-        bespoke_root.contains("topics"),
-        "bespoke root missing 'topics': {bespoke_root:?}"
-    );
-    assert!(
-        tree_root.contains("topics"),
-        "tree root missing 'topics': {tree_root:?}"
-    );
+    assert!(bespoke_root.contains("topics"), "bespoke root missing 'topics': {bespoke_root:?}");
+    assert!(tree_root.contains("topics"), "tree root missing 'topics': {tree_root:?}");
 }
 
 /// Root icon: setting `with_root_icon(Repository)` should change the icon

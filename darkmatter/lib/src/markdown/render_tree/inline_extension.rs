@@ -489,9 +489,7 @@ fn scan_delimiters(source: &str) -> Vec<Delim> {
                 } else {
                     match spec.flanking {
                         Flanking::Unconstrained => (true, true),
-                        Flanking::Emphasis => {
-                            classify_flanking(source, start, spec.delimiter.len())
-                        }
+                        Flanking::Emphasis => classify_flanking(source, start, spec.delimiter.len()),
                     }
                 };
                 delimiters.push(Delim {
@@ -556,9 +554,7 @@ fn pair_delimiters(delimiters: &[Delim]) -> Vec<Role> {
         }
         let stack = &mut open_stacks[delim.spec_index];
 
-        if delim.can_close
-            && let Some(&opener) = stack.last()
-        {
+        if delim.can_close && let Some(&opener) = stack.last() {
             // Empty pair: revert both to literal instead of an empty envelope.
             if delimiters[opener].end == delim.start {
                 stack.pop();
@@ -595,10 +591,7 @@ mod tests {
     fn no_extension_document_is_borrowed_unchanged() {
         let source = "plain text with no darkmatter inline syntax";
         let result = rewrite_inline_extensions(source);
-        assert!(
-            !result.was_rewritten(),
-            "no-extension input must not rewrite"
-        );
+        assert!(!result.was_rewritten(), "no-extension input must not rewrite");
         assert_eq!(result.source, source);
         assert!(result.provenance.is_empty());
     }
@@ -682,10 +675,7 @@ mod tests {
     #[test]
     fn empty_pair_collapses_to_literal() {
         let result = rewrite_inline_extensions("====");
-        assert!(
-            !result.was_rewritten(),
-            "an empty `====` pair must not rewrite"
-        );
+        assert!(!result.was_rewritten(), "an empty `====` pair must not rewrite");
     }
 
     #[test]
@@ -730,7 +720,8 @@ mod tests {
             .provenance
             .resolve_range(payload_start..payload_start + payload.len());
         assert_eq!(
-            &source[resolved], payload,
+            &source[resolved],
+            payload,
             "resolved range must point at the original payload bytes"
         );
     }
@@ -746,10 +737,7 @@ mod tests {
         let end = start + "highlighted".len();
         assert_eq!(result.provenance.resolve(start), 2);
         assert_eq!(result.provenance.resolve(end), 13);
-        assert_eq!(
-            &source[result.provenance.resolve(start)..result.provenance.resolve(end)],
-            "highlighted"
-        );
+        assert_eq!(&source[result.provenance.resolve(start)..result.provenance.resolve(end)], "highlighted");
     }
 
     #[test]

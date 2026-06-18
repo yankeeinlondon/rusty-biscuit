@@ -13,10 +13,7 @@ use super::types::ShellBlockCommandResult;
 /// Separation between commands therefore comes from the commands' own trailing
 /// newlines, exactly as a single `::shell` directive preserves its output.
 pub(crate) fn render_block_output(results: &[ShellBlockCommandResult]) -> String {
-    results
-        .iter()
-        .map(|result| result.output.as_str())
-        .collect()
+    results.iter().map(|result| result.output.as_str()).collect()
 }
 
 #[cfg(test)]
@@ -51,11 +48,7 @@ mod tests {
 
     #[test]
     fn empty_output_contributes_nothing() {
-        let results = vec![
-            make_result("hello\n"),
-            make_result(""),
-            make_result("world\n"),
-        ];
+        let results = vec![make_result("hello\n"), make_result(""), make_result("world\n")];
         assert_eq!(render_block_output(&results), "hello\nworld\n");
     }
 

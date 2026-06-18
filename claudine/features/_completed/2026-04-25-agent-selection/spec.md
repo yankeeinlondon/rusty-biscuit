@@ -11,7 +11,7 @@ use we want to resolve the agent through a layered resolver (see "Resolution Ord
 - In **TTY contexts**, a `--<provider>` CLI flag still wins unconditionally, but otherwise an interactive picker is _always_ shown so the user can confirm. Frontmatter `agent` and the configured `favorite_agent` do **not** resolve past the picker in TTY mode — they only influence the picker's highlighted default and its row ordering.
 - In **non-TTY contexts**, the picker is not an option, so frontmatter `agent` is promoted to a resolving signal along with the configured `favorite_agent`.
 
-The interactive selection box is implemented with the **`ChooseOne`** component from the `tui-chrome` library (workspace crate `tui-chrome`, lives at `biscuit-tui/lib/`), driven by `tui_chrome::run_standalone` as an inline prompt. Behaviorally it:
+The interactive selection box is implemented with the **`ChooseOne`** component from the `biscuit-tui` library (workspace crate `biscuit-tui`, lives at `biscuit-tui/lib/`), driven by `tui_chrome::run_standalone` as an inline prompt. Behaviorally it:
 
 - shows only those agents which the host computer has installed (one `ChoiceOption` per installed provider)
 - pre-selects the user's configured favorite agent (see "Favorite Agent" below) as the highlighted default in the select control, if one is set and installed
@@ -169,7 +169,7 @@ For `claudine sequence`, front-loading is more involved because different steps 
 
 ### Consolidated Review Screen (interactive)
 
-Before any step executes, Claudine presents a **consolidated review screen** implemented with the **`InputTable`** component from `tui-chrome` (see `biscuit-tui/lib/src/components/input_table/`). The table is driven via `tui_chrome::run_standalone` so it renders inline above the eventual execution output.
+Before any step executes, Claudine presents a **consolidated review screen** implemented with the **`InputTable`** component from `biscuit-tui` (see `biscuit-tui/lib/src/components/input_table/`). The table is driven via `tui_chrome::run_standalone` so it renders inline above the eventual execution output.
 
 Column layout (per row, one row per step):
 

@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use renderable::layout::{Layout, TargetValue};
+use renderable::layout::{Alignment, Layout, TargetValue, Width};
 use renderable::style::{PaintColor, PerMode, Style};
 use renderable::tree::{HrAlignment, HrKind, HrWeight, NodeKind, RenderNode};
 
@@ -108,7 +108,10 @@ impl<'a> TreeBuildContext<'a> {
     /// the page background is painted once by the page frame. Copying either
     /// onto each link node would defeat inheritance and double-composite an
     /// alpha-bearing page background.
-    pub fn hyperlink_color(&self, is_local: bool) -> (Option<PaintColor>, Option<PaintColor>) {
+    pub fn hyperlink_color(
+        &self,
+        is_local: bool,
+    ) -> (Option<PaintColor>, Option<PaintColor>) {
         let merged = self.effective_hyperlink_style(is_local);
 
         let fg = merged
@@ -131,7 +134,10 @@ impl<'a> TreeBuildContext<'a> {
     /// foreground inherits to the alt-text placeholder through the styled root,
     /// and the page background is painted by the page frame, not copied onto
     /// each image node.
-    pub fn image_color(&self, is_local: bool) -> (Option<PaintColor>, Option<PaintColor>) {
+    pub fn image_color(
+        &self,
+        is_local: bool,
+    ) -> (Option<PaintColor>, Option<PaintColor>) {
         let local = if is_local {
             self.local_image_style
         } else {
@@ -189,6 +195,11 @@ pub(crate) fn apply_node_policy(node: &mut RenderNode, ctx: &TreeBuildContext) {
         apply_lone_image_layout(node, ctx);
     }
 
+    // Disclosure blocks merge inline opener style over component policy.
+    if matches!(node.kind, NodeKind::Disclosure { .. }) {
+        apply_disclosure_policy(node, ctx);
+    }
+
     // List-item typed text_layout (replaces the old `darkmatter.li` hint).
     if matches!(node.kind, NodeKind::ListItem { .. }) {
         apply_list_item_text_layout(node, ctx);
@@ -215,12 +226,17 @@ fn component_for(kind: &NodeKind) -> Option<PageComponent> {
         NodeKind::ListItem { .. } => Some(PageComponent::Li),
         NodeKind::Image { .. } => Some(PageComponent::Images),
         NodeKind::ThematicBreak => Some(PageComponent::Hr),
+        NodeKind::Disclosure { .. } => Some(PageComponent::Disclosure),
         _ => None,
     }
 }
 
 /// Writes the component's [`ComponentPolicy`] `layout` onto the node.
-fn apply_component_layout(node: &mut RenderNode, ctx: &TreeBuildContext, component: PageComponent) {
+fn apply_component_layout(
+    node: &mut RenderNode,
+    ctx: &TreeBuildContext,
+    component: PageComponent,
+) {
     let Some(policy) = ctx.component_policies.get(&component) else {
         return;
     };
@@ -231,7 +247,11 @@ fn apply_component_layout(node: &mut RenderNode, ctx: &TreeBuildContext, compone
 }
 
 /// Sets foreground / background from the component's resolved colors.
-fn apply_component_color(node: &mut RenderNode, ctx: &TreeBuildContext, component: PageComponent) {
+fn apply_component_color(
+    node: &mut RenderNode,
+    ctx: &TreeBuildContext,
+    component: PageComponent,
+) {
     let fg = ctx.component_color(component);
     let bg = ctx.component_bg_color(component);
     if fg.is_none() && bg.is_none() {
@@ -240,6 +260,58 @@ fn apply_component_color(node: &mut RenderNode, ctx: &TreeBuildContext, componen
     let mut style = node.attrs.style().unwrap_or_default();
     set_style_colors(&mut style, fg.as_ref(), bg.as_ref());
     node.attrs.set_style(&style);
+}
+
+/// Merges inline disclosure style hints over the `style.disclosure` component
+/// policy. Inline opener parameters win; frontmatter fills defaults.
+fn apply_disclosure_policy(node: &mut RenderNode, ctx: &TreeBuildContext) {
+    let inline = match &node.kind {
+        NodeKind::Disclosure { style, .. } => style.as_deref().cloned(),
+        _ => return,
+    };
+
+    let policy = ctx.component_policies.get(&PageComponent::Disclosure);
+    let mut layout = policy.map(|p| p.layout.clone()).unwrap_or_default();
+
+    if let Some(hints) = inline.as_ref()
+        && let Some(il) = hints.layout.as_ref()
+    {
+        // `width` and `max-width` are mutually exclusive (see the disclosure
+        // styling spec). A higher-priority inline choice clears the lower-priority
+        // frontmatter value of the *other* property; keeping both would let a
+        // stale frontmatter cap clamp an instance `width`, or a stale fixed width
+        // survive an instance `max-width`.
+        if il.width != Width::default() {
+            layout.width = il.width.clone();
+            layout.max_width = None;
+        }
+        if il.max_width.is_some() {
+            layout.max_width = il.max_width.clone();
+            layout.width = Width::default();
+        }
+        if il.alignment != Alignment::default() {
+            layout.alignment = il.alignment;
+        }
+    }
+
+    if layout != Layout::default() {
+        node.attrs.set_layout(&layout);
+    }
+
+    let fg = inline
+        .as_ref()
+        .and_then(|h| h.color)
+        .or_else(|| ctx.component_color(PageComponent::Disclosure));
+    let bg = inline
+        .as_ref()
+        .and_then(|h| h.bg_color)
+        .or_else(|| ctx.component_bg_color(PageComponent::Disclosure));
+
+    if fg.is_some() || bg.is_some() {
+        let mut style = node.attrs.style().unwrap_or_default();
+        set_style_colors(&mut style, fg.as_ref(), bg.as_ref());
+        node.attrs.set_style(&style);
+    }
 }
 
 /// Attaches typed link policy: colors, text-layout hints, and structured
@@ -297,7 +369,9 @@ fn apply_image_policy(node: &mut RenderNode, ctx: &TreeBuildContext) {
     }
 
     // Text-layout hints (typed, not content mutation).
-    if is_local && let Some(common) = ctx.local_image_style {
+    if is_local
+        && let Some(common) = ctx.local_image_style
+    {
         attach_text_layout(node, common);
     }
 
@@ -307,8 +381,7 @@ fn apply_image_policy(node: &mut RenderNode, ctx: &TreeBuildContext) {
             .local_image_style
             .and_then(|c| c.to_css_overlay())
             .map(|c| c.to_css().replace('\n', " "));
-        if let Some(directive) = parse_image_directive(&url, raw_title, frontmatter_css.as_deref())
-        {
+        if let Some(directive) = parse_image_directive(&url, raw_title, frontmatter_css.as_deref()) {
             directive.apply_to_image_node(node);
         }
     }
@@ -318,7 +391,7 @@ fn apply_image_policy(node: &mut RenderNode, ctx: &TreeBuildContext) {
 /// policy, so the terminal renderer lifts the marker and pads the body per the
 /// resolved alignment. Replaces the deleted `darkmatter.li` hint.
 fn apply_list_item_text_layout(node: &mut RenderNode, ctx: &TreeBuildContext) {
-    use renderable::layout::Width;
+    use renderable::layout::{Width};
     use renderable::tree::TextLayoutHints;
 
     let Some(policy) = ctx.component_policies.get(&PageComponent::Li) else {
@@ -638,10 +711,7 @@ fn parse_link_directive(
             None
         },
         data: if is_structured {
-            link.data()
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect()
+            link.data().iter().map(|(k, v)| (k.clone(), v.clone())).collect()
         } else {
             Vec::new()
         },
@@ -733,15 +803,13 @@ mod structural_tests {
         let source = renderable::tree::SourceDescriptor::Virtual {
             name: "test".into(),
         };
-        let (doc, diags) = super::super::fold::fold_markdown_spanned_with_context(source, &md, ctx);
+        let (doc, diags) = super::super::fold::fold_markdown_spanned_with_context(source, &md, ctx)
+            .expect("context-aware fold must succeed");
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
         doc
     }
 
-    fn find_node<'a>(
-        node: &'a RenderNode,
-        predicate: &dyn Fn(&RenderNode) -> bool,
-    ) -> Option<&'a RenderNode> {
+    fn find_node<'a>(node: &'a RenderNode, predicate: &dyn Fn(&RenderNode) -> bool) -> Option<&'a RenderNode> {
         if predicate(node) {
             return Some(node);
         }
@@ -796,6 +864,81 @@ mod structural_tests {
         );
     }
 
+    // ── disclosure layout precedence ───────────────────────────────────────
+
+    /// Inline `width` and frontmatter `max-width` are a mutually exclusive
+    /// layout choice across precedence layers, not just within one bucket. An
+    /// instance `width=60ch` must clear the lower-priority frontmatter
+    /// `max-width: 24ch`, otherwise the stale cap clamps the instance width on
+    /// both terminal and browser.
+    #[test]
+    fn context_fold_inline_width_clears_frontmatter_max_width() {
+        use renderable::layout::{Layout, Length, TargetValue, Width};
+
+        let mut policies = empty_policies();
+        policies.insert(
+            PageComponent::Disclosure,
+            ComponentPolicy {
+                layout: Layout {
+                    max_width: Some(TargetValue::universal(Length::Ch(24))),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+        let ctx = ctx_for(&policies);
+        let doc = fold_test(
+            "::disclosure width=60ch Summary\n::details\nBody.\n::end-disclosure\n",
+            &ctx,
+        );
+        let disclosure = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Disclosure { .. }))
+            .expect("disclosure node");
+        let layout = disclosure.attrs.layout_ref().expect("layout is set");
+        assert_eq!(
+            layout.width,
+            Width::Fixed(TargetValue::universal(Length::Ch(60))),
+            "inline width must win"
+        );
+        assert!(
+            layout.max_width.is_none(),
+            "frontmatter max-width must be cleared by inline width: {:?}",
+            layout.max_width
+        );
+    }
+
+    /// The symmetric case: an instance `max-width` must reset a lower-priority
+    /// frontmatter fixed `width` back to `Auto` before applying the cap.
+    #[test]
+    fn context_fold_inline_max_width_clears_frontmatter_width() {
+        use renderable::layout::{Layout, Length, TargetValue, Width};
+
+        let mut policies = empty_policies();
+        policies.insert(
+            PageComponent::Disclosure,
+            ComponentPolicy {
+                layout: Layout {
+                    width: Width::Fixed(TargetValue::universal(Length::Ch(60))),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+        let ctx = ctx_for(&policies);
+        let doc = fold_test(
+            "::disclosure max-width=24ch Summary\n::details\nBody.\n::end-disclosure\n",
+            &ctx,
+        );
+        let disclosure = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Disclosure { .. }))
+            .expect("disclosure node");
+        let layout = disclosure.attrs.layout_ref().expect("layout is set");
+        assert_eq!(layout.width, Width::Auto, "inline max-width must reset width to Auto");
+        assert_eq!(
+            layout.max_width,
+            Some(TargetValue::universal(Length::Ch(24))),
+            "inline max-width must win"
+        );
+    }
+
     // ── component colors ───────────────────────────────────────────────────
 
     #[test]
@@ -840,10 +983,8 @@ mod structural_tests {
         );
         let ctx = ctx_for(&policies);
         let doc = fold_test("> quote\n", &ctx);
-        let quote = find_node(&doc.root, &|n| {
-            matches!(n.kind, NodeKind::BlockQuote { .. })
-        })
-        .expect("blockquote node");
+        let quote = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::BlockQuote { .. }))
+            .expect("blockquote node");
         let style = quote.attrs.style().expect("style is set");
         let bg = style
             .background
@@ -920,8 +1061,8 @@ mod structural_tests {
             renderable::color::Tailwind::Blue500,
         )));
         let doc = fold_test("[label](https://example.com)\n", &ctx);
-        let link =
-            find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. })).expect("link node");
+        let link = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. }))
+            .expect("link node");
         assert!(
             link.attrs.style_ref().is_none_or(|s| s.is_empty()),
             "page color must not be copied onto the link; got {:?}",
@@ -978,8 +1119,8 @@ mod structural_tests {
         let policies = empty_policies();
         let ctx = ctx_for(&policies);
         let doc = fold_test("[label](https://example.com \"class='btn'\")\n", &ctx);
-        let link =
-            find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. })).expect("link node");
+        let link = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. }))
+            .expect("link node");
         assert!(
             link.attrs.classes.iter().any(|c| c == "btn"),
             "class 'btn' attached: {:?}",
@@ -997,21 +1138,30 @@ mod structural_tests {
     fn context_fold_parses_structured_link_target() {
         let policies = empty_policies();
         let ctx = ctx_for(&policies);
-        let doc = fold_test("[x](https://example.com \"target='_blank'\")\n", &ctx);
-        let link =
-            find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. })).expect("link node");
+        let doc = fold_test(
+            "[x](https://example.com \"target='_blank'\")\n",
+            &ctx,
+        );
+        let link = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. }))
+            .expect("link node");
         let browser = link.attrs.browser_ref().expect("browser attrs");
         let link_attrs = browser.link.as_ref().expect("link browser attrs");
-        assert_eq!(link_attrs.target, Some(renderable::tree::LinkTarget::Blank));
+        assert_eq!(
+            link_attrs.target,
+            Some(renderable::tree::LinkTarget::Blank)
+        );
     }
 
     #[test]
     fn context_fold_parses_structured_link_data_prompt() {
         let policies = empty_policies();
         let ctx = ctx_for(&policies);
-        let doc = fold_test("[x](https://example.com \"prompt='explain'\")\n", &ctx);
-        let link =
-            find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. })).expect("link node");
+        let doc = fold_test(
+            "[x](https://example.com \"prompt='explain'\")\n",
+            &ctx,
+        );
+        let link = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. }))
+            .expect("link node");
         let browser = link.attrs.browser_ref().expect("browser attrs");
         let prompt_name = renderable::tree::DataAttrName::new("prompt").unwrap();
         assert_eq!(
@@ -1024,12 +1174,19 @@ mod structural_tests {
     fn context_fold_parses_structured_link_inline_style() {
         let policies = empty_policies();
         let ctx = ctx_for(&policies);
-        let doc = fold_test("[x](https://example.com \"style='color: red'\")\n", &ctx);
-        let link =
-            find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. })).expect("link node");
+        let doc = fold_test(
+            "[x](https://example.com \"style='color: red'\")\n",
+            &ctx,
+        );
+        let link = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. }))
+            .expect("link node");
         let browser = link.attrs.browser_ref().expect("browser attrs");
         let css = browser.inline_style.as_ref().expect("inline_style");
-        assert!(css.to_css().contains("color: red"), "css: {}", css.to_css());
+        assert!(
+            css.to_css().contains("color: red"),
+            "css: {}",
+            css.to_css()
+        );
     }
 
     // ── link children preserved ────────────────────────────────────────────
@@ -1039,8 +1196,8 @@ mod structural_tests {
         let policies = empty_policies();
         let ctx = ctx_for(&policies);
         let doc = fold_test("[**bold** label](https://example.com)\n", &ctx);
-        let link =
-            find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. })).expect("link node");
+        let link = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. }))
+            .expect("link node");
         assert!(
             link.children()
                 .iter()
@@ -1078,8 +1235,8 @@ mod structural_tests {
         let mut ctx = ctx_for(&policies);
         ctx.hyperlink_style = Some(&common);
         let doc = fold_test("[label](https://example.com)\n", &ctx);
-        let link =
-            find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. })).expect("link node");
+        let link = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. }))
+            .expect("link node");
         let hints = link.attrs.text_layout_ref().expect("text_layout hints");
         assert!(hints.width.is_some(), "width hint attached");
     }

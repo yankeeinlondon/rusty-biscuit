@@ -841,10 +841,7 @@ mod tests {
 
     #[test]
     fn pid_from_tag_extracts_owner_pid() {
-        assert_eq!(
-            pid_from_tag("biscuit-test-pane-123-456", "biscuit-test-pane-"),
-            Some(123)
-        );
+        assert_eq!(pid_from_tag("biscuit-test-pane-123-456", "biscuit-test-pane-"), Some(123));
     }
 
     #[test]

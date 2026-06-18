@@ -9,7 +9,8 @@ expression: out
 ┃ Image parsing failed here:
 ┃ 
 ┃ ```md
-┃     > 1 │ ![alt] image.png
+┃ > 1 │ ![alt] image.png
+┃ ```
 ┃ 
 ┃         ^ (offset 7)
 ┃ 

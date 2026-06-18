@@ -47,11 +47,13 @@ pub(crate) enum ContextGroup {
     Hardware,
     /// GPU detection (separate — requires subprocess on macOS).
     Gpu,
+    /// Agentic CLI context: agent, model.
+    Agent,
 }
 
 impl ContextGroup {
     /// All available groups.
-    pub(crate) fn all() -> [ContextGroup; 8] {
+    pub(crate) fn all() -> [ContextGroup; 9] {
         [
             Self::DateTime,
             Self::Repo,
@@ -61,6 +63,7 @@ impl ContextGroup {
             Self::Os,
             Self::Hardware,
             Self::Gpu,
+            Self::Agent,
         ]
     }
 
@@ -167,6 +170,9 @@ impl ContextGroup {
 
             // GPU (requires ioreg subprocess on macOS)
             "gpu" => Some(Self::Gpu),
+
+            // Agent
+            "agent" | "model" => Some(Self::Agent),
 
             _ => None,
         }
@@ -610,6 +616,10 @@ pub(crate) fn capture_runtime_context_for_groups(
 
     if groups.contains(&ContextGroup::Hardware) {
         populate_hardware(&cap, &mut values);
+    }
+
+    if groups.contains(&ContextGroup::Agent) {
+        populate_agent(&mut values);
     }
 
     (values, cap.diagnostics, cap.timings)
@@ -1648,6 +1658,31 @@ fn populate_hardware(cap: &ContextCapture, values: &mut Map<String, Value>) {
     );
 }
 
+// ── Agent context ─────────────────────────────────────────────────
+
+/// Populate agentic CLI context from environment variables.
+///
+/// Reads `AGENT` and `MODEL` from `std::env`, trimming ASCII whitespace.
+/// Missing or empty values fall back to `"unknown"` and `"default"`
+/// respectively. There is no model allowlist; any non-empty trimmed value
+/// is accepted.
+pub(crate) fn populate_agent(values: &mut Map<String, Value>) {
+    let agent = std::env::var("AGENT")
+        .ok()
+        .map(|s| s.trim_ascii().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let model = std::env::var("MODEL")
+        .ok()
+        .map(|s| s.trim_ascii().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "default".to_string());
+
+    values.insert("agent".into(), Value::String(agent));
+    values.insert("model".into(), Value::String(model));
+}
+
 #[cfg(test)]
 impl ContextCapture {
     /// Minimal capture with a fixed repo root and the supplied repo info.
@@ -1715,8 +1750,6 @@ impl ContextCapture {
 fn test_repo_info(root: PathBuf, is_monorepo: bool, packages: Option<Vec<Package>>) -> RepoInfo {
     RepoInfo {
         is_monorepo,
-        monorepo_tool: None,
-        workspace_tools: Vec::new(),
         root,
         dependencies: None,
         dev_dependencies: None,
@@ -1924,5 +1957,89 @@ mod tests {
         assert_eq!(determine_season(6, 1), "Summer");
         assert_eq!(determine_season(9, 1), "Fall");
         assert_eq!(determine_season(12, 15), "Winter");
+    }
+
+    /// Helper: run a closure with the given env var set, restoring the
+    /// previous value (or unset state) afterwards. Tests using this are
+    /// marked `#[serial]` to avoid racing with other env-mutating tests.
+    fn with_env_var<F, R>(key: &str, value: Option<&str>, f: F) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        let previous = std::env::var(key).ok();
+        // `set_var`/`remove_var` are unsafe in Rust 2024. Serial_test isolates
+        // these tests from each other, and the helper restores the prior value
+        // so the mutation does not leak past the closure.
+        unsafe {
+            match value {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+        let result = f();
+        unsafe {
+            match previous {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+        result
+    }
+
+    #[test]
+    #[serial_test::serial(env_agent_model)]
+    fn populate_agent_uses_env_values_with_trim() {
+        with_env_var("AGENT", Some("  claude  "), || {
+            with_env_var("MODEL", Some("  sonnet-4  "), || {
+                let mut values = Map::new();
+                populate_agent(&mut values);
+                assert_eq!(
+                    values.get("agent"),
+                    Some(&Value::String("claude".to_string()))
+                );
+                assert_eq!(
+                    values.get("model"),
+                    Some(&Value::String("sonnet-4".to_string()))
+                );
+            })
+        });
+    }
+
+    #[test]
+    #[serial_test::serial(env_agent_model)]
+    fn populate_agent_defaults_when_missing_or_empty() {
+        with_env_var("AGENT", None, || {
+            with_env_var("MODEL", Some("   "), || {
+                let mut values = Map::new();
+                populate_agent(&mut values);
+                assert_eq!(
+                    values.get("agent"),
+                    Some(&Value::String("unknown".to_string()))
+                );
+                assert_eq!(
+                    values.get("model"),
+                    Some(&Value::String("default".to_string()))
+                );
+            })
+        });
+    }
+
+    #[test]
+    #[serial_test::serial(env_agent_model)]
+    fn capture_runtime_context_includes_agent_group() {
+        with_env_var("AGENT", Some("opencode"), || {
+            with_env_var("MODEL", Some("glm-5.2"), || {
+                let (values, _, _) =
+                    capture_runtime_context_for_groups(Path::new("."), &[ContextGroup::Agent]);
+                assert_eq!(
+                    values.get("agent"),
+                    Some(&Value::String("opencode".to_string()))
+                );
+                assert_eq!(
+                    values.get("model"),
+                    Some(&Value::String("glm-5.2".to_string()))
+                );
+            })
+        });
     }
 }

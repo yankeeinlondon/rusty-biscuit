@@ -978,10 +978,7 @@ mod tests {
         let out = apply_style("ab", &style, &truecolor_term());
         let row = out.split('\n').find(|l| l.contains("ab")).unwrap();
         // `│ab│` — the glyphs hug the content, no space between edge and text.
-        assert!(
-            row.contains("│ab│"),
-            "no implicit interior space, got {row:?}"
-        );
+        assert!(row.contains("│ab│"), "no implicit interior space, got {row:?}");
     }
 
     #[test]

@@ -1,0 +1,10 @@
+[package]
+name = "reaper"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Deterministic web-page and site context extraction (placeholder; see reaper/features)"
+
+[lib]
+name = "reaper"
+path = "src/lib.rs"

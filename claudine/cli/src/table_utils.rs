@@ -1,6 +1,6 @@
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableColumn};
-use biscuit_terminal::utils::layout::{Edges, Length};
+use biscuit_terminal::utils::layout::{Length, Edges};
 
 pub(crate) fn base_table(columns: Vec<TableColumn>) -> Table {
     let mut table = Table::new().with_columns(columns);

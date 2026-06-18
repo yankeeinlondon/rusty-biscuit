@@ -35,11 +35,11 @@ mod validate;
 
 pub use attrs::{
     AriaAttrName, BrowserAttrNameError, BrowserAttrs, CodeRenderHints, ColumnConditional,
-    ColumnWidthKind, ColumnsHints, ComponentHints, DataAttrName, HintNamespace, HrAlignment,
-    HrKind, HrWeight, ImageBrowserAttrs, ImageDecoding, ImageLoading, LinkBrowserAttrs,
-    LinkRelation, LinkTarget, ListMarkerPolicy, ListRenderHints, NodeAttrs, ProgressHints,
-    SequenceJoin, TableCellHints, TableColumnHints, TableHints, TableTerminalHints, TaskHints,
-    TaskState, TextLayoutHints, TextOverflow, ThematicBreakAttrs,
+    ColumnWidthKind, ColumnsHints, ComponentHints, DataAttrName, DisclosureStyleHints,
+    HintNamespace, HrAlignment, HrKind, HrWeight, ImageBrowserAttrs, ImageDecoding, ImageLoading,
+    LinkBrowserAttrs, LinkRelation, LinkTarget, ListMarkerPolicy, ListRenderHints, NodeAttrs,
+    ProgressHints, SequenceJoin, TableCellHints, TableColumnHints, TableHints, TableTerminalHints,
+    TaskHints, TaskState, TextLayoutHints, TextOverflow, ThematicBreakAttrs,
 };
 // Test-only instrumentation (gated): exposed so a downstream crate's perf-gate
 // test can observe the `NodeAttrs::data` hint-access counter while folding a
@@ -47,14 +47,14 @@ pub use attrs::{
 #[cfg(any(test, feature = "hint-access-counter"))]
 pub use attrs::{hint_accesses, reset_hint_accesses};
 pub use diagnostic::{Diagnostic, DiagnosticKind, Severity};
-pub use document::{Document, DocumentMetadata, Frontmatter, FrontmatterFormat};
 pub use embed::{
     EMBED_CLOSE, EMBED_MARKER_SUFFIX, EMBED_OPEN_PREFIX, EmbedError, decode_embedded_open,
     encode_embedded_subtree, is_embedded_close,
 };
+pub use inherit::InheritedStyle;
+pub use document::{Document, DocumentMetadata, Frontmatter, FrontmatterFormat};
 pub use error::{RenderError, RenderStrictness, Rendered};
 pub use graphics::horizontal_rule_svg;
-pub use inherit::InheritedStyle;
 pub use node::{ColumnAlign, HeadingDepth, HeadingDepthError, NodeKind, RenderNode};
 pub use render::{
     BrowserRenderOptions, CodeRenderer, MarkdownDialect, MarkdownRenderOptions,
@@ -136,7 +136,7 @@ mod tests {
 
     #[test]
     fn tree_renderable_can_supply_a_layout() {
-        use crate::layout::{Edges, Layout, Length};
+        use crate::layout::{Layout, Length, Edges};
 
         struct Demo;
         impl TreeRenderable for Demo {

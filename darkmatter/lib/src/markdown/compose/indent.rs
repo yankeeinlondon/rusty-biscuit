@@ -67,7 +67,10 @@ mod tests {
     fn blank_interior_lines_receive_the_indent() {
         // A blank separator line between two output lines must still be nested,
         // otherwise it could break out of the surrounding list/blockquote.
-        assert_eq!(indent_text("one\n\ntwo", "  ", None), "  one\n  \n  two");
+        assert_eq!(
+            indent_text("one\n\ntwo", "  ", None),
+            "  one\n  \n  two"
+        );
     }
 
     #[test]

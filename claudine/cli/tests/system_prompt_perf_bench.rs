@@ -9,7 +9,7 @@
 //! The test is `#[ignore]`d by default — it's diagnostic, not a gate.
 
 use claudine::system_prompt::{
-    LaunchContext, ResolvedSystemPrompt, SystemPromptArgs, resolve_and_prepare_for_session,
+    ResolvedSystemPrompt, LaunchContext, SystemPromptArgs, resolve_and_prepare_for_session,
 };
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeOptions;

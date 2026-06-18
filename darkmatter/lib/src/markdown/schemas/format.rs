@@ -137,17 +137,14 @@ impl fmt::Display for FileReferenceFailure {
 /// distinguishing the three failure modes so callers can render a
 /// situation-appropriate diagnostic.
 pub(crate) fn resolve_file_reference(value: &str) -> Result<PathBuf, FileReferenceFailure> {
-    let reference =
-        FileReference::new(value).map_err(|err| FileReferenceFailure::InvalidSyntax {
-            raw: value.to_string(),
-            err,
-        })?;
-    let path = reference
-        .resolve()
-        .map_err(|err| FileReferenceFailure::Resolution {
-            raw: value.to_string(),
-            err,
-        })?;
+    let reference = FileReference::new(value).map_err(|err| FileReferenceFailure::InvalidSyntax {
+        raw: value.to_string(),
+        err,
+    })?;
+    let path = reference.resolve().map_err(|err| FileReferenceFailure::Resolution {
+        raw: value.to_string(),
+        err,
+    })?;
     let path = path.ok_or_else(|| FileReferenceFailure::NoMatch {
         raw: value.to_string(),
         cwd: std::env::current_dir().ok(),
@@ -448,25 +445,16 @@ mod tests {
     fn resolve_file_reference_reports_missing_file() {
         let dir = temp_dir();
         let _cwd = CwdGuard::enter(dir.path());
-        let err =
-            resolve_file_reference("./does-not-exist.md").expect_err("should fail with NoMatch");
+        let err = resolve_file_reference("./does-not-exist.md")
+            .expect_err("should fail with NoMatch");
         let rendered = err.to_string();
         assert!(
             rendered.contains("no existing file matched reference"),
             "rendered: {rendered}"
         );
-        assert!(
-            rendered.contains("`./does-not-exist.md`"),
-            "rendered: {rendered}"
-        );
-        assert!(
-            rendered.contains("while resolving from"),
-            "rendered: {rendered}"
-        );
-        assert!(matches!(
-            err,
-            FileReferenceFailure::NoMatch { cwd: Some(_), .. }
-        ));
+        assert!(rendered.contains("`./does-not-exist.md`"), "rendered: {rendered}");
+        assert!(rendered.contains("while resolving from"), "rendered: {rendered}");
+        assert!(matches!(err, FileReferenceFailure::NoMatch { cwd: Some(_), .. }));
     }
 
     #[test]
@@ -490,9 +478,7 @@ mod tests {
         let var_name = "DARKMATTER_TEST_UNSET_ENV_REF_98765";
         // Safety: the name is unique enough that no other process should set
         // it, but unset it defensively before resolving.
-        unsafe {
-            std::env::remove_var(var_name);
-        }
+        unsafe { std::env::remove_var(var_name); }
         let raw = format!("{{{{{var_name}}}}}/notes.md");
         let err = resolve_file_reference(&raw).expect_err("should fail with Resolution");
         let rendered = err.to_string();
@@ -500,10 +486,7 @@ mod tests {
             rendered.contains("could not resolve file reference"),
             "rendered: {rendered}"
         );
-        assert!(
-            rendered.contains(&format!("`{raw}`")),
-            "rendered: {rendered}"
-        );
+        assert!(rendered.contains(&format!("`{raw}`")), "rendered: {rendered}");
         assert!(
             rendered.contains(&format!("environment variable `{var_name}` is not set")),
             "rendered: {rendered}"
@@ -523,10 +506,7 @@ mod tests {
             rendered.contains("could not resolve file reference"),
             "rendered: {rendered}"
         );
-        assert!(
-            rendered.contains("`vault:notes/today.md`"),
-            "rendered: {rendered}"
-        );
+        assert!(rendered.contains("`vault:notes/today.md`"), "rendered: {rendered}");
         assert!(
             rendered.contains("vault reference used without any configured vault roots"),
             "rendered: {rendered}"
@@ -546,20 +526,11 @@ mod tests {
             rendered.contains("no existing file matched reference"),
             "rendered: {rendered}"
         );
-        assert!(
-            rendered.contains(&format!("`{raw}`")),
-            "rendered: {rendered}"
-        );
+        assert!(rendered.contains(&format!("`{raw}`")), "rendered: {rendered}");
         // The contract does not fabricate a candidate absolute path; it only
         // reports the raw reference and the resolution directory.
-        assert!(
-            !rendered.contains("/darkmatter-test-missing-absolute-xyz.md "),
-            "rendered: {rendered}"
-        );
-        assert!(matches!(
-            err,
-            FileReferenceFailure::NoMatch { cwd: Some(_), .. }
-        ));
+        assert!(!rendered.contains("/darkmatter-test-missing-absolute-xyz.md "), "rendered: {rendered}");
+        assert!(matches!(err, FileReferenceFailure::NoMatch { cwd: Some(_), .. }));
     }
 
     #[test]
@@ -574,14 +545,8 @@ mod tests {
             rendered.contains("no existing file matched reference"),
             "rendered: {rendered}"
         );
-        assert!(
-            rendered.contains(&format!("`{raw}`")),
-            "rendered: {rendered}"
-        );
-        assert!(
-            !rendered.contains("darkmatter-test-missing-magic-xyz.md "),
-            "rendered: {rendered}"
-        );
+        assert!(rendered.contains(&format!("`{raw}`")), "rendered: {rendered}");
+        assert!(!rendered.contains("darkmatter-test-missing-magic-xyz.md "), "rendered: {rendered}");
         assert!(matches!(err, FileReferenceFailure::NoMatch { .. }));
     }
 
@@ -597,14 +562,8 @@ mod tests {
             rendered.contains("no existing file matched reference"),
             "rendered: {rendered}"
         );
-        assert!(
-            rendered.contains(&format!("`{raw}`")),
-            "rendered: {rendered}"
-        );
-        assert!(
-            !rendered.contains("darkmatter-test-missing-package-xyz.md "),
-            "rendered: {rendered}"
-        );
+        assert!(rendered.contains(&format!("`{raw}`")), "rendered: {rendered}");
+        assert!(!rendered.contains("darkmatter-test-missing-package-xyz.md "), "rendered: {rendered}");
         assert!(matches!(err, FileReferenceFailure::NoMatch { .. }));
     }
 
@@ -620,18 +579,9 @@ mod tests {
             rendered.contains("no existing file matched reference"),
             "rendered: {rendered}"
         );
-        assert!(
-            rendered.contains(&format!("`{raw}`")),
-            "rendered: {rendered}"
-        );
-        assert!(
-            !rendered.contains("darkmatter-test-missing-recursive-xyz.md "),
-            "rendered: {rendered}"
-        );
-        assert!(matches!(
-            err,
-            FileReferenceFailure::NoMatch { cwd: Some(_), .. }
-        ));
+        assert!(rendered.contains(&format!("`{raw}`")), "rendered: {rendered}");
+        assert!(!rendered.contains("darkmatter-test-missing-recursive-xyz.md "), "rendered: {rendered}");
+        assert!(matches!(err, FileReferenceFailure::NoMatch { cwd: Some(_), .. }));
     }
 
     #[test]
@@ -642,7 +592,10 @@ mod tests {
             cwd,
         };
         let rendered = failure.to_string();
-        assert_eq!(rendered, "no existing file matched reference `./x`",);
+        assert_eq!(
+            rendered,
+            "no existing file matched reference `./x`",
+        );
     }
 
     fn make_match_keyword(globs: Value) -> Box<dyn Keyword> {

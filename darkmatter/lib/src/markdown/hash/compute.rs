@@ -318,17 +318,14 @@ fn section_content<'a>(content: &'a str, headings: &[&MarkdownTocNode], index: u
 mod tests {
     use super::*;
 
-    const FM_BODY: &str =
-        "---\ntitle: Hello\nauthor: Alice\n---\n# Intro\n\nWelcome.\n\n## Setup\n\nSteps.";
+    const FM_BODY: &str = "---\ntitle: Hello\nauthor: Alice\n---\n# Intro\n\nWelcome.\n\n## Setup\n\nSteps.";
 
     fn md(content: &str) -> Markdown {
         content.into()
     }
 
     fn is_hex16(s: &str) -> bool {
-        s.len() == 16
-            && s.chars()
-                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        s.len() == 16 && s.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
     }
 
     #[test]
@@ -480,8 +477,7 @@ mod tests {
     #[test]
     fn ignored_keys_do_not_affect_frontmatter_hash() {
         let plain = md("---\ntitle: T\n---\n# H\n\nBody.");
-        let with_managed =
-            md("---\ntitle: T\nhash: stale-value\nlast_updated: 2020-01-01\n---\n# H\n\nBody.");
+        let with_managed = md("---\ntitle: T\nhash: stale-value\nlast_updated: 2020-01-01\n---\n# H\n\nBody.");
         let opts = MdHashOptions::default();
 
         assert_eq!(

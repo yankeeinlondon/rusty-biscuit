@@ -2765,8 +2765,9 @@ mod tests {
         fn parity_default_dashes() {
             let rule = HorizontalRule::new();
             let expected = rule.render_browser_svg();
-            let actual =
-                renderable::tree::graphics::horizontal_rule_svg(None, None, None, None, "0", "0");
+            let actual = renderable::tree::graphics::horizontal_rule_svg(
+                None, None, None, None, "0", "0",
+            );
             assert_eq!(
                 actual, expected,
                 "default dashed SVG must match between renderable and biscuit-terminal"
@@ -2889,23 +2890,24 @@ mod tests {
 
         #[test]
         fn parity_with_custom_margins() {
-            let rule = HorizontalRule::new().with_layout(crate::utils::layout::Layout {
-                margin: crate::utils::layout::Edges {
-                    top: renderable::layout::TargetValue::universal(
-                        renderable::layout::Length::ch(2),
-                    ),
-                    right: renderable::layout::TargetValue::universal(
-                        renderable::layout::Length::Zero,
-                    ),
-                    bottom: renderable::layout::TargetValue::universal(
-                        renderable::layout::Length::ch(1),
-                    ),
-                    left: renderable::layout::TargetValue::universal(
-                        renderable::layout::Length::Zero,
-                    ),
-                },
-                ..crate::utils::layout::Layout::default()
-            });
+            let rule = HorizontalRule::new()
+                .with_layout(crate::utils::layout::Layout {
+                    margin: crate::utils::layout::Edges {
+                        top: renderable::layout::TargetValue::universal(
+                            renderable::layout::Length::ch(2),
+                        ),
+                        right: renderable::layout::TargetValue::universal(
+                            renderable::layout::Length::Zero,
+                        ),
+                        bottom: renderable::layout::TargetValue::universal(
+                            renderable::layout::Length::ch(1),
+                        ),
+                        left: renderable::layout::TargetValue::universal(
+                            renderable::layout::Length::Zero,
+                        ),
+                    },
+                    ..crate::utils::layout::Layout::default()
+                });
             let expected = rule.render_browser_svg();
             let actual = renderable::tree::graphics::horizontal_rule_svg(
                 None, None, None, None, "2ch", "1ch",

@@ -63,7 +63,9 @@ fn bench_toml_to_json(c: &mut Criterion) {
     let doc = biscuit_file::Toml::from_str(&input).unwrap();
     let mut group = c.benchmark_group("toml");
     group.throughput(Throughput::Bytes(input.len() as u64));
-    group.bench_function("to_json", |b| b.iter(|| black_box(&doc).as_json().unwrap()));
+    group.bench_function("to_json", |b| {
+        b.iter(|| black_box(&doc).as_json().unwrap())
+    });
     group.finish();
 }
 
@@ -72,7 +74,9 @@ fn bench_toml_to_yaml(c: &mut Criterion) {
     let doc = biscuit_file::Toml::from_str(&input).unwrap();
     let mut group = c.benchmark_group("toml");
     group.throughput(Throughput::Bytes(input.len() as u64));
-    group.bench_function("to_yaml", |b| b.iter(|| black_box(&doc).as_yaml().unwrap()));
+    group.bench_function("to_yaml", |b| {
+        b.iter(|| black_box(&doc).as_yaml().unwrap())
+    });
     group.finish();
 }
 
@@ -95,7 +99,9 @@ fn bench_yaml_to_json(c: &mut Criterion) {
     let doc = biscuit_file::Yaml::from_str(&input).unwrap();
     let mut group = c.benchmark_group("yaml");
     group.throughput(Throughput::Bytes(input.len() as u64));
-    group.bench_function("to_json", |b| b.iter(|| black_box(&doc).as_json().unwrap()));
+    group.bench_function("to_json", |b| {
+        b.iter(|| black_box(&doc).as_json().unwrap())
+    });
     group.finish();
 }
 
@@ -104,7 +110,9 @@ fn bench_yaml_to_toml(c: &mut Criterion) {
     let doc = biscuit_file::Yaml::from_str(&input).unwrap();
     let mut group = c.benchmark_group("yaml");
     group.throughput(Throughput::Bytes(input.len() as u64));
-    group.bench_function("to_toml", |b| b.iter(|| black_box(&doc).as_toml().unwrap()));
+    group.bench_function("to_toml", |b| {
+        b.iter(|| black_box(&doc).as_toml().unwrap())
+    });
     group.finish();
 }
 
@@ -127,7 +135,9 @@ fn bench_json5_to_json(c: &mut Criterion) {
     let doc = biscuit_file::Json5::from_str(&input).unwrap();
     let mut group = c.benchmark_group("json5");
     group.throughput(Throughput::Bytes(input.len() as u64));
-    group.bench_function("to_json", |b| b.iter(|| black_box(&doc).as_json().unwrap()));
+    group.bench_function("to_json", |b| {
+        b.iter(|| black_box(&doc).as_json().unwrap())
+    });
     group.finish();
 }
 
@@ -136,7 +146,9 @@ fn bench_json5_to_toml(c: &mut Criterion) {
     let doc = biscuit_file::Json5::from_str(&input).unwrap();
     let mut group = c.benchmark_group("json5");
     group.throughput(Throughput::Bytes(input.len() as u64));
-    group.bench_function("to_toml", |b| b.iter(|| black_box(&doc).as_toml().unwrap()));
+    group.bench_function("to_toml", |b| {
+        b.iter(|| black_box(&doc).as_toml().unwrap())
+    });
     group.finish();
 }
 

@@ -14,7 +14,14 @@ use crate::markdown::compose::expression::{Expr, ExpressionFinder, parse};
 use crate::markdown::compose::transclusion::BlockDirective;
 
 /// Expression-function identifiers whose first argument is a file/URL path the
-/// evaluator will actually read. Membership is an **exact** match — a longer
+/// evaluator will actually **fetch over the network** when it is an HTTP(S) URL.
+///
+/// This is deliberately narrower than the context-requiring read-side set
+/// (`expression::functions::FS_FUNCTIONS`, seven functions): `absolute` and
+/// `relative` also require a resolution context but only ever rewrite a path
+/// string — they never touch the network — so registering them as remote
+/// egress would make the pre-fetch discovery scanner contact a host for a URL
+/// that is never actually read. Membership is an **exact** match — a longer
 /// identifier such as `not_frontmatter` is deliberately excluded so it never
 /// registers network egress.
 const REMOTE_READ_FUNCTIONS: &[&str] = &[
@@ -23,8 +30,6 @@ const REMOTE_READ_FUNCTIONS: &[&str] = &[
     "markdown_title",
     "markdown_body_empty",
     "validate_schema",
-    "absolute",
-    "relative",
 ];
 
 /// What kind of directive or expression is consuming a remote URL.
@@ -221,7 +226,10 @@ impl RemoteUrlCatalog {
 
     /// Returns deduplicated URLs.
     pub fn urls(&self) -> Vec<url::Url> {
-        self.deduplicated().iter().map(|e| e.url.clone()).collect()
+        self.deduplicated()
+            .iter()
+            .map(|e| e.url.clone())
+            .collect()
     }
 }
 
@@ -334,7 +342,7 @@ pub fn validate_url_for_remote_read(raw: &str) -> Result<url::Url, RemoteReadErr
             return Err(RemoteReadError::InvalidUrl {
                 url: raw.to_string(),
                 reason: format!("unsupported scheme '{other}' (expected http or https)"),
-            });
+            })
         }
     }
 
@@ -353,10 +361,12 @@ pub fn check_remote_read_allowed(
     config: &RemoteReadConfig,
     url: &url::Url,
 ) -> Result<(), RemoteReadError> {
-    let host = url.host_str().ok_or_else(|| RemoteReadError::InvalidUrl {
-        url: url.to_string(),
-        reason: "missing host".to_string(),
-    })?;
+    let host = url
+        .host_str()
+        .ok_or_else(|| RemoteReadError::InvalidUrl {
+            url: url.to_string(),
+            reason: "missing host".to_string(),
+        })?;
 
     if config.is_host_allowed(host) {
         Ok(())
@@ -417,11 +427,7 @@ fn expr_children(expr: &Expr) -> Vec<&Expr> {
             condition,
             then_branch,
             else_branch,
-        } => vec![
-            condition.as_ref(),
-            then_branch.as_ref(),
-            else_branch.as_ref(),
-        ],
+        } => vec![condition.as_ref(), then_branch.as_ref(), else_branch.as_ref()],
         Expr::Comparison { left, right, .. } => vec![left.as_ref(), right.as_ref()],
         Expr::FunctionCall { args, .. } => args.iter().collect(),
     }
@@ -450,7 +456,11 @@ mod tests {
         ComposeSource::Unknown
     }
 
-    fn make_directive(kind: DirectiveKind, raw_target: &str, line: usize) -> BlockDirective {
+    fn make_directive(
+        kind: DirectiveKind,
+        raw_target: &str,
+        line: usize,
+    ) -> BlockDirective {
         BlockDirective {
             kind,
             raw_target: raw_target.to_string(),
@@ -462,32 +472,28 @@ mod tests {
 
     #[test]
     fn discover_from_file_directive_with_http_target() {
-        let directives = vec![make_directive(
-            DirectiveKind::File,
-            "https://example.com/doc.md",
-            5,
-        )];
+        let directives = vec![
+            make_directive(DirectiveKind::File, "https://example.com/doc.md", 5),
+        ];
         let results = discover_remote_urls_from_directives(&directives, &file_source());
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].url.as_str(), "https://example.com/doc.md");
+        assert_eq!(
+            results[0].url.as_str(),
+            "https://example.com/doc.md"
+        );
         assert_eq!(results[0].consumer, RemoteUrlConsumer::TransclusionFile);
         assert_eq!(results[0].line, 5);
         assert_eq!(
-            results[0]
-                .source_file
-                .as_ref()
-                .map(|p| p.to_string_lossy().to_string()),
+            results[0].source_file.as_ref().map(|p| p.to_string_lossy().to_string()),
             Some("/test/doc.md".to_string())
         );
     }
 
     #[test]
     fn discover_from_code_directive_with_http_target() {
-        let directives = vec![make_directive(
-            DirectiveKind::Code,
-            "https://example.com/snippet.rs",
-            10,
-        )];
+        let directives = vec![
+            make_directive(DirectiveKind::Code, "https://example.com/snippet.rs", 10),
+        ];
         let results = discover_remote_urls_from_directives(&directives, &file_source());
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].consumer, RemoteUrlConsumer::TransclusionCode);
@@ -495,11 +501,9 @@ mod tests {
 
     #[test]
     fn discover_from_url_directive() {
-        let directives = vec![make_directive(
-            DirectiveKind::Url,
-            "https://example.com/doc.md",
-            3,
-        )];
+        let directives = vec![
+            make_directive(DirectiveKind::Url, "https://example.com/doc.md", 3),
+        ];
         let results = discover_remote_urls_from_directives(&directives, &file_source());
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].consumer, RemoteUrlConsumer::TransclusionFile);
@@ -517,7 +521,8 @@ mod tests {
 
     #[test]
     fn discover_from_expression_frontmatter() {
-        let content = "Some text\n{{ frontmatter(\"https://example.com/api.md\") }}\nMore text";
+        let content =
+            "Some text\n{{ frontmatter(\"https://example.com/api.md\") }}\nMore text";
         let results = discover_remote_urls_from_expressions(content, &file_source());
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].consumer, RemoteUrlConsumer::ExpressionFunction);
@@ -572,7 +577,8 @@ mod tests {
     #[test]
     fn discover_from_nested_expression_function() {
         // A read-side call buried in a ternary branch is still discovered.
-        let content = "{{ flag ? frontmatter(\"https://example.com/api.md\") : 'none' }}";
+        let content =
+            "{{ flag ? frontmatter(\"https://example.com/api.md\") : 'none' }}";
         let results = discover_remote_urls_from_expressions(content, &file_source());
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].url.as_str(), "https://example.com/api.md");
@@ -608,6 +614,22 @@ Intro
         let content = "Try `frontmatter(\"https://example.com/doc.md\")` here.";
         let results = discover_remote_urls_from_expressions(content, &file_source());
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn absolute_url_arg_is_not_remote_egress() {
+        // `absolute`/`relative` require a resolution context but never fetch:
+        // a URL argument must not be registered as network egress.
+        let content = "{{ absolute(\"https://example.com/doc.md\") }}";
+        let results = discover_remote_urls_from_expressions(content, &file_source());
+        assert!(results.is_empty(), "absolute() must not register remote egress");
+    }
+
+    #[test]
+    fn relative_url_arg_is_not_remote_egress() {
+        let content = "{{ relative(\"https://example.com/doc.md\") }}";
+        let results = discover_remote_urls_from_expressions(content, &file_source());
+        assert!(results.is_empty(), "relative() must not register remote egress");
     }
 
     #[test]
@@ -683,45 +705,27 @@ Intro
     #[test]
     fn concurrency_default_when_no_override_or_env() {
         // Lowest precedence: no CLI override and no env var → the spec default.
-        assert_eq!(
-            resolve_remote_concurrency_from(None, None),
-            DEFAULT_REMOTE_CONCURRENCY
-        );
+        assert_eq!(resolve_remote_concurrency_from(None, None), DEFAULT_REMOTE_CONCURRENCY);
     }
 
     #[test]
     fn concurrency_env_overrides_default() {
-        assert_eq!(
-            resolve_remote_concurrency_from(None, Some("8".to_string())),
-            8
-        );
+        assert_eq!(resolve_remote_concurrency_from(None, Some("8".to_string())), 8);
     }
 
     #[test]
     fn concurrency_cli_override_beats_env() {
         // An explicit CLI flag wins over the env var.
-        assert_eq!(
-            resolve_remote_concurrency_from(Some(3), Some("8".to_string())),
-            3
-        );
+        assert_eq!(resolve_remote_concurrency_from(Some(3), Some("8".to_string())), 3);
     }
 
     #[test]
     fn concurrency_invalid_or_zero_env_falls_back_to_default() {
         // Garbage, empty, and zero env values are ignored rather than silently
         // deadlocking or weakening the cap.
-        assert_eq!(
-            resolve_remote_concurrency_from(None, Some("nope".to_string())),
-            DEFAULT_REMOTE_CONCURRENCY
-        );
-        assert_eq!(
-            resolve_remote_concurrency_from(None, Some("".to_string())),
-            DEFAULT_REMOTE_CONCURRENCY
-        );
-        assert_eq!(
-            resolve_remote_concurrency_from(None, Some("0".to_string())),
-            DEFAULT_REMOTE_CONCURRENCY
-        );
+        assert_eq!(resolve_remote_concurrency_from(None, Some("nope".to_string())), DEFAULT_REMOTE_CONCURRENCY);
+        assert_eq!(resolve_remote_concurrency_from(None, Some("".to_string())), DEFAULT_REMOTE_CONCURRENCY);
+        assert_eq!(resolve_remote_concurrency_from(None, Some("0".to_string())), DEFAULT_REMOTE_CONCURRENCY);
     }
 
     #[test]
@@ -806,11 +810,9 @@ Intro
 
     #[test]
     fn discover_all_combines_directives_and_expressions() {
-        let directives = vec![make_directive(
-            DirectiveKind::File,
-            "https://example.com/a.md",
-            1,
-        )];
+        let directives = vec![
+            make_directive(DirectiveKind::File, "https://example.com/a.md", 1),
+        ];
         let content = "{{ frontmatter(\"https://example.com/b.md\") }}";
         let catalog = discover_all_remote_urls(&directives, content, &file_source());
 
@@ -820,11 +822,9 @@ Intro
 
     #[test]
     fn discover_all_deduplicates_across_sources() {
-        let directives = vec![make_directive(
-            DirectiveKind::File,
-            "https://example.com/shared.md",
-            1,
-        )];
+        let directives = vec![
+            make_directive(DirectiveKind::File, "https://example.com/shared.md", 1),
+        ];
         let content = "{{ frontmatter(\"https://example.com/shared.md\") }}";
         let catalog = discover_all_remote_urls(&directives, content, &file_source());
 

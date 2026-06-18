@@ -273,14 +273,16 @@ impl EffectEngine {
 
         let client = biscuit_file::file_reference::fetch::PolicyClient::new()
             .map_err(|e| EffectError::Network(e.to_string()))?;
-        let response =
-            biscuit_file::file_reference::fetch::post_blocking(&client, &url, &policy, body.into())
-                .map_err(|e| match e {
-                    biscuit_file::FetchError::PolicyDenied { host } => {
-                        EffectError::HostNotAllowed(host)
-                    }
-                    other => EffectError::Network(other.to_string()),
-                })?;
+        let response = biscuit_file::file_reference::fetch::post_blocking(
+            &client,
+            &url,
+            &policy,
+            body.into(),
+        )
+        .map_err(|e| match e {
+            biscuit_file::FetchError::PolicyDenied { host } => EffectError::HostNotAllowed(host),
+            other => EffectError::Network(other.to_string()),
+        })?;
 
         let response_body = String::from_utf8_lossy(&response.body).to_string();
         Ok(serde_json::json!({
@@ -341,14 +343,8 @@ mod tests {
         std::fs::write(&file, "---\nphase: 1\ntags: [a]\n---\nBody\n").unwrap();
         let eng = EffectEngine::builder().mutation_root(dir.path()).build();
 
-        assert_eq!(
-            eng.increment_frontmatter("d.md", "phase").unwrap(),
-            json!(2)
-        );
-        assert_eq!(
-            eng.decrement_frontmatter("d.md", "phase").unwrap(),
-            json!(1)
-        );
+        assert_eq!(eng.increment_frontmatter("d.md", "phase").unwrap(), json!(2));
+        assert_eq!(eng.decrement_frontmatter("d.md", "phase").unwrap(), json!(1));
         assert_eq!(
             eng.append_frontmatter("d.md", "tags", json!("b")).unwrap(),
             json!(["a", "b"])
@@ -373,9 +369,6 @@ mod tests {
             .http_post("https://example.com/hook", b"{}")
             .unwrap_err();
 
-        assert!(matches!(
-            err,
-            crate::effects::EffectError::HostNotAllowed(_)
-        ));
+        assert!(matches!(err, crate::effects::EffectError::HostNotAllowed(_)));
     }
 }

@@ -96,10 +96,7 @@ mod tests {
 
         let decision = doc.plan_hash_save(Some(&stored), &opts).unwrap();
         assert!(decision.new_stored.is_none());
-        assert!(
-            doc.apply_hash_save(&decision, &opts, "2026-05-28")
-                .is_none()
-        );
+        assert!(doc.apply_hash_save(&decision, &opts, "2026-05-28").is_none());
     }
 
     #[test]
@@ -156,9 +153,7 @@ mod tests {
 
         let edited = md("---\ntitle: T\n---\n# H\n\nNew body.");
         let decision = edited.plan_hash_save(Some(&stored), &opts).unwrap();
-        let written = edited
-            .apply_hash_save(&decision, &opts, "2026-05-28")
-            .unwrap();
+        let written = edited.apply_hash_save(&decision, &opts, "2026-05-28").unwrap();
 
         assert!(written.contains("last_updated: 2026-05-28"));
         assert_body_preserved(&edited, &written);
@@ -179,9 +174,7 @@ mod tests {
             "---\ntitle: T\nhash: aaaa111111111111-bbbb222222222222\nauthor: A\n---\n# H\n\nChanged body.",
         );
         let decision = edited.plan_hash_save(Some(&stored), &opts).unwrap();
-        let written = edited
-            .apply_hash_save(&decision, &opts, "2026-05-28")
-            .unwrap();
+        let written = edited.apply_hash_save(&decision, &opts, "2026-05-28").unwrap();
 
         let reparsed: Markdown = written.into();
         let keys: Vec<&str> = reparsed

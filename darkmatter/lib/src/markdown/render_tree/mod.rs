@@ -57,17 +57,18 @@
 //! [`fold_markdown_to_document`] is the public entry point: it walks a
 //! `pulldown-cmark` event stream and builds a [`renderable::tree::Document`].
 
-pub(crate) mod block_extension;
 pub(crate) mod build_context;
+pub(crate) mod block_extension;
+pub(crate) mod disclosure_style;
 pub mod code_renderer;
 // The inline source rewriter backs `fold_markdown_spanned_with_frontmatter`.
 // A few `pub(crate)` helpers on its result types (e.g. `InlineRewrite::
 // was_rewritten`) are exercised only by the module's own unit tests, so the
 // lib-side dead-code lint stays silenced.
-pub mod entrypoints;
-pub mod fold;
 #[allow(dead_code)]
 pub(crate) mod inline_extension;
+pub mod entrypoints;
+pub mod fold;
 pub mod inventory;
 pub mod pipeline;
 pub mod source;
@@ -75,6 +76,7 @@ pub mod source;
 mod structural_gate;
 pub mod svg_sanitizer;
 
+#[allow(deprecated)]
 pub use code_renderer::TerminalCodeRenderer;
 pub use fold::{
     fold_markdown_spanned_with_frontmatter, fold_markdown_to_document,
@@ -88,8 +90,8 @@ pub use pipeline::{PipelineRenderResult, PipelineResult};
 // / the default-layout `DarkmatterPage::render` path, and the markdown variants
 // serve round-trip callers and the parity suite. `to_render_document` stays
 // `pub(crate)`: it exposes the raw fold and is an internal helper.
-#[allow(unused_imports)]
-pub(crate) use entrypoints::to_render_document;
 pub use entrypoints::{
     render_tree_html, render_tree_markdown, render_tree_markdown_dialect, render_tree_terminal,
 };
+#[allow(unused_imports)]
+pub(crate) use entrypoints::to_render_document;

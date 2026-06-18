@@ -13,9 +13,7 @@ use crate::system_prompt::{
     PreparedSystemPrompt, ResolvedSystemPrompt, SystemPromptMode, SystemPromptSource,
 };
 
-use super::formatting::{
-    prompt_body_width, render_markdown_for_terminal, system_prompt_blockquote_styled,
-};
+use super::formatting::{prompt_body_width, render_markdown_for_terminal, system_prompt_blockquote_styled};
 use super::tokens::estimate_system_prompt_tokens;
 use super::truncation::truncate_front_back;
 use super::{ReportMode, TruncationMode};
@@ -40,7 +38,11 @@ fn render_system_prompt_header(action: &str, term: &Terminal) -> String {
 /// [`NERD_FONT_REPO_GLYPH`] joined to the relative path; non-Nerd-Font
 /// terminals with an in-base path get a `./`-prefixed relative path;
 /// otherwise the absolute path is returned unchanged.
-fn resolve_display_label(absolute: &Path, base: Option<&Path>, term: &Terminal) -> String {
+fn resolve_display_label(
+    absolute: &Path,
+    base: Option<&Path>,
+    term: &Terminal,
+) -> String {
     let rel = base.and_then(|b| absolute.strip_prefix(b).ok());
     match (rel, term.is_nerd_font) {
         (Some(rel), Some(true)) => format!("{NERD_FONT_REPO_GLYPH}/{}", rel.display()),
@@ -104,7 +106,11 @@ fn render_system_prompt_summary(
 ///
 /// `Summary` returns the empty string; `Partial` truncates per the
 /// embedded `TruncationMode`; `Full` renders the full text.
-fn render_system_prompt_body(text: &str, mode: ReportMode, term: &Terminal) -> String {
+fn render_system_prompt_body(
+    text: &str,
+    mode: ReportMode,
+    term: &Terminal,
+) -> String {
     let width = prompt_body_width(term);
     match mode {
         ReportMode::Summary => String::new(),
@@ -172,7 +178,8 @@ impl<'a> SystemPromptReport<'a> {
         }
     }
 
-    fn render_ready(&self, prepared: &PreparedSystemPrompt, term: &Terminal) -> String {
+    fn render_ready(&self, prepared: &PreparedSystemPrompt, term: &Terminal,
+    ) -> String {
         let action = match prepared.mode {
             SystemPromptMode::Append => "appended",
             SystemPromptMode::Replace => "replaced",
@@ -202,7 +209,11 @@ impl<'a> SystemPromptReport<'a> {
         ));
 
         if !matches!(self.mode, ReportMode::Summary) {
-            let body = render_system_prompt_body(&prepared.composed_markdown, self.mode, term);
+            let body = render_system_prompt_body(
+                &prepared.composed_markdown,
+                self.mode,
+                term,
+            );
             if !body.is_empty() {
                 body_parts.push(body);
             }
@@ -217,7 +228,12 @@ impl<'a> SystemPromptReport<'a> {
         format!("{header}\n{quote}")
     }
 
-    fn render_empty(&self, action: &str, body_text: &str, term: &Terminal) -> Option<String> {
+    fn render_empty(
+        &self,
+        action: &str,
+        body_text: &str,
+        term: &Terminal,
+    ) -> Option<String> {
         if !matches!(self.mode, ReportMode::Full) {
             return None;
         }
@@ -507,14 +523,22 @@ mod tests {
     #[test]
     fn summary_format_returns_empty_body() {
         let term = test_terminal();
-        let body = render_system_prompt_body("some content", ReportMode::Summary, &term);
+        let body = render_system_prompt_body(
+            "some content",
+            ReportMode::Summary,
+            &term,
+        );
         assert!(body.is_empty());
     }
 
     #[test]
     fn full_format_renders_content() {
         let term = test_terminal();
-        let body = render_system_prompt_body("Hello world", ReportMode::Full, &term);
+        let body = render_system_prompt_body(
+            "Hello world",
+            ReportMode::Full,
+            &term,
+        );
         let plain = strip_ansi_codes(&body);
         assert!(plain.contains("Hello world"));
     }
@@ -632,10 +656,7 @@ mod tests {
         assert!(plain.contains("■"));
         assert!(plain.contains("Line 1"));
         assert!(plain.contains(" 50"), "should contain the last line number");
-        assert!(
-            !plain.contains("Line 25"),
-            "middle lines should be truncated"
-        );
+        assert!(!plain.contains("Line 25"), "middle lines should be truncated");
     }
 
     #[test]

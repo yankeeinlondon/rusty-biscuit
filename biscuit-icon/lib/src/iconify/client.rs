@@ -9,9 +9,7 @@ const DEFAULT_BASE: &str = "https://api.iconify.design";
 /// Allowed characters in an Iconify prefix or name: ASCII alphanumeric,
 /// hyphen, and underscore.
 fn is_valid_id_part(s: &str) -> bool {
-    !s.is_empty()
-        && s.bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// A thin async client over the Iconify JSON API.
@@ -27,9 +25,7 @@ pub struct IconifyClient {
 /// Returns [`IconError::InvalidIdentifier`] when there is not exactly one `:`
 /// with non-empty, syntactically valid parts on both sides.
 pub fn parse_id(id: &str) -> Result<(String, String)> {
-    let (prefix, name) = id
-        .split_once(':')
-        .ok_or_else(|| IconError::InvalidIdentifier(id.to_string()))?;
+    let (prefix, name) = id.split_once(':').ok_or_else(|| IconError::InvalidIdentifier(id.to_string()))?;
     if !is_valid_id_part(prefix) || !is_valid_id_part(name) || name.contains(':') {
         return Err(IconError::InvalidIdentifier(id.to_string()));
     }
@@ -70,6 +66,14 @@ pub struct License {
 }
 
 #[derive(Deserialize)]
+struct Author {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    url: String,
+}
+
+#[derive(Deserialize)]
 struct CollectionMeta {
     #[serde(default)]
     name: String,
@@ -77,6 +81,12 @@ struct CollectionMeta {
     license: Option<License>,
     #[serde(default)]
     total: Option<usize>,
+    #[serde(default)]
+    author: Option<Author>,
+    #[serde(default)]
+    category: String,
+    #[serde(default)]
+    tags: Vec<String>,
 }
 
 /// Metadata for an Iconify collection returned by [`IconifyClient::fetch_collections`].
@@ -86,6 +96,10 @@ pub struct CollectionInfo {
     pub title: String,
     pub license: Option<License>,
     pub total: Option<usize>,
+    pub author_name: Option<String>,
+    pub author_url: Option<String>,
+    pub category: Option<String>,
+    pub tags: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -109,10 +123,7 @@ impl IconifyClient {
             .timeout(std::time::Duration::from_secs(10))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
-        Self {
-            http,
-            base: base.into(),
-        }
+        Self { http, base: base.into() }
     }
 
     /// Fetches a single icon body by `prefix:name`.
@@ -141,21 +152,12 @@ impl IconifyClient {
             .json()
             .await
             .map_err(|e| IconError::Fetch(e.to_string()))?;
-        let entry = data
-            .icons
-            .get(&name)
-            .ok_or_else(|| IconError::NotFound(id.to_string()))?;
+        let entry = data.icons.get(&name).ok_or_else(|| IconError::NotFound(id.to_string()))?;
         let width = entry.width.or(data.width).unwrap_or(16);
         let height = entry.height.or(data.height).unwrap_or(16);
         let left = entry.left.unwrap_or(0);
         let top = entry.top.unwrap_or(0);
-        Ok(IconBody::with_origin(
-            entry.body.clone(),
-            width,
-            height,
-            left,
-            top,
-        ))
+        Ok(IconBody::with_origin(entry.body.clone(), width, height, left, top))
     }
 
     /// Fetches the list of Iconify set prefixes, each with its human title,
@@ -171,19 +173,12 @@ impl IconifyClient {
             .map_err(|e| IconError::Fetch(e.to_string()))?
             .join("collections")
             .map_err(|e| IconError::Fetch(e.to_string()))?;
-        let resp = self
-            .http
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| IconError::Fetch(e.to_string()))?;
+        let resp = self.http.get(url).send().await.map_err(|e| IconError::Fetch(e.to_string()))?;
         if !resp.status().is_success() {
             return Err(IconError::Fetch(format!("HTTP {}", resp.status())));
         }
-        let map: std::collections::BTreeMap<String, CollectionMeta> = resp
-            .json()
-            .await
-            .map_err(|e| IconError::Fetch(e.to_string()))?;
+        let map: std::collections::BTreeMap<String, CollectionMeta> =
+            resp.json().await.map_err(|e| IconError::Fetch(e.to_string()))?;
         Ok(map
             .into_iter()
             .map(|(prefix, meta)| CollectionInfo {
@@ -191,6 +186,26 @@ impl IconifyClient {
                 title: meta.name,
                 license: meta.license,
                 total: meta.total,
+                author_name: meta.author.as_ref().and_then(|a| {
+                    if a.name.is_empty() {
+                        None
+                    } else {
+                        Some(a.name.clone())
+                    }
+                }),
+                author_url: meta.author.as_ref().and_then(|a| {
+                    if a.url.is_empty() {
+                        None
+                    } else {
+                        Some(a.url.clone())
+                    }
+                }),
+                category: if meta.category.is_empty() {
+                    None
+                } else {
+                    Some(meta.category)
+                },
+                tags: meta.tags,
             })
             .collect())
     }
@@ -230,45 +245,35 @@ impl IconifyClient {
                 .join("search")
                 .map_err(|e| IconError::Fetch(e.to_string()))?;
             {
-                let mut qp = url.query_pairs_mut();
-                qp.append_pair("query", query);
-                qp.append_pair("limit", &BATCH.to_string());
-                qp.append_pair("start", &start.to_string());
-                if let Some(prefs) = prefixes
-                    && !prefs.is_empty()
-                {
-                    if prefs.len() == 1 {
-                        qp.append_pair("prefix", &prefs[0]);
-                    } else {
-                        qp.append_pair("prefixes", &prefs.join(","));
-                    }
+            let mut qp = url.query_pairs_mut();
+            qp.append_pair("query", query);
+            qp.append_pair("limit", &BATCH.to_string());
+            qp.append_pair("start", &start.to_string());
+            if let Some(prefs) = prefixes && !prefs.is_empty() {
+                if prefs.len() == 1 {
+                    qp.append_pair("prefix", &prefs[0]);
+                } else {
+                    qp.append_pair("prefixes", &prefs.join(","));
                 }
             }
-            let resp = self
-                .http
-                .get(url)
-                .send()
-                .await
-                .map_err(|e| IconError::Fetch(e.to_string()))?;
-            if !resp.status().is_success() {
-                return Err(IconError::Fetch(format!("HTTP {}", resp.status())));
-            }
-            let data: SearchResponse = resp
-                .json()
-                .await
-                .map_err(|e| IconError::Fetch(e.to_string()))?;
-            let batch_len = data.icons.len();
-            total = data.total;
-            all.extend(data.icons);
-            if all.len() > limit {
-                all.truncate(limit);
-                break;
-            }
-            let effective_total = std::cmp::min(total, limit);
-            if batch_len == 0 || all.len() >= effective_total {
-                break;
-            }
-            start += batch_len;
+        }
+        let resp = self.http.get(url).send().await.map_err(|e| IconError::Fetch(e.to_string()))?;
+        if !resp.status().is_success() {
+            return Err(IconError::Fetch(format!("HTTP {}", resp.status())));
+        }
+        let data: SearchResponse = resp.json().await.map_err(|e| IconError::Fetch(e.to_string()))?;
+        let batch_len = data.icons.len();
+        total = data.total;
+        all.extend(data.icons);
+        if all.len() > limit {
+            all.truncate(limit);
+            break;
+        }
+        let effective_total = std::cmp::min(total, limit);
+        if batch_len == 0 || all.len() >= effective_total {
+            break;
+        }
+        start += batch_len;
         }
 
         Ok((all, total))
@@ -289,26 +294,17 @@ mod tests {
 
     #[test]
     fn parse_id_rejects_missing_colon() {
-        assert!(matches!(
-            parse_id("mdihome"),
-            Err(IconError::InvalidIdentifier(_))
-        ));
+        assert!(matches!(parse_id("mdihome"), Err(IconError::InvalidIdentifier(_))));
     }
 
     #[test]
     fn parse_id_rejects_extra_colon() {
-        assert!(matches!(
-            parse_id("mdi:home:extra"),
-            Err(IconError::InvalidIdentifier(_))
-        ));
+        assert!(matches!(parse_id("mdi:home:extra"), Err(IconError::InvalidIdentifier(_))));
     }
 
     #[test]
     fn parse_id_rejects_invalid_characters() {
-        assert!(matches!(
-            parse_id("mdi:home/home"),
-            Err(IconError::InvalidIdentifier(_))
-        ));
+        assert!(matches!(parse_id("mdi:home/home"), Err(IconError::InvalidIdentifier(_))));
     }
 
     #[test]
@@ -374,10 +370,7 @@ mod tests {
             .mount(&server)
             .await;
         let client = IconifyClient::with_base(server.uri());
-        assert!(matches!(
-            client.fetch_body("mdi:ghost").await,
-            Err(IconError::NotFound(_))
-        ));
+        assert!(matches!(client.fetch_body("mdi:ghost").await, Err(IconError::NotFound(_))));
     }
 
     #[tokio::test]
@@ -403,6 +396,10 @@ mod tests {
                 title: "Hero Icons".into(),
                 license: None,
                 total: None,
+                author_name: None,
+                author_url: None,
+                category: None,
+                tags: vec![],
             }
         );
         assert_eq!(
@@ -412,6 +409,10 @@ mod tests {
                 title: "Lucide".into(),
                 license: None,
                 total: Some(0),
+                author_name: None,
+                author_url: None,
+                category: None,
+                tags: vec![],
             }
         );
         assert_eq!(
@@ -419,16 +420,50 @@ mod tests {
             CollectionInfo {
                 prefix: "mdi".into(),
                 title: "Material Design Icons".into(),
-                license: Some(License {
-                    title: "Apache License 2.0".into(),
-                    spdx: "Apache-2.0".into(),
-                    url: Some(
-                        "https://github.com/Templarian/MaterialDesign/blob/master/LICENSE".into()
-                    )
-                }),
+                license: Some(License { title: "Apache License 2.0".into(), spdx: "Apache-2.0".into(), url: Some("https://github.com/Templarian/MaterialDesign/blob/master/LICENSE".into()) }),
                 total: Some(5000),
+                author_name: None,
+                author_url: None,
+                category: None,
+                tags: vec![],
             }
         );
+    }
+
+    #[tokio::test]
+    async fn fetch_collections_parses_author_category_tags() {
+        let server = MockServer::start().await;
+        let json = serde_json::json!({
+            "mdi": {
+                "name": "Material Design Icons",
+                "total": 5000,
+                "license": { "title": "Apache License 2.0", "spdx": "Apache-2.0", "url": "https://example.com/license" },
+                "author": { "name": "Templarian", "url": "https://templarian.com" },
+                "category": "General",
+                "tags": ["ui", "design"]
+            },
+            "simple": { "name": "Simple Icons" }
+        });
+        Mock::given(method("GET"))
+            .and(path("/collections"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json))
+            .mount(&server)
+            .await;
+        let client = IconifyClient::with_base(server.uri());
+        let sets = client.fetch_collections().await.unwrap();
+        assert_eq!(sets.len(), 2);
+
+        let mdi = sets.iter().find(|s| s.prefix == "mdi").unwrap();
+        assert_eq!(mdi.author_name, Some("Templarian".into()));
+        assert_eq!(mdi.author_url, Some("https://templarian.com".into()));
+        assert_eq!(mdi.category, Some("General".into()));
+        assert_eq!(mdi.tags, vec!["ui".to_string(), "design".to_string()]);
+
+        let simple = sets.iter().find(|s| s.prefix == "simple").unwrap();
+        assert_eq!(simple.author_name, None);
+        assert_eq!(simple.author_url, None);
+        assert_eq!(simple.category, None);
+        assert!(simple.tags.is_empty());
     }
 
     #[tokio::test]
@@ -496,10 +531,7 @@ mod tests {
 
         let client = IconifyClient::with_base(server.uri());
         let prefixes = vec!["mdi".to_string()];
-        let (hits, total) = client
-            .search_icons("home", None, Some(&prefixes))
-            .await
-            .unwrap();
+        let (hits, total) = client.search_icons("home", None, Some(&prefixes)).await.unwrap();
         assert_eq!(hits, vec!["mdi:home"]);
         assert_eq!(total, 1);
     }
@@ -521,10 +553,7 @@ mod tests {
 
         let client = IconifyClient::with_base(server.uri());
         let prefixes = vec!["mdi".to_string(), "lucide".to_string()];
-        let (hits, total) = client
-            .search_icons("home", None, Some(&prefixes))
-            .await
-            .unwrap();
+        let (hits, total) = client.search_icons("home", None, Some(&prefixes)).await.unwrap();
         assert_eq!(hits, vec!["mdi:home"]);
         assert_eq!(total, 1);
     }

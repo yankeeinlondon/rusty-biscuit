@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
 
-use super::types::ResolutionMode;
+use super::types::{ResolutionMode, SessionInteractivitySource};
 use crate::provider::Provider;
 use thiserror::Error;
 
@@ -146,6 +146,10 @@ pub enum CompositionError {
     #[error("frontmatter `model` must be a string or array of strings, got {0}")]
     ModelHintWrongType(String),
 
+    /// The `interactive` frontmatter property is not a boolean.
+    #[error("frontmatter `interactive` must be a boolean (true/false), got {0}")]
+    InteractiveHintWrongType(String),
+
     /// The `agent` frontmatter hint matches multiple providers.
     #[error("agent hint `{hint}` is ambiguous; matches: {matches}")]
     AgentHintAmbiguous {
@@ -177,12 +181,18 @@ pub enum CompositionError {
     )]
     InteractiveSelectionRequired,
 
-    /// Inline composition with `-i` is not supported for this provider
+    /// Inline composition in interactive mode is not supported for this provider
     /// because it cannot capture the final assistant message.
     #[error(
-        "inline-compose with --interactive is not supported for {0}; the provider cannot capture the final assistant message"
+        "inline-compose in interactive mode (from {source_kind}) is not supported for {provider}; \
+         the provider cannot capture the final assistant message"
     )]
-    InlineInteractiveUnsupported(String),
+    InlineInteractiveUnsupported {
+        /// Provider that does not support interactive inline closure.
+        provider: String,
+        /// Why the session resolved to interactive mode.
+        source_kind: SessionInteractivitySource,
+    },
 
     /// The provider returned an invalid response for inline composition.
     #[error("invalid inline composition response: {0}")]
@@ -301,6 +311,17 @@ pub enum CompositionError {
         /// Number of steps that reported missing properties.
         failure_count: usize,
     },
+
+    /// A `sequence` document authored `interactive: true` in its frontmatter.
+    ///
+    /// Sequences are serial automation; interactive mode must be requested
+    /// per-invocation with the `--interactive` flag instead.
+    #[error(
+        "`interactive: true` is not allowed in a sequence document ({0}); \
+         use `compose` or `inline-compose` for dialog-shaped prompts, \
+         or pass `--interactive` to override a single sequence run"
+    )]
+    SequenceInteractiveRejected(PathBuf),
 
     // -- Loop errors -----------------------------------------------------------
     /// The `loop` frontmatter value is invalid.
@@ -869,6 +890,23 @@ impl BlockError for CompositionError {
             CompositionError::SequenceMissingProperties { failures, .. } => {
                 render_sequence_missing_properties_block(failures)
             }
+            CompositionError::SequenceInteractiveRejected(source_path) => {
+                let file_link = render_file_link(source_path);
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "interactive rejected for sequence",
+                    ))
+                    .body(format!(
+                        "The document {file_link} sets <cyan>`interactive: true`</cyan> in its \
+                         frontmatter, but a <cyan>`sequence`</cyan> is serial automation and does \
+                         not support interactive sessions.\n\n\
+                         Use <cyan>`claudine compose`</cyan> or <cyan>`claudine inline-compose`</cyan> \
+                         for dialog-shaped prompts. To run an individual sequence step \
+                         interactively, use the <cyan>`--interactive`</cyan> CLI flag — this remains \
+                         the only explicit override."
+                    ))
+            }
             CompositionError::UnsupportedInteractiveSchema {
                 source_path,
                 property,
@@ -902,14 +940,11 @@ impl BlockError for CompositionError {
                 let file_link = render_file_link(source_path);
                 let body = render_agent_resolution_failed_body(state, installed, &file_link);
                 StatusBlock::new(StatusState::Error)
-                    .error_header(ErrorHeader::new(
-                        "CompositionError",
-                        "agent resolution failed",
-                    ))
+                    .error_header(ErrorHeader::new("CompositionError", "agent resolution failed"))
                     .body(body)
                     .hint(
                         "Specify an installed provider with --claude, --codex, etc., run in an \
-                         interactive terminal, or correct the `agent` frontmatter property.",
+                         interactive terminal, or correct the `agent` frontmatter property."
                     )
             }
             CompositionError::ComposedBodyEmpty {
@@ -1017,7 +1052,9 @@ impl BlockError for CompositionError {
 /// The Prose layer downgrades `<a href>` to plain text when the terminal
 /// does not support OSC8.
 fn render_file_link(path: &std::path::Path) -> String {
-    let abs = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let abs = path
+        .canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf());
     let abs_display = abs.display().to_string();
     let label = path.display().to_string();
     format!(
@@ -1044,9 +1081,8 @@ fn render_inline_sequence_mismatch_block(
 ) -> StatusBlock {
     let file_link = render_file_link(source_path);
 
-    let opening = Prose::new(
-        "You tried to run an inline-compose operation on a document configured as a sequence.",
-    );
+    let opening =
+        Prose::new("You tried to run an inline-compose operation on a document configured as a sequence.");
 
     let explanation = Prose::new(format!(
         "The document {file_link} defines both <cyan>`prompt`</cyan> and <cyan>`sequence`</cyan>. \
@@ -1142,10 +1178,7 @@ fn render_sequence_missing_properties_block(
             .as_deref()
             .filter(|d| !d.trim().is_empty())
         {
-            body.push_str(&format!(
-                "\n  <i><dim>{}</dim></i>",
-                escape_prose_path(desc)
-            ));
+            body.push_str(&format!("\n  <i><dim>{}</dim></i>", escape_prose_path(desc)));
         }
         if !failure.missing.is_empty() {
             for prop in &failure.missing {
@@ -1187,20 +1220,11 @@ fn render_missing_properties_block(
 ) -> StatusBlock {
     let file_link = render_file_link(source_path);
 
-    let mut body = format!(
-        "Required {plural} missing in {file_link}.",
-        plural = if missing.len() == 1 {
-            "property is"
-        } else {
-            "properties are"
-        }
-    );
+    let mut body = format!("Required {plural} missing in {file_link}.",
+        plural = if missing.len() == 1 { "property is" } else { "properties are" });
 
     if let Some(desc) = frontmatter_description.filter(|d| !d.trim().is_empty()) {
-        body.push_str(&format!(
-            "\n\n<i><dim>{}</dim></i>",
-            escape_prose_path(desc)
-        ));
+        body.push_str(&format!("\n\n<i><dim>{}</dim></i>", escape_prose_path(desc)));
     }
 
     if !missing.is_empty() {
@@ -1463,7 +1487,8 @@ mod tests {
         let block = err.status_block(&Terminal::default());
         let rendered = block.render(&Terminal::default());
         assert!(
-            rendered.contains("Pass key=value") || rendered.contains("prompt_for_missing"),
+            rendered.contains("Pass key=value")
+                || rendered.contains("prompt_for_missing"),
             "expected remediation hint in rendered output: {rendered}"
         );
     }
@@ -1565,10 +1590,7 @@ mod tests {
             body.contains("choose interactively between suggested Agents"),
             "got: {body}"
         );
-        assert!(
-            !body.contains("the interactive picker would ask"),
-            "got: {body}"
-        );
+        assert!(!body.contains("the interactive picker would ask"), "got: {body}");
     }
 
     #[test]
@@ -1590,14 +1612,8 @@ mod tests {
             hint: "nope".into(),
         };
         let body = render_agent_resolution_failed_body(&state, &[Provider::Claude], FILE_LINK);
-        assert!(
-            body.starts_with(&invalid_agent_message("nope", FILE_LINK)),
-            "got: {body}"
-        );
-        assert!(
-            body.contains(&format!("- {}", Provider::Claude)),
-            "got: {body}"
-        );
+        assert!(body.starts_with(&invalid_agent_message("nope", FILE_LINK)), "got: {body}");
+        assert!(body.contains(&format!("- {}", Provider::Claude)), "got: {body}");
     }
 
     #[test]
@@ -1652,10 +1668,7 @@ mod tests {
         // reflow.
         let err = mismatch_err(true);
         let rendered = strip_escape_codes(err.report_block_error_optimistic(Some(80)));
-        assert!(
-            rendered.contains("greeting.md"),
-            "document name: {rendered}"
-        );
+        assert!(rendered.contains("greeting.md"), "document name: {rendered}");
         assert!(rendered.contains("prompt"), "names prompt: {rendered}");
         assert!(rendered.contains("sequence"), "names sequence: {rendered}");
         assert!(

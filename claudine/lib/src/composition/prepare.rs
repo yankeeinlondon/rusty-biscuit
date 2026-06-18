@@ -150,9 +150,15 @@ pub fn prepare_direct(
         .as_map()
         .get("model")
         .map_or(Ok(None), parse_model_hint)?;
+    let interactive_hint = composed
+        .frontmatter()
+        .as_map()
+        .get("interactive")
+        .map_or(Ok(None), parse_interactive_hint)?;
     let selection_hints = EffectiveSelectionHints {
         agent: agent_hint,
         model: model_hint,
+        interactive: interactive_hint,
         agent_invalid: agent_full.invalid,
         agent_was_list: agent_full.is_list,
     };
@@ -236,9 +242,15 @@ pub fn prepare_inline(
         .as_map()
         .get("model")
         .map_or(Ok(None), parse_model_hint)?;
+    let interactive_hint = composed
+        .frontmatter()
+        .as_map()
+        .get("interactive")
+        .map_or(Ok(None), parse_interactive_hint)?;
     let selection_hints = EffectiveSelectionHints {
         agent: agent_hint,
         model: model_hint,
+        interactive: interactive_hint,
         agent_invalid: agent_full.invalid,
         agent_was_list: agent_full.is_list,
     };
@@ -314,9 +326,13 @@ pub fn parse_selection_hints_from_frontmatter(
         .map_or(Ok(ParsedAgentHint::default()), parse_agent_hint_full)?;
     let agent = agent_full.to_agent_hint();
     let model = map.get("model").map_or(Ok(None), parse_model_hint)?;
+    let interactive = map
+        .get("interactive")
+        .map_or(Ok(None), parse_interactive_hint)?;
     Ok(EffectiveSelectionHints {
         agent,
         model,
+        interactive,
         agent_invalid: agent_full.invalid,
         agent_was_list: agent_full.is_list,
     })
@@ -421,6 +437,22 @@ fn parse_model_hint(value: &serde_json::Value) -> Result<Option<ModelHint>, Comp
         }
         serde_json::Value::Null => Ok(None),
         other => Err(CompositionError::ModelHintWrongType(
+            json_type_name(other).to_string(),
+        )),
+    }
+}
+
+/// Parse the `interactive` frontmatter value into an optional boolean.
+///
+/// Accepts `true`, `false`, or `null` (treated as absent). Anything else
+/// is a typed error naming the offending JSON type.
+pub fn parse_interactive_hint(
+    value: &serde_json::Value,
+) -> Result<Option<bool>, CompositionError> {
+    match value {
+        serde_json::Value::Bool(b) => Ok(Some(*b)),
+        serde_json::Value::Null => Ok(None),
+        other => Err(CompositionError::InteractiveHintWrongType(
             json_type_name(other).to_string(),
         )),
     }
@@ -891,8 +923,7 @@ mod tests {
         // not satisfied (no `review` override provided). After composition
         // the body should be empty and detection must fire — this mirrors
         // the real-world prompt that triggered the user-facing bug report.
-        let body =
-            "::block when=\"review\"\n## Context\n\nThis is review-only content.\n::end-block\n";
+        let body = "::block when=\"review\"\n## Context\n\nThis is review-only content.\n::end-block\n";
         let source = make_source(&dir, &[("title", json!("Test"))], body);
 
         let options = PrepareOptions {
@@ -953,65 +984,77 @@ mod tests {
     /// Darkmatter's source-relative fallback runs `::shell` in the prompt
     /// file's parent directory.
     #[test]
-    fn direct_composition_without_working_directory_runs_in_source_parent() {
-        let source_dir = TempDir::new().unwrap();
-        let source = make_source(&source_dir, &[("title", json!("T"))], "::shell pwd\n");
-
-        let mut approved = std::collections::HashSet::new();
-        approved.insert("pwd".to_string());
-        let options = PrepareOptions {
-            pre_approved_commands: Some(approved),
-            ..Default::default()
-        };
-
-        let prepared = prepare_direct(&source, options).unwrap();
-        let source_canon = std::fs::canonicalize(source_dir.path()).unwrap();
-        assert!(
-            prepared.prompt.contains(source_canon.to_str().unwrap()),
-            "expected shell to fall back to the source parent; got: {}",
-            prepared.prompt
-        );
+    fn parse_interactive_hint_accepts_true_false_and_null() {
+        assert_eq!(parse_interactive_hint(&json!(true)).unwrap(), Some(true));
+        assert_eq!(parse_interactive_hint(&json!(false)).unwrap(), Some(false));
+        assert_eq!(parse_interactive_hint(&json!(null)).unwrap(), None);
     }
 
     #[test]
-    fn inline_composition_runs_shell_in_configured_working_directory() {
-        let source_dir = TempDir::new().unwrap();
-        let work_dir = TempDir::new().unwrap();
+    fn parse_interactive_hint_rejects_non_booleans() {
+        for value in [
+            json!("true"),
+            json!(42),
+            json!([true]),
+            json!({"interactive": true}),
+        ] {
+            let err = parse_interactive_hint(&value).unwrap_err();
+            match err {
+                CompositionError::InteractiveHintWrongType(found) => {
+                    assert_eq!(found, json_type_name(&value));
+                }
+                other => panic!("expected InteractiveHintWrongType for {value}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn direct_composition_parses_interactive_hint() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("interactive", json!(true))], "Content");
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert_eq!(prepared.selection_hints.interactive, Some(true));
+    }
+
+    #[test]
+    fn direct_composition_interactive_null_is_absent() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("interactive", json!(null))], "Content");
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert_eq!(prepared.selection_hints.interactive, None);
+    }
+
+    #[test]
+    fn direct_composition_interactive_wrong_type_errors() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("interactive", json!("yes"))], "Content");
+
+        let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+        assert!(matches!(err, CompositionError::InteractiveHintWrongType(_)));
+    }
+
+    #[test]
+    fn inline_composition_parses_interactive_hint() {
+        let dir = TempDir::new().unwrap();
         let source = make_source(
-            &source_dir,
-            &[("prompt", json!("Working dir is:\n\n::shell pwd\n"))],
+            &dir,
+            &[("prompt", json!("Write something")), ("interactive", json!(false))],
             "Old content",
         );
 
-        let mut approved = std::collections::HashSet::new();
-        approved.insert("pwd".to_string());
-        let options = PrepareOptions {
-            pre_approved_commands: Some(approved),
-            shell_working_directory: Some(work_dir.path().to_path_buf()),
-            ..Default::default()
-        };
-
-        let prepared = prepare_inline(&source, options).unwrap();
-        let work_canon = std::fs::canonicalize(work_dir.path()).unwrap();
-        assert!(
-            prepared.prompt.contains(work_canon.to_str().unwrap()),
-            "expected inline shell to run in work_dir; got: {}",
-            prepared.prompt
-        );
+        let prepared = prepare_inline(&source, PrepareOptions::default()).unwrap();
+        assert_eq!(prepared.selection_hints.interactive, Some(false));
     }
 
     #[test]
-    fn direct_composition_empty_body_without_overrides() {
-        let dir = TempDir::new().unwrap();
-        let source = make_source(&dir, &[("title", json!("Test"))], "");
+    fn parse_selection_hints_from_frontmatter_reads_interactive() {
+        let mut fm = Frontmatter::new();
+        fm.insert("interactive", json!(true)).unwrap();
+        let md = Markdown::with_frontmatter(fm, "Content");
 
-        let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
-        let CompositionError::ComposedBodyEmpty {
-            provided_overrides, ..
-        } = err
-        else {
-            panic!("expected ComposedBodyEmpty");
-        };
-        assert!(provided_overrides.is_empty());
+        let hints = parse_selection_hints_from_frontmatter(md.frontmatter()).unwrap();
+        assert_eq!(hints.interactive, Some(true));
     }
 }

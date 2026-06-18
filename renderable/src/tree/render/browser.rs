@@ -31,13 +31,13 @@ use crate::html::HtmlPage;
 use crate::html::attribute::{ClassDefinition, DomId, HtmlDataAttribute};
 use crate::html::tag::{BlockTag, HtmlAttribute, HtmlType, VoidTag};
 use crate::tree::attrs::NodeAttrs;
+use crate::tree::{HrAlignment, HrKind, HrWeight};
 use crate::tree::diagnostic::{Diagnostic, Severity};
 use crate::tree::document::Document;
 use crate::tree::error::{RenderError, RenderStrictness, Rendered};
 use crate::tree::node::{ColumnAlign, HeadingDepth, NodeKind, RenderNode};
 use crate::tree::render::CodeRenderer;
 use crate::tree::validate::{ValidationError, ValidationMode, validate};
-use crate::tree::{HrAlignment, HrKind, HrWeight};
 
 /// How a [`NodeKind::Html`] node is treated by the browser renderer.
 ///
@@ -416,7 +416,40 @@ impl Writer<'_> {
                 token, children, ..
             } => self.render_extended(node, token, children),
             NodeKind::Unsupported { label } => self.render_unsupported(node, label),
+            NodeKind::Disclosure { summary, children, .. } => {
+                self.render_disclosure(node, summary, children)
+            }
         }
+    }
+
+    /// Renders a disclosure block as native `\u003cdetails\u003e`/\u003csummary\u003e` HTML.
+    ///
+    /// The summary is rendered as phrasing content inside `\u003csummary\u003e`; the
+    /// disclosed body is rendered as block children inside `\u003cdetails\u003e`. No
+    /// JavaScript is emitted — the native elements provide collapse/expand.
+    fn render_disclosure(
+        &mut self,
+        node: &RenderNode,
+        summary: &[RenderNode],
+        children: &[RenderNode],
+    ) -> Result<BrowserFragment<Ready>, RenderError> {
+        let mut details = BrowserFragment::new().define_as_block_tag(BlockTag::Details, "");
+        for attr in node_attributes(&node.attrs, false) {
+            details = details.add_attribute(attr);
+        }
+
+        let mut summary_fragment =
+            BrowserFragment::new().define_as_block_tag(BlockTag::Summary, "");
+        for child in summary {
+            summary_fragment = summary_fragment.add_component(self.render(child)?);
+        }
+        details = details.add_component(summary_fragment.finalize());
+
+        for child in children {
+            details = details.add_component(self.render(child)?);
+        }
+
+        Ok(details.finalize())
     }
 
     /// Renders a [`NodeKind::Extended`] node.
@@ -438,9 +471,7 @@ impl Writer<'_> {
     ) -> Result<BrowserFragment<Ready>, RenderError> {
         match token {
             "mark" => self.block(BlockTag::Mark, &node.attrs, children),
-            "dim" => {
-                self.block_with_extra_style(BlockTag::Span, &node.attrs, "opacity:0.6", children)
-            }
+            "dim" => self.block_with_extra_style(BlockTag::Span, &node.attrs, "opacity:0.6", children),
             _ => {
                 let mut attrs = node.attrs.clone();
                 attrs.classes.push(format!("extended-{token}"));
@@ -508,8 +539,8 @@ impl Writer<'_> {
             }
         }
         if !style_emitted {
-            fragment =
-                fragment.add_attribute(HtmlAttribute::Other("style".into(), extra_css.to_string()));
+            fragment = fragment
+                .add_attribute(HtmlAttribute::Other("style".into(), extra_css.to_string()));
         }
         for child in children {
             fragment = fragment.add_component(self.render(child)?);
@@ -941,7 +972,11 @@ impl Writer<'_> {
     /// The diagram source is escaped by the fragment renderer so it is safe
     /// to embed directly. Node attributes (id, classes, layout, style) are
     /// preserved and merged with the required `mermaid` class.
-    fn render_mermaid_interactive(&self, node: &RenderNode, value: &str) -> BrowserFragment<Ready> {
+    fn render_mermaid_interactive(
+        &self,
+        node: &RenderNode,
+        value: &str,
+    ) -> BrowserFragment<Ready> {
         let mut fragment = BrowserFragment::new().define_as_block_tag(BlockTag::Pre, "");
         fragment = fragment.add_attribute(HtmlAttribute::Class(ClassDefinition::new("mermaid")));
         for attr in node_attributes(&node.attrs, false) {
@@ -1401,7 +1436,34 @@ impl StreamWriter<'_> {
                 token, children, ..
             } => self.write_extended(node, token, children),
             NodeKind::Unsupported { label } => self.write_unsupported(node, label),
+            NodeKind::Disclosure { summary, children, .. } => {
+                self.write_disclosure(node, summary, children)
+            }
         }
+    }
+
+    /// Streams a disclosure block as native `\u003cdetails\u003e`/\u003csummary\u003e` HTML.
+    fn write_disclosure(
+        &mut self,
+        node: &RenderNode,
+        summary: &[RenderNode],
+        children: &[RenderNode],
+    ) -> Result<(), RenderError> {
+        let inline = is_inline_block_tag(&BlockTag::Details);
+        self.open_block(&BlockTag::Details, &node_attributes(&node.attrs, inline));
+
+        self.open_block(&BlockTag::Summary, &[]);
+        for child in summary {
+            self.write(child)?;
+        }
+        self.close_block(&BlockTag::Summary);
+
+        for child in children {
+            self.write(child)?;
+        }
+
+        self.close_block(&BlockTag::Details);
+        Ok(())
     }
 
     /// Streams an open tag, child subtrees, and a close tag for a block
@@ -1502,11 +1564,8 @@ impl StreamWriter<'_> {
             .map(layout_to_css)
             .filter(|css| !css.is_empty())
             .unwrap_or_default();
-        self.buf.push_str(&super::shared::progress_html(
-            hints,
-            &fallback_text,
-            &layout_css,
-        ));
+        self.buf
+            .push_str(&super::shared::progress_html(hints, &fallback_text, &layout_css));
     }
 
     /// Streaming analogue of [`Writer::render_columns`].
@@ -2008,9 +2067,7 @@ impl StreamWriter<'_> {
     ) -> Result<(), RenderError> {
         match token {
             "mark" => self.block(BlockTag::Mark, &node.attrs, children),
-            "dim" => {
-                self.block_with_extra_style(BlockTag::Span, &node.attrs, "opacity:0.6", children)
-            }
+            "dim" => self.block_with_extra_style(BlockTag::Span, &node.attrs, "opacity:0.6", children),
             _ => {
                 let mut attrs = node.attrs.clone();
                 attrs.classes.push(format!("extended-{token}"));
@@ -2248,7 +2305,9 @@ fn is_inline_void_tag(tag: &VoidTag) -> bool {
 /// Collects the set `(suffix, value)` pairs for a thematic break's `data-hr-*`
 /// degradation attributes, in a fixed key order shared by the fragment and
 /// streaming HR paths so both emit byte-identical `<hr>` output.
-fn hr_data_attr_pairs(hr: Option<&crate::tree::ThematicBreakAttrs>) -> Vec<(&'static str, &str)> {
+fn hr_data_attr_pairs(
+    hr: Option<&crate::tree::ThematicBreakAttrs>,
+) -> Vec<(&'static str, &str)> {
     let Some(hr) = hr else {
         return Vec::new();
     };
@@ -2619,11 +2678,7 @@ fn lower_border(
             }
         }
     }
-    if let Some(len) = border
-        .radius
-        .as_ref()
-        .and_then(|r| r.resolve(RenderTarget::Browser))
-    {
+    if let Some(len) = border.radius.as_ref().and_then(|r| r.resolve(RenderTarget::Browser)) {
         decls.push(format!("border-radius:{}", css_len(len, false)));
     }
 }
@@ -2805,10 +2860,7 @@ mod tests {
             graphics_mode: mode,
             ..BrowserRenderOptions::default()
         };
-        render_browser_node(node, &opts)
-            .expect("render")
-            .output
-            .render()
+        render_browser_node(node, &opts).expect("render").output.render()
     }
 
     #[test]
@@ -2846,10 +2898,7 @@ mod tests {
         // An unrecognized token wraps its children in a neutral
         // `<span class="extended-{token}">` that a stylesheet can target.
         let node = RenderNode::extended("custom-token", vec![RenderNode::text("hi")], None);
-        assert_eq!(
-            html(&node),
-            "<span class=\"extended-custom-token\">hi</span>"
-        );
+        assert_eq!(html(&node), "<span class=\"extended-custom-token\">hi</span>");
 
         // Nested inline content is preserved, and any author classes are kept
         // alongside the generated `extended-{token}` class.
@@ -3096,10 +3145,7 @@ mod tests {
             ..BrowserRenderOptions::default()
         };
         let out = render_browser_node(&block, &opts).unwrap().output.render();
-        assert!(
-            out.contains(r#"id="diagram-1""#),
-            "id must be preserved: {out}"
-        );
+        assert!(out.contains(r#"id="diagram-1""#), "id must be preserved: {out}");
         assert!(
             out.contains(r#"class="mermaid""#),
             "mermaid class must be present: {out}"
@@ -3251,10 +3297,7 @@ mod tests {
         };
         let rendered = render_browser_node(&block, &warn).expect("warn renders");
         assert!(
-            rendered
-                .output
-                .render()
-                .contains(r#"<pre><code class="language-mermaid">"#),
+            rendered.output.render().contains(r#"<pre><code class="language-mermaid">"#),
             "warn StaticSvg failure must degrade to a code block",
         );
         assert!(
@@ -3412,8 +3455,7 @@ mod tests {
 
     #[test]
     fn link_emits_typed_browser_attributes() {
-        let mut link =
-            RenderNode::link("https://example.com/x", None, vec![RenderNode::text("go")]);
+        let mut link = RenderNode::link("https://example.com/x", None, vec![RenderNode::text("go")]);
         let browser = crate::tree::BrowserAttrs {
             link: Some(crate::tree::LinkBrowserAttrs {
                 target: Some(crate::tree::LinkTarget::Blank),
@@ -3454,10 +3496,9 @@ mod tests {
         let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
         let mut browser = crate::tree::BrowserAttrs::default();
         // Insert out of sorted order; BTreeMap emits them sorted.
-        browser.data_attrs.insert(
-            crate::tree::DataAttrName::new("z-last").unwrap(),
-            "1".into(),
-        );
+        browser
+            .data_attrs
+            .insert(crate::tree::DataAttrName::new("z-last").unwrap(), "1".into());
         browser.data_attrs.insert(
             crate::tree::DataAttrName::new("prompt").unwrap(),
             "explain < this".into(),
@@ -3480,9 +3521,7 @@ mod tests {
         // Node `Style` sets a foreground color; inline_style sets a background.
         span.attrs.set_style(&Style {
             color: Some(crate::layout::TargetValue::universal(PerMode::universal(
-                PaintColor::new(crate::color::Color::Tailwind(
-                    crate::color::Tailwind::Inherit,
-                )),
+                PaintColor::new(crate::color::Color::Tailwind(crate::color::Tailwind::Inherit)),
             ))),
             ..Default::default()
         });
@@ -3526,10 +3565,7 @@ mod tests {
     fn thematic_break_and_breaks() {
         // Under GraphicsMode::Off a plain break degrades to <hr>.
         assert_eq!(
-            html_with_graphics_mode(
-                &RenderNode::thematic_break(),
-                crate::tree::GraphicsMode::Off
-            ),
+            html_with_graphics_mode(&RenderNode::thematic_break(), crate::tree::GraphicsMode::Off),
             "<hr>"
         );
         // Under the default Rich mode a plain break produces the default SVG.
@@ -3843,13 +3879,10 @@ mod tests {
     /// Builds a `Document` whose root carries a foreground `Style`.
     fn doc_with_root_color() -> Document {
         use crate::style::{PaintColor, PerMode, Style};
-        let mut root =
-            RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text("Body")])]);
+        let mut root = RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text("Body")])]);
         root.attrs.set_style(&Style {
             color: Some(crate::layout::TargetValue::universal(PerMode::universal(
-                PaintColor::new(crate::color::Color::Tailwind(
-                    crate::color::Tailwind::Red500,
-                )),
+                PaintColor::new(crate::color::Color::Tailwind(crate::color::Tailwind::Red500)),
             ))),
             ..Style::default()
         });
@@ -3878,9 +3911,7 @@ mod tests {
 
         for (label, html) in [("fragment", &via_page), ("direct", &direct)] {
             assert!(
-                html.contains(
-                    "<body><div style=\"color:rgb(251, 44, 54)\"><p>Body</p></div></body>"
-                ),
+                html.contains("<body><div style=\"color:rgb(251, 44, 54)\"><p>Body</p></div></body>"),
                 "{label}: root foreground must wrap the body in an inheriting div; got:\n{html}"
             );
         }
@@ -3897,9 +3928,7 @@ mod tests {
             root: RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text("Body")])]),
         };
         let opts = BrowserRenderOptions::default();
-        let html = render_browser_document_html(&doc, &opts)
-            .expect("render")
-            .output;
+        let html = render_browser_document_html(&doc, &opts).expect("render").output;
         assert!(html.contains("<body><p>Body</p></body>"), "{html}");
     }
 
@@ -4120,11 +4149,7 @@ mod tests {
             ..BrowserRenderOptions::default()
         };
         let direct = render_browser_document_html(&doc, &opts).expect("render");
-        assert!(
-            direct.output.contains("--primary: #336699;"),
-            "{}",
-            direct.output
-        );
+        assert!(direct.output.contains("--primary: #336699;"), "{}", direct.output);
         let via_page = render_browser_document(&doc, &opts)
             .expect("render")
             .output
@@ -4171,11 +4196,7 @@ mod tests {
         let doc = Document {
             sources: SourceRegistry::default(),
             metadata: DocumentMetadata::default(),
-            root: RenderNode::root(vec![RenderNode::code(
-                Some("rust".into()),
-                None,
-                "fn x() {}",
-            )]),
+            root: RenderNode::root(vec![RenderNode::code(Some("rust".into()), None, "fn x() {}")]),
         };
         let opts = BrowserRenderOptions {
             code_renderer: Some(Rc::new(TitleCodeHook)),
@@ -4183,9 +4204,7 @@ mod tests {
         };
         let direct = render_browser_document_html(&doc, &opts).expect("render");
         assert!(
-            direct
-                .output
-                .contains("<pre class=\"hl\">highlighted</pre>"),
+            direct.output.contains("<pre class=\"hl\">highlighted</pre>"),
             "hook body must be serialized: {}",
             direct.output
         );
@@ -4372,7 +4391,7 @@ mod tests {
 
     #[test]
     fn browser_renderer_lowers_layout_to_css() {
-        use crate::layout::{Alignment, Edges, Layout, Length, TargetValue};
+        use crate::layout::{Alignment, Layout, Length, Edges, TargetValue};
 
         let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
         para.attrs.set_layout(&Layout {
@@ -4403,7 +4422,7 @@ mod tests {
 
     #[test]
     fn browser_renderer_lowers_vertical_margin_to_lh() {
-        use crate::layout::{Edges, Layout, Length};
+        use crate::layout::{Layout, Length, Edges};
 
         let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
         para.attrs.set_layout(&Layout {
@@ -4459,7 +4478,9 @@ mod tests {
     fn border_lowers_full_matrix() {
         use crate::color::{Color, Tailwind};
         use crate::layout::{Length, TargetValue};
-        use crate::style::{Border, BorderLineStyle, BorderSides, BorderWeight, PerMode, Style};
+        use crate::style::{
+            Border, BorderLineStyle, BorderSides, BorderWeight, PerMode, Style,
+        };
 
         let style = Style {
             border: Some(Border {
@@ -4682,7 +4703,7 @@ mod tests {
 
     #[test]
     fn progress_applies_node_layout_to_outer_element() {
-        use crate::layout::{Edges, Layout, Length};
+        use crate::layout::{Layout, Length, Edges};
         let mut node = progress_para(
             "40%",
             crate::tree::ProgressHints {
@@ -4946,7 +4967,7 @@ mod tests {
     #[test]
     fn style_and_layout_share_one_style_attribute() {
         use crate::color::{BasicColor, Color};
-        use crate::layout::{Edges, Layout, Length};
+        use crate::layout::{Layout, Length, Edges};
         let mut para = RenderNode::paragraph(vec![RenderNode::text("text")]);
         para.attrs.set_style(&crate::style::Style {
             color: Some(universal_color(Color::BasicColor(BasicColor::Red))),
@@ -5058,7 +5079,7 @@ mod tests {
 
     #[test]
     fn columns_layout_and_column_css_coexist() {
-        use crate::layout::{Edges, Layout, Length};
+        use crate::layout::{Layout, Length, Edges};
         let mut node = columns_bq(crate::tree::ColumnsHints::default(), vec![]);
         node.attrs.set_layout(&Layout {
             margin: Edges::x(Length::ch(2)),
