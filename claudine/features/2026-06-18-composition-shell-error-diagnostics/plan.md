@@ -4,6 +4,13 @@ phases: 4
 created: 2026-06-18
 start_phase: 1
 yolo: true
+source_files_during_phase_1:
+  - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+  - darkmatter
 ---
 
 # Execution Plan — Composition Shell-Error Diagnostics
@@ -35,11 +42,11 @@ at the end maps every spec criterion to a checkpoint.
 Biggest payoff, smallest change. No coordinate work. Operates entirely inside the
 existing `ExecutionFailed` `BlockError` arm and `truncate_output`.
 
-- [ ] Rewrite `truncate_output` (`types.rs:772`) to be **tail-biased**: keep the final 20 lines AND final 2 KiB (whichever is smaller after UTF-8-safe char-boundary slicing). Emit the spec's truncation marker (e.g. `… output truncated; showing last 20 lines`) only when truncation occurs. Preserve internal newlines exactly; do not shell-escape, quote-rewrite, or colorize.
-- [ ] Refine the `ExecutionFailed` output-selection logic (`types.rs:726`) per §2: include `stderr` whenever non-empty; include `stdout` only when `stderr` is empty or `stdout` has clearly relevant content and the combined output still fits the budget. Trim trailing whitespace on each captured stream before rendering.
-- [ ] Add `cfg(test)` asserting a failing command's captured `stderr` reaches the rendered `ExecutionFailed` diagnostic. Use a **portable** cross-platform failing fixture (spawn the test binary / a known helper, or an existing in-repo test shim) — never POSIX-only `sh -c '… >&2; exit 2'` (repo must build/test on macOS, Windows, Linux).
-- [ ] Add `cfg(test)` for truncation correctness: feed inputs longer than 20 lines and larger than 2 KiB; assert the tail is kept, the marker appears, and no UTF-8 sequence is split.
-- [ ] Confirm the library representation stays plain-text (no ANSI) — captured output must not be colorized in the library.
+- [x] Rewrite `truncate_output` (`types.rs:772`) to be **tail-biased**: keep the final 20 lines AND final 2 KiB (whichever is smaller after UTF-8-safe char-boundary slicing). Emit the spec's truncation marker (e.g. `… output truncated; showing last 20 lines`) only when truncation occurs. Preserve internal newlines exactly; do not shell-escape, quote-rewrite, or colorize.
+- [x] Refine the `ExecutionFailed` output-selection logic (`types.rs:726`) per §2: include `stderr` whenever non-empty; include `stdout` only when `stderr` is empty or `stdout` has clearly relevant content and the combined output still fits the budget. Trim trailing whitespace on each captured stream before rendering.
+- [x] Add `cfg(test)` asserting a failing command's captured `stderr` reaches the rendered `ExecutionFailed` diagnostic. Use a **portable** cross-platform failing fixture (spawn the test binary / a known helper, or an existing in-repo test shim) — never POSIX-only `sh -c '… >&2; exit 2'` (repo must build/test on macOS, Windows, Linux).
+- [x] Add `cfg(test)` for truncation correctness: feed inputs longer than 20 lines and larger than 2 KiB; assert the tail is kept, the marker appears, and no UTF-8 sequence is split.
+- [x] Confirm the library representation stays plain-text (no ANSI) — captured output must not be colorized in the library.
 
 **Validation checkpoint (P1):** `just darkmatter test` green (or `cargo test -p darkmatter`); new `truncate_output` + stderr-surfacing tests pass on macOS; build green.
 
