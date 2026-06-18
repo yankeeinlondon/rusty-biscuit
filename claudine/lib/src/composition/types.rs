@@ -7,7 +7,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::ComposePerfReport;
+use darkmatter::markdown::compose::{ComposePerfReport, ComposeWarning};
 use serde::{Deserialize, Serialize};
 
 use super::launch_workspace::LaunchWorkspaceContext;
@@ -520,6 +520,9 @@ pub struct PreparedComposition {
     /// post-shell re-validation). The CLI renders one user-visible warning
     /// per entry so silently dropped values are surfaced before launch.
     pub dropped_optionals: Vec<super::error::DroppedOptional>,
+    /// Non-fatal warnings emitted by Darkmatter during composition,
+    /// including parser-aware `ctx.*` typo diagnostics.
+    pub warnings: Vec<ComposeWarning>,
 }
 
 /// How the composition result should be applied after provider execution.

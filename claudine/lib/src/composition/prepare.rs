@@ -179,6 +179,7 @@ pub fn prepare_direct(
         lifecycle,
         compose_perf: report.perf,
         dropped_optionals: Vec::new(),
+        warnings: report.warnings.clone(),
     })
 }
 
@@ -291,6 +292,7 @@ pub fn prepare_inline(
         lifecycle,
         compose_perf: report.perf,
         dropped_optionals: Vec::new(),
+        warnings: report.warnings.clone(),
     })
 }
 

@@ -359,7 +359,7 @@ pub enum CompositionError {
 
     /// Increment targeted a property with an unsupported type.
     #[error(
-        "invalid increment at iteration {iteration}, action {action_index} of {total_actions}: property `{property}` has type {found}"
+        "invalid increment at iteration {iteration}, action {action_index} of {total_actions}: property `{property}` has type {found} (value: {value_excerpt})"
     )]
     InvalidIncrementType {
         /// 1-based iteration index.
@@ -372,11 +372,14 @@ pub enum CompositionError {
         property: String,
         /// Actual property type.
         found: String,
+        /// Excerpt of the offending value, including a stage note when it is an
+        /// unresolved template.
+        value_excerpt: String,
     },
 
     /// Decrement targeted a property with an unsupported type.
     #[error(
-        "invalid decrement at iteration {iteration}, action {action_index} of {total_actions}: property `{property}` has type {found}"
+        "invalid decrement at iteration {iteration}, action {action_index} of {total_actions}: property `{property}` has type {found} (value: {value_excerpt})"
     )]
     InvalidDecrementType {
         /// 1-based iteration index.
@@ -389,6 +392,9 @@ pub enum CompositionError {
         property: String,
         /// Actual property type.
         found: String,
+        /// Excerpt of the offending value, including a stage note when it is an
+        /// unresolved template.
+        value_excerpt: String,
     },
 
     /// Loop execution was interrupted by the user (SIGINT / Ctrl+C).

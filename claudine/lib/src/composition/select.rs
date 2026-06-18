@@ -601,6 +601,7 @@ mod tests {
             lifecycle: LifecycleConfig::default(),
             compose_perf: None,
             dropped_optionals: Vec::new(),
+            warnings: Vec::new(),
         }
     }
 

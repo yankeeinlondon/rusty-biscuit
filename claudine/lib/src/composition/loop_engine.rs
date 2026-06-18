@@ -6,8 +6,9 @@ use serde_json::{Map, Value};
 
 use super::error::CompositionError;
 use super::loop_actions::ActionStaging;
-use super::loop_config::resolve_loop_config;
+use super::loop_config::{extract_control_variables, resolve_loop_config};
 use super::loop_expression::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
+use super::prepare::{PrepareOptions, prepare_direct};
 use super::types::{LoopConfig, OnRateLimit, ResolvedCompositionSource};
 use crate::stream::summary::RateLimitInfo;
 
@@ -212,9 +213,55 @@ impl LoopExecutionResult {
     }
 }
 
+/// Build the initial frontmatter for a loop from resolved control variables.
+///
+/// Runs one compose pass to resolve the document, then lifts only:
+/// - CLI `set_overrides` keys, carried verbatim so the body sees them every
+///   iteration;
+/// - control variables (action targets, condition identifiers, and identifiers
+///   referenced by action-value templates), resolved from
+///   `effective_frontmatter`.
+///
+/// Derived/presentation frontmatter keys are intentionally omitted so they
+/// re-resolve each iteration against current state and ambients.
+///
+/// ## Errors
+///
+/// Returns `CompositionError` when the seed compose pass fails.
+pub fn build_loop_seed(
+    source: &ResolvedCompositionSource,
+    config: &LoopConfig,
+    prepare_options: PrepareOptions,
+) -> Result<Map<String, Value>, CompositionError> {
+    let prepared = prepare_direct(source, prepare_options.clone())?;
+    let effective = &prepared.effective_frontmatter;
+    let control_vars = extract_control_variables(config);
+
+    let mut seed = Map::new();
+
+    if let Some(Value::Object(set_overrides)) = &prepare_options.set_overrides {
+        for (key, value) in set_overrides {
+            seed.insert(key.clone(), value.clone());
+        }
+    }
+
+    for name in control_vars {
+        if let Some(value) = effective.get(&name) {
+            seed.insert(name, value.clone());
+        }
+    }
+
+    Ok(seed)
+}
+
 /// Execute a loop defined on a resolved composition source.
 ///
 /// Returns `Ok(None)` when the source has no `loop` frontmatter.
+///
+/// `prepare_options` is used to build the loop seed: one compose pass is run
+/// before iteration 1 so control variables hold resolved, typed values. CLI
+/// `key=value` setters in `prepare_options.set_overrides` are preserved in
+/// the seed.
 ///
 /// ## Errors
 ///
@@ -224,18 +271,13 @@ impl LoopExecutionResult {
 pub fn execute_loop(
     source: &ResolvedCompositionSource,
     options: LoopExecutionOptions,
+    prepare_options: PrepareOptions,
     executor: impl FnMut(LoopIterationContext) -> Result<LoopIterationOutput, CompositionError>,
 ) -> Result<Option<LoopExecutionResult>, CompositionError> {
     let Some(config) = resolve_loop_config(source)? else {
         return Ok(None);
     };
-    let initial_frontmatter = source
-        .markdown
-        .frontmatter()
-        .as_map()
-        .iter()
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect();
+    let initial_frontmatter = build_loop_seed(source, &config, prepare_options)?;
     execute_loop_with_config(
         &source.resolved_path,
         &config,
@@ -638,7 +680,9 @@ mod tests {
     use std::cell::RefCell;
     use std::path::Path;
 
+    use darkmatter::markdown::{Frontmatter, Markdown};
     use serde_json::json;
+    use tempfile::TempDir;
 
     use super::*;
     use crate::composition::types::{LoopAction, LoopCondition};
@@ -655,6 +699,75 @@ mod tests {
             fail_fast: None,
             on_rate_limit: None,
         }
+    }
+
+    fn make_source(frontmatter: &[(&str, serde_json::Value)]) -> ResolvedCompositionSource {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("loop.md");
+        let mut fm = darkmatter::markdown::Frontmatter::new();
+        for (key, value) in frontmatter {
+            fm.insert(key, value.clone()).unwrap();
+        }
+        let md = darkmatter::markdown::Markdown::with_frontmatter(fm, "Body");
+        std::fs::write(&file, md.as_string()).unwrap();
+        let original_text = std::fs::read_to_string(&file).unwrap();
+        let markdown: darkmatter::markdown::Markdown = original_text.clone().into();
+        ResolvedCompositionSource {
+            original_ref: file.to_string_lossy().to_string(),
+            resolved_path: file,
+            original_text,
+            markdown,
+        }
+    }
+
+    fn make_source_with_body(
+        frontmatter: &[(&str, serde_json::Value)],
+        body: &str,
+    ) -> ResolvedCompositionSource {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("loop.md");
+        let mut fm = Frontmatter::new();
+        for (key, value) in frontmatter {
+            fm.insert(key, value.clone()).unwrap();
+        }
+        let md = Markdown::with_frontmatter(fm, body);
+        std::fs::write(&file, md.as_string()).unwrap();
+        let original_text = std::fs::read_to_string(&file).unwrap();
+        let markdown: Markdown = original_text.clone().into();
+        ResolvedCompositionSource {
+            original_ref: file.to_string_lossy().to_string(),
+            resolved_path: file,
+            original_text,
+            markdown,
+        }
+    }
+
+    #[test]
+    fn build_loop_seed_resolves_control_variables_and_omits_derived() {
+        let source = make_source(&[
+            ("phase", json!("{{ initial_phase || 1 }}")),
+            ("total_phases", json!("{{ 6 }}")),
+            (
+                "pass_icon",
+                json!("{{ _loop_is_last ? '✅' : '🧑‍💻' }}"),
+            ),
+            (
+                "loop",
+                json!({"until": "phase > total_phases", "action": "increment(phase)"}),
+            ),
+        ]);
+        let config = resolve_loop_config(&source).unwrap().unwrap();
+        let options = PrepareOptions {
+            set_overrides: Some(json!({"initial_phase": 1})),
+            ..PrepareOptions::default()
+        };
+
+        let seed = build_loop_seed(&source, &config, options).unwrap();
+
+        assert_eq!(seed.get("phase"), Some(&json!(1)));
+        assert_eq!(seed.get("total_phases"), Some(&json!(6)));
+        assert!(!seed.contains_key("pass_icon"), "derived keys must not be lifted into the seed");
+        assert_eq!(seed.get("initial_phase"), Some(&json!(1)));
     }
 
     #[test]
@@ -1420,5 +1533,121 @@ mod tests {
             "interrupt should cut pause short; elapsed = {elapsed:?}"
         );
         FIRED.store(false, Ordering::SeqCst);
+    }
+
+    // ── Seeded-loop integration tests ────────────────────────────────────
+
+    #[test]
+    fn seeded_loop_repro_runs_to_completion_with_live_derived_variable() {
+        let source = make_source_with_body(
+            &[
+                ("phase", json!("{{ start || 1 }}")),
+                ("total_phases", json!(6)),
+                (
+                    "pass_icon",
+                    json!("{{ _loop_is_last ? '✅' : '🧑‍💻' }}"),
+                ),
+                (
+                    "loop",
+                    json!({"until": "phase > total_phases", "action": "increment(phase)"}),
+                ),
+            ],
+            "Implement Phase {{ phase }} of {{ total_phases }}",
+        );
+        let config = resolve_loop_config(&source).unwrap().unwrap();
+        let seed = build_loop_seed(&source, &config, PrepareOptions::default()).unwrap();
+
+        let captured = RefCell::new(Vec::new());
+        let result = execute_loop_with_config(
+            &source.resolved_path,
+            &config,
+            seed,
+            LoopExecutionOptions::default(),
+            |ctx| {
+                let prepared = prepare_direct(
+                    &source,
+                    PrepareOptions {
+                        set_overrides: Some(ctx.as_set_overrides()),
+                        ..PrepareOptions::default()
+                    },
+                )?;
+                let pass_icon = prepared
+                    .effective_frontmatter
+                    .as_object()
+                    .and_then(|fm| fm.get("pass_icon"))
+                    .cloned();
+                let body = prepared.prompt.clone();
+                captured.borrow_mut().push((
+                    ctx.iteration,
+                    ctx.frontmatter.get("phase").cloned(),
+                    body,
+                    pass_icon,
+                ));
+                Ok(LoopIterationOutput::success(prepared.prompt))
+            },
+        )
+        .unwrap();
+
+        assert!(result.error.is_none(), "expected clean run, got {result:?}");
+        assert_eq!(result.iteration_count, 6);
+        assert_eq!(result.final_frontmatter.get("phase"), Some(&json!(7)));
+
+        let seen = captured.into_inner();
+        assert_eq!(seen.len(), 6);
+        for (index, (iteration, phase, body, pass_icon)) in seen.iter().enumerate() {
+            let n = index + 1;
+            assert_eq!(*iteration, n);
+            assert_eq!(*phase, Some(json!(n)));
+            assert_eq!(body.trim(), format!("Implement Phase {n} of 6"));
+            let expected_icon = if n == 6 { "✅" } else { "🧑‍💻" };
+            assert_eq!(
+                pass_icon.as_ref().and_then(|v| v.as_str()),
+                Some(expected_icon),
+                "pass_icon on iteration {n} should be {expected_icon}"
+            );
+        }
+    }
+
+    #[test]
+    fn seeded_loop_reports_honest_error_for_non_numeric_control_variable() {
+        let source = make_source_with_body(
+            &[
+                ("area", json!("claudine")),
+                (
+                    "loop",
+                    json!({"while": "true", "action": "increment(area)"}),
+                ),
+            ],
+            "work",
+        );
+        let config = resolve_loop_config(&source).unwrap().unwrap();
+        let seed = build_loop_seed(&source, &config, PrepareOptions::default()).unwrap();
+
+        let result = execute_loop_with_config(
+            &source.resolved_path,
+            &config,
+            seed,
+            LoopExecutionOptions::default(),
+            |_ctx| Ok(LoopIterationOutput::success("ok")),
+        )
+        .unwrap();
+
+        assert_eq!(result.iteration_count, 1);
+        match result.error {
+            Some(CompositionError::InvalidIncrementType {
+                property,
+                found,
+                value_excerpt,
+                ..
+            }) => {
+                assert_eq!(property, "area");
+                assert_eq!(found, "string");
+                assert!(
+                    value_excerpt.contains("claudine"),
+                    "excerpt should quote the value: {value_excerpt}"
+                );
+            }
+            other => panic!("expected InvalidIncrementType, got {other:?}"),
+        }
     }
 }
