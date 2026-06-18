@@ -407,24 +407,6 @@ pub(crate) fn package_count_outcome(count: usize) -> BuildOutcome {
     BuildOutcome::pure(json!({ "package-count": count }))
 }
 
-/// Build the JSON outcome for `repo version --json`.
-///
-/// Returns `{ "version": "..." | null }`. Exit code is `0` when a version
-/// is found and `1` otherwise (or `0` when `no_error` is `true`).
-pub(crate) fn version_outcome(version: Option<&str>, no_error: bool) -> BuildOutcome {
-    let exit_code = if version.is_some() {
-        None
-    } else if no_error {
-        Some(0)
-    } else {
-        Some(1)
-    };
-    BuildOutcome {
-        value: json!({ "version": version }),
-        exit_code,
-    }
-}
-
 /// Build the JSON value for `repo worktrees --json`.
 ///
 /// Returns `{ "worktrees": [ { name, branch, path, current, detached }, ... ] }`.
@@ -789,7 +771,7 @@ pub(crate) fn build_aggregate_value(
     let commit_set = default_commit_family_set(dir)?;
     let aggregate = SniffRepo {
         name: identity.name.clone(),
-        version: identity.version.clone(),
+        version: aggregate_repo_version(repo),
         language: filesystem::primary_language_name(result),
         is_monorepo: identity.is_monorepo,
         // Count the canonical catalog, not `identity.package_count` (which is
@@ -917,6 +899,28 @@ fn aggregate_result_to_value<T>(
         }
         AggregateResult::Empty => Value::Null,
     }
+}
+
+/// Collapse the bare-aggregate top-level `version` via the library helper.
+///
+/// Returns `Some(version)` when `aggregate_versions` at repo scope finds
+/// exactly one distinct version across every package in `repo`; returns
+/// `None` for zero or more-than-one distinct versions. The serialized type
+/// stays `string | null` so consumers of `sniff repo --json` keep their
+/// existing contract; only the value improves (e.g. a pure-virtual Cargo
+/// workspace with uniform member versions now reports the version string
+/// instead of `null`).
+///
+/// Resolution is rooted at `repo.root`, not the invocation directory: Cargo
+/// `version.workspace = true` inheritance is read from the repository root's
+/// `Cargo.toml`, so invoking bare `sniff repo --json` from inside a member
+/// package must still find the workspace's `[workspace.package].version`.
+fn aggregate_repo_version(repo: Option<&RepoInfo>) -> Option<String> {
+    use sniff::filesystem::repo::bare_aggregate_version;
+
+    let repo = repo?;
+    let packages = repo.packages.as_deref()?;
+    bare_aggregate_version(packages, &repo.root)
 }
 
 /// Build the aggregate's repo-wide `dependencies` projection.
@@ -1852,27 +1856,6 @@ mod tests {
         }
 
         #[test]
-        fn version_outcome_wraps_some_string() {
-            let outcome = version_outcome(Some("1.2.3"), false);
-            assert_eq!(outcome.value, json!({ "version": "1.2.3" }));
-            assert!(outcome.exit_code.is_none());
-        }
-
-        #[test]
-        fn version_outcome_none_sets_exit_code_one() {
-            let outcome = version_outcome(None, false);
-            assert_eq!(outcome.value, json!({ "version": null }));
-            assert_eq!(outcome.exit_code, Some(1));
-        }
-
-        #[test]
-        fn version_outcome_none_with_no_error_sets_exit_code_zero() {
-            let outcome = version_outcome(None, true);
-            assert_eq!(outcome.value, json!({ "version": null }));
-            assert_eq!(outcome.exit_code, Some(0));
-        }
-
-        #[test]
         fn worktrees_value_shapes_entries() {
             use sniff::filesystem::git::WorktreeEntry;
             use std::path::PathBuf;
@@ -2655,7 +2638,10 @@ mod tests {
                 .expect("aggregate should build");
 
             assert_eq!(value["name"], "fixture-repo");
-            assert_eq!(value["version"], "1.0.0");
+            // No packages in the fixture → the `AggregateScope::Repo`
+            // collapse finds zero distinct versions and emits `null`. The
+            // `RepoIdentity.version` is not consulted here.
+            assert_eq!(value["version"], Value::Null);
             assert_eq!(value["language"], Value::Null);
             assert_eq!(value["is_monorepo"], false);
             assert_eq!(value["package_count"], 0);
@@ -2781,6 +2767,114 @@ mod tests {
                 outcome.is_err(),
                 "aggregate must fail rather than emit partial JSON"
             );
+        }
+
+        #[test]
+        fn aggregate_repo_version_uniform_returns_the_shared_string() {
+            let tmp = tempfile::tempdir().unwrap();
+            let root = tmp.path();
+            let a = root.join("a");
+            let b = root.join("b");
+            std::fs::create_dir_all(&a).unwrap();
+            std::fs::create_dir_all(&b).unwrap();
+            std::fs::write(
+                a.join("Cargo.toml"),
+                "[package]\nname = \"a\"\nversion = \"0.1.0\"\n",
+            )
+            .unwrap();
+            std::fs::write(
+                b.join("Cargo.toml"),
+                "[package]\nname = \"b\"\nversion = \"0.1.0\"\n",
+            )
+            .unwrap();
+
+            let packages = vec![
+                Package {
+                    path: a.clone(),
+                    relative: "a".to_string(),
+                    package_area: "root".to_string(),
+                    name: "a".to_string(),
+                    ..Package::default()
+                },
+                Package {
+                    path: b.clone(),
+                    relative: "b".to_string(),
+                    package_area: "root".to_string(),
+                    name: "b".to_string(),
+                    ..Package::default()
+                },
+            ];
+            let repo = RepoInfo {
+                is_monorepo: true,
+                root: root.to_path_buf(),
+                dependencies: None,
+                dev_dependencies: None,
+                peer_dependencies: None,
+                optional_dependencies: None,
+                monorepo_standards: Vec::new(),
+                monorepo_layers: Vec::new(),
+                packages: Some(packages),
+            };
+
+            assert_eq!(
+                aggregate_repo_version(Some(&repo)),
+                Some("0.1.0".to_string())
+            );
+        }
+
+        #[test]
+        fn aggregate_repo_version_zero_packages_returns_none() {
+            let empty = repo_with_packages(Vec::new());
+            assert_eq!(aggregate_repo_version(Some(&empty)), None);
+        }
+
+        #[test]
+        fn aggregate_repo_version_two_distinct_returns_none() {
+            let tmp = tempfile::tempdir().unwrap();
+            let root = tmp.path();
+            let a = root.join("a");
+            let b = root.join("b");
+            std::fs::create_dir_all(&a).unwrap();
+            std::fs::create_dir_all(&b).unwrap();
+            std::fs::write(
+                a.join("Cargo.toml"),
+                "[package]\nname = \"a\"\nversion = \"1.0.0\"\n",
+            )
+            .unwrap();
+            std::fs::write(
+                b.join("Cargo.toml"),
+                "[package]\nname = \"b\"\nversion = \"2.0.0\"\n",
+            )
+            .unwrap();
+
+            let packages = vec![
+                Package {
+                    path: a,
+                    relative: "a".to_string(),
+                    package_area: "root".to_string(),
+                    name: "a".to_string(),
+                    ..Package::default()
+                },
+                Package {
+                    path: b,
+                    relative: "b".to_string(),
+                    package_area: "root".to_string(),
+                    name: "b".to_string(),
+                    ..Package::default()
+                },
+            ];
+            let repo = RepoInfo {
+                is_monorepo: true,
+                root: root.to_path_buf(),
+                dependencies: None,
+                dev_dependencies: None,
+                peer_dependencies: None,
+                optional_dependencies: None,
+                monorepo_standards: Vec::new(),
+                monorepo_layers: Vec::new(),
+                packages: Some(packages),
+            };
+            assert_eq!(aggregate_repo_version(Some(&repo)), None);
         }
     }
 

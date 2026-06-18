@@ -884,42 +884,46 @@ fn repo_package_count_text_is_integer() {
 }
 
 #[test]
-fn repo_version_json_is_single_key_and_exit_tracks_null() {
+fn repo_version_json_returns_array_shape_under_real_repo() {
+    // The repo under test is the rusty-biscuit monorepo (a real Cargo
+    // workspace with packages). `sniff repo version --json` must report
+    // the new `{ "versions": [...] }` contract — never the legacy
+    // `{ "version": ... }` single-key shape.
     let output = cargo_bin_cmd!("sniff")
         .args(["repo", "version", "--json"])
         .output()
         .expect("run sniff repo version --json");
 
-    // stdout must always be a valid single-key JSON object, even when absent.
-    let json: Value =
-        serde_json::from_str(std::str::from_utf8(&output.stdout).expect("utf8")).expect("json");
-    let obj = json.as_object().expect("object");
-    assert_eq!(obj.len(), 1, "version --json must be a single key: {json}");
-    assert!(obj.contains_key("version"));
-
-    let version = &obj["version"];
     assert!(
-        version.is_null() || version.is_string(),
-        "version value must be a string or null: {json}"
+        output.status.success(),
+        "version --json must exit 0 for the real repo: stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
 
-    // Exit code mirrors null-ness: absent version → exit 1, present → exit 0.
-    if version.is_null() {
-        assert_eq!(
-            output.status.code(),
-            Some(1),
-            "version null must exit 1: {json}"
-        );
-    } else {
-        assert!(
-            output.status.success(),
-            "present version must exit 0: {json}"
-        );
+    let json: Value =
+        serde_json::from_str(std::str::from_utf8(&output.stdout).expect("utf8"))
+            .expect("stdout is valid JSON");
+    let obj = json.as_object().expect("JSON object at the top level");
+    assert!(
+        obj.contains_key("versions"),
+        "version --json must surface the `versions` array, got {json}"
+    );
+    let versions = obj["versions"].as_array().expect("`versions` is an array");
+    assert!(!versions.is_empty(), "real repo should report at least one version");
+    for entry in versions {
+        let entry_obj = entry.as_object().expect("entry is an object");
+        assert!(entry_obj.contains_key("version"));
+        assert!(entry_obj.contains_key("packages"));
+        assert!(entry_obj.contains_key("sources"));
     }
 }
 
 #[test]
 fn repo_version_json_no_error_exits_zero() {
+    // The real repo always has at least one resolvable version, so
+    // `--no-error` is exercised on the success path. The empty
+    // `--no-error` behaviour is covered by integration tests in the
+    // `repo_version_empty_with_no_error` family.
     let output = cargo_bin_cmd!("sniff")
         .args(["repo", "version", "--json", "--no-error"])
         .output()
@@ -927,37 +931,36 @@ fn repo_version_json_no_error_exits_zero() {
 
     assert!(
         output.status.success(),
-        "version --json --no-error must exit 0 even when absent: stderr: {}",
+        "version --json --no-error must exit 0: stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
     let json: Value =
-        serde_json::from_str(std::str::from_utf8(&output.stdout).expect("utf8")).expect("json");
-    let obj = json.as_object().expect("object");
-    assert_eq!(obj.len(), 1, "version --json must be a single key: {json}");
-    assert!(obj.contains_key("version"));
+        serde_json::from_str(std::str::from_utf8(&output.stdout).expect("utf8"))
+            .expect("stdout is valid JSON");
+    assert!(json.as_object().expect("JSON object").contains_key("versions"));
 }
 
 #[test]
 fn repo_version_text_absent_exits_one() {
+    // Run from a clean temp dir (no recognizable repo) so the command has
+    // nothing to report. This exercises the empty-result path under real
+    // shell conditions.
+    let tmp = tempfile::tempdir().expect("tempdir");
     let output = cargo_bin_cmd!("sniff")
         .args(["repo", "version"])
         .env("NO_COLOR", "1")
+        .current_dir(tmp.path())
         .output()
-        .expect("run sniff repo version");
+        .expect("run sniff repo version in empty dir");
 
-    let stdout = std::str::from_utf8(&output.stdout).expect("utf8").trim();
-    if stdout.is_empty() {
-        // No root version present in this repo: must signal absence via exit 1.
-        assert_eq!(
-            output.status.code(),
-            Some(1),
-            "repo version with no output must exit 1"
-        );
-    } else {
-        // A version was found: stdout is the bare version string, exit 0.
-        assert!(output.status.success(), "present version must exit 0");
-    }
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "repo version with no resolvable version must exit 1; stdout={:?}, stderr={:?}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 // ============================================================================
@@ -2277,6 +2280,602 @@ fn test_repo_package_manager_json_uses_shared_collapse() {
     );
     let json: Value = serde_json::from_slice(&output.stdout).expect("stdout is valid JSON");
     assert_eq!(json["package_manager"], "cargo");
+}
+
+// ============================================================================
+// `sniff repo version` integration tests — focused array contract mirroring
+// the test-runner JSON shape.
+// ============================================================================
+
+/// Monorepo root reports its cross-package collapse with the new
+/// `{ "versions": [...] }` shape, never the legacy `{ "version": ... }`.
+#[test]
+fn test_repo_version_json_reports_array_shape() {
+    let (_dir, path) = create_cli_monorepo();
+
+    let output = cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "version", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output.stdout).expect("stdout is valid JSON");
+    let versions = json["versions"]
+        .as_array()
+        .expect("`versions` is always an array");
+    assert_eq!(versions.len(), 1, "two crates at 0.1.0 → one entry");
+    let entry = &versions[0];
+    assert_eq!(entry["version"], "0.1.0");
+    assert!(
+        entry["packages"].as_array().expect("packages array").len() >= 2,
+        "in-scope packages should be reported, got {entry:?}"
+    );
+    let sources = entry["sources"]
+        .as_array()
+        .expect("sources is always an array");
+    assert!(!sources.is_empty(), "at least one source, got {entry:?}");
+    assert_eq!(sources[0]["manifest"], "Cargo.toml");
+    assert_eq!(sources[0]["inherited"], false);
+    assert!(sources[0]["href"]
+        .as_str()
+        .expect("href is a string")
+        .starts_with("file://"));
+}
+
+#[test]
+fn test_repo_version_text_output_default() {
+    let (_dir, path) = create_cli_monorepo();
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "version", "--plain"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("0.1.0"));
+}
+
+#[test]
+fn test_repo_version_csv_output_is_names_only() {
+    let (_dir, path) = create_cli_monorepo();
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "version", "--csv"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("0.1.0"));
+}
+
+#[test]
+fn test_repo_version_md_output_uses_dash_prefix() {
+    let (_dir, path) = create_cli_monorepo();
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "version", "--md"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("- 0.1.0"));
+}
+
+#[test]
+fn test_repo_version_list_output_is_names_only() {
+    let (_dir, path) = create_cli_monorepo();
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "version", "--list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("0.1.0"));
+}
+
+/// Monorepo root with no flag reports the cross-package collapse (all crates
+/// at `0.1.0` collapse to one entry).
+#[test]
+fn test_repo_version_monorepo_root_reports_collapsed_versions() {
+    let (_dir, path) = create_cli_monorepo();
+
+    let output = cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "version", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output.stdout).expect("stdout is valid JSON");
+    let versions = json["versions"].as_array().expect("versions array");
+    assert_eq!(versions.len(), 1, "uniform collapse, got {json}");
+    assert_eq!(versions[0]["version"], "0.1.0");
+    let packages = versions[0]["packages"]
+        .as_array()
+        .expect("packages array");
+    let names: Vec<&str> = packages.iter().map(|p| p.as_str().unwrap()).collect();
+    assert!(names.contains(&"pkg-a"));
+    assert!(names.contains(&"pkg-b"));
+}
+
+/// `--all` from inside a package directory must discover the *enclosing* repo
+/// and span every package, not analyze the subdir as a standalone package.
+/// Asserting the package list (not just the collapsed string) is what proves
+/// the enclosing repo was discovered — uniform versions alone would mask a
+/// missing `pkg-b`.
+#[test]
+fn test_repo_version_all_override_returns_repo_scope() {
+    let (_dir, path) = create_cli_monorepo();
+
+    let output = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.join("pkg-a/lib").to_str().unwrap(),
+            "repo",
+            "version",
+            "--all",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output.stdout).expect("stdout is valid JSON");
+    let versions = json["versions"].as_array().expect("versions array");
+    assert_eq!(versions.len(), 1, "uniform collapse, got {json}");
+    assert_eq!(versions[0]["version"], "0.1.0");
+    let names: Vec<&str> = versions[0]["packages"]
+        .as_array()
+        .expect("packages array")
+        .iter()
+        .map(|p| p.as_str().unwrap())
+        .collect();
+    assert!(
+        names.contains(&"pkg-a") && names.contains(&"pkg-b"),
+        "`--all` from inside pkg-a must span the whole repo, got {names:?}"
+    );
+}
+
+/// `--package <name>` scopes the collapse to one package.
+#[test]
+fn test_repo_version_package_override_scopes_to_single_package() {
+    let (_dir, path) = create_cli_monorepo();
+
+    let output = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "version",
+            "--package",
+            "pkg-a",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output.stdout).expect("stdout is valid JSON");
+    let versions = json["versions"].as_array().expect("versions array");
+    assert_eq!(versions.len(), 1);
+    assert_eq!(versions[0]["version"], "0.1.0");
+    let packages = versions[0]["packages"].as_array().expect("packages array");
+    assert_eq!(packages.len(), 1);
+    assert_eq!(packages[0], "pkg-a");
+}
+
+/// `--package-area <name>` scopes the collapse to one area.
+#[test]
+fn test_repo_version_package_area_override_scopes_to_single_area() {
+    let (_dir, path) = create_cli_monorepo();
+
+    let output = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "version",
+            "--package-area",
+            "pkg-a",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output.stdout).expect("stdout is valid JSON");
+    let versions = json["versions"].as_array().expect("versions array");
+    assert_eq!(versions.len(), 1);
+    assert_eq!(versions[0]["version"], "0.1.0");
+    let packages = versions[0]["packages"].as_array().expect("packages array");
+    let names: Vec<&str> = packages.iter().map(|p| p.as_str().unwrap()).collect();
+    assert_eq!(names, vec!["pkg-a"]);
+}
+
+/// Unknown `--package` errors clearly (no JSON, exit non-zero).
+#[test]
+fn test_repo_version_unknown_package_errors() {
+    let (_dir, path) = create_cli_monorepo();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "version",
+            "--package",
+            "ghost",
+        ])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        stderr.contains("ghost") || stderr.contains("package"),
+        "expected unknown-package error, got {stderr}"
+    );
+}
+
+/// Unknown `--package-area` errors clearly.
+#[test]
+fn test_repo_version_unknown_package_area_errors() {
+    let (_dir, path) = create_cli_monorepo();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "version",
+            "--package-area",
+            "ghost",
+        ])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        stderr.contains("ghost") || stderr.contains("area"),
+        "expected unknown-area error, got {stderr}"
+    );
+}
+
+/// A synthesized single-package repo (`is_monorepo == false`) must still
+/// validate `--package` against its catalog: an unknown name errors clearly
+/// instead of silently printing the local version.
+#[test]
+fn test_repo_version_single_package_unknown_package_errors() {
+    let (_dir, path) = create_single_package_repo();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "version",
+            "--package",
+            "ghost",
+        ])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        stderr.contains("ghost") || stderr.contains("package"),
+        "expected unknown-package error on a single-package repo, got {stderr}"
+    );
+}
+
+/// A synthesized single-package repo also validates `--package-area`: an
+/// unknown area errors rather than falling back to the local version.
+#[test]
+fn test_repo_version_single_package_unknown_area_errors() {
+    let (_dir, path) = create_single_package_repo();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "version",
+            "--package-area",
+            "ghost",
+        ])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        stderr.contains("ghost") || stderr.contains("area"),
+        "expected unknown-area error on a single-package repo, got {stderr}"
+    );
+}
+
+/// The known package on a single-package repo resolves and reports its
+/// version, confirming override validation accepts valid catalog targets.
+#[test]
+fn test_repo_version_single_package_known_package_resolves() {
+    let (_dir, path) = create_single_package_repo();
+
+    let output = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "version",
+            "--package",
+            "solo",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output.stdout).expect("stdout is valid JSON");
+    let versions = json["versions"].as_array().expect("versions array");
+    assert_eq!(versions.len(), 1);
+    assert_eq!(versions[0]["version"], "0.4.2");
+    let names: Vec<&str> = versions[0]["packages"]
+        .as_array()
+        .expect("packages array")
+        .iter()
+        .map(|p| p.as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["solo"]);
+}
+
+/// Variance across packages: two distinct versions render as a multi-entry
+/// list, with each version collapsing its own packages.
+#[test]
+fn test_repo_version_variance_reports_each_version_separately() {
+    let (_dir, path) = create_cli_monorepo();
+    // Bump pkg-b to a different version to force variance.
+    std::fs::write(
+        path.join("pkg-b/lib/Cargo.toml"),
+        r#"[package]
+name = "pkg-b"
+version = "2.0.0"
+edition = "2024"
+"#,
+    )
+    .unwrap();
+
+    let output = cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "version", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output.stdout).expect("stdout is valid JSON");
+    let versions = json["versions"].as_array().expect("versions array");
+    assert_eq!(versions.len(), 2, "variance should not collapse, got {json}");
+    let mut values: Vec<&str> = versions
+        .iter()
+        .map(|v| v["version"].as_str().unwrap())
+        .collect();
+    values.sort();
+    assert_eq!(values, vec!["0.1.0", "2.0.0"]);
+
+    let list = cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "version", "--list"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let list = String::from_utf8_lossy(&list);
+    assert!(list.contains("0.1.0") && list.contains("2.0.0"));
+}
+
+/// Empty result (no resolvable version) prints nothing and exits 1.
+#[test]
+fn test_repo_version_empty_exits_one_with_no_stdout() {
+    let (_dir, path) = create_test_repo();
+    // No manifest → nothing to read.
+    let assert = cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "version"])
+        .assert()
+        .failure();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(
+        stdout.trim().is_empty(),
+        "no-version context must print nothing, got {stdout:?}"
+    );
+}
+
+/// `--no-error` flips empty to exit 0 (and JSON still emits `{ "versions": [] }`).
+#[test]
+fn test_repo_version_empty_with_no_error_exits_zero() {
+    let (_dir, path) = create_test_repo();
+
+    let json = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "version",
+            "--json",
+            "--no-error",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&json).expect("stdout is valid JSON");
+    assert_eq!(json["versions"], serde_json::json!([]));
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "version",
+            "--no-error",
+        ])
+        .assert()
+        .success();
+}
+
+/// Verbose mode shows the manifest source for each entry; the single-source
+/// path is hyperlinked, and workspace inheritance is named explicitly.
+#[test]
+fn test_repo_version_verbose_named_workspace_inheritance() {
+    let (_dir, path) = create_test_repo();
+    // Multi-member workspace with `[workspace.package].version`; one member
+    // uses `version.workspace = true` so the inheritance path is exercised.
+    std::fs::write(
+        path.join("Cargo.toml"),
+        r#"[workspace]
+members = ["pkg-a/lib", "pkg-b/lib"]
+resolver = "2"
+
+[workspace.package]
+version = "3.1.4"
+edition = "2024"
+"#,
+    )
+    .unwrap();
+    let pkg_a = path.join("pkg-a/lib");
+    std::fs::create_dir_all(pkg_a.join("src")).unwrap();
+    std::fs::write(
+        pkg_a.join("Cargo.toml"),
+        r#"[package]
+name = "pkg-a"
+version.workspace = true
+edition.workspace = true
+"#,
+    )
+    .unwrap();
+    std::fs::write(pkg_a.join("src/lib.rs"), "pub fn a() {}").unwrap();
+    let pkg_b = path.join("pkg-b/lib");
+    std::fs::create_dir_all(pkg_b.join("src")).unwrap();
+    std::fs::write(
+        pkg_b.join("Cargo.toml"),
+        r#"[package]
+name = "pkg-b"
+version = "0.5.0"
+edition = "2024"
+"#,
+    )
+    .unwrap();
+    std::fs::write(pkg_b.join("src/lib.rs"), "pub fn b() {}").unwrap();
+
+    let json = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "version",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&json).expect("stdout is valid JSON");
+    let versions = json["versions"].as_array().expect("versions array");
+    // Two distinct versions, one inherited.
+    let mut seen: Vec<&str> = versions
+        .iter()
+        .map(|v| v["version"].as_str().unwrap())
+        .collect();
+    seen.sort();
+    assert_eq!(seen, vec!["0.5.0", "3.1.4"]);
+    let inherited_entry = versions
+        .iter()
+        .find(|v| v["version"] == "3.1.4")
+        .expect("3.1.4 entry");
+    let sources = inherited_entry["sources"]
+        .as_array()
+        .expect("sources array");
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0]["inherited"], true, "inherited flag must be set");
+    assert_eq!(sources[0]["path"], "Cargo.toml");
+
+    // Verbose text surfaces `[workspace.package]` rather than a misleading
+    // member-crate path.
+    let text = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "version",
+            "--verbose",
+            "--plain",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8_lossy(&text);
+    assert!(
+        text.contains("[workspace.package]"),
+        "verbose text should name the inherited source, got {text:?}"
+    );
+}
+
+/// Bare `sniff repo --json` invoked from inside a member package of a
+/// Cargo workspace that inherits its version must still collapse the
+/// top-level `version` to the workspace's `[workspace.package].version`.
+///
+/// Regression guard: the aggregate previously resolved inheritance relative
+/// to the invocation directory (the member), where `Cargo.toml` carries no
+/// `[workspace.package]`, so the top-level `version` came back `null`. It
+/// must be rooted at the repo root instead.
+#[test]
+fn test_bare_repo_json_version_collapses_workspace_inheritance_from_member() {
+    let (_dir, path) = create_test_repo();
+    std::fs::write(
+        path.join("Cargo.toml"),
+        r#"[workspace]
+members = ["member"]
+resolver = "2"
+
+[workspace.package]
+version = "7.2.0"
+edition = "2024"
+"#,
+    )
+    .unwrap();
+    let member = path.join("member");
+    std::fs::create_dir_all(member.join("src")).unwrap();
+    std::fs::write(
+        member.join("Cargo.toml"),
+        r#"[package]
+name = "member"
+version.workspace = true
+edition.workspace = true
+"#,
+    )
+    .unwrap();
+    std::fs::write(member.join("src/lib.rs"), "pub fn m() {}").unwrap();
+
+    let output = cargo_bin_cmd!("sniff")
+        .args(["--base", member.to_str().unwrap(), "repo", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output.stdout).expect("stdout is valid JSON");
+    assert_eq!(
+        json["version"], "7.2.0",
+        "bare repo --json from a member must inherit the workspace version, got {json}"
+    );
+}
+
+/// `--json` on an empty result still emits valid JSON; nothing leaks to
+/// stderr in JSON mode (stdout stays machine-parseable).
+#[test]
+fn test_repo_version_empty_json_emits_array_shape() {
+    let (_dir, path) = create_test_repo();
+    let output = cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "version", "--json"])
+        .assert()
+        .failure()
+        .get_output()
+        .clone();
+    let json: Value = serde_json::from_slice(&output.stdout)
+        .expect("stdout is valid JSON even on empty result");
+    assert_eq!(json["versions"], serde_json::json!([]));
 }
 
 #[test]
@@ -4441,6 +5040,43 @@ edition = "2024"
     let tree_id = index.write_tree().unwrap();
     let tree = repo.find_tree(tree_id).unwrap();
     repo.commit(Some("HEAD"), &sig, &sig, "initial monorepo", &tree, &[])
+        .unwrap();
+
+    let path = dir.path().to_path_buf();
+    (dir, path)
+}
+
+/// A standalone single-package Cargo project (no `[workspace]`). Detection
+/// synthesizes a one-package catalog with `is_monorepo == false`, so this
+/// exercises the non-monorepo override-validation path of `repo version`.
+fn create_single_package_repo() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test").unwrap();
+
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[package]
+name = "solo"
+version = "0.4.2"
+edition = "2024"
+"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(dir.path().join("src/lib.rs"), "pub fn solo() {}").unwrap();
+
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    index.write().unwrap();
+    let sig = repo.signature().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "initial solo", &tree, &[])
         .unwrap();
 
     let path = dir.path().to_path_buf();

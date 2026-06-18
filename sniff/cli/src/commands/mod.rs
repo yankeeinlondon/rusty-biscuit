@@ -26,9 +26,9 @@ mod repo;
 use remote::{handle_pr_command, handle_remote_url, handle_shorthand};
 use repo::{
     RepoPackageAreasArgs, RepoPackageManagerArgs, RepoPackagesArgs, RepoTestRunnerArgs,
-    handle_file_list_command, handle_repo_branches, handle_repo_dependencies,
+    RepoVersionArgs, handle_file_list_command, handle_repo_branches, handle_repo_dependencies,
     handle_repo_package_areas, handle_repo_package_manager, handle_repo_packages,
-    handle_repo_test_runner,
+    handle_repo_test_runner, handle_repo_version,
 };
 
 /// Main CLI entrypoint.
@@ -872,26 +872,33 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     &perf,
                 );
             }
-            crate::args::RepoAction::Version { no_error, on_error } => {
-                let dir = base_dir
-                    .as_deref()
-                    .unwrap_or_else(|| std::path::Path::new("."));
-                let identity = sniff::filesystem::repo::detect_repo_identity(dir)?;
-                if cli.json {
-                    let outcome =
-                        output::repo_json::version_outcome(identity.version.as_deref(), *no_error);
-                    output::print_json_value(outcome.value, perf.build_report().as_ref());
-                    if let Some(code) = outcome.exit_code {
-                        std::process::exit(code);
-                    }
-                    return Ok(());
-                }
-                if let Some(version) = identity.version {
-                    println!("{version}");
-                    perf.emit_stderr(None);
-                    return Ok(());
-                }
-                return handle_no_results(*no_error, on_error, cli.plain, &perf);
+            crate::args::RepoAction::Version {
+                csv,
+                list,
+                md,
+                all,
+                package,
+                package_area,
+                no_error,
+                on_error,
+            } => {
+                return handle_repo_version(
+                    base_dir.as_deref(),
+                    RepoVersionArgs {
+                        csv: *csv,
+                        list: *list,
+                        md: *md,
+                        all: *all,
+                        package: package.clone(),
+                        package_area: package_area.clone(),
+                    },
+                    cli.json,
+                    cli.plain,
+                    cli.verbose,
+                    *no_error,
+                    on_error.clone(),
+                    &perf,
+                );
             }
             crate::args::RepoAction::TestRunner { csv, list, md } => {
                 return handle_repo_test_runner(

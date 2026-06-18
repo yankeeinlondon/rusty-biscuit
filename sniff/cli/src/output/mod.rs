@@ -20,6 +20,7 @@ mod services;
 pub(crate) mod test_runner_report;
 mod test_runners;
 mod topics;
+pub(crate) mod version_report;
 
 use sniff::{PerformanceReport, SniffResult};
 

@@ -212,7 +212,20 @@ pub enum RepoAction {
         list: bool,
         md: bool,
     },
+    /// `sniff repo version` — report the declared version(s) for the current
+    /// repo/package context, scoped like `repo test-runner`.
     Version {
+        // Output formats (mutually exclusive: csv | list | md).
+        csv: bool,
+        list: bool,
+        md: bool,
+        // Scope overrides (mutually exclusive: all | package | package_area).
+        // clap enforces the mutual exclusion; the handler treats them in
+        // priority order regardless.
+        all: bool,
+        package: Option<String>,
+        package_area: Option<String>,
+        // Empty-result behaviour (preserved from the prior focused command).
         no_error: bool,
         on_error: Option<String>,
     },
@@ -703,14 +716,39 @@ pub enum RepoSubcommand {
         #[arg(long, conflicts_with_all = ["csv", "list"])]
         md: bool,
     },
-    /// Output the repository version from a root manifest, when present
+    /// Report the declared version(s) for the current repo/package context.
+    ///
+    /// Scoped to the CWD by default (package / package-area / repo, same as
+    /// `repo test-runner`); `--all` / `--package` / `--package-area` override
+    /// that resolution. `--json` returns the `{ "versions": [...] }` shape
+    /// shared with the other focused repo subcommands. `--csv` / `--list` /
+    /// `--md` and `--verbose` follow the `repo test-runner` rendering
+    /// conventions.
     #[command(name = "version")]
     Version {
+        /// Render as comma-separated values on a single line.
+        #[arg(long, conflicts_with_all = ["list", "md"])]
+        csv: bool,
+        /// Render as a newline-delimited list (one version per line).
+        #[arg(long, conflicts_with_all = ["csv", "md"])]
+        list: bool,
+        /// Render as a Markdown unordered list (one `- version` per line).
+        #[arg(long, conflicts_with_all = ["csv", "list"])]
+        md: bool,
+        /// Scope to every package in the repository, regardless of CWD.
+        #[arg(long, conflicts_with_all = ["package", "package_area"])]
+        all: bool,
+        /// Scope to a specific package by name.
+        #[arg(short, long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates), conflicts_with_all = ["all", "package_area"])]
+        package: Option<String>,
+        /// Scope to a specific package area by name.
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates), conflicts_with_all = ["all", "package"])]
+        package_area: Option<String>,
         /// Exit 0 with no output when no version is found (default is exit 1)
         #[arg(long)]
         no_error: bool,
 
-        /// Message to display when no version is found
+        /// Message to display when no version is found (text mode only)
         #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
         on_error: Option<String>,
     },

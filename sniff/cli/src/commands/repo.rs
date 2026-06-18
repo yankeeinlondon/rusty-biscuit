@@ -201,6 +201,16 @@ pub(super) struct RepoTestRunnerArgs {
     pub(super) md: bool,
 }
 
+/// Subcommand-specific args for `sniff repo version`.
+pub(super) struct RepoVersionArgs {
+    pub(super) csv: bool,
+    pub(super) list: bool,
+    pub(super) md: bool,
+    pub(super) all: bool,
+    pub(super) package: Option<String>,
+    pub(super) package_area: Option<String>,
+}
+
 /// Subcommand-specific args for `sniff repo package-manager`.
 pub(super) struct RepoPackageManagerArgs {
     pub(super) csv: bool,
@@ -603,6 +613,149 @@ pub(super) fn handle_repo_test_runner(
         out
     } else {
         crate::output::test_runner_report::render_entries(
+            &entries,
+            verbose,
+            &root,
+            &Terminal::default(),
+        )
+    };
+
+    crate::output::emit_text(&rendered, plain);
+    perf.emit_stderr(None);
+    Ok(())
+}
+
+/// Handle `sniff repo version`.
+///
+/// Reports declared package versions for the current repo/package context
+/// using the shared library aggregation helper. Mirrors
+/// [`handle_repo_test_runner`]: monorepo-with-packages collapses via
+/// `aggregate_versions`; non-monorepo / no catalog falls back to reading the
+/// directory's own manifest into a single attribution (empty `packages`,
+/// one source). `--json` always emits the `{ "versions": [...] }` shape;
+/// `--on-error` is text-mode only.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn handle_repo_version(
+    base_dir: Option<&std::path::Path>,
+    args: RepoVersionArgs,
+    json: bool,
+    plain: bool,
+    verbose: u8,
+    no_error: bool,
+    on_error: Option<String>,
+    perf: &CliPerf,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use biscuit_terminal::components::prose::Prose;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
+    use biscuit_terminal::terminal::Terminal;
+    use sniff::filesystem::repo::{
+        VersionAttribution, aggregate_versions, detect_repo_structure_or_root_package,
+        resolve_directory_version, resolve_scope_with_overrides,
+    };
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
+    // `--base` (or the CWD) is the *scope* directory, not the detection root.
+    // Always discover the enclosing repo root from it so `--all` /
+    // `--package` / `--package-area` select across the whole repo even when
+    // `--base` points inside a package directory of a monorepo.
+    let dir_for_scope = base_dir.unwrap_or(&cwd);
+    let root = sniff::filesystem::repo_root(dir_for_scope)?
+        .unwrap_or_else(|| dir_for_scope.to_path_buf());
+
+    let info = detect_repo_structure_or_root_package(&root)?;
+
+    // Resolve scope (with overrides) and collapse to distinct version entries.
+    // Two paths:
+    //   1. Any repo with a package catalog → resolve overrides and aggregate
+    //      across the resolved scope. Running through the catalog regardless of
+    //      `is_monorepo` is what validates `--package` / `--package-area`
+    //      against a synthesized single-package repo.
+    //   2. No catalog at all → detect at the directory directly (no
+    //      per-package attribution to carry).
+    let entries: Vec<VersionAttribution> = match &info {
+        Some(info) if info.packages.as_ref().is_some_and(|p| !p.is_empty()) => {
+            let scope = resolve_scope_with_overrides(
+                info,
+                dir_for_scope,
+                args.all,
+                args.package.as_deref(),
+                args.package_area.as_deref(),
+            )?;
+            let packages = info.packages.as_deref().expect("non-empty packages");
+            aggregate_versions(packages, &scope, &root)
+        }
+        _ => resolve_directory_version(&root).into_iter().collect(),
+    };
+
+    if json {
+        let value = crate::output::version_report::build_version_json(&entries, &root);
+        crate::output::print_json_value(value, perf.build_report().as_ref());
+        // JSON mode keeps stdout as valid JSON even on empty; exit code
+        // follows the same `--no-error` contract as text mode.
+        if entries.is_empty() {
+            if no_error {
+                return Ok(());
+            }
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
+
+    if entries.is_empty() {
+        // No resolvable version. Emit nothing on stdout; hint on stderr when
+        // not plain. `--on-error` text is honored; `--no-error` keeps exit 0.
+        if let Some(msg) = on_error.as_deref() {
+            let terminal = Terminal::default();
+            let rendered = Prose::new(msg.to_string()).render(&terminal);
+            let text = if plain {
+                biscuit_terminal::prelude::strip_escape_codes(&rendered)
+            } else {
+                rendered
+            };
+            eprintln!("{text}");
+        } else if !plain {
+            eprintln!(
+                "{}",
+                Prose::new("<dim>No declared version for this context.</dim>")
+                    .render(&Terminal::default())
+            );
+        }
+        perf.emit_stderr(None);
+        std::process::exit(if no_error { 0 } else { 1 });
+    }
+
+    let rendered = if args.csv || args.list || args.md {
+        // `--csv`/`--list`/`--md` select the delimiter. Without -v: distinct
+        // version strings only. With -v: each item keeps the same styled
+        // source attribution the default CSV shows (`--plain` strips styling).
+        let items: Vec<String> = if verbose > 0 {
+            let multi = entries.len() > 1;
+            let term = Terminal::default();
+            entries
+                .iter()
+                .map(|entry| {
+                    crate::output::version_report::render_one(entry, verbose, multi, &root, &term)
+                })
+                .collect()
+        } else {
+            crate::output::version_report::entry_names(&entries)
+                .into_iter()
+                .map(str::to_string)
+                .collect()
+        };
+        let mut out = String::new();
+        use std::fmt::Write;
+        if args.csv {
+            let _ = writeln!(out, "{}", items.join(", "));
+        } else {
+            let prefix = if args.md { "- " } else { "" };
+            for item in &items {
+                let _ = writeln!(out, "{prefix}{item}");
+            }
+        }
+        out
+    } else {
+        crate::output::version_report::render_entries(
             &entries,
             verbose,
             &root,

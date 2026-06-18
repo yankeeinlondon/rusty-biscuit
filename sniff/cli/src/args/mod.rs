@@ -1035,7 +1035,22 @@ impl Commands {
                         md: *md,
                     }
                 }
-                Some(RepoSubcommand::Version { no_error, on_error }) => RepoAction::Version {
+                Some(RepoSubcommand::Version {
+                    csv,
+                    list,
+                    md,
+                    all,
+                    package,
+                    package_area,
+                    no_error,
+                    on_error,
+                }) => RepoAction::Version {
+                    csv: *csv,
+                    list: *list,
+                    md: *md,
+                    all: *all,
+                    package: package.clone(),
+                    package_area: package_area.clone(),
                     no_error: *no_error,
                     on_error: on_error.clone(),
                 },
@@ -1220,8 +1235,12 @@ Identity:
   sniff repo package-count            Number of discovered packages (or { \"package-count\": N } with --json)
   sniff repo package-count --json     { \"package-count\": 48 }
   sniff repo package-manager          Package manager(s) for the current context
-  sniff repo version                  Repository version from root manifest (or { \"version\": \"...\" } with --json)
-  sniff repo version --json           { \"version\": \"0.1.0\" }
+  sniff repo version                  Declared version(s) for the current package/area/repo context
+  sniff repo version --json           { \"versions\": [ { \"version\": \"0.1.0\", \"packages\": [...], \"sources\": [...] } ] }
+  sniff repo version --all            All packages, regardless of CWD
+  sniff repo version --package <name> Scope to one package
+  sniff repo version --package-area <name>
+                                       Scope to one package area
 
 Structure:
   sniff repo structure                Show repository/monorepo structure
@@ -2520,14 +2539,26 @@ mod tests {
         fn to_repo_action_version() {
             let cmd = Commands::Repo {
                 repo_subcommand: Some(RepoSubcommand::Version {
+                    csv: false,
+                    list: false,
+                    md: false,
+                    all: false,
+                    package: Some("app".to_string()),
+                    package_area: None,
                     no_error: true,
                     on_error: Some("msg".to_string()),
                 }),
             };
             match cmd.to_repo_action() {
-                Some(RepoAction::Version { no_error, on_error }) => {
+                Some(RepoAction::Version {
+                    no_error,
+                    on_error,
+                    package,
+                    ..
+                }) => {
                     assert!(no_error);
                     assert_eq!(on_error, Some("msg".to_string()));
+                    assert_eq!(package, Some("app".to_string()));
                 }
                 _ => panic!("Expected Version action"),
             }
