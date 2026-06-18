@@ -13,15 +13,17 @@ parameters:
 dir: "$(dirname '{{spec || design}}')"
 iteration: 1
 area: "{{ctx.current_package_area == 'root' ? ctx.current_package || '' : ctx.current_package_area}}"
+review_file: "{{area}}/{{dir}}/review-{{iteration}}.md"
 start:
-    message: "👓 starting the feature review of `{{dir}}` -- _in the **{{ctx.current_package_area}}** package area_ -- at {{ctx.now}}"
+    message: "👓 starting the feature review #{{iteration}} of `{{dir}}` (_in the **{{ctx.current_package_area}}** package area_)"
 success:
-    stderr: "Feature review {{iteration}} in the {{ctx.current_package_area}} package area has completed"
-    message: "✅ feature review #{{iteration}} for `{{dir}}` in the **{{ctx.current_package_area}}** package area has completed. The review can be found at: {{area}}/{{dir}}/review-{{iteration}}.md"
-    effect: small-group-cheer
+    stderr: "Feature review {{iteration}} in the {{ctx.area}} package area has completed"
+    message: "✅  feature review #{{iteration}} for `{{dir}}` in the **{{ctx.current_package_area}}** package area has completed. The review can be found at `{{review-file}}`"
+    effect: "small-group-cheer"
 failure:
-    stderr: "Feature Review {{iteration}} in the {{ctx.current_package_area}} package area failed to complete!"
-    message: "Feature Review #{{iteration}} for `{{ctx.current_package_area}}/{{dir}}` failed to complete!"
+    stderr: "Feature Review {{iteration}} in the {{ctx.area}} package area failed to complete!"
+    message: "Feature Review #{{iteration}} for `{{ctx.area}}/{{dir}}` failed to complete!"
+    effect: two-tone
 ---
 # Review of {{dir}}
 > Iteration #{{iteration}}
