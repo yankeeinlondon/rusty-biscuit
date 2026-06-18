@@ -222,3 +222,104 @@ fn test_graph_json_output() {
         .stdout(predicate::str::contains("example.com"));
 }
 
+// ── JSON baseline fixtures (byte-for-byte compatibility) ────────────────
+//
+// The Phase 1 leak extraction (CLI Atheist / Leak 3) replaced the
+// hand-rolled CLI JSON serializers with `#[derive(serde::Serialize)]`
+// on the library reference types. These tests pin the public JSON shape
+// of `md graph --json` against the captured baseline fixtures under
+// `darkmatter/features/2026-06-17-cli-atheist/baseline/json/`.
+
+use common::baseline;
+
+/// Runs `md graph` with the supplied args, parses stdout as JSON,
+/// normalizes temp paths / hash prefixes, and compares the full value
+/// against the named baseline fixture.
+fn assert_graph_json_matches_baseline(
+    args: &[&str],
+    temp_dir: &std::path::Path,
+    baseline_name: &str,
+) {
+    let output = md_cmd()
+        .args(args)
+        .output()
+        .expect("md command failed to spawn");
+
+    assert!(
+        output.status.success(),
+        "md graph --json failed with status {:?}\nstderr: {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let actual: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("md graph output must be valid JSON");
+
+    let redact = baseline::paths_to_redact(temp_dir);
+    let redact_refs: Vec<&str> = redact.iter().map(|s| s.as_str()).collect();
+    let actual_norm = baseline::normalize(actual, &redact_refs);
+    let expected_norm = baseline::normalize(baseline::load_json(baseline_name), &redact_refs);
+
+    assert_eq!(
+        actual_norm, expected_norm,
+        "md graph --json output did not match baseline {baseline_name}\n\
+         raw output:\n{stdout}",
+    );
+}
+
+#[test]
+fn graph_json_local_baseline() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("local.md"), "# Local Test\n\n[local link](./other.md)\n![local image](./img.png)\n::file other.md\n").unwrap();
+    std::fs::write(root.join("other.md"), "# Other\n").unwrap();
+    let local = root.join("local.md");
+    assert_graph_json_matches_baseline(
+        &["graph", "--json", local.to_str().unwrap()],
+        root,
+        "graph_local.json",
+    );
+}
+
+#[test]
+fn graph_json_follow_baseline() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path();
+    std::fs::write(
+        root.join("prologue.md"),
+        "---\nprologue: other.md\n---\n\n# Prologue\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("other.md"), "# Other\n").unwrap();
+    let prologue = root.join("prologue.md");
+    assert_graph_json_matches_baseline(
+        &[
+            "graph",
+            "--json",
+            "--follow",
+            prologue.to_str().unwrap(),
+        ],
+        root,
+        "graph_follow.json",
+    );
+}
+
+#[test]
+fn graph_json_validate_baseline() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("errors.md"), "# Errors\n\n[missing](./missing.md)\n").unwrap();
+    let errors = root.join("errors.md");
+    assert_graph_json_matches_baseline(
+        &[
+            "graph",
+            "--json",
+            "--validate",
+            errors.to_str().unwrap(),
+        ],
+        root,
+        "graph_validate.json",
+    );
+}
+
