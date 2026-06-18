@@ -1,8 +1,8 @@
 ---
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Roo), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
-last_updated: 2026-06-16
-hash: bbb32528c11dc53d-4c89128042eaa742
+last_updated: 2026-06-18
+hash: bbb32528c11dc53d-89e85f83ee12ca2c
 ---
 
 ## Overview
@@ -98,7 +98,7 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 | `claudine context [--values\|--expressions\|--side-effects]` | Show Darkmatter context variables, expression engine, and side-effect capabilities |
 | `claudine` *(no subcommand)* | Render rich grouped help |
 
-**Context command:** `claudine context` renders from Darkmatter's public typed descriptor catalogs, not from parsed Markdown. The default report shows every context variable grouped by category with `Property` (`ctx.NAME`), `Type`, and `Description` columns. `--values` replaces `Description` with live captured values (nulls shown, not dropped). `--expressions` shows the expression-language overview plus the complete function catalog grouped by category. `--side-effects` shows the capability catalog with `Capability`, `Description`, and `Safety` columns; it is documentation-only and does not invoke, probe, or check availability of any capability. All reports share a 140ch-inclusive width contract, inverse-styled inline code, and `UnorderedList` bullet formatting.
+**Context command:** `claudine context` renders from Darkmatter's public typed descriptor catalogs, not from parsed Markdown. The default report shows every context variable grouped by category with `Property` (`ctx.NAME`), `Type`, and `Description` columns. `--values` replaces `Description` with live captured values (nulls shown, not dropped). `--expressions` shows the expression-language overview — precedence, truthiness, unary/comparison/arithmetic operators, variable access, parse modes, null propagation, and the complete function catalog grouped by category — with an `Example` column where layout permits. `--side-effects` shows the capability catalog with `Capability`, `Description`, `Safety`, and `Example` columns; the `Example` column is hidden below 70 characters to preserve the minimum-supported-width floor. It is documentation-only and does not invoke, probe, or check availability of any capability. All reports share a 140ch-inclusive width contract, inverse-styled inline code, and `UnorderedList` bullet formatting.
 
 **Wrapper & composition notes:**
 
@@ -107,6 +107,7 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 - **Timeouts** — two rules, `timeout` (wall-clock, opt-in) and `step_timeout` (stream-silence, default `30m`). See [Timeouts](../../../claudine/docs/topics/timeouts.md).
 - **Transient overlays** — written to `<repo_root>/.claudine/tmp/` (or `<launch_cwd>/.claudine-tmp/`) and cleaned up on `Drop`.
 - **Schema validation** — when a composition document declares `$schema`, the prepare layer runs Darkmatter's `SimplifiedSchema` validation and emits typed claudine errors (`SchemaLoad`, `SchemaValidation`, `MissingProperties`, `UnsupportedInteractiveSchema`). Required-missing values trigger a `biscuit-tui` prompt loop when stdin+stderr are TTYs, `--silent` is off, and the user-config `prompt_for_missing` is `true` (default). Invalid optional values are dropped with a warning and validation retries once. `sequence` aggregates per-step failures into `SequenceMissingProperties` so all steps can be fixed in one pass. See [Composition — Schema Validation](../../../claudine/docs/topics/composition.md#schema-validation).
+- **Composition warnings** — unknown expression functions and unknown `ctx.*` references detected during prepare emit non-fatal did-you-mean warnings to stderr, suppressed by `--silent`. String literals and code fences do not trigger the `ctx.*` diagnostic because it is parsed from the interpolation AST. See [Composition](../../../claudine/docs/topics/composition.md).
 
 **Config TUI — messenger routes:** `claudine config` manages bot-token routes (Discord, Slack, Signal, WhatsApp) and webhook routes (Discord/Slack webhooks). Webhook URLs use masked input and are validated before advancing; env-only routes (blank URL + env var) are allowed. A **Test Connection** workflow (`T` during webhook input) sends a test message without saving. Desktop notifications are intentionally absent — they are zero-config and triggered via lifecycle `notify` frontmatter only.
 
