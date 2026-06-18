@@ -7,17 +7,86 @@ yolo: true
 spec: darkmatter/features/2026-06-17-cli-atheist/spec.md
 source_code:
   - darkmatter/cli/src/args.rs
-  - darkmatter/cli/src/output.rs
   - darkmatter/cli/src/commands.rs
+  - darkmatter/cli/src/output.rs
+  - darkmatter/cli/src/args/mod.rs
+  - darkmatter/cli/src/args/cli.rs
+  - darkmatter/cli/src/args/command.rs
+  - darkmatter/cli/src/args/target.rs
+  - darkmatter/cli/src/args/enums.rs
+  - darkmatter/cli/src/args/wrappers.rs
+  - darkmatter/cli/src/args/parsers.rs
+  - darkmatter/cli/src/args/completion.rs
+  - darkmatter/cli/src/io/mod.rs
+  - darkmatter/cli/src/commands/render.rs
+  - darkmatter/cli/src/commands/clean.rs
+  - darkmatter/cli/src/commands/validate.rs
+  - darkmatter/cli/src/commands/graph.rs
+  - darkmatter/cli/src/commands/compose.rs
+  - darkmatter/cli/src/commands/frontmatter.rs
+  - darkmatter/cli/src/commands/hash.rs
+  - darkmatter/cli/src/commands/code_block.rs
   - darkmatter/cli/src/commands/mod.rs
   - darkmatter/cli/src/main.rs
   - darkmatter/cli/src/lib.rs
+  - darkmatter/cli/src/artifact.rs
+  - darkmatter/cli/src/render.rs
+  - darkmatter/cli/src/delta.rs
+  - darkmatter/cli/src/style_claims.rs
   - darkmatter/cli/tests/cli.rs
+  - darkmatter/cli/tests/clean.rs
+  - darkmatter/cli/tests/common/mod.rs
+  - darkmatter/cli/tests/common/level2.rs
+  - darkmatter/cli/tests/compose_basic.rs
+  - darkmatter/cli/tests/compose_interpolation.rs
+  - darkmatter/cli/tests/compose_layout.rs
+  - darkmatter/cli/tests/compose_page_blocks.rs
+  - darkmatter/cli/tests/compose_perf.rs
+  - darkmatter/cli/tests/compose_refs_and_missing.rs
+  - darkmatter/cli/tests/compose_remote_caching.rs
+  - darkmatter/cli/tests/compose_shell.rs
+  - darkmatter/cli/tests/compose_state_set.rs
+  - darkmatter/cli/tests/compose_transclusion.rs
+  - darkmatter/cli/tests/delta.rs
+  - darkmatter/cli/tests/get_set_rm.rs
+  - darkmatter/cli/tests/graph.rs
+  - darkmatter/cli/tests/hash.rs
+  - darkmatter/cli/tests/hash_directory.rs
+  - darkmatter/cli/tests/hash_kind_save_diff.rs
+  - darkmatter/cli/tests/help.rs
+  - darkmatter/cli/tests/layout_alignment.rs
+  - darkmatter/cli/tests/layout_fill.rs
+  - darkmatter/cli/tests/layout_flags.rs
+  - darkmatter/cli/tests/layout_style_frontmatter.rs
+  - darkmatter/cli/tests/render_basic.rs
+  - darkmatter/cli/tests/rm.rs
+  - darkmatter/cli/tests/toc.rs
+  - darkmatter/cli/tests/validate_refs.rs
   - darkmatter/cli/tests/level2_layout.rs
+  - darkmatter/cli/tests/level2_layout_dimensions.rs
+  - darkmatter/cli/tests/level2_code_block_styling.rs
+  - darkmatter/cli/tests/level2_frontmatter_tables.rs
+  - darkmatter/cli/tests/level2_frontmatter_images.rs
+  - darkmatter/cli/tests/level2_ordered_lists.rs
+  - darkmatter/cli/tests/level2_horizontal_rules.rs
+  - darkmatter/cli/tests/level2_disclosure_blocks.rs
+  - darkmatter/lib/src/style/cli_claims.rs
+  - darkmatter/lib/src/style/mod.rs
+  - darkmatter/lib/src/markdown/delta/mod.rs
+  - darkmatter/lib/src/markdown/delta/report.rs
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/src/render/stylesheet.rs
+  - darkmatter/lib/tests/disclosure_render_targets.rs
+  - darkmatter/lib/tests/layout_snapshots.rs
   - darkmatter/lib/src/markdown/reference/types.rs
   - darkmatter/lib/src/markdown/reference/validate.rs
   - renderable/src/color/tailwind.rs
   - renderable/src/style/paint.rs
+documentation:
+  - darkmatter/cli/README.md
+  - darkmatter/features/2026-06-17-cli-atheist/plan.md
+  - darkmatter/features/2026-06-17-cli-atheist/log.md
+  - darkmatter/features/2026-06-17-cli-atheist/baseline/help.txt
 source_files_during_phase_2:
   - darkmatter/cli/src/args.rs
   - darkmatter/cli/src/args/mod.rs
@@ -80,6 +149,77 @@ docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
 packages:
+  - darkmatter-cli
+source_files_during_phase_6:
+  - darkmatter/cli/tests/clean.rs
+  - darkmatter/cli/tests/common/mod.rs
+  - darkmatter/cli/tests/compose_basic.rs
+  - darkmatter/cli/tests/compose_interpolation.rs
+  - darkmatter/cli/tests/compose_layout.rs
+  - darkmatter/cli/tests/compose_page_blocks.rs
+  - darkmatter/cli/tests/compose_perf.rs
+  - darkmatter/cli/tests/compose_refs_and_missing.rs
+  - darkmatter/cli/tests/compose_remote_caching.rs
+  - darkmatter/cli/tests/compose_shell.rs
+  - darkmatter/cli/tests/compose_state_set.rs
+  - darkmatter/cli/tests/compose_transclusion.rs
+  - darkmatter/cli/tests/delta.rs
+  - darkmatter/cli/tests/get_set_rm.rs
+  - darkmatter/cli/tests/graph.rs
+  - darkmatter/cli/tests/hash.rs
+  - darkmatter/cli/tests/hash_directory.rs
+  - darkmatter/cli/tests/hash_kind_save_diff.rs
+  - darkmatter/cli/tests/help.rs
+  - darkmatter/cli/tests/layout_alignment.rs
+  - darkmatter/cli/tests/layout_fill.rs
+  - darkmatter/cli/tests/layout_flags.rs
+  - darkmatter/cli/tests/layout_style_frontmatter.rs
+  - darkmatter/cli/tests/render_basic.rs
+  - darkmatter/cli/tests/rm.rs
+  - darkmatter/cli/tests/toc.rs
+  - darkmatter/cli/tests/validate_refs.rs
+docs_updated_during_phase_6:
+  - darkmatter/features/2026-06-17-cli-atheist/plan.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+packages:
+  - darkmatter-cli
+source_files_during_phase_7:
+  - darkmatter/cli/tests/common/mod.rs
+  - darkmatter/cli/tests/common/level2.rs
+  - darkmatter/cli/tests/level2_layout_dimensions.rs
+  - darkmatter/cli/tests/level2_code_block_styling.rs
+  - darkmatter/cli/tests/level2_frontmatter_tables.rs
+  - darkmatter/cli/tests/level2_frontmatter_images.rs
+  - darkmatter/cli/tests/level2_ordered_lists.rs
+  - darkmatter/cli/tests/level2_horizontal_rules.rs
+  - darkmatter/cli/tests/level2_disclosure_blocks.rs
+docs_updated_during_phase_7:
+  - darkmatter/features/2026-06-17-cli-atheist/plan.md
+  - darkmatter/features/2026-06-17-cli-atheist/log.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
+packages:
+  - darkmatter-cli
+source_files_during_phase_8:
+  - darkmatter/cli/src/commands/clean.rs
+  - darkmatter/cli/src/commands/mod.rs
+  - darkmatter/cli/src/lib.rs
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/src/markdown/delta/mod.rs
+  - darkmatter/lib/src/markdown/delta/report.rs
+  - darkmatter/lib/src/render/stylesheet.rs
+  - darkmatter/lib/tests/disclosure_render_targets.rs
+  - darkmatter/lib/tests/layout_snapshots.rs
+docs_updated_during_phase_8:
+  - darkmatter/cli/README.md
+  - darkmatter/features/2026-06-17-cli-atheist/log.md
+  - darkmatter/features/2026-06-17-cli-atheist/plan.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+  - .claude/skills/darkmatter/SKILL.md
+packages:
+  - darkmatter
   - darkmatter-cli
 ---
 
@@ -170,10 +310,10 @@ error text (call out in PR with before/after captures).
 
 ### Readiness (do once, before any sub-task)
 
-- [ ] Confirm `just test` and `just lint` are green for `darkmatter` and `renderable`.
-- [ ] Capture `md --help` output to `darkmatter/features/2026-06-17-cli-atheist/baseline/help.txt` — this is the byte-for-byte reference for Phases 2–7.
-- [ ] Capture `md validate refs --json` and `md graph --json` outputs into `darkmatter/features/2026-06-17-cli-atheist/baseline/json/` across the case matrix: local paths, remote URLs, fragments, data URIs, inline CSS/script/meta records, validation errors, graph insertions.
-- [ ] Capture invalid color parser errors for: `#12`, `300,0,0`, unknown Tailwind name, unknown keyword — into `baseline/color_errors.txt`.
+- [x] Confirm `just test` and `just lint` are green for `darkmatter` and `renderable`.
+- [x] Capture `md --help` output to `darkmatter/features/2026-06-17-cli-atheist/baseline/help.txt` — this is the byte-for-byte reference for Phases 2–7.
+- [x] Capture `md validate refs --json` and `md graph --json` outputs into `darkmatter/features/2026-06-17-cli-atheist/baseline/json/` across the case matrix: local paths, remote URLs, fragments, data URIs, inline CSS/script/meta records, validation errors, graph insertions.
+- [x] Capture invalid color parser errors for: `#12`, `300,0,0`, unknown Tailwind name, unknown keyword — into `baseline/color_errors.txt`.
 
 ### P1a — `Tailwind::from_kebab_name` (Leak 1, args.rs:1317–1572)
 
@@ -190,7 +330,7 @@ error text (call out in PR with before/after captures).
 - [x] Add renderable unit tests covering the full accepted grammar and each representative invalid input from the baseline color-error captures.
 - [x] In `darkmatter/cli/src/args.rs`, replace `parse_page_bg_color` with a thin `value_parser = PaintColor::from_css_str` wrapper.
 - [x] Delete `parse_page_bg_color`, `parse_hex_color`, `parse_rgb_triple` from `args.rs` (~100-line drop).
-- [ ] If error text improved, attach explicit before/after captures to the PR and update affected tests.
+- [x] If error text improved, attach explicit before/after captures to the PR and update affected tests.
 
 ### P1c — serde on reference types (Leak 3, commands.rs:730–974)
 
@@ -210,31 +350,31 @@ error text (call out in PR with before/after captures).
 
 ### P1e — `DeltaReport` TerminalRenderable (Leak 6b, output.rs:767–1124)
 
-- [ ] Add `darkmatter::markdown::delta::DeltaReport` wrapping `MarkdownDelta` with `impl TerminalRenderable`. Replaces the hand-written ANSI blocks (`\x1b[1m`, `\x1b[7m`, etc.) with the `Prose` / renderable model. (ADR-2: terminal-only.)
-- [ ] Add library unit tests asserting rendered output matches the current `print_delta` output for: additions, deletions, code-block changes (via the replaced `format_code_block_change`), and empty delta.
-- [ ] Update the `md delta` text path to call `print!("{}", delta_report.render(&term))`.
-- [ ] Delete `print_delta` and `format_code_block_change` from `output.rs` (~300-line drop).
+- [x] Add `darkmatter::markdown::delta::DeltaReport` wrapping `MarkdownDelta` with `impl TerminalRenderable`. Replaces the hand-written ANSI blocks (`\x1b[1m`, `\x1b[7m`, etc.) with the `Prose` / renderable model. (ADR-2: terminal-only.)
+- [x] Add library unit tests asserting rendered output matches the current `print_delta` output for: additions, deletions, code-block changes (via the replaced `format_code_block_change`), and empty delta.
+- [x] Update the `md delta` text path to call `print!("{}", delta_report.render(&term))`.
+- [x] Delete `print_delta` and `format_code_block_change` from `output.rs` (~300-line drop).
 
 ### P1f — `ReferenceValidationReport` view (Leak 4, commands.rs:598–728)
 
 - [x] Add `darkmatter::markdown::reference::validate::ReportView` (preferred) or `impl TerminalRenderable for ReferenceValidationReport` in `darkmatter/lib/src/markdown/reference/validate.rs`. Falls back to a small adapter in `biscuit-terminal` only if dependency direction forbids it in darkmatter proper.
 - [x] Reuse the same `Prose` + `UnorderedList` shape the CLI uses today so the `md validate` and `md compose` error paths render identically.
 - [x] Add library unit tests asserting rendered output matches the current `format_validation_issues` output for: empty report, single-issue report, multi-issue report spanning every `ReferenceKind`.
-- [ ] Update `md validate refs` and the `md compose` validation-error path to call the new view.
-- [ ] Delete `format_validation_issues` and `reference_kind_category_label` from `commands.rs` (~130-line drop).
+- [x] Update `md validate refs` and the `md compose` validation-error path to call the new view.
+- [x] Delete `format_validation_issues` and `reference_kind_category_label` from `commands.rs` (~130-line drop).
 
 ### Minor leak (call out, do not block)
 
-- [ ] Note `parse_bool_str` / `parse_bool_env` duplication in the Phase 1 PR description; their move to `biscuit-terminal::env` is a separate low-priority cleanup.
+- [x] Note `parse_bool_str` / `parse_bool_env` duplication in the Phase 1 PR description; their move to `biscuit-terminal::env` is a separate low-priority cleanup.
 
 ### Phase 1 validation checkpoint
 
-- [ ] ~1100 CLI lines deleted across `args.rs`, `output.rs`, `commands.rs`.
-- [ ] `just test` green for `darkmatter` + `renderable`.
-- [ ] `just lint` clean.
-- [ ] `md validate refs --json` and `md graph --json` outputs byte-for-byte equal to baseline fixtures.
-- [ ] `md --help` byte-for-byte equal to `baseline/help.txt`.
-- [ ] `cargo metadata --no-deps --format-version 1` reports the same package set.
+- [x] ~1100 CLI lines deleted across `args.rs`, `output.rs`, `commands.rs`.
+- [x] `just test` green for `darkmatter` + `renderable`.
+- [x] `just lint` clean.
+- [x] `md validate refs --json` and `md graph --json` outputs byte-for-byte equal to baseline fixtures.
+- [x] `md --help` byte-for-byte equal to `baseline/help.txt`.
+- [x] `cargo metadata --no-deps --format-version 1` reports the same package set.
 
 ---
 
@@ -373,24 +513,24 @@ harness.
 
 **Behavior:** preserving.
 
-- [ ] Create `darkmatter/cli/tests/common/mod.rs` and move `md_cmd`, `md_file`, `MockHttpResponse`, `MockHttpServer`, `mock_http_server` (currently `tests/cli.rs:51–92`), and shared fixtures.
-- [ ] Optionally split large canned documents used by >1 file into `tests/common/fixtures.rs`.
-- [ ] Split `tests/cli.rs` into the top-level files listed in spec § Proposed Test Layout:
-  - [ ] `help.rs`, `render_basic.rs`, `clean.rs`, `toc.rs`, `delta.rs`, `get_set_rm.rs`, `hash.rs`, `validate_refs.rs`, `graph.rs`.
-  - [ ] `compose_basic.rs`, `compose_state_set.rs`, `compose_interpolation.rs`, `compose_transclusion.rs`, `compose_page_blocks.rs`, `compose_shell.rs`, `compose_refs_and_missing.rs`, `compose_perf.rs`, `compose_remote_caching.rs`, `compose_layout.rs`.
-  - [ ] `layout_flags.rs`, `layout_style_frontmatter.rs`, `layout_alignment.rs`, `layout_fill.rs`.
-- [ ] Reconcile against existing top-level test files (`code_block.rs`, `compose_schema.rs`, `schema_about.rs`, `schema_detect.rs`, `schema_validate.rs`): move their sections out of `cli.rs` into the existing files, or leave the existing files alone if `cli.rs` does not duplicate them.
-- [ ] Each new top-level test file declares `mod common;`.
-- [ ] Preserve L1/L2/L3 separation (per the rust-testing skill): anything needing a real terminal stays in a `level2_*` file with `#[serial(level2_terminal)]`; everything else stays L3 (`assert_cmd`) by default.
-- [ ] Delete `darkmatter/cli/tests/cli.rs`.
-- [ ] Verify focused test filters work: `cargo test -p darkmatter-cli --test compose_basic`, `--test layout_flags`, etc.
+- [x] Create `darkmatter/cli/tests/common/mod.rs` and move `md_cmd`, `md_file`, `MockHttpResponse`, `MockHttpServer`, `mock_http_server` (currently `tests/cli.rs:51–92`), and shared fixtures.
+- [x] Optionally split large canned documents used by >1 file into `tests/common/fixtures.rs`.
+- [x] Split `tests/cli.rs` into the top-level files listed in spec § Proposed Test Layout:
+  - [x] `help.rs`, `render_basic.rs`, `clean.rs`, `toc.rs`, `delta.rs`, `get_set_rm.rs`, `hash.rs`, `validate_refs.rs`, `graph.rs`.
+  - [x] `compose_basic.rs`, `compose_state_set.rs`, `compose_interpolation.rs`, `compose_transclusion.rs`, `compose_page_blocks.rs`, `compose_shell.rs`, `compose_refs_and_missing.rs`, `compose_perf.rs`, `compose_remote_caching.rs`, `compose_layout.rs`.
+  - [x] `layout_flags.rs`, `layout_style_frontmatter.rs`, `layout_alignment.rs`, `layout_fill.rs`.
+- [x] Reconcile against existing top-level test files (`code_block.rs`, `compose_schema.rs`, `schema_about.rs`, `schema_detect.rs`, `schema_validate.rs`): move their sections out of `cli.rs` into the existing files, or leave the existing files alone if `cli.rs` does not duplicate them.
+- [x] Each new top-level test file declares `mod common;`.
+- [x] Preserve L1/L2/L3 separation (per the rust-testing skill): anything needing a real terminal stays in a `level2_*` file with `#[serial(level2_terminal)]`; everything else stays L3 (`assert_cmd`) by default.
+- [x] Delete `darkmatter/cli/tests/cli.rs`.
+- [x] Verify focused test filters work: `cargo test -p darkmatter-cli --test compose_basic`, `--test layout_flags`, etc.
 
 ### Phase 6 validation checkpoint
 
-- [ ] `cargo test -p darkmatter-cli` total test count equals pre-split count (modulo intentional duplicate-name reconciliations, which must be called out).
-- [ ] Each new file under ~500 lines.
-- [ ] `cli.rs` deleted; `tests/common/mod.rs` is the only shared-module import path.
-- [ ] L3/L2 separation preserved — no `assert_cmd` test silently became a real-terminal test or vice versa.
+- [x] `cargo test -p darkmatter-cli` total test count equals pre-split count (modulo intentional duplicate-name reconciliations, which must be called out).
+- [x] Each new file under ~500 lines.
+- [x] `cli.rs` deleted; `tests/common/mod.rs` is the only shared-module import path.
+- [x] L3/L2 separation preserved — no `assert_cmd` test silently became a real-terminal test or vice versa.
 
 ---
 
@@ -408,23 +548,23 @@ Move shared real-terminal harness setup into `tests/common/level2.rs`
 
 ### ADR-7 ratification
 
-- [ ] Record decision in `log.md`: shared L2 harness moves to `tests/common/level2.rs`. Pros: no duplicated WezTerm setup, consistent skip/enforce behavior, lower risk of accidentally testing a host-installed `md`. Cons: `tests/common` becomes more substantial and needs careful namespacing.
+- [x] Record decision in `log.md`: shared L2 harness moves to `tests/common/level2.rs`. Pros: no duplicated WezTerm setup, consistent skip/enforce behavior, lower risk of accidentally testing a host-installed `md`. Cons: `tests/common` becomes more substantial and needs careful namespacing.
 
 ### Work
 
-- [ ] Create `darkmatter/cli/tests/common/level2.rs` with the WezTerm harness bootstrap, the just-built `md` shim, Level 2 skip/enforce policy, and fixture-running helpers extracted from `level2_layout.rs`.
-- [ ] Split `tests/level2_layout.rs` along the existing prefix groups into: `level2_layout_dimensions.rs`, `level2_code_block_styling.rs`, `level2_frontmatter_tables.rs`, `level2_frontmatter_images.rs`, `level2_ordered_lists.rs`, `level2_horizontal_rules.rs`, `level2_disclosure_blocks.rs`.
-- [ ] Existing `level2_errors.rs` and `level2_schema_about.rs` stay unchanged.
-- [ ] Each split file imports the shared harness via `mod common;` and keeps `#[serial(level2_terminal)]` on every test.
-- [ ] Each split file's test functions keep their `level2_*` names so the existing `just` recipe filter `cargo test -p darkmatter-cli level2_` still selects the full L2 suite.
-- [ ] Delete `darkmatter/cli/tests/level2_layout.rs`.
+- [x] Create `darkmatter/cli/tests/common/level2.rs` with the WezTerm harness bootstrap, the just-built `md` shim, Level 2 skip/enforce policy, and fixture-running helpers extracted from `level2_layout.rs`.
+- [x] Split `tests/level2_layout.rs` along the existing prefix groups into: `level2_layout_dimensions.rs`, `level2_code_block_styling.rs`, `level2_frontmatter_tables.rs`, `level2_frontmatter_images.rs`, `level2_ordered_lists.rs`, `level2_horizontal_rules.rs`, `level2_disclosure_blocks.rs`.
+- [x] Existing `level2_errors.rs` and `level2_schema_about.rs` stay unchanged.
+- [x] Each split file imports the shared harness via `mod common;` and keeps `#[serial(level2_terminal)]` on every test.
+- [x] Each split file's test functions keep their `level2_*` names so the existing `just` recipe filter `cargo test -p darkmatter-cli level2_` still selects the full L2 suite.
+- [x] Delete `darkmatter/cli/tests/level2_layout.rs`.
 
 ### Phase 7 validation checkpoint
 
-- [ ] L2 test count equals pre-split count.
-- [ ] `just` Level 2 recipes select the right tests via the `level2_` filter.
-- [ ] No file in `tests/` over ~500 lines.
-- [ ] `level2_layout.rs` deleted; `tests/common/level2.rs` is the single source of truth for the real-terminal harness bootstrap.
+- [x] L2 test count equals pre-split count.
+- [x] `just` Level 2 recipes select the right tests via the `level2_` filter.
+- [x] No file in `tests/` over ~500 lines.
+- [x] `level2_layout.rs` deleted; `tests/common/level2.rs` is the single source of truth for the real-terminal harness bootstrap.
 
 ---
 
@@ -436,18 +576,18 @@ new library surfaces.
 
 **Behavior:** preserving.
 
-- [ ] Update `darkmatter/cli/README.md` "binary overview" section to point at the new module structure (the CLI surface is unchanged, so the section content stays — only the pointers to source files update).
-- [ ] Update `darkmatter/cli/src/lib.rs` prose: drop the long usage docs in favor of a pointer to the README (the prose duplicates `darkmatter/lib/src/lib.rs`).
-- [ ] Update the darkmatter skill's "module layout" topic to reflect the new structure: `args/`, `style_claims.rs`, `render.rs`, `artifact.rs`, `io/`, `commands/{render,clean,validate,graph}.rs`.
-- [ ] Document the new library surfaces in the skill: `Tailwind::from_kebab_name`, `PaintColor::from_css_str` (+ `ParseColorError`), `TocTree`, `DeltaReport`, `ReferenceValidationReport` serde shapes, `CliStyleClaims` + `apply_cli_claims` / `style_overrides_from_claims`.
-- [ ] Add the `just lint-files` script (ADR-5) that reports files in `darkmatter/cli/src/` and `darkmatter/cli/tests/` over the ~500-line soft cap. Wire it into the root or darkmatter-area `justfile`.
-- [ ] Run `sniff repo` to confirm the package list is unchanged.
+- [x] Update `darkmatter/cli/README.md` "binary overview" section to point at the new module structure (the CLI surface is unchanged, so the section content stays — only the pointers to source files update).
+- [x] Update `darkmatter/cli/src/lib.rs` prose: drop the long usage docs in favor of a pointer to the README (the prose duplicates `darkmatter/lib/src/lib.rs`).
+- [x] Update the darkmatter skill's "module layout" topic to reflect the new structure: `args/`, `style_claims.rs`, `render.rs`, `artifact.rs`, `io/`, `commands/{render,clean,validate,graph}.rs`.
+- [x] Document the new library surfaces in the skill: `Tailwind::from_kebab_name`, `PaintColor::from_css_str` (+ `ParseColorError`), `TocTree`, `DeltaReport`, `ReferenceValidationReport` serde shapes, `CliStyleClaims` + `apply_cli_claims` / `style_overrides_from_claims`.
+- [x] Add the `just lint-files` script (ADR-5) that reports files in `darkmatter/cli/src/` and `darkmatter/cli/tests/` over the ~500-line soft cap. Wire it into the root or darkmatter-area `justfile`.
+- [x] Run `sniff repo` to confirm the package list is unchanged.
 
 ### Phase 8 validation checkpoint
 
-- [ ] Docs match implementation (drift check): every documented module path exists; every documented library surface is reachable at the stated path.
-- [ ] `md --help` byte-for-byte equal to `baseline/help.txt` (final regression check across all phases).
-- [ ] `cargo metadata --no-deps --format-version 1` reports the same package set as Phase 1 baseline.
+- [x] Docs match implementation (drift check): every documented module path exists; every documented library surface is reachable at the stated path.
+- [x] `md --help` byte-for-byte equal to `baseline/help.txt` (final regression check across all phases).
+- [x] `cargo metadata --no-deps --format-version 1` reports the same package set as Phase 1 baseline.
 
 ---
 
