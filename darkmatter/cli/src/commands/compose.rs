@@ -3,11 +3,11 @@
 //! performance report.
 
 use crate::args::{Cli, OutputFormat};
-use crate::commands::{format_validation_issues, load_markdown, resolve_file_path};
-use crate::output::{
+use crate::artifact::{
     OutputArtifact, emit_or_show_artifact, html_artifact, json_artifact, markdown_plus_artifact,
     open_output_artifact,
 };
+use crate::io::{load_markdown, resolve_file_path};
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::cleanup::ListSpacingMode;
@@ -284,8 +284,10 @@ pub fn run_compose(
 
                     if allow.is_strict() || has_unallowed {
                         // Strict mode or unallowed errors: show issues and exit
+                        use biscuit_terminal::components::renderable::TerminalRenderable as _;
+                        use darkmatter::markdown::reference::validate::ValidationReportView;
                         let term = Terminal::default();
-                        let formatted = format_validation_issues(&report, &term);
+                        let formatted = ValidationReportView::new(report.clone()).render(&term);
                         eprint!("{formatted}");
                         std::process::exit(2);
                     }
@@ -579,9 +581,11 @@ pub fn run_compose(
 
     // Emit deferred validation issues to stderr (allowed but still reported)
     if let Some(report) = deferred_report {
+        use biscuit_terminal::components::renderable::TerminalRenderable as _;
         use biscuit_terminal::terminal::Terminal;
+        use darkmatter::markdown::reference::validate::ValidationReportView;
         let term = Terminal::default();
-        let formatted = format_validation_issues(&report, &term);
+        let formatted = ValidationReportView::new(report).render(&term);
         if !formatted.is_empty() {
             eprint!("\n{formatted}");
         }

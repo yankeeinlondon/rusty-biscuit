@@ -8,6 +8,7 @@
 
 use std::time::Duration;
 
+use serde::Serialize;
 use tracing::{debug, info, instrument, trace};
 
 use super::errors::ReferenceError;
@@ -71,6 +72,22 @@ pub struct ReferenceValidationReport {
     pub warnings: Vec<String>,
 }
 
+impl Serialize for ReferenceValidationReport {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("ReferenceValidationReport", 5)?;
+        state.serialize_field("valid", &self.is_valid())?;
+        state.serialize_field("references_scanned", &self.references_scanned)?;
+        state.serialize_field("references_valid", &self.references_valid)?;
+        state.serialize_field("issues", &self.issues)?;
+        state.serialize_field("warnings", &self.warnings)?;
+        state.end()
+    }
+}
+
 impl ReferenceValidationReport {
     /// Returns `true` if no error-severity issues were found.
     pub fn is_valid(&self) -> bool {
@@ -86,6 +103,121 @@ impl ReferenceValidationReport {
             .iter()
             .filter(|i| i.severity == ReferenceSeverity::Error)
             .count()
+    }
+}
+
+/// A terminal-rendered view of a [`ReferenceValidationReport`].
+///
+/// Groups error-severity issues by reference kind and renders them as a
+/// styled list with a summary line. Empty reports render to an empty string.
+#[derive(Debug, Clone)]
+pub struct ValidationReportView {
+    report: ReferenceValidationReport,
+    layout: biscuit_terminal::utils::layout::Layout,
+}
+
+impl ValidationReportView {
+    /// Creates a view for the given validation report.
+    pub fn new(report: ReferenceValidationReport) -> Self {
+        Self {
+            report,
+            layout: biscuit_terminal::utils::layout::Layout::default(),
+        }
+    }
+}
+
+impl biscuit_terminal::components::renderable::TerminalRenderable for ValidationReportView {
+    fn layout(&self) -> &biscuit_terminal::utils::layout::Layout {
+        &self.layout
+    }
+
+    fn layout_mut(&mut self) -> &mut biscuit_terminal::utils::layout::Layout {
+        &mut self.layout
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn render(&self, term: &biscuit_terminal::terminal::Terminal) -> String {
+        use std::collections::BTreeMap;
+
+        use biscuit_terminal::components::list::UnorderedList;
+        use biscuit_terminal::components::prose::Prose;
+
+        let errors: Vec<_> = self
+            .report
+            .issues
+            .iter()
+            .filter(|i| i.severity == ReferenceSeverity::Error)
+            .collect();
+
+        if errors.is_empty() {
+            return String::new();
+        }
+
+        let mut out = String::new();
+        let mut groups: BTreeMap<u8, (ReferenceKind, Vec<&ReferenceIssue>)> = BTreeMap::new();
+        for issue in &errors {
+            groups
+                .entry(issue.kind.validation_order())
+                .or_insert_with(|| (issue.kind, Vec::new()))
+                .1
+                .push(*issue);
+        }
+
+        out.push('\n');
+
+        for (kind, issues) in groups.values() {
+            let label = kind.validation_category_label();
+            out.push_str(&Prose::new(format!("<red-500><b>{label}</b></red-500>")).render(term));
+            out.push('\n');
+
+            let mut list = UnorderedList::empty();
+            for issue in issues {
+                let source_name = match &issue.origin.source {
+                    ComposeSource::File(p) => p
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    ComposeSource::Url(u) => u.to_string(),
+                    ComposeSource::Unknown => "unknown".to_string(),
+                };
+
+                let source_href = match &issue.origin.source {
+                    ComposeSource::File(p) => format!("file://{}", p.display()),
+                    _ => String::new(),
+                };
+
+                let item_text = if source_href.is_empty() {
+                    format!(
+                        "the <blue-500>{source_name}</blue-500> reference to <red-500>{ref_display}</red-500> is not valid",
+                        ref_display = issue.reference_display,
+                    )
+                } else {
+                    format!(
+                        "the <a href=\"{source_href}\"><blue-500>{source_name}</blue-500></a> reference to <red-500>{ref_display}</red-500> is not valid",
+                        ref_display = issue.reference_display,
+                    )
+                };
+
+                list.add(Prose::new(item_text));
+            }
+
+            out.push_str(&list.render(term));
+            out.push('\n');
+        }
+
+        let summary = format!(
+            "{} references scanned, {} valid, <red-500><b>{} issues</b></red-500>",
+            self.report.references_scanned,
+            self.report.references_valid,
+            errors.len()
+        );
+        out.push_str(&Prose::new(summary).render(term));
+        out.push('\n');
+
+        out
     }
 }
 
@@ -108,8 +240,27 @@ pub struct ReferenceIssue {
     pub origin: ReferenceOrigin,
 }
 
+impl Serialize for ReferenceIssue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("ReferenceIssue", 7)?;
+        state.serialize_field("code", &self.code)?;
+        state.serialize_field("message", &self.message)?;
+        state.serialize_field("severity", &self.severity)?;
+        state.serialize_field("kind", &self.kind)?;
+        state.serialize_field("reference", &self.reference_display)?;
+        state.serialize_field("line", &self.origin.line)?;
+        state.serialize_field("source", &self.origin.source)?;
+        state.end()
+    }
+}
+
 /// Classification codes for validation issues.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "PascalCase")]
 pub enum ReferenceIssueCode {
     /// Local file target does not exist.
     MissingLocalTarget,
@@ -143,7 +294,8 @@ pub enum ReferenceIssueCode {
 }
 
 /// Severity levels for validation issues.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ReferenceSeverity {
     /// Must be fixed.
     Error,
@@ -718,6 +870,7 @@ fn normalize_remote_url(raw: &str, source: &ComposeSource) -> String {
 mod tests {
     use super::*;
     use crate::markdown::Markdown;
+    use crate::markdown::reference::ReferenceSyntax;
     use serial_test::serial;
 
     #[test]
@@ -981,5 +1134,97 @@ mod tests {
             report.issues
         );
         assert_eq!(report.references_valid, 1);
+    }
+
+    #[test]
+    fn validation_report_serializes_graph_shape() {
+        let issue = ReferenceIssue {
+            code: ReferenceIssueCode::MissingLocalTarget,
+            message: "Missing local target: ./missing.md".to_string(),
+            severity: ReferenceSeverity::Error,
+            kind: ReferenceKind::Hyperlink,
+            reference_display: "./missing.md".to_string(),
+            reference_id: "abc:3:10".to_string(),
+            origin: ReferenceOrigin {
+                source: ComposeSource::File("/tmp/source.md".into()),
+                line: 3,
+                span: 0..10,
+                syntax: ReferenceSyntax::MarkdownLink,
+            },
+        };
+        let report = ReferenceValidationReport {
+            references_scanned: 1,
+            references_valid: 0,
+            issues: vec![issue],
+            warnings: Vec::new(),
+        };
+
+        let value = serde_json::to_value(&report).unwrap();
+        let obj = value.as_object().unwrap();
+        assert_eq!(obj.get("valid").unwrap(), false);
+        assert_eq!(obj.get("references_scanned").unwrap(), 1);
+        assert_eq!(obj.get("references_valid").unwrap(), 0);
+        assert_eq!(obj.get("warnings").unwrap(), &serde_json::json!([]));
+
+        let issues = obj.get("issues").unwrap().as_array().unwrap();
+        assert_eq!(issues.len(), 1);
+        let issue_obj = issues[0].as_object().unwrap();
+        assert_eq!(issue_obj.get("code").unwrap(), "MissingLocalTarget");
+        assert_eq!(issue_obj.get("severity").unwrap(), "error");
+        assert_eq!(issue_obj.get("kind").unwrap(), "hyperlink");
+        assert_eq!(issue_obj.get("reference").unwrap(), "./missing.md");
+        assert_eq!(issue_obj.get("line").unwrap(), 3);
+        assert_eq!(
+            issue_obj.get("source").unwrap(),
+            "/tmp/source.md"
+        );
+    }
+
+    #[test]
+    fn validation_report_view_renders_error_groups() {
+        let issue = ReferenceIssue {
+            code: ReferenceIssueCode::MissingLocalTarget,
+            message: "Missing local target: ./missing.md".to_string(),
+            severity: ReferenceSeverity::Error,
+            kind: ReferenceKind::Hyperlink,
+            reference_display: "./missing.md".to_string(),
+            reference_id: "abc:3:10".to_string(),
+            origin: ReferenceOrigin {
+                source: ComposeSource::File("/tmp/source.md".into()),
+                line: 3,
+                span: 0..10,
+                syntax: ReferenceSyntax::MarkdownLink,
+            },
+        };
+        let report = ReferenceValidationReport {
+            references_scanned: 1,
+            references_valid: 0,
+            issues: vec![issue],
+            warnings: Vec::new(),
+        };
+
+        use biscuit_terminal::components::renderable::TerminalRenderable as _;
+        let rendered = ValidationReportView::new(report)
+            .render(&biscuit_terminal::terminal::Terminal::new_forced());
+
+        assert!(rendered.contains("Invalid Hyperlink(s)"));
+        assert!(rendered.contains("missing.md"));
+        assert!(rendered.contains("references scanned, 0 valid"));
+    }
+
+    #[test]
+    fn validation_report_view_empty_report_renders_nothing() {
+        let report = ReferenceValidationReport {
+            references_scanned: 1,
+            references_valid: 1,
+            issues: Vec::new(),
+            warnings: Vec::new(),
+        };
+
+        use biscuit_terminal::components::renderable::TerminalRenderable as _;
+        let rendered = ValidationReportView::new(report)
+            .render(&biscuit_terminal::terminal::Terminal::new_forced());
+
+        assert!(rendered.is_empty());
     }
 }

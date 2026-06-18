@@ -87,6 +87,8 @@ pub enum TemplateVariable {
     // Environment: Repo
     EnvLanguage,
     EnvIsMonorepo,
+    EnvMonorepoStandard,
+    EnvMonorepoOrchestrators,
     EnvMonorepoTool,
 }
 
@@ -130,6 +132,8 @@ impl TemplateVariable {
             // Project
             TemplateVariable::EnvLanguage => "project.language",
             TemplateVariable::EnvIsMonorepo => "project.is_monorepo",
+            TemplateVariable::EnvMonorepoStandard => "project.monorepo_standard",
+            TemplateVariable::EnvMonorepoOrchestrators => "project.monorepo_orchestrators",
             TemplateVariable::EnvMonorepoTool => "project.monorepo_tool",
         }
     }
@@ -173,7 +177,13 @@ impl TemplateVariable {
             // Environment: Repo
             TemplateVariable::EnvLanguage => "Primary project language",
             TemplateVariable::EnvIsMonorepo => "Monorepo detection (true/false)",
-            TemplateVariable::EnvMonorepoTool => "Monorepo tool (cargo_workspace, pnpm, nx)",
+            TemplateVariable::EnvMonorepoStandard => {
+                "Monorepo authority standard (cargo-workspace, pnpm-workspaces, etc.)"
+            }
+            TemplateVariable::EnvMonorepoOrchestrators => {
+                "Orchestrators on the primary monorepo layer (nx, turborepo, lerna)"
+            }
+            TemplateVariable::EnvMonorepoTool => "Deprecated alias for project.monorepo_standard",
         }
     }
 
@@ -226,6 +236,8 @@ impl TemplateVariable {
 
             TemplateVariable::EnvLanguage
             | TemplateVariable::EnvIsMonorepo
+            | TemplateVariable::EnvMonorepoStandard
+            | TemplateVariable::EnvMonorepoOrchestrators
             | TemplateVariable::EnvMonorepoTool => VariableCategory::ContextRepo,
         }
     }
@@ -270,6 +282,8 @@ impl TemplateVariable {
             // Environment: Repo
             TemplateVariable::EnvLanguage,
             TemplateVariable::EnvIsMonorepo,
+            TemplateVariable::EnvMonorepoStandard,
+            TemplateVariable::EnvMonorepoOrchestrators,
             TemplateVariable::EnvMonorepoTool,
         ]
     }
@@ -365,11 +379,26 @@ impl TemplateVariable {
                     .map(|r| r.is_monorepo.to_string())
                     .unwrap_or_default(),
             ),
+            TemplateVariable::EnvMonorepoStandard => opt_nested_to_cow(
+                meta.env
+                    .repo
+                    .as_ref()
+                    .and_then(|r| r.monorepo_standard.as_deref()),
+            ),
+            TemplateVariable::EnvMonorepoOrchestrators => Cow::Owned(
+                meta.env
+                    .repo
+                    .as_ref()
+                    .map(|r| r.monorepo_orchestrators.join(", "))
+                    .unwrap_or_default(),
+            ),
+            // `project.monorepo_tool` is a deprecated alias derived from
+            // `monorepo_standard`.
             TemplateVariable::EnvMonorepoTool => opt_nested_to_cow(
                 meta.env
                     .repo
                     .as_ref()
-                    .and_then(|r| r.monorepo_tool.as_deref()),
+                    .and_then(|r| r.monorepo_standard.as_deref()),
             ),
         }
     }
@@ -511,6 +540,8 @@ fn is_known_path(path: &str) -> bool {
             | "git.repo_org"
             | "project.language"
             | "project.is_monorepo"
+            | "project.monorepo_standard"
+            | "project.monorepo_orchestrators"
             | "project.monorepo_tool"
     )
 }
@@ -656,7 +687,9 @@ mod tests {
                 }),
                 repo: Some(RepoContext {
                     is_monorepo: true,
-                    monorepo_tool: Some("cargoworkspace".to_string()),
+                    monorepo_standard: Some("cargo-workspace".to_string()),
+                    monorepo_orchestrators: vec!["nx".to_string()],
+                    monorepo_tool: Some("cargo-workspace".to_string()),
                     root: std::path::PathBuf::from("/tmp/project"),
                     packages: vec!["lib".to_string(), "cli".to_string()],
                 }),
@@ -744,6 +777,35 @@ mod tests {
         assert_eq!(
             interpolate("{{git.repo_org}}/{{git.repo_name}}", &meta),
             "anthropics/rusty-biscuit"
+        );
+    }
+
+    #[test]
+    fn project_monorepo_standard() {
+        let meta = sample_meta();
+        assert_eq!(
+            interpolate("{{project.monorepo_standard}}", &meta),
+            "cargo-workspace"
+        );
+    }
+
+    #[test]
+    fn project_monorepo_orchestrators() {
+        let meta = sample_meta();
+        assert_eq!(
+            interpolate("{{project.monorepo_orchestrators}}", &meta),
+            "nx"
+        );
+    }
+
+    #[test]
+    fn project_monorepo_tool_alias() {
+        let meta = sample_meta();
+        // `project.monorepo_tool` is now a deprecated alias for
+        // `project.monorepo_standard` and returns the kebab-case authority id.
+        assert_eq!(
+            interpolate("{{project.monorepo_tool}}", &meta),
+            "cargo-workspace"
         );
     }
 

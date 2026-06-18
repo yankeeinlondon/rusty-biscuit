@@ -790,7 +790,9 @@ mod tests {
                 package_area: "apps".to_string(),
                 name: "browser-root".to_string(),
                 ecosystem: Default::default(),
-                discovery_sources: vec![],
+                standard: Default::default(),
+                provenance: Default::default(),
+                test_runners: vec![],
                 nested_packages: vec![],
                 primary_language: None,
                 secondary_languages: vec![],
@@ -820,7 +822,9 @@ mod tests {
                 package_area: "apps/browser".to_string(),
                 name: "my-app".to_string(),
                 ecosystem: Default::default(),
-                discovery_sources: vec![],
+                standard: Default::default(),
+                provenance: Default::default(),
+                test_runners: vec![],
                 nested_packages: vec![],
                 primary_language: None,
                 secondary_languages: vec![],
@@ -862,7 +866,9 @@ mod tests {
                 package_area: "claudine".to_string(),
                 name: "claudine".to_string(),
                 ecosystem: Default::default(),
-                discovery_sources: vec![],
+                standard: Default::default(),
+                provenance: Default::default(),
+                test_runners: vec![],
                 nested_packages: vec![],
                 primary_language: None,
                 secondary_languages: vec![],
@@ -892,7 +898,9 @@ mod tests {
                 package_area: "claudine".to_string(),
                 name: "claudine-cli".to_string(),
                 ecosystem: Default::default(),
-                discovery_sources: vec![],
+                standard: Default::default(),
+                provenance: Default::default(),
+                test_runners: vec![],
                 nested_packages: vec![],
                 primary_language: None,
                 secondary_languages: vec![],
@@ -930,14 +938,14 @@ mod tests {
     fn fake_repo_info(root: &Path) -> RepoInfo {
         RepoInfo {
             is_monorepo: false,
-            monorepo_tool: None,
-            workspace_tools: vec![],
             root: root.to_path_buf(),
             dependencies: None,
             dev_dependencies: None,
             peer_dependencies: None,
             optional_dependencies: None,
             packages: None,
+            monorepo_standards: vec![],
+            monorepo_layers: vec![],
         }
     }
 
@@ -1136,9 +1144,7 @@ mod tests {
         let pid_str = added
             .get("CLAUDINE_PID")
             .expect("CLAUDINE_PID must be added even in non-interactive mode");
-        let pid: u32 = pid_str
-            .parse()
-            .expect("CLAUDINE_PID must parse as u32");
+        let pid: u32 = pid_str.parse().expect("CLAUDINE_PID must parse as u32");
         assert_eq!(pid, std::process::id());
     }
 
@@ -1311,13 +1317,15 @@ mod tests {
         let repo_root = tempfile::tempdir().unwrap();
         let docs_dir = repo_root.path().join("docs");
         let package_dir = repo_root.path().join("claudine/cli");
+        let lib_dir = repo_root.path().join("claudine/lib");
         fs::create_dir_all(&docs_dir).unwrap();
         fs::create_dir_all(&package_dir).unwrap();
+        fs::create_dir_all(&lib_dir).unwrap();
 
         fs::write(
             repo_root.path().join("Cargo.toml"),
             r#"[workspace]
-members = ["claudine/cli"]
+members = ["claudine/cli", "claudine/lib"]
 "#,
         )
         .unwrap();
@@ -1325,6 +1333,15 @@ members = ["claudine/cli"]
             package_dir.join("Cargo.toml"),
             r#"[package]
 name = "claudine-cli"
+version = "0.1.0"
+edition = "2024"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            lib_dir.join("Cargo.toml"),
+            r#"[package]
+name = "claudine-lib"
 version = "0.1.0"
 edition = "2024"
 "#,

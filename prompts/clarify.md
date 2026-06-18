@@ -1,6 +1,8 @@
 ---
 $schema:
-    doc: string(required)
+    - doc: string(required)
+    - spec: string(required)
+    - design: string(reqquired)
 doc: "{{spec || design}}"
 interactive: true
 start:
@@ -90,10 +92,11 @@ Drive the conversation forward through structured human-in-the-loop clarificatio
 
       - For each question the subagent should be sure to provide:
           - the question
-          - adequate contextual information, using examples where appropriate
+          - adequate contextual information, using examples of how this problem presents
       - Provide 3-4 solutions for each question:
           - these solutions should be well thought out and clearly articulated
-          - you should recommend one of the solutions and say why you're recommending it
+            - each solution must include a description, pros/cons of this solution, and an example of what this solution would look like
+          - you must recommend one of the solutions and say WHY you are recommending it
       - Each question should allow the user to choose an option you've provided, or specify a question or offer an alternative solution
 
 2. Present the questions (along with the sub-agent's solutions) to the user one at a time:

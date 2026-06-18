@@ -427,11 +427,24 @@ fn resolve_env_path(meta: &EventMeta, path: &str) -> Option<Value> {
         // Project
         "project.language" => meta.env.primary_language.clone().map(Value::String),
         "project.is_monorepo" => meta.env.repo.as_ref().map(|r| Value::Bool(r.is_monorepo)),
+        "project.monorepo_standard" => meta
+            .env
+            .repo
+            .as_ref()
+            .and_then(|r| r.monorepo_standard.clone())
+            .map(Value::String),
+        "project.monorepo_orchestrators" => meta
+            .env
+            .repo
+            .as_ref()
+            .map(|r| Value::String(r.monorepo_orchestrators.join(", "))),
+        // `project.monorepo_tool` is a deprecated alias for
+        // `project.monorepo_standard`.
         "project.monorepo_tool" => meta
             .env
             .repo
             .as_ref()
-            .and_then(|r| r.monorepo_tool.clone())
+            .and_then(|r| r.monorepo_standard.clone())
             .map(Value::String),
 
         _ => None,
@@ -526,7 +539,9 @@ mod tests {
                 }),
                 repo: Some(RepoContext {
                     is_monorepo: true,
-                    monorepo_tool: Some("cargo_workspace".to_string()),
+                    monorepo_standard: Some("cargo-workspace".to_string()),
+                    monorepo_orchestrators: vec!["nx".to_string()],
+                    monorepo_tool: Some("cargo-workspace".to_string()),
                     root: PathBuf::from("/tmp/project"),
                     packages: vec!["lib".to_string(), "cli".to_string()],
                 }),
@@ -566,8 +581,16 @@ mod tests {
         assert_eq!(lookup.get("project.language"), Some(json!("Rust")));
         assert_eq!(lookup.get("project.is_monorepo"), Some(json!(true)));
         assert_eq!(
+            lookup.get("project.monorepo_standard"),
+            Some(json!("cargo-workspace"))
+        );
+        assert_eq!(
+            lookup.get("project.monorepo_orchestrators"),
+            Some(json!("nx"))
+        );
+        assert_eq!(
             lookup.get("project.monorepo_tool"),
-            Some(json!("cargo_workspace"))
+            Some(json!("cargo-workspace"))
         );
     }
 
@@ -786,8 +809,16 @@ mod tests {
         assert_eq!(lookup.get("project.language"), Some(json!("Rust")));
         assert_eq!(lookup.get("project.is_monorepo"), Some(json!(true)));
         assert_eq!(
+            lookup.get("project.monorepo_standard"),
+            Some(json!("cargo-workspace"))
+        );
+        assert_eq!(
+            lookup.get("project.monorepo_orchestrators"),
+            Some(json!("nx"))
+        );
+        assert_eq!(
             lookup.get("project.monorepo_tool"),
-            Some(json!("cargo_workspace"))
+            Some(json!("cargo-workspace"))
         );
     }
 

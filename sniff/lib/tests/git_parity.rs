@@ -138,10 +138,22 @@ fn golden_status_categories_staged_unstaged_untracked() {
         .unwrap()
         .expect("repo found");
 
-    assert_eq!(info.status.staged_count, 1, "one staged add");
-    assert_eq!(info.status.unstaged_count, 1, "one unstaged modify");
-    assert_eq!(info.status.untracked_count, 1, "one untracked file");
-    assert!(info.status.is_dirty);
+    assert_eq!(
+        info.status.as_ref().unwrap().staged_count,
+        1,
+        "one staged add"
+    );
+    assert_eq!(
+        info.status.as_ref().unwrap().unstaged_count,
+        1,
+        "one unstaged modify"
+    );
+    assert_eq!(
+        info.status.as_ref().unwrap().untracked_count,
+        1,
+        "one untracked file"
+    );
+    assert!(info.status.as_ref().unwrap().is_dirty);
 }
 
 #[test]
@@ -1419,10 +1431,10 @@ fn phase3_clean_repo_reports_zero_counts_and_not_dirty() {
         .unwrap()
         .expect("repo found");
 
-    assert!(!info.status.is_dirty);
-    assert_eq!(info.status.staged_count, 0);
-    assert_eq!(info.status.unstaged_count, 0);
-    assert_eq!(info.status.untracked_count, 0);
+    assert!(!info.status.as_ref().unwrap().is_dirty);
+    assert_eq!(info.status.as_ref().unwrap().staged_count, 0);
+    assert_eq!(info.status.as_ref().unwrap().unstaged_count, 0);
+    assert_eq!(info.status.as_ref().unwrap().untracked_count, 0);
     assert!(info.file_changes.is_empty());
 }
 
@@ -1440,9 +1452,9 @@ fn phase3_staged_add_is_created_with_staged_status() {
         .unwrap()
         .expect("repo found");
 
-    assert!(info.status.is_dirty);
-    assert_eq!(info.status.staged_count, 1);
-    assert_eq!(info.status.unstaged_count, 0);
+    assert!(info.status.as_ref().unwrap().is_dirty);
+    assert_eq!(info.status.as_ref().unwrap().staged_count, 1);
+    assert_eq!(info.status.as_ref().unwrap().unstaged_count, 0);
 
     let change = info
         .file_changes
@@ -1469,9 +1481,9 @@ fn phase3_staged_delete_is_deleted_with_staged_status() {
         .unwrap()
         .expect("repo found");
 
-    assert!(info.status.is_dirty);
-    assert_eq!(info.status.staged_count, 1);
-    assert_eq!(info.status.unstaged_count, 0);
+    assert!(info.status.as_ref().unwrap().is_dirty);
+    assert_eq!(info.status.as_ref().unwrap().staged_count, 1);
+    assert_eq!(info.status.as_ref().unwrap().unstaged_count, 0);
 
     let change = info
         .file_changes
@@ -1495,9 +1507,9 @@ fn phase3_unstaged_modification_is_modified_with_modified_status() {
         .unwrap()
         .expect("repo found");
 
-    assert!(info.status.is_dirty);
-    assert_eq!(info.status.staged_count, 0);
-    assert_eq!(info.status.unstaged_count, 1);
+    assert!(info.status.as_ref().unwrap().is_dirty);
+    assert_eq!(info.status.as_ref().unwrap().staged_count, 0);
+    assert_eq!(info.status.as_ref().unwrap().unstaged_count, 1);
 
     let change = info
         .file_changes
@@ -1521,9 +1533,9 @@ fn phase3_unstaged_delete_is_deleted_with_modified_status() {
         .unwrap()
         .expect("repo found");
 
-    assert!(info.status.is_dirty);
-    assert_eq!(info.status.staged_count, 0);
-    assert_eq!(info.status.unstaged_count, 1);
+    assert!(info.status.as_ref().unwrap().is_dirty);
+    assert_eq!(info.status.as_ref().unwrap().staged_count, 0);
+    assert_eq!(info.status.as_ref().unwrap().unstaged_count, 1);
 
     let change = info
         .file_changes
@@ -1547,10 +1559,10 @@ fn phase3_untracked_file_is_created_with_untracked_status() {
         .unwrap()
         .expect("repo found");
 
-    assert!(info.status.is_dirty);
-    assert_eq!(info.status.staged_count, 0);
-    assert_eq!(info.status.unstaged_count, 0);
-    assert_eq!(info.status.untracked_count, 1);
+    assert!(info.status.as_ref().unwrap().is_dirty);
+    assert_eq!(info.status.as_ref().unwrap().staged_count, 0);
+    assert_eq!(info.status.as_ref().unwrap().unstaged_count, 0);
+    assert_eq!(info.status.as_ref().unwrap().untracked_count, 1);
 
     let change = info
         .file_changes
@@ -1579,9 +1591,9 @@ fn phase3_both_staged_and_unstaged_reports_both_status() {
         .unwrap()
         .expect("repo found");
 
-    assert!(info.status.is_dirty);
-    assert_eq!(info.status.staged_count, 1);
-    assert_eq!(info.status.unstaged_count, 1);
+    assert!(info.status.as_ref().unwrap().is_dirty);
+    assert_eq!(info.status.as_ref().unwrap().staged_count, 1);
+    assert_eq!(info.status.as_ref().unwrap().unstaged_count, 1);
 
     let change = info
         .file_changes
@@ -1610,8 +1622,8 @@ fn phase3_rename_surfaces_as_delete_and_create() {
         .unwrap()
         .expect("repo found");
 
-    assert!(info.status.is_dirty);
-    assert_eq!(info.status.staged_count, 2);
+    assert!(info.status.as_ref().unwrap().is_dirty);
+    assert_eq!(info.status.as_ref().unwrap().staged_count, 2);
 
     let paths: Vec<String> = info.file_changes.iter().map(|c| norm(&c.path)).collect();
     assert!(paths.contains(&"old.rs".to_string()));
@@ -1656,7 +1668,7 @@ fn phase3_merge_conflict_detected_and_reported() {
         .unwrap()
         .expect("repo found");
 
-    assert!(info.status.is_dirty);
+    assert!(info.status.as_ref().unwrap().is_dirty);
     let conflict = info
         .file_changes
         .iter()
@@ -1674,10 +1686,10 @@ fn phase3_unborn_head_is_not_dirty_and_has_no_changes() {
         .unwrap()
         .expect("repo found");
 
-    assert!(!info.status.is_dirty);
-    assert_eq!(info.status.staged_count, 0);
-    assert_eq!(info.status.unstaged_count, 0);
-    assert_eq!(info.status.untracked_count, 0);
+    assert!(!info.status.as_ref().unwrap().is_dirty);
+    assert_eq!(info.status.as_ref().unwrap().staged_count, 0);
+    assert_eq!(info.status.as_ref().unwrap().unstaged_count, 0);
+    assert_eq!(info.status.as_ref().unwrap().untracked_count, 0);
     assert!(info.file_changes.is_empty());
 }
 
@@ -1722,8 +1734,8 @@ fn phase3_non_utf8_path_resolves_exact_index_entry_for_stats() {
         .unwrap()
         .expect("repo found");
 
-    assert!(info.status.is_dirty);
-    assert_eq!(info.status.staged_count, 1);
+    assert!(info.status.as_ref().unwrap().is_dirty);
+    assert_eq!(info.status.as_ref().unwrap().staged_count, 1);
     // The index entry has no worktree file, so it surfaces as a staged add
     // (3 lines added) plus a worktree delete (3 lines removed). Both stats are
     // non-zero only because the exact byte path resolved its index blob; a
@@ -1753,7 +1765,8 @@ fn phase3_distinct_non_utf8_paths_do_not_collide() {
         .expect("repo found");
 
     assert_eq!(
-        info.status.staged_count, 2,
+        info.status.as_ref().unwrap().staged_count,
+        2,
         "distinct byte paths must not collapse to one"
     );
     assert_eq!(
@@ -1797,15 +1810,28 @@ fn phase3_counts_only_matches_full_request_totals() {
             include_commit_remote_containment: false,
             max_remote_branches: None,
             full_worktree_details: false,
+            identity_only: false,
         },
     )
     .unwrap()
     .expect("repo found");
 
-    assert_eq!(counts.status.is_dirty, full.status.is_dirty);
-    assert_eq!(counts.status.staged_count, full.status.staged_count);
-    assert_eq!(counts.status.unstaged_count, full.status.unstaged_count);
-    assert_eq!(counts.status.untracked_count, full.status.untracked_count);
+    assert_eq!(
+        counts.status.as_ref().unwrap().is_dirty,
+        full.status.as_ref().unwrap().is_dirty
+    );
+    assert_eq!(
+        counts.status.as_ref().unwrap().staged_count,
+        full.status.as_ref().unwrap().staged_count
+    );
+    assert_eq!(
+        counts.status.as_ref().unwrap().unstaged_count,
+        full.status.as_ref().unwrap().unstaged_count
+    );
+    assert_eq!(
+        counts.status.as_ref().unwrap().untracked_count,
+        full.status.as_ref().unwrap().untracked_count
+    );
 }
 
 #[test]
@@ -1830,16 +1856,29 @@ fn phase3_detailed_counts_match_full_request_totals() {
         .unwrap()
         .expect("repo found");
 
-    assert_eq!(detailed.status.is_dirty, full.status.is_dirty);
-    assert_eq!(detailed.status.staged_count, full.status.staged_count);
-    assert_eq!(detailed.status.unstaged_count, full.status.unstaged_count);
-    assert_eq!(detailed.status.untracked_count, full.status.untracked_count);
+    assert_eq!(
+        detailed.status.as_ref().unwrap().is_dirty,
+        full.status.as_ref().unwrap().is_dirty
+    );
+    assert_eq!(
+        detailed.status.as_ref().unwrap().staged_count,
+        full.status.as_ref().unwrap().staged_count
+    );
+    assert_eq!(
+        detailed.status.as_ref().unwrap().unstaged_count,
+        full.status.as_ref().unwrap().unstaged_count
+    );
+    assert_eq!(
+        detailed.status.as_ref().unwrap().untracked_count,
+        full.status.as_ref().unwrap().untracked_count
+    );
 
     // Detailed includes path lists; the count of dirty + untracked entries
     // should equal the file_changes length (excluding conflicts, which this
     // fixture does not produce).
     assert_eq!(
-        detailed.status.dirty.len() + detailed.status.untracked.len(),
+        detailed.status.as_ref().unwrap().dirty.len()
+            + detailed.status.as_ref().unwrap().untracked.len(),
         full.file_changes.len()
     );
 }

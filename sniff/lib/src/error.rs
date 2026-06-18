@@ -37,6 +37,18 @@ pub enum SniffError {
     #[error("package '{name}' not found. Valid packages: {valid}")]
     UnknownPackage { name: String, valid: String },
 
+    /// The specified package name matches more than one catalog entry.
+    ///
+    /// Returned by scope-override resolvers when `--package` is used and the
+    /// name resolves to more than one discovered package. Areas are unique
+    /// by name, so ambiguity is reported only for packages.
+    #[error("package '{name}' is ambiguous: matches {count} entries ({matches})")]
+    AmbiguousPackage {
+        name: String,
+        count: usize,
+        matches: String,
+    },
+
     /// The specified package area was not found in the monorepo.
     #[error("package area '{area}' not found. Valid areas: {valid}")]
     UnknownPackageArea { area: String, valid: String },

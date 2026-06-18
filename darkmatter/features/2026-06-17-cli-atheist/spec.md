@@ -745,6 +745,33 @@ included even though it is related:
   fine; the spec targets file size and responsibility split, not
   dispatch style.
 
+## Accepted Over-Cap Exceptions
+
+Goal 1 sets a ~500-line soft cap, not a CI gate. After Phases 1–8 (and
+the review-3 harness-robustness follow-up) the six files below remain
+over the cap. They are accepted exceptions — each is a
+single-responsibility module that grew past the cap without becoming a
+god-file. `just lint-files` reports them inline with the recorded
+reason so the exception list stays explicit, reviewed, and drifts
+loudly if a new over-cap file appears.
+
+| File | Lines | Why accepted |
+|------|-------|--------------|
+| `darkmatter/cli/src/commands/compose.rs` | 1021 | Compose subcommand; the further split (`compose/{preflight,pipeline,report}.rs`) is a separate feature per spec non-goals. |
+| `darkmatter/cli/src/commands/schema/about.rs` | 626 | One command (`md schema about`), one builder struct (`SchemaAboutReport`). Sections are visually separated report sections, not unrelated responsibilities. |
+| `darkmatter/cli/src/commands/schema/assignment.rs` | 537 | Assignment parsing + schema-aware value coercion for `md schema validate`. Single responsibility shared by the CLI and library surface. |
+| `darkmatter/cli/tests/code_block.rs` | 747 | Exhaustive per-flag coverage of the `md code-block` surface. Splitting by flag family would create artificial fragmentation across one cohesive subcommand. |
+| `darkmatter/cli/tests/schema_validate.rs` | 555 | Per-flag coverage of the `md schema validate` surface. Same rationale as `code_block.rs`. |
+| `darkmatter/cli/tests/common/level2.rs` | 539 | Shared Level 2 harness module — shim creation/integrity, sentinel polling, fixture runners, and frame/color assertion helpers for the real-terminal suite. Grew past the cap after the review-3 cross-platform shim-robustness fix (`link_or_copy` + `is_same_binary` fallback ladder). Splitting would fragment one cohesive test-harness concern. |
+
+The god-file pattern this feature targets — "hundreds of unrelated
+top-level symbols" mixed in one file — does not apply to any of these
+files: each has one responsibility, and the line count is driven by
+coverage of that responsibility rather than by accretion of unrelated
+concerns. The `just lint-files` script (Phase 8 / ADR-5) records the
+list inline so any *new* over-cap file is flagged for review without a
+matching accepted-exception entry.
+
 ## Summary
 
 The CLI has four god-files because business logic that should live in
