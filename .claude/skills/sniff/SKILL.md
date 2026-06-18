@@ -184,7 +184,7 @@ sniff repo name            # Repository name only
 sniff repo name -v         # Repository name only (verbose styling)
 sniff repo is-monorepo     # Monorepo label (e.g. `cargo`; `false` if not). Exits non-zero when false unless `--no-error`. `--json` emits `{ "is_monorepo": true, "authority": "...", "orchestrators": [...] }` / `{ "is_monorepo": false }`
 sniff repo package-count   # Number of discovered packages (`{ "package-count": N }` with --json)
-sniff repo version         # Repository version from root manifest (`{ "version": "..." | null }` with --json)
+sniff repo version         # Declared version(s) for the current package/area/repo context — scoped like `repo test-runner`; `--all`/`--package`/`--package-area` override the CWD scope; `--json` returns `{ "versions": [ { version, packages, sources: [ { manifest, path, href, inherited, packages } ] } ] }`
 sniff repo package-manager # Package manager(s) for the current package/area/repo context (`--csv`, `--list`, `--md`, `--json`)
 sniff repo test-runner     # Declared test runner(s) for the current package/area/repo context with evidence (`--csv`, `--list`, `--md`, `--json`)
 sniff repo git-status      # Git status with commit history
@@ -209,6 +209,8 @@ sniff hardware --json      # Subcommand with JSON output
 
 **`sniff repo --json` aggregate:**
 Bare `sniff repo --json` returns the consolidated `SniffRepo` projection with snake_case top-level keys. Identity fields remain top-level (`name`, `version`, `language`, `is_monorepo`, `package_count`, `root`), the repo-wide `package_manager` and `test_runner` facts collapse across all packages to `string | string[] | null`, cwd-relative facts live under `context`, worktrees and branches appear once as top-level arrays, and change data is grouped into four `ScopeBucket` objects: `dirty`, `staged`, `unstaged`, and `untracked`. Each bucket contains `files`, `source_code`, `documentation`, `packages`, and `package_areas` arrays. Aggregate `git_status` is intentionally lean (`current_branch`, `config`, compact `file_changes`, and dirty/staged/unstaged/untracked counts), while focused commands such as `repo git-status --json`, `repo structure --json`, and `repo recent-commits --json` keep their richer contracts. Network-primary subcommands (`remote`, `pr`) and parameterized subcommands (`hash`) are excluded, and no network requests are made by the aggregate.
+
+The aggregate's top-level `version` is the **`AggregateScope::Repo` collapse**: exactly one distinct version across all packages → that string; zero or more-than-one distinct versions → `null` (e.g. a pure-virtual Cargo workspace with uniform member versions now reports the version string instead of `null`). The focused `sniff repo version --json` shape is `{ "versions": [ { version, packages, sources: [ { manifest, path, href, inherited, packages } ] } ] }`.
 
 ## Detailed Topics
 

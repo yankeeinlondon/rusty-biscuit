@@ -131,7 +131,7 @@ sniff repo name            # Repository name only
 sniff repo name -v         # Repository name only (verbose styling; no foreign fields)
 sniff repo is-monorepo     # Monorepo label (e.g. `cargo`; `false` if not). Exits non-zero when false unless `--no-error`. `--json` emits `{ "is_monorepo": true, "authority": "...", "orchestrators": [...] }` / `{ "is_monorepo": false }`
 sniff repo package-count   # Number of discovered packages
-sniff repo version         # Repository version from root manifest
+sniff repo version         # Declared version(s) for the current package/area/repo context — scoped like `repo test-runner`; `--all`/`--package`/`--package-area` override the CWD scope; `--csv`/`--list`/`--md`/`--json`/`--verbose`
 sniff repo language        # Primary programming language for the repository
 ```
 
@@ -467,7 +467,7 @@ table summarises the contract; see the per-subcommand docs under
 | `repo language` | `{ "language": "..." \| null }` (or full language breakdown with `--breakdown`) |
 | `repo is-monorepo` | `{ "is_monorepo": true, "authority": "...", "orchestrators": [...] }` / `{ "is_monorepo": false }` |
 | `repo package-count` | `{ "package-count": N }` |
-| `repo version` | `{ "version": "..." \| null }` |
+| `repo version` | `{ "versions": [ { version, packages, sources: [ { manifest, path, href, inherited, packages } ] } ] }` |
 | `repo git-status` | `GitInfo` object directly (`repo_root`, `status`, `recent`, `branches`, ...) |
 | `repo package-dependencies` | `{ packages: [{ name, depends_on, used_by, dependencies, dev_dependencies, ... }] }` |
 | `repo dependencies` | `{ dependencies: [{ package, family, name, targeted_version, actual_version }] }` |
