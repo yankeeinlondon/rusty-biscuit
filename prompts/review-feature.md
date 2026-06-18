@@ -18,6 +18,7 @@ start:
 success:
     stderr: "Feature review {{iteration}} in the {{ctx.current_package_area}} package area has completed"
     message: "✅ the Feature Review #{{iteration}} for `{{dir}}` in the **{{ctx.current_package_area}}** package area has completed. The review can be found at: {{area}}/{{dir}}/review-{{iteration}}.md"
+    effect: small-group-cheer
 failure:
     stderr: "Feature Review {{iteration}} in the {{ctx.current_package_area}} package area failed to complete!"
     message: "Feature Review #{{iteration}} for `{{ctx.current_package_area}}/{{dir}}` failed to complete!"

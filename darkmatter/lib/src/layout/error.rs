@@ -34,8 +34,7 @@ pub enum PageRenderError {
     #[error("max_width must be greater than zero")]
     MaxWidthZero,
 
-    /// A [`WidthUnit::Percent`](super::WidthUnit::Percent) value was outside
-    /// the valid `0.0..=100.0` range.
+    /// A percentage value was outside the valid `0.0..=100.0` range.
     #[error("invalid percent value: {0} (expected 0.0..=100.0)")]
     InvalidPercent(f32),
 
@@ -65,4 +64,10 @@ pub enum PageRenderError {
         /// Field name in canonical kebab-case (`width` or `max-width`).
         field: &'static str,
     },
+}
+
+impl From<crate::markdown::MarkdownError> for PageRenderError {
+    fn from(err: crate::markdown::MarkdownError) -> Self {
+        PageRenderError::Render(err.to_string())
+    }
 }

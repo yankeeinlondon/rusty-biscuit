@@ -17,7 +17,7 @@ pub enum ColorDepth {
     TrueColor,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ColorMode {
     /// the background color is light, and text characters must be dark
     /// to provide adequate contrast
@@ -25,7 +25,34 @@ pub enum ColorMode {
     /// the background color is dark, and text characters must be light
     /// to provide the adequate contrast
     Dark,
+    /// we were unable to detect the color mode but in this case a
+    /// lot of functionality will treat this as "dark mode"
     Unknown,
+}
+
+impl ColorMode {
+    /// Return the opposite known mode.
+    ///
+    /// inverts the color mode from light to dark and visa-versa.
+    ///
+    /// > **Note:** if color mode was `Unknown` then inversion results in light mode.
+    pub const fn inverted(self) -> Self {
+        match self {
+            ColorMode::Light => ColorMode::Dark,
+            ColorMode::Dark | ColorMode::Unknown => ColorMode::Light,
+        }
+    }
+
+    /// Because we want `ColorMode` to represent a truthful state
+    /// we have allowed an **Unknown** state but sometimes that state
+    /// gets in the way and we need to resolve to `ColorMode::Unknown`
+    /// to `ColorMode::Dark`
+    pub const fn resolve_unknown(self) -> Self {
+        match self {
+            ColorMode::Unknown => ColorMode::Dark,
+            _ => self,
+        }
+    }
 }
 
 /// Detect the terminal's color depth capability.
@@ -232,6 +259,26 @@ impl From<&ColorMode> for RenderColorMode {
             ColorMode::Light => RenderColorMode::Light,
             ColorMode::Dark => RenderColorMode::Dark,
             ColorMode::Unknown => RenderColorMode::Unknown,
+        }
+    }
+}
+
+impl From<RenderColorMode> for ColorMode {
+    fn from(mode: RenderColorMode) -> Self {
+        match mode {
+            RenderColorMode::Light => ColorMode::Light,
+            RenderColorMode::Dark => ColorMode::Dark,
+            RenderColorMode::Unknown => ColorMode::Unknown,
+        }
+    }
+}
+
+impl From<&RenderColorMode> for ColorMode {
+    fn from(mode: &RenderColorMode) -> Self {
+        match mode {
+            RenderColorMode::Light => ColorMode::Light,
+            RenderColorMode::Dark => ColorMode::Dark,
+            RenderColorMode::Unknown => ColorMode::Unknown,
         }
     }
 }

@@ -103,8 +103,8 @@ docs_updated_during_phase_7:
 docs_created_during_phase_7: []
 skills_files_updated_during_phase7: []
 packages:
-  - tui-chrome
-  - tui-chrome-cli
+  - biscuit-tui
+  - biscuit-tui-cli
 ---
 # TUI Inputs — Implementation Plan
 
@@ -117,10 +117,10 @@ Source documents: [spec.md](./spec.md) | [tech-design.md](./tech-design.md) | [s
 | Item | Status |
 |------|--------|
 | Workspace `Cargo.toml` | Correctly lists `"biscuit-tui/lib"` and `"biscuit-tui/cli"` as members. Both resolve. |
-| `biscuit-tui/lib/Cargo.toml` | Exists, `name = "tui-chrome"`, edition 2024. No dependencies, no source files. |
+| `biscuit-tui/lib/Cargo.toml` | Exists, `name = "biscuit-tui"`, edition 2024. No dependencies, no source files. |
 | `biscuit-tui/lib/src/` | Empty directory. |
-| `biscuit-tui/cli/` | Has `Cargo.toml` (`name = "tui-chrome-cli"`, binary `question`) and `src/main.rs`. Compiles but has no subcommands. |
-| `biscuit-tui/justfile` | Copied from Claudine — references "Claudine" throughout. Needs rewrite for tui-chrome. |
+| `biscuit-tui/cli/` | Has `Cargo.toml` (`name = "biscuit-tui-cli"`, binary `question`) and `src/main.rs`. Compiles but has no subcommands. |
+| `biscuit-tui/justfile` | Copied from Claudine — references "Claudine" throughout. Needs rewrite for biscuit-tui. |
 | Root `CLAUDE.md` | States `tui` is a "single crate" — contradicts lib/cli split design. Needs update. |
 | Community crate strategy | Finalized in [strategy.md](./strategy.md). Adopt as private deps only. |
 
@@ -152,18 +152,18 @@ Source documents: [spec.md](./spec.md) | [tech-design.md](./tech-design.md) | [s
 4. **CLI crate** — already scaffolded (`cli/Cargo.toml` + `cli/src/main.rs` with clap skeleton, binary `question`). No changes needed in Phase 0.
 
 5. **Rewrite `biscuit-tui/justfile`** — adapt from `biscuit-hash` justfile pattern:
-   - `PACKAGE := "tui-chrome"`
-   - `LIBRARY := "tui-chrome"`, `CLI := "tui-chrome-cli"`
+   - `PACKAGE := "biscuit-tui"`
+   - `LIBRARY := "biscuit-tui"`, `CLI := "biscuit-tui-cli"`
    - `CLI_PATH := "./cli"`
    - Recipes: `build`, `install`, `test`, `lint`, `lint-fix`, `check`, `cli`
    - Keep imports of shared just files
 
-6. **Verify:** `cargo check -p tui-chrome -p tui-chrome-cli` passes. `cargo run -p tui-chrome-cli -- --help` prints usage.
+6. **Verify:** `cargo check -p biscuit-tui -p biscuit-tui-cli` passes. `cargo run -p biscuit-tui-cli -- --help` prints usage.
 
 ### Verification
 
 - [ ] `cargo check` succeeds for both crates
-- [ ] `cargo run -p tui-chrome-cli -- --help` exits 0
+- [ ] `cargo run -p biscuit-tui-cli -- --help` exits 0
 - [ ] `just check` in `biscuit-tui/` works
 
 ---
@@ -199,7 +199,7 @@ Source documents: [spec.md](./spec.md) | [tech-design.md](./tech-design.md) | [s
 - [ ] Unit tests for `Label` rendering with `TestBackend` (label above/below/left/right + inner content)
 - [ ] Unit tests for `ComponentTheme::default()` (all fields populated)
 - [ ] Integration-style test: `run_standalone` with a trivial widget (e.g., renders "hello", submits on Enter)
-- [ ] `cargo check` and `cargo test -p tui-chrome` pass
+- [ ] `cargo check` and `cargo test -p biscuit-tui` pass
 
 ---
 
@@ -255,9 +255,9 @@ question text-input [--label <text>] [--label-position <above|below|left|right>]
 - [ ] Unit test: `max_length` rejection (typing beyond limit silently drops)
 - [ ] Unit test: Enter → Submitted, Esc → Cancelled
 - [ ] Snapshot test: render with label above, label left, no label
-- [ ] CLI integration: `echo "" | cargo run -p tui-chrome-cli -- text-input --label Name` (manual)
-- [ ] `cargo test -p tui-chrome` passes
-- [ ] `cargo test -p tui-chrome-cli` passes
+- [ ] CLI integration: `echo "" | cargo run -p biscuit-tui-cli -- text-input --label Name` (manual)
+- [ ] `cargo test -p biscuit-tui` passes
+- [ ] `cargo test -p biscuit-tui-cli` passes
 
 ---
 
@@ -565,7 +565,7 @@ Where `--columns` is JSON array of column definitions and `--rows` is JSON array
 7. **Drift maintenance** — update:
    - `CLAUDE.md` workspace section
    - `docs/dependencies.md` if one exists for biscuit-tui
-   - Root justfile `areas` list if tui-chrome should be covered
+   - Root justfile `areas` list if biscuit-tui should be covered
 
 8. **Performance** — verify no unnecessary re-renders in event loop. `run_standalone` should only redraw on `Consumed`/`Submitted`/`Cancelled`, not on `Ignored`.
 
@@ -615,6 +615,6 @@ Where `--columns` is JSON array of column definitions and `--rows` is JSON array
 1. All 6 components render correctly and handle keyboard input per spec.
 2. Every component works both embedded (StatefulWidget) and standalone (run_standalone).
 3. `question` CLI exposes all components with correct output contract (exit codes, format modes).
-4. All tests pass: `cargo test -p tui-chrome -p tui-chrome-cli`.
+4. All tests pass: `cargo test -p biscuit-tui -p biscuit-tui-cli`.
 5. No community crate types leak into the public API.
 6. Validation model (keystroke rejection + submit-time inline errors) works uniformly.

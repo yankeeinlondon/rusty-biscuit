@@ -11,8 +11,19 @@ pub enum SniffError {
     Io(#[from] std::io::Error),
 
     /// Git operation failed.
-    #[error("Git error: {0}")]
-    Git(#[from] git2::Error),
+    ///
+    /// The underlying backend error (git2 or gix) is boxed as a source so the
+    /// concrete per-operation type is preserved in the cause chain without
+    /// enumerating every backend error enum here. The `operation` tag records
+    /// which conceptual operation failed (e.g. "discover", "status", "diff").
+    #[error("Git error during {operation}: {source}")]
+    Git {
+        /// The conceptual operation that failed.
+        operation: &'static str,
+        /// The underlying backend error.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync + 'static>,
+    },
 
     /// The specified path is not a git repository.
     #[error("Not a git repository: {0}")]
@@ -25,6 +36,18 @@ pub enum SniffError {
     /// The specified package name was not found in the monorepo.
     #[error("package '{name}' not found. Valid packages: {valid}")]
     UnknownPackage { name: String, valid: String },
+
+    /// The specified package name matches more than one catalog entry.
+    ///
+    /// Returned by scope-override resolvers when `--package` is used and the
+    /// name resolves to more than one discovered package. Areas are unique
+    /// by name, so ambiguity is reported only for packages.
+    #[error("package '{name}' is ambiguous: matches {count} entries ({matches})")]
+    AmbiguousPackage {
+        name: String,
+        count: usize,
+        matches: String,
+    },
 
     /// The specified package area was not found in the monorepo.
     #[error("package area '{area}' not found. Valid areas: {valid}")]
@@ -161,6 +184,20 @@ pub enum SniffInstallationError {
     /// authorized by the caller.
     #[error("Installing {pkg} via remote bash requires explicit consent (url: {url})")]
     RemoteBashConsentRequired { pkg: String, url: String },
+}
+
+impl SniffError {
+    /// Construct a [`SniffError::Git`] tagging the failing operation and boxing
+    /// the backend error as its source.
+    pub(crate) fn git(
+        operation: &'static str,
+        source: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    ) -> Self {
+        SniffError::Git {
+            operation,
+            source: source.into(),
+        }
+    }
 }
 
 /// Convenience Result type for Sniff operations.

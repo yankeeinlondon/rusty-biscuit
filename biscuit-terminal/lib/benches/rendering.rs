@@ -157,7 +157,7 @@ fn bench_layout_apply(c: &mut Criterion) {
     });
     group.bench_function("with_margins", |b| {
         let layout = Layout {
-            margin: biscuit_terminal::utils::layout::Margin::x(
+            margin: biscuit_terminal::utils::layout::Edges::x(
                 biscuit_terminal::utils::layout::Length::ch(4),
             ),
             ..Default::default()

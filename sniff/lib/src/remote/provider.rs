@@ -158,24 +158,39 @@ pub trait RemoteRepoProvider: Send + Sync {
         // The metadata call is required - if it fails, the whole report fails
         let metadata = self.get_repo_metadata(owner, repo).await?;
 
-        // All other calls are optional - failures produce empty/None values
-        let org_info = self.get_org_info(owner).await.ok();
-        let documents = self.list_documents(owner, repo).await.unwrap_or_default();
-        let pull_requests = self
-            .list_pull_requests(owner, repo, PullRequestState::Open)
-            .await
-            .unwrap_or_default();
-        let issues = self.list_issues(owner, repo).await.unwrap_or_default();
-        let tags_and_releases = self
-            .get_tags_and_releases(owner, repo)
-            .await
-            .unwrap_or_default();
-        // Try to fetch actual workflow runs first; fall back to presence detection
-        let cicd = match self.list_workflow_runs(owner, repo, 5).await {
-            Ok(runs) if !runs.is_empty() => runs,
-            _ => self.detect_cicd(owner, repo).await.unwrap_or(None).into_iter().collect(),
-        };
-        let org_repos = self.list_org_repos(owner).await.unwrap_or_default();
+        // All other calls are optional and independent, so run them concurrently
+        // to collapse a chain of API round-trips into a single parallel batch.
+        // `join!` (not `try_join!`) is used deliberately: each branch swallows
+        // its own failure into an empty/None value, so a partial failure must
+        // not short-circuit the others.
+        let (org_info, documents, pull_requests, issues, tags_and_releases, cicd, org_repos) = tokio::join!(
+            async { self.get_org_info(owner).await.ok() },
+            async { self.list_documents(owner, repo).await.unwrap_or_default() },
+            async {
+                self.list_pull_requests(owner, repo, PullRequestState::Open)
+                    .await
+                    .unwrap_or_default()
+            },
+            async { self.list_issues(owner, repo).await.unwrap_or_default() },
+            async {
+                self.get_tags_and_releases(owner, repo)
+                    .await
+                    .unwrap_or_default()
+            },
+            // Try to fetch actual workflow runs first; fall back to presence detection
+            async {
+                match self.list_workflow_runs(owner, repo, 5).await {
+                    Ok(runs) if !runs.is_empty() => runs,
+                    _ => self
+                        .detect_cicd(owner, repo)
+                        .await
+                        .unwrap_or(None)
+                        .into_iter()
+                        .collect(),
+                }
+            },
+            async { self.list_org_repos(owner).await.unwrap_or_default() },
+        );
         let key_urls = self.build_key_urls(owner, repo);
 
         Ok(RemoteReport {

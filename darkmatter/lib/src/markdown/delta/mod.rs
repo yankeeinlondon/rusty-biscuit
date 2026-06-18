@@ -25,8 +25,10 @@
 //! ```
 
 mod types;
+mod report;
 pub mod visual;
 
+pub use report::{DeltaReport, format_code_block_change};
 pub use types::{
     BrokenLink, ChangeAction, CodeBlockChange, ContentChange, DeltaStatistics, DocumentChange,
     FrontmatterChange, MarkdownDelta, MovedSection, SectionId, SectionPath,

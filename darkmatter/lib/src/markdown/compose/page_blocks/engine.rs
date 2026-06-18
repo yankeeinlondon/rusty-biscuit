@@ -3,9 +3,9 @@
 use std::ops::Range;
 
 use super::types::{PageBlockError, PageBlockRegion};
-use crate::markdown::compose::EffectiveState;
 use crate::markdown::compose::conditions;
-use crate::markdown::compose::types::ComposeReport;
+use crate::markdown::compose::expression::EvaluationLookup;
+use crate::markdown::compose::ComposeReport;
 use biscuit_terminal::errors::SourceContext;
 use tracing::debug;
 
@@ -14,10 +14,10 @@ use tracing::debug;
 /// Walks the parsed region tree in source order, evaluates each block's
 /// `when` condition, and produces output with true blocks' body content
 /// preserved and false blocks removed entirely.
-pub fn render_page_blocks(
+pub fn render_page_blocks<L: EvaluationLookup>(
     content: &str,
     regions: &[PageBlockRegion],
-    state: &EffectiveState,
+    state: &L,
     report: &mut ComposeReport,
     ctx: SourceContext,
 ) -> Result<String, PageBlockError> {
@@ -64,11 +64,11 @@ pub fn render_page_blocks(
 }
 
 /// Renders the body of a block, recursively processing nested child blocks.
-fn render_body(
+fn render_body<L: EvaluationLookup>(
     content: &str,
     body_span: &Range<usize>,
     children: &[PageBlockRegion],
-    state: &EffectiveState,
+    state: &L,
     report: &mut ComposeReport,
     ctx: &SourceContext,
 ) -> Result<String, PageBlockError> {
@@ -118,7 +118,7 @@ fn render_body(
 mod tests {
     use super::*;
     use crate::markdown::compose::page_blocks::parser::parse_page_blocks;
-    use crate::markdown::compose::{ComposeContext, EffectiveStateBuilder};
+    use crate::markdown::compose::{ComposeContext, EffectiveState, EffectiveStateBuilder};
     use serde_json::json;
     use std::collections::HashMap;
 

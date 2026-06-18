@@ -41,7 +41,7 @@ Suggested fix: implement the test event injection described in the design, or ex
 
 I ran:
 
-- `cargo test -p tui-chrome-cli --test choose_cli`
-- `cargo test -p tui-chrome typing_letter_opens_filter`
+- `cargo test -p biscuit-tui-cli --test choose_cli`
+- `cargo test -p biscuit-tui typing_letter_opens_filter`
 
 Both passed. The passing tests do not cover the missing CLI filter wiring, which is why this review marks the feature as not ready for production.

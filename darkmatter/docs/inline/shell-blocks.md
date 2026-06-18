@@ -31,10 +31,11 @@ Shell blocks use **key-value** parameter syntax (not flag syntax like `::shell`)
 | `enrich_error` | `enrich_error="extra context"` | Add context to unhandled error messages |
 | `enrich_error_on` | `enrich_error_on="1,context"` | Add context only for exit code 1 |
 | `timeout` | `timeout=5` | Override default timeout (seconds) for all commands in block |
+| `no_cache` | `no_cache=true` | Bypass the per-compose command cache; every command in the block executes fresh at each occurrence |
 
 > **Note:** Do not use `--param` or `::param:value` syntax. Shell blocks require
 > `param="value"` syntax. Using the wrong style will produce a targeted error
-> hint.
+> hint — `::shell-block --no-cache` is a parse error; use `no_cache=true`.
 
 ## Command Body Rules
 

@@ -321,11 +321,10 @@ flow filter="":
         fi
         if [[ ${#models[@]} -eq 0 ]]; then
             models=(
-                'zai-coding-plan/glm-5.1'
+                'zai-coding-plan/glm-5.2'
                 'minimax/MiniMax-M2.7-highspeed'
-                'openrouter/qwen/qwen3.6-plus'
-                'openrouter/qwen/qwen3-max'
-                'kimi-for-coding/k2p6'
+                'minimax/MiniMax-M3'
+                'kimi-for-coding/k2p7'
             )
         fi
         choose_from "Choose ${stage} Opencode model" "${models[@]}"

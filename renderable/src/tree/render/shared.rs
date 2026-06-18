@@ -4,7 +4,9 @@
 //! both emit the same semantic HTML for a few render-tree widgets. These
 //! helpers keep that HTML shape defined once so the two targets cannot drift.
 
-use crate::color::Color;
+use crate::color::{Color, Tailwind};
+use crate::style::PaintColor;
+use crate::stylesheet::CssColor;
 use crate::tree::{ColumnWidthKind, ColumnsHints, ProgressHints};
 
 /// HTML-escapes text for placement inside an HTML attribute or text node.
@@ -23,6 +25,36 @@ pub(crate) fn color_to_css(color: Color) -> Option<String> {
     color
         .to_rgb()
         .map(|(r, g, b)| format!("#{r:02x}{g:02x}{b:02x}"))
+}
+
+/// Lowers a [`PaintColor`] to a validated [`CssColor`].
+///
+/// ## Returns
+///
+/// - A fixed RGB color with opaque alpha → [`CssColor::rgb`].
+/// - A fixed RGB color with non-opaque alpha → [`CssColor::rgba`] using the
+///   normalized CSS alpha.
+/// - The Tailwind `transparent` / `current` / `inherit` keywords → the
+///   matching CSS keyword, ignoring any stored alpha.
+/// - The terminal default / reset colors (`DefaultForeground`,
+///   `DefaultBackground`, `Reset`) → `None` (no CSS declaration).
+pub(crate) fn paint_to_css_color(paint: PaintColor) -> Option<CssColor> {
+    match paint.color {
+        Color::Tailwind(Tailwind::Transparent) => Some(CssColor::Transparent),
+        Color::Tailwind(Tailwind::Current) => Some(CssColor::CurrentColor),
+        Color::Tailwind(Tailwind::Inherit) => Some(CssColor::Inherit),
+        Color::DefaultForeground | Color::DefaultBackground | Color::Reset => None,
+        _ => {
+            let (r, g, b) = paint.color.to_rgb()?;
+            if paint.opacity.is_opaque() {
+                Some(CssColor::rgb(r, g, b))
+            } else {
+                // `as_css_alpha` is always within `0.0..=1.0`, so `rgba`
+                // cannot reject it.
+                CssColor::rgba(r, g, b, paint.opacity.as_css_alpha()).ok()
+            }
+        }
+    }
 }
 
 /// Builds the semantic progress-widget HTML emitted by the browser and
@@ -178,4 +210,55 @@ pub(crate) fn columns_container_css(hints: &ColumnsHints, extra: &str) -> String
         css.push_str(extra);
     }
     css
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::color::{BasicColor, RgbColor};
+    use crate::style::Opacity;
+
+    fn red() -> Color {
+        Color::Rgb(RgbColor::new(255, 0, 0, BasicColor::Red))
+    }
+
+    #[test]
+    fn paint_to_css_color_opaque_rgb() {
+        let css = paint_to_css_color(PaintColor::new(red())).unwrap();
+        assert_eq!(css, CssColor::Rgb(255, 0, 0));
+    }
+
+    #[test]
+    fn paint_to_css_color_alpha_rgba() {
+        let paint = PaintColor::new(red()).with_opacity(Opacity::from_percent(50).unwrap());
+        let css = paint_to_css_color(paint).unwrap();
+        match css {
+            CssColor::Rgba(255, 0, 0, alpha) => {
+                assert!((alpha - 128.0 / 255.0).abs() < 1e-4);
+            }
+            other => panic!("expected rgba, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn paint_to_css_color_keywords_ignore_alpha() {
+        let transparent = PaintColor::new(Color::Tailwind(Tailwind::Transparent))
+            .with_opacity(Opacity::from_percent(50).unwrap());
+        assert_eq!(paint_to_css_color(transparent), Some(CssColor::Transparent));
+        assert_eq!(
+            paint_to_css_color(PaintColor::new(Color::Tailwind(Tailwind::Current))),
+            Some(CssColor::CurrentColor)
+        );
+        assert_eq!(
+            paint_to_css_color(PaintColor::new(Color::Tailwind(Tailwind::Inherit))),
+            Some(CssColor::Inherit)
+        );
+    }
+
+    #[test]
+    fn paint_to_css_color_terminal_defaults_have_no_declaration() {
+        assert_eq!(paint_to_css_color(PaintColor::new(Color::DefaultForeground)), None);
+        assert_eq!(paint_to_css_color(PaintColor::new(Color::DefaultBackground)), None);
+        assert_eq!(paint_to_css_color(PaintColor::new(Color::Reset)), None);
+    }
 }

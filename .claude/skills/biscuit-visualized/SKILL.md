@@ -46,7 +46,7 @@ For the legacy HiDPI multiplier path, omit `target_width` and set `scale: N` dir
 
 ### In-repo deep dive
 
-`biscuit-visualized/docs/dot-graph.md` — full reference for the DOT graph subset accepted by this library, including supported / rejected features, cluster syntax, and the resolution-tuning case study from `sniff repo deps --ui`.
+`biscuit-visualized/docs/dot-graph.md` — full reference for the DOT graph subset accepted by this library, including supported / rejected features, cluster syntax, and the resolution-tuning case study from `sniff repo package-dependencies --ui`.
 
 ## Mermaid Diagrams
 

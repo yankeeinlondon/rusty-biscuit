@@ -84,12 +84,12 @@ Mirror the same set of tests in `biscuit-tui/lib/src/components/choose_many.rs` 
 Run:
 
 ```bash
-cargo test -p tui-chrome hotkey
-cargo test -p tui-chrome choose_one::tests
-cargo test -p tui-chrome choose_many::tests
+cargo test -p biscuit-tui hotkey
+cargo test -p biscuit-tui choose_one::tests
+cargo test -p biscuit-tui choose_many::tests
 ```
 
-If exact module filters differ, fall back to `cargo test -p tui-chrome` and read output.
+If exact module filters differ, fall back to `cargo test -p biscuit-tui` and read output.
 
 ## Phase 2 - Reject Empty and Multi-Character Hotkey Specs
 
@@ -168,8 +168,8 @@ If introducing a `Result` return on `extract_hotkey` would cascade into many cal
 Run:
 
 ```bash
-cargo test -p tui-chrome-cli choice_normalize
-cargo test -p tui-chrome-cli hotkey
+cargo test -p biscuit-tui-cli choice_normalize
+cargo test -p biscuit-tui-cli hotkey
 ```
 
 ## Phase 3 - Full Package Verification and Lint Cleanup
@@ -183,9 +183,9 @@ Prove the whole `biscuit-tui` package area is clean after Phase 1 and Phase 2.
 Run from the repository root:
 
 ```bash
-cargo test -p tui-chrome -p tui-chrome-cli
-cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings
-cargo test -p tui-chrome -p tui-chrome-cli
+cargo test -p biscuit-tui -p biscuit-tui-cli
+cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings
+cargo test -p biscuit-tui -p biscuit-tui-cli
 ```
 
 The first command must pass with zero failing tests. The second must pass with zero warnings (since `-D warnings` upgrades them to errors). The third reruns the full non-gated package tests after any clippy-induced edits to prove lint cleanup did not regress behavior.
@@ -195,8 +195,8 @@ The first command must pass with zero failing tests. The second must pass with z
 Review 8 explicitly noted that the gated PTY suites already pass:
 
 ```bash
-RUN_PTY_TESTS=1 cargo test -p tui-chrome-cli --test keyboard_protocol -- --nocapture
-RUN_SHELL_TESTS=1 cargo test -p tui-chrome-cli --test completions_shell -- --nocapture
+RUN_PTY_TESTS=1 cargo test -p biscuit-tui-cli --test keyboard_protocol -- --nocapture
+RUN_SHELL_TESTS=1 cargo test -p biscuit-tui-cli --test completions_shell -- --nocapture
 ```
 
 Re-run them only as a sanity check that Phase 1 and Phase 2 did not perturb PTY behavior. Failures here are out of scope for this review unless they were caused by changes in this plan.
@@ -220,6 +220,6 @@ The review is complete when:
 
 - `review-8.md` finding 1 is resolved: forced `--hotkey-badges` modes (`never`, `always`, `ctrl`, `alt`) survive both modifier-only press/release events and chord-fallback events for both `ChooseOneState` and `ChooseManyState`, with new tests covering each survival case.
 - `review-8.md` finding 2 is resolved: `parse_hotkey_spec` rejects empty and multi-character suffixes for `CTRL+`, `ALT+`, and `OPT+`; both object-source `hotkey` fields and bracketed `[CTRL+...] Label` prefixes surface `NormalizeError::InvalidHotkey` for invalid specs, with new tests covering each case.
-- `cargo test -p tui-chrome -p tui-chrome-cli` passes.
-- `cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings` passes.
-- The post-lint `cargo test -p tui-chrome -p tui-chrome-cli` rerun passes.
+- `cargo test -p biscuit-tui -p biscuit-tui-cli` passes.
+- `cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings` passes.
+- The post-lint `cargo test -p biscuit-tui -p biscuit-tui-cli` rerun passes.

@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::Result;
 use crate::error::SniffError;
+use crate::filesystem::git::GitRepo;
 
 use super::cargo::{cargo_package_name, cargo_package_version};
 use super::go::go_module_name_from_content;
@@ -69,25 +70,39 @@ pub struct RepoIdentity {
 /// Returns [`SniffError::NotARepository`] if `dir` is not inside a git
 /// repository.
 pub fn detect_repo_identity(dir: &Path) -> Result<RepoIdentity> {
-    let repo = git2::Repository::discover(dir)
-        .map_err(|_| SniffError::NotARepository(dir.to_path_buf()))?;
-    let root = repo
-        .workdir()
-        .ok_or_else(|| SniffError::NotARepository(dir.to_path_buf()))?
-        .to_path_buf();
+    // Trust/permission/I/O/corruption failures surface via `?`; only genuine
+    // repository absence becomes `NotARepository`.
+    let Some(git_repo) = GitRepo::discover(dir)? else {
+        return Err(SniffError::NotARepository(dir.to_path_buf()));
+    };
+    detect_repo_identity_with_repo(&git_repo)
+}
 
-    let monorepo = detect_repo_structure(&root)?;
+/// Detect repository identity using an already-discovered [`GitRepo`] handle.
+///
+/// This avoids the redundant `repo_root` discovery that
+/// [`detect_repo_identity`](Self::detect_repo_identity) performs when it has to
+/// discover the repository itself. Callers that already have a `GitRepo` from
+/// the plan-based detection path should prefer this helper.
+///
+/// ## Errors
+///
+/// Returns [`SniffError::NotARepository`] if the handle points at a path with
+/// no working directory (bare repositories are not supported here).
+pub fn detect_repo_identity_with_repo(git_repo: &GitRepo) -> Result<RepoIdentity> {
+    let root = git_repo.repo_root();
+    let monorepo = detect_repo_structure(root)?;
     let (is_monorepo, package_count) = match monorepo {
         Some(info) if info.is_monorepo => (true, info.packages.as_ref().map(Vec::len)),
         _ => (false, None),
     };
 
-    let name = resolve_name(&root, &repo);
-    let version = resolve_version(&root);
+    let name = resolve_name(root);
+    let version = resolve_version(root);
     let language = if is_monorepo {
         None
     } else {
-        resolve_language(&root)
+        resolve_language(root)
     };
 
     Ok(RepoIdentity {
@@ -100,11 +115,11 @@ pub fn detect_repo_identity(dir: &Path) -> Result<RepoIdentity> {
 }
 
 /// Resolve the display name in priority order: manifest → remote → dir name.
-fn resolve_name(root: &Path, repo: &git2::Repository) -> String {
+fn resolve_name(root: &Path) -> String {
     if let Some(name) = manifest_name(root) {
         return name;
     }
-    if let Some(name) = remote_basename(repo) {
+    if let Some(name) = remote_basename(root) {
         return name;
     }
     root.file_name()
@@ -144,19 +159,12 @@ fn manifest_name(root: &Path) -> Option<String> {
     None
 }
 
-fn remote_basename(repo: &git2::Repository) -> Option<String> {
-    let remote_name = repo
-        .find_remote("origin")
+fn remote_basename(root: &Path) -> Option<String> {
+    // `origin` if present, otherwise the first configured remote with a URL.
+    let url = crate::filesystem::preferred_remote_url(root)
         .ok()
-        .map(|_| "origin".to_string())
-        .or_else(|| {
-            repo.remotes()
-                .ok()
-                .and_then(|list| list.iter().flatten().next().map(String::from))
-        })?;
-    let remote = repo.find_remote(&remote_name).ok()?;
-    let url = remote.url()?;
-    parse_remote_basename(url)
+        .flatten()?;
+    parse_remote_basename(&url)
 }
 
 /// Extract the trailing path segment from a git remote URL, stripping `.git`.
@@ -231,12 +239,16 @@ fn resolve_language(root: &Path) -> Option<String> {
     None
 }
 
-fn read_toml(path: &Path) -> Option<toml_crate::Value> {
+/// Read and parse a TOML manifest at `path`, returning `None` on any I/O or
+/// parse failure. Used by the identity detectors and the version aggregator.
+pub(crate) fn read_toml(path: &Path) -> Option<toml_crate::Value> {
     let content = std::fs::read_to_string(path).ok()?;
     toml_crate::from_str(&content).ok()
 }
 
-fn read_json(path: &Path) -> Option<serde_json::Value> {
+/// Read and parse a JSON manifest at `path`, returning `None` on any I/O or
+/// parse failure. Used by the identity detectors and the version aggregator.
+pub(crate) fn read_json(path: &Path) -> Option<serde_json::Value> {
     let content = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&content).ok()
 }
@@ -244,6 +256,27 @@ fn read_json(path: &Path) -> Option<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detects_identity_via_existing_git_repo_handle() {
+        let tmp = tempfile::tempdir().unwrap();
+        git2::Repository::init(tmp.path()).unwrap();
+        std::fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[package]\nname = \"my-crate\"\nversion = \"1.2.3\"\n",
+        )
+        .unwrap();
+
+        let git_repo = GitRepo::discover(tmp.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+        let identity = detect_repo_identity_with_repo(&git_repo).unwrap();
+
+        assert_eq!(identity.name, "my-crate");
+        assert_eq!(identity.version.as_deref(), Some("1.2.3"));
+        assert_eq!(identity.language.as_deref(), Some("Rust"));
+        assert!(!identity.is_monorepo);
+    }
 
     #[test]
     fn errors_when_not_in_git_repo() {
@@ -268,6 +301,58 @@ mod tests {
         assert_eq!(identity.language.as_deref(), Some("Rust"));
         assert!(!identity.is_monorepo);
         assert_eq!(identity.package_count, None);
+    }
+
+    #[test]
+    fn resolves_version_from_cargo_workspace_package() {
+        let tmp = tempfile::tempdir().unwrap();
+        git2::Repository::init(tmp.path()).unwrap();
+        std::fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[workspace]\nmembers = [\"crates/*\"]\n\n[workspace.package]\nversion = \"2.3.4\"\n",
+        )
+        .unwrap();
+
+        let identity = detect_repo_identity(tmp.path()).unwrap();
+        assert_eq!(identity.version.as_deref(), Some("2.3.4"));
+    }
+
+    #[test]
+    fn resolves_version_from_node_manifest() {
+        let tmp = tempfile::tempdir().unwrap();
+        git2::Repository::init(tmp.path()).unwrap();
+        std::fs::write(
+            tmp.path().join("package.json"),
+            r#"{"name":"app","version":"5.6.7"}"#,
+        )
+        .unwrap();
+
+        let identity = detect_repo_identity(tmp.path()).unwrap();
+        assert_eq!(identity.version.as_deref(), Some("5.6.7"));
+    }
+
+    #[test]
+    fn resolves_version_from_pyproject_project_table() {
+        let tmp = tempfile::tempdir().unwrap();
+        git2::Repository::init(tmp.path()).unwrap();
+        std::fs::write(
+            tmp.path().join("pyproject.toml"),
+            "[project]\nname = \"app\"\nversion = \"8.9.10\"\n",
+        )
+        .unwrap();
+
+        let identity = detect_repo_identity(tmp.path()).unwrap();
+        assert_eq!(identity.version.as_deref(), Some("8.9.10"));
+    }
+
+    #[test]
+    fn missing_manifest_version_is_null() {
+        let tmp = tempfile::tempdir().unwrap();
+        git2::Repository::init(tmp.path()).unwrap();
+        std::fs::write(tmp.path().join("go.mod"), "module example.com/app\n").unwrap();
+
+        let identity = detect_repo_identity(tmp.path()).unwrap();
+        assert_eq!(identity.version, None);
     }
 
     #[test]

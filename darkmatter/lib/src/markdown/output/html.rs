@@ -22,7 +22,7 @@
 //! assert!(html.contains("<code"));
 //! ```
 
-use crate::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
+use crate::markdown::highlighting::{CodeBlockMode, CodeHighlighter, ColorMode, ThemePair};
 use crate::markdown::output::terminal::MermaidMode;
 
 /// Options for HTML output with sensible defaults.
@@ -49,6 +49,14 @@ pub struct HtmlOptions {
     pub prose_theme: ThemePair,
     /// Color mode (light/dark).
     pub color_mode: ColorMode,
+    /// Controls how a fenced code block's theme variant contrasts against the
+    /// resolved page [`color_mode`](HtmlOptions::color_mode).
+    ///
+    /// The browser code path resolves the code `ThemePair` against this mode
+    /// (e.g. `Inverse` paints a light panel on a dark page). It feeds both the
+    /// highlighted markup and the injected `.code-block` background rule
+    /// ([`code_block_background_hex`]) so the stylesheet and markup agree.
+    pub code_block_mode: CodeBlockMode,
     /// Global default for line numbering (can be overridden per code block).
     pub include_line_numbers: bool,
     /// Include inline CSS styles.
@@ -103,6 +111,7 @@ impl Default for HtmlOptions {
             code_theme: ThemePair::Github,
             prose_theme: ThemePair::Github,
             color_mode: ColorMode::Dark,
+            code_block_mode: CodeBlockMode::default(),
             include_line_numbers: false,
             include_styles: true,
             mermaid_mode: MermaidMode::default(),
@@ -118,13 +127,22 @@ impl Default for HtmlOptions {
 /// Computes the `.code-block` panel background color (`#rrggbb`) for `options`.
 ///
 /// Code blocks contrast against the page, so the code `ThemePair` resolves
-/// against the **inverted** color mode (`options.color_mode.inverted()`) — a
-/// dark page gets a light code panel and vice versa (Defect D). The render-tree
-/// browser entry point reuses this so its injected `.code-block` rule matches
-/// the computed code-panel background, rather than re-deriving the
-/// theme/inversion math.
+/// against the page color mode using the configured
+/// [`code_block_mode`](HtmlOptions::code_block_mode) (by default `Inverse`: a
+/// dark page gets a light code panel and vice versa — Defect D). The
+/// render-tree browser entry point reuses this so its injected `.code-block`
+/// rule matches the computed code-panel background, rather than re-deriving the
+/// theme/inversion math. Routes through
+/// [`ThemePair::resolve_for_surface`](crate::markdown::highlighting::themes::ThemePair::resolve_for_surface)
+/// so the same boundary resolver the public `CodeBlock` and `DarkmatterPage`
+/// use feeds this helper.
 pub(crate) fn code_block_background_hex(options: &HtmlOptions) -> String {
-    let highlighter = CodeHighlighter::new(options.code_theme, options.color_mode.inverted());
+    let resolved = options.code_theme.resolve_for_surface(
+        crate::markdown::highlighting::Surface::Mode(options.color_mode),
+        Some(options.code_theme),
+        options.code_block_mode,
+    );
+    let highlighter = CodeHighlighter::from_theme(resolved.theme, resolved.color_mode);
     let bg = highlighter
         .theme()
         .settings

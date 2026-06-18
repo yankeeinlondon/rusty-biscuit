@@ -108,10 +108,10 @@ pub fn detect_justfiles(base_dir: &Path, filters: &[String]) -> Result<Vec<Justf
 
 /// Determine scope root: git repo root if in a repo, otherwise base_dir.
 fn find_scope_root(base_dir: &Path) -> PathBuf {
-    match git2::Repository::discover(base_dir) {
-        Ok(repo) => repo.workdir().unwrap_or(base_dir).to_path_buf(),
-        Err(_) => base_dir.to_path_buf(),
-    }
+    crate::filesystem::repo_root(base_dir)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| base_dir.to_path_buf())
 }
 
 /// Walk a directory tree and collect all justfile paths.

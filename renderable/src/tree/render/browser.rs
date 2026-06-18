@@ -30,7 +30,8 @@ use crate::browser::fragment::{BrowserFragment, ComposableNode, Ready, write_att
 use crate::html::HtmlPage;
 use crate::html::attribute::{ClassDefinition, DomId, HtmlDataAttribute};
 use crate::html::tag::{BlockTag, HtmlAttribute, HtmlType, VoidTag};
-use crate::tree::attrs::{HintNamespace, NodeAttrs};
+use crate::tree::attrs::NodeAttrs;
+use crate::tree::{HrAlignment, HrKind, HrWeight};
 use crate::tree::diagnostic::{Diagnostic, Severity};
 use crate::tree::document::Document;
 use crate::tree::error::{RenderError, RenderStrictness, Rendered};
@@ -153,10 +154,16 @@ pub fn render_browser_document(
 ) -> Result<Rendered<HtmlPage>, RenderError> {
     let mut writer = gate(&doc.root, opts)?;
 
-    // The document body is the root's children rendered as page fragments.
-    // A non-`Root` top-level node renders as a single wrapping fragment.
+    // The document body is the root's children rendered as page fragments. When
+    // the root carries a non-empty `Style` (e.g. a page-level foreground), it is
+    // rendered as its own wrapping `<div>` so the style is emitted and inherits
+    // to every descendant through CSS — otherwise the root style would be
+    // silently discarded. A non-`Root` top-level node always renders as a single
+    // wrapping fragment.
     let fragments = match &doc.root.kind {
-        NodeKind::Root { children } => writer.render_each(children)?,
+        NodeKind::Root { children } if root_style_is_empty(&doc.root) => {
+            writer.render_each(children)?
+        }
         _ => vec![writer.render(&doc.root)?],
     };
 
@@ -218,11 +225,12 @@ pub fn render_browser_document_html(
         buf: String::new(),
     };
 
-    // The body is the root's children streamed in order; a non-`Root`
-    // top-level node streams as a single wrapping element — mirroring
-    // `render_browser_document`'s body construction.
+    // The body is the root's children streamed in order; a styled root streams
+    // as its own wrapping `<div>` so a page-level style inherits to descendants,
+    // and a non-`Root` top-level node streams as a single wrapping element —
+    // mirroring `render_browser_document`'s body construction.
     match &doc.root.kind {
-        NodeKind::Root { children } => {
+        NodeKind::Root { children } if root_style_is_empty(&doc.root) => {
             for child in children {
                 writer.write(child)?;
             }
@@ -351,15 +359,15 @@ impl Writer<'_> {
                 // A projected `Progress` widget carries `ProgressHints`. The
                 // browser emits a semantic CSS progress bar before falling
                 // back to normal paragraph rendering.
-                if let Some(hints) = node.attrs.progress_hints() {
-                    self.render_progress(node, &hints, children)
+                if let Some(hints) = node.attrs.progress_hints_ref() {
+                    self.render_progress(node, hints, children)
                 } else {
                     self.block(BlockTag::P, &node.attrs, children)
                 }
             }
             NodeKind::BlockQuote { children } => {
-                if let Some(hints) = node.attrs.columns_hints() {
-                    self.render_columns(node, &hints, children)
+                if let Some(hints) = node.attrs.columns_hints_ref() {
+                    self.render_columns(node, hints, children)
                 } else {
                     self.block(BlockTag::Blockquote, &node.attrs, children)
                 }
@@ -408,7 +416,40 @@ impl Writer<'_> {
                 token, children, ..
             } => self.render_extended(node, token, children),
             NodeKind::Unsupported { label } => self.render_unsupported(node, label),
+            NodeKind::Disclosure { summary, children, .. } => {
+                self.render_disclosure(node, summary, children)
+            }
         }
+    }
+
+    /// Renders a disclosure block as native `\u003cdetails\u003e`/\u003csummary\u003e` HTML.
+    ///
+    /// The summary is rendered as phrasing content inside `\u003csummary\u003e`; the
+    /// disclosed body is rendered as block children inside `\u003cdetails\u003e`. No
+    /// JavaScript is emitted — the native elements provide collapse/expand.
+    fn render_disclosure(
+        &mut self,
+        node: &RenderNode,
+        summary: &[RenderNode],
+        children: &[RenderNode],
+    ) -> Result<BrowserFragment<Ready>, RenderError> {
+        let mut details = BrowserFragment::new().define_as_block_tag(BlockTag::Details, "");
+        for attr in node_attributes(&node.attrs, false) {
+            details = details.add_attribute(attr);
+        }
+
+        let mut summary_fragment =
+            BrowserFragment::new().define_as_block_tag(BlockTag::Summary, "");
+        for child in summary {
+            summary_fragment = summary_fragment.add_component(self.render(child)?);
+        }
+        details = details.add_component(summary_fragment.finalize());
+
+        for child in children {
+            details = details.add_component(self.render(child)?);
+        }
+
+        Ok(details.finalize())
     }
 
     /// Renders a [`NodeKind::Extended`] node.
@@ -520,43 +561,38 @@ impl Writer<'_> {
     /// Builds the `<hr>` or styled SVG for a [`NodeKind::ThematicBreak`].
     ///
     /// Under [`GraphicsMode::Off`] the node degrades to a plain `<hr>`
-    /// carrying any `darkmatter.hr.*` hints as `data-hr-*` attributes so the
-    /// styled rule is still user-observable. Under [`GraphicsMode::Vector`]
-    /// and [`GraphicsMode::Rich`] the hints drive an inline SVG whose
+    /// carrying any typed [`ThematicBreakAttrs`] as `data-hr-*` attributes so
+    /// the styled rule is still user-observable. Under [`GraphicsMode::Vector`]
+    /// and [`GraphicsMode::Rich`] those attrs drive an inline SVG whose
     /// primitives reference CSS custom properties (`--hr-weight`,
     /// `--hr-color`, `--hr-width`) so page-level overrides take effect.
+    ///
+    /// [`ThematicBreakAttrs`]: crate::tree::ThematicBreakAttrs
     fn render_thematic_break(&self, attrs: &NodeAttrs) -> BrowserFragment<Ready> {
         use crate::tree::GraphicsMode;
 
+        let hr = attrs.thematic_break_ref();
         match self.opts.graphics_mode {
             GraphicsMode::Off => {
                 let mut fragment = BrowserFragment::new().define_as_void_tag(VoidTag::Hr);
                 for attr in node_attributes(attrs, is_inline_void_tag(&VoidTag::Hr)) {
                     fragment = fragment.add_attribute(attr);
                 }
-                const HR_NS: HintNamespace = HintNamespace("darkmatter.hr");
-                for key in ["kind", "alignment", "weight", "width", "color"] {
-                    if let Some(value) = attrs.get_hint(HR_NS, key).and_then(|v| v.as_str()) {
-                        fragment = fragment.add_attribute(HtmlAttribute::Data(
-                            HtmlDataAttribute::new(format!("hr-{key}")),
-                            value.to_string(),
-                        ));
-                    }
+                for (key, value) in hr_data_attr_pairs(hr) {
+                    fragment = fragment.add_attribute(HtmlAttribute::Data(
+                        HtmlDataAttribute::new(format!("hr-{key}")),
+                        value.to_string(),
+                    ));
                 }
                 fragment.finalize()
             }
             GraphicsMode::Vector | GraphicsMode::Rich => {
-                const HR_NS: HintNamespace = HintNamespace("darkmatter.hr");
-                let style = attrs.get_hint(HR_NS, "kind").and_then(|v| v.as_str());
-                let weight = attrs.get_hint(HR_NS, "weight").and_then(|v| v.as_str());
-                let width = attrs.get_hint(HR_NS, "width").and_then(|v| v.as_str());
-                let color = attrs.get_hint(HR_NS, "color").and_then(|v| v.as_str());
-
                 let svg = crate::tree::graphics::horizontal_rule_svg(
-                    style,
-                    weight,
-                    width,
-                    color,
+                    hr.and_then(|h| h.kind),
+                    hr.and_then(|h| h.weight),
+                    hr.and_then(|h| h.alignment),
+                    hr.and_then(|h| h.width.as_deref()),
+                    hr.and_then(|h| h.color.as_deref()),
                     "0",
                     "0",
                 );
@@ -690,8 +726,8 @@ impl Writer<'_> {
         let fallback_text = plain_text(children);
         let layout_css = node
             .attrs
-            .layout()
-            .map(|layout| layout_to_css(&layout))
+            .layout_ref()
+            .map(layout_to_css)
             .filter(|css| !css.is_empty())
             .unwrap_or_default();
         let html = super::shared::progress_html(hints, &fallback_text, &layout_css);
@@ -1001,7 +1037,7 @@ impl Writer<'_> {
 
         // A table title/caption is emitted as a `<caption>` before `<thead>`
         // and `<tbody>`. An empty or whitespace-only title is ignored.
-        if let Some(title) = node.attrs.table_title()
+        if let Some(title) = node.attrs.table_title_ref()
             && !title.trim().is_empty()
         {
             let caption = BrowserFragment::new()
@@ -1283,7 +1319,7 @@ impl StreamWriter<'_> {
     /// streaming analogue of [`Writer::render`] + [`wrap_style_emphasis`].
     fn write(&mut self, node: &RenderNode) -> Result<(), RenderError> {
         if is_inline_node_kind(&node.kind)
-            && let Some(style) = node.attrs.style().filter(|s| !s.is_empty())
+            && let Some(style) = node.attrs.style_ref().filter(|s| !s.is_empty())
         {
             let emphasis = style.emphasis;
             // Outermost-first so the nesting renders `<strong><em><s>…`,
@@ -1326,16 +1362,16 @@ impl StreamWriter<'_> {
                 children,
             } => self.write_section(node, *depth, heading, children),
             NodeKind::Paragraph { children } => {
-                if let Some(hints) = node.attrs.progress_hints() {
-                    self.write_progress(node, &hints, children);
+                if let Some(hints) = node.attrs.progress_hints_ref() {
+                    self.write_progress(node, hints, children);
                     Ok(())
                 } else {
                     self.block(BlockTag::P, &node.attrs, children)
                 }
             }
             NodeKind::BlockQuote { children } => {
-                if let Some(hints) = node.attrs.columns_hints() {
-                    self.write_columns(node, &hints, children)
+                if let Some(hints) = node.attrs.columns_hints_ref() {
+                    self.write_columns(node, hints, children)
                 } else {
                     self.block(BlockTag::Blockquote, &node.attrs, children)
                 }
@@ -1400,7 +1436,34 @@ impl StreamWriter<'_> {
                 token, children, ..
             } => self.write_extended(node, token, children),
             NodeKind::Unsupported { label } => self.write_unsupported(node, label),
+            NodeKind::Disclosure { summary, children, .. } => {
+                self.write_disclosure(node, summary, children)
+            }
         }
+    }
+
+    /// Streams a disclosure block as native `\u003cdetails\u003e`/\u003csummary\u003e` HTML.
+    fn write_disclosure(
+        &mut self,
+        node: &RenderNode,
+        summary: &[RenderNode],
+        children: &[RenderNode],
+    ) -> Result<(), RenderError> {
+        let inline = is_inline_block_tag(&BlockTag::Details);
+        self.open_block(&BlockTag::Details, &node_attributes(&node.attrs, inline));
+
+        self.open_block(&BlockTag::Summary, &[]);
+        for child in summary {
+            self.write(child)?;
+        }
+        self.close_block(&BlockTag::Summary);
+
+        for child in children {
+            self.write(child)?;
+        }
+
+        self.close_block(&BlockTag::Details);
+        Ok(())
     }
 
     /// Streams an open tag, child subtrees, and a close tag for a block
@@ -1497,8 +1560,8 @@ impl StreamWriter<'_> {
         let fallback_text = plain_text(children);
         let layout_css = node
             .attrs
-            .layout()
-            .map(|layout| layout_to_css(&layout))
+            .layout_ref()
+            .map(layout_to_css)
             .filter(|css| !css.is_empty())
             .unwrap_or_default();
         self.buf
@@ -1787,7 +1850,7 @@ impl StreamWriter<'_> {
     ) -> Result<(), RenderError> {
         self.open_block(&BlockTag::Table, &node_attributes(&node.attrs, false));
 
-        if let Some(title) = node.attrs.table_title()
+        if let Some(title) = node.attrs.table_title_ref()
             && !title.trim().is_empty()
         {
             self.open_block(&BlockTag::Caption, &[]);
@@ -1940,28 +2003,27 @@ impl StreamWriter<'_> {
     fn write_thematic_break(&mut self, attrs: &NodeAttrs) {
         use crate::tree::GraphicsMode;
 
+        let hr = attrs.thematic_break_ref();
         match self.opts.graphics_mode {
             GraphicsMode::Off => {
                 let mut out = node_attributes(attrs, is_inline_void_tag(&VoidTag::Hr));
-                const HR_NS: HintNamespace = HintNamespace("darkmatter.hr");
-                for key in ["kind", "alignment", "weight", "width", "color"] {
-                    if let Some(value) = attrs.get_hint(HR_NS, key).and_then(|v| v.as_str()) {
-                        out.push(HtmlAttribute::Data(
-                            HtmlDataAttribute::new(format!("hr-{key}")),
-                            value.to_string(),
-                        ));
-                    }
+                for (key, value) in hr_data_attr_pairs(hr) {
+                    out.push(HtmlAttribute::Data(
+                        HtmlDataAttribute::new(format!("hr-{key}")),
+                        value.to_string(),
+                    ));
                 }
                 self.write_void_tag(&VoidTag::Hr, &out);
             }
             GraphicsMode::Vector | GraphicsMode::Rich => {
-                const HR_NS: HintNamespace = HintNamespace("darkmatter.hr");
-                let style = attrs.get_hint(HR_NS, "kind").and_then(|v| v.as_str());
-                let weight = attrs.get_hint(HR_NS, "weight").and_then(|v| v.as_str());
-                let width = attrs.get_hint(HR_NS, "width").and_then(|v| v.as_str());
-                let color = attrs.get_hint(HR_NS, "color").and_then(|v| v.as_str());
                 let svg = crate::tree::graphics::horizontal_rule_svg(
-                    style, weight, width, color, "0", "0",
+                    hr.and_then(|h| h.kind),
+                    hr.and_then(|h| h.weight),
+                    hr.and_then(|h| h.alignment),
+                    hr.and_then(|h| h.width.as_deref()),
+                    hr.and_then(|h| h.color.as_deref()),
+                    "0",
+                    "0",
                 );
                 self.buf.push_str(&svg);
             }
@@ -2087,6 +2149,15 @@ impl StreamWriter<'_> {
 /// without building fragments. An `<h1>` is produced by a depth-1
 /// [`NodeKind::Heading`] or by a depth-1 [`NodeKind::Section`]'s heading; the
 /// scan is document-order and descends container children.
+/// Whether the document root carries no renderable [`Style`](crate::style::Style).
+///
+/// When `true` the document folds emit the root's children directly as page
+/// fragments; when `false` the root is rendered as its own wrapping `<div>` so
+/// its style is emitted and inherits to every descendant.
+fn root_style_is_empty(root: &RenderNode) -> bool {
+    root.attrs.style_ref().is_none_or(|s| s.is_empty())
+}
+
 fn tree_first_h1_text(root: &RenderNode) -> Option<String> {
     match &root.kind {
         NodeKind::Heading { depth, children } if depth.get() == 1 => {
@@ -2231,13 +2302,34 @@ fn is_inline_void_tag(tag: &VoidTag) -> bool {
     matches!(tag, VoidTag::Br | VoidTag::Img)
 }
 
+/// Collects the set `(suffix, value)` pairs for a thematic break's `data-hr-*`
+/// degradation attributes, in a fixed key order shared by the fragment and
+/// streaming HR paths so both emit byte-identical `<hr>` output.
+fn hr_data_attr_pairs(
+    hr: Option<&crate::tree::ThematicBreakAttrs>,
+) -> Vec<(&'static str, &str)> {
+    let Some(hr) = hr else {
+        return Vec::new();
+    };
+    [
+        ("kind", hr.kind.map(HrKind::as_str)),
+        ("alignment", hr.alignment.map(HrAlignment::as_str)),
+        ("weight", hr.weight.map(HrWeight::as_str)),
+        ("width", hr.width.as_deref()),
+        ("color", hr.color.as_deref()),
+    ]
+    .into_iter()
+    .filter_map(|(key, value)| value.map(|v| (key, v)))
+    .collect()
+}
+
 /// Translates a node's [`NodeAttrs`] into HTML attributes: `id` to the `id`
 /// attribute, `classes` to a `class` attribute, and a stored
 /// [`Layout`](crate::layout::Layout) plus the CSS-bearing layers of a stored
 /// [`Style`](crate::style::Style) to an inline `style` attribute.
 ///
-/// Layout is skipped for inline nodes; the validation gate records a warning
-/// when an inline node carries a layout, and the renderer drops it per D5.
+/// Layout is skipped for inline nodes; the validation gate rejects a layout on
+/// an inline node as an error, and the renderer drops it per D5.
 /// `Style` is applied to both block nodes and inline `Span` nodes. The
 /// layout and style declarations share a single `style` attribute and never
 /// overwrite each other.
@@ -2253,9 +2345,17 @@ fn node_attributes(attrs: &NodeAttrs, inline: bool) -> Vec<HtmlAttribute> {
     }
 
     let mut decls: Vec<String> = Vec::new();
-    if !inline && let Some(layout) = attrs.layout() {
-        let css = layout_to_css(&layout);
+    // The renderable width contract is content-box: `width` is the content box
+    // and `padding` / `border` are added around it. A page stylesheet may ship a
+    // global `* { box-sizing: border-box }` reset, which would silently
+    // reinterpret the lowered `width` as a border-box width. Emitting
+    // `box-sizing:content-box` on every node that lowers a non-default width,
+    // padding, or border keeps the contract under any such reset.
+    let mut needs_content_box = false;
+    if !inline && let Some(layout) = attrs.layout_ref() {
+        let css = layout_to_css(layout);
         if !css.is_empty() {
+            needs_content_box |= layout_lowers_box(layout);
             decls.push(css);
         }
     }
@@ -2263,16 +2363,175 @@ fn node_attributes(attrs: &NodeAttrs, inline: bool) -> Vec<HtmlAttribute> {
     // nodes. Bold / italic / strikethrough emphasis lowers to CSS here for
     // block nodes; for inline nodes it is applied as semantic wrappers by
     // `wrap_style_emphasis` instead, so the CSS form is suppressed.
-    if let Some(style) = attrs.style().filter(|s| !s.is_empty()) {
-        let css = style_css_declarations(&style, !inline);
+    if let Some(style) = attrs.style_ref().filter(|s| !s.is_empty()) {
+        let css = style_css_declarations(style, !inline);
         if !css.is_empty() {
+            needs_content_box |= style_draws_border(style);
             decls.push(css);
         }
+    }
+    if needs_content_box {
+        // Prepend so the contract is set before the width/padding it governs.
+        decls.insert(0, "box-sizing:content-box".into());
+    }
+    // Validated `inline_style` (browser-only author CSS, already merged over
+    // frontmatter defaults upstream) is the author's per-node intent: it
+    // *replaces* the derived `Layout` / `Style` declaration for any property it
+    // sets, then its remaining declarations append last. Replacing — rather than
+    // appending a shadowing duplicate — keeps the overridden frontmatter value
+    // out of the attribute entirely (the spec's per-node-wins contract). Derived
+    // declarations whose property `inline_style` does not set are untouched, so
+    // intentional internal pairs (e.g. an explicit margin plus an `auto`
+    // centering margin) are preserved. It is a validated `CssStyle`, so no
+    // unparsed CSS can be injected here.
+    let inline_decls: Vec<String> = attrs
+        .browser_ref()
+        .and_then(|browser| browser.inline_style.as_ref())
+        .map(css_style_declarations)
+        .unwrap_or_default();
+    if !inline_decls.is_empty() {
+        let overridden: std::collections::HashSet<String> =
+            inline_decls.iter().map(|d| css_property_of(d)).collect();
+        let mut merged: Vec<String> = decls
+            .into_iter()
+            .flat_map(|group| {
+                group
+                    .split(';')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|decl| !overridden.contains(&css_property_of(decl)))
+            .collect();
+        merged.extend(inline_decls);
+        decls = merged;
     }
     if !decls.is_empty() {
         out.push(HtmlAttribute::Other("style".into(), decls.join(";")));
     }
+    push_browser_attributes(&mut out, attrs);
     out
+}
+
+/// The property name of a `name:value` CSS declaration (the text before the
+/// first `:`, trimmed). Used to let a validated `inline_style` override the
+/// derived `Layout` / `Style` declaration for the same property.
+fn css_property_of(decl: &str) -> String {
+    decl.split(':').next().unwrap_or("").trim().to_string()
+}
+
+/// Lowers a validated [`CssStyle`](crate::stylesheet::CssStyle) to compact
+/// `name:value` declaration strings matching the inline-`style` form the
+/// browser renderer emits for `Layout` / `Style`.
+///
+/// [`CssStyle::to_css`](crate::stylesheet::CssStyle::to_css) produces the
+/// human-spaced `name: value;` form (one declaration per line); this collapses
+/// each line to `name:value` so it merges cleanly into the joined `style`
+/// attribute.
+fn css_style_declarations(style: &crate::stylesheet::CssStyle) -> Vec<String> {
+    style
+        .to_css()
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim().trim_end_matches(';');
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.replacen(": ", ":", 1))
+            }
+        })
+        .collect()
+}
+
+/// Appends the typed browser attributes carried by [`NodeAttrs::browser`].
+///
+/// The kind-specific `link` / `image` sub-groups are emitted unconditionally
+/// from whichever group is present — validation guarantees a `link` group only
+/// rides a [`NodeKind::Link`] and an `image` group only a [`NodeKind::Image`],
+/// so no node-kind check is needed here. `data_attrs` and `aria_attrs` emit in
+/// the deterministic [`BTreeMap`](std::collections::BTreeMap) key order with a
+/// fixed `data-` / `aria-` prefix, so an arbitrary attribute (`onclick`,
+/// `href`, `src`, `style`) can never be injected through them. `inline_style`
+/// is handled by [`node_attributes`] so it coalesces into the single `style`
+/// attribute.
+fn push_browser_attributes(out: &mut Vec<HtmlAttribute>, attrs: &NodeAttrs) {
+    let Some(browser) = attrs.browser_ref() else {
+        return;
+    };
+    if let Some(link) = &browser.link {
+        if let Some(target) = &link.target {
+            out.push(HtmlAttribute::Target(target.as_str().to_string()));
+        }
+        if !link.rel.is_empty() {
+            let rel = link
+                .rel
+                .iter()
+                .map(|r| r.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            out.push(HtmlAttribute::Other("rel".into(), rel));
+        }
+        if let Some(download) = &link.download {
+            out.push(HtmlAttribute::Other("download".into(), download.clone()));
+        }
+    }
+    if let Some(image) = &browser.image {
+        if let Some(loading) = image.loading {
+            out.push(HtmlAttribute::Other(
+                "loading".into(),
+                loading.as_str().to_string(),
+            ));
+        }
+        if let Some(decoding) = image.decoding {
+            out.push(HtmlAttribute::Other(
+                "decoding".into(),
+                decoding.as_str().to_string(),
+            ));
+        }
+    }
+    for (name, value) in &browser.data_attrs {
+        out.push(HtmlAttribute::Other(
+            format!("data-{}", name.as_str()),
+            value.clone(),
+        ));
+    }
+    for (name, value) in &browser.aria_attrs {
+        out.push(HtmlAttribute::Other(
+            format!("aria-{}", name.as_str()),
+            value.clone(),
+        ));
+    }
+}
+
+/// Whether a [`Layout`](crate::layout::Layout) lowers a non-default `width` or
+/// `padding` for the browser — the box-model declarations whose width contract
+/// is content-box. Mirrors the emission conditions in [`layout_to_css`].
+fn layout_lowers_box(layout: &crate::layout::Layout) -> bool {
+    use crate::layout::{Length, Width};
+    use crate::target::RenderTarget;
+    // The default `Edges` resolve to `Some(Length::Zero)` (not `None`), so a
+    // zero side is a no-op padding that does not widen the box.
+    let p = &layout.padding;
+    let padded = [&p.top, &p.right, &p.bottom, &p.left]
+        .into_iter()
+        .any(|tv| !matches!(tv.resolve(RenderTarget::Browser), None | Some(Length::Zero)));
+    let sized = match &layout.width {
+        Width::Auto => false,
+        Width::FitContent => true,
+        Width::Fixed(tv) => tv.resolve(RenderTarget::Browser).is_some(),
+    };
+    padded || sized
+}
+
+/// Whether a [`Style`](crate::style::Style) draws at least one border edge — the
+/// case where `border` widens the box and the content-box contract matters.
+fn style_draws_border(style: &crate::style::Style) -> bool {
+    use crate::style::BorderSides;
+    style
+        .border
+        .as_ref()
+        .is_some_and(|b| !matches!(b.sides, BorderSides::None))
 }
 
 /// Lowers the CSS-bearing layers of a [`Style`](crate::style::Style) to an
@@ -2286,21 +2545,26 @@ fn node_attributes(attrs: &NodeAttrs, inline: bool) -> Vec<HtmlAttribute> {
 /// `false` (an inline node) those three layers are left to the semantic
 /// wrappers applied by [`wrap_style_emphasis`].
 ///
-/// `border` and `fill` are intentionally ignored until the broader Browser
-/// Style box-painting work defines those semantics.
+/// `border` lowers to the CSS `border-*` matrix via [`lower_border`]. The
+/// deleted `fill` field no longer exists; a painted box is `background`.
 fn style_css_declarations(style: &crate::style::Style, emit_emphasis: bool) -> String {
     use crate::color::ColorMode;
     use crate::target::RenderTarget;
 
     let mut decls: Vec<String> = Vec::new();
 
+    // Both color slots and the border share one lowering: `PaintColor` →
+    // validated `CssColor` (`rgb()` / `rgba()` / keyword) via the shared
+    // `paint_to_css_color`, so alpha survives and the CSS form stays consistent
+    // with the MarkdownPlus emitter.
     let resolve_color = |tv: &crate::layout::TargetValue<
-        crate::style::PerMode<crate::color::Color>,
+        crate::style::PerMode<crate::style::PaintColor>,
     >|
      -> Option<String> {
         tv.resolve(RenderTarget::Browser)
             .map(|per_mode| *per_mode.resolve(ColorMode::Dark))
-            .and_then(super::shared::color_to_css)
+            .and_then(super::shared::paint_to_css_color)
+            .map(|css| css.to_string())
     };
 
     if let Some(color) = style.color.as_ref().and_then(&resolve_color) {
@@ -2341,7 +2605,82 @@ fn style_css_declarations(style: &crate::style::Style, emit_emphasis: bool) -> S
             decls.push("text-decoration-line:line-through".into());
         }
     }
+    if let Some(border) = style.border.as_ref() {
+        lower_border(border, resolve_color, &mut decls);
+    }
     decls.join(";")
+}
+
+/// Lowers a [`Border`](crate::style::Border) to inline CSS declarations.
+///
+/// `weight` maps to a pixel `border-width` (`Thin`→`1px`, `Medium`→`2px`,
+/// `Thick`→`3px`); `line_style` to the matching `border-style` keyword; and
+/// `color` through the shared `PerMode` → CSS color path.
+/// [`BorderSides::All`] emits the `border-{width,style,color}` shorthands;
+/// [`BorderSides::Sides`] emits only the enabled per-side `border-{side}-*`
+/// declarations; [`BorderSides::None`] emits no edges. `radius` lowers to
+/// `border-radius` regardless of which sides are drawn.
+///
+/// [`BorderSides::All`]: crate::style::BorderSides::All
+/// [`BorderSides::Sides`]: crate::style::BorderSides::Sides
+/// [`BorderSides::None`]: crate::style::BorderSides::None
+fn lower_border(
+    border: &crate::style::Border,
+    resolve_color: impl Fn(
+        &crate::layout::TargetValue<crate::style::PerMode<crate::style::PaintColor>>,
+    ) -> Option<String>,
+    decls: &mut Vec<String>,
+) {
+    use crate::style::{BorderLineStyle, BorderSides, BorderWeight};
+    use crate::target::RenderTarget;
+
+    let width = match border.weight {
+        BorderWeight::Thin => "1px",
+        BorderWeight::Medium => "2px",
+        BorderWeight::Thick => "3px",
+    };
+    let line_style = match border.line_style {
+        BorderLineStyle::Solid => "solid",
+        BorderLineStyle::Dashed => "dashed",
+        BorderLineStyle::Dotted => "dotted",
+        BorderLineStyle::Double => "double",
+    };
+    let color = border.color.as_ref().and_then(resolve_color);
+
+    match border.sides {
+        BorderSides::All => {
+            decls.push(format!("border-width:{width}"));
+            decls.push(format!("border-style:{line_style}"));
+            if let Some(color) = &color {
+                decls.push(format!("border-color:{color}"));
+            }
+        }
+        BorderSides::None => {}
+        BorderSides::Sides {
+            top,
+            right,
+            bottom,
+            left,
+        } => {
+            for (enabled, side) in [
+                (top, "top"),
+                (right, "right"),
+                (bottom, "bottom"),
+                (left, "left"),
+            ] {
+                if enabled {
+                    decls.push(format!("border-{side}-width:{width}"));
+                    decls.push(format!("border-{side}-style:{line_style}"));
+                    if let Some(color) = &color {
+                        decls.push(format!("border-{side}-color:{color}"));
+                    }
+                }
+            }
+        }
+    }
+    if let Some(len) = border.radius.as_ref().and_then(|r| r.resolve(RenderTarget::Browser)) {
+        decls.push(format!("border-radius:{}", css_len(len, false)));
+    }
 }
 
 /// Wraps `fragment` in semantic emphasis tags (`<strong>`, `<em>`, `<s>`) for
@@ -2356,7 +2695,7 @@ fn wrap_style_emphasis(
     attrs: &NodeAttrs,
     fragment: BrowserFragment<Ready>,
 ) -> BrowserFragment<Ready> {
-    let Some(style) = attrs.style().filter(|s| !s.is_empty()) else {
+    let Some(style) = attrs.style_ref().filter(|s| !s.is_empty()) else {
         return fragment;
     };
     let emphasis = style.emphasis;
@@ -2386,27 +2725,34 @@ fn wrap_style_emphasis(
 /// Lowers a [`Layout`](crate::layout::Layout) to an inline CSS declaration
 /// string for the browser target.
 ///
-/// Margin sides are resolved with [`TargetValue::resolve`] for
-/// [`RenderTarget::Browser`]. Vertical sides (`top` / `bottom`) lower a
-/// [`Length::Ch`] to `lh` (line-height units); horizontal sides lower it to
-/// `ch`. A `max_width` adds `margin-left` / `margin-right: auto` per the
-/// node's [`Alignment`]. [`WordWrap::None`] adds `white-space:nowrap`; any
-/// wrapping variant adds `overflow-wrap:break-word`.
+/// `margin` and `padding` edge sides are resolved with
+/// [`TargetValue::resolve`] for [`RenderTarget::Browser`]. Vertical sides
+/// (`top` / `bottom`) lower a [`Length::Ch`] to `lh` (line-height units);
+/// horizontal sides lower it to `ch`. [`Width::FitContent`] emits
+/// `width:fit-content` and [`Width::Fixed`] emits an explicit `width`;
+/// [`Width::Auto`] omits the property. A `max_width` adds `margin-left` /
+/// `margin-right: auto` per the node's [`Alignment`]. [`WordWrap::None`] adds
+/// `white-space:nowrap`; any wrapping variant adds `overflow-wrap:break-word`.
+/// Lowers a [`Length`](crate::layout::Length) to a CSS dimension. A
+/// [`Length::Ch`] becomes `lh` (line-height units) when `vertical`, otherwise
+/// `ch`; the other variants are target-independent.
+fn css_len(len: &crate::layout::Length, vertical: bool) -> String {
+    use crate::layout::Length;
+    match len {
+        Length::Zero => "0".into(),
+        Length::Ch(n) if vertical => format!("{n}lh"),
+        Length::Ch(n) => format!("{n}ch"),
+        Length::Percent(p) => format!("{p}%"),
+        Length::Css(sizing) => sizing.to_string(),
+    }
+}
+
 fn layout_to_css(layout: &crate::layout::Layout) -> String {
-    use crate::layout::{Alignment, Length, TargetValue, WordWrap};
+    use crate::layout::{Alignment, Length, TargetValue, Width, WordWrap};
     use crate::target::RenderTarget;
 
     fn resolve(tv: &TargetValue<Length>) -> Option<&Length> {
         tv.resolve(RenderTarget::Browser)
-    }
-    fn css_len(len: &Length, vertical: bool) -> String {
-        match len {
-            Length::Zero => "0".into(),
-            Length::Ch(n) if vertical => format!("{n}lh"),
-            Length::Ch(n) => format!("{n}ch"),
-            Length::Percent(p) => format!("{p}%"),
-            Length::Css(sizing) => sizing.to_string(),
-        }
     }
 
     let m = &layout.margin;
@@ -2422,6 +2768,28 @@ fn layout_to_css(layout: &crate::layout::Layout) -> String {
     }
     if let Some(l) = resolve(&m.right) {
         decls.push(format!("margin-right:{}", css_len(l, false)));
+    }
+    let p = &layout.padding;
+    if let Some(l) = resolve(&p.top) {
+        decls.push(format!("padding-top:{}", css_len(l, true)));
+    }
+    if let Some(l) = resolve(&p.bottom) {
+        decls.push(format!("padding-bottom:{}", css_len(l, true)));
+    }
+    if let Some(l) = resolve(&p.left) {
+        decls.push(format!("padding-left:{}", css_len(l, false)));
+    }
+    if let Some(l) = resolve(&p.right) {
+        decls.push(format!("padding-right:{}", css_len(l, false)));
+    }
+    match &layout.width {
+        Width::Auto => {}
+        Width::FitContent => decls.push("width:fit-content".into()),
+        Width::Fixed(tv) => {
+            if let Some(l) = resolve(tv) {
+                decls.push(format!("width:{}", css_len(l, false)));
+            }
+        }
     }
     if let Some(mw) = layout.max_width.as_ref().and_then(resolve) {
         decls.push(format!("max-width:{}", css_len(mw, false)));
@@ -3086,6 +3454,114 @@ mod tests {
     }
 
     #[test]
+    fn link_emits_typed_browser_attributes() {
+        let mut link = RenderNode::link("https://example.com/x", None, vec![RenderNode::text("go")]);
+        let browser = crate::tree::BrowserAttrs {
+            link: Some(crate::tree::LinkBrowserAttrs {
+                target: Some(crate::tree::LinkTarget::Blank),
+                rel: vec![
+                    crate::tree::LinkRelation::NoOpener,
+                    crate::tree::LinkRelation::NoReferrer,
+                ],
+                download: Some("file.txt".into()),
+            }),
+            ..Default::default()
+        };
+        link.attrs.set_browser(&browser);
+        assert_eq!(
+            html(&link),
+            r#"<a target="_blank" rel="noopener noreferrer" download="file.txt" href="https://example.com/x">go</a>"#
+        );
+    }
+
+    #[test]
+    fn image_emits_typed_browser_attributes() {
+        let mut image = RenderNode::image("p.png", None, "alt");
+        let browser = crate::tree::BrowserAttrs {
+            image: Some(crate::tree::ImageBrowserAttrs {
+                loading: Some(crate::tree::ImageLoading::Lazy),
+                decoding: Some(crate::tree::ImageDecoding::Async),
+            }),
+            ..Default::default()
+        };
+        image.attrs.set_browser(&browser);
+        assert_eq!(
+            html(&image),
+            r#"<img loading="lazy" decoding="async" src="p.png" alt="alt">"#
+        );
+    }
+
+    #[test]
+    fn node_emits_data_and_aria_attributes_in_deterministic_order_and_escaped() {
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        let mut browser = crate::tree::BrowserAttrs::default();
+        // Insert out of sorted order; BTreeMap emits them sorted.
+        browser
+            .data_attrs
+            .insert(crate::tree::DataAttrName::new("z-last").unwrap(), "1".into());
+        browser.data_attrs.insert(
+            crate::tree::DataAttrName::new("prompt").unwrap(),
+            "explain < this".into(),
+        );
+        browser.aria_attrs.insert(
+            crate::tree::AriaAttrName::new("label").unwrap(),
+            "info".into(),
+        );
+        para.attrs.set_browser(&browser);
+        assert_eq!(
+            html(&para),
+            r#"<p data-prompt="explain &lt; this" data-z-last="1" aria-label="info">x</p>"#
+        );
+    }
+
+    #[test]
+    fn inline_style_merges_with_node_style_into_a_single_attribute() {
+        use crate::style::{PaintColor, PerMode, Style};
+        let mut span = RenderNode::span(vec![], vec![RenderNode::text("x")]);
+        // Node `Style` sets a foreground color; inline_style sets a background.
+        span.attrs.set_style(&Style {
+            color: Some(crate::layout::TargetValue::universal(PerMode::universal(
+                PaintColor::new(crate::color::Color::Tailwind(crate::color::Tailwind::Inherit)),
+            ))),
+            ..Default::default()
+        });
+        let browser = crate::tree::BrowserAttrs {
+            inline_style: Some(crate::stylesheet::CssStyle::new().add(
+                crate::stylesheet::CssColorProp::BackgroundColor,
+                crate::stylesheet::CssColor::rgb(0x33, 0x66, 0x99),
+            )),
+            ..Default::default()
+        };
+        span.attrs.set_browser(&browser);
+        // A single `style` attribute carries both the node-`Style` color and the
+        // inline_style background, inline_style last so it wins in source order.
+        assert_eq!(
+            html(&span),
+            r#"<span style="color:inherit;background-color:rgb(51, 102, 153)">x</span>"#
+        );
+    }
+
+    /// The validated `data-*` / `aria-*` name newtypes make it impossible to
+    /// inject a duplicate/replacement `href`, `src`, raw `style`, or
+    /// event-handler attribute through the typed extension maps — the spec's
+    /// "no attribute injection" contract.
+    #[test]
+    fn browser_attr_name_newtypes_reject_injection_vectors() {
+        for forbidden in ["href", "src", "style", "onclick", "onload"] {
+            // A `data-`/`aria-` prefix is always prepended, so even an accepted
+            // name cannot become a bare `href`/`src`/`style`/`onclick`. The
+            // names here are themselves valid suffixes, proving the prefix — not
+            // name rejection — is the guard.
+            let data = crate::tree::DataAttrName::new(forbidden).unwrap();
+            assert_eq!(data.as_str(), forbidden);
+        }
+        // Names that *could* break out of the attribute token are rejected.
+        assert!(crate::tree::DataAttrName::new("on click").is_err());
+        assert!(crate::tree::DataAttrName::new("href=\"x\"").is_err());
+        assert!(crate::tree::AriaAttrName::new("foo>bar").is_err());
+    }
+
+    #[test]
     fn thematic_break_and_breaks() {
         // Under GraphicsMode::Off a plain break degrades to <hr>.
         assert_eq!(
@@ -3103,15 +3579,19 @@ mod tests {
     }
 
     /// Review-4 finding 2: under GraphicsMode::Off a `<hr>` produced from
-    /// darkmatter's HR-attribute fold must surface its `darkmatter.hr.*`
-    /// hints as `data-hr-*` HTML attributes so the styled rule is still
-    /// user-observable. Under Vector/Rich the hints drive an SVG instead.
+    /// darkmatter's HR-attribute fold must surface its typed
+    /// [`ThematicBreakAttrs`](crate::tree::ThematicBreakAttrs) as `data-hr-*`
+    /// HTML attributes so the styled rule is still user-observable. Under
+    /// Vector/Rich those attrs drive an SVG instead.
     #[test]
     fn thematic_break_surfaces_darkmatter_hr_hints_as_data_attrs() {
+        use crate::tree::{HrKind, HrWeight, ThematicBreakAttrs};
         let mut hr = RenderNode::thematic_break();
-        let ns = HintNamespace("darkmatter.hr");
-        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
-        hr.attrs.set_hint(ns, "weight", serde_json::json!("thick"));
+        hr.attrs.set_thematic_break(&ThematicBreakAttrs {
+            kind: Some(HrKind::Waves),
+            weight: Some(HrWeight::Thick),
+            ..Default::default()
+        });
 
         let off = html_with_graphics_mode(&hr, crate::tree::GraphicsMode::Off);
         assert!(
@@ -3396,6 +3876,62 @@ mod tests {
         assert!(!html.contains("Ignored"), "{html}");
     }
 
+    /// Builds a `Document` whose root carries a foreground `Style`.
+    fn doc_with_root_color() -> Document {
+        use crate::style::{PaintColor, PerMode, Style};
+        let mut root = RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text("Body")])]);
+        root.attrs.set_style(&Style {
+            color: Some(crate::layout::TargetValue::universal(PerMode::universal(
+                PaintColor::new(crate::color::Color::Tailwind(crate::color::Tailwind::Red500)),
+            ))),
+            ..Style::default()
+        });
+        Document {
+            sources: SourceRegistry::default(),
+            metadata: DocumentMetadata::default(),
+            root,
+        }
+    }
+
+    #[test]
+    fn document_root_foreground_wraps_body_for_inheritance() {
+        // Review-1 finding 3: a styled root must be rendered as a wrapping
+        // element so its foreground is emitted and inherits to descendants —
+        // not silently discarded. Both document folds must agree.
+        let doc = doc_with_root_color();
+        let opts = BrowserRenderOptions::default();
+
+        let via_page = render_browser_document(&doc, &opts)
+            .expect("render")
+            .output
+            .render();
+        let direct = render_browser_document_html(&doc, &opts)
+            .expect("render")
+            .output;
+
+        for (label, html) in [("fragment", &via_page), ("direct", &direct)] {
+            assert!(
+                html.contains("<body><div style=\"color:rgb(251, 44, 54)\"><p>Body</p></div></body>"),
+                "{label}: root foreground must wrap the body in an inheriting div; got:\n{html}"
+            );
+        }
+        assert_eq!(via_page, direct, "both folds must emit identical HTML");
+    }
+
+    #[test]
+    fn document_unstyled_root_emits_children_directly() {
+        // No-regression guard: an unstyled root still streams its children with
+        // no extra wrapping div.
+        let doc = Document {
+            sources: SourceRegistry::default(),
+            metadata: DocumentMetadata::default(),
+            root: RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text("Body")])]),
+        };
+        let opts = BrowserRenderOptions::default();
+        let html = render_browser_document_html(&doc, &opts).expect("render").output;
+        assert!(html.contains("<body><p>Body</p></body>"), "{html}");
+    }
+
     // ── render_browser_document_html: direct document-string renderer ────────
 
     /// A diverse single-document corpus exercising prose, headings, emphasis,
@@ -3466,6 +4002,65 @@ mod tests {
                 "1",
                 vec![RenderNode::paragraph(vec![RenderNode::text("note")])],
             ),
+            // A paragraph carrying typed browser attrs (inline style merged with
+            // node Style, plus data-* / aria-* maps) — exercises the generic
+            // browser-attr lowering in both writers.
+            {
+                let mut para = RenderNode::paragraph(vec![RenderNode::text("attrs")]);
+                let mut browser = crate::tree::BrowserAttrs {
+                    inline_style: Some(crate::stylesheet::CssStyle::new().add(
+                        crate::stylesheet::CssColorProp::Color,
+                        crate::stylesheet::CssColor::rgb(0x33, 0x66, 0x99),
+                    )),
+                    ..Default::default()
+                };
+                browser.data_attrs.insert(
+                    crate::tree::DataAttrName::new("prompt").unwrap(),
+                    "explain < this".into(),
+                );
+                browser.aria_attrs.insert(
+                    crate::tree::AriaAttrName::new("label").unwrap(),
+                    "info".into(),
+                );
+                para.attrs.set_browser(&browser);
+                para
+            },
+            // A link carrying typed link browser attrs and an image carrying
+            // typed image browser attrs — exercises the kind-specific lowering.
+            RenderNode::paragraph(vec![
+                {
+                    let mut link = RenderNode::link(
+                        "https://example.com/x",
+                        None,
+                        vec![RenderNode::text("go")],
+                    );
+                    let browser = crate::tree::BrowserAttrs {
+                        link: Some(crate::tree::LinkBrowserAttrs {
+                            target: Some(crate::tree::LinkTarget::Blank),
+                            rel: vec![
+                                crate::tree::LinkRelation::NoOpener,
+                                crate::tree::LinkRelation::NoReferrer,
+                            ],
+                            download: Some("file.txt".into()),
+                        }),
+                        ..Default::default()
+                    };
+                    link.attrs.set_browser(&browser);
+                    link
+                },
+                {
+                    let mut image = RenderNode::image("p.png", None, "alt");
+                    let browser = crate::tree::BrowserAttrs {
+                        image: Some(crate::tree::ImageBrowserAttrs {
+                            loading: Some(crate::tree::ImageLoading::Lazy),
+                            decoding: Some(crate::tree::ImageDecoding::Async),
+                        }),
+                        ..Default::default()
+                    };
+                    image.attrs.set_browser(&browser);
+                    image
+                },
+            ]),
         ]
     }
 
@@ -3796,11 +4391,11 @@ mod tests {
 
     #[test]
     fn browser_renderer_lowers_layout_to_css() {
-        use crate::layout::{Alignment, Layout, Length, Margin, TargetValue};
+        use crate::layout::{Alignment, Layout, Length, Edges, TargetValue};
 
         let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
         para.attrs.set_layout(&Layout {
-            margin: Margin::x(Length::ch(2)),
+            margin: Edges::x(Length::ch(2)),
             alignment: Alignment::Center,
             max_width: Some(TargetValue::universal(Length::Percent(80.0))),
             ..Layout::default()
@@ -3827,11 +4422,11 @@ mod tests {
 
     #[test]
     fn browser_renderer_lowers_vertical_margin_to_lh() {
-        use crate::layout::{Layout, Length, Margin};
+        use crate::layout::{Layout, Length, Edges};
 
         let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
         para.attrs.set_layout(&Layout {
-            margin: Margin::y(Length::ch(1)),
+            margin: Edges::y(Length::ch(1)),
             ..Layout::default()
         });
         let root = RenderNode::root(vec![para]);
@@ -3843,6 +4438,141 @@ mod tests {
             html.contains("1lh"),
             "vertical Ch margin must lower to lh: {html}"
         );
+    }
+
+    #[test]
+    fn layout_to_css_emits_padding() {
+        use crate::layout::{Edges, Layout, Length};
+
+        let css = layout_to_css(&Layout {
+            padding: Edges::x(Length::ch(3)),
+            ..Default::default()
+        });
+        assert!(
+            css.contains("padding-left:3ch") && css.contains("padding-right:3ch"),
+            "{css}"
+        );
+    }
+
+    #[test]
+    fn layout_to_css_emits_width_modes() {
+        use crate::layout::{Layout, Length, TargetValue, Width};
+
+        assert!(
+            layout_to_css(&Layout {
+                width: Width::FitContent,
+                ..Default::default()
+            })
+            .contains("width:fit-content")
+        );
+        let fixed = layout_to_css(&Layout {
+            width: Width::Fixed(TargetValue::universal(Length::ch(60))),
+            ..Default::default()
+        });
+        assert!(fixed.contains("width:60ch"), "{fixed}");
+        // Auto omits an explicit width.
+        assert!(!layout_to_css(&Layout::default()).contains("width:"));
+    }
+
+    #[test]
+    fn border_lowers_full_matrix() {
+        use crate::color::{Color, Tailwind};
+        use crate::layout::{Length, TargetValue};
+        use crate::style::{
+            Border, BorderLineStyle, BorderSides, BorderWeight, PerMode, Style,
+        };
+
+        let style = Style {
+            border: Some(Border {
+                weight: BorderWeight::Thick,
+                line_style: BorderLineStyle::Dashed,
+                sides: BorderSides::Sides {
+                    top: false,
+                    right: false,
+                    bottom: false,
+                    left: true,
+                },
+                radius: Some(TargetValue::universal(Length::ch(1))),
+                color: Some(TargetValue::universal(PerMode::universal(Color::Tailwind(
+                    Tailwind::Indigo500,
+                )))),
+            }),
+            ..Default::default()
+        };
+        let css = style_css_declarations(&style, true);
+        assert!(css.contains("border-left-style:dashed"), "{css}");
+        assert!(css.contains("border-left-width:"), "{css}");
+        assert!(css.contains("border-radius:"), "{css}");
+        assert!(
+            css.contains("border-left-color:") || css.contains("border-color:"),
+            "{css}"
+        );
+    }
+
+    #[test]
+    fn border_all_sides_uses_shorthand() {
+        use crate::style::{Border, BorderSides, Style};
+
+        let style = Style {
+            border: Some(Border {
+                sides: BorderSides::All,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let css = style_css_declarations(&style, true);
+        assert!(css.contains("border-style:solid"), "{css}");
+    }
+
+    #[test]
+    fn width_and_padding_emit_box_sizing_content_box() {
+        use crate::layout::{Edges, Layout, Length, TargetValue, Width};
+
+        // A node lowering an explicit `width` + `padding` must carry
+        // `box-sizing:content-box` so a global `border-box` reset cannot
+        // reinterpret the width contract.
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        para.attrs.set_layout(&Layout {
+            width: Width::Fixed(TargetValue::universal(Length::ch(20))),
+            padding: Edges::x(Length::ch(2)),
+            ..Default::default()
+        });
+        let out = html(&para);
+        assert!(out.contains("box-sizing:content-box"), "{out}");
+        assert!(out.contains("width:20ch"), "{out}");
+        assert!(out.contains("padding-left:2ch"), "{out}");
+    }
+
+    #[test]
+    fn border_emits_box_sizing_content_box() {
+        use crate::style::{Border, BorderSides, Style};
+
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        para.attrs.set_style(&Style {
+            border: Some(Border {
+                sides: BorderSides::All,
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let out = html(&para);
+        assert!(out.contains("box-sizing:content-box"), "{out}");
+        assert!(out.contains("border-style:solid"), "{out}");
+    }
+
+    #[test]
+    fn plain_node_omits_box_sizing() {
+        use crate::layout::{Edges, Layout, Length};
+
+        // Margin alone is a transparent outer layer with no width contract, so
+        // it must not drag in a `box-sizing` declaration.
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        para.attrs.set_layout(&Layout {
+            margin: Edges::x(Length::ch(2)),
+            ..Default::default()
+        });
+        let out = html(&para);
+        assert!(!out.contains("box-sizing"), "{out}");
     }
 
     // ── RT-PROGRESS-001: browser progress ──────────────────────────────────
@@ -3973,7 +4703,7 @@ mod tests {
 
     #[test]
     fn progress_applies_node_layout_to_outer_element() {
-        use crate::layout::{Layout, Length, Margin};
+        use crate::layout::{Layout, Length, Edges};
         let mut node = progress_para(
             "40%",
             crate::tree::ProgressHints {
@@ -3982,7 +4712,7 @@ mod tests {
             },
         );
         node.attrs.set_layout(&Layout {
-            margin: Margin::x(Length::ch(3)),
+            margin: Edges::x(Length::ch(3)),
             ..Layout::default()
         });
         let out = html(&node);
@@ -4085,7 +4815,7 @@ mod tests {
 
     fn universal_color(
         c: crate::color::Color,
-    ) -> crate::layout::TargetValue<crate::style::PerMode<crate::color::Color>> {
+    ) -> crate::layout::TargetValue<crate::style::PerMode<crate::style::PaintColor>> {
         crate::layout::TargetValue::universal(crate::style::PerMode::universal(c))
     }
 
@@ -4097,7 +4827,25 @@ mod tests {
             ..Default::default()
         });
         let out = html(&node);
-        assert!(out.contains("color:#"), "{out}");
+        assert!(out.contains("color:rgb("), "{out}");
+    }
+
+    #[test]
+    fn style_foreground_alpha_lowers_to_rgba() {
+        use crate::color::{BasicColor, Color, RgbColor};
+        use crate::style::{Opacity, PaintColor, PerMode};
+        let paint = PaintColor::new(Color::Rgb(RgbColor::new(255, 0, 0, BasicColor::Red)))
+            .with_opacity(Opacity::from_percent(50).unwrap());
+        let node = styled_para(crate::style::Style {
+            color: Some(crate::layout::TargetValue::universal(PerMode::universal(
+                paint,
+            ))),
+            ..Default::default()
+        });
+        let out = html(&node);
+        // A single declaration carrying the alpha — no opaque pre-declaration.
+        assert!(out.contains("color:rgba(255, 0, 0,"), "{out}");
+        assert_eq!(out.matches("color:").count(), 1, "{out}");
     }
 
     #[test]
@@ -4108,7 +4856,7 @@ mod tests {
             ..Default::default()
         });
         let out = html(&node);
-        assert!(out.contains("background-color:#"), "{out}");
+        assert!(out.contains("background-color:rgb("), "{out}");
     }
 
     #[test]
@@ -4219,21 +4967,21 @@ mod tests {
     #[test]
     fn style_and_layout_share_one_style_attribute() {
         use crate::color::{BasicColor, Color};
-        use crate::layout::{Layout, Length, Margin};
+        use crate::layout::{Layout, Length, Edges};
         let mut para = RenderNode::paragraph(vec![RenderNode::text("text")]);
         para.attrs.set_style(&crate::style::Style {
             color: Some(universal_color(Color::BasicColor(BasicColor::Red))),
             ..Default::default()
         });
         para.attrs.set_layout(&Layout {
-            margin: Margin::x(Length::ch(2)),
+            margin: Edges::x(Length::ch(2)),
             ..Layout::default()
         });
         let out = html(&RenderNode::root(vec![para]));
         // A single style attribute carrying both layout and style CSS.
         assert_eq!(out.matches("style=").count(), 1, "{out}");
         assert!(out.contains("margin-left:2ch"), "{out}");
-        assert!(out.contains("color:#"), "{out}");
+        assert!(out.contains("color:rgb("), "{out}");
     }
 
     #[test]
@@ -4245,7 +4993,7 @@ mod tests {
             ..Default::default()
         });
         let out = html(&span);
-        assert!(out.contains("color:#"), "{out}");
+        assert!(out.contains("color:rgb("), "{out}");
     }
 
     #[test]
@@ -4331,10 +5079,10 @@ mod tests {
 
     #[test]
     fn columns_layout_and_column_css_coexist() {
-        use crate::layout::{Layout, Length, Margin};
+        use crate::layout::{Layout, Length, Edges};
         let mut node = columns_bq(crate::tree::ColumnsHints::default(), vec![]);
         node.attrs.set_layout(&Layout {
-            margin: Margin::x(Length::ch(2)),
+            margin: Edges::x(Length::ch(2)),
             ..Layout::default()
         });
         let out = html(&node);
@@ -4434,7 +5182,7 @@ mod tests {
         let td_attrs = &after[..after.find('>').expect("td close")];
         assert_eq!(td_attrs.matches("style=").count(), 1, "{out}");
         assert!(td_attrs.contains("text-align:right"), "{out}");
-        assert!(td_attrs.contains("color:#"), "{out}");
+        assert!(td_attrs.contains("color:rgb("), "{out}");
     }
 
     // ── RT-FILESYSTEM-001: browser marker policy ───────────────────────────

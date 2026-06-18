@@ -3,7 +3,7 @@
 This document complements the functional specification in
 [spec.md](./spec.md) for `2026-04-28-choose-one-improvements`. The spec is
 authoritative for user-facing behavior; this design describes the internal
-shape needed to implement it in the `tui-chrome` library and the `question`
+shape needed to implement it in the `biscuit-tui` library and the `question`
 CLI without duplicating every requirement.
 
 ## Scope
@@ -25,7 +25,7 @@ choice ordering with an explicit sort enum over carrying both long-term.
 
 ```mermaid
 flowchart TD
-    subgraph CLI["tui-chrome-cli: question"]
+    subgraph CLI["biscuit-tui-cli: question"]
         Args["commands/common_choose.rs<br/>clap args and completion metadata"]
         Sources["option_sources.rs<br/>csv, rows, list, file, md frontmatter"]
         Normalize["choice_normalize.rs<br/>hotkey prefixes, label/value transforms"]
@@ -34,7 +34,7 @@ flowchart TD
         Output["output.rs"]
     end
 
-    subgraph Lib["tui-chrome"]
+    subgraph Lib["biscuit-tui"]
         Choice["components/choose.rs<br/>ChoiceInput, ChoiceOption, HotkeySpec, Orientation"]
         Layout["components/choice_layout.rs<br/>vertical and horizontal item geometry"]
         Render["components/choice_render.rs<br/>indicators, active highlight, hotkey badges"]
@@ -423,7 +423,7 @@ explicitly supplies. For example, with `--value snake-case`,
 
 ### Error Types
 
-Keep CLI errors local to `tui-chrome-cli`; the library should not depend on
+Keep CLI errors local to `biscuit-tui-cli`; the library should not depend on
 `clap`, filesystem parsing crates, or Markdown parsing.
 
 ```rust
@@ -592,5 +592,5 @@ Docs that must change with the implementation:
 7. Add explicit hotkey specs, CLI prefix parsing, and numeric hotkeys.
 8. Replace/extend option source parsing and label/value normalization.
 9. Add completions.
-10. Update docs and run focused tests, then `cargo test -p tui-chrome -p
-    tui-chrome-cli`.
+10. Update docs and run focused tests, then `cargo test -p biscuit-tui -p
+    biscuit-tui-cli`.

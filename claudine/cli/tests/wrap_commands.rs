@@ -2672,14 +2672,16 @@ fn compose_interactive_preflight_with_whitelisted_command() {
 
 #[cfg(unix)]
 #[test]
-fn compose_skips_shell_hidden_by_false_block() {
+fn compose_preflight_discovers_shell_inside_false_block() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
     seed_minimal_config(workspace.path());
 
-    // The ::shell is inside a ::block when="false" — Darkmatter's composition
-    // excludes it, so preflight never discovers the un-whitelisted command.
+    // Preflight discovery is condition-blind: a ::shell inside a
+    // ::block when="false" is still discovered and must be whitelisted, even
+    // though composition would exclude it from the output. An un-whitelisted
+    // command therefore fails preflight rather than being silently skipped.
     let md_file = workspace.path().join("template.md");
     fs::write(
         &md_file,
@@ -2691,12 +2693,14 @@ fn compose_skips_shell_hidden_by_false_block() {
     )
     .unwrap();
 
+    // Provider binary (should never be reached — preflight aborts first).
     write_executable(
         &path_dir.join("codex"),
         "#!/bin/sh\necho 'provider-launched' >&2\nexit 0\n",
     );
 
-    // No whitelist for curl — if it were discovered, preflight would fail.
+    // No whitelist for curl and no --interactive approval handler, so the
+    // discovered command fails preflight.
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
@@ -2704,14 +2708,20 @@ fn compose_skips_shell_hidden_by_false_block() {
         .current_dir(workspace.path())
         .args(["compose", "--codex", md_file.to_str().unwrap()])
         .assert()
-        .success();
+        .failure();
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
     let plain = strip_ansi(&stderr);
 
+    // The conditionally-excluded curl is still discovered and named.
     assert!(
-        plain.contains("provider-launched"),
-        "provider should launch — ::shell inside ::block when=\"false\" must be hidden; stderr was:\n{plain}"
+        plain.contains("curl"),
+        "preflight should discover ::shell inside ::block when=\"false\"; stderr was:\n{plain}"
+    );
+    // Provider must not launch when an un-whitelisted command fails preflight.
+    assert!(
+        !plain.contains("provider-launched"),
+        "provider must not launch when preflight fails; stderr was:\n{plain}"
     );
 }
 
@@ -3355,7 +3365,7 @@ exit 0
         .assert()
         .code(1)
         .stderr(contains(
-            "inline-compose with --interactive is not supported",
+            "inline-compose in interactive mode (from --interactive) is not supported",
         ));
 }
 
@@ -6213,6 +6223,84 @@ exit 0
     }
 }
 
+/// Phase 6 regression: service-less new-format stderr lines must be consumed
+/// by the bridge and not leak as raw `timestamp=` passthrough during compose.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn compose_opencode_serviceless_stderr_lines_are_consumed() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+    seed_minimal_config(&fake_home);
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nHello\n").unwrap();
+
+    // Fake opencode emits the exact service-less lines observed in the
+    // wild (spec.md:17-24) plus matching NDJSON stdout so the wrapper
+    // completes normally.
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' 'timestamp=2026-06-10T16:11:27.352Z level=INFO run=df5a9474 message=tracking hash=86a6603a' >&2
+printf '%s\n' 'timestamp=2026-06-10T16:11:27.460Z level=INFO run=df5a9474 message=loop session.id=ses_14db step=1' >&2
+printf '%s\n' 'timestamp=2026-06-10T16:11:27.559Z level=INFO run=df5a9474 message=tracking hash=86a6603a' >&2
+printf '%s\n' 'timestamp=2026-06-10T16:11:27.574Z level=INFO run=df5a9474 message=process session.id=ses_14db' >&2
+printf '%s\n' 'timestamp=2026-06-10T16:11:27.574Z level=INFO run=df5a9474 message=stream providerID=zai-coding-plan modelID=glm-5.1' >&2
+printf '%s\n' 'timestamp=2026-06-10T16:11:27.575Z level=INFO run=df5a9474 message="llm runtime selected"' >&2
+printf '%s\n' 'timestamp=2026-06-10T16:11:31.461Z level=INFO run=df5a9474 message=evaluated permission=glob' >&2
+printf '%s\n' '{"type":"init","session_id":"ses_14db","model":"test-model"}'
+printf '%s\n' '{"type":"step_start","sessionID":"ses_14db"}'
+printf '%s\n' '{"type":"text","text":"Done."}'
+printf '%s\n' '{"type":"step_complete","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2},"duration_ms":50}'
+exit 0
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", augmented_path(&path_dir))
+        .env("OPENCODE_MODEL", "test-model")
+        .args(["compose", "--opencode", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+
+    // The user-visible regression: raw timestamp= lines must not appear.
+    assert!(
+        !stderr.contains("timestamp="),
+        "raw timestamp= lines must be consumed by the bridge, not passthrough to stderr; got: {stderr}"
+    );
+
+    // Verify the JSONL summary contains the expected stderr diagnostics.
+    let row = read_summary_row(&fake_home);
+    let diagnostics = &row["extra"]["provider_summary"]["stderr_diagnostics"];
+    assert_eq!(
+        diagnostics["log_records_parsed"].as_u64().unwrap_or(0),
+        7,
+        "all 7 new-format lines should be parsed; row={row}",
+    );
+    // The bridge should have promoted the service-less lifecycle lines into
+    // semantic events (StepLoop, LlmCall, PermissionEvaluated).  They won't
+    // be visible in the summary directly, but the diagnostics counter proves
+    // the bridge consumed and classified them rather than leaving them as
+    // raw passthrough.
+    assert_eq!(
+        row["extra"]["exit_code"],
+        serde_json::json!(0),
+        "session should succeed: row={row}",
+    );
+}
+
 // ============================================================================
 // Performance flag tests
 // ============================================================================
@@ -7176,7 +7264,7 @@ fn sequence_claude_dry_run_does_not_call_opencode_models() {
 #[cfg(unix)]
 #[test]
 #[serial_test::serial]
-fn compose_sigint_during_prep_exits_130_with_notice() {
+fn slow_compose_sigint_during_prep_exits_130_with_notice() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();

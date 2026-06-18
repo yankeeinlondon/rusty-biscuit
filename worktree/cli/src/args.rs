@@ -23,6 +23,10 @@ pub struct Cli {
     #[arg(long, short = 'v', global = true)]
     pub verbose: bool,
 
+    /// Emit a performance report to stderr after command completion.
+    #[arg(long, global = true)]
+    pub perf: bool,
+
     /// Generate shell completions for the specified shell
     #[arg(long, value_name = "SHELL", hide = true)]
     pub completions: Option<Shell>,

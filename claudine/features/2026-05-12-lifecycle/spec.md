@@ -1,22 +1,26 @@
-# Lifecycle Formalization for Claudine Prompts
+# Lifecycle Formalization for Claudine Prompts & Late Binding Context
+
+
+
 
 ## The Prompt Lifecycle
 
-![lifecycle](./lifecycle.png)
+![lifecycle](./)
 
-A Claudine prompt document moves through a fixed set of lifecycle events. Today four of them exist as `LifecycleSignal` variants in `composition/lifecycle.rs` (`start`, `success`, `blocked`, `failure`), but they only support a handful of communication properties. This feature formalizes the full event set, introduces a unified per-event configuration model, and folds two pre-existing composition concerns (`loop`, `next`) into that model.
+A Claudine prompt document moves through a fixed set of lifecycle events. Today four of them exist as `LifecycleSignal` variants in `composition/lifecycle.rs` (`start`, `success`, `blocked`, `failure`), but they only support a handful of communication properties. This feature formalizes the full event set, introduces a unified per-event configuration model, and folds a pre-existing composition concerns (`loop`) into that model.
+
+> **Note:** the reference to "Next" as a lifecycle event in the picture needs to be removed as we're not going to add "Next" as an event
 
 ### Event Inventory
 
 | Event | New? | Fires when |
 |---|---|---|
-| `initialize` | **new** | Prompt file has been identified, before any pre-flight checks have run |
+| `initialize` | **new** | Prompt file has been identified, immediately after pre-flight checks have completed |
 | `start` | existing | Pre-flight checks have all passed; about to invoke the agent |
 | `blocked` | existing | Pre-flight checks failed; agent will not be invoked |
 | `success` | existing | Agentic loop completed without error |
 | `failure` | existing | Agentic loop returned an error |
 | `loop` | **repurposed** | An iteration of a looping prompt boundary (see [Loop](#loop)) |
-| `next` | **new** | Composition completed successfully and a handoff is configured |
 
 ### Event Purpose
 
@@ -26,7 +30,7 @@ A Claudine prompt document moves through a fixed set of lifecycle events. Today 
 - **`success`** — communicate completion, capture metrics, fire webhooks, advance a sequence.
 - **`failure`** — communicate failure, recover with `Retry` / `Resume` / `Requeue` / `Proxy`, or simply exit.
 - **`loop`** — per-iteration boundary inside a looping prompt; layers lifecycle-event behavior on top of the existing iteration controls.
-- **`next`** — handoff to another document on successful completion.
+- **`finalize`** — called after success/failure, if in a loop then the finalize event is only called on the last iteration of the loop
 
 ## Configuration Model
 
@@ -41,10 +45,18 @@ start:
 
     # The stack: ordered list of conditional actions
     stack:
+        # conditional action, using key/value action
         - when: "env.AGENT == 'claude'"
           action: say
           message: "Using Claude provider"
-        - "shell(git status --short)"
+        # conditional action, shorthand action
+        - when: "env.AGENT == 'codex'"
+          action: "say(using codex)"
+        # unconditional actions, using shorthand form
+        - action: "shell(git status --short)"
+        - action: "echo 'hi there'"
+        # conditional multi-action
+        - when: "file_exists('/path/to/file.md') && "
 ```
 
 ### Top-Level Communication Properties
@@ -74,7 +86,7 @@ pub struct LifecycleStackItem {
 ```
 
 - `when:` is a [Darkmatter conditional expression](@darkmatter/docs/topics/darkmatter-expressions.md). When omitted, the item always executes.
-- `action:` is exactly one action (see [Actions](#actions)). If you want multiple effects, write multiple stack items.
+- `action:` is a singular action (_see [Actions](#actions)_)
 
 ### Stack Processing
 
@@ -91,7 +103,36 @@ If the stack runs to completion without a lifecycle action matching, the event e
 
 ## Actions
 
-An action is one of five categories. Most accept a **short form** (string) and a **long form** (mapping with `action:` key plus parameters).
+An action is one of five categories. 
+
+1. Lifecycle Actions
+2. Communication Actions
+3. Side-Effect Actions
+4. Expression-Function Actions
+
+Most accept a **short form** (string) and a **long form** (dictionary). For any given when/action block you can have a singular action or an array of actions:
+
+```yaml
+    when: "phase > total_phases"
+    # an array of actions, in both short form and long form are allowed
+    action:
+        - say 'you did it'
+        - message 'nice job'
+        - set_frontmatter
+            file: "@spec.md"
+            prop: "status"
+            value: "in-progress"
+```
+
+but if there is only one action to take that is completely fine too:
+
+```yaml
+    when: "phase > total_phases"
+    action: say 'you did it'
+```
+
+The one important consideration for cardinality of _actions_ is that only ONE "Lifecycle Action" is allowed per block. This is because a lifecycle action is
+always the LAST action to be executed. We _could_ allow other actions to follow a lifecycle action but this is effectively "dead code" and these actions would never be executed. For that reason, we feel it is better to just have a Markdown file with this type of configuration resolve to a well communicated error to let the document owner make changes.
 
 ### Lifecycle Actions
 
@@ -270,35 +311,6 @@ loop:
           sound: applause
 ```
 
-### `next`
-
-Opt-in: present means a handoff is configured. Mutually exclusive `suggest` vs `push` keys determine interactivity.
-
-```yaml
-# Interactive: prompt the user before handing off
-next:
-    suggest:
-        compose: "the-next-thing.md"
-
-# Non-interactive: run immediately on success
-next:
-    push:
-        compose: "the-next-thing.md"
-```
-
-The handoff target accepts any of the **execution-group node kinds**:
-
-| Kind | Shape |
-|---|---|
-| `compose` | `compose: "<file>"` — run another prompt through the composition pipeline |
-| `inline-compose` | `inline-compose: "<file>"` — run an inline-compose prompt |
-| `sequence` | `sequence: "<file>"` — run a sequence |
-| `shell` | `shell: "<command>"` — run a shell command |
-| `prompt` | `prompt: "<text>"` — send a direct prompt to the current agent |
-
-Additional optional parameters mirror the execution-group node form (e.g., `yolo:`, `agent:`, `model:`).
-
-Standard lifecycle-event properties (`say`, `notify`, `effect`, `message`, `stack`) are also accepted on the `next` event.
 
 ## Action Error Propagation
 
@@ -343,6 +355,23 @@ failure:
 ```
 
 Adding `stack:` is purely additive. The top-level properties fire first, then the stack is processed.
+
+
+
+## Late Binding Context
+
+![lifecycle](../../docs/getting-started/lifecycle.excalidraw.svg)
+
+Up to now we have relied on using the `doc` (aka, document frontmatter), `ctx`, and `env` global variables to react to the execution environment for Claudine. However, once we introduce the Lifecycle Model (in next section) we will have an interesting gap:
+
+- TODAY: all interpolation, shell expansion, etc. happens immediately upon the composition process starting
+- FUTURE STATE:
+    - The `initialize` event takes place immediately after pre-flight checks have completed (and BEFORE we route to `start` or `blocked`)
+        - from a timing perspective we're in a good position to "handle" a pre-flight check failing or a document's schema being invalid
+        - however, to do that, we would need to be able to receive both the preflight state and the schema validation state
+        - currently there is no way to get this
+    - The `failure` lifecycle event takes place when the prompt has failed
+
 
 ## Dependencies
 

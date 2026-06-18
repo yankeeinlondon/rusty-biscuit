@@ -153,6 +153,7 @@ pub enum FileTreeTransclusionKind {
     Code,
     Url,
     TocLinking,
+    FileLinks,
     Prologue,
     Epilogue,
 }
@@ -430,6 +431,7 @@ fn syntax_to_transclusion_kind(syntax: ReferenceSyntax) -> FileTreeTransclusionK
         ReferenceSyntax::DirectiveCode => FileTreeTransclusionKind::Code,
         ReferenceSyntax::DirectiveUrl => FileTreeTransclusionKind::Url,
         ReferenceSyntax::DirectiveTocLinking => FileTreeTransclusionKind::TocLinking,
+        ReferenceSyntax::DirectiveFileLinks => FileTreeTransclusionKind::FileLinks,
         ReferenceSyntax::FrontmatterPrologue => FileTreeTransclusionKind::Prologue,
         ReferenceSyntax::FrontmatterEpilogue => FileTreeTransclusionKind::Epilogue,
         _ => FileTreeTransclusionKind::File,
@@ -461,6 +463,9 @@ pub fn transclusion_caption(context: &ReferenceInsertionContext) -> String {
         Some(ReferenceSyntax::DirectiveTocLinking) => {
             format!("TOC elements linked{section}")
         }
+        Some(ReferenceSyntax::DirectiveFileLinks) => {
+            format!("file links rendered{section}")
+        }
         Some(ReferenceSyntax::DirectiveCode) => {
             format!("inserted code{section}")
         }
@@ -478,6 +483,7 @@ pub fn transclusion_caption(context: &ReferenceInsertionContext) -> String {
 fn default_caption_for_syntax(syntax: ReferenceSyntax) -> String {
     match syntax {
         ReferenceSyntax::DirectiveTocLinking => "TOC elements linked".to_string(),
+        ReferenceSyntax::DirectiveFileLinks => "file links rendered".to_string(),
         ReferenceSyntax::DirectiveCode => "inserted code".to_string(),
         ReferenceSyntax::DirectiveUrl => "transcluded from URL".to_string(),
         ReferenceSyntax::DirectiveFile

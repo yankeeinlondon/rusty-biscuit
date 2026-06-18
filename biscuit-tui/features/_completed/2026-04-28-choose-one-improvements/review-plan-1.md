@@ -4,8 +4,8 @@ agent: codex
 source_review: review-1.md
 package_area: biscuit-tui
 crates:
-  - tui-chrome (biscuit-tui/lib)
-  - tui-chrome-cli (biscuit-tui/cli)
+  - biscuit-tui (biscuit-tui/lib)
+  - biscuit-tui-cli (biscuit-tui/cli)
 ---
 
 # Review-1 Remediation Plan
@@ -13,8 +13,8 @@ crates:
 This plan addresses every finding from `review-1.md` for the
 `2026-04-28-choose-one-improvements` feature. It is broken into
 **six implementation phases plus a final verification phase**. Each phase
-is independently shippable: it ends with a green `cargo test -p tui-chrome
--p tui-chrome-cli` and a clean `cargo clippy -p tui-chrome -p tui-chrome-cli
+is independently shippable: it ends with a green `cargo test -p biscuit-tui
+-p biscuit-tui-cli` and a clean `cargo clippy -p biscuit-tui -p biscuit-tui-cli
 --all-targets -- -D warnings`.
 
 Phases are ordered to minimize churn:
@@ -81,9 +81,9 @@ Library unit tests in `lib/src/components/choose_one.rs` and
 ### Verification
 
 ```bash
-cargo test -p tui-chrome --lib -- choose_one choose_many
-cargo test -p tui-chrome -p tui-chrome-cli
-cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings
+cargo test -p biscuit-tui --lib -- choose_one choose_many
+cargo test -p biscuit-tui -p biscuit-tui-cli
+cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings
 ```
 
 ### Risks / open questions
@@ -140,9 +140,9 @@ In `cli/src/commands/common_choose.rs`:
 ### Verification
 
 ```bash
-cargo test -p tui-chrome --lib -- core::frame
-cargo test -p tui-chrome -p tui-chrome-cli
-cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings
+cargo test -p biscuit-tui --lib -- core::frame
+cargo test -p biscuit-tui -p biscuit-tui-cli
+cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings
 ```
 
 ### Risks / open questions
@@ -219,10 +219,10 @@ In `cli/tests/cli.rs` (assert_cmd integration):
 ### Verification
 
 ```bash
-cargo test -p tui-chrome-cli --lib -- option_sources choice_normalize
-cargo test -p tui-chrome-cli --test cli
-cargo test -p tui-chrome -p tui-chrome-cli
-cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings
+cargo test -p biscuit-tui-cli --lib -- option_sources choice_normalize
+cargo test -p biscuit-tui-cli --test cli
+cargo test -p biscuit-tui -p biscuit-tui-cli
+cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings
 ```
 
 ### Risks / open questions
@@ -287,9 +287,9 @@ In `cli/tests/cli.rs` (completions):
 ### Verification
 
 ```bash
-cargo test -p tui-chrome-cli --test cli
-cargo test -p tui-chrome -p tui-chrome-cli
-cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings
+cargo test -p biscuit-tui-cli --test cli
+cargo test -p biscuit-tui -p biscuit-tui-cli
+cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings
 question completions zsh | grep -F inverse
 question completions zsh | grep -F reverse  # should be empty if alias hidden
 ```
@@ -353,10 +353,10 @@ CLI tests:
 ### Verification
 
 ```bash
-cargo test -p tui-chrome --lib -- choice_render terminal_style
-cargo test -p tui-chrome-cli --test cli
-cargo test -p tui-chrome -p tui-chrome-cli
-cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings
+cargo test -p biscuit-tui --lib -- choice_render terminal_style
+cargo test -p biscuit-tui-cli --test cli
+cargo test -p biscuit-tui -p biscuit-tui-cli
+cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings
 ```
 
 ### Risks / open questions
@@ -432,9 +432,9 @@ CLI integration (only if `--hotkey-badges` is added):
 ### Verification
 
 ```bash
-cargo test -p tui-chrome --lib -- choose_one choose_many choice_render
-cargo test -p tui-chrome -p tui-chrome-cli
-cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings
+cargo test -p biscuit-tui --lib -- choose_one choose_many choice_render
+cargo test -p biscuit-tui -p biscuit-tui-cli
+cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings
 ```
 
 ### Risks / open questions
@@ -462,11 +462,11 @@ docs up to date, skill catalog refreshed.
 
 ### Tasks
 
-- Run the full focused suite: `cargo test -p tui-chrome -p
-  tui-chrome-cli` and confirm zero failures.
-- Run `cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets --
+- Run the full focused suite: `cargo test -p biscuit-tui -p
+  biscuit-tui-cli` and confirm zero failures.
+- Run `cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets --
   -D warnings` and confirm zero warnings.
-- Run `cargo doc -p tui-chrome -p tui-chrome-cli --no-deps` and skim
+- Run `cargo doc -p biscuit-tui -p biscuit-tui-cli --no-deps` and skim
   for broken intra-doc links (especially after the `Padding` and
   `SortOrder` renames).
 - Run the per-area `just test` and `just lint` from
@@ -500,9 +500,9 @@ docs up to date, skill catalog refreshed.
 ### Verification
 
 ```bash
-cargo test -p tui-chrome -p tui-chrome-cli
-cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings
-cargo doc -p tui-chrome -p tui-chrome-cli --no-deps
+cargo test -p biscuit-tui -p biscuit-tui-cli
+cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings
+cargo doc -p biscuit-tui -p biscuit-tui-cli --no-deps
 cd biscuit-tui && just test && just lint
 ```
 

@@ -4,13 +4,16 @@ $schema:
     total_phases: number(required)
     plan: file(required)
     spec: file
-phase: 1
-dir: "$(dirname '{{plan}}')"
+    spec_file: file
+phase: "{{ frontmatter(plan, 'start_phase') || 1 }}"
+dir: "{{ dir(plan) }}"
 # spec: "{{ frontmatter( }}"
-area: "{{ctx.current_package_area == 'root' ? ctx.current_package || '' : ctx.current_package_area}}"
+area: "{{ ctx.area }}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
+total_phases: "{{ frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') }}"
+spec_file: "{{ file_exists(spec) ? spec : file_exists(join(dir, 'spec.md')) ? join(dir, 'spec.md')  :  '' }}"
 start:
-    message: "🎬  starting the implementation of phase **#{{phase}}** of `{{ctx.current_package_area}}/{{plan}}`"
+    message: "🎬  starting the implementation of phase **#{{phase}}** of `{{area}}/{{plan}}`"
 success: 
     say: "Phase {{phase}} of the plan in the {{area}} package area, was implemented successfully"
     message: "{{pass_icon}} phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{area}}/{{plan}}` successfully completed"
@@ -36,6 +39,10 @@ Your task is to implement phase {{phase}} of the plan found in '@{{area}}/{{plan
 > **NOTE:** for context you should read the lessons learned discovered in earlier stages of this plan. You will find these lessons learned in memory/{{memory}}.md. 
 ::end-block
 
+::block when="spec_file"
+> **NOTE:** this plan is based on the specification file: {{spec_file}}
+::end-block
+
 You are done when:
 
 - all functionality defined in phase {{phase}} has been implemented
@@ -57,12 +64,14 @@ You are done when:
 - Once all Frontmatter has been set to the plan file ({{plan}}), consider if there was anything surprising or novel that you discovered during this phase that would be valuable to know in future stages. If there is, then add a H2 heading `## Phase {{phase}}` to the end of the file `memory/{{memory}}.md`
 ::end-block
 
+::block when="ctx.is_monorepo"
 ## Be Efficient in Testing/Building
 
 - when building or testing, make sure to only build/test the _specific packages_ or package area you are working; not the entire monorepo (this will take too long)
-- The session was started in the "{{area}}" package area and so that's very likely an area you'll be focused on however, 
-- most plan's will have a `packages` Frontmatter property which will explicitly state which packages are being mutated in this plan
-- use to to ensure that you're being efficient while testing and building
+- The session was started in the "{{area}}" package area and so that's very likely an area you'll be focused on, however, 
+- most plan's will have a `packages` or `blast_radius` Frontmatter property which will explicitly state which packages are in the "blast radius" (aka, will be impacted 
+  during the implementation of this plan)
+::end-block
 
 **IMPORTANT:** 
 

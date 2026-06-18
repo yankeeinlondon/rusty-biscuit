@@ -1,13 +1,13 @@
 //! `question boolean-switch` subcommand.
 //!
-//! Maps CLI args onto a [`tui_chrome::BooleanSwitchState`], runs the
-//! component via [`tui_chrome::run_standalone`], and writes the
+//! Maps CLI args onto a [`biscuit_tui::BooleanSwitchState`], runs the
+//! component via [`biscuit_tui::run_standalone`], and writes the
 //! captured boolean according to the current [`OutputMode`].
 
 use std::io::{self, Write};
 
 use clap::Args;
-use tui_chrome::{
+use biscuit_tui::{
     ABORTED_KIND, BooleanSwitch, BooleanSwitchState, CANCELLED_KIND, FrameChromeConfig, HeightSpec,
     Label, run_standalone_with_chrome,
 };

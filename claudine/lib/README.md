@@ -120,7 +120,7 @@ The core event processing pipeline runs in 6 steps:
 
 Sub-modules:
 - `loader` — Config file discovery, loading, merge logic, runtime compilation (matchers + mappers), and config save/validation
-- `template` — `{{placeholder}}` Handlebars-style interpolation engine with 28 variables across 5 categories (legacy `{placeholder}` single-brace syntax is deprecated with warnings)
+- `template` — `{{placeholder}}` Handlebars-style interpolation engine with 30 variables across 5 categories (legacy `{placeholder}` single-brace syntax is deprecated with warnings)
 - `matcher` — Regex-based event filtering against tool name, notification type, or error
 - `runner` — Executes actions (TTS via biscuit-speaks, logging, shell commands, sound effects via playa, report formatting)
 
@@ -136,7 +136,7 @@ Sub-modules:
 | OS | `{{os.name}}`, `{{os.type}}`, `{{os.version}}`, `{{os.hostname}}` |
 | Hardware | `{{hardware.arch}}`, `{{hardware.cpu}}`, `{{hardware.cores}}` |
 | Git | `{{git.branch}}`, `{{git.is_dirty}}`, `{{git.head_sha}}`, `{{git.head_message}}`, `{{git.remote}}`, `{{git.hosting}}`, `{{git.repo_name}}`, `{{git.repo_org}}` |
-| Project | `{{project.language}}`, `{{project.is_monorepo}}`, `{{project.monorepo_tool}}` |
+| Project | `{{project.language}}`, `{{project.is_monorepo}}`, `{{project.monorepo_standard}}`, `{{project.monorepo_orchestrators}}`, `{{project.monorepo_tool}}` (deprecated alias) |
 
 Shell environment variables are also supported via `{{env.VAR_NAME}}` with optional defaults: `{{env.MY_VAR || "fallback"}}`. The legacy single-pipe `|` form is no longer supported.
 
@@ -273,7 +273,7 @@ Sub-modules:
 - `guardrails` — inline composition guardrails appended to prompts to constrain output shape
 - `types` — shared types including `PreparedComposition`, `SelectedProvider`, `SequencePlan`, `SequenceStep`, `SharedApprovalCache`, `CompositionMode`, and `SystemPromptInput`
 
-Execution parity note (2026-04-16): the CLI-side non-harness execution of `compose` and `inline-compose` flows through a single `execute_without_harness` function parameterized by `CompositionExecutionMode::{Direct, Inline}`, with a shared `run_structured_composition` helper that produces a `CompositionStreamResult` and a shared `emit_composition_summary` function that selects section-stream routing via a `defer_section_separator` flag. The Goose-only legacy (non-structured) path renders through `emit_minimal_composition_summary` so it emits the same stderr summary block as structured runs instead of the previous JSONL-only silence.
+Execution parity note (2026-06-16): the CLI-side execution of `compose` and `inline-compose` now flows through a single `run_harness_loop` path with `HarnessPromptMode::Compose` or `HarnessPromptMode::Inline`. Bare documents (no harness frontmatter) yield the empty plan; inline documents get the system-owned writability pre-check injected once by `finalize_effective_plan`. The loop handles structured streaming, captured/non-structured fallback, inline closure, summary emission, and handler-driven recovery in one place.
 
 ### Badges (`badges`)
 

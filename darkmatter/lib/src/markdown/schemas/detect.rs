@@ -19,7 +19,7 @@ use serde_json::Value;
 use url::Url;
 
 use super::simplified::{
-    Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType,
+    Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
 };
 use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeSource;
@@ -93,7 +93,7 @@ fn detect_value_atom(value: &Value, base_dir: &Path) -> PropertyAtom {
         Value::Number(n) => {
             if n.is_i64() || n.is_u64() {
                 PropertyAtom {
-                    ty: SimplifiedType::Number,
+                    ty: TypeExpr::Primitive(SimplifiedType::Number),
                     is_array: false,
                     constraints: vec![Constraint::Integer],
                     array_constraints: vec![],
@@ -113,7 +113,7 @@ fn detect_value_atom(value: &Value, base_dir: &Path) -> PropertyAtom {
 fn detect_array_atom(items: &[Value], base_dir: &Path) -> PropertyAtom {
     if items.is_empty() {
         return PropertyAtom {
-            ty: SimplifiedType::Any,
+            ty: TypeExpr::Primitive(SimplifiedType::Any),
             is_array: true,
             constraints: vec![],
             array_constraints: vec![],
@@ -127,7 +127,7 @@ fn detect_array_atom(items: &[Value], base_dir: &Path) -> PropertyAtom {
     let mut item_constraints = first.constraints;
     for v in iter {
         let next = detect_value_atom(v, base_dir);
-        match unify_types(item_ty, next.ty) {
+        match unify_types(&item_ty, &next.ty) {
             Some(t) => {
                 if t != SimplifiedType::Number {
                     item_constraints.clear();
@@ -138,11 +138,11 @@ fn detect_array_atom(items: &[Value], base_dir: &Path) -> PropertyAtom {
                 {
                     item_constraints.clear();
                 }
-                item_ty = t;
+                item_ty = TypeExpr::Primitive(t);
             }
             None => {
                 return PropertyAtom {
-                    ty: SimplifiedType::Any,
+                    ty: TypeExpr::Primitive(SimplifiedType::Any),
                     is_array: true,
                     constraints: vec![],
                     array_constraints: vec![],
@@ -322,10 +322,10 @@ fn widen_atoms(left: PropertyAtom, right: PropertyAtom) -> Option<PropertyAtom> 
     if left.is_array != right.is_array {
         return None;
     }
-    let ty = unify_types(left.ty, right.ty)?;
+    let ty = unify_types(&left.ty, &right.ty)?;
     let constraints = unify_atom_constraints(ty, &left, &right);
     Some(PropertyAtom {
-        ty,
+        ty: TypeExpr::Primitive(ty),
         is_array: left.is_array,
         constraints,
         array_constraints: vec![],
@@ -351,7 +351,9 @@ fn unify_atom_constraints(
 /// Returns the unified type for `a` and `b` if they share a common ancestor
 /// along the widening hierarchy. Returns `None` when the two types are
 /// genuinely disjoint.
-fn unify_types(a: SimplifiedType, b: SimplifiedType) -> Option<SimplifiedType> {
+fn unify_types(a: &TypeExpr, b: &TypeExpr) -> Option<SimplifiedType> {
+    let a = primitive(a)?;
+    let b = primitive(b)?;
     use SimplifiedType::*;
     if a == b {
         return Some(a);
@@ -380,6 +382,15 @@ fn unify_types(a: SimplifiedType, b: SimplifiedType) -> Option<SimplifiedType> {
         (Any, t) | (t, Any) => Some(t),
 
         _ => None,
+    }
+}
+
+fn primitive(ty: &TypeExpr) -> Option<SimplifiedType> {
+    match ty {
+        TypeExpr::Primitive(p) => Some(*p),
+        // Inline objects do not unify with any other type in detection
+        // (detection of inline objects is a non-goal of this feature).
+        TypeExpr::InlineObject(_) => None,
     }
 }
 
@@ -542,13 +553,13 @@ mod tests {
         let SimplifiedSchema::Single(shape) = schema else {
             panic!("expected Single");
         };
-        let kinds: Vec<(&str, SimplifiedType, bool)> = shape
+        let kinds: Vec<(&str, TypeExpr, bool)> = shape
             .properties
             .iter()
             .map(|(k, def)| match def {
                 PropertyDef::Single(a) => (
                     k.as_str(),
-                    a.ty,
+                    a.ty.clone(),
                     a.constraints.contains(&Constraint::Integer),
                 ),
                 _ => panic!("unexpected union"),
@@ -557,10 +568,18 @@ mod tests {
         assert_eq!(
             kinds,
             vec![
-                ("title", SimplifiedType::String, false),
-                ("active", SimplifiedType::Boolean, false),
-                ("count", SimplifiedType::Number, true),
-                ("rating", SimplifiedType::Number, false),
+                ("title", TypeExpr::Primitive(SimplifiedType::String), false),
+                (
+                    "active",
+                    TypeExpr::Primitive(SimplifiedType::Boolean),
+                    false
+                ),
+                ("count", TypeExpr::Primitive(SimplifiedType::Number), true),
+                (
+                    "rating",
+                    TypeExpr::Primitive(SimplifiedType::Number),
+                    false
+                ),
             ]
         );
     }
@@ -574,20 +593,20 @@ mod tests {
         let SimplifiedSchema::Single(shape) = schema else {
             panic!();
         };
-        let types: Vec<SimplifiedType> = shape
+        let types: Vec<TypeExpr> = shape
             .properties
             .values()
             .map(|d| match d {
-                PropertyDef::Single(a) => a.ty,
+                PropertyDef::Single(a) => a.ty.clone(),
                 _ => panic!(),
             })
             .collect();
         assert_eq!(
             types,
             vec![
-                SimplifiedType::Date,
-                SimplifiedType::DateTime,
-                SimplifiedType::Time,
+                TypeExpr::Primitive(SimplifiedType::Date),
+                TypeExpr::Primitive(SimplifiedType::DateTime),
+                TypeExpr::Primitive(SimplifiedType::Time),
             ]
         );
     }
@@ -599,15 +618,21 @@ mod tests {
         let SimplifiedSchema::Single(shape) = schema else {
             panic!();
         };
-        let types: Vec<SimplifiedType> = shape
+        let types: Vec<TypeExpr> = shape
             .properties
             .values()
             .map(|d| match d {
-                PropertyDef::Single(a) => a.ty,
+                PropertyDef::Single(a) => a.ty.clone(),
                 _ => panic!(),
             })
             .collect();
-        assert_eq!(types, vec![SimplifiedType::Url, SimplifiedType::Email]);
+        assert_eq!(
+            types,
+            vec![
+                TypeExpr::Primitive(SimplifiedType::Url),
+                TypeExpr::Primitive(SimplifiedType::Email),
+            ]
+        );
     }
 
     #[test]
@@ -632,7 +657,7 @@ mod tests {
         match def {
             PropertyDef::Single(atom) => {
                 assert!(atom.is_array);
-                assert_eq!(atom.ty, SimplifiedType::String);
+                assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::String));
             }
             _ => panic!(),
         }
@@ -649,7 +674,7 @@ mod tests {
         match def {
             PropertyDef::Single(atom) => {
                 assert!(atom.is_array);
-                assert_eq!(atom.ty, SimplifiedType::Any);
+                assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::Any));
             }
             _ => panic!(),
         }
@@ -666,7 +691,7 @@ mod tests {
         let def = shape.properties.get("score").unwrap();
         match def {
             PropertyDef::Single(atom) => {
-                assert_eq!(atom.ty, SimplifiedType::Number);
+                assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::Number));
                 assert!(!atom.constraints.contains(&Constraint::Integer));
             }
             _ => panic!(),
@@ -683,7 +708,9 @@ mod tests {
         };
         let def = shape.properties.get("v").unwrap();
         match def {
-            PropertyDef::Single(atom) => assert_eq!(atom.ty, SimplifiedType::String),
+            PropertyDef::Single(atom) => {
+                assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::String))
+            }
             _ => panic!(),
         }
     }
@@ -699,9 +726,9 @@ mod tests {
         let def = shape.properties.get("flag").unwrap();
         match def {
             PropertyDef::Union(arms) => {
-                let types: Vec<_> = arms.iter().map(|a| a.ty).collect();
-                assert!(types.contains(&SimplifiedType::Boolean));
-                assert!(types.contains(&SimplifiedType::String));
+                let types: Vec<_> = arms.iter().map(|a| a.ty.clone()).collect();
+                assert!(types.contains(&TypeExpr::Primitive(SimplifiedType::Boolean)));
+                assert!(types.contains(&TypeExpr::Primitive(SimplifiedType::String)));
             }
             _ => panic!("expected Union, got {:?}", def),
         }

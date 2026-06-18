@@ -2,15 +2,17 @@
 
 use std::path::PathBuf;
 
+use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::components::status_block::StatusBlock;
 use biscuit_terminal::errors::{BlockError, ErrorHeader, StatusBlockExt};
+use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use chrono::{DateTime, Utc};
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
 
-use super::types::ResolutionMode;
+use super::types::{ResolutionMode, SessionInteractivitySource};
 use crate::provider::Provider;
 use thiserror::Error;
 
@@ -64,6 +66,31 @@ pub enum CompositionError {
     /// The `prompt` frontmatter property is not a string.
     #[error("frontmatter `prompt` must be a string, got {0}")]
     PromptPropertyWrongType(String),
+
+    /// `inline-compose` was run on a document that authors both a non-null
+    /// `prompt` and a non-null `sequence` — i.e. an inline sequence. Such a
+    /// document must be run with `claudine sequence` so each sequence state
+    /// invokes an inline-compose using `prompt`.
+    ///
+    /// Detected against the *authored* frontmatter (not command-line overrides),
+    /// before prompt-type validation, schema processing, composition, provider
+    /// selection, or execution. The rendered diagnostic is built from the
+    /// captured fields in [`BlockError::status_block`]; the `stderr_is_tty`
+    /// flag gates whether the authored YAML payload is shown (TTY) or withheld
+    /// (non-TTY) to avoid exposing frontmatter.
+    #[error("`inline-compose` cannot run a document configured as a sequence")]
+    InlineComposeSequenceMismatch {
+        /// The resolved absolute path to the source document.
+        source_path: PathBuf,
+        /// The authored frontmatter YAML interior, captured verbatim to spec
+        /// boundaries (delimiter lines and the final delimiter-adjacent
+        /// line-ending excluded; interior line-endings preserved).
+        raw_yaml: String,
+        /// Whether the error output stream (stderr) was a TTY at detection
+        /// time. Captured here so rendering is deterministic and unit-testable
+        /// without a PTY.
+        stderr_is_tty: bool,
+    },
 
     /// Darkmatter composition failed for a reason other than a known
     /// structured shell-expansion failure.
@@ -119,6 +146,10 @@ pub enum CompositionError {
     #[error("frontmatter `model` must be a string or array of strings, got {0}")]
     ModelHintWrongType(String),
 
+    /// The `interactive` frontmatter property is not a boolean.
+    #[error("frontmatter `interactive` must be a boolean (true/false), got {0}")]
+    InteractiveHintWrongType(String),
+
     /// The `agent` frontmatter hint matches multiple providers.
     #[error("agent hint `{hint}` is ambiguous; matches: {matches}")]
     AgentHintAmbiguous {
@@ -150,12 +181,18 @@ pub enum CompositionError {
     )]
     InteractiveSelectionRequired,
 
-    /// Inline composition with `-i` is not supported for this provider
+    /// Inline composition in interactive mode is not supported for this provider
     /// because it cannot capture the final assistant message.
     #[error(
-        "inline-compose with --interactive is not supported for {0}; the provider cannot capture the final assistant message"
+        "inline-compose in interactive mode (from {source_kind}) is not supported for {provider}; \
+         the provider cannot capture the final assistant message"
     )]
-    InlineInteractiveUnsupported(String),
+    InlineInteractiveUnsupported {
+        /// Provider that does not support interactive inline closure.
+        provider: String,
+        /// Why the session resolved to interactive mode.
+        source_kind: SessionInteractivitySource,
+    },
 
     /// The provider returned an invalid response for inline composition.
     #[error("invalid inline composition response: {0}")]
@@ -274,6 +311,17 @@ pub enum CompositionError {
         /// Number of steps that reported missing properties.
         failure_count: usize,
     },
+
+    /// A `sequence` document authored `interactive: true` in its frontmatter.
+    ///
+    /// Sequences are serial automation; interactive mode must be requested
+    /// per-invocation with the `--interactive` flag instead.
+    #[error(
+        "`interactive: true` is not allowed in a sequence document ({0}); \
+         use `compose` or `inline-compose` for dialog-shaped prompts, \
+         or pass `--interactive` to override a single sequence run"
+    )]
+    SequenceInteractiveRejected(PathBuf),
 
     // -- Loop errors -----------------------------------------------------------
     /// The `loop` frontmatter value is invalid.
@@ -842,6 +890,23 @@ impl BlockError for CompositionError {
             CompositionError::SequenceMissingProperties { failures, .. } => {
                 render_sequence_missing_properties_block(failures)
             }
+            CompositionError::SequenceInteractiveRejected(source_path) => {
+                let file_link = render_file_link(source_path);
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "interactive rejected for sequence",
+                    ))
+                    .body(format!(
+                        "The document {file_link} sets <cyan>`interactive: true`</cyan> in its \
+                         frontmatter, but a <cyan>`sequence`</cyan> is serial automation and does \
+                         not support interactive sessions.\n\n\
+                         Use <cyan>`claudine compose`</cyan> or <cyan>`claudine inline-compose`</cyan> \
+                         for dialog-shaped prompts. To run an individual sequence step \
+                         interactively, use the <cyan>`--interactive`</cyan> CLI flag — this remains \
+                         the only explicit override."
+                    ))
+            }
             CompositionError::UnsupportedInteractiveSchema {
                 source_path,
                 property,
@@ -862,6 +927,11 @@ impl BlockError for CompositionError {
                          frontmatter.",
                     )
             }
+            CompositionError::InlineComposeSequenceMismatch {
+                source_path,
+                stderr_is_tty,
+                ..
+            } => render_inline_sequence_mismatch_block(source_path, *stderr_is_tty),
             CompositionError::AgentResolutionFailed {
                 source_path,
                 state,
@@ -927,6 +997,53 @@ impl BlockError for CompositionError {
             }
         }
     }
+
+    /// Appends the authored frontmatter YAML verbatim after the rendered
+    /// diagnostic for [`CompositionError::InlineComposeSequenceMismatch`].
+    ///
+    /// The YAML is emitted outside the status block's `┃ `-bordered, Prose-
+    /// processed body so it is reproduced exactly as authored: no per-line
+    /// border prefix, no Prose markup interpretation of YAML characters
+    /// (`<`, `{`, backticks), and no word-wrap reflow. This keeps the spec's
+    /// fidelity contract (verbatim, no reserialization, interior line-endings
+    /// preserved). The block is shown only when stderr was a TTY at detection
+    /// time; otherwise the body already states it was withheld. A renderer-
+    /// added trailing newline is permitted by the spec. All other variants
+    /// keep the default `status_block(term).render(term)` behavior.
+    fn report_block_error(&self, term: &Terminal) -> String {
+        match self {
+            CompositionError::InlineComposeSequenceMismatch {
+                raw_yaml,
+                stderr_is_tty,
+                ..
+            } => {
+                let mut out = self.status_block(term).render(term);
+                if *stderr_is_tty {
+                    while out.ends_with('\n') {
+                        out.pop();
+                    }
+                    out.push_str("\n\n");
+                    out.push_str(raw_yaml);
+                    out.push('\n');
+                }
+                // A terminal with no color depth cannot display SGR styling or
+                // OSC 8 hyperlinks, so the diagnostic must contain no escape
+                // bytes — otherwise redirected/`NO_COLOR` output is polluted
+                // (spec criterion 16). The `StatusBlock` bespoke path (entered
+                // because the error header carries `<b>` markup) does not yet
+                // honor `ColorDepth::None`, so strip at this boundary. The
+                // verbatim YAML payload is plain text and survives the strip.
+                if matches!(
+                    term.color_depth,
+                    biscuit_terminal::discovery::detection::ColorDepth::None
+                ) {
+                    out = biscuit_terminal::utils::escape_codes::strip_escape_codes(&out);
+                }
+                out
+            }
+            _ => self.status_block(term).render(term),
+        }
+    }
 }
 
 /// Render an absolute OSC8 hyperlink to `path` showing its relative form
@@ -945,6 +1062,56 @@ fn render_file_link(path: &std::path::Path) -> String {
         escape_prose_path(&abs_display),
         escape_prose_path(&label)
     )
+}
+
+/// Render the diagnostic block for
+/// [`CompositionError::InlineComposeSequenceMismatch`].
+///
+/// Builds the spec's normative, blank-line-separated paragraph sequence:
+/// the opening statement; the explanation (document link, both property
+/// names, what `sequence` does, and the `claudine sequence` directive); the
+/// upcoming-`sections` note; and finally either the YAML introduction (TTY)
+/// or the withheld-for-privacy note (non-TTY). The verbatim YAML payload
+/// itself is appended outside this block by
+/// [`CompositionError::report_block_error`] so it is reproduced exactly as
+/// authored.
+fn render_inline_sequence_mismatch_block(
+    source_path: &std::path::Path,
+    stderr_is_tty: bool,
+) -> StatusBlock {
+    let file_link = render_file_link(source_path);
+
+    let opening =
+        Prose::new("You tried to run an inline-compose operation on a document configured as a sequence.");
+
+    let explanation = Prose::new(format!(
+        "The document {file_link} defines both <cyan>`prompt`</cyan> and <cyan>`sequence`</cyan>. \
+         A <cyan>`sequence`</cyan> makes each state invoke an inline-compose operation using \
+         <cyan>`prompt`</cyan>, so run it with <cyan>`claudine sequence`</cyan> instead."
+    ));
+
+    let sections_note = Prose::new(
+        "Note: the upcoming <cyan>`sections`</cyan> feature may be a better fit when each \
+         operation should update a particular section of the document. It may not suit every \
+         sequence workflow and is not available yet.",
+    );
+
+    let yaml_note = if stderr_is_tty {
+        Prose::new("Below is the full YAML definition of the document:")
+    } else {
+        Prose::new(
+            "The full YAML definition was withheld to avoid exposing frontmatter in \
+             non-interactive output.",
+        )
+    };
+
+    StatusBlock::new(StatusState::Error)
+        .error_header(ErrorHeader::new(
+            "CompositionError",
+            "inline-compose on a sequence",
+        ))
+        .body(vec![opening, explanation, sections_note, yaml_note])
+        .hint("Run the document with `claudine sequence <file>`.")
 }
 
 /// Render the human-facing body for [`CompositionError::AgentResolutionFailed`].
@@ -1474,5 +1641,208 @@ mod tests {
             rendered.contains("/properties/target"),
             "expected JSON pointer in rendered output: {rendered}"
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // Inline-compose / sequence mismatch diagnostic (spec criteria 11-16)
+    // -------------------------------------------------------------------------
+
+    use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+    const MISMATCH_YAML: &str = "# leading comment\nsequence: &seq\n  - name: Hello\nprompt: |-\n  multi\n  line\nalias: *seq";
+
+    fn mismatch_err(stderr_is_tty: bool) -> CompositionError {
+        CompositionError::InlineComposeSequenceMismatch {
+            source_path: PathBuf::from("prompts/greeting.md"),
+            raw_yaml: MISMATCH_YAML.to_string(),
+            stderr_is_tty,
+        }
+    }
+
+    #[test]
+    fn mismatch_tty_render_includes_diagnostic_and_verbatim_yaml() {
+        // Criterion 11 (+ 13, 14 via the captured string): on a TTY the
+        // diagnostic names the document, both properties, the `claudine
+        // sequence` directive, the `sections` note, the YAML intro, and the
+        // verbatim YAML payload — contiguously, with no border prefix or
+        // reflow.
+        let err = mismatch_err(true);
+        let rendered = strip_escape_codes(err.report_block_error_optimistic(Some(80)));
+        assert!(rendered.contains("greeting.md"), "document name: {rendered}");
+        assert!(rendered.contains("prompt"), "names prompt: {rendered}");
+        assert!(rendered.contains("sequence"), "names sequence: {rendered}");
+        assert!(
+            rendered.contains("claudine sequence"),
+            "sequence directive: {rendered}"
+        );
+        assert!(rendered.contains("sections"), "sections note: {rendered}");
+        assert!(
+            rendered.contains("Below is the full YAML definition"),
+            "yaml intro: {rendered}"
+        );
+        assert!(
+            rendered.contains(MISMATCH_YAML),
+            "verbatim YAML payload must appear contiguously: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn mismatch_non_tty_render_withholds_yaml() {
+        // Criterion 12: non-TTY output keeps the mismatch + `sections`
+        // guidance, omits the YAML intro and block, and states the YAML was
+        // withheld.
+        let err = mismatch_err(false);
+        let rendered = strip_escape_codes(err.report_block_error_optimistic(Some(80)));
+        assert!(rendered.contains("claudine sequence"), "got: {rendered}");
+        assert!(rendered.contains("sections"), "got: {rendered}");
+        assert!(rendered.contains("withheld"), "withheld note: {rendered}");
+        assert!(
+            !rendered.contains("Below is the full YAML definition"),
+            "intro must be omitted: {rendered}"
+        );
+        assert!(
+            !rendered.contains(MISMATCH_YAML),
+            "YAML block must be omitted: {rendered:?}"
+        );
+        // The unique alias token from the YAML must not leak in non-TTY mode.
+        assert!(!rendered.contains("*seq"), "got: {rendered}");
+    }
+
+    #[test]
+    fn mismatch_plain_terminal_render_has_no_escape_bytes() {
+        // Criterion 16: a terminal with no color depth cannot display SGR
+        // styling or OSC 8 hyperlinks, so the rendered diagnostic must contain
+        // no escape byte at all — otherwise redirected / `NO_COLOR` output is
+        // polluted. Asserted on the RAW render (no `strip_escape_codes`), then
+        // confirmed still readable: the document name, directive, and verbatim
+        // YAML survive as plain text.
+        let mut term = Terminal::builder()
+            .width(80)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+            .build();
+        term.is_nerd_font = Some(false);
+        let err = mismatch_err(true);
+        let rendered = err.report_block_error(&term);
+        assert!(
+            !rendered.contains('\x1b'),
+            "plain render must contain no escape byte; got: {rendered:?}"
+        );
+        assert!(rendered.contains("greeting.md"), "got: {rendered}");
+        assert!(rendered.contains("claudine sequence"), "got: {rendered}");
+        assert!(rendered.contains(MISMATCH_YAML), "got: {rendered:?}");
+    }
+
+    #[test]
+    fn mismatch_display_message_is_plain() {
+        // The `#[error(...)]` summary is plain text with no rendering markup.
+        let err = mismatch_err(true);
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("cannot run a document configured as a sequence"),
+            "got: {rendered}"
+        );
+        assert!(!rendered.contains('<'), "no markup in Display: {rendered}");
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 4: regression — hint inside block quote for composition errors
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn unsupported_interactive_schema_hint_appears_inside_block_quote_border() {
+        use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+        let err = CompositionError::UnsupportedInteractiveSchema {
+            source_path: PathBuf::from("prompts/review.md"),
+            property: "spec".to_string(),
+            shape: "(unknown)".to_string(),
+        };
+        let term = Terminal::new_optimistic(80);
+        let rendered = strip_escape_codes(err.report_block_error(&term));
+
+        let hint_token = "Pass the value with key=value";
+        let hint_lines: Vec<&str> = rendered
+            .lines()
+            .filter(|l| l.contains(hint_token))
+            .collect();
+        assert!(
+            !hint_lines.is_empty(),
+            "hint text must appear in rendered output: {rendered}"
+        );
+        for hint_line in &hint_lines {
+            assert!(
+                hint_line.contains('┃'),
+                "regression: hint must appear inside block quote border, got: {hint_line:?}\nfull output:\n{rendered}"
+            );
+        }
+
+        let body_token = "cannot be collected interactively";
+        assert!(
+            rendered.contains(body_token),
+            "body text must appear: {rendered}"
+        );
+    }
+
+    #[test]
+    fn missing_properties_hint_appears_inside_block_quote_border() {
+        use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+        let err = CompositionError::MissingProperties {
+            source_path: PathBuf::from("prompts/plan.md"),
+            missing: vec![MissingProperty {
+                name: "target".to_string(),
+                type_label: Some("string".to_string()),
+                description: None,
+                interactive_shape: None,
+            }],
+            frontmatter_description: None,
+            pointer_paths: Vec::new(),
+        };
+        let term = Terminal::new_optimistic(80);
+        let rendered = strip_escape_codes(err.report_block_error(&term));
+
+        let hint_token = "Pass key=value";
+        let hint_lines: Vec<&str> = rendered
+            .lines()
+            .filter(|l| l.contains(hint_token))
+            .collect();
+        assert!(
+            !hint_lines.is_empty(),
+            "hint text must appear in rendered output: {rendered}"
+        );
+        for hint_line in &hint_lines {
+            assert!(
+                hint_line.contains('┃'),
+                "regression: hint must appear inside block quote border, got: {hint_line:?}\nfull output:\n{rendered}"
+            );
+        }
+    }
+
+    #[test]
+    fn schema_load_hint_appears_inside_block_quote_border() {
+        use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+        let err = CompositionError::SchemaLoad {
+            source_path: PathBuf::from("prompts/deploy.md"),
+            message: "unsupported protocol".to_string(),
+        };
+        let term = Terminal::new_optimistic(80);
+        let rendered = strip_escape_codes(err.report_block_error(&term));
+
+        let hint_token = "Verify the `$schema` path";
+        let hint_lines: Vec<&str> = rendered
+            .lines()
+            .filter(|l| l.contains(hint_token))
+            .collect();
+        assert!(
+            !hint_lines.is_empty(),
+            "hint text must appear in rendered output: {rendered}"
+        );
+        for hint_line in &hint_lines {
+            assert!(
+                hint_line.contains('┃'),
+                "regression: hint must appear inside block quote border, got: {hint_line:?}\nfull output:\n{rendered}"
+            );
+        }
     }
 }

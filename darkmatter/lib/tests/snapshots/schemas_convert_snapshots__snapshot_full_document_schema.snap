@@ -1,5 +1,6 @@
 ---
 source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+assertion_line: 243
 expression: convert_yaml(yaml)
 ---
 {
@@ -19,11 +20,18 @@ expression: convert_yaml(yaml)
       ]
     },
     "hero": {
-      "format": "darkmatter-file",
-      "type": "string",
-      "x-darkmatter-match": [
-        "*.png",
-        "*.jpg"
+      "anyOf": [
+        {
+          "const": ""
+        },
+        {
+          "format": "darkmatter-file",
+          "type": "string",
+          "x-darkmatter-match": [
+            "*.png",
+            "*.jpg"
+          ]
+        }
       ]
     },
     "homepage": {

@@ -116,7 +116,7 @@ use crate::discovery::detection::{ColorDepth, ColorMode};
 ///         ],
 ///     ]);
 /// ```
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Table {
     title: Option<String>,
     columns: Vec<TableColumn>,
@@ -1417,9 +1417,14 @@ impl Table {
     /// tree-renderable producer.
     ///
     /// The first child row is the header row; each remaining child row is a
-    /// data row. Every cell carries the readable pre-formatted text as a
-    /// [`NodeKind::Text`] node, plus [`TableCellHints`] recording the cell
-    /// kind, the original typed value as JSON, and alignment. The table node
+    /// data row. Most cells carry the readable pre-formatted text as a single
+    /// [`NodeKind::Text`] child; a [`TableCellContent::StyledProse`] cell
+    /// instead projects its parsed inline children
+    /// ([`Prose::to_render_nodes`](crate::components::prose::Prose::to_render_nodes))
+    /// directly, degrading any top-level
+    /// fenced-code child to escaped literal text. Every cell also carries
+    /// [`TableCellHints`] recording the cell kind, the original typed value as
+    /// JSON (`null` for `StyledProse`), and alignment. The table node
     /// carries per-column [`TableColumnHints`] and [`TableTerminalHints`], and
     /// the consolidated [`Layout`] when margins are non-default. When the
     /// component carries a non-empty title, it is seeded onto the projected
@@ -1466,8 +1471,13 @@ impl Table {
                 .iter()
                 .enumerate()
                 .map(|(col_idx, content)| {
-                    let mut cell =
-                        RenderNode::table_cell(vec![RenderNode::text(content.to_string())]);
+                    let children = match content {
+                        TableCellContent::StyledProse(prose) => {
+                            degrade_code_nodes(prose.to_render_nodes())
+                        }
+                        _ => vec![RenderNode::text(content.to_string())],
+                    };
+                    let mut cell = RenderNode::table_cell(children);
                     let column = self.columns.get(col_idx);
                     let alignment = column
                         .map(TableColumn::effective_alignment)
@@ -1506,6 +1516,11 @@ impl Table {
                 droppable: col.is_droppable(),
                 drop_note: col.drop_note(),
                 uniform_alignment: col.uniform_alignment,
+                // Carry the explicit per-column wrap override so the render-tree
+                // planner and cell wrapper honor the same break behavior the
+                // bespoke planner does. Without this a custom policy is dropped
+                // in the tree round-trip and narrow tables fail to lay out.
+                word_wrap: col.word_wrap.clone(),
             };
             node.attrs.set_table_column_hints(idx, &hints);
         }
@@ -1566,6 +1581,35 @@ impl Table {
         }
     }
 
+    /// Resolves every [`StyledProse`](TableCellContent::StyledProse) cell of a
+    /// cloned [`Table`] into [`Text`](TableCellContent::Text) for the active
+    /// `term`, in place.
+    ///
+    /// The bespoke paths need a uniform `Vec<Vec<TableCellContent>>` of resolved
+    /// content before any width planning, and each Prose cell must be resolved
+    /// exactly once. Mutating `table.data` in place avoids a second full clone of
+    /// the row data (`Table { data, ..self.clone() }` would clone `self.data`
+    /// only to discard it).
+    ///
+    /// ## Returns
+    ///
+    /// The number of `StyledProse` cells resolved — used by
+    /// [`Self::render_bespoke_instrumented`] to prove the single up-front
+    /// resolution pass touches each cell exactly once.
+    fn resolve_prose_cells_in_place(table: &mut Table, term: &Terminal) -> usize {
+        let mut resolved = 0;
+        for row in &mut table.data {
+            for cell in row {
+                if let TableCellContent::StyledProse(prose) = cell {
+                    let rendered = prose.render(term);
+                    *cell = TableCellContent::Text(rendered);
+                    resolved += 1;
+                }
+            }
+        }
+        resolved
+    }
+
     /// Renders via the sanctioned bespoke escape hatch.
     ///
     /// Retained as a `#[doc(hidden)]` surface because [`Table`] supports the
@@ -1583,29 +1627,44 @@ impl Table {
     /// capability to the render tree is a regression.
     #[doc(hidden)]
     pub fn render_bespoke(&self, term: &Terminal) -> String {
+        self.render_bespoke_instrumented(term).0
+    }
+
+    /// [`Self::render_bespoke`] plus the number of `StyledProse` cells resolved
+    /// during the single up-front resolution pass.
+    ///
+    /// ## Notes
+    ///
+    /// `#[doc(hidden)]`, `pub` for tests only. The returned count comes from the
+    /// same resolution pass the real render uses, so a test can assert each
+    /// Prose cell is resolved exactly once *before* any width planning — width
+    /// planning then operates on a uniform `Text` grid with no `StyledProse`
+    /// left to re-resolve.
+    #[doc(hidden)]
+    pub fn render_bespoke_instrumented(&self, term: &Terminal) -> (String, usize) {
+        let mut table = self.clone();
+        let resolved = Self::resolve_prose_cells_in_place(&mut table, term);
         let width = term.width();
-        // Striping degrades with the terminal's color depth rather than
-        // being disabled outright below truecolor; `resolve_stripe_escapes`
-        // returns `None` only when the terminal has no color support.
         let (stripe_bg, stripe_fg) =
-            self.resolve_stripe_escapes(&term.color_mode(), term.color_depth);
-        if self.prefer_cursor_alignment && term.is_tty {
-            self.render_with_cursor_positioning(
+            table.resolve_stripe_escapes(&term.color_mode(), term.color_depth);
+        let output = if table.prefer_cursor_alignment && term.is_tty {
+            table.render_with_cursor_positioning(
                 width,
                 stripe_bg.as_deref(),
                 stripe_fg.as_deref(),
                 term,
             )
         } else {
-            let available = self.layout.available_width(width);
-            let content = self.render_content(
+            let available = table.layout.available_width(width);
+            let content = table.render_content(
                 Some(available),
                 stripe_bg.as_deref(),
                 stripe_fg.as_deref(),
                 term,
             );
-            self.layout.apply_block_layout(&content, width)
-        }
+            table.layout.apply_block_layout(&content, width)
+        };
+        (output, resolved)
     }
 }
 
@@ -1830,6 +1889,7 @@ fn cell_content_kind(content: &TableCellContent) -> &'static str {
         TableCellContent::Integer(_) => "integer",
         TableCellContent::Float(_) => "float",
         TableCellContent::Currency(_, _) => "currency",
+        TableCellContent::StyledProse(_) => "styled_prose",
     }
 }
 
@@ -1843,7 +1903,23 @@ fn cell_content_raw_value(content: &TableCellContent) -> serde_json::Value {
             "currency": currency_token(currency),
             "amount": amount,
         }),
+        TableCellContent::StyledProse(_) => serde_json::Value::Null,
     }
+}
+
+/// Replaces top-level `NodeKind::Code` children with `NodeKind::Text` nodes
+/// containing the code body as literal text. Inline structure (Strong,
+/// Emphasis, Link, Span, Text, etc.) is preserved as-is.
+fn degrade_code_nodes(nodes: Vec<RenderNode>) -> Vec<RenderNode> {
+    nodes
+        .into_iter()
+        .map(|node| match &node.kind {
+            renderable::tree::NodeKind::Code { value, .. } => {
+                RenderNode::text(value.clone())
+            }
+            _ => node,
+        })
+        .collect()
 }
 
 /// Returns the ISO-style token for a [`Currency`].
@@ -2358,7 +2434,11 @@ pub(crate) fn wrap_cell_content(content: &str, strategy: &WordWrap, width: usize
         if lines.is_empty() {
             return vec![String::new()];
         }
-        return lines;
+        // Even without word wrap, a cell may hold explicit newlines (e.g. a
+        // multiline `StyledProse`). Balance the SGR per line so a color or
+        // emphasis run cannot bleed across the split into padding, borders, or
+        // the next row. No-op for a single line.
+        return sanitize_wrapped_lines(lines);
     }
 
     // Apply word wrapping to each line, then ensure each resulting line is
@@ -2436,14 +2516,14 @@ pub(crate) fn apply_vertical_padding(
 
 /// The adaptive default background stripe [`Color`] for a color mode.
 ///
-/// A very subtle tint: a faint warm gray in dark mode, a faint cool gray in
-/// light mode. Each carries a [`BasicColor`] fallback so it degrades on
-/// 16-color terminals.
+/// A subtle tint that stays visible on common dark themes such as Tokyo Night,
+/// plus a soft cool gray in light mode. Each carries a [`BasicColor`] fallback
+/// so it degrades on 16-color terminals.
 pub(crate) fn default_stripe_bg(color_mode: &ColorMode) -> Color {
     match color_mode {
-        ColorMode::Light => Color::Rgb(RgbColor::new(235, 235, 238, BasicColor::White)),
+        ColorMode::Light => Color::Rgb(RgbColor::new(226, 229, 236, BasicColor::White)),
         ColorMode::Dark | ColorMode::Unknown => {
-            Color::Rgb(RgbColor::new(30, 30, 34, BasicColor::Black))
+            Color::Rgb(RgbColor::new(36, 40, 59, BasicColor::Black))
         }
     }
 }
@@ -4239,11 +4319,11 @@ mod tests {
     fn test_stripe_bg_escape_truecolor_modes() {
         assert_eq!(
             stripe_bg_escape(None, &ColorMode::Dark, ColorDepth::TrueColor),
-            Some("\x1b[48;2;30;30;34m".to_string())
+            Some("\x1b[48;2;36;40;59m".to_string())
         );
         assert_eq!(
             stripe_bg_escape(None, &ColorMode::Light, ColorDepth::TrueColor),
-            Some("\x1b[48;2;235;235;238m".to_string())
+            Some("\x1b[48;2;226;229;236m".to_string())
         );
     }
 
@@ -4322,6 +4402,52 @@ mod tests {
             !none.contains("\x1b[40m") && !none.contains("\x1b[48"),
             "no stripe escape on a terminal without color support: {none:?}"
         );
+    }
+
+    #[test]
+    fn tree_rendered_stripe_covers_wrapped_row_lines() {
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("Name").with_max_width(8),
+                TableColumn::new("Notes")
+                    .with_max_width(18)
+                    .with_word_wrap(WordWrap::WrapProse(None, None)),
+            ])
+            .with_data(vec![
+                vec!["row0".into(), "short".into()],
+                vec![
+                    "row1".into(),
+                    "deliberately long text that wraps".into(),
+                ],
+            ])
+            .alternate_background_color();
+
+        let mut term = Terminal::new_optimistic(48);
+        term.color_depth = ColorDepth::TrueColor;
+        term.color_mode = ColorMode::Dark;
+
+        let rendered = table.render(&term);
+        let bg = stripe_bg_escape(None, &ColorMode::Dark, ColorDepth::TrueColor).unwrap();
+        let striped_lines: Vec<&str> = rendered
+            .lines()
+            .filter(|line| {
+                line.contains("row1")
+                    || line.contains("deliberately")
+                    || line.contains("long text")
+                    || line.contains("wraps")
+            })
+            .collect();
+
+        assert!(
+            striped_lines.len() >= 2,
+            "test fixture should produce a wrapped striped row: {rendered:?}"
+        );
+        for line in striped_lines {
+            assert!(
+                line.contains(&bg),
+                "wrapped striped row line should carry the stripe background: {line:?}"
+            );
+        }
     }
 
     #[test]
@@ -5271,11 +5397,11 @@ mod tests {
 
     #[test]
     fn table_render_tree_node_carries_layout_when_margins_set() {
-        use renderable::layout::{Length, Margin};
+        use renderable::layout::{Length, Edges};
         let mut table = Table::new()
             .with_columns(vec![TableColumn::new("Name")])
             .with_data(vec![vec!["Alice".into()]]);
-        table.layout.margin = Margin::x(Length::ch(2));
+        table.layout.margin = Edges::x(Length::ch(2));
         let node = table.render_tree_node().unwrap();
         assert!(node.attrs.layout().is_some());
     }

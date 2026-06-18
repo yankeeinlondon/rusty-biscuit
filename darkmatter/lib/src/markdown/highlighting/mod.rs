@@ -3,15 +3,20 @@
 //! This module provides theme enumeration, theme pairing (light/dark),
 //! and grammar loading utilities for syntax highlighting using syntect.
 
-mod grammars;
+pub(crate) mod grammars;
 pub mod prose;
+pub(crate) mod resolve;
 pub(crate) mod scope_cache;
 pub(crate) mod themes;
 
 pub use themes::{
-    ColorMode, InvalidThemeName, ThemePair, detect_code_theme, detect_color_mode,
-    detect_prose_theme, get_code_theme_for_prose,
+    CodeBlockMode, ColorMode, InvalidCodeBlockMode, InvalidThemeName, ThemePair, detect_code_theme,
+    detect_color_mode, detect_prose_theme, get_code_theme_for_prose,
 };
+
+pub(crate) use resolve::Surface;
+
+use crate::markdown::language_grammar::LanguageGrammar;
 
 use syntect::easy::HighlightLines;
 use syntect::highlighting::Theme as SyntectTheme;
@@ -31,7 +36,6 @@ use syntect::util::LinesWithEndings;
 pub struct CodeHighlighter {
     syntax_set: &'static SyntaxSet,
     theme: SyntectTheme,
-    theme_pair: ThemePair,
     color_mode: ColorMode,
 }
 
@@ -52,7 +56,26 @@ impl CodeHighlighter {
         Self {
             syntax_set,
             theme,
-            theme_pair,
+            color_mode,
+        }
+    }
+
+    /// Creates a [`CodeHighlighter`] from a fully-resolved
+    /// [`themes::Theme`](super::highlighting::themes::Theme) variant and
+    /// color mode.
+    ///
+    /// This is the single constructor used in production: callers feed
+    /// `theme` and `color_mode` from a prior
+    /// [`ThemePair::resolve_for_surface`](super::highlighting::themes::ThemePair::resolve_for_surface)
+    /// call (the boundary resolver), so the page surface and the code panel
+    /// share the same source of truth.
+    pub(crate) fn from_theme(theme: themes::Theme, color_mode: ColorMode) -> Self {
+        let syntax_set = grammars::load_syntax_set();
+        let theme = themes::load_resolved_theme(theme);
+
+        Self {
+            syntax_set,
+            theme,
             color_mode,
         }
     }
@@ -67,48 +90,9 @@ impl CodeHighlighter {
         &self.theme
     }
 
-    /// Returns the current theme pair.
-    pub fn theme_pair(&self) -> ThemePair {
-        self.theme_pair
-    }
-
     /// Returns the current color mode.
     pub fn color_mode(&self) -> ColorMode {
         self.color_mode
-    }
-
-    /// Updates the color mode and reloads the theme.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use darkmatter::markdown::highlighting::{CodeHighlighter, ThemePair, ColorMode};
-    ///
-    /// let mut highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-    /// highlighter.set_color_mode(ColorMode::Light);
-    /// ```
-    pub fn set_color_mode(&mut self, color_mode: ColorMode) {
-        if self.color_mode != color_mode {
-            self.color_mode = color_mode;
-            self.theme = themes::load_theme(self.theme_pair, color_mode);
-        }
-    }
-
-    /// Updates the theme pair and reloads the theme.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use darkmatter::markdown::highlighting::{CodeHighlighter, ThemePair, ColorMode};
-    ///
-    /// let mut highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-    /// highlighter.set_theme_pair(ThemePair::Solarized);
-    /// ```
-    pub fn set_theme_pair(&mut self, theme_pair: ThemePair) {
-        if self.theme_pair != theme_pair {
-            self.theme_pair = theme_pair;
-            self.theme = themes::load_theme(theme_pair, self.color_mode);
-        }
     }
 }
 
@@ -167,12 +151,15 @@ pub fn highlight_yaml_lines_with_theme(
     theme_pair: ThemePair,
     color_mode: ColorMode,
 ) -> Vec<String> {
-    let highlighter = CodeHighlighter::new(theme_pair, color_mode);
-    let syntax = highlighter
-        .syntax_set()
-        .find_syntax_by_extension("yaml")
-        .or_else(|| highlighter.syntax_set().find_syntax_by_name("YAML"))
-        .unwrap_or_else(|| highlighter.syntax_set().find_syntax_plain_text());
+    let resolved = theme_pair.resolve_for_surface(
+        Surface::Mode(color_mode),
+        Some(theme_pair),
+        CodeBlockMode::Same,
+    );
+    let highlighter = CodeHighlighter::from_theme(resolved.theme, resolved.color_mode);
+    let syntax = LanguageGrammar::yaml()
+        .resolve(highlighter.syntax_set())
+        .unwrap_or_else(|_| highlighter.syntax_set().find_syntax_plain_text());
     let mut hl = HighlightLines::new(syntax, highlighter.theme());
 
     // `LinesWithEndings::from("")` yields nothing; emit one empty line in
@@ -220,29 +207,13 @@ mod tests {
     #[test]
     fn test_code_highlighter_new() {
         let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-        assert_eq!(highlighter.theme_pair(), ThemePair::Github);
         assert_eq!(highlighter.color_mode(), ColorMode::Dark);
     }
 
     #[test]
     fn test_code_highlighter_default() {
         let highlighter = CodeHighlighter::default();
-        assert_eq!(highlighter.theme_pair(), ThemePair::Base16Ocean);
         assert_eq!(highlighter.color_mode(), ColorMode::Dark);
-    }
-
-    #[test]
-    fn test_set_color_mode() {
-        let mut highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-        highlighter.set_color_mode(ColorMode::Light);
-        assert_eq!(highlighter.color_mode(), ColorMode::Light);
-    }
-
-    #[test]
-    fn test_set_theme_pair() {
-        let mut highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-        highlighter.set_theme_pair(ThemePair::Solarized);
-        assert_eq!(highlighter.theme_pair(), ThemePair::Solarized);
     }
 
     #[test]

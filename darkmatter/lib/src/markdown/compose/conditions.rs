@@ -11,8 +11,10 @@
 //! [Darkmatter Expressions](../../../../docs/topics/darkmatter-expressions.md)
 //! topic for the full grammar.
 
-use super::EffectiveState;
-use super::expression::{CtxLookup, EvaluationLookup, evaluate, is_truthy, parse_condition};
+use super::expression::{
+    CtxLookup, EvaluationLookup, ResolutionContext, doc_namespace, evaluate, is_truthy,
+    parse_condition,
+};
 use biscuit_terminal::errors::SourceContext;
 use serde_json::Value;
 use std::ops::Range;
@@ -125,9 +127,9 @@ impl biscuit_terminal::errors::BlockError for ConditionError {
 /// Returns [`ConditionError::Parse`] when the expression cannot be parsed,
 /// or [`ConditionError::Eval`] when evaluation fails (e.g. unknown function).
 /// Both variants include the source expression, line number, and source context.
-pub fn evaluate_condition(
+pub fn evaluate_condition<L: EvaluationLookup>(
     expr: &str,
-    state: &EffectiveState,
+    state: &L,
     line: usize,
     ctx: SourceContext,
 ) -> Result<bool, ConditionError> {
@@ -271,6 +273,9 @@ struct ShortcutLookup<'a> {
     data: &'a Value,
     /// Lazy-capturing `ctx.*` resolver.
     ctx: CtxLookup<'a>,
+    /// Optional document-relative context enabling read-side functions. `None`
+    /// leaves the lookup context-free.
+    resolution_context: Option<ResolutionContext>,
 }
 
 impl<'a> ShortcutLookup<'a> {
@@ -278,6 +283,11 @@ impl<'a> ShortcutLookup<'a> {
         Self {
             data,
             ctx: CtxLookup::new(work_dir),
+            // The shortcut API resolves read-side functions against `work_dir`
+            // (local-only: `absolute`/`relative`/`file_exists`/… need a base
+            // directory but no remote runtime). This is a public-API capability
+            // addition for external callers of `evaluate_condition_against`.
+            resolution_context: Some(ResolutionContext::new(work_dir.to_path_buf())),
         }
     }
 
@@ -308,6 +318,12 @@ impl<'a> ShortcutLookup<'a> {
 
 impl EvaluationLookup for ShortcutLookup<'_> {
     fn get(&self, path: &str) -> Option<Value> {
+        // Reserved `doc` namespace, intercepted before the bare-name `ctx.*`
+        // fallback so a missing `doc.*` never collapses into `ctx.*`.
+        if doc_namespace::is_doc_namespace(path) {
+            return doc_namespace::resolve_doc_namespace(path, self.data);
+        }
+
         // Handle ctx.* prefixes with lazy capture
         if path == "ctx" || path.starts_with("ctx.") {
             return self.ctx.resolve_ctx(path);
@@ -326,12 +342,16 @@ impl EvaluationLookup for ShortcutLookup<'_> {
         // Fall back to ctx.* (same behavior as EffectiveState)
         self.get(&format!("ctx.{path}"))
     }
+
+    fn resolution_context(&self) -> Option<ResolutionContext> {
+        self.resolution_context.clone()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::compose::{ComposeContext, EffectiveStateBuilder};
+    use crate::markdown::compose::{ComposeContext, EffectiveState, EffectiveStateBuilder};
     use serde_json::{Value, json};
     use std::collections::HashMap;
 
@@ -747,6 +767,52 @@ mod tests {
         // We test with a datetime key since it's always available
         let result = evaluate_condition_against("year", &data, std::path::Path::new("."));
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn shortcut_doc_namespace_resolves_against_data_only() {
+        let data = json!({
+            "build": "from-data",
+            "doc": { "child": "literal-doc" },
+        });
+        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+
+        // doc.<path> resolves a data property.
+        assert_eq!(lookup.get("doc.build"), Some(json!("from-data")));
+
+        // bare doc returns the whole data object.
+        let obj = lookup.get("doc").expect("bare doc resolves");
+        assert!(obj.is_object());
+        assert_eq!(obj.get("build"), Some(&json!("from-data")));
+
+        // a literal property named `doc` is reached as doc.doc.
+        assert_eq!(lookup.get("doc.doc.child"), Some(json!("literal-doc")));
+
+        // missing doc.* values do not fall back to ctx.*.
+        assert_eq!(lookup.get("doc.year"), None);
+        // The shortcut lookup now carries a work-dir-rooted resolution context
+        // so read-side functions resolve for external callers.
+        assert!(lookup.resolution_context().is_some());
+    }
+
+    #[test]
+    fn shortcut_read_side_functions_resolve_against_work_dir() {
+        // `evaluate_condition_against` now supplies a `work_dir`-rooted
+        // resolution context, so read-side functions resolve for external
+        // callers.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("spec.md"), "# Spec").unwrap();
+        let data = json!({});
+
+        assert!(evaluate_condition_against("file_exists('spec.md')", &data, dir.path()).unwrap());
+        assert!(!evaluate_condition_against("file_exists('nope.md')", &data, dir.path()).unwrap());
+        assert!(
+            evaluate_condition_against("absolute('spec.md') != ''", &data, dir.path()).unwrap()
+        );
+        assert!(
+            evaluate_condition_against("relative('spec.md') == 'spec.md'", &data, dir.path())
+                .unwrap()
+        );
     }
 
     // ── Lazy Context Resolution ─────────────────────────────────────────

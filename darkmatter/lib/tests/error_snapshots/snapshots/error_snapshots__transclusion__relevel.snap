@@ -1,8 +1,9 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/transclusion.rs
-assertion_line: 205
 expression: out
 ---
 ⤫ TransclusionError: re-leveling failed
+┃ 
 ┃ would push past H6
-Check that transcluded headings do not push past H6.
+┃ 
+┃ Check that transcluded headings do not push past H6.

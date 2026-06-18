@@ -368,12 +368,14 @@ pub fn render_unstaged_package_areas(
 }
 /// Render the package area for the given directory.
 ///
-/// Returns empty string if not in a package area.
+/// Returns empty string if not in a package area. In a monorepo, a directory
+/// whose crates are not yet workspace members resolves via the directory
+/// structure (e.g. a freshly scaffolded area).
 pub fn render_repo_package_area(result: &sniff::SniffResult, base_dir: Option<&Path>) -> String {
     let dir = resolve_dir(base_dir);
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
-    repo.and_then(|r| r.package_area_for_dir(&dir))
+    repo.and_then(|r| r.package_area_label_for_dir(&dir))
         .unwrap_or_default()
         .to_string()
 }

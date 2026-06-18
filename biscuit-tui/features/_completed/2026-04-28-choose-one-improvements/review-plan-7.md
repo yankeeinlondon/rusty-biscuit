@@ -47,8 +47,8 @@ Repair the review's failing gated verification tests before changing production 
 Run:
 
 ```bash
-RUN_PTY_TESTS=1 cargo test -p tui-chrome-cli --test keyboard_protocol -- --nocapture
-RUN_SHELL_TESTS=1 cargo test -p tui-chrome-cli --test completions_shell -- --nocapture
+RUN_PTY_TESTS=1 cargo test -p biscuit-tui-cli --test keyboard_protocol -- --nocapture
+RUN_SHELL_TESTS=1 cargo test -p biscuit-tui-cli --test completions_shell -- --nocapture
 ```
 
 Expected result: all enabled gated tests pass. If a local shell dependency is missing, the relevant test may skip only through existing explicit skip behavior; harness errors such as shared tempdirs, bad executable names, or PTY I/O panics must be fixed.
@@ -95,12 +95,12 @@ If existing tests assert the old forced-mode behavior only at construction time,
 Run:
 
 ```bash
-cargo test -p tui-chrome hotkey_display
-cargo test -p tui-chrome choose_one::tests::with_hotkey_display_forces_mode_and_clears_deadline
-cargo test -p tui-chrome choose_many::tests
+cargo test -p biscuit-tui hotkey_display
+cargo test -p biscuit-tui choose_one::tests::with_hotkey_display_forces_mode_and_clears_deadline
+cargo test -p biscuit-tui choose_many::tests
 ```
 
-If exact test module filters differ, use `cargo test -p tui-chrome hotkey` and then the full package test command in the final phase.
+If exact test module filters differ, use `cargo test -p biscuit-tui hotkey` and then the full package test command in the final phase.
 
 ## Phase 3 - Reject Invalid Multi-Character Hotkey Specs
 
@@ -144,8 +144,8 @@ Add CLI normalization tests in `biscuit-tui/cli/src/choice_normalize.rs`:
 Run:
 
 ```bash
-cargo test -p tui-chrome-cli choice_normalize
-cargo test -p tui-chrome-cli hotkey
+cargo test -p biscuit-tui-cli choice_normalize
+cargo test -p biscuit-tui-cli hotkey
 ```
 
 ## Phase 4 - Full Package Verification and Lint Cleanup
@@ -159,11 +159,11 @@ Prove the whole `biscuit-tui` package area is clean after phases 1 through 3.
 Run from the repository root or the `biscuit-tui` area, using the area commands when available:
 
 ```bash
-cargo test -p tui-chrome -p tui-chrome-cli
-RUN_PTY_TESTS=1 cargo test -p tui-chrome-cli --test keyboard_protocol -- --nocapture
-RUN_SHELL_TESTS=1 cargo test -p tui-chrome-cli --test completions_shell -- --nocapture
-cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings
-cargo test -p tui-chrome -p tui-chrome-cli
+cargo test -p biscuit-tui -p biscuit-tui-cli
+RUN_PTY_TESTS=1 cargo test -p biscuit-tui-cli --test keyboard_protocol -- --nocapture
+RUN_SHELL_TESTS=1 cargo test -p biscuit-tui-cli --test completions_shell -- --nocapture
+cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings
+cargo test -p biscuit-tui -p biscuit-tui-cli
 ```
 
 If the local `biscuit-tui/justfile` wraps these exact checks, the developer may use `just test` and `just lint`, but the gated PTY commands must still be run explicitly because default tests skip them without environment variables.
@@ -185,6 +185,6 @@ The review is complete when:
 - `review-7.md` finding 1 is resolved by passing gated PTY keyboard and shell completion tests.
 - `review-7.md` finding 2 is resolved by forced hotkey badge mode tests for both choice components.
 - `review-7.md` finding 3 is resolved by parser and normalization tests for invalid multi-character/empty hotkey specs.
-- `cargo test -p tui-chrome -p tui-chrome-cli` passes.
-- `cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings` passes.
+- `cargo test -p biscuit-tui -p biscuit-tui-cli` passes.
+- `cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings` passes.
 - The final test rerun after lint cleanup passes.

@@ -10,6 +10,26 @@ use darkmatter::markdown::compose::conditions::evaluate_condition_against;
 use serde_json::json;
 use std::path::Path;
 
+/// Runs a closure with `AGENT` set to `value`, restoring the previous value
+/// (or unset state) afterwards.
+fn with_agent_env<F, R>(value: &str, f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    let previous = std::env::var("AGENT").ok();
+    unsafe {
+        std::env::set_var("AGENT", value);
+    }
+    let result = f();
+    unsafe {
+        match previous {
+            Some(v) => std::env::set_var("AGENT", v),
+            None => std::env::remove_var("AGENT"),
+        }
+    }
+    result
+}
+
 // ── Arithmetic in interpolation ────────────────────────────────────
 
 #[test]
@@ -578,9 +598,90 @@ Result: {{ numerator / denominator }}"#;
         .find(|w| w.message.contains("Division by zero"));
     assert!(
         warning.is_some(),
-        "Expected warning containing 'Division by zero', got: {:?}",
+        "Expected warning about non-numeric operand, got: {:?}",
         report.warnings
     );
+}
+
+// ── Phase 7 integration: new expression functions in compose ─────────
+
+#[test]
+fn regression_basename_in_interpolation() {
+    let content = r#"---
+path: foo/bar/baz/test.md
+---
+Basename: {{ basename(doc.path) }}"#;
+    let md: Markdown = content.into();
+    let (composed, _) = md.compose().unwrap();
+    assert!(composed.content().contains("Basename: test.md"));
+}
+
+#[test]
+fn regression_terminal_in_interpolation() {
+    let content = r#"---
+Terminal: {{ terminal("<bold>x</bold>") }}"#;
+    let md: Markdown = content.into();
+    let (composed, _) = md.compose().unwrap();
+    // Prose renders <bold>x</bold> with ANSI SGR sequences. In composed
+    // Markdown output the `[` metacharacter is escaped, so the bold open
+    // sequence appears as "\x1b\\[1m" rather than the raw "\x1b[1m".
+    let content = composed.content();
+    assert!(
+        content.contains("\x1b\\[1m"),
+        "terminal() output should contain an escaped bold SGR sequence, got: {:?}",
+        content
+    );
+    assert!(
+        content.contains("\x1b\\[0m"),
+        "terminal() output should contain an escaped reset SGR sequence, got: {:?}",
+        content
+    );
+}
+
+#[test]
+#[serial_test::serial(env_agent_model)]
+fn regression_ctx_agent_in_interpolation() {
+    let content = r#"---
+Agent: {{ ctx.agent }}"#;
+    let md: Markdown = content.into();
+    let (composed, _) = with_agent_env("opencode", || md.compose().unwrap());
+    assert!(composed.content().contains("Agent: opencode"));
+}
+
+#[test]
+fn regression_page_block_with_is_indexed_file() {
+    let content = r#"---
+path: foo/review-1.md
+---
+::block when="is_indexed_file(doc.path)"
+Indexed file detected
+::end-block"#;
+    let md: Markdown = content.into();
+    let (composed, _) = md.compose().unwrap();
+    assert!(composed.content().contains("Indexed file detected"));
+}
+
+#[test]
+#[serial_test::serial(env_agent_model)]
+fn regression_page_block_with_has_skill() {
+    let dir = tempfile::tempdir().unwrap();
+    let skill_root = dir.path().join(".claude").join("skills").join("foo");
+    std::fs::create_dir_all(&skill_root).unwrap();
+    std::fs::write(skill_root.join("SKILL.md"), "# Foo Skill\n").unwrap();
+
+    let source_path = dir.path().join("source.md");
+    let content = r#"::block when="has_skill('foo')"
+Skill found
+::end-block"#;
+    std::fs::write(&source_path, content).unwrap();
+
+    let md =
+        darkmatter::markdown::Markdown::try_from_content(std::fs::read_to_string(&source_path).unwrap())
+            .unwrap();
+    let options = darkmatter::markdown::compose::ComposeOptions::new()
+        .with_source_file(&source_path);
+    let (composed, _) = with_agent_env("claude", || md.compose_with(options).unwrap());
+    assert!(composed.content().contains("Skill found"));
 }
 
 #[test]

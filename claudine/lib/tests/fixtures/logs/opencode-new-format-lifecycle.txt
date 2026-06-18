@@ -1,0 +1,12 @@
+timestamp=2026-06-10T16:11:27.352Z level=INFO service=default version=1.14.48 message=opencode
+timestamp=2026-06-10T16:11:28.000Z level=INFO service=session id=ses_primary title=Primary session message=created
+timestamp=2026-06-10T16:11:29.000Z level=INFO service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_primary small=false agent=build mode=primary message=stream
+timestamp=2026-06-10T16:11:30.000Z level=INFO service=session.prompt session.id=ses_primary step=0 logSpan.http.span.4=55ms message=loop
+timestamp=2026-06-10T16:11:31.000Z level=INFO service=permission permission=task pattern=general action={"permission":"*","action":"allow","pattern":"*"} message=evaluated
+timestamp=2026-06-10T16:11:32.000Z level=INFO service=session id=ses_child parentID=ses_primary title=Research task message=created
+timestamp=2026-06-10T16:11:33.000Z level=INFO service=llm providerID=opencode modelID=claude-haiku-4-5 session.id=ses_child small=false agent=general mode=subagent message=stream
+timestamp=2026-06-10T16:11:34.000Z level=INFO service=session.prompt session.id=ses_child step=0 logSpan.http.span.4=80ms message=loop
+timestamp=2026-06-10T16:11:35.000Z level=INFO service=session.prompt session.id=ses_child logSpan.http.span.4=1800ms message="exiting loop"
+timestamp=2026-06-10T16:11:36.000Z level=INFO service=session.prompt session.id=ses_primary logSpan.http.span.4=2200ms message="exiting loop"
+timestamp=2026-06-10T16:11:37.000Z level=INFO service=default http.method=POST http.url=/session/ses_primary/message http.status=200 logSpan.http.span.4=12ms message=Sent HTTP response
+timestamp=2026-06-10T16:11:38.000Z level=INFO service=session message=tracking hash=abc123

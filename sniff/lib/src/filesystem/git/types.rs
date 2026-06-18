@@ -1,8 +1,7 @@
 use chrono::{DateTime, Utc};
-use git2::Repository;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -199,6 +198,38 @@ pub struct LocalBranchInfo {
     pub ahead: usize,
     /// Number of commits this branch is behind the current branch.
     pub behind: usize,
+}
+
+/// Local branch projection for repo-level branch listing.
+///
+/// This is distinct from [`LocalBranchInfo`], whose ahead/behind counts are
+/// relative to the current `HEAD`. `BranchInfo` reports each branch against its
+/// configured upstream, using only locally known refs unless the caller
+/// explicitly refreshes remote-tracking refs before detection.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BranchInfo {
+    /// Branch name (e.g., "main", "feature/xyz").
+    pub name: String,
+    /// Whether this branch is currently checked out.
+    pub current: bool,
+    /// Full commit hash for the branch tip.
+    pub sha: String,
+    /// Whether a locally known remote-tracking ref points at this branch tip.
+    pub remote_represented: bool,
+    /// Configured upstream branch, such as "origin/main".
+    ///
+    /// Serializes as `null` when the branch has no configured upstream, so
+    /// consumers can distinguish "no tracking configured" from a present value.
+    pub upstream: Option<String>,
+    /// Number of commits this branch is ahead of its configured upstream.
+    ///
+    /// `None` when no upstream is configured or its tip is not locally known —
+    /// distinguishing "no tracking data" from an even `Some(0)`.
+    pub ahead: Option<usize>,
+    /// Number of commits this branch is behind its configured upstream.
+    ///
+    /// `None` under the same conditions as [`ahead`](Self::ahead).
+    pub behind: Option<usize>,
 }
 
 /// Git hosting provider types.
@@ -457,9 +488,9 @@ fn extract_remote_host(url: &str) -> Option<&str> {
 
 /// Lightweight handle to a discovered git repository.
 ///
-/// Wraps a `git2::Repository` and exposes atomic query methods so callers
-/// can request only the data they need without paying for a full
-/// `detect_git` sweep.
+/// Discovery, trust validation, identity queries (root, branch, HEAD, worktree
+/// state), working-tree status, history, refs, remotes, config, and worktree
+/// queries are all backed by the pure-Rust `gix` handle.
 ///
 /// ## Examples
 ///
@@ -474,12 +505,23 @@ fn extract_remote_host(url: &str) -> Option<&str> {
 /// }
 /// ```
 pub struct GitRepo {
-    repo: Repository,
+    /// Pure-Rust handle backing discovery and all git queries.
+    ///
+    /// Wrapped in [`RefCell`] so object-cache sizing (a mutating operation on
+    /// the gix handle) can be deferred to the first object-intensive call.
+    gix: RefCell<gix::Repository>,
     repo_root: PathBuf,
+    /// Path to this repository's git directory (the `.git` dir or, for a linked
+    /// worktree, its per-worktree git directory).
+    git_dir: PathBuf,
+    /// Path to the common git directory shared across all worktrees.
+    common_dir: PathBuf,
     /// Cached ref decorations to avoid recomputing on every commit query.
-    ref_decorations: RefCell<Option<HashMap<git2::Oid, Vec<RefDecoration>>>>,
+    ref_decorations: RefCell<Option<HashMap<gix::ObjectId, Vec<RefDecoration>>>>,
     /// Cached git config so disk reads happen at most once per instance.
     config_cache: OnceLock<GitConfig>,
+    /// Whether the object cache has already been sized for this handle.
+    cache_configured: Cell<bool>,
 }
 
 impl std::fmt::Debug for GitRepo {
@@ -491,41 +533,85 @@ impl std::fmt::Debug for GitRepo {
 }
 
 impl GitRepo {
+    /// Sizes the object cache once, before the first object-intensive operation.
+    fn ensure_cache(&self) {
+        if !self.cache_configured.get() {
+            super::open::configure_cache(&mut self.gix.borrow_mut());
+            self.cache_configured.set(true);
+        }
+    }
+
     /// Returns cached ref decorations, computing them once on first access.
+    ///
+    /// Errors are suppressed: an unreadable ref store yields an empty map. For
+    /// error propagation, use [`Self::try_ref_decorations`].
     pub(crate) fn ref_decorations(
         &self,
-    ) -> std::cell::Ref<'_, HashMap<git2::Oid, Vec<RefDecoration>>> {
-        // If not yet computed, compute and cache
+    ) -> std::cell::Ref<'_, HashMap<gix::ObjectId, Vec<RefDecoration>>> {
+        // If not yet computed, compute and cache. Collecting decorations peels
+        // refs (object decoding), so size the object cache first — this is the
+        // lazy alternative to sizing it unconditionally at open time.
         if self.ref_decorations.borrow().is_none() {
-            let decorations = super::discovery::collect_ref_decorations(&self.repo);
+            self.ensure_cache();
+            let decorations = super::discovery::collect_ref_decorations(&self.gix.borrow());
             *self.ref_decorations.borrow_mut() = Some(decorations);
         }
         std::cell::Ref::map(self.ref_decorations.borrow(), |opt| opt.as_ref().unwrap())
+    }
+
+    /// Fallible variant of [`Self::ref_decorations`].
+    ///
+    /// Propagates ref-store, ref-iteration, and peel failures as
+    /// [`SniffError::Git`] rather than caching a partial or empty map. On
+    /// success the result is cached for subsequent accessors.
+    pub(crate) fn try_ref_decorations(
+        &self,
+    ) -> Result<std::cell::Ref<'_, HashMap<gix::ObjectId, Vec<RefDecoration>>>> {
+        if self.ref_decorations.borrow().is_none() {
+            self.ensure_cache();
+            let decorations =
+                super::discovery::collect_ref_decorations_fallible(&self.gix.borrow())?;
+            *self.ref_decorations.borrow_mut() = Some(decorations);
+        }
+        Ok(std::cell::Ref::map(self.ref_decorations.borrow(), |opt| {
+            opt.as_ref().unwrap()
+        }))
     }
 }
 
 impl GitRepo {
     /// Discover a repository containing `path`.
     ///
-    /// Returns `Ok(None)` when `path` is not inside a git repository.
+    /// Discovery walks parent directories and rejects untrusted repositories.
+    ///
+    /// ## Returns
+    ///
+    /// `Ok(None)` when `path` is not inside a git repository.
+    ///
+    /// ## Errors
+    ///
+    /// Trust/ownership, permission, I/O, and corruption failures surface as
+    /// [`SniffError::Git`] rather than being reported as repository absence.
     #[instrument(skip_all, fields(path = %path.display()))]
     pub fn discover(path: &Path) -> Result<Option<Self>> {
-        let repo = match Repository::discover(path) {
-            Ok(r) => r,
-            Err(e) => {
-                debug!(error = %e, "not a git repository");
-                return Ok(None);
-            }
+        let Some(gix) = super::open::trusted_discover(path)? else {
+            debug!("not a git repository");
+            return Ok(None);
         };
-        let repo_root = repo
+        let repo_root = gix
             .workdir()
             .ok_or_else(|| SniffError::NotARepository(path.to_path_buf()))?
             .to_path_buf();
+        let git_dir = gix.git_dir().to_path_buf();
+        let common_dir = gix.common_dir().to_path_buf();
         Ok(Some(Self {
-            repo,
+            gix: RefCell::new(gix),
             repo_root,
+            git_dir,
+            common_dir,
             ref_decorations: RefCell::new(None),
             config_cache: OnceLock::new(),
+            cache_configured: Cell::new(false),
         }))
     }
 
@@ -534,29 +620,81 @@ impl GitRepo {
         &self.repo_root
     }
 
-    /// Current branch name (`None` for detached HEAD).
-    pub fn current_branch(&self) -> Option<String> {
-        self.repo
+    /// Path to this repository's git directory (the `.git` dir or, for a linked
+    /// worktree, its per-worktree git directory).
+    pub fn git_dir(&self) -> &Path {
+        &self.git_dir
+    }
+
+    /// Path to the common git directory shared across all worktrees.
+    pub fn common_dir(&self) -> &Path {
+        &self.common_dir
+    }
+
+    /// HEAD commit id as a full hex SHA, or `None` for an unborn HEAD.
+    pub fn head_id(&self) -> Option<String> {
+        self.gix.borrow().head_id().ok().map(|id| id.to_string())
+    }
+
+    /// Whether HEAD is detached (points directly at a commit).
+    pub fn is_detached_head(&self) -> bool {
+        self.gix
+            .borrow()
             .head()
-            .map_err(|e| {
-                debug!(error = %e, "could not read HEAD");
-                e
-            })
-            .ok()
-            .as_ref()
-            .and_then(|h| h.shorthand())
-            .map(String::from)
+            .map(|h| h.is_detached())
+            .unwrap_or(false)
+    }
+
+    /// Current branch name (`None` for detached or unborn HEAD).
+    ///
+    /// Errors are suppressed: an unreadable or malformed HEAD reports `None`.
+    /// For error propagation, use [`Self::try_current_branch`].
+    pub fn current_branch(&self) -> Option<String> {
+        self.try_current_branch().ok().flatten()
+    }
+
+    /// Fallible current branch name.
+    ///
+    /// `Ok(None)` means HEAD is detached or unborn — a branch genuinely is not
+    /// checked out. A missing or malformed HEAD, permission, I/O, or corruption
+    /// failure surfaces as [`SniffError::Git`] rather than collapsing to `None`.
+    ///
+    /// Resolves through gix's HEAD query, which reads packed refs, so a branch
+    /// that exists only in `packed-refs` (after `git pack-refs --all --prune`)
+    /// still reports its name.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`SniffError::Git`] for any HEAD read or parse failure that is
+    /// not a legitimate detached/unborn state.
+    pub fn try_current_branch(&self) -> Result<Option<String>> {
+        use gix::bstr::ByteSlice;
+        use gix::head::Kind;
+
+        let repo = self.gix.borrow();
+        let head = repo.head().map_err(|e| SniffError::git("head", e))?;
+        let name = match head.kind {
+            Kind::Symbolic(reference) => reference.name,
+            Kind::Unborn(_) | Kind::Detached { .. } => return Ok(None),
+        };
+        let full = name.as_bstr().to_str_lossy();
+        Ok(full.strip_prefix("refs/heads/").map(str::to_string))
     }
 
     /// Whether the working directory is a linked worktree.
     pub fn in_worktree(&self) -> bool {
-        self.repo.is_worktree()
+        self.gix.borrow().worktree().is_some_and(|wt| !wt.is_main())
     }
 
     /// Base repository root when inside a worktree.
     pub fn base_repo_root(&self) -> Option<PathBuf> {
-        if self.repo.is_worktree() {
-            self.repo.commondir().parent().map(Path::to_path_buf)
+        if self.in_worktree() {
+            // Canonicalize first: gix may report a relative common_dir (e.g.
+            // `.git/worktrees/wt/../..`) whose `.parent()` does not resolve to
+            // the repository root without filesystem resolution.
+            std::fs::canonicalize(self.gix.borrow().common_dir())
+                .ok()
+                .and_then(|p| p.parent().map(Path::to_path_buf))
         } else {
             None
         }
@@ -564,7 +702,7 @@ impl GitRepo {
 
     /// Organization and repository name parsed from the preferred remote URL.
     pub fn org_and_repo(&self) -> (Option<String>, Option<String>) {
-        let remotes = super::remote_refresh::get_remotes(&self.repo, false);
+        let remotes = super::remote_refresh::get_remotes(&self.gix.borrow(), false);
         preferred_remote(&remotes)
             .and_then(|r| r.url.as_deref())
             .map(parse_org_repo)
@@ -573,13 +711,15 @@ impl GitRepo {
 
     /// File-level working tree status (staged, modified, untracked).
     pub fn file_changes(&self) -> Result<Vec<FileChange>> {
-        let (_status, changes) = super::status::get_repo_status_with_changes(&self.repo, false)?;
+        let (_status, changes) =
+            super::status::get_repo_status_with_changes(&self.gix.borrow(), false)?;
         Ok(changes)
     }
 
     /// Aggregated working tree status.
     pub fn repo_status(&self) -> Result<RepoStatus> {
-        let (status, _changes) = super::status::get_repo_status_with_changes(&self.repo, false)?;
+        let (status, _changes) =
+            super::status::get_repo_status_with_changes(&self.gix.borrow(), false)?;
         Ok(status)
     }
 
@@ -587,7 +727,7 @@ impl GitRepo {
     pub fn recent_commits(&self, count: usize) -> Vec<CommitInfo> {
         let decorations = self.ref_decorations();
         super::discovery::get_recent_commits_with_decorations(
-            &self.repo,
+            &self.gix.borrow(),
             count,
             Some(&*decorations),
         )
@@ -595,31 +735,81 @@ impl GitRepo {
 
     /// Configured remotes.
     pub fn remotes(&self, include_details: bool) -> Vec<RemoteInfo> {
-        super::remote_refresh::get_remotes(&self.repo, include_details)
+        super::remote_refresh::get_remotes(&self.gix.borrow(), include_details)
     }
 
     /// Linked worktrees.
-    pub fn worktrees(&self) -> HashMap<String, WorktreeInfo> {
-        super::remote_refresh::get_worktrees(&self.repo)
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`SniffError::Git`] if a linked worktree cannot be opened due to
+    /// trust, permission, I/O, or corruption failure. The trusted-open invariant
+    /// is enforced for every worktree; failures are propagated rather than
+    /// silently omitted.
+    pub fn worktrees(&self) -> Result<HashMap<String, WorktreeInfo>> {
+        self.ensure_cache();
+        super::remote_refresh::get_worktrees(
+            &self.gix.borrow(),
+            true,
+            Some(self.repo_root.as_path()),
+        )
     }
 
     /// Git user configuration.
     pub fn config(&self) -> GitConfig {
         self.config_cache
-            .get_or_init(|| super::remote_refresh::get_git_config(&self.repo))
+            .get_or_init(|| super::remote_refresh::get_git_config(&self.gix.borrow()))
             .clone()
     }
 
     /// Local branch information.
+    ///
+    /// Errors are suppressed: corrupt or unreadable repositories report empty
+    /// branch lists. For error propagation, use [`Self::try_branches`].
     pub fn branches(&self) -> Vec<LocalBranchInfo> {
-        let current = self.current_branch();
-        super::remote_refresh::get_local_branches(&self.repo, current.as_deref())
+        self.try_branches().unwrap_or_default()
+    }
+
+    /// Fallible local branch information.
+    ///
+    /// Propagates permission, I/O, and corruption failures as
+    /// [`SniffError::Git`] rather than suppressing them.
+    pub fn try_branches(&self) -> Result<Vec<LocalBranchInfo>> {
+        self.ensure_cache();
+        let current = self.try_current_branch()?;
+        super::remote_refresh::get_local_branches_fallible(&self.gix.borrow(), current.as_deref())
+    }
+
+    /// Branch projection for `sniff repo branches`.
+    ///
+    /// By default this uses only local refs and locally cached remote-tracking
+    /// refs. When `refresh_remotes` is true, remote-tracking refs are refreshed
+    /// first using the same non-interactive helper as deep git detection.
+    pub fn branch_info(&self, refresh_remotes: bool) -> Result<Vec<BranchInfo>> {
+        if refresh_remotes {
+            super::remote_refresh::refresh_remote_tracking_refs(&self.gix.borrow(), 2);
+        }
+        self.ensure_cache();
+        let current = self.try_current_branch()?;
+        super::remote_refresh::get_branch_info_fallible(&self.gix.borrow(), current.as_deref())
     }
 
     /// Per-remote tracking status (ahead/behind).
+    ///
+    /// Errors are suppressed: corrupt or unreadable repositories report empty
+    /// tracking lists. For error propagation, use [`Self::try_tracking_status`].
     pub fn tracking_status(&self) -> Vec<RemoteTrackingStatus> {
-        let current = self.current_branch();
-        super::remote_refresh::get_tracking_status(&self.repo, current.as_deref())
+        self.try_tracking_status().unwrap_or_default()
+    }
+
+    /// Fallible per-remote tracking status.
+    ///
+    /// Propagates permission, I/O, and corruption failures as
+    /// [`SniffError::Git`] rather than suppressing them.
+    pub fn try_tracking_status(&self) -> Result<Vec<RemoteTrackingStatus>> {
+        self.ensure_cache();
+        let current = self.try_current_branch()?;
+        super::remote_refresh::get_tracking_status_fallible(&self.gix.borrow(), current.as_deref())
     }
 
     /// Full detection — equivalent to `detect_git()` but reuses
@@ -651,24 +841,69 @@ impl GitRepo {
     /// - `include_file_changes`: false skips per-file diff stats
     /// - `include_worktrees`: false skips worktree enumeration
     /// - `refresh_remote_tracking`: true fetches remote refs (network)
+    ///
+    /// Build the status-free identity payload used by [`GitRequest::identity()`].
+    fn identity_only_info(&self, current_branch: Option<String>) -> GitInfo {
+        let (org, repo) = self.org_and_repo();
+        GitInfo {
+            repo_root: self.repo_root.clone(),
+            org,
+            repo,
+            current_branch,
+            head_id: self.head_id(),
+            branches: Vec::new(),
+            in_worktree: self.in_worktree(),
+            base_repo_root: self.base_repo_root(),
+            recent: Vec::new(),
+            status: None,
+            remotes: Vec::new(),
+            worktrees: HashMap::new(),
+            config: GitConfig::default(),
+            tracking: Vec::new(),
+            file_changes: Vec::new(),
+        }
+    }
+
     pub fn detect_with_request(&self, request: &GitRequest) -> Result<GitInfo> {
-        let current_branch = self.current_branch();
+        // Resolve the branch fallibly: a missing or malformed HEAD must surface
+        // for every detection preset, not only the metadata-producing ones.
+        // `minimal()`/`summary()` skip branch/tracking collection below, so this
+        // is the only point where their HEAD corruption can be detected. The
+        // result is reused for branch/tracking collection to avoid re-reading
+        // HEAD per accessor.
+        let current_branch = self.try_current_branch()?;
+
+        if request.is_identity_only() {
+            return Ok(self.identity_only_info(current_branch));
+        }
+
         let is_minimal = request.is_minimal();
 
         if request.refresh_remote_tracking {
-            super::remote_refresh::refresh_remote_tracking_refs(&self.repo, 2);
+            super::remote_refresh::refresh_remote_tracking_refs(&self.gix.borrow(), 2);
         }
 
         let mut recent = if request.commit_count > 0 {
-            super::discovery::get_recent_commits(&self.repo, request.commit_count)
+            self.ensure_cache();
+            let decorations = self.try_ref_decorations()?;
+            super::discovery::get_recent_commits_fallible(
+                &self.gix.borrow(),
+                request.commit_count,
+                Some(&decorations),
+            )?
         } else {
             Vec::new()
         };
 
         let (mut status, file_changes) = if request.include_file_changes {
-            super::status::get_repo_status_with_changes(&self.repo, request.include_file_diffs)?
+            super::status::get_repo_status_with_changes(
+                &self.gix.borrow(),
+                request.include_file_diffs,
+            )?
         } else if is_minimal {
-            let (is_dirty, _total) = super::status::get_repo_status_counts(&self.repo);
+            // minimal()/summary() only render the dirty flag — short-circuit on
+            // the first change instead of counting every file.
+            let is_dirty = super::status::is_repo_dirty(&self.gix.borrow())?;
             let status = RepoStatus {
                 is_dirty,
                 staged_count: 0,
@@ -681,7 +916,7 @@ impl GitRepo {
             (status, Vec::new())
         } else {
             let (is_dirty, staged, unstaged, untracked) =
-                super::status::get_repo_status_counts_detailed(&self.repo);
+                super::status::get_repo_status_counts_detailed(&self.gix.borrow())?;
             let status = RepoStatus {
                 is_dirty,
                 staged_count: staged,
@@ -702,13 +937,21 @@ impl GitRepo {
         let wants_metadata = request.wants_repo_metadata();
 
         let remotes = if wants_metadata {
-            super::remote_refresh::get_remotes(&self.repo, request.include_remote_branch_details)
+            super::remote_refresh::get_remotes(
+                &self.gix.borrow(),
+                request.include_remote_branch_details,
+            )
         } else {
             Vec::new()
         };
 
         let worktrees = if request.include_worktrees {
-            super::remote_refresh::get_worktrees(&self.repo)
+            self.ensure_cache();
+            super::remote_refresh::get_worktrees(
+                &self.gix.borrow(),
+                request.full_worktree_details,
+                Some(self.repo_root.as_path()),
+            )?
         } else {
             HashMap::new()
         };
@@ -720,13 +963,21 @@ impl GitRepo {
         };
 
         let branches = if wants_metadata {
-            super::remote_refresh::get_local_branches(&self.repo, current_branch.as_deref())
+            self.ensure_cache();
+            super::remote_refresh::get_local_branches_fallible(
+                &self.gix.borrow(),
+                current_branch.as_deref(),
+            )?
         } else {
             Vec::new()
         };
 
         let tracking = if wants_metadata {
-            super::remote_refresh::get_tracking_status(&self.repo, current_branch.as_deref())
+            self.ensure_cache();
+            super::remote_refresh::get_tracking_status_fallible(
+                &self.gix.borrow(),
+                current_branch.as_deref(),
+            )?
         } else {
             Vec::new()
         };
@@ -734,8 +985,9 @@ impl GitRepo {
         if request.refresh_remote_tracking {
             status.is_behind = super::remote_refresh::summarize_behind_status(&tracking);
             if request.include_commit_remote_containment {
+                self.ensure_cache();
                 super::remote_refresh::populate_recent_commit_remotes(
-                    &self.repo,
+                    &self.gix.borrow(),
                     &mut recent,
                     request.max_remote_branches,
                 );
@@ -752,11 +1004,15 @@ impl GitRepo {
             org,
             repo,
             current_branch,
+            // Identity-only requests carry `head_id`; every status-bearing
+            // preset leaves it unset so existing JSON shapes (e.g. `sniff repo
+            // git-status --json`) gain no new top-level field.
+            head_id: None,
             branches,
-            in_worktree: self.repo.is_worktree(),
+            in_worktree: self.in_worktree(),
             base_repo_root: self.base_repo_root(),
             recent,
-            status,
+            status: Some(status),
             remotes,
             worktrees,
             config,
@@ -781,7 +1037,10 @@ impl GitRepo {
 /// if let Some(info) = git_info {
 ///     println!("Repository: {:?}", info.repo_root);
 ///     println!("Branch: {:?}", info.current_branch);
-///     println!("Dirty: {}", info.status.is_dirty);
+///     match info.status {
+///         Some(status) => println!("Dirty: {}", status.is_dirty),
+///         None => println!("Status not requested"),
+///     }
 /// }
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -796,6 +1055,13 @@ pub struct GitInfo {
     pub repo: Option<String>,
     /// Current branch name (None for detached HEAD).
     pub current_branch: Option<String>,
+    /// HEAD commit id as a full hex SHA.
+    ///
+    /// Only populated by [`GitRequest::identity()`]; status-bearing presets
+    /// leave it `None` to preserve their existing JSON shape. Also `None` for an
+    /// unborn HEAD even in identity mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub head_id: Option<String>,
     /// All local branches with commit hashes and ahead/behind counts.
     pub branches: Vec<LocalBranchInfo>,
     /// Whether the current path is inside a worktree (vs main repository).
@@ -806,7 +1072,11 @@ pub struct GitInfo {
     /// Recent commits from HEAD (last 10 commits).
     pub recent: Vec<CommitInfo>,
     /// Working tree status.
-    pub status: RepoStatus,
+    ///
+    /// `None` means the status was not requested (e.g., an identity-only
+    /// request), not that the repository is clean.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<RepoStatus>,
     /// Configured remotes.
     pub remotes: Vec<RemoteInfo>,
     /// Linked worktrees (keyed by branch name).
@@ -1025,6 +1295,8 @@ pub struct WorktreeInfo {
     pub merged: bool,
     /// Number of uncommitted files (staged + unstaged + untracked).
     pub changed_files: usize,
+    /// Whether this worktree is the one the current process is running from.
+    pub is_current: bool,
 }
 
 /// A file with uncommitted changes (staged or unstaged).
@@ -1039,9 +1311,11 @@ pub struct WorktreeInfo {
 /// use std::path::Path;
 ///
 /// let git_info = detect_git(Path::new("."), false, 10).unwrap().unwrap();
-/// for dirty_file in &git_info.status.dirty {
-///     println!("Modified: {:?}", dirty_file.filepath);
-///     println!("Diff:\n{}", dirty_file.diff);
+/// if let Some(status) = &git_info.status {
+///     for dirty_file in &status.dirty {
+///         println!("Modified: {:?}", dirty_file.filepath);
+///         println!("Diff:\n{}", dirty_file.diff);
+///     }
 /// }
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1070,8 +1344,10 @@ pub struct DirtyFile {
 /// use std::path::Path;
 ///
 /// let git_info = detect_git(Path::new("."), false, 10).unwrap().unwrap();
-/// for untracked in &git_info.status.untracked {
-///     println!("Untracked: {:?}", untracked.filepath);
+/// if let Some(status) = &git_info.status {
+///     for untracked in &status.untracked {
+///         println!("Untracked: {:?}", untracked.filepath);
+///     }
 /// }
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1152,6 +1428,7 @@ fn preferred_remote(remotes: &[RemoteInfo]) -> Option<&RemoteInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use tempfile::TempDir;
 
     fn setup_repo() -> (TempDir, git2::Repository) {
@@ -1161,7 +1438,7 @@ mod tests {
         let file_path = dir.path().join("test.txt");
         std::fs::write(&file_path, "content\n").unwrap();
         let mut index = repo.index().unwrap();
-        index.add_path(std::path::Path::new("test.txt")).unwrap();
+        index.add_path(Path::new("test.txt")).unwrap();
         index.write().unwrap();
         let tree_id = index.write_tree().unwrap();
         {
@@ -1170,6 +1447,15 @@ mod tests {
                 .unwrap();
         }
         (dir, repo)
+    }
+
+    fn corrupt_packed_refs(repo_path: &Path) {
+        let packed_refs = repo_path.join(".git").join("packed-refs");
+        std::fs::write(
+            &packed_refs,
+            "# pack-refs with: peeled fully-peeled\n^garbage\n",
+        )
+        .unwrap();
     }
 
     #[test]
@@ -1184,5 +1470,270 @@ mod tests {
 
         assert_eq!(config1.user_email, config2.user_email);
         assert_eq!(config1.user_name, config2.user_name);
+    }
+
+    #[test]
+    fn corrupt_ref_try_branches_propagates_error() {
+        let (dir, _repo) = setup_repo();
+        corrupt_packed_refs(dir.path());
+
+        let git_repo = GitRepo::discover(dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+
+        assert!(
+            git_repo.try_branches().is_err(),
+            "corrupt refs must propagate through try_branches"
+        );
+    }
+
+    #[test]
+    fn corrupt_ref_try_tracking_status_propagates_error() {
+        let (dir, repo) = setup_repo();
+        // Configure a remote so the tracking walk has to look up a
+        // remote-tracking ref. The corrupt packed-refs file causes the
+        // lookup to fail instead of returning an empty Ok result.
+        repo.remote("origin", "https://example.com/repo").unwrap();
+        corrupt_packed_refs(dir.path());
+
+        let git_repo = GitRepo::discover(dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+
+        assert!(
+            git_repo.try_tracking_status().is_err(),
+            "corrupt refs must propagate through try_tracking_status"
+        );
+    }
+
+    #[test]
+    fn corrupt_ref_detect_with_request_propagates_error() {
+        let (dir, _repo) = setup_repo();
+        corrupt_packed_refs(dir.path());
+
+        let git_repo = GitRepo::discover(dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+
+        assert!(
+            git_repo.detect_with_request(&GitRequest::full()).is_err(),
+            "corrupt refs must propagate through detect_with_request"
+        );
+    }
+
+    #[test]
+    fn branches_convenience_suppresses_errors_to_empty_vec() {
+        let (dir, _repo) = setup_repo();
+        corrupt_packed_refs(dir.path());
+
+        let git_repo = GitRepo::discover(dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+
+        assert!(
+            git_repo.branches().is_empty(),
+            "infallible branches() must suppress errors to an empty vec"
+        );
+    }
+
+    #[test]
+    fn tracking_status_convenience_suppresses_errors_to_empty_vec() {
+        let (dir, repo) = setup_repo();
+        repo.remote("origin", "https://example.com/repo").unwrap();
+        corrupt_packed_refs(dir.path());
+
+        let git_repo = GitRepo::discover(dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+
+        assert!(
+            git_repo.tracking_status().is_empty(),
+            "infallible tracking_status() must suppress errors to an empty vec"
+        );
+    }
+
+    #[test]
+    fn identity_request_does_not_walk_status() {
+        let (dir, _repo) = setup_repo();
+        // Make the repo dirty so a status walk would be observable.
+        std::fs::write(dir.path().join("dirty.txt"), "x\n").unwrap();
+
+        let git_repo = GitRepo::discover(dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+
+        // Measure walks for this repo's path as a before/after delta: a global
+        // counter would be contaminated by other tests' walks under `cargo test`.
+        let before = crate::filesystem::git::status::status_walk_count(dir.path());
+        let info = git_repo
+            .detect_with_request(&GitRequest::identity())
+            .unwrap();
+
+        assert_eq!(
+            crate::filesystem::git::status::status_walk_count(dir.path()),
+            before,
+            "identity() must not trigger a working-tree status walk"
+        );
+        assert!(info.status.is_none());
+
+        // Prove the gate is real: summary() does trigger a status walk.
+        let _ = git_repo
+            .detect_with_request(&GitRequest::summary())
+            .unwrap();
+        assert!(
+            crate::filesystem::git::status::status_walk_count(dir.path()) > before,
+            "summary() must record a status walk"
+        );
+    }
+
+    #[test]
+    fn identity_request_on_branch_has_expected_fields() {
+        let (dir, _repo) = setup_repo();
+
+        let git_repo = GitRepo::discover(dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+        let info = git_repo
+            .detect_with_request(&GitRequest::identity())
+            .unwrap();
+
+        assert!(
+            info.current_branch
+                .as_deref()
+                .is_some_and(|b| !b.is_empty()),
+            "current_branch should be set on a branch: {:?}",
+            info.current_branch
+        );
+        assert!(!info.in_worktree);
+        assert!(info.head_id.is_some());
+        assert!(info.status.is_none());
+        assert!(info.branches.is_empty());
+        assert!(info.remotes.is_empty());
+        assert!(info.worktrees.is_empty());
+        assert!(info.recent.is_empty());
+        assert!(info.file_changes.is_empty());
+    }
+
+    #[test]
+    fn identity_request_in_linked_worktree_has_expected_fields() {
+        let (dir, repo) = setup_repo();
+        let worktree_path = dir.path().join("linked-wt");
+        repo.worktree("linked", &worktree_path, None).unwrap();
+
+        let git_repo = GitRepo::discover(&worktree_path)
+            .unwrap()
+            .expect("worktree should be discoverable");
+        let info = git_repo
+            .detect_with_request(&GitRequest::identity())
+            .unwrap();
+
+        assert!(info.in_worktree);
+        assert!(info.base_repo_root.is_some());
+        assert_eq!(
+            info.base_repo_root
+                .as_ref()
+                .unwrap()
+                .canonicalize()
+                .unwrap(),
+            dir.path().canonicalize().unwrap()
+        );
+        assert!(info.status.is_none());
+    }
+
+    #[test]
+    fn identity_request_detached_head_has_expected_fields() {
+        let (dir, repo) = setup_repo();
+        let commit = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.set_head_detached(commit.id()).unwrap();
+
+        let git_repo = GitRepo::discover(dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+        let info = git_repo
+            .detect_with_request(&GitRequest::identity())
+            .unwrap();
+
+        assert_eq!(info.current_branch, None);
+        assert!(info.head_id.is_some());
+        assert!(info.status.is_none());
+    }
+
+    #[test]
+    fn identity_request_unborn_head_has_expected_fields() {
+        let dir = TempDir::new().unwrap();
+        let _repo = git2::Repository::init(dir.path()).unwrap();
+
+        let git_repo = GitRepo::discover(dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+        let info = git_repo
+            .detect_with_request(&GitRequest::identity())
+            .unwrap();
+
+        assert_eq!(info.current_branch, None);
+        assert_eq!(info.head_id, None);
+        assert!(info.status.is_none());
+    }
+
+    #[test]
+    fn identity_request_serializes_without_status_field() {
+        let (dir, _repo) = setup_repo();
+
+        let git_repo = GitRepo::discover(dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+        let identity = git_repo
+            .detect_with_request(&GitRequest::identity())
+            .unwrap();
+        let identity_json = serde_json::to_string(&identity).unwrap();
+        let identity_value: serde_json::Value = serde_json::from_str(&identity_json).unwrap();
+        assert!(
+            !identity_value.as_object().unwrap().contains_key("status"),
+            "identity() JSON must omit the status field"
+        );
+
+        let summary = git_repo
+            .detect_with_request(&GitRequest::summary())
+            .unwrap();
+        let summary_json = serde_json::to_string(&summary).unwrap();
+        let summary_value: serde_json::Value = serde_json::from_str(&summary_json).unwrap();
+        assert!(
+            summary_value.as_object().unwrap().contains_key("status"),
+            "summary() JSON must include the status field"
+        );
+    }
+
+    #[test]
+    fn existing_presets_still_compute_status() {
+        let (dir, _repo) = setup_repo();
+        // Make the repo dirty so the dirty-flag contract is observable.
+        std::fs::write(dir.path().join("dirty.txt"), "x\n").unwrap();
+
+        let git_repo = GitRepo::discover(dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+
+        for request in [GitRequest::minimal(), GitRequest::summary()] {
+            let info = git_repo.detect_with_request(&request).unwrap();
+            assert!(
+                info.status.is_some(),
+                "{:?} must still yield a status object",
+                request
+            );
+            assert!(
+                info.status.unwrap().is_dirty,
+                "{:?} must report a dirty fixture",
+                request
+            );
+        }
+
+        for request in [GitRequest::full(), GitRequest::deep()] {
+            let info = git_repo.detect_with_request(&request).unwrap();
+            assert!(
+                info.status.is_some(),
+                "{:?} must still yield a status object",
+                request
+            );
+        }
     }
 }

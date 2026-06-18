@@ -6,7 +6,7 @@ ready: true
 
 ## Verdict
 
-**Ready for production.** The spec items from both `spec.md` and `tech-design.md` are implemented, test suite is comprehensive and green (342 lib unit tests + 134 CLI unit tests + 5 CLI integration test binaries + 14 doctests, with `cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings` clean), and review-1's two findings were resolved:
+**Ready for production.** The spec items from both `spec.md` and `tech-design.md` are implemented, test suite is comprehensive and green (342 lib unit tests + 134 CLI unit tests + 5 CLI integration test binaries + 14 doctests, with `cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings` clean), and review-1's two findings were resolved:
 
 - CLI defaults `ChoiceInput::filter_enabled = true` with a `--no-filter` opt-out (`cli/src/commands/choose_one.rs:154`, `cli/src/commands/choose_many.rs:191`).
 - Deterministic green-path coverage now lives in the in-module `run_with_writer` tests for both subcommands, which exercise arg → state → output end-to-end without needing a TTY (e.g. `run_writes_delimited_positional_value`, `run_selected_default_matches_delimited_value`, `run_select_all_outputs_all_values`, `run_deselect_all_outputs_no_values`, `run_returns_1_without_output_on_esc`, `run_returns_130_without_output_on_ctrl_c`).
@@ -142,7 +142,7 @@ Suggested fix: add a PTY case in the existing `mod pty` block that spawns with `
 
 I ran the following against the worktree:
 
-- `cargo test -p tui-chrome -p tui-chrome-cli` — all suites pass (342 lib + 134 CLI + 6 + 39 doctests + per-subcommand integration + exit-codes + help-contract all green).
-- `cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings` — clean.
+- `cargo test -p biscuit-tui -p biscuit-tui-cli` — all suites pass (342 lib + 134 CLI + 6 + 39 doctests + per-subcommand integration + exit-codes + help-contract all green).
+- `cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings` — clean.
 
 The PTY-backed tests (`cli/tests/choose_cli.rs::pty`) remain gated behind `QUESTION_INTERACTIVE_PTY=1` and cover Esc, Ctrl+C, and Ctrl+A end-to-end; they were not run in this non-interactive review but the gate-skip branches are green.

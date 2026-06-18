@@ -115,6 +115,7 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
+    #[serial_test::serial(wt_env)]
     fn resolve_base_dir_from_env() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().to_path_buf();
@@ -128,6 +129,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(wt_env)]
     fn resolve_base_dir_rejects_nonexistent() {
         unsafe { std::env::set_var("WT", "/tmp/definitely-does-not-exist-wt-test") };
         let result = resolve_base_dir();
@@ -140,6 +142,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(wt_env)]
     fn resolve_base_dir_rejects_git_repo() {
         let tmp = TempDir::new().unwrap();
         fs::create_dir(tmp.path().join(".git")).unwrap();

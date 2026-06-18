@@ -1,5 +1,6 @@
 //! Type definitions for the markdown module.
 
+use std::ops::Range;
 use std::path::PathBuf;
 
 use biscuit_file::YamlParseError;
@@ -71,6 +72,10 @@ pub enum MarkdownError {
     #[error("TOC linking error: {0}")]
     TocLinking(#[from] crate::markdown::compose::TocLinkingError),
 
+    /// File-links directive pipeline error.
+    #[error("File-links error: {0}")]
+    FileLinks(#[from] crate::markdown::compose::FileLinksError),
+
     /// Shell expansion pipeline error.
     #[error("Shell expansion failed: {0}")]
     ShellExpansion(#[from] Box<crate::markdown::compose::ShellExpansionError>),
@@ -98,6 +103,18 @@ pub enum MarkdownError {
         property: String,
         /// Why parsing failed, phrased for a CLI user to act on.
         reason: String,
+    },
+
+    /// A disclosure block was malformed at render time.
+    ///
+    /// Raised by the block-extension processor when a `::disclosure` region
+    /// violates the summary/body rules or is missing a required delimiter.
+    #[error("Malformed disclosure block: {reason}")]
+    MalformedDisclosure {
+        /// Human-readable reason the block was rejected.
+        reason: String,
+        /// Byte range of the disclosure region in the source document.
+        range: Range<usize>,
     },
 
     /// The render-tree document renderer rejected the document.
@@ -182,6 +199,7 @@ impl BlockError for MarkdownError {
             MarkdownError::PageBlock(inner) => inner.status_block(term),
             MarkdownError::ShellBlock(inner) => inner.status_block(term),
             MarkdownError::TocLinking(inner) => inner.status_block(term),
+            MarkdownError::FileLinks(inner) => inner.status_block(term),
             MarkdownError::Reference(inner) => inner.status_block(term),
             MarkdownError::CtxMerge(inner) => inner.status_block(term),
 
@@ -200,6 +218,9 @@ impl BlockError for MarkdownError {
             MarkdownError::RenderTree(source) => blocks::render_tree_block(&source.to_string()),
             MarkdownError::MalformedStoredHash { property, reason } => {
                 blocks::malformed_stored_hash_block(property, reason)
+            }
+            MarkdownError::MalformedDisclosure { reason, range } => {
+                blocks::malformed_disclosure_block(reason, range)
             }
             MarkdownError::SchemaValidationFailed {
                 path,

@@ -13,7 +13,7 @@ Markdown parsing, rendering, and Mermaid diagram support for terminal and HTML o
     - **Tables:** Richly formatted tables with dynamic sizing and business logic; renders to both HTML and Terminal
     - **Inline TOC:** Render an inline table of contents linking to the various sections of a page
     - **YouTube Embeddings (future):** Embed a YouTube video player for sharable YouTube video references
-    - **Disclosure Blocks (future):** Show only a heading initially, but click to expand to full prose.
+    - **Disclosure Blocks:** Show only a summary line initially, but click to expand to full prose.
     - **Popovers (future):**
     - **Columnar Support (future):** Provides first class primitives for using columns to better utilize horizontal design space
 - **Composition**
@@ -216,7 +216,7 @@ For each of these rendering features there are detailed documents which will des
     - A disclosure block has some overlap in UI design with a popover but enough distinctions to be it's own thing
     - People familiar with the HTML `<detail>` and `<summary>` tags will already have a good idea what this looks like because "disclosure blocks" are now natively supported in modern browsers by these tags.
     - Because Markdown is a _superset_ of HTML, you could just use these tags in any Markdown document as inner-HTML blocks but doing that is awkward and doesn't meet the "notational velocity" vibe of Markdown authoring
-    - More detail on how **disclosure blocks** are made available via **Darkmatter**'s DSL can be found in the [disclosure](../docs/disclosure.md) document.
+    - More detail on how **disclosure blocks** are made available via **Darkmatter**'s DSL can be found in the [disclosure](../docs/rendering/disclosure.md) document.
 
 - **List Expansion:**
 
@@ -302,6 +302,8 @@ The Darkmatter Library uses the following libraries from this monorepo to achiev
     - File reference lookups (`FileReference` struct)
         - provides relative and absolute path resolution, magic multipath resolution, and even glob finding resolution strategies
     - Conversion of common config and frontmatter formats (JSON, JSON5, YAML, TOML)
+- [`sniff`](../../sniff/README.md)
+    - Runtime context capture for the compose pipeline — OS, hardware, git repo structure, monorepo package discovery, document inventory, and file-change tracking
 
 > **Note:** each of these libraries above has an **Agent Skill** by the same name you can use to gain deep insights into these libraries.
 
@@ -707,10 +709,14 @@ Themes come in light/dark pairs with automatic mode detection:
 | `Gruvbox` | Gruvbox Light | Gruvbox Dark |
 | `Solarized` | Solarized Light | Solarized Dark |
 | `Base16Ocean` | Base16 Ocean Light | Base16 Ocean Dark |
-| `Nord` | Nord | Nord |
-| `Dracula` | Dracula | Dracula |
-| `Monokai` | Monokai | Monokai |
-| `VisualStudioDark` | VS Dark | VS Dark |
+| `Nord` | One Half Light | Nord |
+| `Dracula` | One Half Light | Dracula |
+| `Monokai` | One Half Light | Monokai Extended |
+| `VisualStudioDark` | GitHub Light | VS Dark |
+
+Each `ThemePair` is a (light theme, dark theme) couple. Several pairs use the
+same theme in their light slot: `Nord`, `Dracula`, and `Monokai` use One Half
+Light, and `VisualStudioDark` uses GitHub Light.
 
 ### Color Mode Detection
 
@@ -737,8 +743,11 @@ pub struct TerminalOptions {
     pub max_width: Option<u16>,       // Text wrapping width
     pub mermaid_mode: MermaidMode,    // Off, Image, Text
     pub hyperlink_mode: HyperlinkMode, // Auto, Always, Never
+    pub code_block_mode: CodeBlockMode, // Inverse (default), Dark, Light, Same
 }
 ```
+
+Code blocks invert their theme variant relative to the page/terminal for contrast by default (a light code panel on a dark terminal, and vice versa). This is configurable via `code_block_mode` (`CodeBlockMode::{Inverse, Dark, Light, Same}`) on `TerminalOptions`, or `DarkmatterPage::with_code_block_mode(...)` for page layout.
 
 ## CLI
 
@@ -753,4 +762,4 @@ For command-line usage, see the [darkmatter-cli](../cli/) package which provides
 - **biscuit-hash**: Content hashing (xxHash) for TOC, delta, and mermaid caching
 - **serde**: Frontmatter serialization
 - **chrono**: Date/time handling for expression validators (reused; no new dependency added)
-- **sniff**: System detection for timezone-aware date validators (reused; no new dependency added)
+- **sniff**: System detection for runtime context capture — timezone info, OS/hardware detection, git repo structure, monorepo package discovery, document inventory, and file-change tracking

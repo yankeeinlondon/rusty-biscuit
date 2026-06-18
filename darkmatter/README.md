@@ -1,3 +1,6 @@
+---
+hash: ef46db3751d8e999-6fc11745eb6bfc34
+---
 # Darkmatter
 
 <img src="../assets/darkmatter-512.png" style="width: 250px" />
@@ -30,7 +33,7 @@ For details, choose one or more of the packages in this package area.
     - [Transclusion](./docs/topics/transclusion.md)
     - [Rendering Output Formats](./docs/topics/output-formats.md)
     - [Delta Processing](./docs/topics/delta.md)
-    - [Context Variables provided to Composition](./docs/topics/context-variables.md)
+    - [Context Variables provided to Composition](./docs/topics/context-variables.md) — date/time, repo/monorepo, file changes, OS, hardware, and document discovery via `sniff`
     - [Error Rendering Conventions](./docs/errors/README.md) — `BlockError` body
       contract, `SourceContext`, snapshot tests
 

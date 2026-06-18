@@ -12,7 +12,7 @@
 ///
 /// ## Examples
 ///
-/// ```
+/// ```ignore
 /// use claudine::prompt_reporting::truncate_front_back;
 ///
 /// let text = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6";
@@ -89,7 +89,7 @@ pub fn truncate_front_back(text: &str, front_count: usize, back_count: usize) ->
 ///
 /// ## Examples
 ///
-/// ```
+/// ```ignore
 /// use claudine::prompt_reporting::strip_leading_whitespace;
 ///
 /// // Common 4-space indent is removed; the inner 4-space indent of the

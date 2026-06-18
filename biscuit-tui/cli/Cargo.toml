@@ -1,5 +1,5 @@
 [package]
-name = "tui-chrome-cli"
+name = "biscuit-tui-cli"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
@@ -9,7 +9,7 @@ name = "question"
 path = "src/main.rs"
 
 [dependencies]
-tui-chrome = { path = "../lib" }
+biscuit-tui = { path = "../lib" }
 clap = { version = "4", features = ["derive", "wrap_help"] }
 clap_complete = "4"
 serde_json = "1"
@@ -27,7 +27,7 @@ predicates = "3"
 serial_test = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
 
-# Opt-out of benchmarking: thin CLI wrapper around the tui-chrome library.
+# Opt-out of benchmarking: thin CLI wrapper around the biscuit-tui library.
 [package.metadata.benchmarks]
 required = false
-reason = "Thin CLI wrapper around tui-chrome; no measurable hot paths."
+reason = "Thin CLI wrapper around biscuit-tui; no measurable hot paths."

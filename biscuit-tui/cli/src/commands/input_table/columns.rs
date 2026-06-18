@@ -1,10 +1,10 @@
 use std::io;
 
 use serde_json::Value;
-use tui_chrome::components::input_table::{
+use biscuit_tui::components::input_table::{
     BooleanSwitchConfig, TextAreaInputConfig, TextInputConfig,
 };
-use tui_chrome::{ChoiceInput, ChoiceOption, InputTableColumn};
+use biscuit_tui::{ChoiceInput, ChoiceOption, InputTableColumn};
 
 #[derive(Debug, Clone)]
 pub(super) enum ColumnSpec {

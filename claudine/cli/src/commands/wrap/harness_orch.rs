@@ -4,6 +4,7 @@ use claudine::events::EnvironmentContext;
 use claudine::provider::Provider;
 use claudine::stream::stderr::Verbosity;
 use color_eyre::eyre::{Result, eyre};
+use super::composition::IterationSummarySignals;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
@@ -254,8 +255,9 @@ pub(crate) fn materialized_harness_prompt_from_prepared(
 pub(crate) fn materialize_passthrough_harness_seed(
     source_path: &Path,
     prompt: String,
+    shell_cwd: Option<&Path>,
 ) -> Result<MaterializedHarnessPrompt> {
-    super::overlay::materialize_passthrough_harness_seed(source_path, prompt)
+    super::overlay::materialize_passthrough_harness_seed(source_path, prompt, shell_cwd)
 }
 
 pub(crate) fn find_wrapper_harness_source(
@@ -282,6 +284,7 @@ pub(crate) fn find_wrapper_harness_source(
 pub(crate) fn materialize_harness_prompt(
     state: &HarnessPromptState,
     _repo_root: Option<&Path>,
+    child_cwd: &Path,
 ) -> Result<MaterializedHarnessPrompt> {
     let source_text = fs::read_to_string(&state.source_path)
         .map_err(|e| eyre!("failed to read '{}': {e}", state.source_path.display()))?;
@@ -293,8 +296,11 @@ pub(crate) fn materialize_harness_prompt(
 
     let (mut prompt, frontmatter, env_overrides, inline_closure_plan) = match state.mode {
         HarnessPromptMode::Passthrough => {
-            let options = darkmatter::markdown::compose::ComposeOptions::new()
-                .with_source_file(&state.source_path);
+            let options = claudine::composition::bind_agent_workspace(
+                darkmatter::markdown::compose::ComposeOptions::new(),
+                &state.source_path,
+                Some(child_cwd),
+            );
             let (composed, _report) = effective_markdown.compose_with(options)?;
             let prompt = state.base_prompt.clone().ok_or_else(|| {
                 eyre!(
@@ -310,8 +316,11 @@ pub(crate) fn materialize_harness_prompt(
             )
         }
         HarnessPromptMode::Compose => {
-            let options = darkmatter::markdown::compose::ComposeOptions::new()
-                .with_source_file(&state.source_path);
+            let options = claudine::composition::bind_agent_workspace(
+                darkmatter::markdown::compose::ComposeOptions::new(),
+                &state.source_path,
+                Some(child_cwd),
+            );
             let (composed, _report) = effective_markdown.compose_with(options)?;
             let body = composed.content().to_string();
 
@@ -435,6 +444,7 @@ pub(crate) fn execute_harness_attempt(
     prompt_mode: HarnessPromptMode,
     prompt_state: &HarnessPromptState,
     _materialized: &MaterializedHarnessPrompt,
+    effective_non_interactive: bool,
     use_structured: bool,
     structured_codex_output: Option<&super::policy::StructuredCodexOutput>,
     stdout_noise: &[&str],
@@ -451,6 +461,7 @@ pub(crate) fn execute_harness_attempt(
 ) -> Result<(
     claudine::harness::AttemptOutcome,
     Option<crate::perf::AgentExecutionPerf>,
+    Option<IterationSummarySignals>,
 )> {
     let _attempt_span = info_span!(
         "harness_attempt",
@@ -482,7 +493,7 @@ pub(crate) fn execute_harness_attempt(
         launch.clone()
     };
     let launch = &launch;
-    let (exit_code, termination, session_id, final_response, stderr_text, perf) = if use_structured
+    let (exit_code, termination, session_id, final_response, stderr_text, perf, iteration_signals) = if use_structured
     {
         let summary_details = Arc::new(Mutex::new(
             super::policy::StructuredSummaryDetails::default(),
@@ -614,6 +625,8 @@ pub(crate) fn execute_harness_attempt(
             }
         };
 
+        let iteration_signals = Some(IterationSummarySignals::from_summary(&summary));
+
         (
             summary.exit_code,
             termination,
@@ -621,8 +634,9 @@ pub(crate) fn execute_harness_attempt(
             effective_response,
             summary.stderr_text.clone(),
             perf,
+            iteration_signals,
         )
-    } else {
+    } else if effective_non_interactive {
         let capture = super::exec::run_child_capture(
             binary_path,
             &launch.args,
@@ -669,6 +683,47 @@ pub(crate) fn execute_harness_attempt(
             response,
             (!stderr.trim().is_empty()).then_some(stderr),
             perf,
+            None,
+        )
+    } else {
+        // Interactive TUI path: inherit stdout/stderr directly so the
+        // provider can drive the terminal. For Codex inline composition,
+        // the final response is recovered from `--output-last-message`.
+        let result = super::exec::run_child(
+            binary_path,
+            &launch.args,
+            &launch.env,
+            child_cwd,
+            launch.timeout_config.timeout.map(|d| d.as_secs()),
+            super::exec::ChildIoOptions {
+                stdout_noise_prefixes: &[],
+                stderr_noise_prefixes: &[],
+                stdin_seed: launch.stdin_seed.as_deref(),
+            },
+            child_spawned,
+        )?;
+        let perf = Some(result.telemetry.into_agent_perf(None));
+        let termination = result.termination;
+        let response = if provider == Provider::Codex {
+            if let Some(output) = structured_codex_output {
+                let text = std::fs::read_to_string(&output.last_message_path).unwrap_or_default();
+                let _ = std::fs::remove_file(&output.last_message_path);
+                text
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        (
+            result.data,
+            termination,
+            None,
+            response,
+            None,
+            perf,
+            None,
         )
     };
 
@@ -695,6 +750,7 @@ pub(crate) fn execute_harness_attempt(
             stderr_text,
         },
         perf,
+        iteration_signals,
     ))
 }
 
@@ -735,7 +791,7 @@ pub(crate) fn run_harness_loop(
     // pass `false` to suppress the header entirely; composition callers
     // pass `true`.
     emit_prompt_timing: bool,
-) -> Result<(i32, Option<crate::perf::AgentExecutionPerf>)> {
+) -> Result<(i32, Option<crate::perf::AgentExecutionPerf>, Option<IterationSummarySignals>)> {
     const DEFAULT_MAX_RETRIES: u32 = 3;
     let mut guard =
         claudine::composition::LifecycleRunGuard::new(lifecycle, lifecycle_ctx, lifecycle_emitter);
@@ -749,6 +805,7 @@ pub(crate) fn run_harness_loop(
     let mut attempt = 1u32;
     let mut initial_materialized = initial_materialized;
     let mut harness_perf: Option<crate::perf::AgentExecutionPerf> = None;
+    let mut terminal_signals: Option<IterationSummarySignals> = None;
     let mut _harness_attempts: usize = 0;
 
     loop {
@@ -769,11 +826,11 @@ pub(crate) fn run_harness_loop(
                 attempt,
                 source_path = %prompt_state.source_path.display(),
             )
-            .in_scope(|| materialize_harness_prompt(prompt_state, repo_root))
+            .in_scope(|| materialize_harness_prompt(prompt_state, repo_root, child_cwd))
             .map_err(|e| guard.emit_blocked_or_err(e))?
         };
         let resolve_ctx = harness_context.resolve_context();
-        let mut plan = info_span!(
+        let plan = info_span!(
             "harness_plan_parse",
             attempt,
             source_path = %prompt_state.source_path.display(),
@@ -809,15 +866,18 @@ pub(crate) fn run_harness_loop(
             ));
         }
 
-        // For inline composition, prepend a system-owned writability
-        // pre-check so handler recovery paths can respond to permission
-        // failures.
-        if matches!(prompt_state.mode, HarnessPromptMode::Inline) {
-            plan.pre_checks.insert(
-                0,
-                claudine::harness::inline_writability_pre_check(&prompt_state.source_path),
-            );
-        }
+        // Finalize the parsed plan into the effective plan. For inline
+        // composition this prepends a system-owned writability pre-check so
+        // handler recovery paths can respond to permission failures.
+        let plan = claudine::harness::finalize_effective_plan(
+            plan,
+            if matches!(prompt_state.mode, HarnessPromptMode::Inline) {
+                claudine::harness::EffectivePlanMode::Inline
+            } else {
+                claudine::harness::EffectivePlanMode::Direct
+            },
+            &prompt_state.source_path,
+        );
 
         // Shell audit preflight.
         //
@@ -1055,6 +1115,7 @@ pub(crate) fn run_harness_loop(
             prompt_state.mode,
             prompt_state,
             &materialized,
+            effective_non_interactive,
             use_structured,
             structured_codex_output,
             stdout_noise,
@@ -1076,7 +1137,7 @@ pub(crate) fn run_harness_loop(
         if child_spawned {
             guard.mark_provider_launched();
         }
-        let (outcome, perf) = attempt_result?;
+        let (outcome, perf, iteration_signals) = attempt_result?;
         if let Some(p) = perf {
             _harness_attempts += 1;
             match harness_perf.as_mut() {
@@ -1106,7 +1167,8 @@ pub(crate) fn run_harness_loop(
             // and the operator has no feedback that Claudine noticed.
             eprintln!("{}", crate::output::format_user_interrupt_status());
             guard.emit_terminal(LifecycleSignal::Failure);
-            return Ok((outcome.exit_code, harness_perf));
+            terminal_signals = iteration_signals;
+            return Ok((outcome.exit_code, harness_perf, terminal_signals));
         }
 
         if let Some(failure_event) = claudine::harness::classify_failure(&outcome) {
@@ -1151,7 +1213,13 @@ pub(crate) fn run_harness_loop(
                 claudine::harness::report::report_unhandled_failure(&message, term);
             }
             guard.emit_terminal(LifecycleSignal::Failure);
-            return Err(eyre!("{message}"));
+            // For provider-level failures, preserve the exit code at the
+            // boundary rather than converting it into an `eyre` error. This
+            // lets callers (e.g. `compose --loop`) inspect the terminal
+            // attempt's iteration signals to build an honest
+            // `LoopIterationFailed` cause.
+            terminal_signals = iteration_signals;
+            return Ok((outcome.exit_code, harness_perf, terminal_signals));
         }
 
         // For inline mode, apply closure BEFORE post-checks so that
@@ -1236,7 +1304,8 @@ pub(crate) fn run_harness_loop(
 
         if post_report.all_passed() {
             guard.emit_terminal(LifecycleSignal::Success);
-            return Ok((outcome.exit_code, harness_perf));
+            terminal_signals = iteration_signals;
+            return Ok((outcome.exit_code, harness_perf, terminal_signals));
         }
 
         let failures = post_report.failures();

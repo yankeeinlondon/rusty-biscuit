@@ -3,6 +3,7 @@
 //! Read-only: these helpers resolve and read paths; they never mutate.
 
 use biscuit_file::PathPosition;
+use serde_json::{Map, Value};
 use std::path::PathBuf;
 
 use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
@@ -23,6 +24,13 @@ pub struct ResolutionContext {
     /// Run-local remote-fetch runtime for URL-typed arguments. `None` disables
     /// remote reads in expression functions.
     pub(crate) remote_fetch: Option<RemoteFetchRuntime>,
+    /// Captured context values (e.g. `ctx.agent`) available to read-side
+    /// functions. Populated by production surfaces; tests can inject values
+    /// directly via [`Self::with_ctx_value`].
+    pub(crate) ctx_values: Map<String, Value>,
+    /// Injectable home directory for skill-root discovery. When `None`,
+    /// skill lookups fall back to `dirs::home_dir()`.
+    pub(crate) home_dir: Option<PathBuf>,
 }
 
 impl ResolutionContext {
@@ -33,7 +41,49 @@ impl ResolutionContext {
             base_dir,
             magic_paths: Vec::new(),
             remote_fetch: None,
+            ctx_values: Map::new(),
+            home_dir: None,
         }
+    }
+
+    /// Sets a captured context value (e.g. `agent`) for read-side functions.
+    #[must_use]
+    pub fn with_ctx_value(mut self, key: &str, value: Value) -> Self {
+        self.ctx_values.insert(key.to_string(), value);
+        self
+    }
+
+    /// Injects a home directory for hermetic skill-root tests.
+    #[must_use]
+    #[cfg(test)]
+    pub fn with_home_dir(mut self, home_dir: PathBuf) -> Self {
+        self.home_dir = Some(home_dir);
+        self
+    }
+
+    /// Returns the captured value for a context key, if present.
+    pub(crate) fn ctx_value(&self, key: &str) -> Option<&Value> {
+        self.ctx_values.get(key)
+    }
+
+    /// Returns the executing agent name.
+    ///
+    /// Uses the captured `ctx.agent` value when available; otherwise reads
+    /// `AGENT` from the environment with the same trim-and-default rules.
+    pub(crate) fn agent(&self) -> String {
+        if let Some(Value::String(s)) = self.ctx_value("agent") {
+            return s.clone();
+        }
+        std::env::var("AGENT")
+            .ok()
+            .map(|s| s.trim_ascii().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "unknown".to_string())
+    }
+
+    /// Returns the home directory to use for skill-root discovery.
+    pub(crate) fn home_dir(&self) -> Option<PathBuf> {
+        self.home_dir.clone().or_else(dirs::home_dir)
     }
 
     /// Fetches the text body for an HTTP(S) URL argument.
@@ -71,8 +121,17 @@ impl ResolutionContext {
 
 /// Returns `true` when the argument is an HTTP(S) URL (handled remotely rather
 /// than as a filesystem path).
+///
+/// Scheme detection is case-insensitive per RFC 3986, so values like
+/// `HTTPS://example.com/doc.md` are recognized as remote URLs.
 pub(crate) fn is_remote_url(raw: &str) -> bool {
-    raw.starts_with("http://") || raw.starts_with("https://")
+    url::Url::parse(raw)
+        .ok()
+        .filter(|u| {
+            let scheme = u.scheme();
+            scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https")
+        })
+        .is_some()
 }
 
 /// Normalizes a filepath argument: strips a leading `file://` scheme and
@@ -110,6 +169,22 @@ mod tests {
     }
 
     #[test]
+    fn is_remote_url_is_case_insensitive() {
+        assert!(is_remote_url("http://example.com"));
+        assert!(is_remote_url("https://example.com"));
+        assert!(is_remote_url("HTTP://example.com"));
+        assert!(is_remote_url("HTTPS://example.com"));
+        assert!(is_remote_url("Http://example.com"));
+        assert!(is_remote_url("hTtPs://example.com/doc.md"));
+        assert!(is_remote_url("HTTPS://example.com/doc.md"));
+
+        assert!(!is_remote_url("ftp://example.com"));
+        assert!(!is_remote_url("C:/foo/bar"));
+        assert!(!is_remote_url("foo/bar.md"));
+        assert!(!is_remote_url("file://foo/bar"));
+    }
+
+    #[test]
     fn resolution_context_default_is_cwd_no_magic() {
         let ctx = ResolutionContext::new(PathBuf::from("/tmp/docdir"));
         assert_eq!(ctx.base_dir, PathBuf::from("/tmp/docdir"));
@@ -142,6 +217,8 @@ mod tests {
             base_dir: PathBuf::from("/tmp"),
             magic_paths: Vec::new(),
             remote_fetch: Some(rt),
+            ctx_values: Map::new(),
+            home_dir: None,
         };
 
         // The URL was never registered by discovery; the read-side function
@@ -166,6 +243,8 @@ mod tests {
             base_dir: PathBuf::from("/tmp"),
             magic_paths: Vec::new(),
             remote_fetch: Some(rt),
+            ctx_values: Map::new(),
+            home_dir: None,
         };
 
         let result = tokio::task::spawn_blocking(move || {

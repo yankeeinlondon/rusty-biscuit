@@ -425,6 +425,7 @@ pub(crate) fn execute_sequence(
         &resolved_targets,
         &user_set_overrides,
         source_repo_root.as_deref(),
+        &prep_context.launch_workspace.child_cwd,
         shared,
         effective_fail_fast,
         inline_mode,
@@ -532,45 +533,49 @@ pub(crate) fn execute_sequence(
             replace_file: shared.replace_system_prompt.clone(),
         };
 
-        let request = CompositionExecutionRequest {
-            mode: if inline_mode {
-                CompositionMode::InlineFrontmatterPrompt
-            } else {
-                CompositionMode::ChainedDocument
-            },
-            file_ref: source.original_ref.clone(),
-            prepared,
-            resolved_target,
-            explicit_provider: shared.explicit_provider(),
-            excluded: shared.excluded(),
-            sequence: true,
-            yolo: shared.yolo,
-            include: shared.include.clone(),
-            model: shared.model.clone(),
-            output: shared.output,
-            system_prompt_args,
-            timeout: shared.timeout.clone(),
-            step_timeout: shared.step_timeout.clone(),
-            operation: shared.operation.clone(),
-            sandbox: shared.sandbox,
-            repo: shared.repo,
-            dry_run: shared.dry_run,
-            mcp: shared.mcp,
-            mcp_use: shared.mcp_use.clone(),
-            strict: shared.strict,
-            session_interactive: shared.interactive,
-            quiet: shared.quiet,
-            silent: shared.silent,
-            env_overrides: step_ctx.env_overrides.clone(),
-            shared_approval_cache: Some(Arc::clone(&shared_approval_cache)),
-            installed_snapshot: Some(prep_context.installed_snapshot.clone()),
-            prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
-            prep_launch_context: Some(prep_context.launch_context.clone()),
-            prep_env_context: Some(prep_context.env_context.clone()),
-            prep_launch_detection_error: prep_context.launch_detection_error.clone(),
-            // Sequence steps render their header in-pipeline: per-step
-            // prep already ran up front, so the executor's emit is timely.
-            header_emitted: false,
+        let request = {
+            let resolved = shared.resolve_session_interactivity(prepared.selection_hints.interactive);
+            CompositionExecutionRequest {
+                mode: if inline_mode {
+                    CompositionMode::InlineFrontmatterPrompt
+                } else {
+                    CompositionMode::ChainedDocument
+                },
+                file_ref: source.original_ref.clone(),
+                prepared,
+                resolved_target,
+                explicit_provider: shared.explicit_provider(),
+                excluded: shared.excluded(),
+                sequence: true,
+                yolo: shared.yolo,
+                include: shared.include.clone(),
+                model: shared.model.clone(),
+                output: shared.output,
+                system_prompt_args,
+                timeout: shared.timeout.clone(),
+                step_timeout: shared.step_timeout.clone(),
+                operation: shared.operation.clone(),
+                sandbox: shared.sandbox,
+                repo: shared.repo,
+                dry_run: shared.dry_run,
+                mcp: shared.mcp,
+                mcp_use: shared.mcp_use.clone(),
+                strict: shared.strict,
+                session_interactive: resolved.value,
+                session_interactive_source: resolved.source,
+                quiet: shared.quiet,
+                silent: shared.silent,
+                env_overrides: step_ctx.env_overrides.clone(),
+                shared_approval_cache: Some(Arc::clone(&shared_approval_cache)),
+                installed_snapshot: Some(prep_context.installed_snapshot.clone()),
+                prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
+                prep_launch_context: Some(prep_context.launch_context.clone()),
+                prep_env_context: Some(prep_context.env_context.clone()),
+                prep_launch_detection_error: prep_context.launch_detection_error.clone(),
+                // Sequence steps render their header in-pipeline: per-step
+                // prep already ran up front, so the executor's emit is timely.
+                header_emitted: false,
+            }
         };
 
         let step_result = super::composition::execute_composition_request_inner(
@@ -886,6 +891,7 @@ fn run_phase_1c_with_schema(
     resolved_targets: &[Option<claudine::composition::ResolvedExecutionTarget>],
     user_set_overrides: &Option<serde_json::Value>,
     source_repo_root: Option<&std::path::Path>,
+    child_cwd: &std::path::Path,
     shared: &SharedComposeArgs,
     effective_fail_fast: bool,
     inline_mode: bool,
@@ -905,6 +911,7 @@ fn run_phase_1c_with_schema(
             resolved_targets,
             &overrides,
             source_repo_root,
+            child_cwd,
             shared,
             effective_fail_fast,
             inline_mode,
@@ -1019,6 +1026,7 @@ fn run_phase_1c_attempt(
     resolved_targets: &[Option<claudine::composition::ResolvedExecutionTarget>],
     user_set_overrides: &Option<serde_json::Value>,
     source_repo_root: Option<&std::path::Path>,
+    child_cwd: &std::path::Path,
     shared: &SharedComposeArgs,
     effective_fail_fast: bool,
     inline_mode: bool,
@@ -1051,7 +1059,11 @@ fn run_phase_1c_attempt(
         // --dry-run path (`{{env.AGENT}}` resolves to empty for those states).
         if let Some(target) = target {
             env_overrides.insert("AGENT".to_string(), target.provider.as_slug().to_string());
+            if let Some(ref model) = target.model {
+                env_overrides.insert("MODEL".to_string(), model.clone());
+            }
         }
+        env_overrides.insert("YOLO".to_string(), shared.yolo.to_string());
 
         // Per-step schema pre-validation BEFORE preflight. If a step's
         // effective frontmatter (source + overlay overrides) is missing
@@ -1123,6 +1135,7 @@ fn run_phase_1c_attempt(
             env_overrides: env_overrides.clone(),
             perf_enabled: shared.perf,
             source_repo_root: source_repo_root.map(std::path::Path::to_path_buf),
+            shell_working_directory: Some(child_cwd.to_path_buf()),
         };
 
         // Inline steps prepare via `prepare_inline_with_schema` so the

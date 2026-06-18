@@ -7,7 +7,7 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::git::BehindStatus;
-use sniff::filesystem::repo::{DependencyEntry, Package, RepoIdentity, RepoInfo};
+use sniff::filesystem::repo::{DependencyEntry, MonorepoStandard, Package, RepoIdentity, RepoInfo};
 
 use super::language::render_framework_summary;
 use super::packages::select_repo_packages;
@@ -15,15 +15,20 @@ use super::{format_number, relative_path};
 
 /// Render `sniff repo name` output.
 ///
-/// At verbosity `0`, emits just the bare repo name followed by a newline so
-/// the command pipes cleanly. At verbosity `>= 1`, decorates the name with
-/// version and a language-or-monorepo-package-count suffix, styled through
-/// Prose so terminal-aware fallbacks apply.
-pub fn render_repo_name(identity: &RepoIdentity, verbose: u8) -> String {
-    if verbose == 0 {
-        return format!("{}\n", identity.name);
-    }
+/// Emits just the bare repo name followed by a newline so the command pipes
+/// cleanly and its terminal output matches the `{ name }` JSON scope at every
+/// verbosity level. The bare-`repo` parent command uses
+/// [`render_repo_default_verbose`] for the rich one-liner.
+pub fn render_repo_name(identity: &RepoIdentity, _verbose: u8) -> String {
+    format!("{}\n", identity.name)
+}
 
+/// Render the rich one-liner for bare `sniff repo -v`.
+///
+/// Draws from the full `RepoIdentity`, including the version suffix, the
+/// monorepo package-count suffix, and the primary language suffix. Every field
+/// shown is part of the parent aggregate scope.
+pub fn render_repo_default_verbose(identity: &RepoIdentity) -> String {
     let mut markup = format!("**{}**", identity.name);
     if let Some(version) = identity.version.as_deref() {
         markup.push_str(&format!(" v{version}"));
@@ -134,19 +139,50 @@ fn append_area_section(
         output.push(RenderableTerminalContent::Component(Rc::new(inner_list)));
     }
 }
-/// Format a MonorepoTool for display.
-fn format_monorepo_tool(tool: &sniff::filesystem::repo::MonorepoTool) -> &'static str {
-    use sniff::filesystem::repo::MonorepoTool;
-    match tool {
-        MonorepoTool::CargoWorkspace => "Cargo Workspace",
-        MonorepoTool::NpmWorkspaces => "npm Workspaces",
-        MonorepoTool::PnpmWorkspaces => "pnpm Workspaces",
-        MonorepoTool::YarnWorkspaces => "Yarn Workspaces",
-        MonorepoTool::Nx => "Nx",
-        MonorepoTool::Turborepo => "Turborepo",
-        MonorepoTool::Lerna => "Lerna",
-        _ => "Unknown",
+/// Compose the unified CLI label for a monorepo layer.
+///
+/// Returns `{orchestrator_label} (using {authority_label})` when one or more
+/// orchestrators are present, otherwise just `{authority_label}`. When several
+/// orchestrators ride on the layer they are joined as
+/// `{a} + {b} (using {authority_label})`, preserving the deterministic order
+/// the topology layer already carries (the same order the JSON `orchestrators`
+/// array emits). Reads each standard's `spec().label`.
+pub(crate) fn format_monorepo_label(
+    authority: MonorepoStandard,
+    orchestrators: &[MonorepoStandard],
+) -> String {
+    let authority_label = authority.spec().label;
+    if orchestrators.is_empty() {
+        return authority_label.to_string();
     }
+    let orchestrator_labels: Vec<&str> = orchestrators.iter().map(|o| o.spec().label).collect();
+    format!(
+        "{} (using {})",
+        orchestrator_labels.join(" + "),
+        authority_label
+    )
+}
+
+/// Format the monorepo authority/orchestrator summary for display.
+///
+/// Derives the one-liner from the primary topology layer's authority and any
+/// orchestrators riding on top.
+fn format_monorepo_summary(repo: &RepoInfo) -> String {
+    repo.primary_layer()
+        .map(|layer| format_monorepo_label(layer.authority, &layer.orchestrators))
+        .unwrap_or_default()
+}
+
+/// Build a one-line summary of a single `MonorepoLayer`.
+fn format_monorepo_layer(layer: &sniff::filesystem::repo::MonorepoLayer) -> String {
+    let label = format_monorepo_label(layer.authority, &layer.orchestrators);
+    let count = layer.packages.len();
+    format!(
+        "{} — {} {}",
+        label,
+        format_number(count),
+        package_word(count)
+    )
 }
 
 #[derive(Debug, Clone, Default)]
@@ -461,30 +497,47 @@ pub fn render_repo_section(
     }
 
     // Monorepo heading
-    let tool_name = repo
-        .monorepo_tool
-        .as_ref()
-        .map(format_monorepo_tool)
-        .unwrap_or("Unknown");
-
     let total_count = repo.packages.as_ref().map(|p| p.len()).unwrap_or(0);
+    let layer_count = repo.monorepo_layers.len();
 
     if let Some(ref packages) = repo.packages {
         let filtered = select_repo_packages(packages, repo_filter, package, package_area);
         let showing_count = filtered.len();
 
         let any_scope = !repo_filter.is_empty() || package.is_some() || package_area.is_some();
-        let title_suffix = if any_scope && showing_count != total_count {
-            format!(
-                " <dim>({} / showing {} of {} packages)</dim>",
-                tool_name, showing_count, total_count,
-            )
+        let title_suffix = if layer_count > 1 {
+            format!(" <dim>({} layers)</dim>", layer_count)
         } else {
-            format!(" <dim>({} / {} packages)</dim>", tool_name, total_count)
+            let summary = format_monorepo_summary(repo);
+            if any_scope && showing_count != total_count {
+                format!(
+                    " <dim>({} / showing {} of {} packages)</dim>",
+                    summary,
+                    format_number(showing_count),
+                    format_number(total_count),
+                )
+            } else {
+                format!(
+                    " <dim>({} / {} packages)</dim>",
+                    summary,
+                    format_number(total_count),
+                )
+            }
         };
 
         let title = Prose::new(format!("<b><u>Repository</u></b>{}", title_suffix));
         writeln!(out, "\n{}\n", title.render(&terminal)).unwrap();
+
+        // For multiple layers, list each layer's authority + orchestrators.
+        if layer_count > 1 {
+            let layer_items: Vec<String> = repo
+                .monorepo_layers
+                .iter()
+                .map(format_monorepo_layer)
+                .collect();
+            let layer_list = UnorderedList::new(layer_items);
+            writeln!(out, "{}", layer_list.render(&terminal)).unwrap();
+        }
 
         let update_summary =
             summarize_repo_updates(repo, Some(filtered.as_slice()), latest_versions_requested);
@@ -553,9 +606,11 @@ pub fn render_repo_section(
             writeln!(out, "{}", Prose::new(&legend).render(&terminal)).unwrap();
         }
     } else {
+        let summary = format_monorepo_summary(repo);
         let title = Prose::new(format!(
             "<b><u>Repository</u></b> <dim>({} / {} packages)</dim>",
-            tool_name, total_count,
+            summary,
+            format_number(total_count),
         ));
         writeln!(out, "\n{}\n", title.render(&terminal)).unwrap();
     }
@@ -703,24 +758,24 @@ pub fn render_filesystem_section(
             }
         }
 
-        let dirty = if git.status.is_dirty {
-            "dirty"
-        } else {
-            "clean"
-        };
-        writeln!(
-            out,
-            "  Status: {} ({} staged, {} unstaged, {} untracked)",
-            dirty, git.status.staged_count, git.status.unstaged_count, git.status.untracked_count
-        )
-        .unwrap();
+        // Identity-only `GitInfo` has no computed status; skip the status line
+        // entirely rather than printing a misleading "clean" or panicking.
+        if let Some(status) = git.status.as_ref() {
+            let dirty = if status.is_dirty { "dirty" } else { "clean" };
+            writeln!(
+                out,
+                "  Status: {} ({} staged, {} unstaged, {} untracked)",
+                dirty, status.staged_count, status.unstaged_count, status.untracked_count
+            )
+            .unwrap();
 
-        // Show is_behind status (deep mode only)
-        if let Some(ref behind) = git.status.is_behind {
-            match behind {
-                BehindStatus::NotBehind => writeln!(out, "  Behind: no").unwrap(),
-                BehindStatus::Behind(remotes) => {
-                    writeln!(out, "  Behind: {}", remotes.join(", ")).unwrap();
+            // Show is_behind status (deep mode only)
+            if let Some(ref behind) = status.is_behind {
+                match behind {
+                    BehindStatus::NotBehind => writeln!(out, "  Behind: no").unwrap(),
+                    BehindStatus::Behind(remotes) => {
+                        writeln!(out, "  Behind: {}", remotes.join(", ")).unwrap();
+                    }
                 }
             }
         }
@@ -750,9 +805,12 @@ pub fn render_filesystem_section(
         }
 
         // Show dirty file details at verbose level 1+
-        if verbose > 0 && !git.status.dirty.is_empty() {
+        if verbose > 0
+            && let Some(status) = git.status.as_ref()
+            && !status.dirty.is_empty()
+        {
             writeln!(out, "  Dirty files:").unwrap();
-            for dirty_file in &git.status.dirty {
+            for dirty_file in &status.dirty {
                 writeln!(out, "    - {}", dirty_file.filepath.display()).unwrap();
                 // Show diff at verbose level 2+
                 if verbose > 1 && !dirty_file.diff.is_empty() {
@@ -768,17 +826,20 @@ pub fn render_filesystem_section(
         }
 
         // Show untracked files at verbose level 1+
-        if verbose > 0 && !git.status.untracked.is_empty() {
+        if verbose > 0
+            && let Some(status) = git.status.as_ref()
+            && !status.untracked.is_empty()
+        {
             writeln!(out, "  Untracked files:").unwrap();
-            let show_count = 5.min(git.status.untracked.len());
-            for untracked in git.status.untracked.iter().take(show_count) {
+            let show_count = 5.min(status.untracked.len());
+            for untracked in status.untracked.iter().take(show_count) {
                 writeln!(out, "    - {}", untracked.filepath.display()).unwrap();
             }
-            if git.status.untracked.len() > show_count {
+            if status.untracked.len() > show_count {
                 writeln!(
                     out,
                     "    ... and {} more",
-                    git.status.untracked.len() - show_count
+                    status.untracked.len() - show_count
                 )
                 .unwrap();
             }
@@ -857,18 +918,33 @@ pub fn render_filesystem_section(
             return out;
         }
 
-        let tool_name = repo
-            .monorepo_tool
-            .as_ref()
-            .map(format_monorepo_tool)
-            .unwrap_or("Unknown");
+        let summary = format_monorepo_summary(repo);
         let pkg_count = repo.packages.as_ref().map(|p| p.len()).unwrap_or(0);
+        let layer_count = repo.monorepo_layers.len();
 
-        let header = Prose::new(format!(
-            "<b>Packages:</b> <dim>({} / {} packages)</dim>",
-            tool_name, pkg_count,
-        ));
+        let header = if layer_count > 1 {
+            Prose::new(format!(
+                "<b>Packages:</b> <dim>({} layers)</dim>",
+                layer_count
+            ))
+        } else {
+            Prose::new(format!(
+                "<b>Packages:</b> <dim>({} / {} packages)</dim>",
+                summary,
+                format_number(pkg_count),
+            ))
+        };
         writeln!(out, "{}", header.render_optimistic(None)).unwrap();
+
+        if layer_count > 1 {
+            let layer_items: Vec<String> = repo
+                .monorepo_layers
+                .iter()
+                .map(format_monorepo_layer)
+                .collect();
+            let layer_list = UnorderedList::new(layer_items);
+            writeln!(out, "{}", layer_list.render_optimistic(None)).unwrap();
+        }
 
         if let Some(ref packages) = repo.packages {
             let mut items: Vec<RenderableTerminalContent> = Vec::new();

@@ -29,6 +29,7 @@
 
 pub mod block;
 pub mod cleanup;
+pub mod code_block;
 pub mod compose;
 pub mod delta;
 pub mod dsl;
@@ -39,6 +40,7 @@ pub mod hash;
 pub mod highlighting;
 pub mod inline;
 mod inline_html;
+pub mod language_grammar;
 pub mod normalize;
 pub mod output;
 pub mod reference;
@@ -52,11 +54,13 @@ pub use delta::{
     BrokenLink, ChangeAction, CodeBlockChange, ContentChange, DeltaStatistics, DocumentChange,
     FrontmatterChange, MarkdownDelta, MovedSection, SectionId, SectionPath,
 };
+pub use code_block::{CodeBlock, CodeBlockError};
 pub use frontmatter::{Frontmatter, MergeStrategy};
 pub use hash::{
     ComputedHash, DetailedValue, FmHashPair, MdHashKind, MdHashOptions, ParseMdHashKindError,
     SectionTuple,
 };
+pub use language_grammar::{LanguageGrammar, LanguageGrammarError};
 pub use normalize::{
     HeadingAdjustment, HeadingLevel, NormalizationError, NormalizationReport, StructureIssue,
     StructureIssueKind, StructureValidation, ViolationCorrection,
@@ -66,9 +70,11 @@ pub use reference::{
     ReferenceError, ReferenceGraph, ReferenceGraphOptions, ReferenceKind, ReferenceRecord,
     ReferenceSet, TransclusionRef,
 };
+#[allow(deprecated)]
 pub use render_tree::TerminalCodeRenderer;
 pub use toc::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode};
 pub use types::{FrontmatterMap, MarkdownError, MarkdownResult};
+#[allow(deprecated)]
 pub use yaml_block::{YamlBlock, YamlBlockError};
 
 use std::path::Path;
@@ -573,6 +579,34 @@ impl Markdown {
         output::as_ast(self)
     }
 
+    /// Folds the markdown document into the canonical renderable [`Document`].
+    ///
+    /// This is the target-agnostic intermediate representation used by the
+    /// terminal, HTML, and Markdown renderers. Serializing the returned
+    /// document to JSON produces a lossless tree that includes darkmatter
+    /// extensions such as disclosure blocks as native [`NodeKind::Disclosure`].
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::Markdown;
+    ///
+    /// let md = Markdown::new("# Hello\n\nWorld".to_string());
+    /// let document = md.as_document().unwrap();
+    ///
+    /// let json = serde_json::to_string_pretty(&document).unwrap();
+    /// assert!(json.contains("heading"));
+    /// ```
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`MarkdownError::RenderTree`](crate::markdown::MarkdownError::RenderTree)
+    /// when the render tree fold fails (for example, a malformed disclosure
+    /// block).
+    pub fn as_document(&self) -> MarkdownResult<renderable::tree::Document> {
+        Ok(render_tree::entrypoints::to_render_document(self)?.0)
+    }
+
     /// Converts the markdown document to HTML with syntax highlighting.
     ///
     /// Routes through the render-tree browser pipeline
@@ -606,22 +640,7 @@ impl Markdown {
     /// when the render tree fails structural validation or a strict-mode
     /// rejection occurs.
     pub fn as_html(&self, options: output::HtmlOptions) -> MarkdownResult<String> {
-        let (mut doc, fold_diagnostics) = render_tree::entrypoints::to_render_document(self);
-        // Restore the legacy `output::as_html` contract: a malformed fenced
-        // code-block directive (e.g. an invalid highlight range) is a fatal
-        // error on the browser path, not a silent degrade. The render-tree
-        // code renderer only degrades (matching the legacy *terminal* path), so
-        // this preflight runs over the same folded tree before rendering.
-        render_tree::entrypoints::validate_code_directives(&doc.root)?;
-        // Direct-API fallback: with no explicit `hr_defaults`, seed bare rules
-        // from the deprecated top-level `hr:` frontmatter, matching the deleted
-        // bespoke serializer. An explicit option (e.g. a `DarkmatterPage`
-        // `style.hr.*` projection) is applied by `render_tree_html_from_document`
-        // instead, so the branches stay mutually exclusive.
-        if options.hr_defaults.is_none() {
-            render_tree::entrypoints::apply_hr_frontmatter_fallback(&mut doc.root, self);
-        }
-        Ok(render_tree::entrypoints::render_tree_html_from_document(doc, fold_diagnostics, &options)?.output)
+        Ok(render_tree::render_tree_html(self, &options)?.output)
     }
 
     /// Renders the markdown document as ANSI-styled terminal output.
@@ -652,33 +671,7 @@ impl Markdown {
     /// when the render tree fails structural validation or a strict-mode
     /// rejection occurs.
     pub fn as_terminal(&self, options: output::TerminalOptions) -> MarkdownResult<String> {
-        self.as_terminal_with_layout(options, None)
-    }
-
-    /// Internal entry point that passes an optional page layout context through
-    /// to the renderer so per-component alignment and fill are honoured.
-    ///
-    /// Both branches route through the render-tree terminal document renderer.
-    /// With no layout context (the default-layout path that
-    /// [`DarkmatterPage::render`](crate::layout::DarkmatterPage::render) and
-    /// [`as_terminal`](Self::as_terminal) take), the document folds and renders
-    /// directly. With a layout context (`Some(ctx)`), the tree-side decoration
-    /// pass
-    /// ([`render_tree_terminal_with_layout`](render_tree::entrypoints::render_tree_terminal_with_layout))
-    /// projects per-component alignment, fill, width caps, list-left margins,
-    /// colors, line numbers, hyperlink-label and image-alt width/alignment, and
-    /// the right-aligned list-item body onto the tree before rendering.
-    pub(crate) fn as_terminal_with_layout(
-        &self,
-        options: output::TerminalOptions,
-        layout_ctx: Option<&crate::layout::LayoutContext>,
-    ) -> MarkdownResult<String> {
-        match layout_ctx {
-            None => Ok(render_tree::render_tree_terminal(self, &options)?.output),
-            Some(ctx) => {
-                Ok(render_tree::entrypoints::render_tree_terminal_with_layout(self, &options, ctx)?.output)
-            }
-        }
+        Ok(render_tree::render_tree_terminal(self, &options)?.output)
     }
 
     /// Extracts a Table of Contents from the markdown document.
@@ -1541,6 +1534,7 @@ title: Test
             mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
             hyperlink_mode: crate::markdown::output::terminal::HyperlinkMode::Always,
             hr_defaults: None,
+            code_block_mode: crate::markdown::highlighting::CodeBlockMode::default(),
         };
         let output = md.as_terminal(options).unwrap();
 
@@ -1610,6 +1604,7 @@ title: Test
             mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
             hyperlink_mode: crate::markdown::output::terminal::HyperlinkMode::Always,
             hr_defaults: None,
+            code_block_mode: crate::markdown::highlighting::CodeBlockMode::default(),
         };
         let terminal_output = md.as_terminal(terminal_options).unwrap();
         let terminal_plain = strip_ansi_codes(&terminal_output);

@@ -13,8 +13,8 @@ and explicitly defers findings 5–6 (purely cosmetic refactors). Each phase
 is independently verifiable and concludes with the same standard
 verification pair:
 
-- `cargo test -p tui-chrome -p tui-chrome-cli`
-- `cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings`
+- `cargo test -p biscuit-tui -p biscuit-tui-cli`
+- `cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings`
 
 plus, where the phase touches gated suites, the env-gated PTY/shell tests.
 
@@ -78,7 +78,7 @@ choose-cli PTY harness the DSR cursor-position responder that
      (the choose-cli `mod pty` and `mod keyboard_protocol` are both
      `#[cfg(unix)]`).
    - Carry a `//!` module doc comment explaining: "Shared PTY helpers
-     for `tui-chrome-cli` integration tests. Any test that spawns
+     for `biscuit-tui-cli` integration tests. Any test that spawns
      `question` with `--height` (Inline-viewport mode) MUST call
      `answer_cursor_position_request` before sending input; otherwise
      the binary blocks during initialisation while crossterm waits
@@ -185,16 +185,16 @@ choose-cli PTY harness the DSR cursor-position responder that
 ```bash
 # Verifies the previously-failing inline-viewport test now passes.
 QUESTION_INTERACTIVE_PTY=1 \
-  cargo test -p tui-chrome-cli --test choose_cli \
+  cargo test -p biscuit-tui-cli --test choose_cli \
   pty::choose_one_height_100_percent_runs_end_to_end -- --nocapture
 
 # Ensures the dedup'd keyboard-protocol harness still passes.
 RUN_PTY_TESTS=1 \
-  cargo test -p tui-chrome-cli --test keyboard_protocol -- --nocapture
+  cargo test -p biscuit-tui-cli --test keyboard_protocol -- --nocapture
 
 # Full choose_cli pty suite (4 tests).
 QUESTION_INTERACTIVE_PTY=1 \
-  cargo test -p tui-chrome-cli --test choose_cli pty:: -- --nocapture
+  cargo test -p biscuit-tui-cli --test choose_cli pty:: -- --nocapture
 ```
 
 ### Verification Checklist
@@ -206,7 +206,7 @@ QUESTION_INTERACTIVE_PTY=1 \
       `answer_cursor_position_request`; it calls the shared helper.
 - [ ] `cli/tests/choose_cli.rs::pty::spawn_question` calls the
       responder iff `args_use_inline_viewport(args)` returns true.
-- [ ] `QUESTION_INTERACTIVE_PTY=1 cargo test -p tui-chrome-cli --test
+- [ ] `QUESTION_INTERACTIVE_PTY=1 cargo test -p biscuit-tui-cli --test
       choose_cli pty::choose_one_height_100_percent_runs_end_to_end`
       passes.
 - [ ] All 4 `choose_cli::pty` tests pass under
@@ -214,8 +214,8 @@ QUESTION_INTERACTIVE_PTY=1 \
 - [ ] All 4 `keyboard_protocol` tests pass under `RUN_PTY_TESTS=1`.
 - [ ] `pty-test-bugs.md` Bug 2 marked resolved with the new helper
       path cited.
-- [ ] `cargo test -p tui-chrome -p tui-chrome-cli` passes.
-- [ ] `cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets --
+- [ ] `cargo test -p biscuit-tui -p biscuit-tui-cli` passes.
+- [ ] `cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets --
       -D warnings` is clean.
 
 ## Phase 2 — `just test-pty` Recipe (Finding 2)
@@ -246,7 +246,7 @@ gated suites in one shot.
    ```
 
    Notes on shape:
-   - The recipe uses `{{CLI}}` (already defined as `tui-chrome-cli` at
+   - The recipe uses `{{CLI}}` (already defined as `biscuit-tui-cli` at
      line 21 of the justfile) for consistency with the existing
      `test` / `lint` / `build` recipes.
    - Each invocation gets its own env-var prefix so the three suites
@@ -331,10 +331,10 @@ at the time of review-10 (`review-10.md:171-172`).
 - [ ] `completions_shell` reports 8/8 passing.
 - [ ] `choose_cli pty::` reports 4/4 passing (depends on Phase 1).
 - [ ] README change is in place pointing at the recipe.
-- [ ] `cargo test -p tui-chrome -p tui-chrome-cli` (default suite)
+- [ ] `cargo test -p biscuit-tui -p biscuit-tui-cli` (default suite)
       still passes — adding the recipe must not perturb default test
       runs.
-- [ ] `cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets --
+- [ ] `cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets --
       -D warnings` is clean.
 
 ## Phase 3 — CRLF/BOM-Tolerant `parse_md` Test (Finding 3)
@@ -502,8 +502,8 @@ pass, **without** broadening the parser's contract beyond
 ### Focused Verification
 
 ```bash
-cargo test -p tui-chrome-cli option_sources::tests::parse_md_
-cargo test -p tui-chrome-cli option_sources::tests
+cargo test -p biscuit-tui-cli option_sources::tests::parse_md_
+cargo test -p biscuit-tui-cli option_sources::tests
 ```
 
 Confirm all `parse_md_*` tests pass and no other `option_sources`
@@ -517,8 +517,8 @@ test regresses.
 - [ ] `parse_md_tolerates_utf8_bom_with_lf_line_endings` passes.
 - [ ] `parse_md_tolerates_crlf_line_endings_without_bom` passes.
 - [ ] All other `option_sources::tests` continue to pass.
-- [ ] `cargo test -p tui-chrome -p tui-chrome-cli` passes.
-- [ ] `cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets --
+- [ ] `cargo test -p biscuit-tui -p biscuit-tui-cli` passes.
+- [ ] `cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets --
       -D warnings` is clean.
 
 ## Phase 4 — Document the TOML `options = [...]` Convention (Finding 4)
@@ -632,7 +632,7 @@ verification checks are sufficient:
 - **Help-text check** (mandatory): run
 
   ```bash
-  cargo run -p tui-chrome-cli --bin question -- choose-one --help \
+  cargo run -p biscuit-tui-cli --bin question -- choose-one --help \
       | grep -A 6 -- "--file"
   ```
 
@@ -644,8 +644,8 @@ verification checks are sufficient:
   running:
 
   ```bash
-  cargo test -p tui-chrome-cli parse_toml
-  cargo test -p tui-chrome-cli parse_file_toml
+  cargo test -p biscuit-tui-cli parse_toml
+  cargo test -p biscuit-tui-cli parse_file_toml
   ```
 
   No assertions change — the help-text update must not affect parser
@@ -654,12 +654,12 @@ verification checks are sufficient:
 ### Focused Verification
 
 ```bash
-cargo build -p tui-chrome-cli
-cargo run -p tui-chrome-cli --bin question -- choose-one --help \
+cargo build -p biscuit-tui-cli
+cargo run -p biscuit-tui-cli --bin question -- choose-one --help \
     | grep -F "options = [...]"
-cargo run -p tui-chrome-cli --bin question -- choose-many --help \
+cargo run -p biscuit-tui-cli --bin question -- choose-many --help \
     | grep -F "options = [...]"
-cargo test -p tui-chrome-cli parse_toml
+cargo test -p biscuit-tui-cli parse_toml
 ```
 
 Each `grep` must produce at least one matching line; the test command
@@ -677,8 +677,8 @@ must pass.
       `choose_one.rs` text).
 - [ ] `question choose-one --help` and
       `question choose-many --help` both surface the new TOML note.
-- [ ] `cargo test -p tui-chrome -p tui-chrome-cli` passes.
-- [ ] `cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets --
+- [ ] `cargo test -p biscuit-tui -p biscuit-tui-cli` passes.
+- [ ] `cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets --
       -D warnings` is clean.
 
 ## Phase 5 — Final Verification + Lint Cleanup
@@ -698,13 +698,13 @@ Run from the repository root:
 
 ```bash
 # Default suite — must pass with zero failures.
-cargo test -p tui-chrome -p tui-chrome-cli
+cargo test -p biscuit-tui -p biscuit-tui-cli
 
 # Lint with -D warnings — zero warnings, zero errors.
-cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings
+cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings
 
 # Re-run default suite after any clippy-induced edits.
-cargo test -p tui-chrome -p tui-chrome-cli
+cargo test -p biscuit-tui -p biscuit-tui-cli
 
 # Env-gated PTY/shell verification suites — must all pass.
 cd biscuit-tui && just test-pty
@@ -735,9 +735,9 @@ recipe and on Phase 1 having unblocked the previously-failing
 
 ### Verification Checklist
 
-- [ ] `cargo test -p tui-chrome -p tui-chrome-cli` passes (892+ tests
+- [ ] `cargo test -p biscuit-tui -p biscuit-tui-cli` passes (892+ tests
       after the new `parse_md` tests, all green).
-- [ ] `cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets --
+- [ ] `cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets --
       -D warnings` is clean.
 - [ ] `cd biscuit-tui && just test-pty` passes:
   - `keyboard_protocol`: 4/4 pass.
@@ -771,8 +771,8 @@ The review is complete when:
 - **Finding 4 resolved.** `docs/cli-reference.md` and the `--file`
   clap help on both `choose-one` and `choose-many` document the
   TOML `options = [...]` convention.
-- `cargo test -p tui-chrome -p tui-chrome-cli` passes.
-- `cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets --
+- `cargo test -p biscuit-tui -p biscuit-tui-cli` passes.
+- `cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets --
   -D warnings` is clean.
 - `just test-pty` passes from `biscuit-tui/`.
 

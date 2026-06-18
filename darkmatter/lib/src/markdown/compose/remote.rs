@@ -14,7 +14,14 @@ use crate::markdown::compose::expression::{Expr, ExpressionFinder, parse};
 use crate::markdown::compose::transclusion::BlockDirective;
 
 /// Expression-function identifiers whose first argument is a file/URL path the
-/// evaluator will actually read. Membership is an **exact** match — a longer
+/// evaluator will actually **fetch over the network** when it is an HTTP(S) URL.
+///
+/// This is deliberately narrower than the context-requiring read-side set
+/// (`expression::functions::FS_FUNCTIONS`, seven functions): `absolute` and
+/// `relative` also require a resolution context but only ever rewrite a path
+/// string — they never touch the network — so registering them as remote
+/// egress would make the pre-fetch discovery scanner contact a host for a URL
+/// that is never actually read. Membership is an **exact** match — a longer
 /// identifier such as `not_frontmatter` is deliberately excluded so it never
 /// registers network egress.
 const REMOTE_READ_FUNCTIONS: &[&str] = &[
@@ -23,8 +30,6 @@ const REMOTE_READ_FUNCTIONS: &[&str] = &[
     "markdown_title",
     "markdown_body_empty",
     "validate_schema",
-    "absolute",
-    "relative",
 ];
 
 /// What kind of directive or expression is consuming a remote URL.
@@ -609,6 +614,22 @@ Intro
         let content = "Try `frontmatter(\"https://example.com/doc.md\")` here.";
         let results = discover_remote_urls_from_expressions(content, &file_source());
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn absolute_url_arg_is_not_remote_egress() {
+        // `absolute`/`relative` require a resolution context but never fetch:
+        // a URL argument must not be registered as network egress.
+        let content = "{{ absolute(\"https://example.com/doc.md\") }}";
+        let results = discover_remote_urls_from_expressions(content, &file_source());
+        assert!(results.is_empty(), "absolute() must not register remote egress");
+    }
+
+    #[test]
+    fn relative_url_arg_is_not_remote_egress() {
+        let content = "{{ relative(\"https://example.com/doc.md\") }}";
+        let results = discover_remote_urls_from_expressions(content, &file_source());
+        assert!(results.is_empty(), "relative() must not register remote egress");
     }
 
     #[test]

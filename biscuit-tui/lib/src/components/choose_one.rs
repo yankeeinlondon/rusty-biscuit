@@ -8,7 +8,7 @@
 //! ## Examples
 //!
 //! ```
-//! use tui_chrome::prelude::*;
+//! use biscuit_tui::prelude::*;
 //!
 //! let input: ChoiceInput = ChoiceInput::new("colour", "Pick a colour")
 //!     .with_options(vec![

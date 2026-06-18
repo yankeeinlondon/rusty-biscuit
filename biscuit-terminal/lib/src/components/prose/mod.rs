@@ -656,10 +656,11 @@ mod tests {
             .build();
         let prose = Prose::new("<double-underline>important text</double-underline>");
         let result = prose.render(&term);
-        // Tree renderer emits a trailing reset even when the span produced no
-        // visible SGR because the terminal lacks underline support.
-        assert_eq!(result, "important text\x1b[0m", "got: {result:?}");
-        assert!(!result.contains("\x1b[4"), "got: {result:?}");
+        // The span produces no visible SGR (the terminal lacks underline
+        // support), so it opens nothing and emits no stray reset — the output is
+        // the bare text with no escapes.
+        assert_eq!(result, "important text", "got: {result:?}");
+        assert!(!result.contains("\x1b["), "got: {result:?}");
     }
 
     #[test]
@@ -675,14 +676,16 @@ mod tests {
     // ── Fenced code blocks ───────────────────────────────────────────
 
     #[test]
-    fn code_block_renders_dim_and_indented() {
+    fn code_block_renders_dim_with_fences() {
         let prose = Prose::new("<code-block lang=\"yaml\">key: value\nlist:\n  - a</code-block>");
         let result = prose.render_optimistic(None);
-        // Tree renderer wraps the entire code block in one dim open/close pair
-        // and may emit a language header line.
-        assert!(result.contains("\x1b[2m    key: value"), "got: {result:?}");
-        assert!(result.contains("    list:"), "got: {result:?}");
-        assert!(result.contains("      - a\x1b[0m"), "got: {result:?}");
+        // Each segment — the opening language fence, the body, and the closing
+        // fence — is its own dim pair. Fences are shown literally and the body
+        // is not indented.
+        assert_eq!(
+            result,
+            "\x1b[2m```yaml\x1b[0m\n\x1b[2mkey: value\nlist:\n  - a\x1b[0m\n\x1b[2m```\x1b[0m"
+        );
     }
 
     #[test]
@@ -697,28 +700,29 @@ mod tests {
     fn code_block_inside_span_restores_enclosing_style() {
         // A fenced code block nested in a styled span is split around the
         // block child: the inline text before and after the fence each keep
-        // the enclosing red style (`\x1b[31m`), while the code block renders
-        // as its own dim block (`\x1b[2m`). Earlier the block-in-phrasing
-        // shape tripped tree validation and the whole span rendered empty.
+        // the enclosing red style (`\x1b[31m`), while the fence markers and
+        // body each render as their own dim segment (`\x1b[2m`). Earlier the
+        // block-in-phrasing shape tripped tree validation and the whole span
+        // rendered empty.
         let prose = Prose::new("<red>before\n```\ncode\n```\nafter</red>");
         let result = prose.render_optimistic(None);
         assert_eq!(
             result,
-            "\x1b[31mbefore\n\x1b[0m\n\n\x1b[2m    code\x1b[0m\n\n\x1b[31m\nafter\x1b[0m"
+            "\x1b[31mbefore\n\x1b[0m\n\n\x1b[2m```\x1b[0m\n\x1b[2mcode\x1b[0m\n\x1b[2m```\x1b[0m\n\n\x1b[31m\nafter\x1b[0m"
         );
     }
 
     #[test]
     fn standalone_code_block_emits_no_restoration_escape() {
-        // A code block with no enclosing span re-emits nothing after its
-        // reset — the standalone dim output is unchanged.
+        // A code block with no enclosing span re-emits nothing after its final
+        // dim segment — there is no enclosing style to restore.
         let prose = Prose::new("```\ncode\n```");
         let result = prose.render_optimistic(None);
-        let dim = "\x1b[2m    code\x1b[0m";
-        assert!(result.starts_with(dim), "got: {result:?}");
-        // Nothing is re-applied after the code-block reset; only the
-        // document's own final reset may follow.
-        let tail = &result[dim.len()..];
+        let block = "\x1b[2m```\x1b[0m\n\x1b[2mcode\x1b[0m\n\x1b[2m```\x1b[0m";
+        assert!(result.starts_with(block), "got: {result:?}");
+        // Nothing is re-applied after the closing fence; only the document's
+        // own final reset may follow.
+        let tail = &result[block.len()..];
         assert!(tail.is_empty() || tail == "\x1b[0m", "got: {result:?}");
     }
 

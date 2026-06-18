@@ -5,7 +5,7 @@
 //! - `ts title="Main"`
 //! - `js line-numbering=true highlight=1,4-6`
 
-use super::{CodeBlockMeta, HighlightSpec};
+use super::{CodeBlockMeta, HighlightSpec, parse_highlight_spec};
 use crate::markdown::MarkdownError;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -117,50 +117,13 @@ fn parse_bool(s: &str) -> bool {
 /// Format: comma-separated list of numbers and ranges.
 /// Examples: "1", "1,3,5", "1-3", "1,4-6,10"
 fn parse_highlight(s: &str) -> Result<HighlightSpec, MarkdownError> {
-    let mut spec = HighlightSpec::new();
-
-    for part in s.split(',') {
-        let part = part.trim();
-        if part.is_empty() {
-            continue;
-        }
-
-        if part.contains('-') {
-            // Parse range
-            let range_parts: Vec<&str> = part.split('-').collect();
-            if range_parts.len() != 2 {
-                return Err(MarkdownError::InvalidLineRange(format!(
-                    "Invalid range format: {}",
-                    part
-                )));
-            }
-
-            let start = range_parts[0].trim().parse::<usize>().map_err(|_| {
-                MarkdownError::InvalidLineRange(format!("Invalid start number: {}", range_parts[0]))
-            })?;
-
-            let end = range_parts[1].trim().parse::<usize>().map_err(|_| {
-                MarkdownError::InvalidLineRange(format!("Invalid end number: {}", range_parts[1]))
-            })?;
-
-            spec.add_range(start, end)?;
-        } else {
-            // Parse single number
-            let line = part.parse::<usize>().map_err(|_| {
-                MarkdownError::InvalidLineRange(format!("Invalid line number: {}", part))
-            })?;
-
-            spec.add_line(line);
-        }
-    }
-
-    Ok(spec)
+    parse_highlight_spec(s).map_err(|e| MarkdownError::InvalidLineRange(e.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::dsl::ValidLineRange;
+    use crate::markdown::dsl::{HighlightSpecParseError, ValidLineRange};
 
     #[test]
     fn test_parse_empty_string() {
@@ -374,5 +337,99 @@ mod tests {
     fn test_valid_line_range_invalid() {
         let result = ValidLineRange::range(7, 3);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_highlight_spec_single_line() {
+        let spec = parse_highlight_spec("5").unwrap();
+        assert!(spec.contains(5));
+        assert!(!spec.contains(4));
+        assert!(!spec.contains(6));
+    }
+
+    #[test]
+    fn test_parse_highlight_spec_multiple_lines() {
+        let spec = parse_highlight_spec("1,3,5").unwrap();
+        assert!(spec.contains(1));
+        assert!(spec.contains(3));
+        assert!(spec.contains(5));
+        assert!(!spec.contains(2));
+        assert!(!spec.contains(4));
+    }
+
+    #[test]
+    fn test_parse_highlight_spec_range() {
+        let spec = parse_highlight_spec("4-6").unwrap();
+        assert!(spec.contains(4));
+        assert!(spec.contains(5));
+        assert!(spec.contains(6));
+        assert!(!spec.contains(3));
+        assert!(!spec.contains(7));
+    }
+
+    #[test]
+    fn test_parse_highlight_spec_mixed() {
+        let spec = parse_highlight_spec("1,4-6,10").unwrap();
+        assert!(spec.contains(1));
+        assert!(spec.contains(4));
+        assert!(spec.contains(5));
+        assert!(spec.contains(6));
+        assert!(spec.contains(10));
+        assert!(!spec.contains(2));
+        assert!(!spec.contains(7));
+        assert!(!spec.contains(9));
+    }
+
+    #[test]
+    fn test_parse_highlight_spec_empty_segments() {
+        let spec = parse_highlight_spec("1,,3,",).unwrap();
+        assert!(spec.contains(1));
+        assert!(spec.contains(3));
+        assert_eq!(spec.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_highlight_spec_invalid_range_format() {
+        let err = parse_highlight_spec("1-2-3").unwrap_err();
+        assert!(matches!(err, HighlightSpecParseError::InvalidRangeFormat { .. }));
+    }
+
+    #[test]
+    fn test_parse_highlight_spec_invalid_start_number() {
+        let err = parse_highlight_spec("abc-5").unwrap_err();
+        assert!(matches!(err, HighlightSpecParseError::InvalidStartNumber { .. }));
+    }
+
+    #[test]
+    fn test_parse_highlight_spec_invalid_end_number() {
+        let err = parse_highlight_spec("5-xyz").unwrap_err();
+        assert!(matches!(err, HighlightSpecParseError::InvalidEndNumber { .. }));
+    }
+
+    #[test]
+    fn test_parse_highlight_spec_invalid_line_number() {
+        let err = parse_highlight_spec("abc").unwrap_err();
+        assert!(matches!(err, HighlightSpecParseError::InvalidLineNumber { .. }));
+    }
+
+    #[test]
+    fn test_parse_highlight_spec_invalid_range() {
+        let err = parse_highlight_spec("6-4").unwrap_err();
+        assert!(matches!(err, HighlightSpecParseError::InvalidRange { start: 6, end: 4 }));
+    }
+
+    #[test]
+    fn test_parse_highlight_spec_error_display_matches_invalid_line_range() {
+        let cases = [
+            ("1-2-3", "Invalid range format: 1-2-3"),
+            ("abc-5", "Invalid start number: abc"),
+            ("5-xyz", "Invalid end number: xyz"),
+            ("abc", "Invalid line number: abc"),
+            ("6-4", "6-4 (start must be <= end)"),
+        ];
+        for (input, expected) in cases {
+            let err = parse_highlight_spec(input).unwrap_err();
+            assert_eq!(err.to_string(), expected, "input: {input}");
+        }
     }
 }

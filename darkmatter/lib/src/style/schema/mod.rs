@@ -11,7 +11,7 @@ pub mod lists;
 pub mod page;
 
 pub use common::CommonStyle;
-pub use components::{BlockQuoteStyle, TableStyle};
+pub use components::{BlockQuoteStyle, DisclosureStyle, TableStyle};
 pub use hr::HrStyle;
 pub use inline::{HyperlinkStyle, ImageStyle};
 pub use lists::{LiStyle, OlStyle, UlStyle};
@@ -34,6 +34,7 @@ pub struct StyleFrontmatter {
     pub li: Option<LiStyle>,
     #[serde(alias = "block_quote")]
     pub block_quote: Option<BlockQuoteStyle>,
+    pub disclosure: Option<DisclosureStyle>,
 }
 
 #[cfg(test)]
@@ -60,6 +61,7 @@ mod tests {
         assert!(s.hyperlinks.is_none());
         assert!(s.images.is_none());
         assert!(s.block_quote.is_none());
+        assert!(s.disclosure.is_none());
 
         let page = s.page.unwrap();
         assert_eq!(page.left_margin, Some(Length::Ch(2)));

@@ -1,6 +1,6 @@
 # Table of Contents Linking
 
-Darkmatter's DSL provides a compact syntax for a page to link into the Table of Contents of another Markdown page.
+Darkmatter's DSL provides a compact syntax for a page to link into the Table of Contents of another Markdown page. For linking to a set of document files as a tree rather than a single file's headings, see [`::file-links`](./file-links.md).
 
 The basic syntax is:
 

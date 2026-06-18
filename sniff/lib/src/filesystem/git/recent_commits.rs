@@ -1,12 +1,12 @@
 use chrono::{DateTime, Duration, Local, NaiveDate, Utc};
-use git2::Repository;
+use gix::bstr::ByteSlice;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use tracing::debug;
 
 use crate::filesystem::git::ConventionalCommit;
-use crate::filesystem::git::discovery::{DeltaKind, get_commit_files};
+use crate::filesystem::git::discovery::DeltaKind;
 use crate::filesystem::path_kind::{is_documentation_path, is_source_code_path};
 use crate::filesystem::repo::{Package, detect_repo};
 use crate::{Result, SniffError};
@@ -199,18 +199,19 @@ pub fn get_recent_commits_by_duration(
     duration: Duration,
     period_label: &str,
 ) -> Result<CommitDescSet> {
-    let repo = Repository::discover(base_dir)
-        .map_err(|_| SniffError::NotARepository(base_dir.to_path_buf()))?;
+    let mut repo = super::open::trusted_discover(base_dir)?
+        .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?;
+    super::open::configure_cache(&mut repo);
     let repo_root = repo
         .workdir()
-        .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?
-        .to_path_buf();
+        .map(Path::to_path_buf)
+        .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?;
 
     let until = Utc::now();
     let since = until - duration;
     let repo_info = detect_repo(&repo_root)?;
 
-    let commits = collect_commits_in_range(&repo, since, until, repo_info.as_ref());
+    let commits = collect_commits_in_range(&repo, since, until, repo_info.as_ref())?;
     let packages = repo_info.as_ref().and_then(|ri| ri.packages.clone());
 
     Ok(CommitDescSet {
@@ -227,16 +228,17 @@ pub fn get_recent_commits_in_range(
     until: DateTime<Utc>,
     period_label: &str,
 ) -> Result<CommitDescSet> {
-    let repo = Repository::discover(base_dir)
-        .map_err(|_| SniffError::NotARepository(base_dir.to_path_buf()))?;
+    let mut repo = super::open::trusted_discover(base_dir)?
+        .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?;
+    super::open::configure_cache(&mut repo);
     let repo_root = repo
         .workdir()
-        .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?
-        .to_path_buf();
+        .map(Path::to_path_buf)
+        .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?;
 
     let repo_info = detect_repo(&repo_root)?;
 
-    let commits = collect_commits_in_range(&repo, since, until, repo_info.as_ref());
+    let commits = collect_commits_in_range(&repo, since, until, repo_info.as_ref())?;
     let packages = repo_info.as_ref().and_then(|ri| ri.packages.clone());
 
     Ok(CommitDescSet {
@@ -248,18 +250,19 @@ pub fn get_recent_commits_in_range(
 }
 
 pub fn get_recent_commits_by_date(base_dir: &Path, date: NaiveDate) -> Result<CommitDescSet> {
-    let repo = Repository::discover(base_dir)
-        .map_err(|_| SniffError::NotARepository(base_dir.to_path_buf()))?;
+    let mut repo = super::open::trusted_discover(base_dir)?
+        .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?;
+    super::open::configure_cache(&mut repo);
     let repo_root = repo
         .workdir()
-        .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?
-        .to_path_buf();
+        .map(Path::to_path_buf)
+        .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?;
 
     let since = date.and_hms_opt(0, 0, 0).unwrap_or_default().and_utc();
     let until = Utc::now();
     let repo_info = detect_repo(&repo_root)?;
 
-    let commits = collect_commits_in_range(&repo, since, until, repo_info.as_ref());
+    let commits = collect_commits_in_range(&repo, since, until, repo_info.as_ref())?;
     let packages = repo_info.as_ref().and_then(|ri| ri.packages.clone());
     let period_label = format!("since {}", date);
 
@@ -272,43 +275,39 @@ pub fn get_recent_commits_by_date(base_dir: &Path, date: NaiveDate) -> Result<Co
 }
 
 pub fn get_recent_commits_by_hash(base_dir: &Path, hash: &str) -> Result<CommitDescSet> {
-    let repo = Repository::discover(base_dir)
-        .map_err(|_| SniffError::NotARepository(base_dir.to_path_buf()))?;
+    let mut repo = super::open::trusted_discover(base_dir)?
+        .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?;
+    super::open::configure_cache(&mut repo);
     let repo_root = repo
         .workdir()
-        .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?
-        .to_path_buf();
+        .map(Path::to_path_buf)
+        .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?;
 
-    let obj = repo.revparse_single(hash).map_err(|e| {
+    let target = repo.rev_parse_single(hash).map_err(|e| {
         debug!(hash = hash, error = %e, "could not resolve hash");
-        SniffError::Git(e)
+        SniffError::git("revparse", e)
     })?;
-    let target_commit = obj.peel_to_commit().map_err(|e| {
-        debug!(hash = hash, error = %e, "could not peel to commit");
-        SniffError::Git(e)
-    })?;
-    let target_oid = target_commit.id();
+    let target_oid = target.detach();
 
-    // Validate that the target commit is reachable from HEAD
-    let head_commit = repo
-        .head()
-        .and_then(|h| h.peel_to_commit())
-        .map_err(SniffError::Git)?;
-    let head_oid = head_commit.id();
+    let head = repo.head_id().map_err(|e| SniffError::git("head", e))?;
+    let head_oid = head.detach();
 
-    if target_oid != head_oid
-        && !repo
-            .graph_descendant_of(head_oid, target_oid)
-            .unwrap_or(false)
-    {
-        return Err(SniffError::HashNotReachable {
-            hash: hash.to_string(),
-        });
+    if target_oid != head_oid {
+        let reachable = repo
+            .merge_base(head_oid, target_oid)
+            .ok()
+            .map(|base| base.detach() == target_oid)
+            .unwrap_or(false);
+        if !reachable {
+            return Err(SniffError::HashNotReachable {
+                hash: hash.to_string(),
+            });
+        }
     }
 
     let repo_info = detect_repo(&repo_root)?;
 
-    let commits = collect_commits_from_hash_to_head(&repo, target_oid, repo_info.as_ref());
+    let commits = collect_commits_from_hash_to_head(&repo, target_oid, repo_info.as_ref())?;
     let packages = repo_info.as_ref().and_then(|ri| ri.packages.clone());
     let short_hash = &hash[..hash.len().min(8)];
     let period_label = format!("since commit {}", short_hash);
@@ -332,16 +331,17 @@ pub fn get_recent_commits_by_count(base_dir: &Path, count: usize) -> Result<Comm
         return Err(SniffError::InvalidPeriod("0".to_string()));
     }
 
-    let repo = Repository::discover(base_dir)
-        .map_err(|_| SniffError::NotARepository(base_dir.to_path_buf()))?;
+    let mut repo = super::open::trusted_discover(base_dir)?
+        .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?;
+    super::open::configure_cache(&mut repo);
     let repo_root = repo
         .workdir()
-        .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?
-        .to_path_buf();
+        .map(Path::to_path_buf)
+        .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?;
 
     let repo_info = detect_repo(&repo_root)?;
 
-    let commits = collect_commits_by_count(&repo, count, repo_info.as_ref());
+    let commits = collect_commits_by_count(&repo, count, repo_info.as_ref())?;
     let packages = repo_info.as_ref().and_then(|ri| ri.packages.clone());
     let period_label = format!("last {} commits", count);
 
@@ -358,44 +358,54 @@ pub fn get_recent_commits_by_count(base_dir: &Path, count: usize) -> Result<Comm
 // ---------------------------------------------------------------------------
 
 fn collect_commits_in_range(
-    repo: &Repository,
+    repo: &gix::Repository,
     since: DateTime<Utc>,
     until: DateTime<Utc>,
     repo_info_opt: Option<&crate::filesystem::repo::RepoInfo>,
-) -> Vec<CommitDesc> {
+) -> Result<Vec<CommitDesc>> {
     let mut commits = Vec::new();
 
-    let Ok(mut revwalk) = repo.revwalk() else {
-        return commits;
+    let Some(head) = super::discovery::head_id_opt(repo)? else {
+        return Ok(commits);
     };
-    // Pure TIME sort guarantees monotonic newest-first ordering, making the
-    // early `break` below safe even when commit timestamps are skewed.
-    revwalk.set_sorting(git2::Sort::TIME).ok();
-    if revwalk.push_head().is_err() {
-        return commits;
-    }
+
+    let walk = repo
+        .rev_walk(Some(head))
+        .sorting(gix::revision::walk::Sorting::ByCommitTime(
+            gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
+        ))
+        .use_commit_graph(Some(true))
+        .all()
+        .map_err(|e| SniffError::git("revwalk", e))?;
+
+    let mut diff_cache = repo
+        .diff_resource_cache_for_tree_diff()
+        .map_err(|e| SniffError::git("diff", e))?;
 
     let packages = repo_info_opt.and_then(|ri| ri.packages.as_ref());
     let is_monorepo = repo_info_opt.is_some_and(|ri| ri.is_monorepo);
 
-    for oid_result in revwalk {
-        let Ok(oid) = oid_result else {
-            continue;
-        };
-        let Ok(commit) = repo.find_commit(oid) else {
-            continue;
-        };
+    for info_result in walk {
+        let info = info_result.map_err(|e| SniffError::git("revwalk", e))?;
 
-        let commit_time = DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_default();
-        if commit_time < since {
-            break;
-        }
-        if commit_time >= until {
+        // Git commit times are whole seconds; treat the commit as occurring at
+        // the start of its second and compare against the full-precision
+        // `since`/`until` instants. Truncating the bounds to seconds instead
+        // would make a 0-width window (`Duration::days(0)`, since == until ==
+        // now) wrongly include a commit from the current second.
+        let commit_time = DateTime::from_timestamp(info.commit_time(), 0).unwrap_or_default();
+        // `ByCommitTime` is a lazy frontier walk: a tip is always yielded
+        // before its parents, so an old HEAD can precede a newer ancestor.
+        // Filter out-of-range commits with `continue` rather than `break` —
+        // breaking on the first old commit would hide newer parents behind a
+        // skewed HEAD (matching the git2 baseline's full-ancestry scan).
+        if commit_time < since || commit_time > until {
             continue;
         }
 
-        let sha = oid.to_string();
-        let files_raw = get_commit_files(repo, &sha);
+        let sha = info.id.to_string();
+        let files_raw =
+            super::discovery::get_commit_files_with_cache_fallible(repo, info.id, &mut diff_cache)?;
         let files: Vec<CommitFileChange> = files_raw
             .iter()
             .map(|(p, k)| CommitFileChange {
@@ -404,8 +414,12 @@ fn collect_commits_in_range(
             })
             .collect();
 
-        let message = commit.message().unwrap_or("").trim();
-        let (description, bullet_points) = parse_commit_message(message);
+        let commit = info.object().map_err(|e| SniffError::git("object", e))?;
+        let message_raw = commit
+            .message_raw()
+            .map_err(|e| SniffError::git("message", e))?;
+        let message = String::from_utf8_lossy(message_raw.trim());
+        let (description, bullet_points) = parse_commit_message(&message);
 
         let (commit_packages, commit_package_areas) = if is_monorepo {
             if let Some(pkgs) = packages {
@@ -444,45 +458,47 @@ fn collect_commits_in_range(
         });
     }
 
-    commits
+    Ok(commits)
 }
 
 /// Walk from HEAD down to (and including) `target_oid`, returning commits in
 /// newest-first order. The caller must have already validated that `target_oid`
 /// is an ancestor of HEAD.
 fn collect_commits_from_hash_to_head(
-    repo: &Repository,
-    target_oid: git2::Oid,
+    repo: &gix::Repository,
+    target_oid: gix::ObjectId,
     repo_info_opt: Option<&crate::filesystem::repo::RepoInfo>,
-) -> Vec<CommitDesc> {
+) -> Result<Vec<CommitDesc>> {
     let mut commits = Vec::new();
 
-    let Ok(mut revwalk) = repo.revwalk() else {
-        return commits;
+    let Some(head) = super::discovery::head_id_opt(repo)? else {
+        return Ok(commits);
     };
-    revwalk
-        .set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)
-        .ok();
 
-    if revwalk.push_head().is_err() {
-        return commits;
-    }
+    let walk = repo
+        .rev_walk(Some(head))
+        .sorting(gix::revision::walk::Sorting::ByCommitTime(
+            gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
+        ))
+        .use_commit_graph(Some(true))
+        .all()
+        .map_err(|e| SniffError::git("revwalk", e))?;
+
+    let mut diff_cache = repo
+        .diff_resource_cache_for_tree_diff()
+        .map_err(|e| SniffError::git("diff", e))?;
 
     let packages = repo_info_opt.and_then(|ri| ri.packages.as_ref());
     let is_monorepo = repo_info_opt.is_some_and(|ri| ri.is_monorepo);
 
-    for oid_result in revwalk {
-        let Ok(oid) = oid_result else {
-            continue;
-        };
-        let Ok(commit) = repo.find_commit(oid) else {
-            continue;
-        };
+    for info_result in walk {
+        let info = info_result.map_err(|e| SniffError::git("revwalk", e))?;
 
-        let commit_time = DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_default();
+        let commit_time = DateTime::from_timestamp(info.commit_time(), 0).unwrap_or_default();
 
-        let sha = oid.to_string();
-        let files_raw = get_commit_files(repo, &sha);
+        let sha = info.id.to_string();
+        let files_raw =
+            super::discovery::get_commit_files_with_cache_fallible(repo, info.id, &mut diff_cache)?;
         let files: Vec<CommitFileChange> = files_raw
             .iter()
             .map(|(p, k)| CommitFileChange {
@@ -491,8 +507,12 @@ fn collect_commits_from_hash_to_head(
             })
             .collect();
 
-        let message = commit.message().unwrap_or("").trim();
-        let (description, bullet_points) = parse_commit_message(message);
+        let commit = info.object().map_err(|e| SniffError::git("object", e))?;
+        let message_raw = commit
+            .message_raw()
+            .map_err(|e| SniffError::git("message", e))?;
+        let message = String::from_utf8_lossy(message_raw.trim());
+        let (description, bullet_points) = parse_commit_message(&message);
 
         let (commit_packages, commit_package_areas) = if is_monorepo {
             if let Some(pkgs) = packages {
@@ -531,48 +551,53 @@ fn collect_commits_from_hash_to_head(
         });
 
         // Stop after including the target commit
-        if oid == target_oid {
+        if info.id == target_oid {
             break;
         }
     }
 
-    commits
+    Ok(commits)
 }
 
 /// Walk HEAD newest-first and emit at most `count` commits.
 fn collect_commits_by_count(
-    repo: &Repository,
+    repo: &gix::Repository,
     count: usize,
     repo_info_opt: Option<&crate::filesystem::repo::RepoInfo>,
-) -> Vec<CommitDesc> {
+) -> Result<Vec<CommitDesc>> {
     let mut commits = Vec::new();
 
-    let Ok(mut revwalk) = repo.revwalk() else {
-        return commits;
+    let Some(head) = super::discovery::head_id_opt(repo)? else {
+        return Ok(commits);
     };
-    revwalk.set_sorting(git2::Sort::TIME).ok();
-    if revwalk.push_head().is_err() {
-        return commits;
-    }
+
+    let walk = repo
+        .rev_walk(Some(head))
+        .sorting(gix::revision::walk::Sorting::ByCommitTime(
+            gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
+        ))
+        .use_commit_graph(Some(true))
+        .all()
+        .map_err(|e| SniffError::git("revwalk", e))?;
+
+    let mut diff_cache = repo
+        .diff_resource_cache_for_tree_diff()
+        .map_err(|e| SniffError::git("diff", e))?;
 
     let packages = repo_info_opt.and_then(|ri| ri.packages.as_ref());
     let is_monorepo = repo_info_opt.is_some_and(|ri| ri.is_monorepo);
 
-    for oid_result in revwalk {
+    for info_result in walk {
         if commits.len() >= count {
             break;
         }
-        let Ok(oid) = oid_result else {
-            continue;
-        };
-        let Ok(commit) = repo.find_commit(oid) else {
-            continue;
-        };
+        let info = info_result.map_err(|e| SniffError::git("revwalk", e))?;
 
-        let commit_time = DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_default();
+        let commit_time = DateTime::from_timestamp(info.commit_time(), 0).unwrap_or_default();
 
-        let sha = oid.to_string();
-        let files_raw = get_commit_files(repo, &sha);
+        let sha = info.id.to_string();
+        let files_raw =
+            super::discovery::get_commit_files_with_cache_fallible(repo, info.id, &mut diff_cache)?;
         let files: Vec<CommitFileChange> = files_raw
             .iter()
             .map(|(p, k)| CommitFileChange {
@@ -581,8 +606,12 @@ fn collect_commits_by_count(
             })
             .collect();
 
-        let message = commit.message().unwrap_or("").trim();
-        let (description, bullet_points) = parse_commit_message(message);
+        let commit = info.object().map_err(|e| SniffError::git("object", e))?;
+        let message_raw = commit
+            .message_raw()
+            .map_err(|e| SniffError::git("message", e))?;
+        let message = String::from_utf8_lossy(message_raw.trim());
+        let (description, bullet_points) = parse_commit_message(&message);
 
         let (commit_packages, commit_package_areas) = if is_monorepo {
             if let Some(pkgs) = packages {
@@ -621,7 +650,7 @@ fn collect_commits_by_count(
         });
     }
 
-    commits
+    Ok(commits)
 }
 
 // ---------------------------------------------------------------------------
@@ -1382,7 +1411,8 @@ mod tests {
                     package_area: String::from("pkg"),
                     name: String::from("pkg-a"),
                     ecosystem: crate::filesystem::repo::PackageEcosystem::Cargo,
-                    discovery_sources: vec![],
+                    standard: crate::filesystem::repo::MonorepoStandard::Unknown,
+                    provenance: crate::filesystem::repo::PackageProvenance::ManifestScan,
                     nested_packages: vec![],
                     primary_language: None,
                     secondary_languages: vec![],
@@ -1394,6 +1424,7 @@ mod tests {
                     editor_config: None,
                     command_runner: vec![],
                     package_managers: vec![],
+                    test_runners: vec![],
                     version: None,
                     features: vec![],
                     depends_on: vec![],
@@ -1412,7 +1443,8 @@ mod tests {
                     package_area: String::from("pkg"),
                     name: String::from("pkg-b"),
                     ecosystem: crate::filesystem::repo::PackageEcosystem::Cargo,
-                    discovery_sources: vec![],
+                    standard: crate::filesystem::repo::MonorepoStandard::Unknown,
+                    provenance: crate::filesystem::repo::PackageProvenance::ManifestScan,
                     nested_packages: vec![],
                     primary_language: None,
                     secondary_languages: vec![],
@@ -1424,6 +1456,7 @@ mod tests {
                     editor_config: None,
                     command_runner: vec![],
                     package_managers: vec![],
+                    test_runners: vec![],
                     version: None,
                     features: vec![],
                     depends_on: vec![],
@@ -1442,7 +1475,8 @@ mod tests {
                     package_area: String::from("apps"),
                     name: String::from("apps-web"),
                     ecosystem: crate::filesystem::repo::PackageEcosystem::Node,
-                    discovery_sources: vec![],
+                    standard: crate::filesystem::repo::MonorepoStandard::Unknown,
+                    provenance: crate::filesystem::repo::PackageProvenance::ManifestScan,
                     nested_packages: vec![],
                     primary_language: None,
                     secondary_languages: vec![],
@@ -1454,6 +1488,7 @@ mod tests {
                     editor_config: None,
                     command_runner: vec![],
                     package_managers: vec![],
+                    test_runners: vec![],
                     version: None,
                     features: vec![],
                     depends_on: vec![],
@@ -1472,7 +1507,8 @@ mod tests {
                     package_area: String::from("apps"),
                     name: String::from("apps-browser"),
                     ecosystem: crate::filesystem::repo::PackageEcosystem::Node,
-                    discovery_sources: vec![],
+                    standard: crate::filesystem::repo::MonorepoStandard::Unknown,
+                    provenance: crate::filesystem::repo::PackageProvenance::ManifestScan,
                     nested_packages: vec![],
                     primary_language: None,
                     secondary_languages: vec![],
@@ -1484,6 +1520,7 @@ mod tests {
                     editor_config: None,
                     command_runner: vec![],
                     package_managers: vec![],
+                    test_runners: vec![],
                     version: None,
                     features: vec![],
                     depends_on: vec![],

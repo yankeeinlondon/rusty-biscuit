@@ -57,9 +57,10 @@
 //! [`fold_markdown_to_document`] is the public entry point: it walks a
 //! `pulldown-cmark` event stream and builds a [`renderable::tree::Document`].
 
+pub(crate) mod build_context;
 pub(crate) mod block_extension;
+pub(crate) mod disclosure_style;
 pub mod code_renderer;
-pub(crate) mod decorate;
 // The inline source rewriter backs `fold_markdown_spanned_with_frontmatter`.
 // A few `pub(crate)` helpers on its result types (e.g. `InlineRewrite::
 // was_rewritten`) are exercised only by the module's own unit tests, so the
@@ -71,8 +72,11 @@ pub mod fold;
 pub mod inventory;
 pub mod pipeline;
 pub mod source;
+#[cfg(test)]
+mod structural_gate;
 pub mod svg_sanitizer;
 
+#[allow(deprecated)]
 pub use code_renderer::TerminalCodeRenderer;
 pub use fold::{
     fold_markdown_spanned_with_frontmatter, fold_markdown_to_document,

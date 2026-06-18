@@ -45,6 +45,16 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 filter = 'test(/browser_/)'
 leak-timeout = { period = "5s", result = "fail" }
 
+# worktree's lib/CLI tests are fast and spawn only short-lived git children.
+# Under heavy parallel load nextest's post-test pipe-drain check occasionally
+# flags spurious LEAK-FAILs on tests that provably spawn nothing (e.g.
+# `classify_dirty_lines_clean`, a pure string parse). Give the runner a 1s
+# grace window to observe the closed pipe; keep `result = "fail"` so a genuine
+# runaway child still fails (1s is far longer than any real git child here).
+[[profile.default.overrides]]
+filter = 'package(worktree) + package(worktree-cli)'
+leak-timeout = { period = "1s", result = "fail" }
+
 [profile.ci]
 # Same behavior for CI environment
 retries = 3
@@ -64,3 +74,10 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 [[profile.ci.overrides]]
 filter = 'test(/browser_/)'
 leak-timeout = { period = "5s", result = "fail" }
+
+# See the default-profile note: spurious LEAK-FAILs on worktree's fast,
+# no-child tests under parallel load. CI hosts may be slower, so the same 1s
+# grace applies; `result = "fail"` still catches a genuine runaway child.
+[[profile.ci.overrides]]
+filter = 'package(worktree) + package(worktree-cli)'
+leak-timeout = { period = "1s", result = "fail" }

@@ -4,8 +4,23 @@
 
 <img src="../assets/Worktree-512.png" style="width: 250px" />
 
+## Packages
 
-## Commands
+The **worktree** package area, like many in this monorepo, is composed of both a library and a CLI:
+
+- **Library**(./lib)
+
+    - the library encapsulates all the business logic and git functionality
+    - this allows other library callers to use this functionality programmatically
+
+- **CLI**(./cli)
+
+    - provides a binary which allows anyone at the termianl to be able to leverage the features the library exposes
+    - we leverage the `clap` and `clap_complete` crates to provide a high quality CLI with:
+        - help system
+        - shell completions
+
+## CLI Commands
 
 - `wt list`
     Lists the worktree's (along with the base repo checkout) which currently exist.
@@ -91,3 +106,23 @@
 - all underlying git commands use the host's git program via shell commands (detects the absence of `git` when missing)
 
 > **Note:** business logic,  shell command orchestration, and `git` detection are all provided as a small library. The primary consumer of that library being the CLI.
+
+## Performance
+
+### Runtime diagnostic
+
+Run `wt list --perf` to emit a per-stage timing report to stderr after the command completes. The report is rendered as a reconciling tree: recorded stages plus an `unattributed` node sum to the total wall-clock time. Only stages that actually ran are shown, so on a non-image terminal the graph-related stages are omitted.
+
+### Dev-time benchmarks
+
+`just bench` runs Criterion benches for the library-owned `list_worktrees()` gather stage. The HTML report is written to `target/criterion/report/index.html`.
+
+Use `just bench-save` to capture a host-derived baseline before a change, then `just bench-compare` after the change to see the delta. The shared bench helpers run a preflight check (battery, memory, load) and use a host-derived baseline ID so comparisons stay on the same machine.
+
+### Ahead/Behind + Merge Result Cache
+
+`wt list` caches each branch's `(ahead, behind, is_clean)` result by default-branch tip SHA and worktree branch tip SHA. Cache files live under the user cache directory in a `worktree` subdirectory; the full path and invalidation rules are documented in [`docs/performance-testing.md`](./docs/performance-testing.md).
+
+The cache self-invalidates when either branch tip changes. `CACHE_FORMAT_VERSION` forces invalidation when the on-disk shape or semantics change, and working-tree dirtiness is still measured live on every run.
+
+See [`docs/performance-testing.md`](./docs/performance-testing.md) for the full performance contract.

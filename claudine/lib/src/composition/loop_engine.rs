@@ -37,7 +37,7 @@ pub struct LoopExecutionOptions {
     pub interrupt_check: Option<fn() -> bool>,
     /// Override for the safety margin added on top of a provider's `reset_at`
     /// when pausing for a rate limit. `None` uses the built-in
-    /// [`PAUSE_RESET_MARGIN`]. The CLI populates this from
+    /// `PAUSE_RESET_MARGIN`. The CLI populates this from
     /// `CLAUDINE_PAUSE_RESET_MARGIN`; tests inject a near-zero value to keep
     /// pause-policy coverage fast without weakening it.
     pub pause_reset_margin: Option<std::time::Duration>,
@@ -272,6 +272,11 @@ pub fn execute_loop_with_config(
         .or(config.on_rate_limit)
         .unwrap_or_default();
 
+    // Read-side expression functions in loop conditions resolve against the
+    // prompt document's directory; the probe re-runs each iteration while this
+    // base stays fixed.
+    let base_dir = prompt_path.parent();
+
     let mut frontmatter = initial_frontmatter;
     let mut iteration_count = 0usize;
     let mut last_output = String::new();
@@ -294,7 +299,7 @@ pub fn execute_loop_with_config(
             last_output.clone(),
             last_exit_code,
         );
-        let lookup = LoopExpressionLookup::new(&frontmatter, &ambient);
+        let lookup = LoopExpressionLookup::new(&frontmatter, &ambient).with_base_dir(base_dir);
         if !evaluate_condition(&config.condition, &lookup)? {
             return Ok(LoopExecutionResult::success(
                 frontmatter,
@@ -393,7 +398,8 @@ pub fn execute_loop_with_config(
             last_output.clone(),
             last_exit_code,
         );
-        let post_lookup = LoopExpressionLookup::new(&frontmatter, &post_ambient);
+        let post_lookup =
+            LoopExpressionLookup::new(&frontmatter, &post_ambient).with_base_dir(base_dir);
         match apply_actions(config, &frontmatter, iteration, Some(&post_lookup)) {
             Ok(next_frontmatter) => frontmatter = next_frontmatter,
             Err(error) => {
@@ -416,6 +422,7 @@ pub fn execute_loop_with_config(
                 iteration + 1,
                 &last_output,
                 last_exit_code,
+                base_dir,
             )?
         {
             return Ok(LoopExecutionResult::failure(
@@ -557,6 +564,8 @@ fn compute_is_last(
         return Ok(true);
     }
 
+    let base_dir = prompt_path.parent();
+
     // Speculative is_last computation: render templates against the
     // pre-iteration state. `_loop_last_output` / `_loop_last_exit_code`
     // here reflect the prior iteration (or the seed values on iteration 1)
@@ -568,7 +577,8 @@ fn compute_is_last(
         last_output.to_string(),
         last_exit_code,
     );
-    let speculative_lookup = LoopExpressionLookup::new(frontmatter, &speculative_ambient);
+    let speculative_lookup =
+        LoopExpressionLookup::new(frontmatter, &speculative_ambient).with_base_dir(base_dir);
     let Ok(next_frontmatter) =
         apply_actions(config, frontmatter, iteration, Some(&speculative_lookup))
     else {
@@ -581,7 +591,7 @@ fn compute_is_last(
         last_output,
         last_exit_code,
     );
-    let lookup = LoopExpressionLookup::new(&next_frontmatter, &next_ambient);
+    let lookup = LoopExpressionLookup::new(&next_frontmatter, &next_ambient).with_base_dir(base_dir);
     evaluate_condition(&config.condition, &lookup)
         .map(|will_continue| !will_continue)
         .map_err(|error| match error {
@@ -599,9 +609,10 @@ fn should_continue_after_cap(
     next_iteration: usize,
     last_output: &str,
     last_exit_code: i32,
+    base_dir: Option<&Path>,
 ) -> Result<bool, CompositionError> {
     let ambient = LoopAmbient::new(next_iteration, false, true, last_output, last_exit_code);
-    let lookup = LoopExpressionLookup::new(frontmatter, &ambient);
+    let lookup = LoopExpressionLookup::new(frontmatter, &ambient).with_base_dir(base_dir);
     evaluate_condition(&config.condition, &lookup)
 }
 
@@ -1079,6 +1090,44 @@ mod tests {
 
         let seen = exit_codes.borrow();
         assert_eq!(&*seen, &[0, 0, 7]);
+    }
+
+    #[test]
+    fn until_file_exists_resolves_against_prompt_parent() {
+        // `until="file_exists('artifact')"` continues while the artifact is
+        // absent and stops once the executor creates it under the prompt's
+        // parent directory — proving the loop condition's read-side function
+        // resolves against the prompt document root, re-probed each iteration.
+        let dir = tempfile::TempDir::new().unwrap();
+        let prompt_path = dir.path().join("loop.md");
+        let artifact = dir.path().join("artifact");
+
+        let config = LoopConfig {
+            condition: LoopCondition::Until("file_exists('artifact')".into()),
+            actions: vec![],
+            max_iterations: None,
+            fail_fast: None,
+            on_rate_limit: None,
+        };
+
+        let result = execute_loop_with_config(
+            &prompt_path,
+            &config,
+            Map::new(),
+            LoopExecutionOptions::default(),
+            |ctx| {
+                // Create the artifact on the third iteration; earlier passes
+                // see it absent and keep looping.
+                if ctx.iteration == 3 {
+                    std::fs::write(&artifact, "done").unwrap();
+                }
+                Ok(LoopIterationOutput::success("ok"))
+            },
+        )
+        .unwrap();
+
+        assert!(result.error.is_none(), "got: {result:?}");
+        assert_eq!(result.iteration_count, 3);
     }
 
     // ── Rate-limit policy tests ──────────────────────────────────────────

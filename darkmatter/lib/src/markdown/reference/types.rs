@@ -2,6 +2,7 @@
 
 use crate::markdown::compose::ComposeSource;
 use crate::markdown::normalize::HeadingLevel;
+use serde::Serialize;
 use std::ops::Range;
 use std::path::PathBuf;
 
@@ -41,7 +42,8 @@ impl AsRef<str> for NodeId {
 // ── Reference classification ────────────────────────────────────────
 
 /// The semantic kind of a reference.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ReferenceKind {
     /// A hyperlink (`<a>` or markdown link).
     Hyperlink,
@@ -71,8 +73,43 @@ pub enum ReferenceKind {
     MetaTag,
 }
 
+impl ReferenceKind {
+    /// Human-readable category label used when grouping validation issues.
+    pub fn validation_category_label(self) -> &'static str {
+        match self {
+            ReferenceKind::Hyperlink => "Invalid Hyperlink(s)",
+            ReferenceKind::Image => "Invalid Image Reference(s)",
+            ReferenceKind::HtmlVideo
+            | ReferenceKind::HtmlAudio
+            | ReferenceKind::HtmlSource => "Invalid Media Reference(s)",
+            ReferenceKind::HtmlIframe => "Invalid Iframe(s)",
+            ReferenceKind::Transclusion => "Invalid Transclusion Target(s)",
+            ReferenceKind::CssImport | ReferenceKind::InlineCss => "Invalid CSS Import(s)",
+            ReferenceKind::ScriptImport | ReferenceKind::InlineScript => "Invalid Script Import(s)",
+            ReferenceKind::FontImport => "Invalid Font Import(s)",
+            ReferenceKind::MetaTag => "Invalid Meta Tag(s)",
+        }
+    }
+
+    /// Stable ordering key used when grouping validation issues by kind.
+    pub fn validation_order(self) -> u8 {
+        match self {
+            ReferenceKind::Transclusion => 0,
+            ReferenceKind::Hyperlink => 1,
+            ReferenceKind::Image => 2,
+            ReferenceKind::HtmlVideo | ReferenceKind::HtmlAudio | ReferenceKind::HtmlSource => 3,
+            ReferenceKind::HtmlIframe => 4,
+            ReferenceKind::CssImport | ReferenceKind::InlineCss => 5,
+            ReferenceKind::ScriptImport | ReferenceKind::InlineScript => 6,
+            ReferenceKind::FontImport => 7,
+            ReferenceKind::MetaTag => 8,
+        }
+    }
+}
+
 /// The syntactic form in which a reference appears.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ReferenceSyntax {
     /// `[text](url)` markdown link.
     MarkdownLink,
@@ -98,6 +135,8 @@ pub enum ReferenceSyntax {
     DirectiveCode,
     /// `::toc-linking path` directive.
     DirectiveTocLinking,
+    /// `::file-links` directive.
+    DirectiveFileLinks,
     /// `prologue: path` frontmatter reference.
     FrontmatterPrologue,
     /// `epilogue: path` frontmatter reference.
@@ -134,7 +173,8 @@ impl ReferenceSyntax {
 }
 
 /// Classification of a reference's target.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum ReferenceTarget {
     /// A local filesystem path.
     LocalPath { raw: PathBuf },
@@ -192,7 +232,7 @@ pub fn classify_target(raw: &str) -> ReferenceTarget {
 // ── Provenance ──────────────────────────────────────────────────────
 
 /// Records where a reference was found.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ReferenceOrigin {
     /// The compose source (file, URL, or unknown).
     pub source: ComposeSource,
@@ -219,6 +259,25 @@ pub struct ReferenceRecord {
     pub origin: ReferenceOrigin,
     /// Extra attributes (`data-*`, CSS classes, etc.).
     pub attributes: serde_json::Map<String, serde_json::Value>,
+}
+
+impl Serialize for ReferenceRecord {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("ReferenceRecord", 6)?;
+        state.serialize_field("id", &self.id)?;
+        state.serialize_field("kind", &self.kind)?;
+        state.serialize_field("target", &self.target)?;
+        state.serialize_field("syntax", &self.origin.syntax)?;
+        state.serialize_field("line", &self.origin.line)?;
+        if !self.attributes.is_empty() {
+            state.serialize_field("attributes", &self.attributes)?;
+        }
+        state.end()
+    }
 }
 
 /// Generates a stable reference ID from source, line, and span start.
@@ -317,7 +376,7 @@ impl<'a> IntoIterator for &'a ReferenceSet {
 
 /// Contextual metadata about where a transclusion directive appears
 /// within the parent document's section structure.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct ReferenceInsertionContext {
     /// The syntactic form of the directive that triggered insertion.
     pub directive_kind: Option<ReferenceSyntax>,
@@ -346,6 +405,22 @@ pub struct ReferenceInsertion {
     pub context: ReferenceInsertionContext,
 }
 
+impl ReferenceInsertion {
+    /// Returns the directive kind as a short string used in JSON output.
+    pub(crate) fn directive_kind_str(&self) -> &'static str {
+        match self.context.directive_kind {
+            Some(ReferenceSyntax::DirectiveFile) => "file",
+            Some(ReferenceSyntax::DirectiveUrl) => "url",
+            Some(ReferenceSyntax::DirectiveCode) => "code",
+            Some(ReferenceSyntax::DirectiveTocLinking) => "toc_linking",
+            Some(ReferenceSyntax::DirectiveFileLinks) => "file_links",
+            Some(ReferenceSyntax::FrontmatterPrologue) => "prologue",
+            Some(ReferenceSyntax::FrontmatterEpilogue) => "epilogue",
+            _ => "unknown",
+        }
+    }
+}
+
 /// A single document node in the reference graph.
 #[derive(Debug, Clone)]
 pub struct ReferenceGraphNode {
@@ -366,6 +441,95 @@ pub struct ReferenceGraph {
     pub root: ReferenceGraphNode,
     /// All non-root nodes (children, grandchildren, etc.).
     pub nodes: Vec<ReferenceGraphNode>,
+}
+
+/// A view of a [`ReferenceGraphNode`] with the graph context needed to
+/// serialize child insertions.
+pub struct ReferenceGraphNodeView<'a> {
+    /// The node to serialize.
+    pub node: &'a ReferenceGraphNode,
+    /// The containing graph, used to resolve child node sources.
+    pub graph: &'a ReferenceGraph,
+    /// Whether to recursively expand child nodes.
+    pub follow: bool,
+}
+
+impl Serialize for ReferenceGraphNodeView<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("ReferenceGraphNode", 4)?;
+
+        let file_name = match &self.node.source {
+            ComposeSource::File(p) => p
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default(),
+            ComposeSource::Url(u) => u.to_string(),
+            ComposeSource::Unknown => String::new(),
+        };
+
+        let references: Vec<serde_json::Value> = self
+            .node
+            .local_references
+            .records
+            .iter()
+            .filter(|r| r.kind != ReferenceKind::Transclusion)
+            .map(|r| serde_json::to_value(r).map_err(serde::ser::Error::custom))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let transclusions: Vec<serde_json::Value> = self
+            .node
+            .child_insertions
+            .iter()
+            .map(|ins| {
+                let child = self.graph.node_by_id(ins.child_node_id.as_ref());
+                let target = child
+                    .map(|n| serde_json::to_value(&n.source).map_err(serde::ser::Error::custom))
+                    .transpose()?
+                    .unwrap_or(serde_json::Value::Null);
+
+                let mut obj = serde_json::Map::new();
+                obj.insert("kind".to_string(), ins.directive_kind_str().into());
+                obj.insert("target".to_string(), target);
+                obj.insert("line".to_string(), ins.directive_line.into());
+                obj.insert(
+                    "followable".to_string(),
+                    ins.context
+                        .directive_kind
+                        .map(|s| s.is_followable_transclusion())
+                        .unwrap_or(false)
+                        .into(),
+                );
+                if let Some(ref section) = ins.context.section_heading_text {
+                    obj.insert("section".to_string(), section.clone().into());
+                }
+                if let Some(level) = ins.context.section_heading_level {
+                    obj.insert("section_level".to_string(), level.as_u8().into());
+                }
+                if self.follow && let Some(child) = child {
+                    obj.insert(
+                        "node".to_string(),
+                        serde_json::to_value(ReferenceGraphNodeView {
+                            node: child,
+                            graph: self.graph,
+                            follow: self.follow,
+                        })
+                        .map_err(serde::ser::Error::custom)?,
+                    );
+                }
+                Ok(serde_json::Value::Object(obj))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        state.serialize_field("file", &file_name)?;
+        state.serialize_field("source", &self.node.source)?;
+        state.serialize_field("references", &references)?;
+        state.serialize_field("transclusions", &transclusions)?;
+        state.end()
+    }
 }
 
 impl ReferenceGraph {
@@ -548,6 +712,8 @@ pub enum TransclusionRefKind {
     Url,
     /// `::toc-linking` directive.
     TocLinking,
+    /// `::file-links` directive.
+    FileLinks,
     /// Frontmatter `prologue` reference.
     Prologue,
     /// Frontmatter `epilogue` reference.
@@ -828,5 +994,129 @@ mod tests {
         // Different line → different ID
         let id3 = make_reference_id(&ComposeSource::Unknown, 6, 42);
         assert_ne!(id1, id3);
+    }
+
+    #[test]
+    fn reference_record_serializes_to_expected_shape() {
+        let record = ReferenceRecord {
+            id: "abc:1:2".into(),
+            kind: ReferenceKind::Hyperlink,
+            target: ReferenceTarget::LocalPath {
+                raw: "./file.md".into(),
+            },
+            origin: ReferenceOrigin {
+                source: ComposeSource::Unknown,
+                line: 3,
+                span: 0..10,
+                syntax: ReferenceSyntax::MarkdownLink,
+            },
+            attributes: serde_json::Map::new(),
+        };
+
+        let value = serde_json::to_value(&record).unwrap();
+        let obj = value.as_object().unwrap();
+        assert_eq!(obj.get("id").unwrap(), "abc:1:2");
+        assert_eq!(obj.get("kind").unwrap(), "hyperlink");
+        assert_eq!(obj.get("line").unwrap(), 3);
+        assert_eq!(obj.get("syntax").unwrap(), "markdown_link");
+
+        let target = obj.get("target").unwrap().as_object().unwrap();
+        assert_eq!(target.get("type").unwrap(), "local_path");
+        assert_eq!(target.get("raw").unwrap(), "./file.md");
+    }
+
+    #[test]
+    fn reference_graph_node_view_serializes_transclusion_target() {
+        let child = ReferenceGraphNode {
+            node_id: NodeId::from("child"),
+            source: ComposeSource::Url("https://example.com/page.md".parse().unwrap()),
+            local_references: ReferenceSet { records: Vec::new() },
+            child_insertions: Vec::new(),
+        };
+        let root = ReferenceGraphNode {
+            node_id: NodeId::from("root"),
+            source: ComposeSource::File(PathBuf::from("/tmp/root.md")),
+            local_references: ReferenceSet { records: Vec::new() },
+            child_insertions: vec![ReferenceInsertion {
+                child_node_id: NodeId::from("child"),
+                directive_line: 5,
+                insertion_order: 0,
+                reference_id: None,
+                context: ReferenceInsertionContext {
+                    directive_kind: Some(ReferenceSyntax::DirectiveFile),
+                    section_heading_text: None,
+                    section_heading_level: None,
+                },
+            }],
+        };
+        let graph = ReferenceGraph {
+            root,
+            nodes: vec![child],
+        };
+
+        let value = serde_json::to_value(ReferenceGraphNodeView {
+            node: &graph.root,
+            graph: &graph,
+            follow: false,
+        })
+        .unwrap();
+        let obj = value.as_object().unwrap();
+        assert_eq!(obj.get("file").unwrap(), "root.md");
+        assert_eq!(
+            obj.get("source").unwrap(),
+            "/tmp/root.md"
+        );
+
+        let transclusions = obj.get("transclusions").unwrap().as_array().unwrap();
+        assert_eq!(transclusions.len(), 1);
+        let ins = transclusions[0].as_object().unwrap();
+        assert_eq!(ins.get("kind").unwrap(), "file");
+        assert_eq!(ins.get("line").unwrap(), 5);
+        assert_eq!(ins.get("followable").unwrap(), true);
+        assert_eq!(
+            ins.get("target").unwrap(),
+            "https://example.com/page.md"
+        );
+        assert!(!ins.contains_key("node"));
+    }
+
+    #[test]
+    fn reference_graph_node_view_follow_expands_child_node() {
+        let child = ReferenceGraphNode {
+            node_id: NodeId::from("child"),
+            source: ComposeSource::File(PathBuf::from("/tmp/child.md")),
+            local_references: ReferenceSet { records: Vec::new() },
+            child_insertions: Vec::new(),
+        };
+        let root = ReferenceGraphNode {
+            node_id: NodeId::from("root"),
+            source: ComposeSource::File(PathBuf::from("/tmp/root.md")),
+            local_references: ReferenceSet { records: Vec::new() },
+            child_insertions: vec![ReferenceInsertion {
+                child_node_id: NodeId::from("child"),
+                directive_line: 1,
+                insertion_order: 0,
+                reference_id: None,
+                context: ReferenceInsertionContext {
+                    directive_kind: Some(ReferenceSyntax::DirectiveFile),
+                    section_heading_text: None,
+                    section_heading_level: None,
+                },
+            }],
+        };
+        let graph = ReferenceGraph {
+            root,
+            nodes: vec![child],
+        };
+
+        let value = serde_json::to_value(ReferenceGraphNodeView {
+            node: &graph.root,
+            graph: &graph,
+            follow: true,
+        })
+        .unwrap();
+        let ins = value["transclusions"][0].as_object().unwrap();
+        assert!(ins.contains_key("node"));
+        assert_eq!(ins["node"]["file"], "child.md");
     }
 }

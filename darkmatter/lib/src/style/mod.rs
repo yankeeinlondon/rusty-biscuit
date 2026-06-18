@@ -38,6 +38,7 @@
 pub mod alignment;
 pub mod apply;
 pub mod bespoke;
+pub mod cli_claims;
 pub mod color;
 pub mod descriptor;
 pub mod error;
@@ -51,14 +52,20 @@ pub mod warning;
 mod coverage_tests;
 
 pub use apply::{
-    apply_color_style, apply_component_style, apply_hr_style, apply_list_style, apply_page_style,
-    ComponentStyleOverrides, HrStyleOverrides, ListStyleOverrides, PageStyleOverrides,
-    StyleApplyError,
+    apply_color_style, apply_component_style, apply_disclosure_style, apply_hr_style,
+    apply_list_style, apply_page_style, ComponentStyleOverrides, DisclosureStyleOverrides,
+    HrStyleOverrides, ListStyleOverrides, PageStyleOverrides, StyleApplyError,
 };
 pub use bespoke::{
     apply_bespoke_style, BespokeStyleOverrides, MetaTag, PageMeta, PageStylesheet,
 };
 pub use apply::{map_hr_alignment, map_hr_kind, map_hr_weight};
+pub use cli_claims::{
+    apply_cli_claims, bespoke_style_overrides_from_claims,
+    component_style_overrides_from_claims, disclosure_style_overrides_from_claims,
+    hr_style_overrides_from_claims, list_style_overrides_from_claims, CliStyleClaims,
+    FillClaim, page_style_overrides_from_claims,
+};
 pub use color::{lower_to_css, lower_to_sgr, wrap_with_color, StyleColor};
 pub use error::StyleParseError;
 pub use parse::{from_frontmatter, from_json_value, into_strict};
