@@ -153,7 +153,7 @@ pub(super) fn parse_requirements_txt_dependencies(
 }
 
 /// Extracts the package name from a parsed pyproject.toml `[project].name`.
-pub(super) fn pyproject_package_name(parsed: &toml_crate::Value) -> Option<String> {
+pub(crate) fn pyproject_package_name(parsed: &toml_crate::Value) -> Option<String> {
     parsed
         .get("project")
         .and_then(|p| p.get("name"))
@@ -162,7 +162,7 @@ pub(super) fn pyproject_package_name(parsed: &toml_crate::Value) -> Option<Strin
 }
 
 /// Extracts the package version from a parsed pyproject.toml `[project].version`.
-pub(super) fn pyproject_package_version(parsed: &toml_crate::Value) -> Option<String> {
+pub(crate) fn pyproject_package_version(parsed: &toml_crate::Value) -> Option<String> {
     parsed
         .get("project")
         .and_then(|p| p.get("version"))

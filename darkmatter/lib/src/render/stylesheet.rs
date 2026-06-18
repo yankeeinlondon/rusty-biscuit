@@ -371,8 +371,14 @@ mod tests {
 
     #[test]
     fn terminal_rendering_contains_ansi_when_tty() {
+        use biscuit_terminal::discovery::detection::ColorDepth;
+
         let style = CssStyle::new().add(CssColorProp::Color, CssColor::rgb(1, 2, 3));
-        let terminal = Terminal::new_tty();
+        let terminal = Terminal::builder()
+            .width(80)
+            .is_tty(true)
+            .color_depth(ColorDepth::TrueColor)
+            .build();
 
         let rendered = style.to_terminal_string(&terminal);
         assert!(rendered.contains("\u{1b}["));

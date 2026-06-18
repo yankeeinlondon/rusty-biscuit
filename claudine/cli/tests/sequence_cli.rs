@@ -1450,6 +1450,81 @@ exit 0
     );
 }
 
+// ============================================================================
+// Frontmatter `interactive: true` is hard-rejected for sequence
+// (2026-06-14-interactive, review-1 medium finding)
+// ============================================================================
+
+#[cfg(unix)]
+#[test]
+fn sequence_rejects_interactive_true_frontmatter_via_cli() {
+    // A sequence document that authors `interactive: true` must be rejected
+    // up front with the sequence-specific diagnostic, before any provider
+    // step is launched. This exercises the rendered CLI error surface (not
+    // just the unit-level `reject_sequence_interactive`).
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let count_path = workspace.path().join("call-count.txt");
+
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        "---\ninteractive: true\nsequence:\n  - alpha\n  - beta\n---\nStep {{state}}.\n",
+    )
+    .unwrap();
+
+    // Provider stub records every invocation so the test can prove no step
+    // ever launched.
+    write_executable(
+        &path_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\necho touched >> {count}\nexit 0\n",
+            count = count_path.display()
+        ),
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["sequence", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    // The styled BlockError word-wraps the body, so tokens like
+    // `--interactive` and `inline-compose` may break across lines at hyphens,
+    // with the frame's `┃` border glyph reinserted at each wrapped line.
+    // Strip whitespace and the border glyph before substring-matching so wrap
+    // points don't defeat the assertion.
+    let collapsed: String = plain
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '┃')
+        .collect();
+    // The rendered diagnostic must name `interactive: true`, point to the
+    // compose/inline-compose commands, and mention the `--interactive`
+    // single-run override.
+    assert!(
+        collapsed.contains("interactive:true"),
+        "error should quote the rejected `interactive: true` key; stderr:\n{plain}"
+    );
+    assert!(
+        collapsed.contains("inline-compose"),
+        "error should point to compose / inline-compose for dialog prompts; stderr:\n{plain}"
+    );
+    assert!(
+        collapsed.contains("--interactive"),
+        "error should mention the --interactive single-run override; stderr:\n{plain}"
+    );
+    assert!(
+        !count_path.exists(),
+        "no provider step should launch when interactive: true is rejected"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn sequence_rejects_non_string_prompt_property() {

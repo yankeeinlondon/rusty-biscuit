@@ -94,7 +94,7 @@ Treat bare-modifier visibility as **best-effort** on macOS: it works in practice
 
 ## Helper Functions
 
-The `tui_chrome::helpers::choice_builders` module provides convenience functions for constructing `ChoiceInput<String>` from common sources:
+The `biscuit_tui::helpers::choice_builders` module provides convenience functions for constructing `ChoiceInput<String>` from common sources:
 
 - `choose_one_from_csv(id, prompt, csv)` — builds options from a comma-separated string.
 - `choose_one_from_markdown_list(id, prompt, markdown)` — builds options from a Markdown bullet or numbered list.
@@ -108,8 +108,8 @@ See the [CLI Reference](../cli-reference.md) and [Theming & Configuration](../th
 A simple list of options using the default `String` value type.
 
 ```rust
-use tui_chrome::components::choose::{ChoiceInput, ChoiceOption};
-use tui_chrome::components::choose_one::ChooseOneState;
+use biscuit_tui::components::choose::{ChoiceInput, ChoiceOption};
+use biscuit_tui::components::choose_one::ChooseOneState;
 
 let input = ChoiceInput::new("color", "Pick a color")
     .with_options(vec![

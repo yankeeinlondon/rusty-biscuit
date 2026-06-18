@@ -165,7 +165,7 @@ All findings addressed:
       own foreground-visible harness because AXRaise requires the spawn
       to be on the active workspace.
     - `cargo check --tests` and `cargo clippy --tests` both pass with zero
-      warnings for `biscuit-terminal-cli` and `tui-chrome-cli`.
+      warnings for `biscuit-terminal-cli` and `biscuit-tui-cli`.
 
 - **M2 (claudine `test-l2` comment)** — Resolved. `claudine/justfile` line 67
   now reads:

@@ -27,6 +27,7 @@ use serde_json::{Map, Value, json};
 
 use super::types::{
     Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, SimplifiedType,
+    TypeExpr,
 };
 use crate::markdown::schemas::errors::SchemaError;
 
@@ -190,7 +191,19 @@ fn atom_to_schema(name: &str, atom: &PropertyAtom) -> Result<(Value, bool), Sche
         }
     }
 
-    let inner = type_fragment(name, atom.ty, &atom.constraints)?;
+    let inner = match &atom.ty {
+        TypeExpr::Primitive(ty) => type_fragment(name, *ty, &atom.constraints)?,
+        TypeExpr::InlineObject(shape) => inline_object_fragment(name, shape, &atom.constraints)?,
+    };
+
+    // Decision A: a non-`required` scalar `file` field treats an empty string
+    // as "absent" so a ternary like `spec: "{{ ... ? path : '' }}"` validates
+    // when the optional file is missing. The empty arm wraps the unchanged
+    // `darkmatter-file` fragment, so file typing (and SimplifiedSchema-driven
+    // completions, which read `atom.ty`, not this JSON Schema) are preserved.
+    // Required file fields keep the strict fragment and still reject empty.
+    let optional_empty_file =
+        matches!(&atom.ty, TypeExpr::Primitive(SimplifiedType::File)) && !atom.is_array && !required;
 
     let mut schema = if atom.is_array {
         let mut arr = Map::new();
@@ -198,6 +211,8 @@ fn atom_to_schema(name: &str, atom: &PropertyAtom) -> Result<(Value, bool), Sche
         arr.insert("items".into(), inner);
         apply_array_constraints(name, &mut arr, &atom.array_constraints)?;
         Value::Object(arr)
+    } else if optional_empty_file {
+        json!({ "anyOf": [ { "const": "" }, inner ] })
     } else {
         inner
     };
@@ -214,6 +229,58 @@ fn atom_to_schema(name: &str, atom: &PropertyAtom) -> Result<(Value, bool), Sche
     }
 
     Ok((schema, required))
+}
+
+/// Lowers an inline object `SchemaShape` to a Draft 2020-12 object fragment.
+///
+/// The fragment always emits `additionalProperties: false` (Decision #7):
+/// authors reach for an inline object specifically to constrain the shape,
+/// so silently accepting extra keys would defeat their intent. Nested
+/// `required` constraints live on the fragment, not the parent property, so
+/// `union_property_to_schema`'s hoisting logic cannot accidentally lift them
+/// out of an inline object arm (Risk Mitigation Checkpoint 4).
+fn inline_object_fragment(
+    name: &str,
+    shape: &SchemaShape,
+    atom_constraints: &[Constraint],
+) -> Result<Value, SchemaError> {
+    // Inline object atoms accept only the universal `required` / `default`
+    // constraints. Reject anything else with the same wording primitive
+    // fragment builders use.
+    for c in atom_constraints {
+        match c {
+            Constraint::Required | Constraint::Default(_) => {}
+            other => {
+                return Err(SchemaError::Convert {
+                    property: name.to_string(),
+                    message: format!(
+                        "constraint `{}` is not valid on an inline object",
+                        other.keyword()
+                    ),
+                });
+            }
+        }
+    }
+
+    let mut properties = Map::new();
+    let mut required = Vec::new();
+
+    for (prop_name, def) in &shape.properties {
+        let (prop_schema, is_required) = property_def_to_schema(prop_name, def)?;
+        if is_required {
+            required.push(Value::String(prop_name.clone()));
+        }
+        properties.insert(prop_name.clone(), prop_schema);
+    }
+
+    let mut obj = Map::new();
+    obj.insert("type".into(), Value::String("object".into()));
+    obj.insert("additionalProperties".into(), Value::Bool(false));
+    obj.insert("properties".into(), Value::Object(properties));
+    if !required.is_empty() {
+        obj.insert("required".into(), Value::Array(required));
+    }
+    Ok(Value::Object(obj))
 }
 
 fn apply_array_constraints(
@@ -604,12 +671,51 @@ mod tests {
 
     #[test]
     fn file_emits_format_and_match_extension() {
+        // An optional `file` field wraps the `darkmatter-file` fragment in an
+        // `anyOf` with an empty-string arm (Decision A); the file shape lives
+        // in the second arm.
         let v = atom_value("file(match('*.md', '!_*.md'))");
-        assert_eq!(v["type"], "string");
-        assert_eq!(v["format"], "darkmatter-file");
-        let globs = v["x-darkmatter-match"].as_array().unwrap();
+        let file_arm = &v["anyOf"][1];
+        assert_eq!(file_arm["type"], "string");
+        assert_eq!(file_arm["format"], "darkmatter-file");
+        let globs = file_arm["x-darkmatter-match"].as_array().unwrap();
         assert_eq!(globs[0], "*.md");
         assert_eq!(globs[1], "!_*.md");
+    }
+
+    #[test]
+    fn optional_file_wraps_empty_string_arm() {
+        let v = atom_value("file");
+        // Arm 0 admits the empty string ("absent"); arm 1 is the file shape.
+        assert_eq!(v["anyOf"][0]["const"], "");
+        assert_eq!(v["anyOf"][1]["format"], "darkmatter-file");
+    }
+
+    #[test]
+    fn required_file_is_not_empty_wrapped() {
+        // A required `file` field keeps the strict, unwrapped fragment so an
+        // empty string is still rejected.
+        let v = atom_value("file(required)");
+        assert_eq!(v["type"], "string");
+        assert_eq!(v["format"], "darkmatter-file");
+        assert!(v.get("anyOf").is_none(), "required file must not be empty-wrapped");
+    }
+
+    #[test]
+    fn optional_file_accepts_empty_string_as_absent() {
+        // End-to-end: the converted schema validates an empty-string optional
+        // `file` value as absent, and an omitted key is likewise valid.
+        let schema = convert("spec: file");
+        let v = crate::markdown::schemas::validate::build_validator(&schema).unwrap();
+        assert!(v.is_valid(&json!({ "spec": "" })), "empty optional file must validate");
+        assert!(v.is_valid(&json!({})), "absent optional file must validate");
+    }
+
+    #[test]
+    fn required_file_rejects_empty_string() {
+        let schema = convert("plan: 'file(required)'");
+        let v = crate::markdown::schemas::validate::build_validator(&schema).unwrap();
+        assert!(!v.is_valid(&json!({ "plan": "" })), "empty required file must fail");
     }
 
     #[test]
@@ -813,5 +919,212 @@ flag:
         assert!(props.contains_key("zeta"));
         assert!(props.contains_key("alpha"));
         assert!(props.contains_key("middle"));
+    }
+
+    // ── Inline object conversion (Phase 2) ───────────────────────────────
+
+    #[test]
+    fn inline_object_compiles_to_additional_properties_false() {
+        // Decision #7: every inline object fragment carries
+        // `additionalProperties: false` so a user-facing inline object
+        // restricts the shape, unlike the root schema's `true` default.
+        let v = atom_value("{ foo: string, bar: number }");
+        assert_eq!(v["type"], "object");
+        assert_eq!(v["additionalProperties"], false);
+        let props = v["properties"].as_object().unwrap();
+        assert!(props.contains_key("foo"));
+        assert!(props.contains_key("bar"));
+    }
+
+    #[test]
+    fn inline_object_collects_required_from_inner_properties() {
+        // `host: string(required)` puts `host` on the inline object's
+        // `required` array; the *outer* atom's `Required` (if any) stays
+        // at the parent level and does not show up here.
+        let v = atom_value("{ host: string(required) }");
+        let required = v["required"].as_array().unwrap();
+        assert_eq!(required, &vec![Value::String("host".into())]);
+    }
+
+    #[test]
+    fn inline_object_does_not_hoist_inner_required_to_property_level() {
+        // Risk Mitigation Checkpoint #4: inner `required` stays inside
+        // the inline object fragment, not at the property's parent. The
+        // document schema's `required` array must not pick up `host`.
+        let yaml = r#"
+config: "{ host: string(required) }"
+"#;
+        let v = convert(yaml);
+        // The root document's `required` array is absent — the outer atom
+        // has no `Required` constraint of its own, and the inner one must
+        // not be lifted out.
+        assert!(
+            v.get("required").is_none(),
+            "root required must not include inline object inner requireds: {v:?}"
+        );
+        // But the inner fragment carries it.
+        let config = &v["properties"]["config"];
+        let required = config["required"].as_array().unwrap();
+        assert_eq!(required, &vec![Value::String("host".into())]);
+    }
+
+    #[test]
+    fn inline_object_array_wraps_items_with_array_constraints() {
+        // `{ foo: string }[](min(1))` becomes an array whose `items`
+        // carries the inline object fragment and whose `minItems` is set
+        // on the array level — not on the inner `items` schema.
+        let v = atom_value("{ foo: string }[](min(1); max(3); unique)");
+        assert_eq!(v["type"], "array");
+        let items = &v["items"];
+        assert_eq!(items["type"], "object");
+        assert_eq!(items["additionalProperties"], false);
+        assert_eq!(v["minItems"], 1);
+        assert_eq!(v["maxItems"], 3);
+        assert_eq!(v["uniqueItems"], true);
+        // The inner `items` must NOT carry array-level keys.
+        assert!(items.get("minItems").is_none());
+        assert!(items.get("maxItems").is_none());
+        assert!(items.get("uniqueItems").is_none());
+    }
+
+    #[test]
+    fn inline_object_outer_required_is_on_property_not_fragment() {
+        // `{ host: string }(required)` is a single-value inline object
+        // with the *containing property* marked required. The inner
+        // fragment's `required` array must be absent (no inner `host`
+        // is required), and the document's `required` array must
+        // contain `config`.
+        let yaml = r#"
+config: "{ host: string }(required)"
+"#;
+        let v = convert(yaml);
+        let required = v["required"].as_array().unwrap();
+        assert_eq!(required, &vec![Value::String("config".into())]);
+        let config = &v["properties"]["config"];
+        assert!(
+            config.get("required").is_none(),
+            "outer required must not leak into the fragment: {config:?}"
+        );
+    }
+
+    #[test]
+    fn nested_inline_object_emits_additional_properties_false_at_every_level() {
+        // Each inline object layer (outer and inner) must carry
+        // `additionalProperties: false` — the decision applies at every
+        // level, not just the top one.
+        let v = atom_value("{ outer: { inner: string } }");
+        let outer = &v;
+        assert_eq!(outer["additionalProperties"], false);
+        let outer_props = outer["properties"].as_object().unwrap();
+        let inner = &outer_props["outer"];
+        assert_eq!(inner["type"], "object");
+        assert_eq!(inner["additionalProperties"], false);
+    }
+
+    #[test]
+    fn inline_object_rejects_non_universal_atom_constraint() {
+        // Inline object atoms accept only `required` and `default(...)`.
+        // `string(min(1))` after the closing brace is rejected as
+        // illegal on an inline object, mirroring the per-type
+        // `invalid_constraint` wording in the existing fragment builders.
+        let atom = parse_type_expr("test", "{ host: string }(min(1))").unwrap();
+        let err = atom_to_schema("test", &atom).unwrap_err();
+        match err {
+            SchemaError::Convert { property, message } => {
+                assert_eq!(property, "test");
+                assert!(message.contains("inline object"), "{message}");
+            }
+            other => panic!("expected Convert, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn empty_inline_object_compiles_with_additional_properties_false() {
+        // `{}` is a legal inline object; the fragment carries an empty
+        // `properties` map and `additionalProperties: false` (so a value
+        // is still constrained to be an empty object, not a free-form
+        // map of arbitrary keys).
+        let v = atom_value("{}");
+        assert_eq!(v["type"], "object");
+        assert_eq!(v["additionalProperties"], false);
+        let props = v["properties"].as_object().unwrap();
+        assert!(props.is_empty());
+        assert!(v.get("required").is_none());
+    }
+
+    #[test]
+    fn inline_object_preserves_descriptions_on_inner_properties() {
+        // Per-property `-> description` is preserved on the inner
+        // property fragments, not hoisted to the parent.
+        let v = atom_value("{ foo: string(required) -> The foo }");
+        let foo = &v["properties"]["foo"];
+        assert_eq!(foo["description"], "The foo");
+        // And it does not appear on the outer fragment.
+        assert!(v.get("description").is_none());
+    }
+
+    // ── Backward compatibility: v1 schemas must still parse identically ─
+
+    #[test]
+    fn v1_opaque_object_still_compiles_without_additional_properties_false() {
+        // The opaque `object` keyword (Decision #7) keeps its existing
+        // behavior: `{ "type": "object" }` with NO `additionalProperties`.
+        let v = atom_value("object");
+        assert_eq!(v["type"], "object");
+        assert!(
+            v.get("additionalProperties").is_none(),
+            "opaque object must not gain `additionalProperties: false`: {v:?}"
+        );
+    }
+
+    #[test]
+    fn v1_opaque_object_array_still_compiles_without_additional_properties_false() {
+        // And the array-of-objects form keeps the same shape: a `type:
+        // array` whose `items.type` is `object` and which carries no
+        // `additionalProperties` anywhere.
+        let v = atom_value("object[]");
+        assert_eq!(v["type"], "array");
+        assert_eq!(v["items"]["type"], "object");
+        assert!(v["items"].get("additionalProperties").is_none());
+        assert!(v.get("additionalProperties").is_none());
+    }
+
+    #[test]
+    fn v1_scalar_atoms_are_byte_for_byte_unchanged() {
+        // Snapshot-style check on the v1 scalar atoms: the JSON shape
+        // emitted by the converter for a fully-typed scalar property
+        // matches what the Phase 1 codebase produced, byte for byte.
+        // This guards against any accidental behaviour drift in the
+        // atom-to-schema pass now that the dispatch has gained a new
+        // `TypeExpr::InlineObject` arm.
+        for (input, expected_keys) in [
+            ("string", vec!["type"]),
+            ("number", vec!["type"]),
+            ("boolean", vec!["type"]),
+            (
+                "string(min(5); max(80))",
+                vec!["type", "minLength", "maxLength"],
+            ),
+            ("date", vec!["type", "format"]),
+            ("datetime", vec!["type", "format"]),
+            ("time", vec!["type", "format"]),
+            ("email", vec!["type", "format"]),
+            ("any", vec![]),
+            (
+                "string(pattern(^[a-z]+$))[](min(1); max(5); unique)",
+                vec!["type", "items", "minItems", "maxItems", "uniqueItems"],
+            ),
+        ] {
+            let v = atom_value(input);
+            let obj = v.as_object().unwrap();
+            let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
+            keys.sort();
+            let mut expected: Vec<&str> = expected_keys.clone();
+            expected.sort();
+            assert_eq!(
+                keys, expected,
+                "v1 atom `{input}` has drifted: got keys {keys:?}"
+            );
+        }
     }
 }

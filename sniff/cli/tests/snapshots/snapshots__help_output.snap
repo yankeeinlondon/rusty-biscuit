@@ -1,6 +1,5 @@
 ---
 source: sniff/cli/tests/snapshots.rs
-assertion_line: 117
 expression: "normalize_text(&run_stdout(&[\"--help\"]))"
 ---
 sniff 0.1.0
@@ -8,17 +7,14 @@ Detect system and repository information
 
 Usage: sniff [OPTIONS] [COMMAND]
 
-  -b, --base <BASE>   Base directory for filesystem analysis
-      --json          Output as JSON instead of text (with subcommand) or force JSON (no subcommand)
-      --perf          Include structured performance timings and counters in the output
-  -v, --verbose...    Increase output verbosity (styled user output only; never raw tracing)
-      --debug...      Emit raw developer tracing to stderr; repeat for higher verbosity
-      --plain         Strip terminal escape codes from text output
-      --with-network  Include network-dependent supplemental data (requires connectivity). Affects
-                      both terminal and JSON output. No effect on subcommands that do not currently
-                      consume network data — included as the well-known surface for future opt-in
-  -h, --help          Print help
-  -V, --version       Print version
+  -b, --base <BASE>  Base directory for filesystem analysis
+      --json         Output as JSON instead of text (with subcommand) or force JSON (no subcommand)
+      --perf         Include structured performance timings and counters in the output
+  -v, --verbose...   Increase output verbosity (styled user output only; never raw tracing)
+      --debug...     Emit raw developer tracing to stderr; repeat for higher verbosity
+      --plain        Strip terminal escape codes from text output
+  -h, --help         Print help
+  -V, --version      Print version
 
 
 Commands:
@@ -33,7 +29,8 @@ Commands:
     sniff audio-devices   Show audio devices
 
   Repository & Filesystem:
-    sniff repo            Show repository structure (use --help for all repo commands)
+    sniff repo            Show repository name (--json for the scope-complete aggregate; --help for
+    all repo commands)
     sniff filesystem      Show full filesystem report
     sniff language        Show language detection
     sniff files           Show file associations
@@ -41,12 +38,19 @@ Commands:
     sniff blast-radius    Find docs affected by changed source files
 
   Programs:
-    sniff programs                        Show all installed programs
-    sniff programs install-plan <name>    Explain how a program would be installed
-    sniff editors                         Show editors (supports 'install' and 'install-plan')
-    sniff utilities                       Show utilities
-    sniff agents                          Show AI agent CLI tools
-    sniff notification-helpers            Show desktop notification helpers
+    sniff software                                      Show all installed programs
+    sniff software install-plan <name>                  Explain how a program would be installed
+    sniff software editors                              Show editors (supports 'install' and
+    'install-plan')
+    sniff software utilities                            Show utilities
+    sniff software agents                               Show AI agent CLI tools
+    sniff software notification-helpers                 Show desktop notification helpers
+    sniff software language-package-managers            Show language package managers
+    sniff software os-package-managers                  Show OS package managers
+    sniff software tts-clients                          Show TTS clients
+    sniff software terminal-apps                        Show terminal apps
+    sniff software audio-players                        Show headless audio players
+    sniff software test-runners                         Show test runners
 
   Services:
     sniff services        Show running services

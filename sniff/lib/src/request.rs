@@ -15,6 +15,21 @@
 //!     .without_network()
 //!     .without_filesystem();
 //!
+//! // Git identity only: repo root, branch, HEAD id, worktree flag, and
+//! // org/repo. No working-tree status walk, no commits, no remotes.
+//! let plan = DetectionPlan::new()
+//!     .without_os()
+//!     .without_hardware()
+//!     .without_network()
+//!     .filesystem(
+//!         FilesystemRequest::new()
+//!             .git(GitRequest::identity())
+//!             .repo(RepoRequest::structure())
+//!             .without_file_inventory()
+//!             .without_formatting()
+//!             .without_docs(),
+//!     );
+//!
 //! // Full audit with deep git
 //! let plan = DetectionPlan::new()
 //!     .filesystem(FilesystemRequest::new().git(GitRequest::deep()));
@@ -275,6 +290,13 @@ impl NetworkRequest {
 }
 
 /// Controls git repository detection detail level.
+///
+/// Presets range from [`identity()`](Self::identity) — the cheapest,
+/// status-free floor — through [`summary()`](Self::summary),
+/// [`full()`](Self::full), and [`deep()`](Self::deep). The
+/// [`identity_only`](Self::identity_only) field discriminates the
+/// identity level from the all-false `minimal()`/`summary()` presets; see
+/// [`is_identity_only`](Self::is_identity_only) for the public predicate.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitRequest {
     /// Number of recent commits to retrieve (0 = skip commit history)
@@ -296,6 +318,20 @@ pub struct GitRequest {
     /// containment. Lower values reduce deep-git latency for repos with many
     /// remote branches. `None` means no limit.
     pub max_remote_branches: Option<usize>,
+    /// Compute ahead/behind, merge status, and conflict detection for every
+    /// linked worktree. When `false` (default), only the current worktree
+    /// receives full detail; all other linked worktrees skip the expensive
+    /// commit graph walks.
+    pub full_worktree_details: bool,
+    /// When true, return only repository identity (root, branch, HEAD id,
+    /// worktree flag, base root, org/repo) and skip every expensive walk,
+    /// including the working-tree status walk.
+    ///
+    /// This is set by [`Self::identity`]; setting it manually on any other
+    /// preset yields identity semantics (early return). Defaults to `false`
+    /// so older serialized plans deserialize to the pre-identity behavior.
+    #[serde(default)]
+    pub identity_only: bool,
 }
 
 impl GitRequest {
@@ -311,6 +347,29 @@ impl GitRequest {
             include_remote_branch_details: false,
             include_commit_remote_containment: false,
             max_remote_branches: None,
+            full_worktree_details: false,
+            identity_only: false,
+        }
+    }
+
+    /// Repository identity only: root, branch, HEAD id, worktree flag, base
+    /// repo root, and org/repo from the preferred remote. No working-tree
+    /// status walk, no commits, no branches, no remotes, no config.
+    ///
+    /// This is the cheapest git request level and is the new floor below
+    /// [`minimal`](Self::minimal) and [`summary`](Self::summary).
+    pub fn identity() -> Self {
+        Self {
+            commit_count: 0,
+            include_file_changes: false,
+            include_file_diffs: false,
+            include_worktrees: false,
+            refresh_remote_tracking: false,
+            include_remote_branch_details: false,
+            include_commit_remote_containment: false,
+            max_remote_branches: None,
+            full_worktree_details: false,
+            identity_only: true,
         }
     }
 
@@ -332,11 +391,18 @@ impl GitRequest {
             include_remote_branch_details: false,
             include_commit_remote_containment: false,
             max_remote_branches: None,
+            full_worktree_details: false,
+            identity_only: false,
         }
     }
 
     /// Standard detection with 10 commits, file change stats (paths and line counts),
     /// worktrees, but no unified diff payloads and no remote refresh.
+    ///
+    /// Worktrees are enumerated, but expensive ahead/behind and merge-conflict
+    /// probes are skipped for non-current linked worktrees. Use
+    /// [`Self::deep()`] or call `.full_worktree_details(true)` to force full
+    /// detail for every worktree.
     pub fn full() -> Self {
         Self {
             commit_count: 10,
@@ -347,6 +413,8 @@ impl GitRequest {
             include_remote_branch_details: false,
             include_commit_remote_containment: false,
             max_remote_branches: None,
+            full_worktree_details: false,
+            identity_only: false,
         }
     }
 
@@ -362,6 +430,8 @@ impl GitRequest {
             include_remote_branch_details: true,
             include_commit_remote_containment: true,
             max_remote_branches: Some(50),
+            full_worktree_details: true,
+            identity_only: false,
         }
     }
 
@@ -393,10 +463,17 @@ impl GitRequest {
     /// Returns true when the request is so minimal that branches, remotes,
     /// config, and tracking can be skipped entirely.
     pub fn is_minimal(&self) -> bool {
-        self.commit_count == 0
+        !self.identity_only
+            && self.commit_count == 0
             && !self.include_file_changes
             && !self.include_worktrees
             && !self.refresh_remote_tracking
+    }
+
+    /// Returns true when only repository identity should be returned, with no
+    /// working-tree status walk and no metadata collection.
+    pub fn is_identity_only(&self) -> bool {
+        self.identity_only
     }
 
     /// Whether this request needs repo metadata enrichment — remotes, git
@@ -416,6 +493,11 @@ impl GitRequest {
 
     pub fn max_remote_branches(mut self, limit: Option<usize>) -> Self {
         self.max_remote_branches = limit;
+        self
+    }
+
+    pub fn full_worktree_details(mut self, full: bool) -> Self {
+        self.full_worktree_details = full;
         self
     }
 }
@@ -591,6 +673,21 @@ mod tests {
     }
 
     #[test]
+    fn git_request_identity_preset() {
+        let identity = GitRequest::identity();
+        assert!(identity.identity_only);
+        assert!(identity.is_identity_only());
+        assert!(!identity.is_minimal());
+        assert!(!identity.wants_repo_metadata());
+
+        // Existing presets stay non-identity.
+        assert!(!GitRequest::minimal().is_identity_only());
+        assert!(!GitRequest::summary().is_identity_only());
+        assert!(!GitRequest::full().is_identity_only());
+        assert!(!GitRequest::deep().is_identity_only());
+    }
+
+    #[test]
     fn git_request_detail_levels() {
         let minimal = GitRequest::minimal();
         assert_eq!(minimal.commit_count, 0);
@@ -696,6 +793,26 @@ mod tests {
         let fs = parsed.filesystem.unwrap();
         assert_eq!(fs.git.unwrap().commit_count, 5);
         assert!(fs.repo.unwrap().structure_only);
+    }
+
+    #[test]
+    fn git_request_identity_deserializes_from_old_payload() {
+        // Old serialized plans omit identity_only; serde(default) must keep
+        // them working instead of erroring.
+        let json = r#"{
+            "commit_count": 0,
+            "include_file_changes": false,
+            "include_file_diffs": false,
+            "include_worktrees": false,
+            "refresh_remote_tracking": false,
+            "include_remote_branch_details": false,
+            "include_commit_remote_containment": false,
+            "max_remote_branches": null,
+            "full_worktree_details": false
+        }"#;
+        let parsed: GitRequest = serde_json::from_str(json).unwrap();
+        assert!(!parsed.is_identity_only());
+        assert!(parsed.is_minimal());
     }
 
     #[test]

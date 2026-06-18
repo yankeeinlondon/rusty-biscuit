@@ -57,6 +57,24 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Type Predicates",
         order: 6,
     },
+    ExpressionFunctionDescriptor {
+        signature: "is_positive(val)",
+        description: "Returns true when the coerced value is greater than zero.",
+        category: "Type Predicates",
+        order: 7,
+    },
+    ExpressionFunctionDescriptor {
+        signature: "is_negative(val)",
+        description: "Returns true when the coerced value is less than zero.",
+        category: "Type Predicates",
+        order: 8,
+    },
+    ExpressionFunctionDescriptor {
+        signature: "is_integer(val)",
+        description: "Returns true when the value is a JSON number with no fractional component.",
+        category: "Type Predicates",
+        order: 9,
+    },
     // ── Math ────────────────────────────────────────────────────────
     ExpressionFunctionDescriptor {
         signature: "min(a, b)",
@@ -150,6 +168,31 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         description: "Converts a string to Title Case.",
         category: "String Mutations",
         order: 8,
+    },
+    ExpressionFunctionDescriptor {
+        signature: "without_date(string)",
+        description: "Removes substrings that are real YYYY-MM-DD calendar dates, leaving surrounding text untouched.",
+        category: "String Mutations",
+        order: 9,
+    },
+    ExpressionFunctionDescriptor {
+        signature: "ensure_leading(var, prefix)",
+        description: "Ensures the string form of a value starts with a prefix.",
+        category: "String Mutations",
+        order: 10,
+    },
+    ExpressionFunctionDescriptor {
+        signature: "ensure_trailing(var, postfix)",
+        description: "Ensures the string form of a value ends with a postfix.",
+        category: "String Mutations",
+        order: 11,
+    },
+    // ── Rendering ───────────────────────────────────────────────────
+    ExpressionFunctionDescriptor {
+        signature: "terminal(string)",
+        description: "Renders Prose markup to a terminal string with ANSI SGR sequences.",
+        category: "Rendering",
+        order: 1,
     },
     // ── Date Formatting ─────────────────────────────────────────────
     ExpressionFunctionDescriptor {
@@ -341,6 +384,102 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         description: "Two-argument form accepted for forward compatibility.",
         category: "Filesystem",
         order: 9,
+    },
+    ExpressionFunctionDescriptor {
+        signature: "is_indexed_file(file)",
+        description: "Returns true when the filename stem matches the indexed grammar (base-NNN).",
+        category: "Filesystem",
+        order: 10,
+    },
+    ExpressionFunctionDescriptor {
+        signature: "file_index(file)",
+        description: "Returns the parsed index suffix, or -1 when non-indexed.",
+        category: "Filesystem",
+        order: 11,
+    },
+    ExpressionFunctionDescriptor {
+        signature: "increment_file_index(file)",
+        description: "Increments the numeric index suffix, preserving zero-padding width.",
+        category: "Filesystem",
+        order: 12,
+    },
+    ExpressionFunctionDescriptor {
+        signature: "decrement_file_index(file)",
+        description: "Decrements the numeric index suffix, clamped at 0.",
+        category: "Filesystem",
+        order: 13,
+    },
+    ExpressionFunctionDescriptor {
+        signature: "basename(file)",
+        description: "Returns the final path component including extension.",
+        category: "Filesystem",
+        order: 14,
+    },
+    ExpressionFunctionDescriptor {
+        signature: "basename_without_index(file)",
+        description: "Returns the basename with any indexed suffix removed from the stem.",
+        category: "Filesystem",
+        order: 15,
+    },
+    ExpressionFunctionDescriptor {
+        signature: "dir(file)",
+        description: "Returns the directory portion of the display path.",
+        category: "Filesystem",
+        order: 16,
+    },
+    ExpressionFunctionDescriptor {
+        signature: "ext(file)",
+        description: "Returns the final extension without the leading dot.",
+        category: "Filesystem",
+        order: 17,
+    },
+    ExpressionFunctionDescriptor {
+        signature: "parent_dir(file)",
+        description: "Returns the directory segment immediately above the basename.",
+        category: "Filesystem",
+        order: 18,
+    },
+    ExpressionFunctionDescriptor {
+        signature: "file_trailing(file)",
+        description: "Returns the last directory segment plus the basename.",
+        category: "Filesystem",
+        order: 19,
+    },
+    ExpressionFunctionDescriptor {
+        signature: "dir_leading(file)",
+        description: "Returns the directory path above the last directory segment, dropping the basename and its parent (the complement of file_trailing).",
+        category: "Filesystem",
+        order: 20,
+    },
+    ExpressionFunctionDescriptor {
+        signature: "join(left, right)",
+        description: "Joins two path strings with normalized separators.",
+        category: "Filesystem",
+        order: 21,
+    },
+    ExpressionFunctionDescriptor {
+        signature: "link(file)",
+        description: "Creates a Markdown link to a local file, using its relative path as the link text.",
+        category: "Filesystem",
+        order: 22,
+    },
+    ExpressionFunctionDescriptor {
+        signature: "link(target, desc)",
+        description: "Creates a Markdown link to a local file or HTTP(S) URL with the given description.",
+        category: "Filesystem",
+        order: 23,
+    },
+    ExpressionFunctionDescriptor {
+        signature: "has_skill(name)",
+        description: "Returns true when a skill directory exists in a user-scoped or local-scoped skill root.",
+        category: "Context",
+        order: 1,
+    },
+    ExpressionFunctionDescriptor {
+        signature: "has_local_skill(name)",
+        description: "Returns true when a skill directory exists in a local-scoped skill root.",
+        category: "Context",
+        order: 2,
     },
 ];
 
@@ -556,5 +695,60 @@ mod tests {
     #[test]
     fn catalog_access_performs_no_capture() {
         let _ = expression_function_descriptors();
+    }
+
+    /// Claudine anti-drift: every function added by this feature must remain
+    /// present in the exported expression catalog (`claudine context --expressions`).
+    ///
+    /// Asserts against the shared [`EXPRESSION_FUNCTION_DESCRIPTORS`] so the
+    /// check stays in sync with the runtime surface and does not duplicate a
+    /// Claudine-only list.
+    #[test]
+    fn feature_functions_are_present_in_exported_expression_catalog() {
+        let expected = [
+            // Phase 3 — pure functions
+            "is_positive(val)",
+            "is_negative(val)",
+            "is_integer(val)",
+            "without_date(string)",
+            "ensure_leading(var, prefix)",
+            "ensure_trailing(var, postfix)",
+            "terminal(string)",
+            // Phase 4 — filesystem functions
+            "is_indexed_file(file)",
+            "file_index(file)",
+            "increment_file_index(file)",
+            "decrement_file_index(file)",
+            "basename(file)",
+            "basename_without_index(file)",
+            "dir(file)",
+            "ext(file)",
+            "parent_dir(file)",
+            "file_trailing(file)",
+            "dir_leading(file)",
+            "join(left, right)",
+            // Phase 5 — link and skill functions
+            "link(file)",
+            "link(target, desc)",
+            "has_skill(name)",
+            "has_local_skill(name)",
+        ];
+
+        let descriptor_sigs: std::collections::HashSet<&str,
+        > = EXPRESSION_FUNCTION_DESCRIPTORS
+            .iter()
+            .map(|d| d.signature)
+            .collect();
+
+        let missing: Vec<&str> = expected
+            .iter()
+            .copied()
+            .filter(|sig| !descriptor_sigs.contains(sig))
+            .collect();
+
+        assert!(
+            missing.is_empty(),
+            "Feature function signatures missing from exported catalog: {missing:?}"
+        );
     }
 }

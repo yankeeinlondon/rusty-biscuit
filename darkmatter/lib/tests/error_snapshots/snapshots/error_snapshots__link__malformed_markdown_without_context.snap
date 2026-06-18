@@ -3,9 +3,12 @@ source: darkmatter/lib/tests/error_snapshots/link.rs
 expression: out
 ---
 ⤫ LinkError: malformed markdown link
+┃ 
 ┃ Message: missing closing bracket
 ┃ 
 ┃ Link parsing failed here:
 ┃ 
 ┃ ```md
-Use the pattern display with balanced brackets.
+┃ ```
+┃ 
+┃ Use the pattern display with balanced brackets.

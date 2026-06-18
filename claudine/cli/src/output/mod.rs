@@ -156,14 +156,17 @@ pub(crate) fn log_compose_prompt(
     prompt: &str,
     verbose: bool,
     silent: bool,
-    quiet: bool,
+    _quiet: bool,
     term: &Terminal,
 ) {
-    use claudine::prompt_reporting::{report_user_prompt, resolve_user_prompt_report_config};
+    use claudine::prompt_reporting::{AgentPromptReport, resolve_agent_prompt_report_mode};
 
-    let config = resolve_user_prompt_report_config(silent, quiet, verbose, prompt.lines().count());
+    if silent {
+        return;
+    }
 
-    if let Some(output) = report_user_prompt(prompt, config, term) {
+    let mode = resolve_agent_prompt_report_mode(silent, verbose, prompt.lines().count());
+    if let Some(output) = AgentPromptReport::new(prompt, mode).render(term) {
         log::message(&output);
     }
 }
@@ -188,10 +191,10 @@ pub(crate) fn log_system_prompt_with_scope(
     term: &Terminal,
 ) {
     use claudine::prompt_reporting::{
-        ReportMode, parse_frontmatter_verbosity, report_system_prompt_empty,
-        report_system_prompt_with_base, resolve_system_prompt_report_config_with_change,
-        state::check_and_record,
+        ReportMode, SystemPromptReport, parse_frontmatter_verbosity,
+        resolve_system_prompt_report_mode,
     };
+    use claudine::system_prompt::check_and_record;
 
     if silent {
         return;
@@ -226,7 +229,7 @@ pub(crate) fn log_system_prompt_with_scope(
         _ => (0, None, false),
     };
 
-    let config = resolve_system_prompt_report_config_with_change(
+    let mode = resolve_system_prompt_report_mode(
         silent,
         quiet,
         verbose,
@@ -236,9 +239,7 @@ pub(crate) fn log_system_prompt_with_scope(
         unchanged,
     );
 
-    if let Some(output) = report_system_prompt_with_base(effective_sp, config, scope, term) {
-        log::message(&output);
-    } else if let Some(output) = report_system_prompt_empty(effective_sp, config, term) {
+    if let Some(output) = SystemPromptReport::new(effective_sp, mode, scope).render(term) {
         log::message(&output);
     }
 }

@@ -593,6 +593,7 @@ mod tests {
             selection_hints: EffectiveSelectionHints {
                 agent: agent_hint.clone(),
                 model: model_hint,
+                interactive: None,
                 agent_invalid: Vec::new(),
                 agent_was_list: matches!(agent_hint, Some(AgentHint::List(_))),
             },
@@ -1024,6 +1025,7 @@ mod tests {
         EffectiveSelectionHints {
             agent,
             model: None,
+            interactive: None,
             agent_invalid: invalid,
             agent_was_list: was_list,
         }

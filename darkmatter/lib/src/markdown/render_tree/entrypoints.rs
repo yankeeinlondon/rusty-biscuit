@@ -21,6 +21,11 @@
 //! and the parity benches reach them. [`to_render_document`] and the
 //! `*_with_context` internal entry points stay `pub(crate)`: they expose the
 //! raw fold / context boundary used only inside the crate.
+//!
+//! As the internal adapter boundary, these entry points wire the deprecated
+//! [`TerminalCodeRenderer`](super::code_renderer::TerminalCodeRenderer) directly;
+//! the module-level `allow` keeps that intentional internal use warning-free.
+#![allow(deprecated)]
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -39,7 +44,7 @@ use renderable::tree::{
 use renderable::tree::{NodeKind, RenderNode};
 
 use super::code_renderer::TerminalCodeRenderer;
-use super::pipeline::{PipelineRenderResult, PipelineResult};
+use super::pipeline::PipelineResult;
 use crate::markdown::Markdown;
 use crate::markdown::inline::HorizontalRuleAttrs;
 use crate::markdown::output::{ColorDepth, HtmlOptions, TerminalOptions};
@@ -55,9 +60,11 @@ use crate::markdown::output::{ColorDepth, HtmlOptions, TerminalOptions};
 /// ## Returns
 ///
 /// The folded [`Document`] and any non-fatal fold-phase [`Diagnostic`]s
-/// (unsupported variants, lossy conversions, malformed structure).
-#[must_use]
-pub(crate) fn to_render_document(md: &Markdown) -> (Document, Vec<Diagnostic>) {
+/// (unsupported variants, lossy conversions, malformed structure), or a fatal
+/// [`MarkdownError`] raised by the block-extension processor.
+pub(crate) fn to_render_document(
+    md: &Markdown,
+) -> crate::markdown::MarkdownResult<(Document, Vec<Diagnostic>)> {
     let empty_policies = HashMap::new();
     let ctx = super::build_context::TreeBuildContext {
         component_policies: &empty_policies,
@@ -81,12 +88,12 @@ pub(crate) fn to_render_document(md: &Markdown) -> (Document, Vec<Diagnostic>) {
 ///
 /// ## Returns
 ///
-/// The folded [`Document`] and any non-fatal fold-phase [`Diagnostic`]s.
-#[must_use]
+/// The folded [`Document`] and any non-fatal fold-phase [`Diagnostic`]s, or a
+/// fatal [`MarkdownError`] raised by the block-extension processor.
 pub(crate) fn to_render_document_with_context(
     md: &Markdown,
     ctx: &super::build_context::TreeBuildContext,
-) -> (Document, Vec<Diagnostic>) {
+) -> crate::markdown::MarkdownResult<(Document, Vec<Diagnostic>)> {
     let source = derive_source(md);
     super::fold::fold_markdown_spanned_with_context(source, md, ctx)
 }
@@ -267,7 +274,7 @@ pub(crate) fn render_tree_html_with_context(
     options: &HtmlOptions,
     build_ctx: &super::build_context::TreeBuildContext,
 ) -> crate::markdown::MarkdownResult<PipelineResult<String>> {
-    let (doc, fold_diagnostics) = to_render_document_with_context(md, build_ctx);
+    let (doc, fold_diagnostics) = to_render_document_with_context(md, build_ctx)?;
     // Fatal browser-path preflight over the same folded tree the renderer
     // consumes: a malformed code-block directive is a hard error, not a silent
     // degrade. Runs on the single fold — no second traversal of the source.
@@ -338,7 +345,7 @@ pub(crate) fn validate_code_directives(root: &RenderNode) -> Result<(), crate::m
 pub fn render_tree_terminal(
     md: &Markdown,
     options: &TerminalOptions,
-) -> PipelineRenderResult<String> {
+) -> crate::markdown::MarkdownResult<PipelineResult<String>> {
     let empty_policies = HashMap::new();
     let hr_defaults_owned = resolve_hr_defaults(md, &options.hr_defaults);
     let build_ctx = super::build_context::TreeBuildContext {
@@ -372,8 +379,8 @@ pub(crate) fn render_tree_terminal_with_context(
     md: &Markdown,
     options: &TerminalOptions,
     build_ctx: &super::build_context::TreeBuildContext,
-) -> PipelineRenderResult<String> {
-    let (doc, fold_diagnostics) = to_render_document_with_context(md, build_ctx);
+) -> crate::markdown::MarkdownResult<PipelineResult<String>> {
+    let (doc, fold_diagnostics) = to_render_document_with_context(md, build_ctx)?;
     let mut term_opts = terminal_options_from_terminal_options(options);
     term_opts.context.image_placeholder = ImagePlaceholder::Block;
     let rendered = render_terminal_document(&doc, &term_opts)?;
@@ -418,14 +425,16 @@ pub(crate) fn render_tree_terminal_with_context(
 ///
 /// ## Errors
 ///
-/// Propagates any fatal [`RenderError`] from [`render_terminal_document`].
+/// Returns any fatal fold-time [`MarkdownError`], including [`RenderError`]
+/// from [`render_terminal_document`] converted to
+/// [`MarkdownError::RenderTree`](crate::markdown::MarkdownError::RenderTree).
 pub(crate) fn render_page_terminal_document(
     doc: &Document,
     fold_diagnostics: Vec<Diagnostic>,
     options: &TerminalOptions,
     content_width: u16,
     optimistic_capabilities: bool,
-) -> PipelineRenderResult<String> {
+) -> crate::markdown::MarkdownResult<PipelineResult<String>> {
     // Select the capability profile via the adapter's optimistic/ambient base,
     // then pin the content width independently on top.
     let mut capability_options = options.clone();
@@ -439,7 +448,8 @@ pub(crate) fn render_page_terminal_document(
     term_opts.context.width = width;
     term_opts.context.available_width = width;
     term_opts.context.image_placeholder = ImagePlaceholder::Block;
-    let rendered = render_terminal_document(doc, &term_opts)?;
+    let rendered = render_terminal_document(doc, &term_opts)
+        .map_err(crate::markdown::MarkdownError::RenderTree)?;
     Ok(PipelineResult::new(
         rendered.output,
         fold_diagnostics,
@@ -456,8 +466,34 @@ pub(crate) fn render_page_terminal_document(
 ///
 /// Propagates any fatal [`RenderError`] from
 /// [`render_markdown_document`].
-pub fn render_tree_markdown(md: &Markdown) -> PipelineRenderResult<String> {
+pub fn render_tree_markdown(md: &Markdown) -> crate::markdown::MarkdownResult<PipelineResult<String>> {
     render_tree_markdown_dialect(md, MarkdownDialect::Markdown)
+}
+
+/// Renders a [`Markdown`] to MarkdownPlus via the render-tree pipeline,
+/// using the provided construction-time context so component policy and
+/// disclosure inline styles are preserved.
+///
+/// ## Errors
+///
+/// Propagates any fatal [`RenderError`] from
+/// [`render_markdown_document`].
+pub(crate) fn render_tree_markdown_plus_with_context(
+    md: &Markdown,
+    ctx: &super::build_context::TreeBuildContext,
+) -> crate::markdown::MarkdownResult<PipelineResult<String>> {
+    let (doc, fold_diagnostics) = to_render_document_with_context(md, ctx)?;
+    let opts = MarkdownRenderOptions {
+        dialect: MarkdownDialect::MarkdownPlus,
+        strictness: RenderStrictness::Warn,
+        style: None,
+    };
+    let rendered = render_markdown_document(&doc, &opts)?;
+    Ok(PipelineResult::new(
+        rendered.output,
+        fold_diagnostics,
+        rendered.diagnostics,
+    ))
 }
 
 /// Renders a [`Markdown`] to either standard Markdown or MarkdownPlus via the
@@ -470,8 +506,8 @@ pub fn render_tree_markdown(md: &Markdown) -> PipelineRenderResult<String> {
 pub fn render_tree_markdown_dialect(
     md: &Markdown,
     dialect: MarkdownDialect,
-) -> PipelineRenderResult<String> {
-    let (doc, fold_diagnostics) = to_render_document(md);
+) -> crate::markdown::MarkdownResult<PipelineResult<String>> {
+    let (doc, fold_diagnostics) = to_render_document(md)?;
     let opts = MarkdownRenderOptions {
         dialect,
         strictness: RenderStrictness::Warn,
@@ -543,7 +579,14 @@ fn browser_options_from_html_options(opts: &HtmlOptions) -> BrowserRenderOptions
         strictness: RenderStrictness::Warn,
         raw_html: RawHtmlPolicy::Escape,
         page,
-        code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+        // Carry the caller's resolved `HtmlOptions` (code theme, page color
+        // mode, code-block mode, line numbers) into the code renderer so the
+        // highlighted markup uses the same mode/theme policy as the page frame
+        // and the `.code-block` stylesheet, rather than `HtmlOptions::default()`
+        // (review-1 finding 2).
+        code_renderer: Some(Rc::new(
+            TerminalCodeRenderer::new().with_html_options(opts.clone()),
+        )),
         mermaid_mode,
         ..Default::default()
     }
@@ -593,20 +636,33 @@ fn code_block_stylesheet(opts: &HtmlOptions) -> renderable::stylesheet::Styleshe
 /// dropped `TerminalOptions::color_depth`, so `ColorDepth::None` callers and
 /// the `migration/terminal_no_color` benchmark group both measured a
 /// TrueColor tree context.
+///
+/// Phase 2 (centralize theme resolution) removes the `term.color_mode =
+/// opts.color_mode` rebuild that created an independent code-panel mode. The
+/// `Terminal` constructed here is the single source of truth for the page
+/// surface and the nested code-block panel: `code_block_mode.resolve(term.
+/// color_mode())` produces the panel variant, and `term.color_mode()` itself
+/// is the page variant. Callers who want a specific mode should construct a
+/// `Terminal` with that mode (the page path through
+/// [`DarkmatterPage::render`](crate::layout::DarkmatterPage::render) already
+/// captures the terminal; direct [`Markdown::as_terminal`](crate::markdown::Markdown::as_terminal)
+/// callers inherit the default-detection `Terminal::default()`). The
+/// `opts.color_mode` field is preserved for backward compatibility with the
+/// page path (where it is the [`ColorMode::Unknown`] fallback in
+/// [`LayoutContext::from_page`](crate::layout::context::LayoutContext::from_page))
+/// but no longer overrides the terminal here.
 fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRenderOptions {
-    let mut term = match opts.max_width {
-        Some(width) => Terminal::new_optimistic(u32::from(width)),
-        None => Terminal::default(),
-    };
+    let mut term = Terminal::default();
+    if let Some(width) = opts.max_width {
+        if term.is_tty {
+            term.fixed_width = Some(u32::from(width));
+        } else {
+            term = Terminal::new_optimistic(u32::from(width));
+        }
+    }
     if let Some(depth) = opts.color_depth {
         term.color_depth = darkmatter_color_depth_to_terminal(depth);
     }
-    // Thread the requested color mode so the code renderer's contrast
-    // resolution (which inverts the mode for page contrast) sees the caller's
-    // mode rather than the detected/optimistic terminal default. Without this
-    // the highlighter always resolved against the terminal's own mode, dropping
-    // a caller's `with_color_mode(...)`.
-    term.color_mode = darkmatter_color_mode_to_terminal(opts.color_mode);
 
     // Map legacy image_mode onto the graphics fidelity tier so the tree
     // renderer honors the same opt-in / never / force contract as the legacy
@@ -654,11 +710,43 @@ fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRen
     if opts.image_mode == crate::markdown::output::terminal::TerminalImageMode::Force {
         context.force_graphics = true;
     }
+    // Phase 2 (centralize theme resolution): the `Terminal` above carries the
+    // capability profile (width, color depth, is_tty). The page surface and
+    // the nested code-block panel must resolve against the *caller's*
+    // `opts.color_mode` — for the page path that is the captured
+    // `DarkmatterPage` terminal's mode; for direct `Markdown::as_terminal`
+    // callers it is the requested mode. Setting `context.color_mode` here
+    // and binding an *unbound* code renderer below keeps the page surface
+    // and the code panel on the same source of truth, removing the
+    // pre-Phase-2 dual-source defect (an env-only `Terminal::default()` mode
+    // disagreed with the caller-supplied `opts.color_mode`).
+    context.color_mode = opts.color_mode;
+
+    // Inline code spans take their foreground/background from the prose theme
+    // reduced to the page's color mode — the same source the syntect code panel
+    // uses — so a `code` span sits on a subtle theme-derived band instead of
+    // reverse-video. Resolved here (syntect lives in darkmatter) and forwarded
+    // to the generic terminal renderer, which cannot load themes itself.
+    let inline_mode = opts.color_mode.resolve_unknown();
+    let (inline_fg, inline_bg) =
+        crate::markdown::highlighting::themes::inline_code_colors(opts.prose_theme, inline_mode);
+    context.inline_code_color = Some(inline_fg);
+    context.inline_code_background = Some(inline_bg);
 
     TerminalRenderOptions {
         context,
         strictness: RenderStrictness::Warn,
-        code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+        // Bind a code renderer with no terminal: the renderer's
+        // `terminal_mode` falls back to `context.color_mode()` (set from
+        // `opts.color_mode` above), so the code panel inverts the caller's
+        // mode — the same source feeds the page and the panel. The
+        // caller's `opts.code_block_mode` is forwarded so direct
+        // `Markdown::as_terminal(opts)` callers (e.g. `md schema about
+        // --code-block ...`) still control the panel's contrast against
+        // the page.
+        code_renderer: Some(Rc::new(TerminalCodeRenderer::new_with_code_block_mode(
+            opts.code_block_mode,
+        ))),
     }
 }
 
@@ -674,19 +762,6 @@ fn darkmatter_color_depth_to_terminal(depth: ColorDepth) -> TerminalColorDepth {
         ColorDepth::Colors256 => TerminalColorDepth::Enhanced,
         ColorDepth::Colors16 => TerminalColorDepth::Basic,
         ColorDepth::None => TerminalColorDepth::None,
-    }
-}
-
-/// Maps darkmatter's highlighting [`ColorMode`](crate::markdown::highlighting::ColorMode)
-/// onto biscuit-terminal's [`ColorMode`](biscuit_terminal::discovery::detection::ColorMode).
-fn darkmatter_color_mode_to_terminal(
-    mode: crate::markdown::highlighting::ColorMode,
-) -> biscuit_terminal::discovery::detection::ColorMode {
-    use biscuit_terminal::discovery::detection::ColorMode as TermColorMode;
-    use crate::markdown::highlighting::ColorMode as DmColorMode;
-    match mode {
-        DmColorMode::Light => TermColorMode::Light,
-        DmColorMode::Dark => TermColorMode::Dark,
     }
 }
 
@@ -716,15 +791,105 @@ fn derive_source(md: &Markdown) -> SourceDescriptor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::markdown::highlighting::{CodeHighlighter, ThemePair};
+    use syntect::easy::HighlightLines;
+    use syntect::highlighting::Color;
 
     /// Smoke: every entry point renders a small fixture without panicking and
     /// surfaces fold/render diagnostics separately.
     const FIXTURE: &str = "# Heading\n\nA paragraph with **strong** text.\n";
 
+    fn fg_sgr(color: Color) -> String {
+        format!("\x1b[38;2;{};{};{}m", color.r, color.g, color.b)
+    }
+
+    fn bg_sgr(color: Color) -> String {
+        format!("\x1b[48;2;{};{};{}m", color.r, color.g, color.b)
+    }
+
+    fn one_half_yaml_color(
+        mode: crate::markdown::highlighting::ColorMode,
+        line: &str,
+        token: &str,
+    ) -> Color {
+        let highlighter = CodeHighlighter::new(ThemePair::OneHalf, mode);
+        let syntax = highlighter
+            .syntax_set()
+            .find_syntax_by_extension("yaml")
+            .expect("yaml syntax");
+        let mut hl = HighlightLines::new(syntax, highlighter.theme());
+        let token_start = line
+            .find(token)
+            .unwrap_or_else(|| panic!("missing token {token:?} in source line {line:?}"));
+        let mut offset = 0;
+        hl.highlight_line(line, highlighter.syntax_set())
+            .expect("highlight line")
+            .into_iter()
+            .find_map(|(style, text)| {
+                let end = offset + text.len();
+                let matched = (offset..end).contains(&token_start);
+                offset = end;
+                matched.then_some(style.foreground)
+            })
+            .unwrap_or_else(|| panic!("missing token {token:?} in highlighted line {line:?}"))
+    }
+
+    fn one_half_background(mode: crate::markdown::highlighting::ColorMode) -> Color {
+        CodeHighlighter::new(ThemePair::OneHalf, mode)
+            .theme()
+            .settings
+            .background
+            .expect("theme background")
+    }
+
+    fn assert_yaml_colors(output: &str, expected_mode: crate::markdown::highlighting::ColorMode) {
+        let background = one_half_background(expected_mode);
+        let object_key = one_half_yaml_color(expected_mode, "  foo: string", "foo");
+        let string_value = one_half_yaml_color(expected_mode, "  foo: string", "string");
+
+        assert!(
+            output.contains(&bg_sgr(background)),
+            "expected OneHalf {:?} background RGB({},{},{}), raw:\n{output:?}",
+            expected_mode,
+            background.r,
+            background.g,
+            background.b,
+        );
+        assert!(
+            output.contains(&format!("{}foo", fg_sgr(object_key))),
+            "expected OneHalf {:?} YAML key RGB({},{},{}), raw:\n{output:?}",
+            expected_mode,
+            object_key.r,
+            object_key.g,
+            object_key.b,
+        );
+        assert!(
+            output.contains(&format!("{}string", fg_sgr(string_value))),
+            "expected OneHalf {:?} YAML scalar RGB({},{},{}), raw:\n{output:?}",
+            expected_mode,
+            string_value.r,
+            string_value.g,
+            string_value.b,
+        );
+    }
+
+    fn terminal_opts_for_pipeline(
+        mode: crate::markdown::highlighting::ColorMode,
+    ) -> TerminalOptions {
+        TerminalOptions {
+            code_theme: ThemePair::OneHalf,
+            prose_theme: ThemePair::OneHalf,
+            color_mode: mode,
+            color_depth: Some(ColorDepth::TrueColor),
+            max_width: Some(80),
+            ..TerminalOptions::default()
+        }
+    }
+
     #[test]
     fn to_render_document_smoke() {
         let md: Markdown = FIXTURE.into();
-        let (doc, diags) = to_render_document(&md);
+        let (doc, diags) = to_render_document(&md).expect("fold must succeed");
         assert!(diags.is_empty(), "smoke fixture must fold cleanly");
         assert!(!doc.root.children().is_empty(), "fold produced no nodes");
     }
@@ -747,6 +912,29 @@ mod tests {
         };
         let result = render_tree_terminal(&md, &opts).expect("terminal render");
         assert!(result.output.contains("Heading"));
+    }
+
+    #[test]
+    fn render_tree_terminal_inline_code_uses_theme_background() {
+        // Regression guard: inline code derives its background from the prose
+        // theme (reduced to the page color mode), not reverse-video.
+        let md: Markdown = "Use the `review.md` file.".into();
+        let opts = terminal_opts_for_pipeline(crate::markdown::highlighting::ColorMode::Dark);
+        let result = render_tree_terminal(&md, &opts).expect("terminal render");
+
+        let bg = one_half_background(crate::markdown::highlighting::ColorMode::Dark);
+        assert!(
+            result
+                .output
+                .contains(&format!("\x1b[48;2;{};{};{}m", bg.r, bg.g, bg.b)),
+            "inline code should paint the OneHalf dark background band, raw:\n{:?}",
+            result.output,
+        );
+        assert!(
+            !result.output.contains("\x1b[7m"),
+            "inline code must not use reverse video, raw:\n{:?}",
+            result.output,
+        );
     }
 
     #[test]
@@ -778,7 +966,7 @@ mod tests {
         // File-backed: must surface as `SourceDescriptor::File`.
         let md: Markdown = Markdown::from("Body paragraph.\n")
             .with_source(ComposeSource::File(PathBuf::from("docs/example.md")));
-        let (doc, _diags) = to_render_document(&md);
+        let (doc, _diags) = to_render_document(&md).expect("fold must succeed");
         assert_eq!(
             doc.sources.resolve(SourceId(0)),
             Some(&SourceDescriptor::File {
@@ -789,7 +977,7 @@ mod tests {
 
         // No source: stays virtual.
         let md: Markdown = "Body paragraph.\n".into();
-        let (doc, _diags) = to_render_document(&md);
+        let (doc, _diags) = to_render_document(&md).expect("fold must succeed");
         assert_eq!(
             doc.sources.resolve(SourceId(0)),
             Some(&SourceDescriptor::Virtual {
@@ -803,7 +991,7 @@ mod tests {
     fn frontmatter_attaches_via_entry_point() {
         let raw = "---\ntitle: Smoke\n---\n\nBody paragraph.\n";
         let md: Markdown = raw.into();
-        let (doc, _diags) = to_render_document(&md);
+        let (doc, _diags) = to_render_document(&md).expect("fold must succeed");
         let fm = doc
             .metadata
             .frontmatter
@@ -842,7 +1030,7 @@ mod tests {
         }
 
         let md: Markdown = "plain ==highlighted== after\n".into();
-        let (doc, diags) = to_render_document(&md);
+        let (doc, diags) = to_render_document(&md).expect("fold must succeed");
         assert!(
             diags.is_empty(),
             "mark fixture must fold cleanly: {diags:?}"
@@ -867,7 +1055,7 @@ mod tests {
         }
 
         let md: Markdown = "normal \u{2304}dimmed\u{2304} after\n".into();
-        let (doc, diags) = to_render_document(&md);
+        let (doc, diags) = to_render_document(&md).expect("fold must succeed");
         assert!(diags.is_empty(), "dim fixture must fold cleanly: {diags:?}");
         assert!(
             has_dim(&doc.root),
@@ -895,7 +1083,7 @@ use renderable::tree::{NodeKind, RenderNode};
         }
 
         let md: Markdown = "--- { style: waves }\n".into();
-        let (doc, _diags) = to_render_document(&md);
+        let (doc, _diags) = to_render_document(&md).expect("fold must succeed");
         let hr = find_hr(&doc.root).expect("HR-attribute paragraph must fold to a ThematicBreak");
         assert_eq!(
             hr.attrs.thematic_break_ref().and_then(|h| h.kind),
@@ -980,7 +1168,7 @@ use renderable::tree::{NodeKind, RenderNode};
     /// observable rendered-bytes contract.
     #[test]
     fn render_tree_terminal_color_depth_none_emits_no_color_sgrs() {
-        // Mix prose, inline code (lowers to `<dim>…</dim>`), and a link
+        // Mix prose, inline code (lowers to reverse video), and a link
         // so multiple color-capable paths are exercised in one fixture.
         let md: Markdown =
             "# Heading\n\nText with `code` and [link](https://example.com).\n".into();
@@ -1674,30 +1862,143 @@ use renderable::tree::{NodeKind, RenderNode};
         );
     }
 
-    /// The terminal entry point must thread `TerminalOptions::color_mode` onto
-    /// the terminal so the code-renderer hook's contrast resolution sees the
-    /// caller's mode rather than the optimistic terminal default.
+    /// Phase 2 (centralize theme resolution): the terminal entry point must
+    /// keep the `Terminal`'s own `color_mode()` as the single source of
+    /// truth for the page surface and the nested code-block panel. Setting
+    /// `TerminalOptions::color_mode` no longer overrides the terminal — that
+    /// field is now consumed only by the page path's
+    /// `LayoutContext::from_page` as the fallback for `Unknown`. The code
+    /// renderer's contrast resolution inverts the terminal's mode, so a dark
+    /// terminal always produces a light panel and a light terminal always
+    /// produces a dark panel — the same source feeds both.
     #[test]
-    fn terminal_options_mapping_threads_color_mode() {
+    fn terminal_options_mapping_keeps_terminal_color_mode_as_source_of_truth() {
         use biscuit_terminal::discovery::detection::ColorMode as TermColorMode;
         use crate::markdown::highlighting::ColorMode as DmColorMode;
 
-        let mut opts = TerminalOptions {
+        // `opts.color_mode = Light` does not override the default-detected
+        // terminal mode (which is `Dark` in this test environment).
+        let opts = TerminalOptions {
             color_mode: DmColorMode::Light,
             ..Default::default()
         };
         let term_opts = terminal_options_from_terminal_options(&opts);
-        assert!(matches!(
-            term_opts.context.terminal.color_mode,
-            TermColorMode::Light
-        ));
+        assert!(
+            matches!(term_opts.context.terminal.color_mode, TermColorMode::Dark),
+            "terminal entry point must keep the default terminal mode; got {:?}",
+            term_opts.context.terminal.color_mode
+        );
 
-        opts.color_mode = DmColorMode::Dark;
+        // `opts.color_mode = Dark` likewise leaves the default `Dark` terminal
+        // mode in place. (In a CI / non-TTY environment where detection
+        // returns `Unknown`, the page path's `LayoutContext::from_page` is
+        // the only place that fallback takes effect; the entry point's
+        // terminal context is still the terminal's own mode.)
+        let opts = TerminalOptions {
+            color_mode: DmColorMode::Dark,
+            ..Default::default()
+        };
         let term_opts = terminal_options_from_terminal_options(&opts);
-        assert!(matches!(
-            term_opts.context.terminal.color_mode,
-            TermColorMode::Dark
-        ));
+        assert!(
+            matches!(term_opts.context.terminal.color_mode, TermColorMode::Dark),
+            "terminal entry point must keep the default terminal mode; got {:?}",
+            term_opts.context.terminal.color_mode
+        );
+    }
+
+    #[test]
+    fn terminal_options_mapping_preserves_code_pipeline_inputs_for_both_modes() {
+        use biscuit_terminal::discovery::detection::ColorMode as TermColorMode;
+        use crate::markdown::highlighting::ColorMode as DmColorMode;
+
+        // Phase 2: the entry point's context color mode is set from
+        // `opts.color_mode` (the caller's request — the page path sets
+        // it from the captured `DarkmatterPage` terminal, direct
+        // `Markdown::as_terminal` callers set it from their own
+        // request). The pipeline-correctness assertions (code theme
+        // threaded as kebab name, truecolor preserved, code renderer
+        // wired) are orthogonal to which mode is in effect; the mode
+        // comparison below pins the *request* rather than the
+        // terminal's own default.
+        for dm_mode in [DmColorMode::Dark, DmColorMode::Light] {
+            let opts = terminal_opts_for_pipeline(dm_mode);
+            let mapped = terminal_options_from_terminal_options(&opts);
+            let term_mode = match dm_mode {
+                DmColorMode::Dark => TermColorMode::Dark,
+                DmColorMode::Light => TermColorMode::Light,
+                DmColorMode::Unknown => TermColorMode::Unknown,
+            };
+
+            assert_eq!(
+                mapped.context.code_theme.as_deref(),
+                Some("one-half"),
+                "stage TerminalOptions -> TerminalRenderContext dropped the code theme for {dm_mode:?}",
+            );
+            assert_eq!(
+                mapped.context.color_depth,
+                biscuit_terminal::discovery::detection::ColorDepth::TrueColor,
+                "stage TerminalOptions -> TerminalRenderContext dropped truecolor for {dm_mode:?}",
+            );
+            assert!(
+                std::mem::discriminant(&mapped.context.color_mode)
+                    == std::mem::discriminant(&term_mode),
+                "stage TerminalOptions -> TerminalRenderContext mapped color mode incorrectly for {dm_mode:?}: {:?}",
+                mapped.context.color_mode,
+            );
+            assert!(
+                mapped.code_renderer.is_some(),
+                "stage TerminalOptions -> TerminalRenderOptions dropped the code renderer for {dm_mode:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn render_tree_terminal_inverts_code_theme_against_terminal_source() {
+        // Phase 2: the entry point's single source of truth for the page
+        // surface and the nested code panel is `opts.color_mode` (which
+        // the page path sets from the captured terminal's mode and
+        // direct `Markdown::as_terminal` callers set from their request).
+        // The `Terminal` constructed for the capability profile is
+        // transport only — its own `color_mode` is not used for theme
+        // resolution. The code panel inverts `opts.color_mode` under the
+        // default `CodeBlockMode::Inverse`, so a dark request yields a
+        // light panel and vice versa — the same source feeds the page
+        // and the panel.
+        use crate::markdown::highlighting::ColorMode as DmColorMode;
+
+        let md: Markdown = "```yaml\n$schema:\n  foo: string\n```\n".into();
+
+        let dark_output = render_tree_terminal(&md, &terminal_opts_for_pipeline(DmColorMode::Dark))
+            .expect("dark terminal render")
+            .output;
+        assert_yaml_colors(&dark_output, DmColorMode::Light);
+
+        let light_output =
+            render_tree_terminal(&md, &terminal_opts_for_pipeline(DmColorMode::Light))
+                .expect("light terminal render")
+                .output;
+        // A light request yields a light page, so the panel inverts to
+        // dark — the cross-surface invariant.
+        assert_yaml_colors(&light_output, DmColorMode::Dark);
+    }
+
+    #[test]
+    fn markdown_as_terminal_inverts_code_theme_against_terminal_source() {
+        use crate::markdown::highlighting::ColorMode as DmColorMode;
+
+        let md: Markdown = "```yaml\n$schema:\n  foo: string\n```\n".into();
+
+        let dark_output = md
+            .as_terminal(terminal_opts_for_pipeline(DmColorMode::Dark))
+            .expect("dark as_terminal render");
+        assert_yaml_colors(&dark_output, DmColorMode::Light);
+
+        let light_output = md
+            .as_terminal(terminal_opts_for_pipeline(DmColorMode::Light))
+            .expect("light as_terminal render");
+        // Same rationale as the tree-entry-point test: the caller's
+        // `color_mode` is the source, and the panel inverts it.
+        assert_yaml_colors(&light_output, DmColorMode::Dark);
     }
 
     /// The terminal entry point must thread `TerminalOptions::base_path` into

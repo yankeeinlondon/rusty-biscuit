@@ -182,7 +182,7 @@ pub(crate) fn try_inline_closure(
                 }
             }
 
-            match super::composition::inline_guards::cleanup_inline_output(source_path) {
+            match super::composition::inline_cleanup::cleanup_inline_output(source_path) {
                 Ok(true) => {
                     if show_checks {
                         log::message(&crate::output::fm_check_ok(

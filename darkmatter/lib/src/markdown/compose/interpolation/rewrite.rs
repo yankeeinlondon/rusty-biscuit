@@ -6,9 +6,20 @@
 //! (skipping code regions) and plain-text scanning.
 
 use super::{EvalResult, Evaluator, ExpressionFinder, ExpressionLocation, parse};
-use crate::markdown::compose::expression::EvaluationLookup;
-use crate::markdown::compose::types::ComposeWarning;
+use crate::markdown::compose::expression::{EvaluationLookup, UNKNOWN_FUNCTION_PREFIX};
+use crate::markdown::compose::ComposeWarning;
 use crate::markdown::types::MarkdownError;
+use serde_json::Value;
+
+/// Whether an evaluation error is fatal even in non-fail-fast mode.
+///
+/// An unknown function is an authoring mistake, not a data-dependent miss
+/// (unlike an undefined variable, which resolves to an empty string by design).
+/// Tolerating it would leave the literal `{{ … }}` text in place to poison a
+/// later consumer with an unrelated error, so it is always surfaced here.
+fn is_fatal_eval_error(message: &str) -> bool {
+    message.starts_with(UNKNOWN_FUNCTION_PREFIX)
+}
 
 /// Controls how `interpolate_text` scans for `{{ }}` expressions.
 pub(crate) enum ScanMode {
@@ -99,7 +110,9 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
                         output.replace_range(loc.start..loc.end, &replacement);
                         count += 1;
                     }
-                    EvalResult::Error { message, .. } if fail_fast => {
+                    EvalResult::Error { message, .. }
+                        if fail_fast || is_fatal_eval_error(&message) =>
+                    {
                         return Err(MarkdownError::Transform(format!(
                             "Interpolation evaluation failed for '{}': {}",
                             loc.expression, message
@@ -153,11 +166,64 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
     })
 }
 
+/// Interpolates a single frontmatter value, preserving scalar type when the
+/// whole value is one `{{ expr }}`.
+///
+/// When `input` is exactly one interpolation expression (ignoring surrounding
+/// whitespace) that evaluates to a boolean, number, or null, the typed
+/// `serde_json::Value` is returned so `{{ false }}` stays the boolean `false`
+/// (falsy) rather than the string `"false"` (truthy), and `{{ file_index(x) }}`
+/// stays a number for downstream predicates like `is_number`. Strings, arrays,
+/// objects, mixed text (`"a {{ x }}"`), parse/eval failures, and unresolved
+/// (e.g. shell-pending) templates fall through to [`interpolate_text`], keeping
+/// the established string-rewrite behavior — including leaving an unresolved
+/// `{{ … }}` in place for a later pass.
+///
+/// ## Errors
+///
+/// Propagates the same `MarkdownError` as [`interpolate_text`] when `fail_fast`
+/// is set or a fatal evaluation error occurs on the string path.
+pub(crate) fn interpolate_value<L: EvaluationLookup>(
+    input: &str,
+    evaluator: &Evaluator<L>,
+    fail_fast: bool,
+    warning_stage: &'static str,
+) -> Result<(Value, usize, Vec<ComposeWarning>), MarkdownError> {
+    if let Some(typed) = whole_value_scalar(input, evaluator) {
+        return Ok((typed, 1, Vec::new()));
+    }
+    let result = interpolate_text(input, evaluator, ScanMode::Plain, fail_fast, warning_stage)?;
+    Ok((Value::String(result.output), result.replacements, result.warnings))
+}
+
+/// Returns the typed scalar value when `input` is a single whole-value
+/// `{{ expr }}` that evaluates to a boolean, number, or null.
+///
+/// Returns `None` (string path) when the value is mixed text, holds more than
+/// one expression, evaluates to a string/array/object, or fails to parse or
+/// evaluate. Restricting to `Bool`/`Number`/`Null` keeps the change to the
+/// value kinds literal frontmatter already produces (`yolo: true`, `phase: 1`),
+/// and leaves string/array/object results on the proven string path.
+fn whole_value_scalar<L: EvaluationLookup>(input: &str, evaluator: &Evaluator<L>) -> Option<Value> {
+    let locations = ExpressionFinder::find_all_plain(input);
+    let [loc] = locations.as_slice() else {
+        return None;
+    };
+    if !input[..loc.start].trim().is_empty() || !input[loc.end..].trim().is_empty() {
+        return None;
+    }
+    let expr = parse(&loc.expression).ok()?;
+    match evaluator.eval_json(&expr) {
+        Ok(value @ (Value::Bool(_) | Value::Number(_) | Value::Null)) => Some(value),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::compose::state::EffectiveStateBuilder;
-    use crate::markdown::compose::types::ComposeContext;
+    use crate::markdown::compose::EffectiveStateBuilder;
+    use crate::markdown::compose::ComposeContext;
     use serde_json::json;
     use std::collections::HashMap;
 
@@ -254,6 +320,26 @@ mod tests {
         assert!(result.warnings[0].message.contains("failed to parse"));
         // Original is preserved
         assert!(result.output.contains("{{ > invalid }}"));
+    }
+
+    #[test]
+    fn unknown_function_is_fatal_even_without_fail_fast() {
+        // An unrecognized symbol can never resolve; it must surface as an error
+        // rather than leaking its literal `{{ … }}` text downstream, even when
+        // fail_fast is off.
+        let state = make_state(json!({"spec": "a/b/spec.md"}));
+        let evaluator = Evaluator::new(&state);
+        let result = interpolate_text(
+            "{{ unknown_fn(spec) }}",
+            &evaluator,
+            ScanMode::Plain,
+            false,
+            "test",
+        );
+        let Err(err) = result else {
+            panic!("unknown function must be fatal");
+        };
+        assert!(err.to_string().contains("Unknown function: unknown_fn"));
     }
 
     #[test]

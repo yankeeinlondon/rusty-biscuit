@@ -8,7 +8,7 @@
 //! ## Examples
 //!
 //! ```
-//! use tui_chrome::prelude::*;
+//! use biscuit_tui::prelude::*;
 //!
 //! let state = TextInputState::new()
 //!     .with_label(Label::new("Name", LabelPosition::Above))

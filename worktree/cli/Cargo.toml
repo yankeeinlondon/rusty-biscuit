@@ -19,6 +19,7 @@ sniff = { path = "../../sniff/lib" }
 worktree = { path = "../lib" }
 
 [dev-dependencies]
+worktree = { path = "../lib", features = ["count-git"] }
 assert_cmd = "2"
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 predicates = "3"

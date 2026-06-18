@@ -11,8 +11,8 @@ use serde_json::{Map, Value};
 use std::path::Path;
 
 use super::types::DependencyRef;
-use crate::markdown::compose::state::EffectiveState;
-use crate::markdown::compose::types::{ComposeContext, ComposeOptions};
+use crate::markdown::compose::EffectiveState;
+use crate::markdown::compose::{ComposeContext, ComposeOptions};
 
 // ── Source identification ──────────────────────────────────────────
 
@@ -621,6 +621,7 @@ mod tests {
     fn options_hash_sensitive_to_baseline_schema() {
         use crate::markdown::schemas::{
             Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType,
+            TypeExpr,
         };
         use indexmap::IndexMap;
 
@@ -630,7 +631,7 @@ mod tests {
         props_a.insert(
             "title".into(),
             PropertyDef::Single(PropertyAtom {
-                ty: SimplifiedType::String,
+                ty: TypeExpr::Primitive(SimplifiedType::String),
                 is_array: false,
                 constraints: vec![Constraint::Required],
                 array_constraints: vec![],
@@ -643,7 +644,7 @@ mod tests {
         props_b.insert(
             "owner".into(),
             PropertyDef::Single(PropertyAtom {
-                ty: SimplifiedType::String,
+                ty: TypeExpr::Primitive(SimplifiedType::String),
                 is_array: false,
                 constraints: vec![Constraint::Required],
                 array_constraints: vec![],

@@ -925,7 +925,7 @@ shell-detection change.
 
 ### Implementation steps
 
-1. `cargo test -p tui-chrome-cli --tests` (or whichever package the
+1. `cargo test -p biscuit-tui-cli --tests` (or whichever package the
    biscuit-tui CLI is named — check via the workspace
    `Cargo.toml`).
 2. If failures appear:
@@ -939,8 +939,8 @@ shell-detection change.
 ### Verification
 
 ```bash
-cargo test  -p tui-chrome-cli --tests
-cargo clippy -p tui-chrome-cli --tests -- -D warnings
+cargo test  -p biscuit-tui-cli --tests
+cargo clippy -p biscuit-tui-cli --tests -- -D warnings
 ```
 
 ### Definition of done
@@ -953,7 +953,7 @@ cargo clippy -p tui-chrome-cli --tests -- -D warnings
 
 - Per CLAUDE.md ("biscuit-tui follows the lib/cli split; CLI binary
   is named `question`"), the CLI package name may not be
-  `tui-chrome-cli`. Confirm via `cargo metadata` if needed.
+  `biscuit-tui-cli`. Confirm via `cargo metadata` if needed.
 
 ---
 
@@ -1077,7 +1077,7 @@ cargo doc --no-deps -p biscuit-test-harness -p biscuit-terminal -p biscuit-termi
    clean.
 8. `cargo fmt -p biscuit-test-harness -p biscuit-terminal -p
    biscuit-terminal-cli -- --check` is clean.
-9. `cargo test -p tui-chrome-cli --tests` (or correct CLI package
+9. `cargo test -p biscuit-tui-cli --tests` (or correct CLI package
    name) shows no regression introduced by the `detect_shell()`
    change.
 

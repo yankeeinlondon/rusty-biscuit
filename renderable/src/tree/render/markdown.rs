@@ -336,6 +336,40 @@ impl Writer<'_> {
                 token, children, ..
             } => self.render_extended(token, children),
             NodeKind::Unsupported { label } => self.render_unsupported(node, label),
+            NodeKind::Disclosure { summary, children, .. } => self.render_disclosure(summary, children),
+        }
+    }
+
+    /// Renders a disclosure block.
+    ///
+    /// Plain Markdown emits the `::disclosure / ::details / ::end-disclosure`
+    /// DSL verbatim so the output remains a clean Darkmatter document.
+    /// MarkdownPlus renders the summary and body to Markdown first, then wraps
+    /// them with `<details>`/`<summary>`; the summary is rendered inside an
+    /// inline-HTML context so `<`, `>`, and `&` are escaped.
+    fn render_disclosure(
+        &mut self,
+        summary: &[RenderNode],
+        children: &[RenderNode],
+    ) -> Result<String, RenderError> {
+        match self.opts.dialect {
+            MarkdownDialect::Markdown => {
+                let summary_text = self.render_inline(summary)?;
+                let body_text = self.render_blocks(children)?;
+                Ok(format!(
+                    "::disclosure\n{summary_text}\n::details\n{body_text}\n::end-disclosure"
+                ))
+            }
+            MarkdownDialect::MarkdownPlus => {
+                self.html_depth += 1;
+                let summary_text = self.render_inline(summary);
+                self.html_depth -= 1;
+                let summary_text = summary_text?;
+                let body_text = self.render_blocks(children)?;
+                Ok(format!(
+                    "<details><summary>{summary_text}</summary>\n\n{body_text}\n</details>"
+                ))
+            }
         }
     }
 
@@ -364,7 +398,18 @@ impl Writer<'_> {
         for child in children {
             parts.push(self.render(child)?);
         }
-        Ok(parts.join("\n\n"))
+        let mut result = String::new();
+        for (i, part) in parts.iter().enumerate() {
+            if i > 0 {
+                if part.is_empty() || parts[i - 1].is_empty() {
+                    result.push('\n');
+                } else {
+                    result.push_str("\n\n");
+                }
+            }
+            result.push_str(part);
+        }
+        Ok(result)
     }
 
     /// Renders a sequence of children in order with no inserted separator.

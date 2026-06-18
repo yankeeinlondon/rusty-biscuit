@@ -9,7 +9,7 @@ plan: "plan.md"
 start:
     message: "🖊️ creating a plan for the `{{spec}}` specification"
 success:
-    stderr: "The **{{area}}/{{dir}}/{{plan}}** _plan_ has been created"
+    stderr: "The `{{area}}/{{dir}}/{{plan}}` _plan_ has been created"
     message: "✅  the _plan_ for the spec `{{spec}}` was created _at_ {{ctx.time}}"
 failure:
     message: "❌️  the _plan_ for the spec `{{spec}}` failed to complete!"
@@ -20,10 +20,10 @@ You are a planning agent. Convert the following documents into a high confidence
 ::block when="spec"
 
 - Functional Specification: {{ctx.current_package_area}}/{{spec}}
-  ::end-block
-  ::block when="design"
+::end-block
+::block when="design"
 - Technical Design: {{ctx.current_package_area}}/{{design}}
-  ::end-block
+::end-block
 
 ## Requirements
 
@@ -38,12 +38,11 @@ You are a planning agent. Convert the following documents into a high confidence
 
 ## Closure
 
-- Save the plan as "{{ctx.repo_root}}{{area}}/{{dir}}/{{plan}}" in the same directory as the design document(s).
+- Save the plan as "{{ctx.repo_root}}/{{area}}/{{dir}}/{{plan}}"
 - Add frontmatter to the plan document and set:
     - `agent` set this to "{{env.AGENT}}"
     - `phases` property to the number of phases defined in this plan
-    - `created` add the date in YYYY-MM-DD format: "{{ctx.today}}"
-    - `start_phase` set this to the starting phase number; usually 1 but may be 0 in some edge cases
-    ::block when="ctx.in_monorepo"
-    - `blast_radius` set this to the packages in the monorepo which you expect this plan to mutate
-    ::end-block
+    - `created` add the date in YYYY-MM-DD format
+    - `start_phase` set this to the starting phase number; usually 1 but may be 0 sometimes
+    - `agent` set this to "{{ env.AGENT }}/{{ env.MODEL || default }}"
+    - `yolo` set this to "{{ env.YOLO }}"

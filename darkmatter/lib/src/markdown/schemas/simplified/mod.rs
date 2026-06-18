@@ -18,6 +18,7 @@ pub use convert::{DRAFT_2020_12, to_json_schema};
 pub use serialize::serialize_property_atom;
 pub use types::{
     Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, SimplifiedType,
+    TypeExpr,
 };
 
 use indexmap::IndexMap;
@@ -148,8 +149,9 @@ fn parse_property_def(name: &str, value: &YamlValue) -> Result<PropertyDef, Sche
         }
         YamlValue::Mapping(_) => Err(SchemaError::Grammar {
             property: name.to_string(),
-            message: "mapping property values are reserved for future nested object schemas; \
-                 use a string type expression"
+            message: "mapping property values are reserved for a future YAML-native schema shape; \
+                 to declare nested object typing today, quote an inline object literal as a \
+                 string (e.g. '{ host: string(required) }')"
                 .into(),
             span: 0..0,
         }),
@@ -221,8 +223,8 @@ mod tests {
         match foo {
             PropertyDef::Union(arms) => {
                 assert_eq!(arms.len(), 2);
-                assert_eq!(arms[0].ty, SimplifiedType::String);
-                assert_eq!(arms[1].ty, SimplifiedType::Number);
+                assert_eq!(arms[0].ty, TypeExpr::Primitive(SimplifiedType::String));
+                assert_eq!(arms[1].ty, TypeExpr::Primitive(SimplifiedType::Number));
             }
             _ => panic!("expected Union"),
         }
@@ -303,7 +305,14 @@ mod tests {
             panic!("expected Grammar error, got {err:?}")
         };
         assert_eq!(property, "foo");
-        assert!(message.contains("nested object schemas"));
+        assert!(
+            message.contains("YAML-native schema shape"),
+            "expected error to clarify YAML mapping values are reserved for a future YAML-native schema shape, got: {message}"
+        );
+        assert!(
+            message.contains("inline object literal"),
+            "expected error to point authors at the inline object literal string form, got: {message}"
+        );
     }
 
     #[test]

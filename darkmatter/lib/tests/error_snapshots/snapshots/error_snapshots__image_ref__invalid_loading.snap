@@ -1,8 +1,9 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/image_ref.rs
-assertion_line: 147
 expression: out
 ---
 ⤫ ImageRefError: invalid loading
+┃ 
 ┃ Value: never
-Accepted values: eager, lazy.
+┃ 
+┃ Accepted values: eager, lazy.

@@ -263,8 +263,7 @@ Despite the centralized catalog, several sites across the codebase still encode 
 | `cli/src/commands/wrap/live_semantic_sink/mod.rs` | 400–405 | Codex | Codex tool-result body rendering: show the raw body in `Normal` verbosity. |
 | `cli/src/commands/wrap/live_semantic_sink/mod.rs` | 465 | OpenCode | OpenCode `step_phase` info events are suppressed from human-visible output. |
 | `cli/src/commands/wrap/inline.rs` | 9–16 | Codex, Gemini, OpenCode | `strip_prompt_tags_for_provider` strips MCP tags only for Codex, Gemini, and OpenCode. |
-| `cli/src/commands/wrap/composition/structured.rs` | 119 | Codex | `had_streamed_assistant` explicitly excludes Codex (`provider != Provider::Codex`). |
-| `cli/src/commands/wrap/composition/legacy_goose.rs` | 69–77 | Codex | Codex last-message file extraction in the legacy (non-structured) branch. |
+| `cli/src/commands/wrap/harness_orch.rs` | ~640 | Codex | Codex last-message file extraction for captured/non-structured attempts inside the harness loop. |
 
 ### CLI Crate — WrapperProfile Trait Overrides
 

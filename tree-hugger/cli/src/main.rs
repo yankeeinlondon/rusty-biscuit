@@ -3171,16 +3171,19 @@ fn render_god_files(analyses: &[GodAnalysis], config: &OutputConfig, high_risk_o
         .filter(|a| a.risk == RiskBand::Moderate)
         .count();
 
-    // Report heading: two count lines, always printed (including the 0/0 case
-    // for an empty scan), so the band totals are always visible.
-    prose_line(
-        &term,
-        plain,
-        0,
-        &format!(
-            "- There are <yellow>{moderate_count}</yellow> files with moderate risk of being considered _god files_"
-        ),
-    );
+    // Report heading. The high-risk count is always printed (including the 0/0
+    // case for an empty scan). The moderate count is suppressed under
+    // `--high-risk`, where moderate files are out of scope entirely.
+    if !high_risk_only {
+        prose_line(
+            &term,
+            plain,
+            0,
+            &format!(
+                "- There are <yellow>{moderate_count}</yellow> files with moderate risk of being considered _god files_"
+            ),
+        );
+    }
     prose_line(
         &term,
         plain,

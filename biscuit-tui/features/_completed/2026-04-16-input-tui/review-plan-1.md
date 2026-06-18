@@ -124,8 +124,8 @@ Goal: finish with green tests and a clean lint pass for the package area.
 
 Required verification:
 
-- `cargo nextest run -p tui-chrome -p tui-chrome-cli`
-- `cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets --all-features -- -D warnings`
+- `cargo nextest run -p biscuit-tui -p biscuit-tui-cli`
+- `cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets --all-features -- -D warnings`
 
 Area-level convenience checks:
 
@@ -134,6 +134,6 @@ Area-level convenience checks:
 
 Final exit criteria:
 
-- All tests pass for `tui-chrome` and `tui-chrome-cli`.
+- All tests pass for `biscuit-tui` and `biscuit-tui-cli`.
 - `clippy` reports zero warnings/errors for the `biscuit-tui` package area.
 - The code and tests cover every recommendation from `review-1.md`.

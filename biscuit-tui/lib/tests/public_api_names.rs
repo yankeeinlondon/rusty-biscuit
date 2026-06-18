@@ -3,7 +3,7 @@
 //! This test ensures the canonical component names (`ChooseOne`, `ChooseMany`)
 //! remain the only exposed API surface. Legacy `Select*` names must not leak.
 
-use tui_chrome::{
+use biscuit_tui::{
     BooleanSwitch, BooleanSwitchState, CellState, CellValue, ChoiceInput, ChoiceOption, ChooseMany,
     ChooseManyState, ChooseOne, ChooseOneState, ComponentTheme, EventOutcome, HandleEvent,
     InputTable, InputTableColumn, InputTableState, KeyBindings, Label, LabelPosition, Row, RowCell,

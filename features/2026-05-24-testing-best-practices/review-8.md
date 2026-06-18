@@ -38,7 +38,7 @@ Suggested fix: either change the L2 recipe shape for shared-harness suites to ru
 | --- | --- | --- |
 | `require_level!` env gating semantics | L1: `cargo test -p test-toolkit` passed | Pass |
 | biscuit-terminal L2 test code compiles after migration | Compile: `cargo check --tests -p biscuit-terminal-cli` passed | Pass |
-| biscuit-tui L2/L3 test code compiles after migration | Compile: `cargo check --tests -p tui-chrome-cli` passed | Pass |
+| biscuit-tui L2/L3 test code compiles after migration | Compile: `cargo check --tests -p biscuit-tui-cli` passed | Pass |
 | Canonical `test-l2` command amortizes real-terminal spawn cost via `SharedHarness` | Not verified; structurally incompatible with nextest process-per-test execution | Gap |
 | User-observable terminal rendering requirements remain assigned to L2/L3 tests | L2/L3 tests are present and selected by `level2_`/`level3_` names | Pass for selection; not rerun against real terminals in this review |
 
@@ -127,7 +127,7 @@ was regenerated.
 ### Verification
 
 - `cargo check --tests` passes for `biscuit-terminal-cli`,
-  `tui-chrome-cli`, `darkmatter`, and `darkmatter-cli`.
+  `biscuit-tui-cli`, `darkmatter`, and `darkmatter-cli`.
 - `cargo check -p biscuit-test-harness --bins` passes (broker
   compiles).
 - `just --list` re-parses the modified `just/devops.just`.

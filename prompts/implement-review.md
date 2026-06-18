@@ -1,94 +1,58 @@
 ---
 $schema:
-    review: string(required)
-    spec: string
-    design: string
+    spec: file(required)
+    iteration: number(required; default(1))
+    design: file
 name: Implement Review Suggestions
 description: |-
-    Implements all the recommendations/suggestions produced in a review. Provide either:
+    Implements all the recommendations/suggestions produced in a review.
 
-    1. a `review` path is required
-    2. optionally a `spec` path if this a review of **feature** or **fix**
-    3. optionally provide a `design` path if there design file for the **feature** or **fix**
+    - if implementing a spec review, provide the `spec` file and an `iteration` number for the review
 area: "{{ ctx.area }}"
-has_skill: true
-target: "{{ review || spec }}"
-file: "$(basename '{{target}}')"
-dir: "$(dirname '{{target}}')"
-review_path: "@{{area}}/{{dir}}/review-{{iteration}}.md"
-spec_path: "@{{area}}/{{dir}}/{{file}}"
+dir: "$(dirname '{{spec}}')"
+review: "{{ dir + '/review-' + iteration + '.md'  }}"
+log: "{{ 'review-implementation-log-' + iteration + '.md' }}"
+review_path: "{{review}}"
+spec_path: "{{spec}}"
+log_path: "{{dir}}/{{log}}"
+
+success:
+    effect: select-4
+    say: "Implementation of review suggestions complete in {{ctx.area}}"
 ---
-::block when="spec"
+
+::block when="spec && iteration"
 ## Context
-::block when="has_skill"
-- Use the '{{area}}' agent skill when reviewing
-::end-block
 
-- This review is focused on the '{{area}}' package area which has the following packages:
-
-    ::shell sniff repo packages --package-area "{{ctx.current_package_area}}" --md
-
-You will review the **implementation**'s fidelity to the specification file:
-
-- {{spec_path}}
-
-Your review will be written to:
+Your task revolves around **implementing** all the suggestions found in the recent review:
 
 - {{review_path}}
 
-::block when="iteration == 1"
-This is the first review of this specification document since the original implementation.
-::end-block
-::block when="iteration != 1"
-A prior review of the _implementation_ of this specification did NOT deem the implementation
-to be "production ready" but we have now implemented all of the suggestions from that review
-and your task will be to again compare the implementation of the specification relative to
-the written intention of the specification.
+The review was done to evaluate the fidelity of the implementation to the specification it was derived from:
 
-> Note: you should _also_ validate that all of the "complaints/suggestions" of the prior review have been fully addressed. You are current performing review #{{iteration}} so you should be looking for review in the @{{area}}/{{dir}} directory with a name similar to "review-{{iteration - 1}}.md"
-::end-block
+- {{spec_path}}
 
 ## Task
 
-Read the specification document and then perform a review on the implementation:
 
-- look for gaps in functionality that were designed but not implemented
-- features who's implementation is broken or incomplete
-- functionality which is light on test coverage (we expect strong unit and integration testing for everything)
-- are there any changes which would make the code more ergonomic, more performant, or both?
+1. Create a log file for this task at '{{log_path}}'
 
-## Test Rigor — Level 1 / Level 2 / Level 3
+    - Add two H2 headings:
+        - `## Implementation Notes`
+        - `## Lessons Learned`
 
-Test count is not test rigor. Phrases like "covered by substantial unit and integration tests" are
-banned from this review unless you can pair each user-facing requirement with a verification level:
+2. Review the suggestions in the review
+3. Act as an orchestrator and iterate over all the suggestions in the review (serially):
 
-- **Level 1 (in-process / PTY).** Unit tests, plus tests that spawn the binary in a pseudo-TTY and
-  feed it manufactured input bytes. Useful and necessary, but does NOT verify the terminal emulator's
-  encoder/decoder behaviour — *we* generate those bytes. Cannot catch bugs like "WezTerm does not
-  emit bare-modifier press events because we forgot to push `REPORT_ALL_KEYS_AS_ESCAPE_CODES`."
+    - ask a subagent to implement the suggestions and then report back a summary of what they did
+    - write to the log file for this task -- {{log_path}} -- adding a H3 heading for the suggestion which completed and appending the summary that the subagent provided
+    - if anything novel or unexpected came up during this implementation, add unordered list items to the `## Lessons Learned` section of the log document
+    - move to the next suggestion
 
-- **Level 2 (run-in-real-terminal with IPC).** Spawn the binary inside an actual terminal emulator
-  (WezTerm, Kitty) or multiplexer (tmux), capture the rendered pane text via the terminal's CLI
-  (`wezterm cli get-text`, `kitty @ get-text`, `tmux capture-pane`). Verifies that glyphs, widths,
-  SGR styling, and scrolling render correctly through the real terminal. Input is still byte-level
-  injected via the terminal's CLI, so the terminal's input encoder is NOT exercised.
+4. Once all review suggestions have been implemented:
 
-- **Level 3 (OS keyboard injection).** Real OS keyboard events (`cliclick` on macOS, `xdotool` on
-  Linux) injected into the spawned terminal window. The terminal's input encoder fires — this is
-  the only level that can verify "what bytes does the terminal actually emit when the user presses
-  bare Ctrl?" Required for any UX requirement of the form "when the user holds/presses key X, Y
-  happens." Currently env-gated behind `RUN_LEVEL3=1` because focus stability is platform-specific.
-
-A feature MAY be marked production-ready only when each user-observable requirement has at minimum
-the level of verification appropriate for it. Reviewers MUST list any requirement whose strongest
-test is at the wrong level under "Findings" with severity at least "high".
-
-## Closure
-
-- Save your review suggestions to "{{review_path}}"
-- based on your review suggestions indicate whether you think this feature is **ready for production** by setting the `ready` frontmatter property on "{{review_path}}" to `true` or `false`
-- save the `agent` frontmatter property as "{{env.AGENT}}" in the "{{review_path}}" file
-- save the `model` frontmatter property as "{{env.MODEL}}" in the "{{review_path}}" file
+    - communicate the summary of what was achieved
+    - communicate any lessons learned during the process
 
 ## **IMPORTANT:**
 
@@ -98,7 +62,6 @@ test is at the wrong level under "Findings" with severity at least "high".
 - do not run `cargo fmt` ... we want functional changes during this work not formatting changes
 - do not commit your work to git (this will be done as an independent process which you are not responsible for)
 ::file ./you-are-non-interactive.md
-- communicate as much as possible so that the caller can keep track of progress
 
 ::end-block
 
@@ -107,13 +70,6 @@ test is at the wrong level under "Findings" with severity at least "high".
 The following review has just completed:
 
 - {{review_path}}
-
-::block when="iteration != 1"
-A prior review did NOT deem the implementation to be "production ready" but we have now implemented all of the suggestions from that review and your task will be to again compare the implementation of the specification relative to the written intention of the specification.
-
-> Note: you should also validate that all of the "complaints/suggestions" of the _prior_ review have now been fully addressed. You are current performing review #{{iteration}} so you should be looking for review in the 
-{{dir}} directory with a name similar to "review-{ {{iteration}} - 1 }.md"
-::end-block
 
 Your task is to implement all the suggestions in that review.
 

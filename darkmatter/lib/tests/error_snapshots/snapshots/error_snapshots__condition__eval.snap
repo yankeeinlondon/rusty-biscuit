@@ -3,10 +3,13 @@ source: darkmatter/lib/tests/error_snapshots/condition.rs
 expression: out
 ---
 ⤫ ConditionError: evaluation failed
+┃ 
 ┃ Condition evaluation failed for when="length(items) > 0":
 ┃ 
 ┃ ```md
-┃        9 │ line 9
-┃     > 10 │ line 10
-┃       11 │ line 11
-Error: items not found
+┃    9 │ line 9
+┃ > 10 │ line 10
+┃   11 │ line 11
+┃ ```
+┃ 
+┃ Error: items not found

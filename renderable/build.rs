@@ -1710,6 +1710,64 @@ fn main() {
     writeln!(writer, "        }}").unwrap();
     writeln!(writer, "    }}").unwrap();
 
+    // Write kebab_name method
+    writeln!(writer).unwrap();
+    writeln!(
+        writer,
+        "    /// Returns the kebab-case name for this Tailwind color."
+    )
+    .unwrap();
+    writeln!(
+        writer,
+        "    pub const fn kebab_name(self) -> &'static str {{"
+    )
+    .unwrap();
+    writeln!(writer, "        match self {{").unwrap();
+    writeln!(writer, "            Tailwind::Inherit => \"inherit\",").unwrap();
+    writeln!(writer, "            Tailwind::Current => \"currentColor\",").unwrap();
+    writeln!(writer, "            Tailwind::Transparent => \"transparent\",").unwrap();
+
+    for color in TAILWIND_COLORS {
+        let name = color.css_var.strip_prefix("--color-").unwrap_or(color.css_var);
+        writeln!(
+            writer,
+            "            Tailwind::{} => \"{}\",",
+            color.variant, name
+        )
+        .unwrap();
+    }
+
+    writeln!(writer, "        }}").unwrap();
+    writeln!(writer, "    }}").unwrap();
+
+    // Write from_kebab_name method
+    writeln!(writer).unwrap();
+    writeln!(
+        writer,
+        "    /// Parses a kebab-case Tailwind color name into the enum variant."
+    )
+    .unwrap();
+    writeln!(writer, "    pub fn from_kebab_name(name: &str) -> Option<Self> {{").unwrap();
+    writeln!(writer, "        let normalized = name.trim().replace('_', \"-\");").unwrap();
+    writeln!(writer, "        match normalized.as_str() {{").unwrap();
+    writeln!(writer, "            \"inherit\" => Some(Tailwind::Inherit),").unwrap();
+    writeln!(writer, "            \"currentColor\" | \"current-color\" => Some(Tailwind::Current),").unwrap();
+    writeln!(writer, "            \"transparent\" => Some(Tailwind::Transparent),").unwrap();
+
+    for color in TAILWIND_COLORS {
+        let name = color.css_var.strip_prefix("--color-").unwrap_or(color.css_var);
+        writeln!(
+            writer,
+            "            \"{}\" => Some(Tailwind::{}),",
+            name, color.variant
+        )
+        .unwrap();
+    }
+
+    writeln!(writer, "            _ => None,").unwrap();
+    writeln!(writer, "        }}").unwrap();
+    writeln!(writer, "    }}").unwrap();
+
     // Write palette_defaults method
     writeln!(writer).unwrap();
     writeln!(writer, "    /// Every concrete Tailwind palette color as a").unwrap();

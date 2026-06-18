@@ -445,16 +445,23 @@ If re-level would overflow H6:
 
 ### `disclosure`
 
-Wrap included content as:
+Wrap included content in the render-time disclosure DSL triple rather than
+inline HTML:
 
-```html
-<details>
-<summary>Summary text</summary>
+```md
+::disclosure
+Summary text
+::details
 
 ...included content...
 
-</details>
+::end-disclosure
 ```
+
+`disclosure=true` (or an empty summary) uses the default summary `"Details"`.
+The DSL is lowered per render target during rendering (terminal block quote,
+browser `<details>`/`<summary>`, etc.); no `<details>` HTML is emitted at
+compose time. See [Disclosure Blocks](../rendering/disclosure.md).
 
 Wrapper order if both present:
 

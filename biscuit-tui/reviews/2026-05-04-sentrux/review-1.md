@@ -31,7 +31,7 @@ Baseline metrics from `.sentrux/baseline.json`:
 
 ---
 
-## tui-chrome
+## biscuit-tui
 
 The `lib/` crate. Quality drag is concentrated in five over-large files and the `choose_one` ↔ `choose_many` peer coupling.
 
@@ -286,7 +286,7 @@ pub use crate::helpers::choice_builders::{
 
 ---
 
-## tui-chrome-cli
+## biscuit-tui-cli
 
 The `cli/` crate. Smaller package, but carries three concrete redundancies and two over-large command files.
 

@@ -1,5 +1,6 @@
 ---
 source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+assertion_line: 110
 expression: "convert_atom(\"file(match('*.md', '!_*.md'))\")"
 ---
 {
@@ -7,11 +8,18 @@ expression: "convert_atom(\"file(match('*.md', '!_*.md'))\")"
   "additionalProperties": true,
   "properties": {
     "field": {
-      "format": "darkmatter-file",
-      "type": "string",
-      "x-darkmatter-match": [
-        "*.md",
-        "!_*.md"
+      "anyOf": [
+        {
+          "const": ""
+        },
+        {
+          "format": "darkmatter-file",
+          "type": "string",
+          "x-darkmatter-match": [
+            "*.md",
+            "!_*.md"
+          ]
+        }
       ]
     }
   },

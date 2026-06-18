@@ -674,7 +674,53 @@ impl Writer<'_> {
                 Ok(self.render_prose(&markup))
             }
             NodeKind::Html { value, block } => self.render_html(node, value, *block),
+            NodeKind::Disclosure { summary, children, .. } => {
+                self.render_disclosure(summary, children)
+            }
             NodeKind::Unsupported { label } => self.render_unsupported(node, label),
+        }
+    }
+
+    /// Renders a disclosure block: the summary is shown normally and the body is
+    /// rendered as a block quote whose text is dim and italic.
+    fn render_disclosure(
+        &mut self,
+        summary: &[RenderNode],
+        children: &[RenderNode],
+    ) -> Result<String, RenderError> {
+        let effective = self.inherited.effective().clone();
+        let summary_markup = self.render_inline(summary, &effective)?;
+        let summary_line = self.render_prose(&summary_markup);
+
+        let body = if children.is_empty() {
+            String::new()
+        } else {
+            let dim_italic = Style {
+                emphasis: TextEmphasis {
+                    dim: true,
+                    italic: true,
+                    ..Default::default()
+                },
+                ..Style::default()
+            };
+            let (child_ctx, _) = self.inherited.enter(Some(&dim_italic));
+            let prev = std::mem::replace(&mut self.inherited, child_ctx);
+            let rendered = self.render_blocks(children);
+            self.inherited = prev;
+            let rendered = rendered?;
+            // The inherited context above only restores dim/italic for nested
+            // inline spans; plain body text is painted at the block level (as
+            // `render_styled` does), so paint the appearance onto every line
+            // before wrapping it as a block quote.
+            let styled = style::apply_style(&rendered, &dim_italic, &self.opts.context.terminal);
+            BlockQuote::from(styled.as_str()).render(&self.opts.context.terminal)
+        };
+
+        match (summary_line.is_empty(), body.is_empty()) {
+            (true, true) => Ok(String::new()),
+            (true, false) => Ok(body),
+            (false, true) => Ok(summary_line),
+            (false, false) => Ok(format!("{summary_line}\n\n{body}")),
         }
     }
 
@@ -684,7 +730,18 @@ impl Writer<'_> {
         for child in children {
             parts.push(self.render(child)?);
         }
-        Ok(parts.join("\n\n"))
+        let mut result = String::new();
+        for (i, part) in parts.iter().enumerate() {
+            if i > 0 {
+                if part.is_empty() || parts[i - 1].is_empty() {
+                    result.push('\n');
+                } else {
+                    result.push_str("\n\n");
+                }
+            }
+            result.push_str(part);
+        }
+        Ok(result)
     }
 
     /// Renders a sequence of children in order with no inserted separator.
@@ -1018,7 +1075,20 @@ impl Writer<'_> {
             }
             NodeKind::InlineCode { value } => {
                 let mut child_effective = effective.clone();
-                child_effective.emphasis.dim = true;
+                // The background (and foreground) come from the prose theme
+                // reduced to the page color mode, forwarded by the darkmatter
+                // entry point. A caller that builds the context directly leaves
+                // them unset, so inline code falls back to a dim run rather than
+                // reverse-video.
+                match self.opts.context.inline_code_background {
+                    Some(bg) => {
+                        child_effective.background = Some(rgb_style_color(bg));
+                        if let Some(fg) = self.opts.context.inline_code_color {
+                            child_effective.color = Some(rgb_style_color(fg));
+                        }
+                    }
+                    None => child_effective.emphasis.dim = true,
+                }
                 let open = style::text_appearance_sgr(&child_effective, term);
                 let close = style::appearance_close(&open, effective, term);
                 Ok(apply_classes(&format!("{open}{value}{close}"), &node.attrs.classes, effective, term))
@@ -1151,6 +1221,7 @@ impl Writer<'_> {
             | NodeKind::TableRow { .. }
             | NodeKind::TableCell { .. }
             | NodeKind::FootnoteDefinition { .. }
+            | NodeKind::Disclosure { .. }
             | NodeKind::Html { .. }
             | NodeKind::Unsupported { .. } => self.render(node),
         }
@@ -1622,6 +1693,10 @@ impl Writer<'_> {
                 (&self.opts.context.color_depth).into(),
                 (&self.opts.context.color_mode).into(),
             )
+            .with_page_surface(
+                self.opts.context.page_text_color,
+                self.opts.context.page_background_color,
+            )
             .with_code_theme_name(self.opts.context.code_theme.clone())
             .with_line_numbers(self.opts.context.line_numbers);
             if let Some(rendered) = renderer.render_terminal_code(lang, value, meta, attrs, context)
@@ -1755,16 +1830,14 @@ impl Writer<'_> {
         let no_color = self.opts.context.color_depth == ColorDepth::None;
         let dim_open = if no_color { "" } else { "\x1b[2m" };
         let dim_close = if no_color { "" } else { "\x1b[0m" };
-        let header = lang
-            .filter(|l| !l.is_empty())
-            .map(|l| format!("{dim_open}```{l}{dim_close}\n"))
-            .unwrap_or_default();
-        let indented: String = body
-            .lines()
-            .map(|line| format!("    {line}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        format!("{header}{dim_open}{indented}{dim_close}")
+        let lang = lang.filter(|l| !l.is_empty()).unwrap_or("");
+        // Plain fenced fallback (no syntax highlighter, e.g. `ColorDepth::None`):
+        // an opening fence, the verbatim body, and a matching CLOSING fence. The
+        // body is not extra-indented — the page frame applies the left margin, so
+        // adding spaces here would double it.
+        format!(
+            "{dim_open}```{lang}{dim_close}\n{dim_open}{body}{dim_close}\n{dim_open}```{dim_close}"
+        )
     }
 
     /// Renders a [`NodeKind::Table`] node with a native two-pass renderer.
@@ -2252,6 +2325,25 @@ fn prefix_first_line(prefix: &str, body: &str) -> String {
     out
 }
 
+/// Wraps an opaque RGB triple as a universal terminal [`Style`] color value.
+///
+/// The ANSI fallback is chosen by luminance so a 16-color terminal degrades a
+/// dark band to black and a light band to white.
+fn rgb_style_color(
+    (r, g, b): (u8, u8, u8),
+) -> renderable::layout::TargetValue<renderable::style::PerMode<renderable::style::PaintColor>> {
+    use renderable::color::{BasicColor, Color, RgbColor};
+    use renderable::layout::TargetValue;
+    use renderable::style::PerMode;
+
+    let fallback = if u16::from(r) + u16::from(g) + u16::from(b) < 384 {
+        BasicColor::Black
+    } else {
+        BasicColor::White
+    };
+    TargetValue::universal(PerMode::universal(Color::Rgb(RgbColor::new(r, g, b, fallback))))
+}
+
 /// Applies recognized semantic classes as direct SGR escapes.
 ///
 /// `mark` highlights via reverse video, `dim` dims, and `sup`/`sub` are
@@ -2654,7 +2746,10 @@ fn emit_table(
 #[cfg(test)]
 mod render_tree_tests {
     use super::*;
+    use renderable::color::TerminalCodeContext;
     use renderable::tree::HeadingDepth;
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     use crate::terminal::Terminal;
     use crate::utils::escape_codes::strip_escape_codes;
@@ -2668,10 +2763,178 @@ mod render_tree_tests {
     }
 
     #[test]
+    fn render_tree_code_renderer_receives_page_surface() {
+        struct CaptureRenderer {
+            seen: Rc<RefCell<Option<TerminalCodeContext>>>,
+        }
+
+        impl renderable::tree::CodeRenderer for CaptureRenderer {
+            fn render_terminal_code(
+                &self,
+                _lang: Option<&str>,
+                _value: &str,
+                _meta: Option<&str>,
+                _attrs: &renderable::tree::NodeAttrs,
+                context: TerminalCodeContext,
+            ) -> Option<String> {
+                *self.seen.borrow_mut() = Some(context);
+                Some("captured".to_string())
+            }
+
+            fn render_browser_code(
+                &self,
+                _lang: Option<&str>,
+                _value: &str,
+                _meta: Option<&str>,
+                _attrs: &renderable::tree::NodeAttrs,
+            ) -> Option<renderable::browser::fragment::BrowserFragment<renderable::browser::fragment::Ready>> {
+                None
+            }
+        }
+
+        let seen = Rc::new(RefCell::new(None));
+        let mut opts = opts(RenderStrictness::Warn);
+        opts.context.page_text_color = Some((192, 202, 245));
+        opts.context.page_background_color = Some((26, 27, 38));
+        opts.code_renderer = Some(Rc::new(CaptureRenderer {
+            seen: Rc::clone(&seen),
+        }));
+
+        let node = RenderNode::code(Some("yaml".to_string()), None, "foo: string");
+        let out = render_terminal_node(&node, &opts).expect("render");
+        assert_eq!(out.output, "captured");
+
+        let context = seen.borrow().clone().expect("code renderer context");
+        assert_eq!(context.page_text_color(), Some((192, 202, 245)));
+        assert_eq!(context.page_background_color(), Some((26, 27, 38)));
+    }
+
+    #[test]
+    fn render_tree_code_renderer_receives_color_context_for_both_modes() {
+        struct CaptureRenderer {
+            seen: Rc<RefCell<Vec<TerminalCodeContext>>>,
+        }
+
+        impl renderable::tree::CodeRenderer for CaptureRenderer {
+            fn render_terminal_code(
+                &self,
+                _lang: Option<&str>,
+                _value: &str,
+                _meta: Option<&str>,
+                _attrs: &renderable::tree::NodeAttrs,
+                context: TerminalCodeContext,
+            ) -> Option<String> {
+                self.seen.borrow_mut().push(context);
+                Some("captured".to_string())
+            }
+
+            fn render_browser_code(
+                &self,
+                _lang: Option<&str>,
+                _value: &str,
+                _meta: Option<&str>,
+                _attrs: &renderable::tree::NodeAttrs,
+            ) -> Option<renderable::browser::fragment::BrowserFragment<renderable::browser::fragment::Ready>> {
+                None
+            }
+        }
+
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let node = RenderNode::code(Some("yaml".to_string()), None, "foo: string");
+        for mode in [
+            crate::discovery::detection::ColorMode::Dark,
+            crate::discovery::detection::ColorMode::Light,
+        ] {
+            let mut opts = opts(RenderStrictness::Warn);
+            opts.context.color_depth = crate::discovery::detection::ColorDepth::TrueColor;
+            opts.context.color_mode = mode.clone();
+            opts.context.code_theme = Some("one-half".to_string());
+            opts.context.line_numbers = true;
+            opts.code_renderer = Some(Rc::new(CaptureRenderer {
+                seen: Rc::clone(&seen),
+            }));
+
+            let out = render_terminal_node(&node, &opts).expect("render");
+            assert_eq!(out.output, "captured");
+        }
+
+        let contexts = seen.borrow();
+        assert_eq!(contexts.len(), 2);
+        assert_eq!(
+            contexts[0].color_mode(),
+            renderable::color::ColorMode::Dark
+        );
+        assert_eq!(
+            contexts[1].color_mode(),
+            renderable::color::ColorMode::Light
+        );
+        for context in contexts.iter() {
+            assert_eq!(context.color_depth(), renderable::color::ColorDepth::TrueColor);
+            assert_eq!(context.code_theme_name(), Some("one-half"));
+            assert!(context.line_numbers());
+        }
+    }
+
+    #[test]
     fn render_tree_paragraph_renders_text() {
         let node = RenderNode::paragraph(vec![RenderNode::text("hello world")]);
         let out = render(&node);
         assert!(strip_escape_codes(&out.output).contains("hello world"));
+    }
+
+    #[test]
+    fn render_tree_inline_code_uses_theme_background() {
+        // With a theme-resolved background supplied (as the darkmatter entry
+        // point does), inline code paints that background band — not the
+        // reverse-video block the regression introduced.
+        let node = RenderNode::paragraph(vec![
+            RenderNode::text("use "),
+            RenderNode::inline_code("code"),
+            RenderNode::text(" here"),
+        ]);
+        let mut opts = opts(RenderStrictness::Warn);
+        opts.context.inline_code_color = Some((220, 220, 220));
+        opts.context.inline_code_background = Some((50, 50, 55));
+        let out = render_terminal_node(&node, &opts).expect("render");
+
+        assert!(
+            out.output.contains("\x1b[48;2;50;50;55m"),
+            "inline code should paint the theme background band: {:?}",
+            out.output,
+        );
+        assert!(
+            !out.output.contains("\x1b[7m"),
+            "inline code must not use reverse video: {:?}",
+            out.output,
+        );
+        assert!(
+            strip_escape_codes(&out.output).contains("use code here"),
+            "inline code text should remain visible: {:?}",
+            out.output,
+        );
+    }
+
+    #[test]
+    fn render_tree_inline_code_falls_back_to_dim_without_theme() {
+        // A context built directly (no theme surface) keeps inline code distinct
+        // with a dim run rather than reverse-video.
+        let node = RenderNode::paragraph(vec![
+            RenderNode::text("use "),
+            RenderNode::inline_code("code"),
+            RenderNode::text(" here"),
+        ]);
+        let out = render(&node);
+
+        assert!(
+            out.output.contains("\x1b[2m"),
+            "inline code should fall back to a dim run: {:?}",
+            out.output,
+        );
+        assert!(
+            !out.output.contains("\x1b[7m"),
+            "inline code must not use reverse video: {:?}",
+            out.output,
+        );
     }
 
     #[test]
@@ -3069,7 +3332,18 @@ mod render_tree_tests {
         let out = render(&node);
         let plain = strip_escape_codes(&out.output);
         assert!(plain.contains("let a = 1;"));
-        assert!(plain.contains("rust"));
+        assert!(plain.contains("```rust"));
+        // Both an opening AND a closing fence (regression: the close was dropped).
+        assert_eq!(
+            plain.matches("```").count(),
+            2,
+            "expected open + close fence, got:\n{plain}"
+        );
+        // The body is not extra-indented; the page frame applies any margin.
+        assert!(
+            !plain.contains("    let a = 1;"),
+            "body should not be 4-space indented:\n{plain}"
+        );
     }
 
     #[test]

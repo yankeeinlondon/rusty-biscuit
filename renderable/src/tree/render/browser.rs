@@ -416,7 +416,40 @@ impl Writer<'_> {
                 token, children, ..
             } => self.render_extended(node, token, children),
             NodeKind::Unsupported { label } => self.render_unsupported(node, label),
+            NodeKind::Disclosure { summary, children, .. } => {
+                self.render_disclosure(node, summary, children)
+            }
         }
+    }
+
+    /// Renders a disclosure block as native `\u003cdetails\u003e`/\u003csummary\u003e` HTML.
+    ///
+    /// The summary is rendered as phrasing content inside `\u003csummary\u003e`; the
+    /// disclosed body is rendered as block children inside `\u003cdetails\u003e`. No
+    /// JavaScript is emitted — the native elements provide collapse/expand.
+    fn render_disclosure(
+        &mut self,
+        node: &RenderNode,
+        summary: &[RenderNode],
+        children: &[RenderNode],
+    ) -> Result<BrowserFragment<Ready>, RenderError> {
+        let mut details = BrowserFragment::new().define_as_block_tag(BlockTag::Details, "");
+        for attr in node_attributes(&node.attrs, false) {
+            details = details.add_attribute(attr);
+        }
+
+        let mut summary_fragment =
+            BrowserFragment::new().define_as_block_tag(BlockTag::Summary, "");
+        for child in summary {
+            summary_fragment = summary_fragment.add_component(self.render(child)?);
+        }
+        details = details.add_component(summary_fragment.finalize());
+
+        for child in children {
+            details = details.add_component(self.render(child)?);
+        }
+
+        Ok(details.finalize())
     }
 
     /// Renders a [`NodeKind::Extended`] node.
@@ -1403,7 +1436,34 @@ impl StreamWriter<'_> {
                 token, children, ..
             } => self.write_extended(node, token, children),
             NodeKind::Unsupported { label } => self.write_unsupported(node, label),
+            NodeKind::Disclosure { summary, children, .. } => {
+                self.write_disclosure(node, summary, children)
+            }
         }
+    }
+
+    /// Streams a disclosure block as native `\u003cdetails\u003e`/\u003csummary\u003e` HTML.
+    fn write_disclosure(
+        &mut self,
+        node: &RenderNode,
+        summary: &[RenderNode],
+        children: &[RenderNode],
+    ) -> Result<(), RenderError> {
+        let inline = is_inline_block_tag(&BlockTag::Details);
+        self.open_block(&BlockTag::Details, &node_attributes(&node.attrs, inline));
+
+        self.open_block(&BlockTag::Summary, &[]);
+        for child in summary {
+            self.write(child)?;
+        }
+        self.close_block(&BlockTag::Summary);
+
+        for child in children {
+            self.write(child)?;
+        }
+
+        self.close_block(&BlockTag::Details);
+        Ok(())
     }
 
     /// Streams an open tag, child subtrees, and a close tag for a block

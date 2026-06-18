@@ -40,9 +40,10 @@ default:
     just --list | grep -v 'default'
     echo
 
-# Build the library and CLI
+# Build the library, contract adapter, and CLI
 build *args="":
     @just _build claudine "Claudine Library" {{ args }}
+    @just _build claudine-contract "Claudine Contract Library" {{ args }}
     @just _build claudine-cli "Claudine CLI" {{ args }}
 
 # Install the CLI
@@ -57,6 +58,7 @@ install *args="":
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
     @just _sanity claudine
+    @just _sanity claudine-contract
     @just _sanity claudine-cli
 
 # test just the CLI in Claudine
@@ -67,14 +69,21 @@ test-cli *args="":
 test-library *args="":
     @just _test claudine {{ args }}
     
-# test just the remote-signal daemon 
-test-remote-signal *args: 
-    @just _test remote-signal {{args}}
+# test the rendezvous core, daemon, and test-client crates
+test-rendezvous *args:
+    @just _test rendezvous-core {{args}}
+    @just _test rendezvous-daemon {{args}}
+    @just _test rendezvous-client {{args}}
     
-# Test both library and CLI.
+# Test the library, contract adapter, and CLI.
 test *args="":
     @just _test claudine {{ args }}
+    @just _test claudine-contract {{ args }}
     @just _test claudine-cli {{ args }}
+
+# test just the contract adapter library
+test-contract *args="":
+    @just _test claudine-contract {{ args }}
 
 # Level-2 PTY tests. Gated by `require_level!(Level::L2, pty_available(), ...)`;
 # skip cleanly when /dev/ptmx is unavailable, hard-fail when
@@ -90,27 +99,31 @@ test-l3:
 test-browser:
     @echo "test-browser: not applicable for claudine"
 
-# not applicable: claudine has no real-resource integration tier
-test-real:
-    @echo "test-real: not applicable for claudine"
+# opt-in real_ tier: contract adapter against an installed+authenticated
+# provider. Gated by CLAUDINE_CONTRACT_REAL=1 and the provider binary on PATH.
+test-real *args="":
+    @CLAUDINE_CONTRACT_REAL=1 cargo test -p claudine-contract --test real_provider {{ args }}
 
-# Lint both the library and CLI
+# Lint the library, contract adapter, and CLI
 lint:
     @just _lint claudine
+    @just _lint claudine-contract
     @just _lint claudine-cli
 
 # Criterion benches for the runtime hot paths.
 bench *args="":
     @just _bench claudine {{ args }}
 
-# Per-package LCOV coverage for the library and CLI.
+# Per-package LCOV coverage for the library, contract adapter, and CLI.
 coverage *args="":
     @just _coverage claudine {{ args }}
+    @just _coverage claudine-contract {{ args }}
     @just _coverage claudine-cli {{ args }}
 
-# Doctests for the library and CLI.
+# Doctests for the library, contract adapter, and CLI.
 doctest *args="":
     @just _doctest claudine {{ args }}
+    @just _doctest claudine-contract {{ args }}
     @just _doctest claudine-cli {{ args }}
 
 # not applicable: claudine has no cargo-fuzz targets (Phase 5 scope)
@@ -135,7 +148,7 @@ lint-fix:
 
 # Validate the source code without doing a full build
 check:
-    @cargo check -p claudine -p claudine-cli
+    @cargo check -p claudine -p claudine-contract -p claudine-cli
 
 # Run the latest debug build of the Claudine CLI
 cli *args="":

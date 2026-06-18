@@ -29,15 +29,16 @@
 //! 4. Additive `+`, `-` (`+` doubles as string concatenation when either
 //!    operand is a string)
 //! 5. Comparison `==`, `!=`, `>`, `>=`, `<`, `<=`
-//! 6. Logical AND `&&` (condition mode)
+//! 6. Logical AND `&&`
 //! 7. Logical OR / Fallback `||`
 //! 8. Ternary `? :` (right-associative; all binary operators are
 //!    left-associative)
 //!
 //! ## Parser Modes
 //!
+//! `&&` is logical AND in both modes. Only `||` differs:
 //! - **Interpolation** (`ParseMode::Interpolation`) - `||` is fallback operator
-//! - **Condition** (`ParseMode::Condition`) - `||` is logical OR, `&&` is logical AND
+//! - **Condition** (`ParseMode::Condition`) - `||` is logical OR
 //!
 //! ## Truthiness
 //!
@@ -66,6 +67,7 @@
 pub mod ast;
 pub mod catalog;
 pub mod ctx;
+pub(crate) mod doc_namespace;
 pub mod functions;
 pub mod lexer;
 pub mod parser;
@@ -188,9 +190,20 @@ pub trait EvaluationLookup {
         }
     }
 
-    /// Returns the document-relative resolution context for filesystem
-    /// functions. Defaults to `None` (filesystem functions then error or treat
-    /// paths as CWD-relative).
+    /// Returns the document-relative resolution context that the seven
+    /// read-side functions (`file_exists`, `frontmatter`, `markdown_title`,
+    /// `markdown_body_empty`, `validate_schema`, `absolute`, `relative`)
+    /// resolve their path arguments against.
+    ///
+    /// The default `None` is the **opt-out / test** case: a lookup that has no
+    /// document anchor (or a unit test that does not exercise read-side
+    /// functions). Every production surface that evaluates the grammar against
+    /// a real document — frontmatter interpolation, body interpolation, `$()`
+    /// ternary conditions, `when=` conditions, the public condition API, and
+    /// claudine's loop/hook conditions — overrides this to return
+    /// `Some(ctx)` so read-side functions resolve identically wherever the
+    /// grammar runs. A `None`-returning lookup makes a read-side function
+    /// return the recoverable "requires a document resolution context" error.
     fn resolution_context(&self) -> Option<ResolutionContext> {
         None
     }
@@ -478,6 +491,13 @@ fn evaluate_member(base: &Value, name: &str) -> Value {
     current
 }
 
+/// Error-message prefix for an unrecognized function name.
+///
+/// A stable contract: interpolation treats evaluation errors starting with
+/// this prefix as fatal even in non-fail-fast mode, since an unknown symbol can
+/// never resolve and would otherwise leak its literal `{{ … }}` text downstream.
+pub(crate) const UNKNOWN_FUNCTION_PREFIX: &str = "Unknown function:";
+
 fn evaluate_function<L: EvaluationLookup>(
     name: &str,
     args: &[Expr],
@@ -517,8 +537,19 @@ fn evaluate_function<L: EvaluationLookup>(
             {
                 return result;
             }
-            functions::dispatch(other, &evaluated)
-                .unwrap_or_else(|| Err(format!("Unknown function: {name}")))
+            if let Some(result) = functions::dispatch(other, &evaluated) {
+                return result;
+            }
+            // A known filesystem function reaches here only because the lookup
+            // returned no resolution context — an opt-out or test lookup, not a
+            // real document surface (all of which now supply one). Keep it
+            // recoverable so it doesn't read as an unknown symbol.
+            if functions::is_fs_function(other) {
+                return Err(format!(
+                    "Filesystem function '{name}' requires a document resolution context, which is unavailable here"
+                ));
+            }
+            Err(format!("{UNKNOWN_FUNCTION_PREFIX} {name}"))
         }
     }
 }

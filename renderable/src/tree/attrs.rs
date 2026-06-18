@@ -66,6 +66,24 @@ impl HintNamespace {
     pub const WIDGET_TASK: HintNamespace = HintNamespace("renderable.widget.task");
 }
 
+/// Inline style hints parsed from a `::disclosure` opener.
+///
+/// Carries layout and color overrides declared as `key=value` tokens on the
+/// same line as the opener. Frontmatter `style.disclosure.*` fills missing
+/// values; these hints win where both are present.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct DisclosureStyleHints {
+    /// Optional layout override (width, max-width, alignment).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<crate::layout::Layout>,
+    /// Optional foreground color override.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<crate::style::PaintColor>,
+    /// Optional background color override.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bg_color: Option<crate::style::PaintColor>,
+}
+
 /// How a sequence of children is joined when rendered.
 ///
 /// Normal document [`NodeKind::Root`] rendering treats children as document

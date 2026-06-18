@@ -13,6 +13,7 @@ Darkmatter reserves the Frontmatter property `style` for defining stylistic pref
 1. `ol` - Ordered Lists
 1. `li` - List Item
 1. `block-quote` (canonical) / `block_quote` (snake-case alias, emits `Deprecated`)
+1. `disclosure` - Disclosure blocks
 
 When performing a composition argument the caller can send in a style object to modify the default style of the full page graph (`style` property is passed down to child properties).
 
@@ -27,8 +28,9 @@ When performing a composition argument the caller can send in a style object to 
 | #5       | `color` / `bg-color` application  | **Live**        |
 | #6       | `style.hr.*` HR migration          | **Live**        |
 | #7       | Bespoke knobs (stylesheet, meta, code-theme, hyperlinks, local-style) | **Live** |
+| #8       | `style.disclosure.*` disclosure blocks | **Live**    |
 
-The library exposes `ACTIVE_STYLE_WIRING_SUB_SPEC` (currently `7`) so `KnownButInactive` warnings only fire for keys whose wiring sub-spec has not yet landed. After sub-spec #7, every valid v1 schema key is either visually honored or rejected with a documented `StyleApplyError`. No valid v1 key emits `KnownButInactive`.
+The library exposes `ACTIVE_STYLE_WIRING_SUB_SPEC` (currently `8`) so `KnownButInactive` warnings only fire for keys whose wiring sub-spec has not yet landed. After sub-spec #8, every valid v1 schema key is either visually honored or rejected with a documented `StyleApplyError`. No valid v1 key emits `KnownButInactive`.
 
 ## Schema & Parser Architecture (Sub-Spec #1)
 
@@ -499,7 +501,7 @@ The `color` and `bg-color` knobs on `style.table`, `style.images`, and `style.bl
 | `style.ol.*` | `PageComponent::Ol` |
 | `style.li.*` | `PageComponent::Li` |
 
-`PageComponent::ALL` includes all concrete variants (`Images`, `BlockQuotes`, `Tables`, `CodeBlocks`, `Ul`, `Ol`, `Li`, `Hyperlinks`, `Hr`).
+`PageComponent::ALL` includes all concrete variants (`Images`, `BlockQuotes`, `Tables`, `CodeBlocks`, `Ul`, `Ol`, `Li`, `Hyperlinks`, `Hr`, `Disclosure`).
 
 ### Tag-to-Component Mapping
 
@@ -793,10 +795,11 @@ The integration order in `darkmatter-cli` extends sub-spec #4's pipeline:
 3. `darkmatter::style::apply_page_style(page, &style, page_overrides)`
 4. `darkmatter::style::apply_component_style(page, &style, component_overrides)` — table/image/block-quote frontmatter
 5. `darkmatter::style::apply_list_style(page, &style, list_overrides)` — ul/ol/li frontmatter
-6. `darkmatter::style::apply_color_style(page, &style)` — color and bg-color for all wired components
-7. `darkmatter::style::apply_hr_style(page, &style, hr_overrides)` — HR frontmatter
-8. `darkmatter::style::apply_bespoke_style(page, &style, bespoke_overrides, source_path)` — stylesheet, meta, code-theme, hyperlink/image local-style
-9. `render / render_to_browser`
+6. `darkmatter::style::apply_disclosure_style(page, &style, disclosure_overrides)` — disclosure frontmatter
+7. `darkmatter::style::apply_color_style(page, &style)` — color and bg-color for all wired components
+8. `darkmatter::style::apply_hr_style(page, &style, hr_overrides)` — HR frontmatter
+9. `darkmatter::style::apply_bespoke_style(page, &style, bespoke_overrides, source_path)` — stylesheet, meta, code-theme, hyperlink/image local-style
+10. `render / render_to_browser`
 
 Color has no CLI override in this sub-spec; frontmatter is the only color source.
 
@@ -938,10 +941,11 @@ The integration order in `darkmatter-cli` extends sub-spec #5's pipeline:
 3. `darkmatter::style::apply_page_style(page, &style, page_overrides)`
 4. `darkmatter::style::apply_component_style(page, &style, component_overrides)` — table/image/block-quote frontmatter
 5. `darkmatter::style::apply_list_style(page, &style, list_overrides)` — ul/ol/li frontmatter
-6. `darkmatter::style::apply_color_style(page, &style)` — color and bg-color for all wired components
-7. `darkmatter::style::apply_hr_style(page, &style, hr_overrides)` — HR frontmatter
-8. `darkmatter::style::apply_bespoke_style(page, &style, bespoke_overrides, source_path)` — stylesheet, meta, code-theme, hyperlink/image local-style
-9. `render / render_to_browser`
+6. `darkmatter::style::apply_disclosure_style(page, &style, disclosure_overrides)` — disclosure frontmatter
+7. `darkmatter::style::apply_color_style(page, &style)` — color and bg-color for all wired components
+8. `darkmatter::style::apply_hr_style(page, &style, hr_overrides)` — HR frontmatter
+9. `darkmatter::style::apply_bespoke_style(page, &style, bespoke_overrides, source_path)` — stylesheet, meta, code-theme, hyperlink/image local-style
+10. `render / render_to_browser`
 
 ### `--strict-style` and HR
 
@@ -1189,10 +1193,11 @@ The full integration order in `darkmatter-cli` is:
 3. `darkmatter::style::apply_page_style(page, &style, page_overrides)`
 4. `darkmatter::style::apply_component_style(page, &style, component_overrides)` — table/image/block-quote frontmatter
 5. `darkmatter::style::apply_list_style(page, &style, list_overrides)` — ul/ol/li frontmatter
-6. `darkmatter::style::apply_color_style(page, &style)` — color and bg-color for all wired components
-7. `darkmatter::style::apply_hr_style(page, &style, hr_overrides)` — HR frontmatter
-8. `darkmatter::style::apply_bespoke_style(page, &style, bespoke_overrides, source_path)` — stylesheet, meta, code-theme, hyperlink/image local-style
-9. `render / render_to_browser`
+6. `darkmatter::style::apply_disclosure_style(page, &style, disclosure_overrides)` — disclosure frontmatter
+7. `darkmatter::style::apply_color_style(page, &style)` — color and bg-color for all wired components
+8. `darkmatter::style::apply_hr_style(page, &style, hr_overrides)` — HR frontmatter
+9. `darkmatter::style::apply_bespoke_style(page, &style, bespoke_overrides, source_path)` — stylesheet, meta, code-theme, hyperlink/image local-style
+10. `render / render_to_browser`
 
 ### Errors
 
@@ -1234,6 +1239,70 @@ style:
 ```
 
 In this example, all hyperlinks render with cyan-400 text on a slate-900 background, except local links (anchors, relative file paths) which use blue-300 text. Local images receive green-400 fallback alt text at 80% width. The page includes an inlined CSS file, meta tags, and the Dracula code theme.
+
+## Disclosure Style (Sub-Spec #8)
+
+`style.disclosure.*` controls the layout and color of render-time [`::disclosure` blocks](./disclosure.md). The bucket uses `CommonStyle`, so it supports the same five knobs as `style.table.*` and `style.block-quote.*`.
+
+### Supported Keys
+
+| Key | Value Shape | Notes |
+|---|---|---|
+| `width` | `Nch` or `N%` | Fixed width; mutually exclusive with `max-width` |
+| `max-width` | `Nch` or `N%` | Upper bound; mutually exclusive with `width` |
+| `alignment` | `left` \| `center` \| `right` | |
+| `color` | Tailwind, hex, or web named | Foreground color for the disclosure summary |
+| `bg-color` | Tailwind, hex, or web named | Background color for the disclosure summary |
+
+Snake-case aliases (`max_width`, `bg_color`) parse but emit a `Deprecated` warning; `--strict-style` rejects them.
+
+### PageComponent
+
+`PageComponent::Disclosure` stores the resolved `ComponentPolicy` on `DarkmatterPage`. The block-extension processor emits `NodeKind::Disclosure` during the render-tree fold; the build context applies the `PageComponent::Disclosure` policy to each disclosure node before the target fold runs.
+
+### Inline Opener Overrides
+
+Individual disclosure blocks can override the frontmatter bucket with `key=value` tokens on the opener line:
+
+```md
+::disclosure max-width=60ch color=red-500 License Agreement
+::details
+Keep your hands off.
+::end-disclosure
+```
+
+Recognized keys are the same five style knobs. Tokens that are not recognized style pairs become part of the summary text. See [Disclosure Blocks](./disclosure.md) for the full syntax.
+
+### Precedence
+
+Disclosure style resolves from most specific to least specific:
+
+1. Inline `key=value` tokens on the `::disclosure` opener.
+2. `style.disclosure.*` frontmatter.
+3. Page-level `style.page.alignment` broadcast and any future disclosure-specific CLI flags.
+4. Built-in default.
+
+### Integration Order
+
+`apply_disclosure_style` runs immediately after `apply_component_style` in the darkmatter-cli pipeline:
+
+1. `DarkmatterPage::new(&terminal)`
+2. `apply_cli_layout_flags(page, &cli)`
+3. `apply_page_style(page, &style, page_overrides)`
+4. `apply_component_style(page, &style, component_overrides)` — table/image/block-quote frontmatter
+5. `apply_list_style(page, &style, list_overrides)` — ul/ol/li frontmatter
+6. `apply_disclosure_style(page, &style, disclosure_overrides)` — disclosure frontmatter
+7. `apply_color_style(page, &style)` — color and bg-color for all wired components
+8. `apply_hr_style(page, &style, hr_overrides)` — HR frontmatter
+9. `apply_bespoke_style(page, &style, bespoke_overrides, source_path)` — stylesheet, meta, code-theme, hyperlink/image local-style
+10. `render / render_to_browser`
+
+### Errors
+
+`apply_disclosure_style` returns the same errors as other component buckets:
+
+- `ComponentWidthConflict { bucket: "disclosure" }` — `style.disclosure.width` and `style.disclosure.max-width` set simultaneously.
+- `ComponentInvalidCssLength { bucket: "disclosure", field }` — `width` or `max-width` is a `Length::Css(_)` value.
 
 ## Style Mutation
 
@@ -1303,7 +1372,7 @@ The `page.code` theme (`--code-theme`, `code_theme`) is a mode-agnostic
 deliberately resolve against the *inverted* color mode so the panel contrasts
 against the page (light code on a dark page, and vice versa); prose, tables, and
 the page background follow the real mode. This holds for **both terminal and
-HTML** output, so the targets agree. Single-variant themes
-(`dracula`/`nord`/`monokai`/`vs-dark`) ignore the mode by design.
+HTML** output, so the targets agree. Every `ThemePair` is a (light theme, dark
+theme) couple, so this inversion applies to all of them.
 
 See [Code Highlighting](./code-highlighting.md) for the full model.

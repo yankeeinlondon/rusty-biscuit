@@ -24,9 +24,11 @@ use biscuit_terminal::components::status_block::StatusBlock;
 use biscuit_terminal::utils::color::{Color, Tailwind};
 use biscuit_terminal::utils::layout::{Length, TargetValue};
 use renderable::markdown::MarkdownRenderable;
-use renderable::tree::{NodeKind, TreeRenderable, ValidationMode, validate};
+use renderable::tree::{NodeKind, RenderNode, TreeRenderable, ValidationMode, validate};
 
+use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
 use parity_helpers::{PARITY_WIDTHS, assert_contains_tokens, strip_ansi, test_terminal};
+use renderable::tree::RenderStrictness;
 
 // ---------------------------------------------------------------------------
 // Structural snapshot
@@ -445,4 +447,594 @@ fn renders_at_all_parity_widths() {
         let rendered = strip_ansi(&block.render(&term));
         assert_contains_tokens(&rendered, &["Header", "Body", "Hint"]);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3: Component-level body/hint layout tests
+// ---------------------------------------------------------------------------
+
+/// Helper: extract the BlockQuote children from a StatusBlock render tree.
+/// Panics if the tree root has no BlockQuote child.
+fn body_block_quote_children(block: &StatusBlock) -> Vec<RenderNode> {
+    let node = block.render_tree();
+    let root_children = match &node.kind {
+        NodeKind::Root { children } => children,
+        other => panic!("expected Root, got {other:?}"),
+    };
+    for child in root_children {
+        if let NodeKind::BlockQuote { children } = &child.kind {
+            return children.clone();
+        }
+    }
+    panic!("no BlockQuote found in tree root");
+}
+
+#[test]
+fn every_status_state_renders_body_with_leading_blank_and_body_paragraph() {
+    let states = [
+        StatusState::NotStarted,
+        StatusState::Active,
+        StatusState::Success,
+        StatusState::Error,
+        StatusState::Warning,
+        StatusState::Info,
+        StatusState::ToolUse,
+        StatusState::Subagent,
+    ];
+    for state in &states {
+        let block = StatusBlock::new(state.clone()).body("Body text");
+        let bq = body_block_quote_children(&block);
+        assert_eq!(
+            bq.len(),
+            2,
+            "state {:?}: body-only block quote should have exactly two children (leading blank + body paragraph)",
+            state
+        );
+        assert!(
+            matches!(&bq[0].kind, NodeKind::Paragraph { children } if children.is_empty()
+                || children.iter().all(|c| matches!(&c.kind, NodeKind::Text { value } if value.is_empty()))),
+            "state {:?}: first child must be a structural blank paragraph",
+            state
+        );
+        match &bq[1].kind {
+            NodeKind::Paragraph { children } => {
+                assert!(
+                    !children.is_empty(),
+                    "state {:?}: body paragraph must not be empty",
+                    state
+                );
+            }
+            other => panic!("state {:?}: expected Paragraph, got {other:?}", state),
+        }
+    }
+}
+
+#[test]
+fn failure_renders_identically_to_error() {
+    #[allow(deprecated)]
+    let failure = StatusBlock::new(StatusState::Failure)
+        .header("Header")
+        .body("Body")
+        .hint("Hint");
+    let error = StatusBlock::new(StatusState::Error)
+        .header("Header")
+        .body("Body")
+        .hint("Hint");
+
+    let failure_tree = failure.render_tree();
+    let error_tree = error.render_tree();
+    assert_eq!(
+        serde_json::to_string(&failure_tree).unwrap(),
+        serde_json::to_string(&error_tree).unwrap(),
+        "Failure and Error must produce identical render trees"
+    );
+
+    let failure_json = serde_json::to_string(&failure_tree).unwrap();
+    assert!(
+        failure_tree.attrs.classes.iter().any(|c| c == "status-block--error"),
+        "Failure must map to error severity class: {failure_json}"
+    );
+
+    let term = test_terminal(80);
+    let failure_rendered = strip_ansi(&failure.render(&term));
+    let error_rendered = strip_ansi(&error.render(&term));
+    assert_eq!(failure_rendered, error_rendered);
+}
+
+#[test]
+fn body_plus_hint_renders_hint_inside_block_quote_for_terminal() {
+    let term = test_terminal(80);
+    let block = StatusBlock::new(StatusState::Error)
+        .body("Body text")
+        .hint("Fix this hint");
+    let rendered = strip_ansi(&block.render(&term));
+    let hint_lines: Vec<&str> = rendered
+        .lines()
+        .filter(|l| l.contains("Fix this hint"))
+        .collect();
+    assert!(
+        !hint_lines.is_empty(),
+        "hint must appear in terminal output: {rendered:?}"
+    );
+    for hint_line in &hint_lines {
+        assert!(
+            hint_line.contains('┃'),
+            "hint line must carry the block quote border: {:?}",
+            hint_line
+        );
+    }
+}
+
+#[test]
+fn body_plus_hint_carries_italic_sgr_on_terminal() {
+    let term = test_terminal(80);
+    let block = StatusBlock::new(StatusState::Error)
+        .body("Body text")
+        .hint("Fix this hint");
+    let rendered = block.render(&term);
+    let italic_sgr = "\x1b[3m";
+    assert!(
+        rendered.contains(italic_sgr),
+        "hint must carry italic SGR (ESC[3m) in raw terminal output: {rendered:?}"
+    );
+    let hint_lines_raw: Vec<&str> = rendered
+        .lines()
+        .filter(|l| l.contains("Fix this hint"))
+        .collect();
+    assert!(
+        !hint_lines_raw.is_empty(),
+        "hint text must appear in raw output: {rendered:?}"
+    );
+    for line in &hint_lines_raw {
+        assert!(
+            line.contains(italic_sgr),
+            "hint line must contain italic SGR: {:?}",
+            line
+        );
+    }
+}
+
+#[test]
+fn body_plus_hint_renders_hint_inside_block_quote_for_markdown() {
+    let block = StatusBlock::new(StatusState::Error)
+        .body("Body text")
+        .hint("Fix this hint");
+    let md = block.render_markdown();
+    assert!(
+        md.contains("> Body text"),
+        "body must be in block quote: {md:?}"
+    );
+    let hint_lines: Vec<&str> = md
+        .lines()
+        .filter(|l| l.contains("Fix this hint"))
+        .collect();
+    assert!(
+        !hint_lines.is_empty(),
+        "hint must appear in markdown: {md:?}"
+    );
+    for hint_line in &hint_lines {
+        assert!(
+            hint_line.starts_with('>'),
+            "hint line must be inside block quote: {:?}",
+            hint_line
+        );
+        assert!(
+            hint_line.contains("_Fix this hint_"),
+            "hint must be italicized with Markdown emphasis: {:?}",
+            hint_line
+        );
+    }
+}
+
+#[test]
+fn body_plus_hint_renders_hint_inside_block_quote_for_browser() {
+    let block = StatusBlock::new(StatusState::Error)
+        .body("Body text")
+        .hint("Fix this hint");
+    let html = BrowserRenderable::render_html_fragment(&block).render();
+    let bq_open = html.find("<blockquote").expect("blockquote opening tag");
+    let hint_pos = html
+        .find("status-block__hint")
+        .expect("hint class in HTML");
+    let bq_close = html
+        .find("</blockquote>")
+        .expect("blockquote closing tag");
+    assert!(
+        bq_open < hint_pos && hint_pos < bq_close,
+        "hint class must be inside blockquote: {html:?}"
+    );
+}
+
+#[test]
+fn blank_hint_omits_separator_and_hint() {
+    let block = StatusBlock::new(StatusState::Error)
+        .body("Body text")
+        .hint("   ");
+    let bq = body_block_quote_children(&block);
+    assert_eq!(
+        bq.len(),
+        2,
+        "blank hint should produce exactly 2 children (leading blank + body paragraph), got {}",
+        bq.len()
+    );
+    assert!(
+        !bq.iter()
+            .any(|c| c.attrs.classes.iter().any(|cl| cl == "status-block__hint")),
+        "blank hint must not produce a hint node"
+    );
+}
+
+#[test]
+fn hint_only_remains_outside_block_quote() {
+    let block = StatusBlock::new(StatusState::Info)
+        .header("Header")
+        .hint("Hint only");
+    let node = block.render_tree();
+    let root_children = match &node.kind {
+        NodeKind::Root { children } => children,
+        other => panic!("expected Root, got {other:?}"),
+    };
+    assert!(
+        !root_children
+            .iter()
+            .any(|c| matches!(c.kind, NodeKind::BlockQuote { .. })),
+        "hint-only block must not contain a BlockQuote"
+    );
+    let hint_node = root_children
+        .iter()
+        .find(|c| c.attrs.classes.iter().any(|cl| cl == "status-block__hint"))
+        .expect("hint paragraph");
+    assert!(
+        matches!(hint_node.kind, NodeKind::Paragraph { .. }),
+        "hint must be a standalone paragraph"
+    );
+}
+
+#[test]
+fn multiple_body_items_keep_blank_line_separation_in_block_quote() {
+    let block = StatusBlock::new(StatusState::Info)
+        .body(vec![Prose::new("first item"), Prose::new("second item")]);
+    let bq = body_block_quote_children(&block);
+    assert_eq!(bq.len(), 2, "expected leading blank + single body paragraph");
+    let body_text = match &bq[1].kind {
+        NodeKind::Paragraph { children } => match &children.first().unwrap().kind {
+            NodeKind::Text { value } => value.clone(),
+            other => panic!("expected Text node, got {other:?}"),
+        },
+        other => panic!("expected Paragraph, got {other:?}"),
+    };
+    assert!(
+        body_text.contains("first item\n\nsecond item"),
+        "body items must be separated by blank line: {body_text:?}"
+    );
+}
+
+/// The render-tree contract requires the body-plus-hint body block quote to
+/// contain exactly `blank, body, blank, hint` — the hint separator must be a
+/// structural `Paragraph` node, not a renderer-side spacing rule, so Browser
+/// output preserves the blank line even when the Browser renderer does not
+/// insert spacing between adjacent paragraphs.
+#[test]
+fn body_plus_hint_block_quote_has_structural_blank_separator_before_hint() {
+    let block = StatusBlock::new(StatusState::Error)
+        .body("Body text")
+        .hint("Hint text");
+    let bq = body_block_quote_children(&block);
+    assert_eq!(
+        bq.len(),
+        4,
+        "body-plus-hint block quote must have exactly four children (blank, body, blank, hint)"
+    );
+
+    let is_blank_paragraph = |node: &RenderNode| matches!(&node.kind,
+        NodeKind::Paragraph { children }
+            if children.is_empty() || children.iter()
+                .all(|c| matches!(&c.kind, NodeKind::Text { value } if value.is_empty()))
+    );
+    assert!(
+        is_blank_paragraph(&bq[0]),
+        "first child must be the leading blank paragraph"
+    );
+    match &bq[1].kind {
+        NodeKind::Paragraph { children } => assert!(
+            !children.is_empty(),
+            "second child must be the non-empty body paragraph"
+        ),
+        other => panic!("second child must be a Paragraph, got {other:?}"),
+    }
+    assert!(
+        is_blank_paragraph(&bq[2]),
+        "third child must be the structural blank separator paragraph"
+    );
+    let hint_node = &bq[3];
+    assert!(
+        hint_node.attrs.classes.iter().any(|c| c == "status-block__hint"),
+        "fourth child must carry the status-block__hint class"
+    );
+    if let NodeKind::Paragraph { children } = &hint_node.kind {
+        assert!(
+            children.iter().any(|c| matches!(c.kind, NodeKind::Emphasis { .. })),
+            "hint paragraph must contain an Emphasis child"
+        );
+    } else {
+        panic!("hint node must be a Paragraph");
+    }
+
+    let html = BrowserRenderable::render_html_fragment(&block).render();
+    let p_tags: Vec<_> = html.match_indices("<p").collect();
+    let p_closes: Vec<_> = html.match_indices("</p>").collect();
+    let em_tags: Vec<_> = html.match_indices("<em>").collect();
+    let em_closes: Vec<_> = html.match_indices("</em>").collect();
+    let bq_open = html.find("<blockquote").expect("blockquote opening");
+    let bq_close = html.find("</blockquote>").expect("blockquote closing");
+    let hint_pos = html
+        .find("status-block__hint")
+        .expect("hint class in HTML");
+    assert!(
+        bq_open < hint_pos && hint_pos < bq_close,
+        "hint class must live inside the blockquote: {html:?}"
+    );
+    let p_in_bq: Vec<_> = p_tags
+        .iter()
+        .copied()
+        .filter(|(idx, _)| *idx > bq_open && *idx < bq_close)
+        .collect();
+    let p_closes_in_bq: Vec<_> = p_closes
+        .iter()
+        .copied()
+        .filter(|(idx, _)| *idx > bq_open && *idx < bq_close)
+        .collect();
+    assert_eq!(
+        p_in_bq.len(),
+        4,
+        "block quote must contain four <p> elements (blank, body, blank, hint): {html:?}"
+    );
+    assert_eq!(
+        p_closes_in_bq.len(),
+        4,
+        "block quote must close four <p> elements: {html:?}"
+    );
+    assert_eq!(
+        em_tags.len(),
+        1,
+        "block quote must contain exactly one <em> element (the hint): {html:?}"
+    );
+    assert_eq!(em_closes.len(), 1, "exactly one </em> expected: {html:?}");
+}
+
+#[test]
+fn default_border_terminal_uses_tree_projection() {
+    let term = test_terminal(80);
+    let block = StatusBlock::new(StatusState::Error)
+        .body("Body text")
+        .hint("Hint text");
+    let via_render = strip_ansi(&block.render(&term));
+    let via_tree = {
+        let node = block.render_tree();
+        let opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        strip_ansi(&render_terminal_node(&node, &opts).unwrap().output)
+    };
+    assert_eq!(via_render, via_tree);
+}
+
+#[test]
+fn custom_border_mirrors_body_hint_layout() {
+    let term = test_terminal(80);
+    let block = StatusBlock::new(StatusState::Error)
+        .body("Body text")
+        .hint("Hint text")
+        .border("!! ");
+    let rendered = strip_ansi(&block.render(&term));
+    assert!(
+        rendered.contains("!! Body text"),
+        "custom border must prefix body: {rendered:?}"
+    );
+    let hint_lines: Vec<&str> = rendered
+        .lines()
+        .filter(|l| l.contains("Hint text"))
+        .collect();
+    assert!(
+        !hint_lines.is_empty(),
+        "hint must appear in output: {rendered:?}"
+    );
+    for hint_line in &hint_lines {
+        assert!(
+            hint_line.contains("!! "),
+            "hint must be inside block quote with custom prefix: {:?}",
+            hint_line
+        );
+    }
+}
+
+#[test]
+fn custom_border_hint_carries_italic_sgr_on_terminal() {
+    let term = test_terminal(80);
+    let block = StatusBlock::new(StatusState::Error)
+        .body("Body text")
+        .hint("Fix this hint")
+        .border("!! ");
+    let rendered = block.render(&term);
+    let italic_sgr = "\x1b[3m";
+    assert!(
+        rendered.contains(italic_sgr),
+        "bespoke-path hint must carry italic SGR (ESC[3m) in raw terminal output: {rendered:?}"
+    );
+    let hint_lines_raw: Vec<&str> = rendered
+        .lines()
+        .filter(|l| l.contains("Fix this hint"))
+        .collect();
+    assert!(
+        !hint_lines_raw.is_empty(),
+        "hint text must appear in raw bespoke output: {rendered:?}"
+    );
+    for line in &hint_lines_raw {
+        assert!(
+            line.contains(italic_sgr),
+            "bespoke hint line must contain italic SGR: {:?}",
+            line
+        );
+    }
+}
+
+#[test]
+fn markdown_does_not_leak_custom_border_prefix_with_body_and_hint() {
+    let block = StatusBlock::new(StatusState::Error)
+        .body("Body text")
+        .hint("Hint text")
+        .border("!! ");
+    let md = block.render_markdown();
+    assert!(
+        !md.contains("!! "),
+        "custom border must not leak into Markdown: {md:?}"
+    );
+    assert!(md.contains("> Body text"));
+    assert!(
+        md.lines().any(|l| l.contains("Hint text") && l.starts_with('>')),
+        "hint must be inside block quote in Markdown: {md:?}"
+    );
+}
+
+#[test]
+fn browser_preserves_hint_class_and_italic_inside_body_block_quote() {
+    let block = StatusBlock::new(StatusState::Error)
+        .body("Body text")
+        .hint("Fix this hint");
+    let html = BrowserRenderable::render_html_fragment(&block).render();
+    assert!(html.contains("status-block__hint"));
+    let bq_open = html.find("<blockquote").expect("blockquote");
+    let hint_pos = html
+        .find("status-block__hint")
+        .expect("hint class");
+    let bq_close = html
+        .find("</blockquote>")
+        .expect("blockquote close");
+    assert!(
+        bq_open < hint_pos && hint_pos < bq_close,
+        "hint class must be inside blockquote: {html:?}"
+    );
+    assert!(
+        html.contains("<em>Fix this hint</em>"),
+        "hint must be italicized via <em> in HTML: {html:?}"
+    );
+    let bq = body_block_quote_children(&block);
+    let hint_node = bq
+        .iter()
+        .find(|c| c.attrs.classes.iter().any(|cl| cl == "status-block__hint"))
+        .expect("hint node in block quote");
+    if let NodeKind::Paragraph { children } = &hint_node.kind {
+        assert!(
+            children.iter().any(|c| matches!(c.kind, NodeKind::Emphasis { .. })),
+            "hint paragraph must contain an Emphasis child: {hint_node:#?}"
+        );
+    } else {
+        panic!("hint node must be a Paragraph: {hint_node:#?}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3b: Rendered-output row-count assertions
+// ---------------------------------------------------------------------------
+
+#[test]
+fn terminal_body_plus_hint_has_leading_blank_and_one_separator_row() {
+    let term = test_terminal(80);
+    let block = StatusBlock::new(StatusState::Error)
+        .body("Body text")
+        .hint("Hint text");
+    let rendered = strip_ansi(&block.render(&term));
+    let quoted_lines: Vec<&str> = rendered.lines().filter(|l| l.contains('┃')).collect();
+    let blank_idx = quoted_lines
+        .iter()
+        .position(|l| !l.contains("Body text") && !l.contains("Hint text"))
+        .expect("leading blank row");
+    let body_idx = quoted_lines
+        .iter()
+        .position(|l| l.contains("Body text"))
+        .expect("body line");
+    let hint_idx = quoted_lines
+        .iter()
+        .position(|l| l.contains("Hint text"))
+        .expect("hint line");
+    assert_eq!(
+        body_idx - blank_idx,
+        1,
+        "body must immediately follow leading blank:\n{rendered}"
+    );
+    assert_eq!(
+        hint_idx - body_idx,
+        2,
+        "exactly one blank quoted row between body and hint:\n{rendered}"
+    );
+}
+
+#[test]
+fn terminal_body_only_has_one_leading_blank_row_before_body() {
+    let term = test_terminal(80);
+    let block = StatusBlock::new(StatusState::Error).body("Body text");
+    let rendered = strip_ansi(&block.render(&term));
+    let quoted_lines: Vec<&str> = rendered.lines().filter(|l| l.contains('┃')).collect();
+    assert_eq!(
+        quoted_lines.len(),
+        2,
+        "body-only block quote must have exactly two quoted rows (blank + body):\n{rendered}"
+    );
+    assert!(
+        !quoted_lines[0].contains("Body text"),
+        "first quoted row must be the leading blank: {rendered}"
+    );
+    assert!(
+        quoted_lines[1].contains("Body text"),
+        "second quoted row must be the body: {rendered}"
+    );
+}
+
+#[test]
+fn markdown_body_plus_hint_has_leading_blank_and_one_separator_row() {
+    let block = StatusBlock::new(StatusState::Error)
+        .body("Body text")
+        .hint("Hint text");
+    let md = block.render_markdown();
+    let quoted_lines: Vec<&str> = md.lines().filter(|l| l.starts_with('>')).collect();
+    let blank_idx = quoted_lines
+        .iter()
+        .position(|l| !l.contains("Body text") && !l.contains("Hint text"))
+        .expect("leading blank row");
+    let body_idx = quoted_lines
+        .iter()
+        .position(|l| l.contains("Body text"))
+        .expect("body line");
+    let hint_idx = quoted_lines
+        .iter()
+        .position(|l| l.contains("Hint text"))
+        .expect("hint line");
+    assert_eq!(
+        body_idx - blank_idx,
+        1,
+        "body must immediately follow leading blank in Markdown:\n{md}"
+    );
+    assert_eq!(
+        hint_idx - body_idx,
+        2,
+        "exactly one blank quoted row between body and hint in Markdown:\n{md}"
+    );
+}
+
+#[test]
+fn markdown_body_only_has_leading_blank_and_body_rows() {
+    let block = StatusBlock::new(StatusState::Error).body("Body text");
+    let md = block.render_markdown();
+    let quoted_lines: Vec<&str> = md.lines().filter(|l| l.starts_with('>')).collect();
+    assert_eq!(
+        quoted_lines.len(),
+        2,
+        "body-only block quote must have exactly two quoted rows (blank + body) in Markdown:\n{md}"
+    );
+    assert!(
+        quoted_lines[0].trim().is_empty() || quoted_lines[0] == ">",
+        "first quoted row must be the leading blank: {md}"
+    );
+    assert!(
+        quoted_lines[1].contains("Body text"),
+        "second quoted row must be the body: {md}"
+    );
 }

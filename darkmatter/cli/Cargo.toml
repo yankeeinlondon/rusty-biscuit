@@ -48,3 +48,4 @@ biscuit-test-harness = { path = "../../biscuit-test-harness" }
 serial_test = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
 tracing-test = "0.2"
+syntect = "5.2"

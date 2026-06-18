@@ -52,6 +52,10 @@
 //! right boundary, blank-line rhythm) — properties an in-process ANSI string
 //! cannot verify. See `run_page_in_pane` and the `level2_page_*` tests.
 
+// Whitebox: these tests wire the deprecated `TerminalCodeRenderer` adapter
+// directly to exercise the render-tree code path.
+#![allow(deprecated)]
+
 use biscuit_terminal::discovery::detection::ImageSupport;
 use biscuit_terminal::render_tree::{
     TerminalRenderContext, TerminalRenderOptions, render_terminal_document,
@@ -195,7 +199,8 @@ fn render_tree_terminal_spanned_vector_to_tempfile(
 fn fold_spanned_doc(body: &str, name: &str) -> renderable::tree::Document {
     let source = SourceDescriptor::Virtual { name: name.into() };
     let md: Markdown = body.into();
-    let (doc, diags) = fold_markdown_spanned_with_frontmatter(source, &md);
+    let (doc, diags) = fold_markdown_spanned_with_frontmatter(source, &md)
+        .expect("span-aware fold must succeed");
     assert!(
         diags.is_empty(),
         "Level 2 span-aware fixture must fold without diagnostics: {diags:?}"

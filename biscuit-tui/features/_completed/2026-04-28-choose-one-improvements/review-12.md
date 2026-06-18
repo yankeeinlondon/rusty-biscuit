@@ -11,7 +11,7 @@ model: ""
 The implementation is substantially complete. I verified the focused suite:
 
 ```text
-cargo test -p tui-chrome -p tui-chrome-cli
+cargo test -p biscuit-tui -p biscuit-tui-cli
 ```
 
 It passed on this host, including the shell-completion PTY tests and the real-terminal rendering tests. The prior review items around keyboard protocol flags, completion PTY coverage, duplicate hotkey semantics, file/frontmatter sources, padding, active colours, and real-terminal badge checks appear addressed.

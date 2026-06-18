@@ -100,9 +100,13 @@ struct RemoteFetchInner {
     policy: FetchPolicy,
     stats: Mutex<RemoteFetchStats>,
     /// Shared redirect-disabled HTTP client reused for every fetch in a compose
-    /// run. `None` means the client build failed; every fetch is then reported
-    /// as a failure rather than falling back to a redirect-following client.
-    client: Option<PolicyClient>,
+    /// run. Built lazily on first fetch so construction happens *inside* the
+    /// shared runtime (reqwest binds its IO/timer driver to the ambient runtime
+    /// at build time; a client built on a non-runtime thread — e.g. the sync CLI
+    /// `main` — fails every send with "error sending request"). `None` (after
+    /// init) means the client build failed; every fetch is then reported as a
+    /// failure rather than falling back to a redirect-following client.
+    client: OnceLock<Option<PolicyClient>>,
     /// Caps concurrent in-flight network requests. Acquired inside each
     /// spawned fetch task, so the slot map may hold more entries than there
     /// are permits without all requests being issued at once.
@@ -142,6 +146,19 @@ impl RemoteFetchInner {
                     .build()
                     .ok()
             })
+            .as_ref()
+    }
+
+    /// Returns the shared HTTP client, building it on first use.
+    ///
+    /// Must be called from a thread with an active Tokio runtime (every fetch
+    /// task is, since it runs on [`runtime`](Self::runtime)). Building here
+    /// rather than in [`build`](RemoteFetchRuntime::build) guarantees reqwest
+    /// binds to the runtime that will issue the request. Returns `None` only if
+    /// the client build failed.
+    fn client(&self) -> Option<&PolicyClient> {
+        self.client
+            .get_or_init(|| PolicyClient::new().ok())
             .as_ref()
     }
 }
@@ -226,7 +243,7 @@ impl RemoteFetchRuntime {
                 slots: DashMap::new(),
                 policy,
                 stats: Mutex::new(RemoteFetchStats::default()),
-                client: PolicyClient::new().ok(),
+                client: OnceLock::new(),
                 // A zero cap would deadlock every fetch; clamp to at least one.
                 semaphore: Arc::new(tokio::sync::Semaphore::new(concurrency.max(1))),
                 runtime: OnceLock::new(),
@@ -311,7 +328,7 @@ impl RemoteFetchRuntime {
                     // reflects requests actually issued, bounded by the cap.
                     let current = task_inner.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
                     task_inner.peak_in_flight.fetch_max(current, Ordering::SeqCst);
-                    let result = match task_inner.client.as_ref() {
+                    let result = match task_inner.client() {
                         Some(client) => {
                             fetch_with_cache(
                                 task_inner.store.as_deref(),

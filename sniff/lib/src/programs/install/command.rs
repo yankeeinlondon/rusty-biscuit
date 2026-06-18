@@ -383,6 +383,10 @@ pub(super) fn build_install_command(
             "hex".into(),
             (*pkg).into(),
         ],
+        InstallationMethod::Maven(pkg) => {
+            vec!["mvn".into(), "dependency:get".into(), (*pkg).into()]
+        }
+        InstallationMethod::Gem(pkg) => vec!["gem".into(), "install".into(), (*pkg).into()],
         InstallationMethod::Cpan(pkg) => vec!["cpan".into(), (*pkg).into()],
         InstallationMethod::Cpanm(pkg) => vec!["cpanm".into(), (*pkg).into()],
 
@@ -520,13 +524,15 @@ pub(super) fn build_versioned_install_command(
 
         // Others that don't support versioning
         InstallationMethod::Poetry(_)
-        | InstallationMethod::SwiftPm(_)
         | InstallationMethod::Composer(_)
+        | InstallationMethod::SwiftPm(_)
         | InstallationMethod::LuaRocks(_)
         | InstallationMethod::VcPkg(_)
         | InstallationMethod::Conan(_)
         | InstallationMethod::Nuget(_)
         | InstallationMethod::Hex(_)
+        | InstallationMethod::Maven(_)
+        | InstallationMethod::Gem(_)
         | InstallationMethod::Cpan(_)
         | InstallationMethod::Cpanm(_) => {
             return Err(SniffInstallationError::InstallationError {

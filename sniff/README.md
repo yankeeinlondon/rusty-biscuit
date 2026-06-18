@@ -11,7 +11,7 @@
 
 <ul>
   <li>OS, hardware, network, filesystem detection</li>
-  <li>Program inventory with install support (editors, utilities, package managers, etc.)</li>
+  <li>Software inventory with install support (editors, utilities, package managers, test runners, etc.)</li>
   <li>System services and init system detection</li>
   <li>Git repository analysis, monorepo detection, and remote inspection</li>
   <li>Blast radius analysis, recent commits, and justfile detection</li>
@@ -31,7 +31,7 @@ A comprehensive Rust library for system detection:
 - **Hardware Detection**: CPU (with SIMD), GPU (Metal support), memory, storage, audio devices
 - **Network Detection**: Interface enumeration with IPv4/IPv6 addresses plus WAN IP lookup (TTL-cached)
 - **Filesystem Analysis**: Git repos, monorepo tools, language detection, file type classification, EditorConfig, document discovery, blast radius, justfile detection, recent commits
-- **Programs Module**: Detect installed programs across 8 categories with install support and remote-bash consent gating
+- **Programs Module**: Detect installed software across 9 categories with install support, test-runner availability, and remote-bash consent gating
 - **Services Module**: Detect and list system services across 10+ init systems
 - **Remote Inspection**: Query GitHub, GitLab, Gitea, and Bitbucket APIs for repository metadata
 
@@ -44,7 +44,7 @@ A feature-rich CLI exposing all library capabilities:
 - **Flexible Output**: Text (with verbosity levels), JSON, or plain text
 - **Subcommand Filtering**: Use subcommands to show specific sections
 - **Scoped Enrichment**: `--refresh-remotes` for git sync, `--latest-versions` for dependency updates
-- **Program Detection**: List and install programs across 8 categories
+- **Software Detection**: List and install programs across 9 categories
 - **Repository Queries**: Recent commits, source code changes, blast radius analysis
 
 See [sniff/cli/README.md](cli/README.md) for complete CLI documentation.
@@ -67,8 +67,8 @@ sniff hardware
 # Show only CPU info
 sniff cpu
 
-# Show installed programs
-sniff programs
+# Show installed software
+sniff software
 
 # Show system services
 sniff services
@@ -80,15 +80,18 @@ sniff audio-devices
 sniff just
 
 # Repository analysis
-sniff repo                           # Monorepo structure
+sniff repo                           # Repository name
 sniff repo recent-commits 1w         # Commits from last week
 sniff repo git-status                # Git status with commit history
+sniff repo branches                  # Local branches from known refs
+sniff repo package-dependencies      # Internal workspace dependency graph
+sniff repo dependencies              # External package dependencies
 sniff repo git-status --compact      # Status section only
 sniff repo remote origin             # Inspect remote repository
 sniff blast-radius                   # Docs affected by dirty changes
 
 # Scoped enrichment (opt-in network queries)
-sniff repo --latest-versions         # Check registries for updates
+sniff repo structure --latest-versions  # Check registries for updates
 sniff repo git-status --refresh-remotes  # Sync remote tracking data
 
 # JSON output for subcommands
@@ -103,7 +106,7 @@ sniff hardware --json
 | **Hardware** | CPU (SIMD), GPU (Metal), memory, storage, audio devices |
 | **Network** | Interfaces, IPv4/IPv6 addresses, WAN IP |
 | **Filesystem** | Git repos, monorepos, languages, file types, docs, blast radius, justfiles |
-| **Programs** | Editors, utilities, package managers, TTS, terminals, audio, AI tools |
+| **Programs** | Editors, utilities, package managers, TTS, terminals, audio, AI tools, test runners |
 | **Services** | System services across 10+ init systems |
 | **Remote** | GitHub, GitLab, Gitea, Bitbucket repository metadata |
 
@@ -132,7 +135,7 @@ sniff/
 │   │   ├── network/          # Network interfaces
 │   │   ├── filesystem/       # Git, repo, languages, docs, blast radius, file types, just
 │   │   ├── package/          # Package manager abstraction (110+)
-│   │   ├── programs/         # Program detection and install (8 categories)
+│   │   ├── programs/         # Program detection and install (9 categories)
 │   │   ├── remote/           # Remote repo inspection (GitHub, GitLab, Gitea, Bitbucket)
 │   │   └── services/         # System service detection (10+ init systems)
 │   └── Cargo.toml

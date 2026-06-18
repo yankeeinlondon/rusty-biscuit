@@ -113,14 +113,14 @@ packages:
 - Add `biscuit-test-harness` as a dev-dependency in `biscuit-tui/cli/Cargo.toml`.
 - Replace `biscuit-tui/cli/tests/common/real_terminal/mod.rs` with a re-export from `biscuit_test_harness`.
 - Remove the now-redundant `wezterm.rs`, `kitty.rs`, `tmux.rs`, `cliclick.rs` files from biscuit-tui's tree.
-- **Verify:** `cargo test -p tui-chrome-cli` still passes (existing Level-2 tests still work).
+- **Verify:** `cargo test -p biscuit-tui-cli` still passes (existing Level-2 tests still work).
 
 ### Step 1.7 — Add dev-dependency in biscuit-terminal-cli
 
 - Add `biscuit-test-harness` as a dev-dependency in `biscuit-terminal/cli/Cargo.toml`.
 - **Verify:** `cargo check -p biscuit-terminal-cli --tests` succeeds.
 
-**Checkpoint 1:** `cargo test -p biscuit-test-harness` passes. Both `tui-chrome-cli` and `biscuit-terminal-cli` compile with `--tests`. The workspace member is registered.
+**Checkpoint 1:** `cargo test -p biscuit-test-harness` passes. Both `biscuit-tui-cli` and `biscuit-terminal-cli` compile with `--tests`. The workspace member is registered.
 
 ---
 

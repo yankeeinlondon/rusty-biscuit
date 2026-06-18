@@ -43,6 +43,10 @@ fn offline_sets_includes_builtin_prefixes_and_cached_metadata() {
             license_title: Some("ISC License".into()),
             license_url: None,
             total: None,
+            author_name: None,
+            author_url: None,
+            tags: None,
+            category: None,
         })
         .unwrap();
 
@@ -64,6 +68,10 @@ fn offline_sets_deduplicates_overlapping_prefixes() {
             license_title: Some("MIT License".into()),
             license_url: Some("https://opensource.org/licenses/MIT".into()),
             total: None,
+            author_name: None,
+            author_url: None,
+            tags: None,
+            category: None,
         })
         .unwrap();
 

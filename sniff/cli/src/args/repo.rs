@@ -3,7 +3,7 @@ use super::{
 };
 use clap::Subcommand;
 
-/// Layout direction for `sniff repo deps` visual rendering.
+/// Layout direction for `sniff repo package-dependencies` visual rendering.
 ///
 /// Maps to `biscuit_visualized::graph::GraphOrientation` in the renderer.
 /// Aliased so users can write the long form (`left-to-right`/`horizontal`,
@@ -11,7 +11,7 @@ use clap::Subcommand;
 /// suggest the short canonical forms.
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum OrientationArg {
-    /// Left-to-right — hub graphs scroll vertically (default for `repo deps`).
+    /// Left-to-right — hub graphs scroll vertically (default for `repo package-dependencies`).
     #[value(name = "lr", alias = "left-to-right", alias = "horizontal")]
     LeftToRight,
     /// Top-to-bottom — good for deep chain-like graphs.
@@ -20,7 +20,7 @@ pub enum OrientationArg {
 }
 
 impl OrientationArg {
-    /// Canonical short form passed through `RepoAction::Deps::orientation`.
+    /// Canonical short form passed through `RepoAction::PackageDependencies::orientation`.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::LeftToRight => "lr",
@@ -68,7 +68,10 @@ pub enum RepoAction {
     Remote {
         remote: Option<String>,
     },
-    Deps {
+    Branches {
+        refresh_remotes: bool,
+    },
+    PackageDependencies {
         filter: Vec<String>,
         ui: bool,
         /// Emit the raw SVG document instead of a terminal-image render.
@@ -82,6 +85,12 @@ pub enum RepoAction {
         /// Layout direction for `--ui` / `--svg` rendering. Accepts `lr`
         /// (left-to-right, default) or `tb` (top-to-bottom).
         orientation: Option<String>,
+    },
+    Dependencies {
+        dependencies: bool,
+        dev_dependencies: bool,
+        peer_dependencies: bool,
+        optional_dependencies: bool,
     },
     Packages {
         filter: Vec<String>,
@@ -193,6 +202,43 @@ pub enum RepoAction {
         verbose: bool,
     },
     Name,
+    IsMonorepo {
+        no_error: bool,
+    },
+    PackageCount,
+    /// `sniff repo package-manager` — report package manager usage.
+    PackageManager {
+        csv: bool,
+        list: bool,
+        md: bool,
+    },
+    /// `sniff repo version` — report the declared version(s) for the current
+    /// repo/package context, scoped like `repo test-runner`.
+    Version {
+        // Output formats (mutually exclusive: csv | list | md).
+        csv: bool,
+        list: bool,
+        md: bool,
+        // Scope overrides (mutually exclusive: all | package | package_area).
+        // clap enforces the mutual exclusion; the handler treats them in
+        // priority order regardless.
+        all: bool,
+        package: Option<String>,
+        package_area: Option<String>,
+        // Empty-result behaviour (preserved from the prior focused command).
+        no_error: bool,
+        on_error: Option<String>,
+    },
+    /// `sniff repo test-runner` — report declared test runner usage.
+    TestRunner {
+        csv: bool,
+        list: bool,
+        md: bool,
+    },
+    /// Bare `sniff repo` dispatch marker. Distinct from `Name` so the parent
+    /// command can aggregate its children's scopes in `--json` mode while
+    /// preserving the existing text fallback.
+    Default,
 }
 
 // ---------------------------------------------------------------------------
@@ -330,8 +376,15 @@ pub enum RepoSubcommand {
         #[arg(value_name = "REMOTE")]
         remote: Option<String>,
     },
-    /// Render an internal dependency diagram
-    Deps {
+    /// List local branches
+    Branches {
+        /// Fetch remotes before calculating upstream ahead/behind counts
+        #[arg(long)]
+        refresh_remotes: bool,
+    },
+    /// Render an internal package dependency diagram
+    #[command(name = "package-dependencies")]
+    PackageDependencies {
         /// Use visual graph rendering instead of text
         #[arg(long, conflicts_with = "svg")]
         ui: bool,
@@ -353,6 +406,21 @@ pub enum RepoSubcommand {
         /// Layout direction for `--ui` / `--svg` rendering: `lr` (left-to-right, default — hub graphs scroll vertically) or `tb` (top-to-bottom — good for deep chains).
         #[arg(long, value_name = "DIR", value_enum)]
         orientation: Option<OrientationArg>,
+    },
+    /// List external package dependencies
+    Dependencies {
+        /// Include runtime dependencies
+        #[arg(long)]
+        dependencies: bool,
+        /// Include development dependencies
+        #[arg(long)]
+        dev_dependencies: bool,
+        /// Include peer dependencies
+        #[arg(long)]
+        peer_dependencies: bool,
+        /// Include optional dependencies
+        #[arg(long)]
+        optional_dependencies: bool,
     },
     /// Output only package names as a comma-separated list
     Packages {
@@ -615,6 +683,91 @@ pub enum RepoSubcommand {
         #[arg(long, conflicts_with_all = ["md", "list"])]
         csv: bool,
     },
-    /// Output the repository name (plain text); use -v for version + language/monorepo info
+    /// Output the repository name (plain text); the rich version + language/monorepo one-liner lives on the parent `repo -v`
     Name,
+    /// Output whether the repository is a monorepo.
+    ///
+    /// Prints the unified monorepo label when inside a monorepo, otherwise
+    /// prints `false`. Exits non-zero outside a monorepo unless `--no-error`
+    /// is given. Genuine failures (not a git repository, unreadable path, …)
+    /// still exit non-zero even with `--no-error`.
+    #[command(name = "is-monorepo")]
+    IsMonorepo {
+        /// Exit 0 with `false` output when not inside a monorepo.
+        ///
+        /// This only suppresses the predicate failure for non-monorepos;
+        /// genuine repository errors still exit non-zero.
+        #[arg(long)]
+        no_error: bool,
+    },
+    /// Output the number of packages discovered in the repository
+    #[command(name = "package-count")]
+    PackageCount,
+    /// Report the package manager(s) used by the current repo/package context.
+    #[command(name = "package-manager")]
+    PackageManager {
+        /// Render as comma-separated values on a single line.
+        #[arg(long, conflicts_with_all = ["list", "md"])]
+        csv: bool,
+        /// Render as a newline-delimited list (one package manager per line).
+        #[arg(long, conflicts_with_all = ["csv", "md"])]
+        list: bool,
+        /// Render as a Markdown unordered list (one `- name` per line).
+        #[arg(long, conflicts_with_all = ["csv", "list"])]
+        md: bool,
+    },
+    /// Report the declared version(s) for the current repo/package context.
+    ///
+    /// Scoped to the CWD by default (package / package-area / repo, same as
+    /// `repo test-runner`); `--all` / `--package` / `--package-area` override
+    /// that resolution. `--json` returns the `{ "versions": [...] }` shape
+    /// shared with the other focused repo subcommands. `--csv` / `--list` /
+    /// `--md` and `--verbose` follow the `repo test-runner` rendering
+    /// conventions.
+    #[command(name = "version")]
+    Version {
+        /// Render as comma-separated values on a single line.
+        #[arg(long, conflicts_with_all = ["list", "md"])]
+        csv: bool,
+        /// Render as a newline-delimited list (one version per line).
+        #[arg(long, conflicts_with_all = ["csv", "md"])]
+        list: bool,
+        /// Render as a Markdown unordered list (one `- version` per line).
+        #[arg(long, conflicts_with_all = ["csv", "list"])]
+        md: bool,
+        /// Scope to every package in the repository, regardless of CWD.
+        #[arg(long, conflicts_with_all = ["package", "package_area"])]
+        all: bool,
+        /// Scope to a specific package by name.
+        #[arg(short, long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates), conflicts_with_all = ["all", "package_area"])]
+        package: Option<String>,
+        /// Scope to a specific package area by name.
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates), conflicts_with_all = ["all", "package"])]
+        package_area: Option<String>,
+        /// Exit 0 with no output when no version is found (default is exit 1)
+        #[arg(long)]
+        no_error: bool,
+
+        /// Message to display when no version is found (text mode only)
+        #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
+        on_error: Option<String>,
+    },
+    /// Report the test runner(s) declared by the current repo/package context.
+    ///
+    /// Host installation is reported by `sniff software test-runners`; this
+    /// subcommand reports repository usage (manifest keys, config files,
+    /// ecosystem defaults). Output modes: default styled text, `--csv`,
+    /// `--list`, `--md`, and `--json`.
+    #[command(name = "test-runner")]
+    TestRunner {
+        /// Render as comma-separated values on a single line.
+        #[arg(long, conflicts_with_all = ["list", "md"])]
+        csv: bool,
+        /// Render as a newline-delimited list (one runner per line).
+        #[arg(long, conflicts_with_all = ["csv", "md"])]
+        list: bool,
+        /// Render as a Markdown unordered list (one `- name` per line).
+        #[arg(long, conflicts_with_all = ["csv", "list"])]
+        md: bool,
+    },
 }

@@ -53,7 +53,7 @@ Recommendation: either strip Markdown bullet/numbered prefixes for `--list`, or 
 
 The default test suite passes:
 
-`cargo test -p tui-chrome -p tui-chrome-cli -- --skip completions_shell --skip keyboard_protocol`
+`cargo test -p biscuit-tui -p biscuit-tui-cli -- --skip completions_shell --skip keyboard_protocol`
 
 The existing direct component tests cover modifier release, but the runner-level path contradicts them by skipping releases. The PTY keyboard tests are gated and also spawn `choose-one "Red" "Green" "Blue"` without explicit hotkeys, so they do not currently prove the spec’s badge behavior for real hotkeys.
 

@@ -1,6 +1,6 @@
 # biscuit-tui
 
-Reusable terminal UI (TUI) input components for Rust, built on [ratatui](https://ratatui.rs). Provides both a library (`tui-chrome`) for embedding interactive widgets in larger applications and a CLI (`question`) for shell-scriptable prompts.
+Reusable terminal UI (TUI) input components for Rust, built on [ratatui](https://ratatui.rs). Provides both a library (`biscuit-tui`) for embedding interactive widgets in larger applications and a CLI (`question`) for shell-scriptable prompts.
 
 ## Overview
 
@@ -8,8 +8,8 @@ This package area contains:
 
 | Crate | Binary | Purpose |
 |-------|--------|---------|
-| `tui-chrome` (library) | — | Composable input widgets + event loop helpers |
-| `tui-chrome-cli` (CLI) | `question` | Shell-facing front-end to every library component |
+| `biscuit-tui` (library) | — | Composable input widgets + event loop helpers |
+| `biscuit-tui-cli` (CLI) | `question` | Shell-facing front-end to every library component |
 
 ## Components
 
@@ -87,7 +87,7 @@ question input-table --columns '[{"type":"text","id":"name"},{"type":"boolean","
 ### Embedded in a TUI Application
 
 ```rust
-use tui_chrome::{TextInput, TextInputState, EventOutcome, HandleEvent};
+use biscuit_tui::{TextInput, TextInputState, EventOutcome, HandleEvent};
 use crossterm::event::{Event, KeyCode};
 
 let mut state = TextInputState::new()
@@ -112,7 +112,7 @@ terminal.draw(|frame| {
 ### Standalone Prompt
 
 ```rust
-use tui_chrome::{run_standalone, TextInput, TextInputState};
+use biscuit_tui::{run_standalone, TextInput, TextInputState};
 
 let state = TextInputState::new().with_max_length(100);
 match run_standalone(TextInput, state, None) {
@@ -124,7 +124,7 @@ match run_standalone(TextInput, state, None) {
 ## Architecture
 
 ```
-tui-chrome/
+biscuit-tui/
 ├── core/           # Cross-cutting primitives (events, themes, keys, frames, fuzzy, validation)
 ├── components/     # Per-component widgets + state structs
 │   ├── text_input

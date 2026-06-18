@@ -6,7 +6,7 @@
 
 use gix::bstr::ByteSlice;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{debug, warn};
 
@@ -27,6 +27,101 @@ fn ahead_behind(
         count_reachable_excluding(repo, local, upstream)?,
         count_reachable_excluding(repo, upstream, local)?,
     ))
+}
+
+pub(crate) fn get_branch_info_fallible(
+    repo: &gix::Repository,
+    current_branch: Option<&str>,
+) -> crate::Result<Vec<BranchInfo>> {
+    let remote_tips = remote_tracking_tips(repo)?;
+    let config = repo.config_snapshot();
+    let mut branches = Vec::new();
+
+    let platform = repo
+        .references()
+        .map_err(|e| SniffError::git("references", e))?;
+    let iter = platform
+        .local_branches()
+        .map_err(|e| SniffError::git("local_branches", e))?;
+
+    for reference in iter {
+        let reference = reference.map_err(|e| SniffError::git("local_branches", e))?;
+        let full = reference.name().as_bstr().to_str_lossy().into_owned();
+        let Some(name) = full.strip_prefix("refs/heads/") else {
+            continue;
+        };
+        let name = name.to_string();
+        let tip = reference
+            .into_fully_peeled_id()
+            .map_err(|e| SniffError::git("peel", e))?
+            .detach();
+        let sha = tip.to_string();
+        let upstream = configured_upstream(&config, &name);
+        // ahead/behind are only meaningful against a known upstream tip. With no
+        // configured upstream (or one whose tip is not locally known), report
+        // `None` so a fresh branch is distinguishable from one that is exactly
+        // even with its upstream.
+        let (ahead, behind) = match upstream
+            .as_deref()
+            .and_then(|upstream| remote_tips.get(upstream))
+        {
+            Some(remote) => {
+                let (ahead, behind) = ahead_behind(repo, tip, *remote)?;
+                (Some(ahead), Some(behind))
+            }
+            None => (None, None),
+        };
+
+        branches.push(BranchInfo {
+            current: current_branch.is_some_and(|current| current == name),
+            remote_represented: remote_tips.values().any(|remote| *remote == tip),
+            name,
+            sha,
+            upstream,
+            ahead,
+            behind,
+        });
+    }
+
+    branches.sort_by(|a, b| b.current.cmp(&a.current).then_with(|| a.name.cmp(&b.name)));
+    Ok(branches)
+}
+
+fn configured_upstream(config: &gix::config::File<'_>, branch: &str) -> Option<String> {
+    let remote = config
+        .string(format!("branch.{branch}.remote").as_str())
+        .map(|value| value.to_string())?;
+    let merge = config
+        .string(format!("branch.{branch}.merge").as_str())
+        .map(|value| value.to_string())?;
+    let upstream_branch = merge.strip_prefix("refs/heads/").unwrap_or(&merge);
+    Some(format!("{remote}/{upstream_branch}"))
+}
+
+fn remote_tracking_tips(repo: &gix::Repository) -> crate::Result<HashMap<String, gix::ObjectId>> {
+    let platform = repo
+        .references()
+        .map_err(|e| SniffError::git("references", e))?;
+    let iter = platform
+        .prefixed("refs/remotes/")
+        .map_err(|e| SniffError::git("remote_branches", e))?;
+    let mut tips = HashMap::new();
+    for reference in iter {
+        let reference = reference.map_err(|e| SniffError::git("remote_branches", e))?;
+        let full = reference.name().as_bstr().to_str_lossy().into_owned();
+        let Some(name) = full.strip_prefix("refs/remotes/") else {
+            continue;
+        };
+        if name.ends_with("/HEAD") {
+            continue;
+        }
+        let tip = reference
+            .into_fully_peeled_id()
+            .map_err(|e| SniffError::git("peel", e))?
+            .detach();
+        tips.insert(name.to_string(), tip);
+    }
+    Ok(tips)
 }
 
 /// Count commits reachable from `tip` once everything reachable from `hide` is
@@ -598,8 +693,22 @@ fn get_remote_branches(repo: &gix::Repository, remote_name: &str) -> Option<Vec<
 /// are filtered out. For each worktree, opens it as a Repository to access
 /// HEAD commit, dirty status, and ahead/behind counts relative to the base
 /// repository's default branch.
+///
+/// When `full_details` is `false`, the expensive per-worktree probes — the
+/// commit-graph walks (ahead/behind, merge-conflict detection) and the
+/// working-tree status scan — are skipped for any worktree that is not the one
+/// identified by `current_worktree_path`; those worktrees report `ahead`,
+/// `behind`, and `changed_files` as `0` and `dirty` as `false`. This is the
+/// default for [`GitRequest::full()`] and keeps enumeration fast on checkouts
+/// with many linked worktrees.
+///
+/// `current_worktree_path` should be the canonical (or at least absolute) path
+/// to the worktree the calling process is running inside. `None` means "no
+/// current worktree" (e.g. the caller is outside any git worktree).
 pub(crate) fn get_worktrees(
     repo: &gix::Repository,
+    full_details: bool,
+    current_worktree_path: Option<&Path>,
 ) -> crate::Result<HashMap<String, WorktreeInfo>> {
     use rayon::prelude::*;
 
@@ -610,6 +719,10 @@ pub(crate) fn get_worktrees(
     // Base branch name and tip for ahead/behind: the main worktree's HEAD,
     // falling back to "main"/"master".
     let (base_branch, base_oid) = resolve_base_branch(repo)?;
+
+    // Canonicalize the current worktree path once so every worker can do a
+    // cheap path comparison without repeated disk access.
+    let current_canonical = current_worktree_path.and_then(|p| std::fs::canonicalize(p).ok());
 
     // Collect (name, worktree path) pairs up front — cheap sequential work —
     // before the per-worktree analysis fans out. Trust, permission, I/O, and
@@ -644,29 +757,59 @@ pub(crate) fn get_worktrees(
             let wt_head = worktree_repo.head_id().ok().map(|id| id.detach());
             let sha = wt_head.map(|o| o.to_string()).unwrap_or_default();
 
-            let (ahead, behind) = match (wt_head, base_oid) {
-                (Some(wt), Some(base_id)) => ahead_behind(&base, wt, base_id)?,
-                _ => (0, 0),
+            // Determine whether this worktree is the current one.
+            let is_current = current_canonical.as_ref().is_some_and(|current| {
+                std::fs::canonicalize(worktree_path).ok().as_ref() == Some(current)
+            });
+
+            // Skip expensive commit-graph walks for non-current worktrees when
+            // the caller has not requested full details.
+            let compute_full = full_details || is_current;
+
+            let (ahead, behind) = if compute_full {
+                match (wt_head, base_oid) {
+                    (Some(wt), Some(base_id)) => ahead_behind(&base, wt, base_id)?,
+                    _ => (0, 0),
+                }
+            } else {
+                (0, 0)
             };
 
             // `merged` when the base already contains the worktree tip.
-            let merged = match (wt_head, base_oid) {
-                (Some(wt), Some(base_id)) => is_ancestor(&base, wt, base_id)?,
-                _ => false,
+            let merged = if compute_full {
+                match (wt_head, base_oid) {
+                    (Some(wt), Some(base_id)) => is_ancestor(&base, wt, base_id)?,
+                    _ => false,
+                }
+            } else {
+                false
             };
 
             // R5: a merged branch cannot conflict, so skip the merge probe;
             // only unmerged branches are merged in-memory to detect conflicts.
-            let has_conflicts = if merged {
-                false
-            } else {
-                match (wt_head, base_oid) {
-                    (Some(wt), Some(base_id)) => has_merge_conflicts(&base, wt, base_id)?,
-                    _ => false,
+            let has_conflicts = if compute_full {
+                if merged {
+                    false
+                } else {
+                    match (wt_head, base_oid) {
+                        (Some(wt), Some(base_id)) => has_merge_conflicts(&base, wt, base_id)?,
+                        _ => false,
+                    }
                 }
+            } else {
+                false
             };
 
-            let (dirty, changed_files) = get_repo_status_counts(&worktree_repo)?;
+            // The working-tree status walk is the single most expensive
+            // per-worktree probe after the commit-graph walks. Skip it for
+            // non-current worktrees unless full detail was requested: the
+            // default `git-status` renders only a count for other worktrees, so
+            // their dirty state is never shown and must not cost a status scan.
+            let (dirty, changed_files) = if compute_full {
+                get_repo_status_counts(&worktree_repo)?
+            } else {
+                (false, 0)
+            };
 
             Ok((
                 branch.clone(),
@@ -681,6 +824,7 @@ pub(crate) fn get_worktrees(
                     has_conflicts,
                     merged,
                     changed_files,
+                    is_current,
                 },
             ))
         })
@@ -1639,5 +1783,263 @@ mod tests {
             result.is_err(),
             "corrupt refs must cause tracking status to return an error, not empty vec"
         );
+    }
+
+    // ------------------------------------------------------------------
+    // get_worktrees lazy-detail tests
+    // ------------------------------------------------------------------
+
+    /// Creates a repo with one commit on master and two linked worktrees
+    /// (`feature` and `other`). Each worktree has one additional commit on
+    /// its own branch, making it one commit ahead of master.
+    fn setup_repo_with_worktrees() -> (TempDir, Repository) {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "initial\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("test.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "Initial", &tree, &[])
+                .unwrap();
+        }
+
+        // Create linked worktrees.
+        let feature_path = dir.path().join("feature");
+        let _wt_feature = repo.worktree("feature", &feature_path, None).unwrap();
+        let other_path = dir.path().join("other");
+        let _wt_other = repo.worktree("other", &other_path, None).unwrap();
+
+        // Add a commit to the feature worktree.
+        {
+            let wt_repo = Repository::open(&feature_path).unwrap();
+            let head = wt_repo.head().unwrap().peel_to_commit().unwrap();
+            wt_repo.branch("feature", &head, false).unwrap();
+            wt_repo.set_head("refs/heads/feature").unwrap();
+            std::fs::write(feature_path.join("feat.txt"), "feat\n").unwrap();
+            let mut index = wt_repo.index().unwrap();
+            index.add_path(Path::new("feat.txt")).unwrap();
+            index.write().unwrap();
+            let tree_id = index.write_tree().unwrap();
+            let tree = wt_repo.find_tree(tree_id).unwrap();
+            wt_repo
+                .commit(Some("HEAD"), &sig, &sig, "Feature", &tree, &[&head])
+                .unwrap();
+        }
+
+        // Add a commit to the other worktree.
+        {
+            let wt_repo = Repository::open(&other_path).unwrap();
+            let head = wt_repo.head().unwrap().peel_to_commit().unwrap();
+            wt_repo.branch("other", &head, false).unwrap();
+            wt_repo.set_head("refs/heads/other").unwrap();
+            std::fs::write(other_path.join("other.txt"), "other\n").unwrap();
+            let mut index = wt_repo.index().unwrap();
+            index.add_path(Path::new("other.txt")).unwrap();
+            index.write().unwrap();
+            let tree_id = index.write_tree().unwrap();
+            let tree = wt_repo.find_tree(tree_id).unwrap();
+            wt_repo
+                .commit(Some("HEAD"), &sig, &sig, "Other", &tree, &[&head])
+                .unwrap();
+        }
+
+        (dir, repo)
+    }
+
+    #[test]
+    fn get_worktrees_default_mode_skips_ahead_behind_for_non_current() {
+        let (dir, _repo) = setup_repo_with_worktrees();
+        let feature_path = dir.path().join("feature");
+        let gix_repo = gix::open(dir.path()).unwrap();
+
+        let worktrees = get_worktrees(&gix_repo, false, Some(&feature_path)).unwrap();
+
+        assert_eq!(
+            worktrees.len(),
+            2,
+            "both linked worktrees must be enumerated"
+        );
+
+        let feature = worktrees
+            .get("feature")
+            .expect("feature worktree must exist");
+        assert!(
+            feature.is_current,
+            "feature worktree must be marked current"
+        );
+        assert!(
+            feature.ahead > 0,
+            "current worktree must have ahead computed"
+        );
+
+        let other = worktrees.get("other").expect("other worktree must exist");
+        assert!(
+            !other.is_current,
+            "other worktree must not be marked current"
+        );
+        assert_eq!(
+            other.ahead, 0,
+            "non-current worktree must skip ahead in default mode"
+        );
+        assert_eq!(
+            other.behind, 0,
+            "non-current worktree must skip behind in default mode"
+        );
+        assert!(
+            !other.has_conflicts,
+            "non-current worktree must skip conflict probe in default mode"
+        );
+        assert!(
+            !other.merged,
+            "non-current worktree must skip merge check in default mode"
+        );
+    }
+
+    #[test]
+    fn get_worktrees_full_detail_computes_ahead_behind_for_all() {
+        let (dir, _repo) = setup_repo_with_worktrees();
+        let feature_path = dir.path().join("feature");
+        let gix_repo = gix::open(dir.path()).unwrap();
+
+        let worktrees = get_worktrees(&gix_repo, true, Some(&feature_path)).unwrap();
+
+        let feature = worktrees
+            .get("feature")
+            .expect("feature worktree must exist");
+        assert!(
+            feature.ahead > 0,
+            "current worktree must have ahead in full-detail mode"
+        );
+
+        let other = worktrees.get("other").expect("other worktree must exist");
+        assert!(
+            other.ahead > 0,
+            "non-current worktree must also have ahead in full-detail mode"
+        );
+    }
+
+    #[test]
+    fn get_worktrees_no_current_path_skips_all_ahead_behind() {
+        let (dir, _repo) = setup_repo_with_worktrees();
+        let gix_repo = gix::open(dir.path()).unwrap();
+
+        let worktrees = get_worktrees(&gix_repo, false, None).unwrap();
+
+        let feature = worktrees
+            .get("feature")
+            .expect("feature worktree must exist");
+        assert!(
+            !feature.is_current,
+            "without a current path, no worktree is current"
+        );
+        assert_eq!(
+            feature.ahead, 0,
+            "all worktrees skip ahead when no current path is given"
+        );
+
+        let other = worktrees.get("other").expect("other worktree must exist");
+        assert_eq!(
+            other.ahead, 0,
+            "all worktrees skip ahead when no current path is given"
+        );
+    }
+
+    #[test]
+    fn get_worktrees_main_worktree_current_skips_linked_ahead_behind() {
+        let (dir, _repo) = setup_repo_with_worktrees();
+        let gix_repo = gix::open(dir.path()).unwrap();
+
+        // Current path is the main worktree, not a linked worktree.
+        let worktrees = get_worktrees(&gix_repo, false, Some(dir.path())).unwrap();
+
+        let feature = worktrees
+            .get("feature")
+            .expect("feature worktree must exist");
+        assert!(
+            !feature.is_current,
+            "linked worktree must not be current when main is current"
+        );
+        assert_eq!(
+            feature.ahead, 0,
+            "linked worktree must skip ahead when main is current"
+        );
+
+        let other = worktrees.get("other").expect("other worktree must exist");
+        assert_eq!(
+            other.ahead, 0,
+            "linked worktree must skip ahead when main is current"
+        );
+    }
+
+    #[test]
+    fn branch_info_reports_some_ahead_behind_with_configured_upstream() {
+        let (dir, repo) = setup_repo();
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        let base = repo.head().unwrap().peel_to_commit().unwrap().id();
+
+        // origin/<branch> stays at the base commit.
+        add_fake_remote(&repo, "origin", &branch, base);
+
+        // Advance the local branch one commit past origin.
+        std::fs::write(dir.path().join("test.txt"), "second\n").unwrap();
+        stage_path(&repo, "test.txt");
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            let parent = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "second", &tree, &[&parent])
+                .unwrap();
+        }
+
+        // Configure the upstream so the branch tracks origin/<branch>.
+        let mut config = repo.config().unwrap();
+        config
+            .set_str(&format!("branch.{branch}.remote"), "origin")
+            .unwrap();
+        config
+            .set_str(
+                &format!("branch.{branch}.merge"),
+                &format!("refs/heads/{branch}"),
+            )
+            .unwrap();
+
+        let gix_repo = open_gix(&dir);
+        let branches = get_branch_info_fallible(&gix_repo, Some(&branch)).unwrap();
+        let info = branches
+            .iter()
+            .find(|b| b.name == branch)
+            .expect("branch present");
+
+        assert_eq!(
+            info.upstream.as_deref(),
+            Some(format!("origin/{branch}").as_str())
+        );
+        assert_eq!(info.ahead, Some(1), "one commit ahead of origin");
+        assert_eq!(info.behind, Some(0), "zero behind origin");
+    }
+
+    #[test]
+    fn branch_info_reports_null_tracking_without_upstream() {
+        let (dir, repo) = setup_repo();
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+
+        let gix_repo = open_gix(&dir);
+        let branches = get_branch_info_fallible(&gix_repo, Some(&branch)).unwrap();
+        let info = branches
+            .iter()
+            .find(|b| b.name == branch)
+            .expect("branch present");
+
+        // No configured upstream: tracking facts are absent, not zeroed.
+        assert_eq!(info.upstream, None);
+        assert_eq!(info.ahead, None);
+        assert_eq!(info.behind, None);
     }
 }

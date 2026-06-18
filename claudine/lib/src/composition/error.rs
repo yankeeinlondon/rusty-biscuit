@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
 
-use super::types::ResolutionMode;
+use super::types::{ResolutionMode, SessionInteractivitySource};
 use crate::provider::Provider;
 use thiserror::Error;
 
@@ -146,6 +146,10 @@ pub enum CompositionError {
     #[error("frontmatter `model` must be a string or array of strings, got {0}")]
     ModelHintWrongType(String),
 
+    /// The `interactive` frontmatter property is not a boolean.
+    #[error("frontmatter `interactive` must be a boolean (true/false), got {0}")]
+    InteractiveHintWrongType(String),
+
     /// The `agent` frontmatter hint matches multiple providers.
     #[error("agent hint `{hint}` is ambiguous; matches: {matches}")]
     AgentHintAmbiguous {
@@ -177,12 +181,18 @@ pub enum CompositionError {
     )]
     InteractiveSelectionRequired,
 
-    /// Inline composition with `-i` is not supported for this provider
+    /// Inline composition in interactive mode is not supported for this provider
     /// because it cannot capture the final assistant message.
     #[error(
-        "inline-compose with --interactive is not supported for {0}; the provider cannot capture the final assistant message"
+        "inline-compose in interactive mode (from {source_kind}) is not supported for {provider}; \
+         the provider cannot capture the final assistant message"
     )]
-    InlineInteractiveUnsupported(String),
+    InlineInteractiveUnsupported {
+        /// Provider that does not support interactive inline closure.
+        provider: String,
+        /// Why the session resolved to interactive mode.
+        source_kind: SessionInteractivitySource,
+    },
 
     /// The provider returned an invalid response for inline composition.
     #[error("invalid inline composition response: {0}")]
@@ -301,6 +311,17 @@ pub enum CompositionError {
         /// Number of steps that reported missing properties.
         failure_count: usize,
     },
+
+    /// A `sequence` document authored `interactive: true` in its frontmatter.
+    ///
+    /// Sequences are serial automation; interactive mode must be requested
+    /// per-invocation with the `--interactive` flag instead.
+    #[error(
+        "`interactive: true` is not allowed in a sequence document ({0}); \
+         use `compose` or `inline-compose` for dialog-shaped prompts, \
+         or pass `--interactive` to override a single sequence run"
+    )]
+    SequenceInteractiveRejected(PathBuf),
 
     // -- Loop errors -----------------------------------------------------------
     /// The `loop` frontmatter value is invalid.
@@ -868,6 +889,23 @@ impl BlockError for CompositionError {
             ),
             CompositionError::SequenceMissingProperties { failures, .. } => {
                 render_sequence_missing_properties_block(failures)
+            }
+            CompositionError::SequenceInteractiveRejected(source_path) => {
+                let file_link = render_file_link(source_path);
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "interactive rejected for sequence",
+                    ))
+                    .body(format!(
+                        "The document {file_link} sets <cyan>`interactive: true`</cyan> in its \
+                         frontmatter, but a <cyan>`sequence`</cyan> is serial automation and does \
+                         not support interactive sessions.\n\n\
+                         Use <cyan>`claudine compose`</cyan> or <cyan>`claudine inline-compose`</cyan> \
+                         for dialog-shaped prompts. To run an individual sequence step \
+                         interactively, use the <cyan>`--interactive`</cyan> CLI flag — this remains \
+                         the only explicit override."
+                    ))
             }
             CompositionError::UnsupportedInteractiveSchema {
                 source_path,
@@ -1704,5 +1742,107 @@ mod tests {
             "got: {rendered}"
         );
         assert!(!rendered.contains('<'), "no markup in Display: {rendered}");
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 4: regression — hint inside block quote for composition errors
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn unsupported_interactive_schema_hint_appears_inside_block_quote_border() {
+        use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+        let err = CompositionError::UnsupportedInteractiveSchema {
+            source_path: PathBuf::from("prompts/review.md"),
+            property: "spec".to_string(),
+            shape: "(unknown)".to_string(),
+        };
+        let term = Terminal::new_optimistic(80);
+        let rendered = strip_escape_codes(err.report_block_error(&term));
+
+        let hint_token = "Pass the value with key=value";
+        let hint_lines: Vec<&str> = rendered
+            .lines()
+            .filter(|l| l.contains(hint_token))
+            .collect();
+        assert!(
+            !hint_lines.is_empty(),
+            "hint text must appear in rendered output: {rendered}"
+        );
+        for hint_line in &hint_lines {
+            assert!(
+                hint_line.contains('┃'),
+                "regression: hint must appear inside block quote border, got: {hint_line:?}\nfull output:\n{rendered}"
+            );
+        }
+
+        let body_token = "cannot be collected interactively";
+        assert!(
+            rendered.contains(body_token),
+            "body text must appear: {rendered}"
+        );
+    }
+
+    #[test]
+    fn missing_properties_hint_appears_inside_block_quote_border() {
+        use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+        let err = CompositionError::MissingProperties {
+            source_path: PathBuf::from("prompts/plan.md"),
+            missing: vec![MissingProperty {
+                name: "target".to_string(),
+                type_label: Some("string".to_string()),
+                description: None,
+                interactive_shape: None,
+            }],
+            frontmatter_description: None,
+            pointer_paths: Vec::new(),
+        };
+        let term = Terminal::new_optimistic(80);
+        let rendered = strip_escape_codes(err.report_block_error(&term));
+
+        let hint_token = "Pass key=value";
+        let hint_lines: Vec<&str> = rendered
+            .lines()
+            .filter(|l| l.contains(hint_token))
+            .collect();
+        assert!(
+            !hint_lines.is_empty(),
+            "hint text must appear in rendered output: {rendered}"
+        );
+        for hint_line in &hint_lines {
+            assert!(
+                hint_line.contains('┃'),
+                "regression: hint must appear inside block quote border, got: {hint_line:?}\nfull output:\n{rendered}"
+            );
+        }
+    }
+
+    #[test]
+    fn schema_load_hint_appears_inside_block_quote_border() {
+        use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+        let err = CompositionError::SchemaLoad {
+            source_path: PathBuf::from("prompts/deploy.md"),
+            message: "unsupported protocol".to_string(),
+        };
+        let term = Terminal::new_optimistic(80);
+        let rendered = strip_escape_codes(err.report_block_error(&term));
+
+        let hint_token = "Verify the `$schema` path";
+        let hint_lines: Vec<&str> = rendered
+            .lines()
+            .filter(|l| l.contains(hint_token))
+            .collect();
+        assert!(
+            !hint_lines.is_empty(),
+            "hint text must appear in rendered output: {rendered}"
+        );
+        for hint_line in &hint_lines {
+            assert!(
+                hint_line.contains('┃'),
+                "regression: hint must appear inside block quote border, got: {hint_line:?}\nfull output:\n{rendered}"
+            );
+        }
     }
 }
