@@ -13,9 +13,9 @@ parameters:
 dir: "$(dirname '{{spec || design}}')"
 iteration: 1
 area: "{{ctx.current_package_area == 'root' ? ctx.current_package || '' : ctx.current_package_area}}"
-review_file: "{{area}}/{{dir}}/review-{{iteration}}.md"
+review_file: "{{ctx.area}}/{{dir}}/review-{{iteration}}.md"
 start:
-    message: "👓 starting the feature review #{{iteration}} of `{{dir}}` (_in the **{{ctx.current_package_area}}** package area_)"
+    message: "👓 starting feature review #{{iteration}} of `{{parent_dir(spec)}}` (_in the **{{ctx.area}}** package area_)"
 success:
     stderr: "Feature review {{iteration}} in the {{ctx.area}} package area has completed"
     message: "✅  feature review #{{iteration}} for `{{dir}}` in the **{{ctx.current_package_area}}** package area has completed. The review can be found at `{{review-file}}`"
