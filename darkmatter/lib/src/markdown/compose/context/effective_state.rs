@@ -6,6 +6,7 @@
 use super::runtime::ComposeContext;
 use super::ContextMergeDiagnostic;
 use super::merge::CtxMergeError;
+use crate::markdown::compose::context::catalog::CONTEXT_VARIABLE_DESCRIPTORS;
 use crate::markdown::frontmatter::MergeStrategy;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -310,6 +311,24 @@ impl super::super::expression::EvaluationLookup for EffectiveState {
     fn get_string(&self, path: &str) -> String {
         self.get_string(path)
     }
+
+    fn is_valid_context_variable(&self, name: &str) -> bool {
+        if CONTEXT_VARIABLE_DESCRIPTORS.iter().any(|d| d.name == name) {
+            return true;
+        }
+        self.get_context_value(name).is_some()
+    }
+
+    fn context_variable_names(&self) -> &[&'static str] {
+        use std::sync::LazyLock;
+        static NAMES: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
+            CONTEXT_VARIABLE_DESCRIPTORS
+                .iter()
+                .map(|d| d.name)
+                .collect()
+        });
+        NAMES.as_slice()
+    }
 }
 
 /// Wraps an [`EffectiveState`] with a [`ResolutionContext`] so any surface that
@@ -354,6 +373,14 @@ impl super::super::expression::EvaluationLookup for ResolvingLookup<'_> {
 
     fn resolution_context(&self) -> Option<super::super::expression::ResolutionContext> {
         Some(self.resolution_context.clone())
+    }
+
+    fn is_valid_context_variable(&self, name: &str) -> bool {
+        self.state.is_valid_context_variable(name)
+    }
+
+    fn context_variable_names(&self) -> &[&'static str] {
+        self.state.context_variable_names()
     }
 }
 

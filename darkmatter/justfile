@@ -296,6 +296,15 @@ docs_library:
     @just _claude_file ./prompts/update-library-docs.md || ( _speak "Ran into problems updating the CLI docs for Darkmatter!" && exit 1 )
     @just _play confirmation
 
+# Regenerate the expression function table in docs/topics/darkmatter-expressions.md
+regen-expr-doc:
+    @echo
+    @echo -e "Regenerating {{ BOLD }}Darkmatter Expressions{{ RESET }} function table"
+    @echo
+    @cargo run -p darkmatter --example expression_doc_generator -- --write
+    @echo
+    @echo -e "{{ BOLD }}{{ GREEN }}Function table regenerated{{ RESET }} in docs/topics/darkmatter-expressions.md"
+
 readme:
     _readme_files darkmatter
 

@@ -4,7 +4,7 @@
 //! [`EffectEngine`]. The catalog is a static, compile-time constant —
 //! constructing or reading it performs no host probes, no I/O, and no runtime
 //! context capture.
-use crate::catalog::{Described, Example};
+use crate::catalog::{Described, Example, ExampleVerification};
 
 
 /// Safety classification for a side-effect capability.
@@ -65,7 +65,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         category: "Frontmatter Mutations",
         order: 1,
 
-        example: Some(Example { invocation: "set_frontmatter(\"d.md\", \"status\", \"x\")", result: "null" }),
+        example: Some(Example { invocation: "set_frontmatter(\"d.md\", \"status\", \"x\")", result: "null", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
  },
     EffectDescriptor {
 
@@ -75,7 +75,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         category: "Frontmatter Mutations",
         order: 2,
 
-        example: Some(Example { invocation: "merge_frontmatter(\"d.md\", {\"owner\": \"ken\"})", result: "{\"owner\":\"ken\"}" }),
+        example: Some(Example { invocation: "merge_frontmatter(\"d.md\", {\"owner\": \"ken\"})", result: "{\"owner\":\"ken\"}", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
 
     },
     EffectDescriptor {
@@ -86,7 +86,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         category: "Frontmatter Mutations",
         order: 3,
 
-        example: Some(Example { invocation: "delete_frontmatter(\"d.md\", \"owner\")", result: "ken" }),
+        example: Some(Example { invocation: "delete_frontmatter(\"d.md\", \"owner\")", result: "ken", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
 
     },
     EffectDescriptor {
@@ -97,7 +97,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         category: "Frontmatter Mutations",
         order: 4,
 
-        example: Some(Example { invocation: "increment_frontmatter(\"d.md\", \"phase\")", result: "2" }),
+        example: Some(Example { invocation: "increment_frontmatter(\"d.md\", \"phase\")", result: "2", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
 
     },
     EffectDescriptor {
@@ -108,7 +108,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         category: "Frontmatter Mutations",
         order: 5,
 
-        example: Some(Example { invocation: "decrement_frontmatter(\"d.md\", \"phase\")", result: "0" }),
+        example: Some(Example { invocation: "decrement_frontmatter(\"d.md\", \"phase\")", result: "0", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
 
     },
     EffectDescriptor {
@@ -119,7 +119,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         category: "Frontmatter Mutations",
         order: 6,
 
-        example: Some(Example { invocation: "append_frontmatter(\"d.md\", \"tags\", \"b\")", result: "[\"a\",\"b\"]" }),
+        example: Some(Example { invocation: "append_frontmatter(\"d.md\", \"tags\", \"b\")", result: "[\"a\",\"b\"]", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
 
     },
     EffectDescriptor {
@@ -130,7 +130,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         category: "Frontmatter Mutations",
         order: 7,
 
-        example: Some(Example { invocation: "prepend_frontmatter(\"d.md\", \"tags\", \"z\")", result: "[\"z\",\"a\",\"b\"]" }),
+        example: Some(Example { invocation: "prepend_frontmatter(\"d.md\", \"tags\", \"z\")", result: "[\"z\",\"a\",\"b\"]", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
 
     },
     // ── File & Directory ────────────────────────────────────────────
@@ -142,7 +142,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         category: "File & Directory",
         order: 1,
 
-        example: Some(Example { invocation: "ensure_file(\"new.txt\")", result: "/path/to/new.txt" }),
+        example: Some(Example { invocation: "ensure_file(\"new.txt\")", result: "/path/to/new.txt", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
 
     },
     EffectDescriptor {
@@ -153,7 +153,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         category: "File & Directory",
         order: 2,
 
-        example: Some(Example { invocation: "ensure_file(\"new.txt\", \"hello\")", result: "/path/to/new.txt" }),
+        example: Some(Example { invocation: "ensure_file(\"new.txt\", \"hello\")", result: "/path/to/new.txt", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
 
     },
     EffectDescriptor {
@@ -164,7 +164,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         category: "File & Directory",
         order: 3,
 
-        example: Some(Example { invocation: "ensure_dir(\"sub\")", result: "/path/to/sub" }),
+        example: Some(Example { invocation: "ensure_dir(\"sub\")", result: "/path/to/sub", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
 
     },
     EffectDescriptor {
@@ -175,7 +175,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         category: "File & Directory",
         order: 4,
 
-        example: Some(Example { invocation: "append_line(\"log.txt\", \"entry\")", result: "/path/to/log.txt" }),
+        example: Some(Example { invocation: "append_line(\"log.txt\", \"entry\")", result: "/path/to/log.txt", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
 
     },
     EffectDescriptor {
@@ -186,7 +186,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         category: "File & Directory",
         order: 5,
 
-        example: Some(Example { invocation: "append_jsonl(\"log.jsonl\", {\"k\": 1})", result: "/path/to/log.jsonl" }),
+        example: Some(Example { invocation: "append_jsonl(\"log.jsonl\", {\"k\": 1})", result: "/path/to/log.jsonl", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
 
     },
     // ── Network ─────────────────────────────────────────────────────
@@ -198,7 +198,7 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         category: "Network",
         order: 1,
 
-        example: Some(Example { invocation: "http_post(\"https://example.com/hook\", \"{}\")", result: "{\"status\":403,\"body\":\"\"}" }),
+        example: Some(Example { invocation: "http_post(\"https://example.com/hook\", \"{}\")", result: "{\"status\":403,\"body\":\"\"}", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
 
     },
 ];

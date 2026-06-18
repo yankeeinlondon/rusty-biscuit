@@ -7,12 +7,33 @@
 //! specific catalog type.
 
 /// One verified example for a described item.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Example {
     /// Literal invocation shown to the user (e.g. `upper("hello")`).
     pub invocation: &'static str,
     /// Expected rendered result of the invocation.
     pub result: &'static str,
+    /// Declares whether the example is machine-auditable, and if not, why.
+    pub verification: ExampleVerification,
+}
+
+/// The verification intent of an [`Example`].
+///
+/// Distinguishes examples that an audit harness can execute and assert against
+/// from those that are display-only. A display-only example is allowed but never
+/// silent: it must carry a non-empty reason, so the opt-out is runtime-readable
+/// metadata rather than a source comment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExampleVerification {
+    /// The invocation is executed and its rendered result is asserted to equal
+    /// [`Example::result`].
+    Executable,
+    /// The result shape is illustrative only; live values are environment- or
+    /// host-dependent, so equality is not asserted.
+    TypeShapeOnly,
+    /// The example is for display only and is never executed. The payload is a
+    /// non-empty reason explaining why it cannot be machine-audited.
+    DisplayOnly(&'static str),
 }
 
 /// Trait implemented by every static descriptor catalog in Darkmatter.
@@ -40,18 +61,28 @@ pub fn describe<'a, D: Described>(catalog: &'a [D], key: &str) -> Option<&'a D> 
 /// tie-breaking by [`Described::order`]. `max == 0` yields an empty list.
 /// Both the input key and catalog keys are normalized by stripping a leading
 /// `ctx.` prefix and any parenthesized argument list before comparison.
+///
+/// A quality gate filters out candidates whose normalized distance is strictly
+/// greater than `max(2, normalized_query_char_len / 3)`. This suppresses
+/// confident-looking "did you mean" output for unrelated typos while still
+/// catching common one- and two-character mistakes. As a result the returned
+/// list may be shorter than `max`, including empty when nothing passes the gate.
 pub fn suggest<'a, D: Described>(catalog: &'a [D], key: &str, max: usize) -> Vec<&'a D> {
     if max == 0 {
         return Vec::new();
     }
 
     let normalized = normalize_key(key);
+    // Char count, not byte length: distances are computed over chars, and the
+    // input may carry non-ASCII typo text even though catalog keys are ASCII.
+    let threshold = (normalized.chars().count() / 3).max(2);
     let mut scored: Vec<(usize, usize, &'a D)> = catalog
         .iter()
         .map(|d| {
             let distance = levenshtein(&normalized, &normalize_key(d.key()));
             (distance, d.order(), d)
         })
+        .filter(|(distance, _, _)| *distance <= threshold)
         .collect();
 
     scored.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
@@ -78,7 +109,7 @@ fn normalize_key(key: &str) -> String {
         .to_lowercase()
 }
 
-fn levenshtein(a: &str, b: &str) -> usize {
+pub fn levenshtein(a: &str, b: &str) -> usize {
     let a_chars: Vec<char> = a.chars().collect();
     let b_chars: Vec<char> = b.chars().collect();
     let m = a_chars.len();
@@ -142,6 +173,7 @@ mod tests {
     const UPPER_EXAMPLE: Example = Example {
         invocation: r#"upper("hello")"#,
         result: "HELLO",
+        verification: ExampleVerification::Executable,
     };
 
     static TEST_CATALOG: &[TestDescriptor] = &[
@@ -187,17 +219,54 @@ mod tests {
 
     #[test]
     fn suggest_ranks_by_distance() {
+        // "uper" (4 chars) -> threshold max(2, 4/3) = 2. Only `upper(x)` (distance
+        // 1) clears the quality gate; `lower(x)` (distance 3) is now correctly
+        // filtered out as an unrelated match, so a single result is returned.
         let results = suggest(TEST_CATALOG, "uper", 2);
-        assert_eq!(results.len(), 2);
+        assert_eq!(results.len(), 1);
         assert_eq!(results[0].key, "upper(x)");
-        assert_eq!(results[1].key, "lower(x)");
     }
 
     #[test]
     fn suggest_tie_breaks_by_order() {
-        let results = suggest(TEST_CATALOG, "strng", 2);
+        // "oper" sits at distance 2 from both `upper(x)` (order 1) and `lower(x)`
+        // (order 2) — equal distance, within the threshold-2 gate — so the
+        // deterministic order tie-break decides their ranking. (The previous
+        // "strng" input fell outside the gate for every entry once it was added.)
+        let results = suggest(TEST_CATALOG, "oper", 2);
+        assert_eq!(results.len(), 2);
         assert_eq!(results[0].order, 1);
         assert_eq!(results[1].order, 2);
+    }
+
+    #[test]
+    fn suggest_omits_unrelated_typo() {
+        // A long string unrelated to any catalog key must not produce a
+        // confident-looking suggestion; the gate yields an empty list rather
+        // than the first `max` entries.
+        let results = suggest(TEST_CATALOG, "xxxxxxxxxxxx", 3);
+        assert!(results.is_empty(), "unrelated typo should yield no suggestion");
+    }
+
+    #[test]
+    fn suggest_keeps_common_short_typo() {
+        // A common one-character mistake still surfaces the close match: "uper"
+        // (distance 1) is well within the threshold-2 gate for `upper(x)`.
+        let results = suggest(TEST_CATALOG, "uper", 1);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].key, "upper(x)");
+    }
+
+    #[test]
+    fn suggest_threshold_boundary_includes_and_excludes() {
+        // "upwe" (4 chars) -> threshold max(2, 4/3) = 2.
+        //   `upper(x)` distance == 2 (== threshold)      -> INCLUDED
+        //   `lower(x)` distance == 3 (== threshold + 1)   -> EXCLUDED
+        //   `today`    distance == 5                       -> EXCLUDED
+        // A single call proves both edges of the gate by membership.
+        let results = suggest(TEST_CATALOG, "upwe", 3);
+        assert_eq!(results.len(), 1, "only the at-threshold candidate passes");
+        assert_eq!(results[0].key, "upper(x)");
     }
 
     #[test]
@@ -245,5 +314,73 @@ mod tests {
         let d = &TEST_CATALOG[1];
         let text = describe_for_error(d);
         assert!(!text.contains("example:"));
+    }
+
+    /// `describe_for_error` still renders `invocation → result`, independent of
+    /// the new verification intent on the example.
+    #[test]
+    fn describe_for_error_renders_invocation_to_result_regardless_of_verification() {
+        let display_only = TestDescriptor {
+            key: "now()",
+            description: "Current time.",
+            category: "Date",
+            order: 1,
+            example: Some(Example {
+                invocation: "now()",
+                result: "10:30",
+                verification: ExampleVerification::DisplayOnly("wall-clock dependent"),
+            }),
+        };
+        let text = describe_for_error(&display_only);
+        assert!(text.contains("now()"));
+        assert!(text.contains("10:30"));
+        assert!(text.contains("→"));
+    }
+
+    /// Generic invariant: every `DisplayOnly` example in EVERY shipped catalog
+    /// carries a non-empty reason string. A silent (empty-reason) opt-out is a
+    /// documentation hole, so the audit fails the build rather than shipping it.
+    #[test]
+    fn every_display_only_example_carries_a_non_empty_reason() {
+        fn check<D: Described>(catalog: &[D], label: &str, failures: &mut Vec<String>) {
+            for d in catalog {
+                if let Some(Example {
+                    verification: ExampleVerification::DisplayOnly(reason),
+                    ..
+                }) = d.example()
+                    && reason.trim().is_empty()
+                {
+                    failures.push(format!("{label}: `{}` has an empty DisplayOnly reason", d.key()));
+                }
+            }
+        }
+
+        let mut failures = Vec::new();
+        check(
+            crate::markdown::compose::context::catalog::CONTEXT_VARIABLE_DESCRIPTORS,
+            "context",
+            &mut failures,
+        );
+        check(
+            crate::markdown::compose::expression::catalog::EXPRESSION_FUNCTION_DESCRIPTORS,
+            "expression",
+            &mut failures,
+        );
+        check(crate::effects::catalog::EFFECT_DESCRIPTORS, "effects", &mut failures);
+
+        use crate::markdown::compose::expression::semantics::*;
+        check(OPERATOR_DESCRIPTORS, "semantics::operator", &mut failures);
+        check(TRUTHINESS_DESCRIPTORS, "semantics::truthiness", &mut failures);
+        check(MODE_DESCRIPTORS, "semantics::mode", &mut failures);
+        check(NULL_PROPAGATION_DESCRIPTORS, "semantics::null_propagation", &mut failures);
+        check(UNARY_OPERATOR_DESCRIPTORS, "semantics::unary", &mut failures);
+        check(COMPARISON_OPERATOR_DESCRIPTORS, "semantics::comparison", &mut failures);
+        check(ARITHMETIC_OPERATOR_DESCRIPTORS, "semantics::arithmetic", &mut failures);
+        check(VARIABLE_ACCESS_DESCRIPTORS, "semantics::variable_access", &mut failures);
+
+        assert!(
+            failures.is_empty(),
+            "display-only examples with empty reasons: {failures:?}"
+        );
     }
 }

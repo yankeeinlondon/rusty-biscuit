@@ -4,7 +4,7 @@
 //! captured into `ComposeContext` at runtime. The catalog is a static,
 //! compile-time constant — constructing or reading it performs no host probes,
 //! no I/O, and no runtime context capture.
-use crate::catalog::{Described, Example};
+use crate::catalog::{Described, Example, ExampleVerification};
 
 
 /// Display type for a context variable's runtime value.
@@ -87,7 +87,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 1,
 
-        example: Some(Example { invocation: "ctx.now", result: "2024-06-15T10:30:00" }),
+        example: Some(Example { invocation: "ctx.now", result: "2024-06-15T10:30:00", verification: ExampleVerification::TypeShapeOnly }),
  },
     ContextVariableDescriptor {
 
@@ -98,7 +98,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 2,
 
-        example: Some(Example { invocation: "ctx.now_utc", result: "2024-06-15T17:30:00Z" }),
+        example: Some(Example { invocation: "ctx.now_utc", result: "2024-06-15T17:30:00Z", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -110,7 +110,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 3,
 
-        example: Some(Example { invocation: "ctx.today", result: "2024-06-15" }),
+        example: Some(Example { invocation: "ctx.today", result: "2024-06-15", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -122,7 +122,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 4,
 
-        example: Some(Example { invocation: "ctx.today_utc", result: "2024-06-15" }),
+        example: Some(Example { invocation: "ctx.today_utc", result: "2024-06-15", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -134,7 +134,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 5,
 
-        example: Some(Example { invocation: "ctx.yesterday", result: "2024-06-14" }),
+        example: Some(Example { invocation: "ctx.yesterday", result: "2024-06-14", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -146,7 +146,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 6,
 
-        example: Some(Example { invocation: "ctx.yesterday_utc", result: "2024-06-14" }),
+        example: Some(Example { invocation: "ctx.yesterday_utc", result: "2024-06-14", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -158,7 +158,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 7,
 
-        example: Some(Example { invocation: "ctx.tomorrow", result: "2024-06-16" }),
+        example: Some(Example { invocation: "ctx.tomorrow", result: "2024-06-16", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -170,7 +170,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 8,
 
-        example: Some(Example { invocation: "ctx.tomorrow_utc", result: "2024-06-16" }),
+        example: Some(Example { invocation: "ctx.tomorrow_utc", result: "2024-06-16", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -182,7 +182,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 9,
 
-        example: Some(Example { invocation: "ctx.day", result: "Saturday" }),
+        example: Some(Example { invocation: "ctx.day", result: "Saturday", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -194,7 +194,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 10,
 
-        example: Some(Example { invocation: "ctx.day_utc", result: "Saturday" }),
+        example: Some(Example { invocation: "ctx.day_utc", result: "Saturday", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -206,7 +206,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 11,
 
-        example: Some(Example { invocation: "ctx.day_abbr", result: "Sat" }),
+        example: Some(Example { invocation: "ctx.day_abbr", result: "Sat", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -218,7 +218,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 12,
 
-        example: Some(Example { invocation: "ctx.day_abbr_utc", result: "Sat" }),
+        example: Some(Example { invocation: "ctx.day_abbr_utc", result: "Sat", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -230,7 +230,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         order: 13,
 
 
-        example: Some(Example { invocation: "ctx.year", result: "2024" }),
+        example: Some(Example { invocation: "ctx.year", result: "2024", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -242,7 +242,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         order: 14,
 
 
-        example: Some(Example { invocation: "ctx.year_utc", result: "2024" }),
+        example: Some(Example { invocation: "ctx.year_utc", result: "2024", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -254,7 +254,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         order: 15,
 
 
-        example: Some(Example { invocation: "ctx.month", result: "06" }),
+        example: Some(Example { invocation: "ctx.month", result: "06", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -266,7 +266,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 16,
 
-        example: Some(Example { invocation: "ctx.month_name", result: "June" }),
+        example: Some(Example { invocation: "ctx.month_name", result: "June", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -278,7 +278,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 17,
 
-        example: Some(Example { invocation: "ctx.month_name_abbr", result: "Jun" }),
+        example: Some(Example { invocation: "ctx.month_name_abbr", result: "Jun", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -290,7 +290,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         order: 18,
 
 
-        example: Some(Example { invocation: "ctx.day_of_month", result: "15" }),
+        example: Some(Example { invocation: "ctx.day_of_month", result: "15", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -302,7 +302,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 19,
 
-        example: Some(Example { invocation: "ctx.day_of_month_suffixed", result: "15th" }),
+        example: Some(Example { invocation: "ctx.day_of_month_suffixed", result: "15th", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -314,7 +314,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 20,
 
-        example: Some(Example { invocation: "ctx.time", result: "10:30 AM" }),
+        example: Some(Example { invocation: "ctx.time", result: "10:30 AM", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -326,7 +326,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 21,
 
-        example: Some(Example { invocation: "ctx.time_military", result: "10:30" }),
+        example: Some(Example { invocation: "ctx.time_military", result: "10:30", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -338,7 +338,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 22,
 
-        example: Some(Example { invocation: "ctx.time_utc", result: "05:30 PM (UTC)" }),
+        example: Some(Example { invocation: "ctx.time_utc", result: "05:30 PM (UTC)", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -350,7 +350,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 23,
 
-        example: Some(Example { invocation: "ctx.time_military_utc", result: "17:30 (UTC)" }),
+        example: Some(Example { invocation: "ctx.time_military_utc", result: "17:30 (UTC)", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -362,7 +362,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 24,
 
-        example: Some(Example { invocation: "ctx.timezone", result: "PDT" }),
+        example: Some(Example { invocation: "ctx.timezone", result: "PDT", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -374,7 +374,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 25,
 
-        example: Some(Example { invocation: "ctx.timezone_offset", result: "-0700" }),
+        example: Some(Example { invocation: "ctx.timezone_offset", result: "-0700", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -386,7 +386,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 26,
 
-        example: Some(Example { invocation: "ctx.timezone_iana", result: "America/Los_Angeles" }),
+        example: Some(Example { invocation: "ctx.timezone_iana", result: "America/Los_Angeles", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -398,7 +398,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 27,
 
-        example: Some(Example { invocation: "ctx.start_of_week_sun", result: "2024-06-09" }),
+        example: Some(Example { invocation: "ctx.start_of_week_sun", result: "2024-06-09", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -410,7 +410,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 28,
 
-        example: Some(Example { invocation: "ctx.end_of_week_sun", result: "2024-06-15" }),
+        example: Some(Example { invocation: "ctx.end_of_week_sun", result: "2024-06-15", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -422,7 +422,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 29,
 
-        example: Some(Example { invocation: "ctx.start_of_week_mon", result: "2024-06-10" }),
+        example: Some(Example { invocation: "ctx.start_of_week_mon", result: "2024-06-10", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -434,7 +434,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 30,
 
-        example: Some(Example { invocation: "ctx.end_of_week_mon", result: "2024-06-16" }),
+        example: Some(Example { invocation: "ctx.end_of_week_mon", result: "2024-06-16", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -446,7 +446,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 31,
 
-        example: Some(Example { invocation: "ctx.start_of_week_sun_utc", result: "2024-06-09" }),
+        example: Some(Example { invocation: "ctx.start_of_week_sun_utc", result: "2024-06-09", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -458,7 +458,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 32,
 
-        example: Some(Example { invocation: "ctx.end_of_week_sun_utc", result: "2024-06-15" }),
+        example: Some(Example { invocation: "ctx.end_of_week_sun_utc", result: "2024-06-15", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -470,7 +470,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 33,
 
-        example: Some(Example { invocation: "ctx.start_of_week_mon_utc", result: "2024-06-10" }),
+        example: Some(Example { invocation: "ctx.start_of_week_mon_utc", result: "2024-06-10", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -482,7 +482,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 34,
 
-        example: Some(Example { invocation: "ctx.end_of_week_mon_utc", result: "2024-06-16" }),
+        example: Some(Example { invocation: "ctx.end_of_week_mon_utc", result: "2024-06-16", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -494,7 +494,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 35,
 
-        example: Some(Example { invocation: "ctx.season", result: "Summer" }),
+        example: Some(Example { invocation: "ctx.season", result: "Summer", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -506,7 +506,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 36,
 
-        example: Some(Example { invocation: "ctx.timestamp", result: "1718458200" }),
+        example: Some(Example { invocation: "ctx.timestamp", result: "1718458200", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -518,7 +518,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 37,
 
-        example: Some(Example { invocation: "ctx.timestamp_ms", result: "1718458200000" }),
+        example: Some(Example { invocation: "ctx.timestamp_ms", result: "1718458200000", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     // ── Date and Time aliases ───────────────────────────────────────
@@ -536,7 +536,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Aliases",
         order: 1,
 
-        example: Some(Example { invocation: "ctx.utc", result: "2024-06-15T17:30:00Z" }),
+        example: Some(Example { invocation: "ctx.utc", result: "2024-06-15T17:30:00Z", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -548,7 +548,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Aliases",
         order: 2,
 
-        example: Some(Example { invocation: "ctx.dow", result: "Saturday" }),
+        example: Some(Example { invocation: "ctx.dow", result: "Saturday", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -560,7 +560,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Aliases",
         order: 3,
 
-        example: Some(Example { invocation: "ctx.dow_abbr", result: "Sat" }),
+        example: Some(Example { invocation: "ctx.dow_abbr", result: "Sat", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     // ── Repository ──────────────────────────────────────────────────
@@ -573,7 +573,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 1,
 
-        example: Some(Example { invocation: "ctx.repo", result: "rusty-biscuit" }),
+        example: Some(Example { invocation: "ctx.repo", result: "rusty-biscuit", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -585,7 +585,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 2,
 
-        example: Some(Example { invocation: "ctx.repo_root", result: "/Users/ken/rusty-biscuit" }),
+        example: Some(Example { invocation: "ctx.repo_root", result: "/Users/ken/rusty-biscuit", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -597,7 +597,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 3,
 
-        example: Some(Example { invocation: "ctx.is_monorepo", result: "true" }),
+        example: Some(Example { invocation: "ctx.is_monorepo", result: "true", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -609,7 +609,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Packages",
         order: 1,
 
-        example: Some(Example { invocation: "ctx.package_root", result: "claudine/lib" }),
+        example: Some(Example { invocation: "ctx.package_root", result: "claudine/lib", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -621,7 +621,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Packages",
         order: 2,
 
-        example: Some(Example { invocation: "ctx.package_area_root", result: "claudine" }),
+        example: Some(Example { invocation: "ctx.package_area_root", result: "claudine", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -633,7 +633,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Packages",
         order: 3,
 
-        example: Some(Example { invocation: "ctx.packages", result: "biscuit-hash, claudine, darkmatter" }),
+        example: Some(Example { invocation: "ctx.packages", result: "biscuit-hash, claudine, darkmatter", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -645,7 +645,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Packages",
         order: 4,
 
-        example: Some(Example { invocation: "ctx.packages_list", result: "- biscuit-hash\\n- claudine\\n- darkmatter" }),
+        example: Some(Example { invocation: "ctx.packages_list", result: "- biscuit-hash\\n- claudine\\n- darkmatter", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -657,7 +657,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Packages",
         order: 5,
 
-        example: Some(Example { invocation: "ctx.package_areas", result: "biscuit, claudine" }),
+        example: Some(Example { invocation: "ctx.package_areas", result: "biscuit, claudine", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -669,7 +669,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Packages",
         order: 6,
 
-        example: Some(Example { invocation: "ctx.package_areas_list", result: "- biscuit\\n- claudine" }),
+        example: Some(Example { invocation: "ctx.package_areas_list", result: "- biscuit\\n- claudine", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -681,7 +681,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Packages",
         order: 7,
 
-        example: Some(Example { invocation: "ctx.current_package", result: "claudine" }),
+        example: Some(Example { invocation: "ctx.current_package", result: "claudine", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -693,7 +693,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Packages",
         order: 8,
 
-        example: Some(Example { invocation: "ctx.current_package_area", result: "claudine" }),
+        example: Some(Example { invocation: "ctx.current_package_area", result: "claudine", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -705,7 +705,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Scope",
         order: 1,
 
-        example: Some(Example { invocation: "ctx.area", result: "claudine" }),
+        example: Some(Example { invocation: "ctx.area", result: "claudine", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -717,7 +717,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Scope",
         order: 2,
 
-        example: Some(Example { invocation: "ctx.area_description", result: "claudine package area" }),
+        example: Some(Example { invocation: "ctx.area_description", result: "claudine package area", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -729,7 +729,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Scope",
         order: 3,
 
-        example: Some(Example { invocation: "ctx.area_root", result: "/Users/ken/rusty-biscuit/claudine" }),
+        example: Some(Example { invocation: "ctx.area_root", result: "/Users/ken/rusty-biscuit/claudine", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -741,7 +741,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Scope",
         order: 4,
 
-        example: Some(Example { invocation: "ctx.current_packages", result: "- claudine (claudine/lib)\\n- claudine-cli (claudine/cli)" }),
+        example: Some(Example { invocation: "ctx.current_packages", result: "- claudine (claudine/lib)\\n- claudine-cli (claudine/cli)", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -753,7 +753,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Scope",
         order: 5,
 
-        example: Some(Example { invocation: "ctx.depends_on", result: "- 'claudine' depends on:\\n    - biscuit-terminal" }),
+        example: Some(Example { invocation: "ctx.depends_on", result: "- 'claudine' depends on:\\n    - biscuit-terminal", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -765,7 +765,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Scope",
         order: 6,
 
-        example: Some(Example { invocation: "ctx.used_by", result: "- 'claudine' is used by:\\n    - claudine-cli" }),
+        example: Some(Example { invocation: "ctx.used_by", result: "- 'claudine' is used by:\\n    - claudine-cli", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     // ── File Changes ────────────────────────────────────────────────
@@ -778,7 +778,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 1,
 
-        example: Some(Example { invocation: "ctx.dirty_files", result: "Cargo.toml, src/lib.rs" }),
+        example: Some(Example { invocation: "ctx.dirty_files", result: "Cargo.toml, src/lib.rs", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -790,7 +790,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 2,
 
-        example: Some(Example { invocation: "ctx.dirty_files_list", result: "- Cargo.toml\\n- src/lib.rs" }),
+        example: Some(Example { invocation: "ctx.dirty_files_list", result: "- Cargo.toml\\n- src/lib.rs", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -802,7 +802,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 3,
 
-        example: Some(Example { invocation: "ctx.dirty_source_code_files", result: "src/lib.rs" }),
+        example: Some(Example { invocation: "ctx.dirty_source_code_files", result: "src/lib.rs", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -814,7 +814,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 4,
 
-        example: Some(Example { invocation: "ctx.dirty_source_code_files_list", result: "- src/lib.rs" }),
+        example: Some(Example { invocation: "ctx.dirty_source_code_files_list", result: "- src/lib.rs", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -826,7 +826,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 5,
 
-        example: Some(Example { invocation: "ctx.staged_files", result: "src/lib.rs" }),
+        example: Some(Example { invocation: "ctx.staged_files", result: "src/lib.rs", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -838,7 +838,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 6,
 
-        example: Some(Example { invocation: "ctx.staged_files_list", result: "- src/lib.rs" }),
+        example: Some(Example { invocation: "ctx.staged_files_list", result: "- src/lib.rs", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -850,7 +850,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 7,
 
-        example: Some(Example { invocation: "ctx.untracked_files", result: "new.md" }),
+        example: Some(Example { invocation: "ctx.untracked_files", result: "new.md", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -862,7 +862,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 8,
 
-        example: Some(Example { invocation: "ctx.untracked_files_list", result: "- new.md" }),
+        example: Some(Example { invocation: "ctx.untracked_files_list", result: "- new.md", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -874,7 +874,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Packages",
         order: 1,
 
-        example: Some(Example { invocation: "ctx.dirty_packages", result: "claudine" }),
+        example: Some(Example { invocation: "ctx.dirty_packages", result: "claudine", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -886,7 +886,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Packages",
         order: 2,
 
-        example: Some(Example { invocation: "ctx.dirty_packages_list", result: "- claudine" }),
+        example: Some(Example { invocation: "ctx.dirty_packages_list", result: "- claudine", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -898,7 +898,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Packages",
         order: 3,
 
-        example: Some(Example { invocation: "ctx.dirty_package_areas", result: "claudine" }),
+        example: Some(Example { invocation: "ctx.dirty_package_areas", result: "claudine", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -910,7 +910,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Packages",
         order: 4,
 
-        example: Some(Example { invocation: "ctx.dirty_package_areas_list", result: "- claudine" }),
+        example: Some(Example { invocation: "ctx.dirty_package_areas_list", result: "- claudine", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -922,7 +922,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Packages",
         order: 5,
 
-        example: Some(Example { invocation: "ctx.staged_packages", result: "claudine" }),
+        example: Some(Example { invocation: "ctx.staged_packages", result: "claudine", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -934,7 +934,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Packages",
         order: 6,
 
-        example: Some(Example { invocation: "ctx.staged_packages_list", result: "- claudine" }),
+        example: Some(Example { invocation: "ctx.staged_packages_list", result: "- claudine", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -946,7 +946,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Packages",
         order: 7,
 
-        example: Some(Example { invocation: "ctx.staged_package_areas", result: "claudine" }),
+        example: Some(Example { invocation: "ctx.staged_package_areas", result: "claudine", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -958,7 +958,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Packages",
         order: 8,
 
-        example: Some(Example { invocation: "ctx.staged_package_areas_list", result: "- claudine" }),
+        example: Some(Example { invocation: "ctx.staged_package_areas_list", result: "- claudine", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -970,7 +970,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Flags",
         order: 1,
 
-        example: Some(Example { invocation: "ctx.current_package_has_staged_files", result: "false" }),
+        example: Some(Example { invocation: "ctx.current_package_has_staged_files", result: "false", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -982,7 +982,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Flags",
         order: 2,
 
-        example: Some(Example { invocation: "ctx.current_package_area_has_staged_files", result: "false" }),
+        example: Some(Example { invocation: "ctx.current_package_area_has_staged_files", result: "false", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -994,7 +994,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Flags",
         order: 3,
 
-        example: Some(Example { invocation: "ctx.current_package_has_dirty_files", result: "true" }),
+        example: Some(Example { invocation: "ctx.current_package_has_dirty_files", result: "true", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -1006,7 +1006,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "Flags",
         order: 4,
 
-        example: Some(Example { invocation: "ctx.current_package_area_has_dirty_files", result: "true" }),
+        example: Some(Example { invocation: "ctx.current_package_area_has_dirty_files", result: "true", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     // ── Languages ───────────────────────────────────────────────────
@@ -1019,7 +1019,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         order: 1,
 
 
-        example: Some(Example { invocation: "ctx.programming_languages_in_repo", result: "Rust, TypeScript" }),
+        example: Some(Example { invocation: "ctx.programming_languages_in_repo", result: "Rust, TypeScript", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -1031,7 +1031,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 2,
 
-        example: Some(Example { invocation: "ctx.programming_language", result: "Rust" }),
+        example: Some(Example { invocation: "ctx.programming_language", result: "Rust", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -1043,7 +1043,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 3,
 
-        example: Some(Example { invocation: "ctx.package_manager", result: "cargo" }),
+        example: Some(Example { invocation: "ctx.package_manager", result: "cargo", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     // ── Documents ───────────────────────────────────────────────────
@@ -1056,7 +1056,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 1,
 
-        example: Some(Example { invocation: "ctx.docs_readme", result: "README.md, claudine/README.md" }),
+        example: Some(Example { invocation: "ctx.docs_readme", result: "README.md, claudine/README.md", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -1068,7 +1068,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 2,
 
-        example: Some(Example { invocation: "ctx.docs_blast_radius", result: "claudine/features/plan.md" }),
+        example: Some(Example { invocation: "ctx.docs_blast_radius", result: "claudine/features/plan.md", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -1080,7 +1080,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 3,
 
-        example: Some(Example { invocation: "ctx.docs_drift", result: "claudine/features/plan.md" }),
+        example: Some(Example { invocation: "ctx.docs_drift", result: "claudine/features/plan.md", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -1092,7 +1092,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 4,
 
-        example: Some(Example { invocation: "ctx.docs_skill", result: ".claude/skills/claudine/SKILL.md" }),
+        example: Some(Example { invocation: "ctx.docs_skill", result: ".claude/skills/claudine/SKILL.md", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     // ── Operating System ────────────────────────────────────────────
@@ -1105,7 +1105,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 1,
 
-        example: Some(Example { invocation: "ctx.os", result: "macOS" }),
+        example: Some(Example { invocation: "ctx.os", result: "macOS", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -1117,7 +1117,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 2,
 
-        example: Some(Example { invocation: "ctx.os_distro", result: "macOS" }),
+        example: Some(Example { invocation: "ctx.os_distro", result: "macOS", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -1129,7 +1129,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 3,
 
-        example: Some(Example { invocation: "ctx.os_package_manager", result: "brew" }),
+        example: Some(Example { invocation: "ctx.os_package_manager", result: "brew", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -1141,7 +1141,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 4,
 
-        example: Some(Example { invocation: "ctx.os_version", result: "14.5" }),
+        example: Some(Example { invocation: "ctx.os_version", result: "14.5", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     // ── Hardware ────────────────────────────────────────────────────
@@ -1154,7 +1154,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 1,
 
-        example: Some(Example { invocation: "ctx.memory_total", result: "32 GB" }),
+        example: Some(Example { invocation: "ctx.memory_total", result: "32 GB", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -1166,7 +1166,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 2,
 
-        example: Some(Example { invocation: "ctx.memory_used", result: "45%" }),
+        example: Some(Example { invocation: "ctx.memory_used", result: "45%", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -1178,7 +1178,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 3,
 
-        example: Some(Example { invocation: "ctx.memory_avail", result: "18 GB" }),
+        example: Some(Example { invocation: "ctx.memory_avail", result: "18 GB", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -1190,7 +1190,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 4,
 
-        example: Some(Example { invocation: "ctx.cpu_cores", result: "12" }),
+        example: Some(Example { invocation: "ctx.cpu_cores", result: "12", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -1202,7 +1202,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 5,
 
-        example: Some(Example { invocation: "ctx.cpu_arch", result: "arm64" }),
+        example: Some(Example { invocation: "ctx.cpu_arch", result: "arm64", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -1214,7 +1214,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 6,
 
-        example: Some(Example { invocation: "ctx.gpu", result: "Apple M3 Max" }),
+        example: Some(Example { invocation: "ctx.gpu", result: "Apple M3 Max", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     // ── Agent ───────────────────────────────────────────────────────
@@ -1227,7 +1227,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 1,
 
-        example: Some(Example { invocation: "ctx.agent", result: "opencode" }),
+        example: Some(Example { invocation: "ctx.agent", result: "opencode", verification: ExampleVerification::TypeShapeOnly }),
 
     },
     ContextVariableDescriptor {
@@ -1239,7 +1239,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
         subsection: "",
         order: 2,
 
-        example: Some(Example { invocation: "ctx.model", result: "kimi-for-coding/k2p7" }),
+        example: Some(Example { invocation: "ctx.model", result: "kimi-for-coding/k2p7", verification: ExampleVerification::TypeShapeOnly }),
 
     },
 ];
@@ -1321,6 +1321,26 @@ mod tests {
         // that intentionally captures, and it lives in the test module.)
         let _ = context_variable_descriptors();
         // If we reach here without panicking or hanging, the test passes.
+    }
+
+    /// Context-variable examples illustrate shape only: live values are
+    /// environment-dependent, so every example must declare `TypeShapeOnly`.
+    #[test]
+    fn every_context_example_is_type_shape_only() {
+        use crate::catalog::ExampleVerification;
+        let mut offenders = Vec::new();
+        for d in CONTEXT_VARIABLE_DESCRIPTORS {
+            match d.example() {
+                Some(example)
+                    if matches!(example.verification, ExampleVerification::TypeShapeOnly) => {}
+                Some(_) => offenders.push(d.name),
+                None => offenders.push(d.name),
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "context descriptors must use TypeShapeOnly examples: {offenders:?}"
+        );
     }
 }
 

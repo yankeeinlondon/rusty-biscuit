@@ -4,7 +4,7 @@
 //! available in Darkmatter expressions. The catalog is a static, compile-time
 //! constant — constructing or reading it performs no host probes, no I/O, and
 //! no runtime context capture.
-use crate::catalog::{Described, Example};
+use crate::catalog::{Described, Example, ExampleVerification};
 
 
 /// Descriptor for a single expression function.
@@ -50,7 +50,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Type Predicates",
         order: 1,
 
-        example: Some(Example { invocation: "is_string(\"hello\")", result: "true" }),
+        example: Some(Example { invocation: "is_string(\"hello\")", result: "true", verification: ExampleVerification::Executable }),
  },
     ExpressionFunctionDescriptor {
 
@@ -59,7 +59,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Type Predicates",
         order: 2,
 
-        example: Some(Example { invocation: "is_number(42)", result: "true" }),
+        example: Some(Example { invocation: "is_number(42)", result: "true", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -69,7 +69,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Type Predicates",
         order: 3,
 
-        example: Some(Example { invocation: "is_array(items)", result: "true" }),
+        example: Some(Example { invocation: "is_array(items)", result: "true", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -79,7 +79,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Type Predicates",
         order: 4,
 
-        example: Some(Example { invocation: "is_null(null)", result: "true" }),
+        example: Some(Example { invocation: "is_null(null)", result: "true", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -89,7 +89,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Type Predicates",
         order: 5,
 
-        example: Some(Example { invocation: "is_object(obj)", result: "true" }),
+        example: Some(Example { invocation: "is_object(obj)", result: "true", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -99,7 +99,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Type Predicates",
         order: 6,
 
-        example: Some(Example { invocation: "is_empty(\"\")", result: "true" }),
+        example: Some(Example { invocation: "is_empty(\"\")", result: "true", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -109,7 +109,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Type Predicates",
         order: 7,
 
-        example: Some(Example { invocation: "is_positive(5)", result: "true" }),
+        example: Some(Example { invocation: "is_positive(5)", result: "true", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -119,7 +119,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Type Predicates",
         order: 8,
 
-        example: Some(Example { invocation: "is_negative(-3)", result: "true" }),
+        example: Some(Example { invocation: "is_negative(-3)", result: "true", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -129,7 +129,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Type Predicates",
         order: 9,
 
-        example: Some(Example { invocation: "is_integer(7)", result: "true" }),
+        example: Some(Example { invocation: "is_integer(7)", result: "true", verification: ExampleVerification::Executable }),
 
     },
     // ── Math ────────────────────────────────────────────────────────
@@ -140,7 +140,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Math",
         order: 1,
 
-        example: Some(Example { invocation: "min(2, 5)", result: "2" }),
+        example: Some(Example { invocation: "min(2, 5)", result: "2", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -150,7 +150,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Math",
         order: 2,
 
-        example: Some(Example { invocation: "max(2, 5)", result: "5" }),
+        example: Some(Example { invocation: "max(2, 5)", result: "5", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -160,7 +160,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Math",
         order: 3,
 
-        example: Some(Example { invocation: "abs(-3)", result: "3" }),
+        example: Some(Example { invocation: "abs(-3)", result: "3", verification: ExampleVerification::Executable }),
 
     },
     // ── Collection ──────────────────────────────────────────────────
@@ -171,7 +171,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Collection",
         order: 1,
 
-        example: Some(Example { invocation: "first(items)", result: "1" }),
+        example: Some(Example { invocation: "first(items)", result: "1", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -181,7 +181,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Collection",
         order: 2,
 
-        example: Some(Example { invocation: "last(items)", result: "3" }),
+        example: Some(Example { invocation: "last(items)", result: "3", verification: ExampleVerification::Executable }),
 
     },
     // ── String Predicates ───────────────────────────────────────────
@@ -192,7 +192,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "String Predicates",
         order: 1,
 
-        example: Some(Example { invocation: "starts_with(\"hello\", \"he\")", result: "true" }),
+        example: Some(Example { invocation: "starts_with(\"hello\", \"he\")", result: "true", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -202,7 +202,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "String Predicates",
         order: 2,
 
-        example: Some(Example { invocation: "ends_with(\"hello\", \"lo\")", result: "true" }),
+        example: Some(Example { invocation: "ends_with(\"hello\", \"lo\")", result: "true", verification: ExampleVerification::Executable }),
 
     },
     // ── String Mutations ────────────────────────────────────────────
@@ -213,7 +213,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "String Mutations",
         order: 1,
 
-        example: Some(Example { invocation: "lower(\"HELLO\")", result: "hello" }),
+        example: Some(Example { invocation: "lower(\"HELLO\")", result: "hello", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -223,7 +223,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "String Mutations",
         order: 2,
 
-        example: Some(Example { invocation: "upper(\"hello\")", result: "HELLO" }),
+        example: Some(Example { invocation: "upper(\"hello\")", result: "HELLO", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -233,7 +233,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "String Mutations",
         order: 3,
 
-        example: Some(Example { invocation: "capitalize(\"hello\")", result: "Hello" }),
+        example: Some(Example { invocation: "capitalize(\"hello\")", result: "Hello", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -243,7 +243,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "String Mutations",
         order: 4,
 
-        example: Some(Example { invocation: "kebab_case(\"Hello World\")", result: "hello-world" }),
+        example: Some(Example { invocation: "kebab_case(\"Hello World\")", result: "hello-world", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -253,7 +253,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "String Mutations",
         order: 5,
 
-        example: Some(Example { invocation: "snake_case(\"Hello World\")", result: "hello_world" }),
+        example: Some(Example { invocation: "snake_case(\"Hello World\")", result: "hello_world", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -263,7 +263,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "String Mutations",
         order: 6,
 
-        example: Some(Example { invocation: "camel_case(\"hello world\")", result: "helloWorld" }),
+        example: Some(Example { invocation: "camel_case(\"hello world\")", result: "helloWorld", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -273,7 +273,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "String Mutations",
         order: 7,
 
-        example: Some(Example { invocation: "pascal_case(\"hello world\")", result: "HelloWorld" }),
+        example: Some(Example { invocation: "pascal_case(\"hello world\")", result: "HelloWorld", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -283,7 +283,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "String Mutations",
         order: 8,
 
-        example: Some(Example { invocation: "title_case(\"hello world\")", result: "Hello World" }),
+        example: Some(Example { invocation: "title_case(\"hello world\")", result: "Hello World", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -293,7 +293,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "String Mutations",
         order: 9,
 
-        example: Some(Example { invocation: "without_date(\"Note 2024-06-15\")", result: "Note " }),
+        example: Some(Example { invocation: "without_date(\"Note 2024-06-15\")", result: "Note ", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -303,7 +303,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "String Mutations",
         order: 10,
 
-        example: Some(Example { invocation: "ensure_leading(\"world\", \"hello \")", result: "hello world" }),
+        example: Some(Example { invocation: "ensure_leading(\"world\", \"hello \")", result: "hello world", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -313,7 +313,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "String Mutations",
         order: 11,
 
-        example: Some(Example { invocation: "ensure_trailing(\"hello\", \" world\")", result: "hello world" }),
+        example: Some(Example { invocation: "ensure_trailing(\"hello\", \" world\")", result: "hello world", verification: ExampleVerification::Executable }),
 
     },
     // ── Rendering ───────────────────────────────────────────────────
@@ -324,7 +324,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Rendering",
         order: 1,
 
-        example: Some(Example { invocation: "terminal(\"hello\")", result: "hello" }),
+        example: Some(Example { invocation: "terminal(\"hello\")", result: "hello", verification: ExampleVerification::Executable }),
 
     },
     // ── Date Formatting ─────────────────────────────────────────────
@@ -335,7 +335,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Date Formatting",
         order: 1,
 
-        example: Some(Example { invocation: "date(\"2024-06-15\", \"long\")", result: "Sat, June 15th, 2024" }),
+        example: Some(Example { invocation: "date(\"2024-06-15\", \"long\")", result: "Sat, June 15th, 2024", verification: ExampleVerification::Executable }),
 
     },
     // ── Date Validators (Strict) ────────────────────────────────────
@@ -346,7 +346,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Date Validators",
         order: 1,
 
-        example: Some(Example { invocation: "is_date(\"2024-06-15\")", result: "true" }),
+        example: Some(Example { invocation: "is_date(\"2024-06-15\")", result: "true", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -356,7 +356,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Date Validators",
         order: 2,
 
-        example: Some(Example { invocation: "is_date_utc(\"2024-06-15\")", result: "true" }),
+        example: Some(Example { invocation: "is_date_utc(\"2024-06-15\")", result: "true", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -366,7 +366,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Date Validators",
         order: 3,
 
-        example: Some(Example { invocation: "is_date_time(\"2024-06-15T12:30:00\")", result: "true" }),
+        example: Some(Example { invocation: "is_date_time(\"2024-06-15T12:30:00\")", result: "true", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -376,7 +376,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Date Validators",
         order: 4,
 
-        example: Some(Example { invocation: "is_date_time_utc(\"2024-06-15T12:30:00Z\")", result: "true" }),
+        example: Some(Example { invocation: "is_date_time_utc(\"2024-06-15T12:30:00Z\")", result: "true", verification: ExampleVerification::Executable }),
 
     },
     // ── Date Validators (Relative) ──────────────────────────────────
@@ -387,7 +387,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Date Validators",
         order: 5,
 
-        example: None // display-only: Result depends on the current wall-clock date.,
+        example: Some(Example { invocation: "is_today(\"2024-06-15\")", result: "true", verification: ExampleVerification::DisplayOnly("wall-clock dependent") }),
 
     },
     ExpressionFunctionDescriptor {
@@ -397,7 +397,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Date Validators",
         order: 6,
 
-        example: None // display-only: Result depends on the current wall-clock date.,
+        example: Some(Example { invocation: "is_today_utc(\"2024-06-15\")", result: "true", verification: ExampleVerification::DisplayOnly("wall-clock dependent") }),
 
     },
     ExpressionFunctionDescriptor {
@@ -407,7 +407,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Date Validators",
         order: 7,
 
-        example: None // display-only: Result depends on the current wall-clock date.,
+        example: Some(Example { invocation: "is_yesterday(\"2024-06-14\")", result: "true", verification: ExampleVerification::DisplayOnly("wall-clock dependent") }),
 
     },
     ExpressionFunctionDescriptor {
@@ -417,7 +417,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Date Validators",
         order: 8,
 
-        example: None // display-only: Result depends on the current wall-clock date.,
+        example: Some(Example { invocation: "is_yesterday_utc(\"2024-06-14\")", result: "true", verification: ExampleVerification::DisplayOnly("wall-clock dependent") }),
 
     },
     ExpressionFunctionDescriptor {
@@ -427,7 +427,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Date Validators",
         order: 9,
 
-        example: None // display-only: Result depends on the current wall-clock date.,
+        example: Some(Example { invocation: "is_tomorrow(\"2024-06-16\")", result: "true", verification: ExampleVerification::DisplayOnly("wall-clock dependent") }),
 
     },
     ExpressionFunctionDescriptor {
@@ -437,7 +437,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Date Validators",
         order: 10,
 
-        example: None // display-only: Result depends on the current wall-clock date.,
+        example: Some(Example { invocation: "is_tomorrow_utc(\"2024-06-16\")", result: "true", verification: ExampleVerification::DisplayOnly("wall-clock dependent") }),
 
     },
     ExpressionFunctionDescriptor {
@@ -447,7 +447,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Date Validators",
         order: 11,
 
-        example: None // display-only: Result depends on the current wall-clock date.,
+        example: Some(Example { invocation: "is_this_month(\"2024-06-15\")", result: "true", verification: ExampleVerification::DisplayOnly("wall-clock dependent") }),
 
     },
     ExpressionFunctionDescriptor {
@@ -457,7 +457,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Date Validators",
         order: 12,
 
-        example: None // display-only: Result depends on the current wall-clock date.,
+        example: Some(Example { invocation: "is_this_month_utc(\"2024-06-15\")", result: "true", verification: ExampleVerification::DisplayOnly("wall-clock dependent") }),
 
     },
     ExpressionFunctionDescriptor {
@@ -467,7 +467,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Date Validators",
         order: 13,
 
-        example: None // display-only: Result depends on the current wall-clock date.,
+        example: Some(Example { invocation: "is_this_year(\"2024-06-15\")", result: "true", verification: ExampleVerification::DisplayOnly("wall-clock dependent") }),
 
     },
     ExpressionFunctionDescriptor {
@@ -477,7 +477,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Date Validators",
         order: 14,
 
-        example: None // display-only: Result depends on the current wall-clock date.,
+        example: Some(Example { invocation: "is_this_year_utc(\"2024-06-15\")", result: "true", verification: ExampleVerification::DisplayOnly("wall-clock dependent") }),
 
     },
     // ── Core Operators (in evaluate_function) ───────────────────────
@@ -488,7 +488,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Logical",
         order: 1,
 
-        example: Some(Example { invocation: "and(true, true)", result: "true" }),
+        example: Some(Example { invocation: "and(true, true)", result: "true", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -498,7 +498,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Logical",
         order: 2,
 
-        example: Some(Example { invocation: "or(false, true)", result: "true" }),
+        example: Some(Example { invocation: "or(false, true)", result: "true", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -508,7 +508,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Collection",
         order: 3,
 
-        example: Some(Example { invocation: "has_key(obj, \"a\")", result: "true" }),
+        example: Some(Example { invocation: "has_key(obj, \"a\")", result: "true", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -518,7 +518,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Collection",
         order: 4,
 
-        example: Some(Example { invocation: "contains(\"hello\", \"ell\")", result: "true" }),
+        example: Some(Example { invocation: "contains(\"hello\", \"ell\")", result: "true", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -528,7 +528,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Collection",
         order: 5,
 
-        example: Some(Example { invocation: "length(\"hello\")", result: "5" }),
+        example: Some(Example { invocation: "length(\"hello\")", result: "5", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -538,7 +538,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Type Conversion",
         order: 1,
 
-        example: Some(Example { invocation: "number(\"42\")", result: "42" }),
+        example: Some(Example { invocation: "number(\"42\")", result: "42", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -548,7 +548,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Math",
         order: 4,
 
-        example: Some(Example { invocation: "round(3.7)", result: "4" }),
+        example: Some(Example { invocation: "round(3.7)", result: "4", verification: ExampleVerification::Executable }),
 
     },
     // ── Filesystem Functions ────────────────────────────────────────
@@ -559,7 +559,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 1,
 
-        example: None // display-only: Result depends on the absolute path of the resolution context, which is not portable.,
+        example: Some(Example { invocation: "absolute(\"fixture.md\")", result: "/path/to/fixture.md", verification: ExampleVerification::DisplayOnly("resolves to an absolute path of the resolution context, which is not portable") }),
 
     },
     ExpressionFunctionDescriptor {
@@ -569,7 +569,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 2,
 
-        example: Some(Example { invocation: "relative(\"fixture.md\")", result: "fixture.md" }),
+        example: Some(Example { invocation: "relative(\"fixture.md\")", result: "fixture.md", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -579,7 +579,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 3,
 
-        example: Some(Example { invocation: "file_exists(\"fixture.md\")", result: "true" }),
+        example: Some(Example { invocation: "file_exists(\"fixture.md\")", result: "true", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -589,7 +589,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 4,
 
-        example: Some(Example { invocation: "frontmatter(\"fixture.md\")", result: "{\"title\":\"Fixture Title\"}" }),
+        example: Some(Example { invocation: "frontmatter(\"fixture.md\")", result: "{\"title\":\"Fixture Title\"}", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -599,7 +599,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 5,
 
-        example: Some(Example { invocation: "frontmatter(\"fixture.md\", \"title\")", result: "Fixture Title" }),
+        example: Some(Example { invocation: "frontmatter(\"fixture.md\", \"title\")", result: "Fixture Title", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -609,7 +609,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 6,
 
-        example: Some(Example { invocation: "markdown_body_empty(\"fixture.md\")", result: "false" }),
+        example: Some(Example { invocation: "markdown_body_empty(\"fixture.md\")", result: "false", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -619,7 +619,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 7,
 
-        example: Some(Example { invocation: "markdown_title(\"fixture.md\")", result: "Fixture Title" }),
+        example: Some(Example { invocation: "markdown_title(\"fixture.md\")", result: "Fixture Title", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -629,7 +629,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 8,
 
-        example: Some(Example { invocation: "validate_schema(\"fixture.md\")", result: "true" }),
+        example: Some(Example { invocation: "validate_schema(\"fixture.md\")", result: "true", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -639,7 +639,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 9,
 
-        example: None,
+        example: Some(Example { invocation: "validate_schema(\"fixture.md\", {})", result: "true", verification: ExampleVerification::DisplayOnly("forward-compatible overload with no evaluable behavior yet") }),
 
     },
     ExpressionFunctionDescriptor {
@@ -649,7 +649,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 10,
 
-        example: Some(Example { invocation: "is_indexed_file(\"review-1.md\")", result: "true" }),
+        example: Some(Example { invocation: "is_indexed_file(\"review-1.md\")", result: "true", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -659,7 +659,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 11,
 
-        example: Some(Example { invocation: "file_index(\"review-1.md\")", result: "1" }),
+        example: Some(Example { invocation: "file_index(\"review-1.md\")", result: "1", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -669,7 +669,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 12,
 
-        example: Some(Example { invocation: "increment_file_index(\"review-1.md\")", result: "review-2.md" }),
+        example: Some(Example { invocation: "increment_file_index(\"review-1.md\")", result: "review-2.md", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -679,7 +679,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 13,
 
-        example: Some(Example { invocation: "decrement_file_index(\"review-2.md\")", result: "review-1.md" }),
+        example: Some(Example { invocation: "decrement_file_index(\"review-2.md\")", result: "review-1.md", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -689,7 +689,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 14,
 
-        example: Some(Example { invocation: "basename(\"sub/note.md\")", result: "note.md" }),
+        example: Some(Example { invocation: "basename(\"sub/note.md\")", result: "note.md", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -699,7 +699,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 15,
 
-        example: Some(Example { invocation: "basename_without_index(\"review-1.md\")", result: "review.md" }),
+        example: Some(Example { invocation: "basename_without_index(\"review-1.md\")", result: "review.md", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -709,7 +709,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 16,
 
-        example: Some(Example { invocation: "dir(\"sub/note.md\")", result: "sub" }),
+        example: Some(Example { invocation: "dir(\"sub/note.md\")", result: "sub", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -719,7 +719,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 17,
 
-        example: Some(Example { invocation: "ext(\"sub/note.md\")", result: "md" }),
+        example: Some(Example { invocation: "ext(\"sub/note.md\")", result: "md", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -729,7 +729,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 18,
 
-        example: Some(Example { invocation: "parent_dir(\"sub/note.md\")", result: "sub" }),
+        example: Some(Example { invocation: "parent_dir(\"sub/note.md\")", result: "sub", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -739,7 +739,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 19,
 
-        example: Some(Example { invocation: "file_trailing(\"sub/note.md\")", result: "sub/note.md" }),
+        example: Some(Example { invocation: "file_trailing(\"sub/note.md\")", result: "sub/note.md", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -749,7 +749,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 20,
 
-        example: Some(Example { invocation: "dir_leading(\"sub/note.md\")", result: "" }),
+        example: Some(Example { invocation: "dir_leading(\"sub/note.md\")", result: "", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -759,7 +759,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 21,
 
-        example: Some(Example { invocation: "join(\"sub\", \"note.md\")", result: "sub/note.md" }),
+        example: Some(Example { invocation: "join(\"sub\", \"note.md\")", result: "sub/note.md", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -769,7 +769,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 22,
 
-        example: None // display-only: Result includes an absolute path, which is not portable.,
+        example: Some(Example { invocation: "link(\"fixture.md\")", result: "[fixture.md](/path/to/fixture.md)", verification: ExampleVerification::DisplayOnly("result includes an absolute path, which is not portable") }),
 
     },
     ExpressionFunctionDescriptor {
@@ -779,7 +779,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Filesystem",
         order: 23,
 
-        example: None // display-only: Result includes an absolute destination path, which is not portable.,
+        example: Some(Example { invocation: "link(\"fixture.md\", \"Fixture\")", result: "[Fixture](/path/to/fixture.md)", verification: ExampleVerification::DisplayOnly("result includes an absolute destination path, which is not portable") }),
 
     },
     ExpressionFunctionDescriptor {
@@ -789,7 +789,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Context",
         order: 1,
 
-        example: None // display-only: Depends on agent-specific skill roots outside the tempdir fixture.,
+        example: Some(Example { invocation: "has_skill(\"darkmatter\")", result: "true", verification: ExampleVerification::DisplayOnly("depends on agent-specific skill roots outside the tempdir fixture") }),
 
     },
     ExpressionFunctionDescriptor {
@@ -799,7 +799,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         category: "Context",
         order: 2,
 
-        example: None // display-only: Depends on agent-specific skill roots outside the tempdir fixture.,
+        example: Some(Example { invocation: "has_local_skill(\"darkmatter\")", result: "true", verification: ExampleVerification::DisplayOnly("depends on agent-specific skill roots outside the tempdir fixture") }),
 
     },
 ];
@@ -807,6 +807,36 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
 /// Returns all expression function descriptors in display order.
 pub fn expression_function_descriptors() -> &'static [ExpressionFunctionDescriptor] {
     EXPRESSION_FUNCTION_DESCRIPTORS
+}
+
+/// Generates a Markdown function-reference table from the expression catalog.
+///
+/// The output is a single table with `Category`, `Function`, `Description`, and
+/// `Example` columns, suitable for embedding in `darkmatter-expressions.md`.
+/// Only machine-executed (`Executable`) examples populate the example cell;
+/// display-only examples are illustrative metadata, not verified results, so
+/// their cell is left empty.
+pub fn generate_expression_function_table() -> String {
+    let mut out = String::new();
+    out.push_str("| Category | Function | Description | Example |\n");
+    out.push_str("| --- | --- | --- | --- |\n");
+    for d in EXPRESSION_FUNCTION_DESCRIPTORS {
+        let example = match d.example() {
+            Some(ex) if ex.verification == ExampleVerification::Executable => {
+                format!("`{}` ⇒ `{}`", ex.invocation, ex.result)
+            }
+            _ => String::new(),
+        };
+        let description = d.description().replace('|', "\\|");
+        out.push_str(&format!(
+            "| {} | `{}` | {} | {} |\n",
+            d.category(),
+            d.key(),
+            description,
+            example
+        ));
+    }
+    out
 }
 
 #[cfg(test)]
@@ -1018,6 +1048,53 @@ mod tests {
         let _ = expression_function_descriptors();
     }
 
+    /// Every expression descriptor that carries an example must declare it
+    /// `Executable` or `DisplayOnly` — never `TypeShapeOnly`. Expression
+    /// functions are deterministic enough to either be executed or to carry a
+    /// documented opt-out reason; a "type shape only" example would be an
+    /// un-audited, un-explained middle ground.
+    #[test]
+    fn every_expression_example_is_executable_or_display_only() {
+        use crate::catalog::ExampleVerification;
+        let mut offenders = Vec::new();
+        for d in EXPRESSION_FUNCTION_DESCRIPTORS {
+            if let Some(example) = d.example()
+                && matches!(example.verification, ExampleVerification::TypeShapeOnly)
+            {
+                offenders.push(d.signature);
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "expression descriptors must not use TypeShapeOnly: {offenders:?}"
+        );
+    }
+
+    /// The generated function table in `darkmatter-expressions.md` must match
+    /// the catalog output exactly.
+    #[test]
+    fn narrative_doc_function_table_matches_catalog() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let doc_path = manifest_dir
+            .join("../../darkmatter/docs/topics/darkmatter-expressions.md");
+        let content = std::fs::read_to_string(&doc_path)
+            .expect("darkmatter-expressions.md should be readable");
+
+        const START: &str = "<!-- BEGIN GENERATED FUNCTION TABLE -->";
+        const END: &str = "<!-- END GENERATED FUNCTION TABLE -->";
+
+        let start = content.find(START).expect("start marker should exist") + START.len();
+        let end = content.find(END).expect("end marker should exist");
+
+        let doc_table = content[start..end].trim();
+        let generated = generate_expression_function_table().trim().to_string();
+
+        assert_eq!(
+            doc_table, generated,
+            "function table in darkmatter-expressions.md does not match generated output"
+        );
+    }
+
     /// Claudine anti-drift: every function added by this feature must remain
     /// present in the exported expression catalog (`claudine context --expressions`).
     ///
@@ -1126,10 +1203,17 @@ mod phase2_tests {
 
     #[test]
     fn every_example_evaluates_to_its_declared_result() {
+        use crate::catalog::ExampleVerification;
         let (_dir, lookup) = make_fixture();
         let mut failures = Vec::new();
         for d in EXPRESSION_FUNCTION_DESCRIPTORS {
             let Some(example) = d.example() else { continue };
+            // Only `Executable` examples are asserted to evaluate to their
+            // declared result; display-only examples are illustrative and not
+            // run.
+            if example.verification != ExampleVerification::Executable {
+                continue;
+            }
             let expr = match parse(example.invocation) {
                 Ok(e) => e,
                 Err(err) => {
