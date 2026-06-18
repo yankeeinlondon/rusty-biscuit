@@ -1,6 +1,6 @@
 ---
-reviewed: false
-status: draft — needs review before planning
+reviewed: true
+status: ready for planning and implementation
 supersedes: "2026-06-14-more-repo/spec.md › Fix `sniff repo version`"
 ---
 
@@ -74,6 +74,13 @@ The reference implementation is `handle_repo_test_runner`
 Version follows the same shape, substituting "version + manifest source"
 for "runner + evidence source".
 
+Reader note: the original focused JSON contract was
+`{ "version": string | null }`. This spec intentionally changes the focused
+command to `{ "versions": [...] }` because the command now answers a scoped
+package-catalog question and can legitimately return more than one value.
+Keep the bare `sniff repo --json` aggregate's top-level
+`version: string | null` for compatibility.
+
 ### Library
 
 Add to `sniff/lib/src/filesystem/repo/aggregate.rs` (or a sibling
@@ -82,6 +89,7 @@ Add to `sniff/lib/src/filesystem/repo/aggregate.rs` (or a sibling
 
 ```rust
 /// Where a package's version was read from.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VersionSource {
     /// Manifest filename the version was read from
     /// (`Cargo.toml`, `package.json`, `pyproject.toml`).
@@ -93,12 +101,22 @@ pub struct VersionSource {
     pub inherited: bool,
 }
 
+/// One physical version source, grouped with the packages that used it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VersionSourceAttribution {
+    pub source: VersionSource,
+    /// In-scope packages that read this version from this source.
+    pub packages: Vec<String>,
+}
+
 /// A distinct version value across a scope, with the packages that carry it.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VersionAttribution {
     pub version: String,
-    pub source: VersionSource,
     /// In-scope packages contributing this exact version (first-seen order).
     pub packages: Vec<String>,
+    /// Distinct manifest sources contributing this exact version.
+    pub sources: Vec<VersionSourceAttribution>,
 }
 
 /// Collapse per-package versions across `scope` into distinct entries.
@@ -113,25 +131,30 @@ pub fn aggregate_versions(
 ```
 
 - Collapse key: the **version string** (so uniform repos collapse to one
-  entry). When a single entry's packages all share one `VersionSource`, that
-  source is carried; when they differ, carry the first-seen source and rely on
-  the multi-package attribution (same disambiguation rule as
-  `aggregate_test_runners`: name a single package only when `packages.len() == 1`).
-- Reuse `in_scope` (`aggregate.rs:227`) unchanged.
+  entry). Source evidence is grouped separately in `sources`, keyed by
+  `(manifest, path, inherited)`, so JSON never implies that a version came from
+  only one manifest when several packages read the same value from different
+  manifests.
+- Reuse the same scope predicate as `aggregate_test_runners`. Since
+  `in_scope` is currently private in `aggregate.rs`, either keep
+  `aggregate_versions` in that module or extract a small private helper shared
+  by both aggregation functions. Do not duplicate divergent scope semantics.
 
 **Capturing `VersionSource`.** `resolve_package_version` (`detection.rs:733`)
 currently returns only `Option<String>` and discards which manifest it read.
-Two acceptable approaches — planner to choose:
+Use approach A unless implementation proves a concrete gap:
 
-- **(A, preferred) Derive at aggregation time.** `VersionSource.manifest` is
-  fully determined by `Package.ecosystem` (`types.rs`): Cargo→`Cargo.toml`,
-  npm→`package.json`, Python→`pyproject.toml`. The repo-relative path is
-  `Package.relative + "/" + manifest`. `inherited` requires re-reading the
-  manifest to check for `version.workspace = true`; do this lazily only when
-  needed. No schema change to `Package`.
-- **(B) Enrich detection.** Change `resolve_package_version` to also return the
-  source, and store it on `Package`. Heavier (touches the serialized `Package`
-  shape and every construction site); only do this if (A) proves insufficient.
+- **A, recommended: derive source at aggregation time by reusing manifest
+  parsing helpers.** Locate the same manifest that produced
+  `Package.version`, in the same priority order as `resolve_package_version`.
+  For Cargo, inspect the package manifest and, when `version.workspace = true`,
+  resolve the value from the workspace root. For npm and Python, use the
+  package root `package.json` / `pyproject.toml` when present. This avoids a
+  serialized `Package` schema change and keeps the implementation surgical.
+- **B: enrich detection.** Change `resolve_package_version` to return a
+  `(version, source)` pair and store source data on `Package`. This is more
+  direct but touches the public serialized package shape and every construction
+  site, so it should be used only if A cannot produce accurate source paths.
 
 **Workspace-inheritance robustness (Cargo).** `cargo_package_version`
 (`cargo.rs:194`) reads `[package].version` as a string and returns `None` for
@@ -141,6 +164,10 @@ unaffected, but other Cargo workspaces inherit. Resolve
 inheriting crates report the workspace version (with `inherited: true`). This
 belongs in the library version-resolution path, shared by detection and
 aggregation.
+
+When resolving workspace inheritance, do not shell out to Cargo. Parse TOML
+with the existing repo manifest parsing stack so the command remains
+cross-platform and non-networked.
 
 **Scope override resolver.** Add a helper that turns the CLI flags into an
 `AggregateScope`, validating named targets against the catalog:
@@ -158,7 +185,8 @@ pub fn resolve_scope_with_overrides(
 ```
 
 - `--all` → `AggregateScope::Repo`.
-- `--package <NAME>` → `AggregateScope::Package(NAME)` (error if no such package).
+- `--package <NAME>` → `AggregateScope::Package(NAME)` (error if no such
+  package; error as ambiguous if more than one catalog package has that name).
 - `--package-area <NAME>` → `AggregateScope::PackageArea(NAME)` (error if no such area).
 - none → `resolve_scope(info, cwd)` (`aggregate.rs:108`, today's behavior).
 - The three overrides are mutually exclusive (`conflicts_with_all` at the CLI
@@ -175,8 +203,9 @@ modeled on `handle_repo_test_runner` (`commands/repo.rs:503`):
 4. Entries:
    - Monorepo with packages → `aggregate_versions(packages, &scope)`.
    - Non-monorepo / no packages → resolve the directory's own manifest version
-     directly into a single `VersionAttribution` with empty `packages`
-     (the test-runner fallback shape).
+     directly into a single `VersionAttribution` with empty `packages` and one
+     source attribution when a manifest source is known (the test-runner
+     fallback shape).
 5. Render: `--json` → array shape (below); else text via a new
    `output/version_report.rs` mirroring `output/test_runner_report.rs`.
 6. Empty result → emit nothing on stdout, hint on stderr when not `--plain`,
@@ -205,6 +234,9 @@ Version {
 `--verbose`/`-v` and `--plain` are already global CLI flags (as for
 test-runner); the handler receives `verbose: u8` and `plain: bool`.
 
+The implementation must update the help examples in `args/mod.rs` that
+currently describe `sniff repo version --json` as `{ "version": "0.1.0" }`.
+
 ### Text rendering
 
 Mirror `test_runner_report.rs` exactly; substitute version for runner name.
@@ -225,6 +257,11 @@ Mirror `test_runner_report.rs` exactly; substitute version for runner name.
     root `Cargo.toml` rather than a single package, following the
     test-runner shared-config disambiguation (`entry_markup`,
     `test_runner_report.rs:108` — name a package only when `packages.len() == 1`).
+  - When one collapsed version has multiple manifest sources, verbose text
+    should not print a misleading first source. Render one concise source
+    detail only when `sources.len() == 1`; otherwise render a summary such as
+    `from 12 manifests` and include package names only for single-package
+    source groups.
   - `--plain` strips styling, as elsewhere.
 
 All terminal output goes through `Prose` / `biscuit-terminal`, never
@@ -238,15 +275,23 @@ Focused `sniff repo version --json` returns the array shape (mirrors
 ```jsonc
 { "versions": [
   { "version": "0.9.3",
-    "source": { "manifest": "package.json", "path": "web/package.json",
-                "href": "file://…/web/package.json", "inherited": false },
-    "packages": ["web"] }
+    "packages": ["web"],
+    "sources": [
+      { "manifest": "package.json",
+        "path": "web/package.json",
+        "href": "file://…/web/package.json",
+        "inherited": false,
+        "packages": ["web"] }
+    ] }
 ]}
 ```
 
 - Empty result → `{ "versions": [] }` on stdout; exit 1 unless `--no-error`.
 - The `--on-error` text applies to text mode only; `--json` stdout stays valid
   JSON (`{ "versions": [] }`), never a message string.
+- Remove or replace `output::repo_json::version_outcome`; leaving both focused
+  JSON builders around with different shapes invites accidental reuse of the
+  obsolete `{ "version": ... }` contract.
 
 ### Bare `sniff repo --json` aggregate — top-level `version`
 
@@ -263,6 +308,11 @@ aggregate's top-level `version` switches to the collapse. claudine's
 `repo --json` consumer reads `version` as `string | null` either way, so the
 type is unchanged — only the value improves.
 
+The aggregate builder currently assigns `identity.version.clone()` to
+`SniffRepo.version` in `output/repo_json.rs`; replace that assignment with a
+library-derived repo-scope collapse. Do not make the CLI JSON builder inspect
+package manifests itself.
+
 ## Out of scope
 
 - Reworking the bare `sniff repo --json` aggregate beyond the single
@@ -271,6 +321,8 @@ type is unchanged — only the value improves.
 - Adding version reporting for ecosystems Sniff does not already parse
   (Go remains `null`; JVM/.NET/PHP/Ruby/Elixir only if the existing parser
   reads them safely).
+- Adding registry lookups or "latest version" checks. This command reports
+  declared package versions only and must not perform network requests.
 - `--package` / `--package-area` semantics for any other `repo` subcommand
   (owned by `2026-05-07-repo-package-consistency`); this fix only adds them to
   `version`.
@@ -297,8 +349,11 @@ type is unchanged — only the value improves.
    `sniff/lib`; the CLI only selects scope/format and renders via
    `biscuit-terminal`.
 10. Library unit tests cover collapse (uniform, variant, single, empty,
-    workspace-inheritance) mirroring the `aggregate_test_runners` tests
-    (`aggregate.rs:383+`); CLI integration tests cover scope flags, formats,
-    verbose, and exit codes.
-11. The `sniff` skill's `repo version` line and the CLI README are updated to
-    the new scope/format/JSON contract.
+    multiple sources for the same version, and workspace-inheritance) mirroring
+    the `aggregate_test_runners` tests (`aggregate.rs:383+`); CLI integration
+    tests cover scope flags, formats, verbose, JSON shape, and exit codes.
+11. Bare `sniff repo --json` reports a top-level string only when repo-scope
+    aggregation finds exactly one distinct package version; it reports `null`
+    for zero or multiple distinct versions.
+12. The `sniff` skill's `repo version` line, CLI README, and relevant help
+    examples are updated to the new scope/format/JSON contract.
