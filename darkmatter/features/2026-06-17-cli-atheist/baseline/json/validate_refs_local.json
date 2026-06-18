@@ -1,15 +1,17 @@
 {
-  "is_valid": false,
+  "valid": false,
+  "references_scanned": 3,
+  "references_valid": 2,
   "issues": [
     {
       "code": "MissingLocalTarget",
-      "line": 4,
       "message": "Missing local target: ./img.png",
-      "reference_id": "14a3c3213bfc8b6c:4:39",
-      "severity": "error"
+      "severity": "error",
+      "kind": "image",
+      "reference": "./img.png",
+      "line": 4,
+      "source": "<TMP>/local.md"
     }
   ],
-  "references_scanned": 3,
-  "references_valid": 2,
   "warnings": []
 }

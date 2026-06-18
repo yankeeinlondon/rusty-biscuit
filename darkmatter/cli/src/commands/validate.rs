@@ -56,7 +56,14 @@ pub(crate) fn run_validate(target: ValidateTarget) -> Result<()> {
                     print_validation_report_text(&report, &input, show_all);
                 }
                 ValidateOutputFormat::Json => {
-                    print_validation_report_json(&report)?;
+                    // Serialize the library `ReferenceValidationReport`
+                    // directly. This is the same serde shape emitted by
+                    // `md graph --validate --json`'s `validation` block,
+                    // so the two CLI surfaces share one contract and
+                    // cannot drift (review-2 finding #2). The shape is
+                    // pinned by the baseline fixtures under
+                    // `darkmatter/features/2026-06-17-cli-atheist/baseline/json/`.
+                    println!("{}", serde_json::to_string_pretty(&report)?);
                 }
             }
 
@@ -69,6 +76,18 @@ pub(crate) fn run_validate(target: ValidateTarget) -> Result<()> {
     }
 }
 
+/// Prints the validation report in the legacy plain-text shape.
+///
+/// `md validate refs`'s text output is the *primary* per-issue report: it
+/// lists every issue (not just errors), it includes the scan/valid/issue
+/// counts at the top, and it stays readable in CI logs that strip ANSI.
+/// That is a different role from
+/// [`ValidationReportView`](darkmatter::markdown::reference::validate::ValidationReportView),
+/// which is a styled error-only summary used as a footer by
+/// `md graph --validate`. Routing `--format text` through the view would
+/// silently drop warnings, info-severity issues, the count header, and
+/// the success case (`ValidationReportView` renders empty when there are
+/// no errors), so the two surfaces are intentionally separate.
 fn print_validation_report_text(
     report: &darkmatter::markdown::reference::validate::ReferenceValidationReport,
     input: &std::path::Path,
@@ -112,39 +131,4 @@ fn print_validation_report_text(
             println!("WARN   {warning}");
         }
     }
-}
-
-fn print_validation_report_json(
-    report: &darkmatter::markdown::reference::validate::ReferenceValidationReport,
-) -> Result<()> {
-    use darkmatter::markdown::reference::validate::ReferenceSeverity;
-
-    let issues: Vec<serde_json::Value> = report
-        .issues
-        .iter()
-        .map(|i| {
-            serde_json::json!({
-                "code": format!("{:?}", i.code),
-                "message": i.message,
-                "severity": match i.severity {
-                    ReferenceSeverity::Error => "error",
-                    ReferenceSeverity::Warning => "warning",
-                    ReferenceSeverity::Info => "info",
-                },
-                "reference_id": i.reference_id,
-                "line": i.origin.line,
-            })
-        })
-        .collect();
-
-    let json = serde_json::json!({
-        "references_scanned": report.references_scanned,
-        "references_valid": report.references_valid,
-        "issues": issues,
-        "warnings": report.warnings,
-        "is_valid": report.is_valid(),
-    });
-
-    println!("{}", serde_json::to_string_pretty(&json)?);
-    Ok(())
 }

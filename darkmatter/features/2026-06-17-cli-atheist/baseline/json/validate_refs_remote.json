@@ -1,8 +1,8 @@
 {
-  "is_valid": true,
-  "issues": [],
+  "valid": true,
   "references_scanned": 1,
   "references_valid": 1,
+  "issues": [],
   "warnings": [
     "Remote URL not verified: https://example.com"
   ]
