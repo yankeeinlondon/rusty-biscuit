@@ -201,6 +201,13 @@ The highest-value gap to close.
 
 The cleanest case.
 
+- **Head start (post-`86fe86e2a`):** dispatch is now centralized through the
+  `PURE_FUNCTIONS` / `FS_FUNCTIONS` registries with `dispatchable_canonical_names()`,
+  and Layer 2 already has bidirectional parity tests
+  (`descriptor_name_set_equals_dispatchable_runtime_name_set`,
+  `lazy_operators_are_dispatchable`) keeping the descriptor set exactly equal to
+  the dispatchable runtime set. Reuse the registries to drive the example-eval
+  harness rather than re-deriving the executable function list.
 - New `cfg(test)` `every_example_evaluates_to_its_declared_result`: parse
   `example.invocation`, run it through the real `evaluate` pipeline, assert the
   rendered output equals `example.result`. A renamed handler or a wrong result
@@ -237,6 +244,18 @@ The cleanest case.
   enumerate a type's methods at compile time, so this *documents and reviews*
   the decision — it converts a silent omission into a named, reviewed list,
   which is the most achievable here.
+  - **Existing contract (post-`8d5c628c9`/`01cc40b45`):** the `effects/mod.rs`
+    and `effects/catalog.rs` module docs already establish that *"the descriptor
+    catalog is the authoritative capability surface — a method without a
+    descriptor is intentionally outside the surface until a descriptor adds
+    it."* That already encodes the intent of this allow-list in code. The
+    `EffectVerb`/`EFFECT_VERBS` harness is now `cfg(test)`, and the no-probe
+    counters (`engine_build_count`/`network_attempt_count`) live behind the
+    off-by-default `effects-instrumentation` cargo feature — a harness asserting
+    "no `EffectEngine` constructed" must enable that feature. Reconcile this
+    section with that contract: either reference it instead of adding a parallel
+    named const, or justify why a discoverable `INTENTIONALLY_UNCATALOGUED`
+    const still earns its keep over the prose contract.
 
 ### Deliberate non-change
 
@@ -255,7 +274,7 @@ summaries) become typed Darkmatter catalogs, rendered by the CLI (Layer 1) and
 anchored to the real lexer/evaluator (Layer 2) wherever the behavior is
 executable.
 
-### New catalogs in `expression/semantics.rs`
+### New catalogs in `markdown/compose/expression/semantics.rs`
 
 ```rust
 pub struct OperatorDescriptor {
@@ -399,16 +418,20 @@ fs-function display-only examples are unexecuted by design.
 
 - `darkmatter/lib/src/catalog/mod.rs` *(new)* — `Described`, `Example`,
   `describe`, `suggest`, `describe_for_error`, in-crate Levenshtein.
-- `context/catalog.rs`, `expression/catalog.rs`, `effects/catalog.rs` — add
-  `example`, `impl Described`, new anchor tests.
-- `expression/semantics.rs` *(new)* — operator/truthiness/mode/null-propagation
-  catalogs plus unary/comparison/arithmetic/variable-access semantics catalogs.
-- `expression/parser.rs` — expose precedence as `pub(crate) const` for
-  assert-equal.
+- `darkmatter/lib/src/markdown/compose/context/catalog.rs`,
+  `darkmatter/lib/src/markdown/compose/expression/catalog.rs`,
+  `darkmatter/lib/src/effects/catalog.rs` — add `example`, `impl Described`,
+  new anchor tests. (The context/expression catalogs live under
+  `markdown/compose/`; only the effects catalog sits at the `src/` root.)
+- `darkmatter/lib/src/markdown/compose/expression/semantics.rs` *(new)* —
+  operator/truthiness/mode/null-propagation catalogs plus
+  unary/comparison/arithmetic/variable-access semantics catalogs.
+- `darkmatter/lib/src/markdown/compose/expression/parser.rs` — expose precedence
+  as `pub(crate) const` for assert-equal.
 - `claudine/cli/src/commands/context.rs` + `context_render.rs` — render
   semantics from catalogs; add Example column to reports.
-- Error paths: `expression/mod.rs` (evaluate); a parsed compose-time diagnostic
-  for ctx typos.
+- Error paths: `darkmatter/lib/src/markdown/compose/expression/mod.rs`
+  (evaluate); a parsed compose-time diagnostic for ctx typos.
 
 ### Implementation phasing
 

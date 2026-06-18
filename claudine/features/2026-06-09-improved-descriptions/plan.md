@@ -38,7 +38,7 @@ Add `example` fields and `impl Described` to the existing context, expression, a
 
 ### Context variables
 
-- [ ] Add `example: Option<Example>` to `ContextVariableDescriptor` in `darkmatter/lib/src/context/catalog.rs`.
+- [ ] Add `example: Option<Example>` to `ContextVariableDescriptor` in `darkmatter/lib/src/markdown/compose/context/catalog.rs`.
 - [ ] Implement `Described` for `ContextVariableDescriptor`.
 - [ ] Add one illustrative `Example` per descriptor where the `result` string is type-consistent with `display_type`.
 - [ ] Write `cfg(test)` `capture_value_shape_matches_display_type` that captures one `ComposeContext` and asserts every descriptor's JSON value shape matches `display_type` (including `Nullable(T)` semantics).
@@ -47,7 +47,7 @@ Add `example` fields and `impl Described` to the existing context, expression, a
 
 ### Expression functions
 
-- [ ] Add `example: Option<Example>` to `ExpressionFunctionDescriptor` in `darkmatter/lib/src/expression/catalog.rs`.
+- [ ] Add `example: Option<Example>` to `ExpressionFunctionDescriptor` in `darkmatter/lib/src/markdown/compose/expression/catalog.rs`.
 - [ ] Implement `Described` for `ExpressionFunctionDescriptor`.
 - [ ] Add executable `Example` entries for every pure function.
 - [ ] Mark filesystem functions as display-only if their examples cannot be pinned to a tempdir fixture; document the reason beside each such descriptor.
@@ -62,7 +62,8 @@ Add `example` fields and `impl Described` to the existing context, expression, a
 - [ ] Add `example: Option<Example>` to `EffectDescriptor` in `darkmatter/lib/src/effects/catalog.rs`.
 - [ ] Implement `Described` for `EffectDescriptor`.
 - [ ] Add one display `Example` per effect descriptor.
-- [ ] Define `const INTENTIONALLY_UNCATALOGUED: &[&str]` naming `EffectEngine` methods deliberately outside the capability surface.
+- [ ] Reconcile with the existing in-code contract: `effects/mod.rs` + `effects/catalog.rs` already document the descriptor catalog as the authoritative capability surface (a method without a descriptor is intentionally outside the surface). Either reference that contract or, if a discoverable list still earns its keep, define `const INTENTIONALLY_UNCATALOGUED: &[&str]` naming `EffectEngine` methods deliberately outside the capability surface.
+- [ ] Note: `EffectVerb`/`EFFECT_VERBS` is now `cfg(test)` and the no-probe counters live behind the off-by-default `effects-instrumentation` cargo feature — enable that feature for any test asserting "no `EffectEngine` constructed".
 - [ ] Update existing `verb_signature_set_equals_descriptor_signature_set` to additionally assert every descriptor carries an example.
 - [ ] Run `cargo test` for effects catalog tests and confirm green.
 
@@ -80,12 +81,12 @@ Add `example` fields and `impl Described` to the existing context, expression, a
 
 Move the literal semantics arrays out of `claudine/cli/src/commands/context.rs` into typed Darkmatter catalogs anchored to the parser.
 
-- [ ] Create `darkmatter/lib/src/expression/semantics.rs` with:
+- [ ] Create `darkmatter/lib/src/markdown/compose/expression/semantics.rs` with:
   - `OperatorDescriptor` struct and `OPERATOR_DESCRIPTORS` catalog.
   - `TRUTHINESS_DESCRIPTORS`, `MODE_DESCRIPTORS`, `NULL_PROPAGATION_DESCRIPTORS` catalogs.
   - Unary operator, comparison, arithmetic, and variable-access semantics catalogs.
   - `impl Described` for every semantics descriptor type.
-- [ ] Expose the parser's precedence table as `pub(crate) const` in `darkmatter/lib/src/expression/parser.rs`.
+- [ ] Expose the parser's precedence table as `pub(crate) const` in `darkmatter/lib/src/markdown/compose/expression/parser.rs`.
 - [ ] Write `cfg(test)` `operator_precedence_matches_parser` asserting `OPERATOR_DESCRIPTORS` precedence equals the parser's precedence table.
 - [ ] Write `cfg(test)` `semantics_examples_evaluate_correctly` executing curated examples for precedence, truthiness, mode behavior, and null propagation.
 - [ ] Refactor `claudine/cli/src/commands/context.rs` to render precedence, truthiness, mode, null propagation, unary/comparison/arithmetic, and variable-access sections by iterating the new catalogs instead of using literal arrays.
@@ -106,7 +107,7 @@ Wire did-you-mean + verified example into expression evaluation and context comp
 
 ### Expression evaluation errors
 
-- [ ] In `darkmatter/lib/src/expression/mod.rs` `evaluate`, update the `Unknown function: <name>` path to call `suggest(...)` on `EXPRESSION_FUNCTION_DESCRIPTORS`.
+- [ ] In `darkmatter/lib/src/markdown/compose/expression/mod.rs` `evaluate`, update the `Unknown function: <name>` path to call `suggest(...)` on `EXPRESSION_FUNCTION_DESCRIPTORS`.
 - [ ] Append the nearest match's signature, description, and verified example using `describe_for_error`.
 - [ ] Update arity errors to call `describe(...)` on the matched function and append correct signature + example.
 - [ ] Add unit tests for unknown-function did-you-mean (e.g., `uper` → `upper(x)`).
