@@ -4,6 +4,23 @@ Binary: `md`
 
 A themed markdown renderer for terminal and browser workflows with markdown, markdown-plus, HTML, and AST JSON output modes.
 
+## Binary Overview
+
+The user-facing CLI surface is defined in `src/args/`: `cli.rs` holds global
+flags, `command.rs` holds subcommands, `target.rs` holds command targets,
+`enums.rs` holds output/format enums, `wrappers.rs` holds CLI conversion types,
+`parsers.rs` holds value parsers, and `completion.rs` holds shell completion
+helpers.
+
+Runtime dispatch lives in `src/commands/mod.rs`, with command-specific
+implementations in `commands/render.rs`, `commands/clean.rs`,
+`commands/validate.rs`, `commands/graph.rs`, `commands/compose.rs`,
+`commands/frontmatter.rs`, `commands/hash.rs`, and `commands/code_block.rs`.
+Shared input loading is in `src/io/`, output artifact handling is in
+`src/artifact.rs`, terminal rendering setup is in `src/render.rs`, and CLI flag
+precedence is lowered to `darkmatter::style::CliStyleClaims` in
+`src/style_claims.rs`.
+
 ## Installation
 
 ```bash
