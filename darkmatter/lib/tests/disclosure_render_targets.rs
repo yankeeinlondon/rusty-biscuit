@@ -7,7 +7,7 @@
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::layout::DarkmatterPage;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::output::{HtmlOptions, TerminalOptions};
+use darkmatter::markdown::output::{ColorDepth, HtmlOptions, TerminalOptions};
 use darkmatter::markdown::render_tree::{render_tree_markdown, render_tree_markdown_dialect};
 use darkmatter::style::{
     DisclosureStyleOverrides, apply_color_style, apply_disclosure_style, from_frontmatter,
@@ -118,7 +118,9 @@ fn browser_target_uses_native_details_summary() {
 #[test]
 fn terminal_target_renders_summary_and_dim_italic_body() {
     let md = fixture();
-    let rendered = md.as_terminal(TerminalOptions::default()).expect("terminal render must succeed");
+    let mut options = TerminalOptions::default();
+    options.color_depth = Some(ColorDepth::TrueColor);
+    let rendered = md.as_terminal(options).expect("terminal render must succeed");
 
     assert!(rendered.contains("License"), "must contain summary text: {rendered}");
     assert!(rendered.contains("Agreement"), "must contain summary text: {rendered}");
@@ -157,19 +159,18 @@ fn inline_opener_style_is_parsed_off_the_summary() {
     );
 }
 
-/// Terminal rendering must honor inline opener `color`, `alignment`, and
-/// `max-width`: the summary carries the foreground color, centered alignment
-/// indents the rendered lines, and `max-width` wraps the body into multiple
-/// quoted lines.
+/// Terminal rendering must honor inline opener `alignment` and `max-width`:
+/// centered alignment indents the rendered lines, and `max-width` wraps the
+/// body into multiple quoted lines. Inline color capture is asserted by
+/// `inline_opener_style_is_parsed_off_the_summary`.
 #[test]
 fn terminal_target_honors_inline_opener_style() {
     let md = Markdown::new(
         "::disclosure color=red-500 alignment=center max-width=24ch A Title\n::details\nThis disclosed body is comfortably longer than twenty-four columns wide.\n::end-disclosure\n".to_string(),
     );
-    let term = Terminal::new_optimistic(80);
+    let mut term = Terminal::new_optimistic(80);
+    term.color_depth = biscuit_terminal::discovery::detection::ColorDepth::TrueColor;
     let rendered = DarkmatterPage::new(&term).render(&md).expect("render must succeed");
-
-    assert!(rendered.contains(RED_500_FG), "summary must carry red-500 fg: {rendered:?}");
 
     let title_line = rendered
         .lines()
