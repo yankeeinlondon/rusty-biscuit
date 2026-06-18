@@ -1,14 +1,12 @@
 use crate::artifact::{OutputFormat, RenderRequest};
-use crate::cache::FileCache;
 use crate::mermaid::{MermaidConfig, MermaidDiagram, MermaidTheme, QuadrantTheme};
+use crate::tests::isolated_cache_dir;
 use serial_test::serial;
 
 #[test]
 #[serial]
 fn mermaid_diagram_renders_to_png() {
-    // Clear cache to ensure clean state
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let diagram = MermaidDiagram::new("graph LR; A-->B");
     let request = RenderRequest::default();
@@ -30,9 +28,7 @@ fn mermaid_diagram_renders_to_png() {
 #[test]
 #[serial]
 fn mermaid_diagram_cache_hit_on_second_render() {
-    // Clear cache to ensure clean state
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let diagram = MermaidDiagram::new("graph LR; A-->B");
     let request = RenderRequest::default();
@@ -75,9 +71,7 @@ fn mermaid_builder_methods_are_chainable() {
 #[test]
 #[serial]
 fn mermaid_handles_unusual_syntax_gracefully() {
-    // Clear cache to ensure clean state
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     // mermaid-rs-renderer tends to handle invalid syntax gracefully
     // by producing a simple diagram or placeholder, rather than failing.
@@ -106,13 +100,13 @@ fn mermaid_handles_unusual_syntax_gracefully() {
 #[test]
 #[serial]
 fn mermaid_renders_to_svg() {
-    // Clear cache to ensure clean state
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let diagram = MermaidDiagram::new("graph LR; A-->B");
-    let mut request = RenderRequest::default();
-    request.format = OutputFormat::Svg;
+    let request = RenderRequest {
+        format: OutputFormat::Svg,
+        ..RenderRequest::default()
+    };
 
     let artifact = diagram.render(&request).expect("Failed to render diagram");
 
@@ -127,12 +121,12 @@ fn mermaid_renders_to_svg() {
 #[test]
 #[serial]
 fn mermaid_theme_changes_svg_output() {
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let request = RenderRequest {
         format: OutputFormat::Svg,
         scale: 1,
+        target_width: None,
         transparent_background: false,
     };
 
@@ -156,14 +150,14 @@ fn mermaid_theme_changes_svg_output() {
 #[test]
 #[serial]
 fn mermaid_transparent_background_changes_svg_output() {
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let diagram = MermaidDiagram::new("graph LR; A-->B").with_theme(MermaidTheme::Default);
     let opaque = diagram
         .render(&RenderRequest {
             format: OutputFormat::Svg,
             scale: 1,
+            target_width: None,
             transparent_background: false,
         })
         .unwrap();
@@ -171,6 +165,7 @@ fn mermaid_transparent_background_changes_svg_output() {
         .render(&RenderRequest {
             format: OutputFormat::Svg,
             scale: 1,
+            target_width: None,
             transparent_background: true,
         })
         .unwrap();
@@ -186,8 +181,7 @@ fn mermaid_transparent_background_changes_svg_output() {
 #[test]
 #[serial]
 fn mermaid_quadrant_config_changes_svg_output() {
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let instructions = "quadrantChart\n    title Sample\n    A: [0.2, 0.8]\n    B: [0.7, 0.3]";
     let diagram = MermaidDiagram::new(instructions)
@@ -202,6 +196,7 @@ fn mermaid_quadrant_config_changes_svg_output() {
         .render(&RenderRequest {
             format: OutputFormat::Svg,
             scale: 1,
+            target_width: None,
             transparent_background: false,
         })
         .unwrap();
@@ -214,14 +209,14 @@ fn mermaid_quadrant_config_changes_svg_output() {
 #[test]
 #[serial]
 fn mermaid_cache_separates_scale_theme_and_transparency() {
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let base = MermaidDiagram::new("graph LR; A-->B");
     let scaled = base
         .render(&RenderRequest {
             format: OutputFormat::Png,
             scale: 1,
+            target_width: None,
             transparent_background: false,
         })
         .unwrap();
@@ -229,6 +224,7 @@ fn mermaid_cache_separates_scale_theme_and_transparency() {
         .render(&RenderRequest {
             format: OutputFormat::Png,
             scale: 3,
+            target_width: None,
             transparent_background: false,
         })
         .unwrap();
@@ -237,6 +233,7 @@ fn mermaid_cache_separates_scale_theme_and_transparency() {
         .render(&RenderRequest {
             format: OutputFormat::Png,
             scale: 1,
+            target_width: None,
             transparent_background: false,
         })
         .unwrap();
@@ -244,6 +241,7 @@ fn mermaid_cache_separates_scale_theme_and_transparency() {
         .render(&RenderRequest {
             format: OutputFormat::Png,
             scale: 1,
+            target_width: None,
             transparent_background: true,
         })
         .unwrap();
@@ -363,9 +361,7 @@ fn quadrant_theme_apply_light_mode() {
 #[test]
 #[serial]
 fn mermaid_alt_text_uses_title() {
-    // Clear cache to ensure clean state
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let diagram = MermaidDiagram::new("graph LR; A-->B").with_title("My Custom Diagram");
     let request = RenderRequest::default();
@@ -378,8 +374,7 @@ fn mermaid_alt_text_uses_title() {
 #[test]
 #[serial]
 fn mermaid_pie_chart_init_directive_applies_custom_colors() {
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let instructions = "%%{init: {'themeVariables': {'pie1': '#3178C6', 'pie2': '#A72145'}}}%%\npie\n    \"TypeScript\" : 45\n    \"Rust\" : 35\n    \"Python\" : 20";
     let diagram = MermaidDiagram::new(instructions);
@@ -387,6 +382,7 @@ fn mermaid_pie_chart_init_directive_applies_custom_colors() {
         .render(&RenderRequest {
             format: OutputFormat::Svg,
             scale: 1,
+            target_width: None,
             transparent_background: true,
         })
         .unwrap();
@@ -427,9 +423,7 @@ fn mermaid_pie_chart_init_directive_applies_custom_colors() {
 #[test]
 #[serial]
 fn mermaid_alt_text_defaults_to_mermaid_diagram() {
-    // Clear cache to ensure clean state
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let diagram = MermaidDiagram::new("graph LR; A-->B");
     let request = RenderRequest::default();
@@ -442,8 +436,7 @@ fn mermaid_alt_text_defaults_to_mermaid_diagram() {
 #[test]
 #[serial]
 fn mermaid_backend_smoke_renders_supported_cli_diagram_families() {
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let diagrams = [
         (
@@ -481,6 +474,7 @@ fn mermaid_backend_smoke_renders_supported_cli_diagram_families() {
             .render(&RenderRequest {
                 format: OutputFormat::Svg,
                 scale: 1,
+                target_width: None,
                 transparent_background: true,
             })
             .unwrap_or_else(|err| panic!("{name} should render successfully: {err}"));

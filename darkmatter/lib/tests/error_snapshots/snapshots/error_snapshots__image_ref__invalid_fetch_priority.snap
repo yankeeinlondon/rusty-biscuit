@@ -2,6 +2,8 @@
 source: darkmatter/lib/tests/error_snapshots/image_ref.rs
 expression: out
 ---
-⨫ ImageRefError: invalid fetch priority
+⤫ ImageRefError: invalid fetch priority
+┃ 
 ┃ Value: mid
-Accepted values: high, low, auto.
+┃ 
+┃ Accepted values: high, low, auto.

@@ -92,11 +92,14 @@ impl AlerterHelper {
             args.push(OsString::from(subtitle));
         }
 
+        // alerter requires `-message`. When body is missing or empty, pass an
+        // empty string so the notification renders title-only instead of
+        // duplicating the title as the message body.
         let body = request
             .body
             .as_deref()
             .filter(|s| !s.is_empty())
-            .unwrap_or(&request.title);
+            .unwrap_or("");
         args.push(OsString::from("-message"));
         args.push(OsString::from(body));
 

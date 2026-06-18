@@ -11,9 +11,7 @@
 //! - [`docs`] - Module documentation generation
 
 pub mod client;
-pub mod codec;
 pub mod docs;
 pub mod host;
 pub mod plan;
-pub mod routing;
 pub mod shared;

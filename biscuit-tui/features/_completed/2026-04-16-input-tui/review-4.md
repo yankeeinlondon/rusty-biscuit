@@ -6,7 +6,7 @@ ready: true
 
 # Review 4: TUI Inputs Implementation
 
-This fourth review evaluates the `tui-chrome` library and the `question`
+This fourth review evaluates the `biscuit-tui` library and the `question`
 CLI after the review-1 plan was fully implemented. The core surface
 area is now very strong: typed `InputTable` rows (`Vec<Row>`),
 configurable `KeyBindings` everywhere, a generic `ChoiceInput<V>` end

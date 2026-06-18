@@ -456,6 +456,48 @@ mod tests {
     }
 
     #[test]
+    fn rewrite_preserves_schema_property_with_inline_value() {
+        // Phase 5 Task 2: `$schema` must survive the inline rewrite so the
+        // document continues to validate on subsequent runs.
+        let original = concat!(
+            "---\n",
+            "$schema:\n",
+            "  title: 'string(required)'\n",
+            "prompt: |-\n",
+            "  write a title\n",
+            "title: Hello\n",
+            "---\n",
+            "Old body\n",
+        );
+
+        let rewritten =
+            rewrite_inline_document(original, "Fresh body\n", "2026-05-26", &[]).unwrap();
+
+        assert!(rewritten.contains("$schema:"));
+        assert!(rewritten.contains("title: 'string(required)'"));
+        assert!(rewritten.contains("last_updated: 2026-05-26"));
+        assert!(rewritten.ends_with("---\nFresh body\n"));
+    }
+
+    #[test]
+    fn rewrite_does_not_persist_set_only_keys() {
+        // Phase 5 Task 2: interactive-collected values flow through
+        // `--set` overrides during composition only; they must not appear
+        // in the rewritten document. The rewrite reuses the original
+        // frontmatter text and only adds `last_updated` + any new keys
+        // explicitly handed to it. Pass an empty `new_properties` slice
+        // to simulate the inline closure path.
+        let original = "---\n$schema:\n  title: 'string(required)'\n---\nOld\n";
+        let rewritten = rewrite_inline_document(original, "New body\n", "2026-05-26", &[]).unwrap();
+
+        // The collected `title` value is never in the original document
+        // and should not be inserted on the way out.
+        assert!(!rewritten.contains("title: Plan"));
+        assert!(rewritten.contains("$schema:"));
+        assert!(rewritten.contains("last_updated: 2026-05-26"));
+    }
+
+    #[test]
     fn rewrite_preserves_crlf_line_endings() {
         let original = "---\r\nlast_updated: 2026-01-01\r\n---\r\nBody\r\n";
         let rewritten =
@@ -734,5 +776,63 @@ mod tests {
         let written = std::fs::read_to_string(&file).unwrap();
         assert!(written.contains("last_updated: 2026-04-02\n"));
         assert!(written.contains("Updated body\n"));
+    }
+
+    #[test]
+    fn apply_closure_writes_dirty_body_for_downstream_cleanup() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.md");
+        let original = "---\nprompt: test\nlast_updated: 2026-01-01\n---\nOld body\n";
+        std::fs::write(&file, original).unwrap();
+
+        let original_markdown: darkmatter::markdown::Markdown = original.to_string().into();
+        let plan = InlineClosurePlan {
+            original_document_text: original.to_string(),
+            original_body_hash: original_markdown.hash_body(false),
+        };
+
+        let dirty_body = "# Generated\nNo blank line before paragraph\n";
+        apply_inline_closure(&plan, dirty_body, &file, "2026-04-02", None).unwrap();
+
+        let written = std::fs::read_to_string(&file).unwrap();
+        // apply_inline_closure writes the raw body — cleanup is the caller's job.
+        // Verify the dirty body IS present so the downstream cleanup test is meaningful.
+        assert!(
+            written.contains("# Generated\nNo blank line before paragraph\n"),
+            "raw replacement body must be on disk for downstream cleanup; got:\n{written}"
+        );
+        // Now simulate the cleanup step that callers (inline_cleanup, try_inline_closure) perform
+        let (fm_prefix, body) = split_frontmatter(&written);
+        let cleaned = darkmatter::markdown::cleanup::cleanup_content(body);
+        assert_ne!(
+            cleaned, body,
+            "cleanup_content must transform the dirty body"
+        );
+        assert!(
+            cleaned.contains("# Generated\n\nNo blank line before paragraph"),
+            "cleaned body must insert blank line between header and paragraph; got:\n{cleaned}"
+        );
+        let _ = fm_prefix;
+    }
+
+    fn split_frontmatter(text: &str) -> (&str, &str) {
+        let mut lines = text.split_inclusive('\n');
+        let first = match lines.next() {
+            Some(l) => l,
+            None => return ("", text),
+        };
+        if first.trim_end_matches(['\r', '\n']) != "---" {
+            return ("", text);
+        }
+        let mut offset = first.len();
+        for line in lines {
+            offset += line.len();
+            if line.trim_end_matches(['\r', '\n']) == "---" {
+                return (&text[..offset], &text[offset..]);
+            }
+        }
+        ("", text)
     }
 }

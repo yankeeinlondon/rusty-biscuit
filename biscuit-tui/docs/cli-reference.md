@@ -1,6 +1,6 @@
 # CLI Reference
 
-The `question` CLI exposes every `tui-chrome` component as a subcommand. This page documents the global flags and conventions that apply to **all** subcommands, so individual component docs don't need to repeat them.
+The `question` CLI exposes every `biscuit-tui` component as a subcommand. This page documents the global flags and conventions that apply to **all** subcommands, so individual component docs don't need to repeat them.
 
 ## Global Flags
 

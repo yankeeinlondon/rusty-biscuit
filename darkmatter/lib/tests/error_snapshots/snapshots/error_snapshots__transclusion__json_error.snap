@@ -2,7 +2,9 @@
 source: darkmatter/lib/tests/error_snapshots/transclusion.rs
 expression: out
 ---
-⨫ TransclusionError: JSON5 parse failure in options
+⤫ TransclusionError: JSON5 parse failure in options
+┃ 
 ┃ key must be a string at line 1 column 3
 ┃ Position: line 1, column 3
-Directive options use JSON5; check braces, quoting, and commas.
+┃ 
+┃ Directive options use JSON5; check braces, quoting, and commas.

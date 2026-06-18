@@ -2,7 +2,9 @@
 
 use super::tokenize::{ShellToken, parse_pipeline, tokenize};
 use super::types::{ErrorHandling, ShellCommandOrigin, ShellDirective, ShellExpansionError};
-use crate::markdown::compose::parse_utils::{find_code_regions, is_in_code_region};
+use crate::markdown::compose::parse_utils::{
+    directive_prefix_len, find_code_regions, is_in_code_region,
+};
 use biscuit_terminal::errors::SourceContext;
 
 /// Parses all `::shell` directives from markdown content.
@@ -47,8 +49,15 @@ pub fn parse_directives(
 
         // Check if this line is inside a code region
         if !is_in_code_region(line_start, &code_regions) {
-            let trimmed = line.trim();
-            if let Some(command_text) = trimmed.strip_prefix("::shell ") {
+            // Detect the directive after any block-quote markers and indentation
+            // whitespace. The captured prefix (e.g. `> > ` or `    `) is replayed
+            // verbatim on every output line so the splice stays nested in its
+            // container — a block quote, a list item, or the document root.
+            let prefix_len = directive_prefix_len(line);
+            let after = line[prefix_len..].trim_end();
+            if let Some(command_text) = after.strip_prefix("::shell ") {
+                let indent = line[..prefix_len].to_string();
+
                 // Parse the command
                 let tokens = tokenize(command_text, &ctx).map_err(|e| {
                     ShellExpansionError::ParseDirective {
@@ -69,8 +78,9 @@ pub fn parse_directives(
                     });
                 }
 
-                // Separate error handling options and timeout from shell tokens
-                let (error_handling, shell_tokens, timeout_override) =
+                // Separate error handling options, timeout, and the cache opt-out
+                // from shell tokens
+                let (error_handling, shell_tokens, timeout_override, no_cache) =
                     extract_options_from_tokens(&tokens, line_num, &ctx)?;
 
                 if shell_tokens.is_empty() {
@@ -102,9 +112,11 @@ pub fn parse_directives(
                     executable,
                     args,
                     span: line_start..line_with_newline_end,
+                    indent,
                     origin: ShellCommandOrigin::Body { line: line_num },
                     error_handling,
                     timeout_override,
+                    no_cache,
                     pipeline: Some(pipeline),
                     ctx: ctx.clone(),
                 });
@@ -138,17 +150,19 @@ fn option_arg_count(option: &str) -> usize {
     }
 }
 
-/// Extracts error handling options and timeout from a mixed token list,
-/// returning the remaining shell tokens.
+/// Extracts error handling options, the timeout suffix, and the `--no-cache`
+/// cache opt-out from a mixed token list, returning the remaining shell tokens.
 fn extract_options_from_tokens(
     tokens: &[ShellToken],
     line: usize,
     ctx: &SourceContext,
-) -> Result<(ErrorHandling, Vec<ShellToken>, Option<std::time::Duration>), ShellExpansionError> {
+) -> Result<(ErrorHandling, Vec<ShellToken>, Option<std::time::Duration>, bool), ShellExpansionError>
+{
     let mut handling = ErrorHandling::default();
     let mut shell_tokens = Vec::new();
     let mut i = 0;
     let mut timeout_override = None;
+    let mut no_cache = false;
 
     while i < tokens.len() {
         match &tokens[i] {
@@ -211,6 +225,9 @@ fn extract_options_from_tokens(
                     }
 
                     i = j;
+                } else if w == "--no-cache" {
+                    no_cache = true;
+                    i += 1;
                 } else if let Some(value_str) = w.strip_prefix("::timeout:") {
                     let seconds: u64 = value_str.parse().map_err(|_| {
                         ShellExpansionError::ParseDirective {
@@ -252,7 +269,7 @@ fn extract_options_from_tokens(
         }
     }
 
-    Ok((handling, shell_tokens, timeout_override))
+    Ok((handling, shell_tokens, timeout_override, no_cache))
 }
 
 /// Parses an exit code string into an i32.
@@ -344,6 +361,55 @@ And `::shell echo inline` should also be ignored.
     }
 
     #[test]
+    fn parse_directive_captures_space_indent() {
+        let content = "    ::shell echo hello\n";
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+        assert_eq!(directives[0].indent, "    ");
+    }
+
+    #[test]
+    fn parse_directive_captures_tab_indent() {
+        let content = "\t::shell echo hello\n";
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+        assert_eq!(directives[0].indent, "\t");
+    }
+
+    #[test]
+    fn parse_directive_at_column_one_has_empty_indent() {
+        let content = "::shell echo hello\n";
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+        assert_eq!(directives[0].indent, "");
+    }
+
+    #[test]
+    fn parse_directive_in_blockquote_captures_marker_indent() {
+        let content = "> ::shell echo hello\n";
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].executable, "echo");
+        assert_eq!(directives[0].args, vec!["hello"]);
+        assert_eq!(directives[0].indent, "> ");
+    }
+
+    #[test]
+    fn parse_directive_in_nested_blockquote_captures_marker_indent() {
+        let content = "> > ::shell echo hello\n";
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].executable, "echo");
+        assert_eq!(directives[0].indent, "> > ");
+    }
+
+    #[test]
+    fn parse_directive_mid_line_after_blockquote_is_not_a_directive() {
+        // `::shell` must be at the directive position (only markers/whitespace
+        // before it); a `::shell` that follows prose stays literal text.
+        let content = "> some text ::shell echo hello\n";
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+        assert_eq!(directives.len(), 0);
+    }
+
+    #[test]
     fn parse_directive_span_includes_newline() {
         let content = "::shell echo hello\nNext line\n";
         let directives = parse_directives(content, dummy_ctx(content)).unwrap();
@@ -411,7 +477,9 @@ And `::shell echo inline` should also be ignored.
         assert!(result.is_err());
         let err = result.unwrap_err();
         match err {
-            ShellExpansionError::ParseDirective { origin, message, .. } => {
+            ShellExpansionError::ParseDirective {
+                origin, message, ..
+            } => {
                 assert_eq!(origin, ShellCommandOrigin::Body { line: 1 });
                 assert!(message.contains("pipes"));
             }
@@ -645,6 +713,38 @@ And `::shell echo inline` should also be ignored.
         let content = "::shell echo hello\n";
         let directives = parse_directives(content, dummy_ctx(content)).unwrap();
         assert!(directives[0].timeout_override.is_none());
+    }
+
+    #[test]
+    fn parse_no_cache_flag() {
+        let content = "::shell --no-cache uuidgen\n";
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].executable, "uuidgen");
+        assert!(directives[0].no_cache);
+    }
+
+    #[test]
+    fn parse_no_cache_defaults_false() {
+        let content = "::shell uuidgen\n";
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+        assert!(!directives[0].no_cache);
+    }
+
+    #[test]
+    fn parse_no_cache_alongside_error_handling_and_timeout() {
+        let content = "::shell --no-cache --when-error empty uuidgen ::timeout:3\n";
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+        assert_eq!(directives[0].executable, "uuidgen");
+        assert!(directives[0].no_cache);
+        assert_eq!(
+            directives[0].error_handling.when_error,
+            Some("empty".to_string())
+        );
+        assert_eq!(
+            directives[0].timeout_override,
+            Some(std::time::Duration::from_secs(3))
+        );
     }
 
     #[test]

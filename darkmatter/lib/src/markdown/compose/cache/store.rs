@@ -147,6 +147,7 @@ impl FileStore {
             ArtifactClass::DocumentSnapshot => "snapshot",
             ArtifactClass::ComposeDocumentCore => "composed",
             ArtifactClass::OperationResult => "operation",
+            ArtifactClass::RemoteUrl => "remote",
         };
         self.root
             .join("manifests")

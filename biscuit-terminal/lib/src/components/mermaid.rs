@@ -1,6 +1,6 @@
 //! Mermaid diagram rendering for terminals.
 //!
-//! This module provides [`MermaidDiagram`], a composable [`Renderable`] component
+//! This module provides [`MermaidDiagram`], a composable [`TerminalRenderable`] component
 //! for rendering Mermaid diagrams inline in the terminal. It delegates rendering
 //! to `biscuit-visualized` and displays via the terminal's image protocol.
 //!
@@ -24,7 +24,8 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::components::renderable::Renderable;
+use crate::components::renderable::TerminalRenderable;
+use crate::utils::layout::LayoutTerminalExt;
 
 // Re-export types from biscuit-visualized
 pub use biscuit_visualized::mermaid::{MermaidConfig, MermaidTheme, QuadrantTheme};
@@ -92,7 +93,7 @@ pub enum MermaidRenderError {
 /// ## Note
 ///
 /// For composable rendering, prefer [`MermaidDiagram`] which implements
-/// [`Renderable`] and provides proper error handling via
+/// [`TerminalRenderable`] and provides proper error handling via
 /// [`try_render()`](MermaidDiagram::try_render).
 #[derive(Debug, Clone)]
 pub(crate) struct MermaidRenderer {
@@ -272,6 +273,27 @@ impl MermaidRenderer {
         self.diagram.fallback_code_block()
     }
 
+    /// Renders the diagram to an SVG string.
+    ///
+    /// Delegates to `biscuit-visualized`'s Mermaid renderer and reads the
+    /// cached SVG file into a string. This is the browser static-SVG path
+    /// for Mermaid promotion.
+    ///
+    /// ## Errors
+    ///
+    /// Returns error if diagram rendering or file I/O fails.
+    pub fn render_to_svg(&self) -> Result<String, MermaidRenderError> {
+        let request = biscuit_visualized::artifact::RenderRequest {
+            format: biscuit_visualized::artifact::OutputFormat::Svg,
+            scale: self.scale,
+            target_width: None,
+            transparent_background: self.transparent_background,
+        };
+        let artifact = self.diagram.render(&request)?;
+        std::fs::read_to_string(&artifact.path)
+            .map_err(|e| MermaidRenderError::DisplayError(e.to_string()))
+    }
+
     /// Renders the diagram to a cached PNG file, returning the path and cache hit status.
     ///
     /// This method renders the diagram using biscuit-visualized's caching system.
@@ -296,17 +318,35 @@ impl MermaidRenderer {
     /// println!("Rendered to: {:?} (cache hit: {})", path, cache_hit);
     /// # Ok::<(), biscuit_terminal::components::mermaid::MermaidRenderError>(())
     /// ```
+    /// Renders the diagram to a cached PNG at the specified target pixel width.
+    ///
+    /// Height is derived from the SVG's aspect ratio. The rasterizer renders
+    /// the SVG fresh at `target_width` pixels — no oversampling, no
+    /// downstream downscaling.
+    ///
+    /// ## Errors
+    ///
+    /// Returns error if diagram rendering or file I/O fails.
     #[tracing::instrument(skip(self))]
-    pub fn render_to_cached_png(&self) -> Result<(PathBuf, bool), MermaidRenderError> {
+    pub fn render_to_cached_png_at_width(
+        &self,
+        target_width: u32,
+    ) -> Result<(PathBuf, bool), MermaidRenderError> {
         let request = biscuit_visualized::artifact::RenderRequest {
             format: biscuit_visualized::artifact::OutputFormat::Png,
             scale: self.scale,
+            target_width: Some(target_width),
             transparent_background: self.transparent_background,
         };
 
         let artifact = self.diagram.render(&request)?;
 
-        tracing::info!(path = ?artifact.path, cache_hit = artifact.cache_hit, "Rendered diagram to PNG");
+        tracing::info!(
+            path = ?artifact.path,
+            cache_hit = artifact.cache_hit,
+            target_width,
+            "Rendered diagram to PNG at target width"
+        );
 
         Ok((artifact.path, artifact.cache_hit))
     }
@@ -324,10 +364,10 @@ impl From<&str> for MermaidRenderer {
     }
 }
 
-/// A composable Mermaid diagram that implements [`Renderable`].
+/// A composable Mermaid diagram that implements [`TerminalRenderable`].
 ///
 /// `MermaidDiagram` wraps [`MermaidRenderer`] and makes diagrams usable
-/// anywhere a `Renderable` is expected — inside `Section`, `Compose`,
+/// anywhere a `TerminalRenderable` is expected — inside `Section`, `Compose`,
 /// lists, or any other container component.
 ///
 /// The render pipeline is:
@@ -343,7 +383,7 @@ impl From<&str> for MermaidRenderer {
 ///
 /// ```rust
 /// use biscuit_terminal::components::mermaid::{MermaidDiagram, MermaidTheme};
-/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::renderable::TerminalRenderable;
 /// use biscuit_terminal::components::terminal_image::ImageWidth;
 ///
 /// let diagram = MermaidDiagram::new("flowchart LR\n    A --> B --> C")
@@ -351,7 +391,7 @@ impl From<&str> for MermaidRenderer {
 ///     .with_title("My Flow")
 ///     .with_width(ImageWidth::Percent(0.6));
 ///
-/// // Use in any Renderable context
+/// // Use in any TerminalRenderable context
 /// let term = biscuit_terminal::terminal::Terminal::default();
 /// let output = diagram.render(&term);
 /// ```
@@ -431,6 +471,13 @@ impl MermaidDiagram {
         self.renderer.fallback_code_block()
     }
 
+    /// Renders the diagram to an SVG string.
+    ///
+    /// Delegates to [`MermaidRenderer::render_to_svg`].
+    pub fn render_to_svg(&self) -> Result<String, MermaidRenderError> {
+        self.renderer.render_to_svg()
+    }
+
     /// Renders the diagram to a terminal-displayable string.
     ///
     /// This is the **fallible** render path. Use this when you need to
@@ -473,7 +520,9 @@ impl MermaidDiagram {
         term: &crate::terminal::Terminal,
     ) -> Result<MermaidRenderResult, MermaidRenderError> {
         let (output, png_path, cache_hit, width_cells) = self.render_to_image(term)?;
-        let output = self.layout.apply_layout(&output, term.width());
+        // Diagrams are inherently block-cohesive (image escapes or fenced code
+        // fallback) — align as a block.
+        let output = self.layout.apply_block_layout(&output, term.width());
 
         Ok(MermaidRenderResult {
             output,
@@ -503,13 +552,26 @@ impl MermaidDiagram {
         &self,
         term: &crate::terminal::Terminal,
     ) -> Result<(String, PathBuf, bool, u32), MermaidRenderError> {
-        let (png_path, cache_hit) = self.renderer.render_to_cached_png()?;
+        // Translate the configured display width (cells) into pixels using the
+        // terminal's detected cell size, and have the rasterizer render the
+        // SVG once at that exact pixel width. No oversampling, no downstream
+        // downscaling — text glyphs are rasterised at the display resolution.
+        let dims = super::terminal_image::TerminalImage::resolve_dimensions_for(
+            &self.width,
+            &self.layout,
+            term.width(),
+        );
+        let cell_pixel_width = term.cell_size().map(|cs| cs.width.max(1)).unwrap_or(8u32);
+        let target_width_px = (dims.image_width.max(1)) * cell_pixel_width;
+
+        let (png_path, cache_hit) = self
+            .renderer
+            .render_to_cached_png_at_width(target_width_px)?;
 
         let term_image = super::terminal_image::TerminalImage::new(&png_path)
             .map_err(|e| MermaidRenderError::DisplayError(e.to_string()))?
             .with_width(self.width.clone());
 
-        let dims = term_image.resolve_dimensions(term.width());
         let width_cells = dims.image_width;
 
         let output = term_image.render(term);
@@ -536,17 +598,17 @@ pub struct MermaidRenderResult {
     pub width_cells: u32,
 }
 
-impl super::renderable::Renderable for MermaidDiagram {
+impl super::renderable::TerminalRenderable for MermaidDiagram {
     fn render(&self, term: &crate::terminal::Terminal) -> String {
         let content = self.render_raw(term);
-        self.layout.apply_layout(&content, term.width())
+        self.layout.apply_block_layout(&content, term.width())
     }
 
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let term = crate::terminal::Terminal::new_optimistic(width);
         let content = self.render_raw(&term);
-        self.layout.apply_layout(&content, width)
+        self.layout.apply_block_layout(&content, width)
     }
 
     fn is_block_level(&self) -> bool {
@@ -693,6 +755,31 @@ mod tests {
                 // the assertion rather than fail — the Level-2 tests
                 // exercise the full pipeline.
                 eprintln!("Mermaid render unavailable in unit-test env: {e}");
+            }
+        }
+    }
+
+    /// `render_to_svg` must produce an SVG string containing expected Mermaid
+    /// elements, or gracefully skip when the host lacks rendering deps.
+    #[test]
+    fn diagram_render_to_svg_produces_svg() {
+        let diagram = MermaidDiagram::new("flowchart LR\n    A --> B");
+        match diagram.render_to_svg() {
+            Ok(svg) => {
+                assert!(
+                    svg.contains("<svg"),
+                    "render_to_svg must produce an <svg> element, got: {svg}"
+                );
+                assert!(
+                    svg.contains("</svg>"),
+                    "render_to_svg must close the <svg> element, got: {svg}"
+                );
+            }
+            Err(e) => {
+                // If the host lacks Mermaid rendering dependencies, skip
+                // rather than fail — the Level-2 tests exercise the full
+                // pipeline.
+                eprintln!("Mermaid SVG render unavailable in unit-test env: {e}");
             }
         }
     }

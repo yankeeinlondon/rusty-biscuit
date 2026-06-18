@@ -132,7 +132,7 @@ Each entry point destructures its clap args struct, then calls the shared `parse
 | Positional tokens         | Classified as file ref or `key=value` setter; errors on multiple file refs or empty setter keys |
 | `--set JSON`              | Parsed as JSON5 object; forms the base override map                                             |
 | `key=value` setters       | Override matching keys from `--set` on conflict                                                 |
-| `--step-timeout DURATION` | Validated against the `parse_timeout()` grammar; rejected when combined with `--interactive`    |
+| `--step-timeout DURATION` | Validated against the `parse_timeout()` grammar; rejected when the session resolves to interactive (`--interactive` or `interactive: true` frontmatter) |
 
 #### Step 2: Source Resolution
 
@@ -223,6 +223,38 @@ Scans all shell command sources in the document before execution begins.
 | `--set` / `key=value` setters                     | Override template variables before Darkmatter processes the document |
 | `--perf`                                          | Enables Darkmatter composition performance collection                |
 
+#### Step 4b: Schema Validation (compose)
+
+After `prepare_direct` produces the effective frontmatter, the schema-aware
+wrapper translates Darkmatter's structural failures into typed claudine errors:
+
+1. **No `$schema`** — pass through unchanged.
+2. **Required value missing** — return `CompositionError::MissingProperties`
+   carrying the prompt path, the missing names in declaration order, their
+   type labels and descriptions, and the frontmatter `description` for context.
+   When Interactive Mode is allowed (config `prompt_for_missing` + stdin/stderr
+   TTYs + not `--silent`) the CLI consumes this error to drive a `biscuit-tui`
+   prompt loop and re-runs preparation with the collected overrides.
+3. **Required value present but invalid** — return
+   `CompositionError::SchemaValidation` as a hard abort; no prompting.
+4. **Optional value present but invalid** — drop the key from a clone of the
+   markdown, emit a `tracing::warn!`, and retry preparation once. Residual
+   problems (typically a missing required) surface after the retry.
+5. **`$schema` itself unresolvable / uncompilable** — return
+   `CompositionError::SchemaLoad`.
+
+This stage runs before provider/model selection so a schema failure aborts
+without launching anything.
+
+**Affected by:**
+
+| Input                              | Impact                                                                                                  |
+|------------------------------------|---------------------------------------------------------------------------------------------------------|
+| Frontmatter `$schema`              | Activates schema validation; controls required vs optional classification and Interactive Mode mapping  |
+| `--set` / `key=value` setters      | Applied before validation so users can satisfy required values without entering the interactive prompt  |
+| Config `prompt_for_missing`        | Required (along with TTY/silent checks) to enable Interactive Mode for missing-required collection      |
+| `--silent`                         | Forces Interactive Mode off; missing required values surface as `MissingProperties` instead of prompts  |
+
 #### Step 5: Build Execution Request (compose)
 
 Constructs a `CompositionExecutionRequest` with `mode: ChainedDocument`, the prepared composition, all CLI flags, and an empty env override map. `resolved_target` is set to `None` — the executor will resolve provider and model.
@@ -236,14 +268,14 @@ Constructs a `CompositionExecutionRequest` with `mode: ChainedDocument`, the pre
 1. Detects installed providers via `InstalledAiClients::new()`
 2. Builds installed provider snapshot, filtering excluded providers
 3. Loads selection config (favorite provider, model overrides) from Claudine config
-4. Builds model catalog via `ModelCatalogService` and calls `refresh_blocking()`
+4. Builds model catalog via `ModelCatalogService` (no upfront refresh; refresh is provider-scoped and deferred until after a provider is selected)
 5. Resolves execution target:
 
     - **If `resolved_target` is pre-set** (from sequence): uses it directly
-    - **TTY mode**: explicit `--provider` flag wins unconditionally; otherwise shows interactive picker via `tui-chrome::ChooseOne`
+    - **TTY mode**: explicit `--provider` flag wins unconditionally; otherwise shows interactive picker via `biscuit-tui::ChooseOne`
     - **Non-TTY mode**: `resolve_target_non_tty_with_catalog()` applies strict chain: explicit flag → frontmatter `agent` (single or first-installed-from-list) → config favorite → hard error
 
-6. Resolves model: CLI `--model` → provider-specific env vars → generic `MODEL` → frontmatter `model` (validated against catalog) → provider default
+6. Resolves model: CLI `--model` → provider-specific env vars → generic `MODEL` → frontmatter `model` (validated against catalog) → provider default. When the frontmatter `model` hint is the only source, the selected provider's catalog is refreshed via `refresh_provider_blocking(provider)` before validation; CLI/env model wins skip the refresh entirely.
 
 **Affected by:**
 
@@ -322,6 +354,7 @@ Applies provider-specific flags to child args:
 |------------------------|-----------------------------------------------------------|
 | `--yolo` / `-y`        | Enables provider-specific auto-approval mode              |
 | `--interactive` / `-i` | Switches from non-interactive to interactive session mode |
+| `--no-interactive`     | Forces non-interactive mode, overriding `interactive: true` frontmatter |
 | `--output` / `-o`      | Sets output format (json, text, stream)                   |
 | `--sandbox`            | Enables provider-specific sandboxing                      |
 | `--model`              | Applied to provider-specific flags                        |
@@ -355,21 +388,21 @@ If `--dry-run`: prints what would be executed and exits with code 0.
 
 ##### 6j. Preflight Checks
 
-1. Switches process CWD to child working directory
+1. Switches process CWD to child working directory via `switch_process_cwd` (in `claudine/cli/src/commands/wrap/mod.rs`). This is **intentional and not restored** for two reasons:
+    - Agents should always start at the repo root for permission-grant scope and consistent context — many provider sandboxes treat CWD as the trust boundary.
+    - The original launch CWD is preserved separately on `LaunchContext`/`LaunchWorkspaceContext` so downstream stages (system-prompt discovery, package-area detection) still know where the user actually invoked Claudine from.
+
+    **Implication for loops, sequences, and `ctx.*`:** because the CWD mutation persists for the parent claudine process across iterations and across sequence steps, any code that re-derives state from `std::env::current_dir()` between iterations (notably `ComposeContext::capture()` for `ctx.current_package_area` and friends) will see the post-switch CWD on iteration 2+ / step 2+. The intended fix is a Claudine-owned launch-CWD scratchpad captured once at process startup and used as the base directory for every `ComposeContext::capture_for_dir(...)` call — not re-reading the process CWD, and not anchoring to the source file's parent (which would change the user-facing meaning of `ctx.current_package_area`).
+
 2. Detects harness from effective frontmatter via `has_harness_properties()`
 3. Builds lifecycle context and creates `LifecycleRunGuard`
-4. **If harness enabled**: parses harness plan, prepends inline writability pre-check (if inline), resolves shell approvals for harness commands
-5. **If not harness and not inline**: no additional checks
+4. Parses the harness plan from the effective frontmatter; for bare documents (no harness properties) this yields the empty/bare plan. Prepend the inline writability pre-check if the mode is inline.
+5. Resolves shell approvals for harness commands (and any system-owned inline writability check) via `resolve_shell_approvals`
 6. Emits preflight-complete status
 
 ##### 6k. Execution
 
-**If harness enabled**: runs through `run_harness_loop()` with `HarnessPromptMode::Compose`. The harness loop manages retries, pre/post checks, timeout enforcement, and lifecycle signals.
-
-**If no harness**: calls `execute_without_harness()` with `CompositionExecutionMode::Direct`:
-
-- **Structured stream path** (most providers): runs child with semantic streaming via `run_structured_composition()`, renders assistant text through section stream, emits summary immediately
-- **Legacy path** (Goose): calls `exec::run_child()` directly, emits minimal summary
+All non-dry-run composition runs flow through `run_harness_loop()` with `HarnessPromptMode::Compose` or `HarnessPromptMode::Inline`. The loop re-parses the plan each attempt, runs pre-checks (including the system-owned inline writability rule), spawns the provider, streams the response, runs post-checks, and invokes handler-driven recovery on failure.
 
 ##### 6l. Post-Execution
 
@@ -434,6 +467,17 @@ Identical to compose Step 3.
 | Frontmatter `prompt`          | Required; the text that gets composed and sent as the agent's task |
 | `.claudine/inline-compose.md` | Custom guardrails file; overrides default instructions             |
 
+#### Step 6b: Schema Validation (inline-compose)
+
+Schema validation runs **after** the `prompt` property check so a missing or
+non-string `prompt` still surfaces as `PromptPropertyMissing` /
+`PromptPropertyWrongType` instead of a generic schema error. After that
+guard, the same typed translation as direct compose applies — `SchemaLoad`,
+`SchemaValidation`, `MissingProperties`, automatic drop-and-retry for invalid
+optionals. The original `$schema` declaration is preserved byte-for-byte by
+the inline rewrite, and interactive values collected during the run are never
+persisted to the source file.
+
 #### Step 7: Build Execution Request (inline-compose)
 
 Constructs `CompositionExecutionRequest` with `mode: InlineFrontmatterPrompt` and `closure: Inline(InlineClosurePlan)`.
@@ -444,7 +488,7 @@ Runs the same pipeline as compose Step 6, with these differences:
 
 - Header shows `ComposeDisplay::InlineCompose` instead of `Compose`
 - Inline + interactive check: rejects providers that don't support interactive inline closure recovery
-- When no harness, calls `execute_without_harness()` with `CompositionExecutionMode::Inline` instead of `Direct`
+- All non-dry-run runs call `run_harness_loop()` with `HarnessPromptMode::Inline`
 
 **Affected by:**
 
@@ -564,6 +608,17 @@ For each step (0..total_steps):
 | `FAIL_FAST` env var                            | Injected per step so `{{env.FAIL_FAST}}` and `::shell` directives see the policy |
 | `--set` / `key=value` setters                  | Override template variables but lose to reserved overlay keys                    |
 
+##### Phase 1a.5: Aggregate Schema Validation Across Steps
+
+Every step is validated against its `$schema` during Phase 1a, before any
+provider session is launched. When multiple steps share the same missing
+required property with the same shape and description, the interactive prompt
+fires once and the answer is reused for the remaining steps (unless a step
+overlay supplies a different value). When Interactive Mode is denied or one
+or more steps have invalid required values, claudine returns a single
+aggregated `CompositionError::SequenceMissingProperties` listing every
+failing step so the user can fix the entire sequence in one edit pass.
+
 ##### Phase 1b: Resolve Provider/Model for Every Step
 
 1. Detects installed providers and builds snapshot
@@ -574,7 +629,7 @@ For each step (0..total_steps):
 **Phase 1c: Review or validate:**
 
 - **If failures exist**: returns `SequenceSelectionFailed` aggregate error
-- **TTY + no explicit provider**: shows review screen via `tui-chrome::InputTable` where user can edit per-step provider and model; `Ctrl+S` confirms, `Esc` aborts
+- **TTY + no explicit provider**: shows review screen via `biscuit-tui::InputTable` where user can edit per-step provider and model; `Ctrl+S` confirms, `Esc` aborts
 - **Non-TTY**: converts drafts directly to `ResolvedExecutionTarget` array
 
 **Affected by:**
@@ -652,7 +707,7 @@ Provider selection behaves differently in **TTY** (interactive terminal) and **n
 
 When stdout is a terminal and no explicit `--<provider>` flag is given:
 
-1. **Interactive picker** — a `tui-chrome` one-shot picker shows all installed providers. Frontmatter `agent` and config `favorite_agent` only influence the **default index** and **row ordering**; they do not bypass the picker.
+1. **Interactive picker** — a `biscuit-tui` one-shot picker shows all installed providers. Frontmatter `agent` and config `favorite_agent` only influence the **default index** and **row ordering**; they do not bypass the picker.
 
 ### Non-TTY Mode
 
@@ -705,11 +760,11 @@ Roo Code is excluded from composition provider selection because it is a VS Code
 
 The shorthand booleans and the `--provider` value both accept fuzzy input (`cl` → `claude`, `gem` → `gemini`, `oc` → `opencode`). The [argv normalizer](argv-normalization.md) rewrites every shorthand into a canonical `--provider <slug>` pair before clap runs, so runtime provider selection only ever reads the single `--provider` field.
 
-### The `--interactive` Flag
+### The `--interactive` and `--no-interactive` Flags
 
-`-i` / `--interactive` controls the **provider session mode**, not provider selection. The composed prompt is still prepared first, then passed as the initial message for an interactive session.
+`-i` / `--interactive` and `--no-interactive` control the **provider session mode**, not provider selection. The composed prompt is still prepared first, then passed as the initial message for the session. The resolved mode follows a fixed precedence: `--no-interactive` > `-i` / `--interactive` > `interactive` frontmatter property > default (non-interactive). The two flags are mutually exclusive. `compose` and `inline-compose` honor the `interactive` frontmatter property; `sequence` rejects `interactive: true`. See [Composition](composition.md#the---interactive-and---no-interactive-flags) for the full contract.
 
-> **Note:** `inline-compose -i` is provider-gated. Claudine allows it only when the selected provider can recover the final assistant message for the inline rewrite path.
+> **Note:** `inline-compose -i` is provider-gated. Claudine allows it only when the selected provider can recover the final assistant message for the inline rewrite path. When the interactive intent comes from `interactive: true` frontmatter, the diagnostic names `frontmatter` as the source.
 
 ### The `--exclude` Flag
 

@@ -28,7 +28,7 @@ feature feat:
         echo
         echo -e "A {{ italic }}spec{{ reset }} file for the feature {{ blue }}${file_link}{{ reset }} already exists inside the {{ italic }}_unscheduled{{ reset }} folder"
         echo
-        eza -lhga --git --hyperlink --group "${file}" 2>/dev/null
+        eza -lhga --git --icons=always --hyperlink --group "${file}" 2>/dev/null
         echo
 
         if just _file_has_content "${file}" 2>/dev/null; then
@@ -118,10 +118,10 @@ fix name="":
     #!/usr/bin/env bash
     set -euo pipefail
 
-    if [[ -z "{{name}}" ]]; then
+    if [[ -z "{{ name }}" ]]; then
         use_name="$(just _choose_fix)"
     else
-        use_name="{{name}}"
+        use_name="{{ name }}"
     fi
 
     descriptive="$(just _title_case "${use_name}")"
@@ -249,14 +249,14 @@ fix name="":
     fi
 
 # adds a complimentary tech design to the specification file
-[arg("spec", long="spec")]
 [arg("dir", long="dir")]
+[arg("spec", long="spec")]
 design filter="" spec="" dir="":
     #!/usr/bin/env bash
     set -euo pipefail
 
-    file="{{spec}}"
-    use_dir="{{dir}}"
+    file="{{ spec }}"
+    use_dir="{{ dir }}"
 
     # ensure that `file` is set
     if [[ -z "${file}" ]]; then
@@ -303,7 +303,7 @@ clarify filter="" agent="":
         file="$(fd -g '*{spec,design}*.md' --exclude '_completed' | rg "{{ filter }}" | fzf --height=15 --border --border-label 'Choose a spec or design file' )"
     fi
 
-    use_agent="{{agent}}"
+    use_agent="{{ agent }}"
     if [[ -z "${use_agent}" ]]; then
         use_agent="$(just _choose_agent)"
     fi

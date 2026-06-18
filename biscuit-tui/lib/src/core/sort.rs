@@ -15,8 +15,8 @@
 //! ## Examples
 //!
 //! ```
-//! use tui_chrome::components::ChoiceOption;
-//! use tui_chrome::core::SortOrder;
+//! use biscuit_tui::components::ChoiceOption;
+//! use biscuit_tui::core::SortOrder;
 //!
 //! let mut options: Vec<ChoiceOption<String>> = vec![
 //!     ChoiceOption::new("b", "Berry", "b"),

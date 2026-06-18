@@ -1,249 +1,328 @@
 ---
 name: darkmatter
-description: Expert knowledge for the darkmatter Rust library - markdown parsing, rendering (terminal/HTML), syntax highlighting, frontmatter, and document comparison. Delegates terminal rendering to biscuit-terminal. Use when parsing markdown, generating terminal/HTML output, working with frontmatter, or comparing documents.
+description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
+hash: 87f17662fa397abe-b4ff566298eef5fc
+last_updated: 2026-06-15
 ---
 
 # darkmatter
 
-Markdown parsing, rendering, and composition library. Part of the dockhand monorepo.
+Darkmatter owns Markdown parsing, composition, frontmatter, document comparison,
+and the public Markdown rendering paths. Terminal capability detection,
+terminal components, images, Mermaid, and graph rendering are delegated to
+`biscuit-terminal`.
 
-**Key principle**: darkmatter handles **markdown parsing and composition**. Terminal rendering (images, mermaid, detection) is delegated to `biscuit-terminal`.
+## Start Here
+
+The simplified-rendering model centers on **two public components**:
+
+- `darkmatter::markdown::code_block::CodeBlock` — the atomic renderer for
+  one syntax-highlighted code block. Use it for a single snippet, a fenced
+  block in Markdown (which routes through the same helper), or a direct
+  `CodeBlock::yaml/rust/json/toml/from_source_file` call. It implements
+  `TerminalRenderable` and `BrowserRenderable` directly.
+- `darkmatter::layout::DarkmatterPage` — the page assembler that renders
+  a full Markdown document. It owns page-frame layout (margins, padding,
+  max-width, page background) and delegates nested code blocks to
+  `CodeBlock` so a fence in a `DarkmatterPage` renders byte-for-byte
+  equal to a direct `CodeBlock` call.
+
+Other entry points:
+
+- Use `darkmatter::markdown::Markdown` for document content.
+- Use the compose pipeline for source transformations before rendering.
+- Use `darkmatter::style` for document `style:` frontmatter.
+- Use `biscuit-terminal` components for rich terminal UI outside ordinary
+  parsed Markdown rendering.
 
 ## Responsibility Split
 
-| Responsibility | Package |
-|----------------|---------|
-| Markdown parsing (CommonMark + GFM) | darkmatter |
-| Compose pipeline (Inline Pre + Transclusion + Inline Post + Finalization) | darkmatter |
-| Syntax highlighting | darkmatter (syntect) |
-| Frontmatter extraction | darkmatter |
-| HTML output | darkmatter |
-| Visual diff utilities | darkmatter |
-| Document comparison/normalization | darkmatter |
-| Terminal detection, image/mermaid rendering, tables | **biscuit-terminal** |
+| Need | Owner |
+|------|-------|
+| CommonMark/GFM parsing | `darkmatter` |
+| Compose pipeline, interpolation, shell directives, transclusion | `darkmatter` |
+| Frontmatter extraction and Markdown-aware hashing | `darkmatter` / `md hash` |
+| `$schema` / SimplifiedSchema validation, detection, compose integration | `darkmatter::markdown::schemas` |
+| `style:` frontmatter parsing and application | `darkmatter::style` |
+| HTML and terminal Markdown renderers | `darkmatter` |
+| Terminal capability detection, images, Mermaid, graph adapters | `biscuit-terminal` |
+| Shared render tree and target-agnostic layout/style types | `renderable` |
 
-## Quick Start
+## Grammar Authority
+
+`darkmatter::markdown::language_grammar::LanguageGrammar` is the single
+production grammar authority in Darkmatter. All code that resolves a fence
+token, extension, filename, or syntect name to a syntax grammar must route
+through `LanguageGrammar` — do not call
+`syntect::parsing::SyntaxSet::find_syntax_by_extension`,
+`find_syntax_by_name`, or equivalent syntect lookup APIs directly in
+production code outside the `LanguageGrammar` implementation.
+
+Preferred entry points:
+
+- `from_token` — Markdown fence info strings (ignores metadata after the first
+  token).
+- `from_token_or_plain_text` / `from_lossy` — infallible; fall back to
+  `LanguageGrammar::PlainText` for unknown input.
+- `from_extension` / `from_name` / `from_filename` — explicit caller intent.
+- `yaml()`, `rust()`, `json()`, `toml()`, `markdown()` — guaranteed named
+  variants.
+
+Because `LanguageGrammar` resolves against the two-face extended grammar set,
+code transclusion recognizes extensions that syntect's bare defaults lack
+(e.g. `.ts`, `.toml`). A two-face-only extension emits its real token instead
+of the fallback token in composed Markdown output; this is intended widening,
+not a regression.
+
+## `style:` Frontmatter Status
+
+The active style-frontmatter wiring phase is
+`darkmatter::style::parse::ACTIVE_STYLE_WIRING_SUB_SPEC = 7`.
+
+Implemented:
+
+- schema/parser with kebab-case canonical keys and snake-case deprecation
+  aliases
+- `style.page.*` layout/background wiring
+- `style.table.*`, `style.images.*`, `style.block-quote.*` layout/fill wiring
+- `style.ul.*`, `style.ol.*`, `style.li.*` list wiring
+- page and component `color` / `bg-color` wiring
+- `md --strict-style`, which fails on unknown/deprecated schema keys but not
+  on valid future-phase keys
+- sub-spec #6 HR migration: top-level `hr:` merges into `style.hr.*` with
+  `Deprecated` warnings; inline `{ style: ... }` is parsed as a deprecated alias
+  for `{ kind: ... }`; `apply_hr_style` wires `style.hr.*` onto `DarkmatterPage`
+- sub-spec #7 bespoke knobs: `page.stylesheet`, `page.meta`, `page.code.theme`,
+  hyperlink/image local-style behavior; `apply_bespoke_style` wired into the
+  CLI render pipeline; `ACTIVE_STYLE_WIRING_SUB_SPEC` advanced to `7`
+
+No valid v1 schema keys remain unwired.
+
+CLI flags win over frontmatter field-by-field. For implementation details, read
+`darkmatter/lib/src/style/{parse.rs,apply.rs}` and
+`renderable/features/2026-05-23-style-property/`.
+
+## Common Entry Points
 
 ```rust
-use darkmatter::markdown::{Markdown, output::{TerminalOptions, write_terminal}};
+use darkmatter::markdown::Markdown;
+use darkmatter::markdown::output::TerminalOptions;
 
 let md: Markdown = "# Hello\n\nWorld".into();
-let mut stdout = std::io::stdout();
-write_terminal(&mut stdout, &md, TerminalOptions::default())?;
+print!("{}", md.as_terminal(TerminalOptions::default())?);
+```
+
+```rust
+use biscuit_terminal::terminal::Terminal;
+use darkmatter::layout::{DarkmatterPage, PageBackground};
+use darkmatter::markdown::Markdown;
+
+let term = Terminal::new_optimistic(120);
+let md: Markdown = "# Hello\n\nWorld".into();
+let output = DarkmatterPage::new(&term)
+    .with_margin(2)
+    .with_padding(1)
+    .with_page_background(PageBackground::Subtle)
+    .with_max_width(100)
+    .render(&md)?;
 ```
 
 ## Compose Pipeline
 
-Three-phase pipeline for document preparation leveraging the [pulldown-cmark](./pulldown-cmark.md) crate:
+The compose pipeline runs in four phases:
 
 **Inline Pre** (serial):
-1. **Frontmatter Interpolation** - `{{ variable }}` in frontmatter resolves before effective state is built
-2. **Frontmatter Shell Expansion** - top-level `$(cmd)` frontmatter values execute after interpolation and write trimmed `stdout` back into frontmatter
-3. **Text Replacement** - `replace:` frontmatter replaces literal strings
-4. **Page Blocks** - `::block` / `::end-block` conditional regions; nest to arbitrary depth with stack-based pairing, lazy child evaluation (skipped parents never evaluate inner `when`), and code-fence protection at every depth
-5. **Interpolation** - `{{ variable }}` expressions expand to values
-6. **Shell Expansion** - `::shell` directives execute approved commands and inject combined `stdout` + `stderr`
-7. **Shell Blocks** - `::shell-block` / `::end-block` directives execute multiple approved commands sequentially and render their combined output
-8. **Link Resolve (abs)** - Converts local links to absolute paths before transclusion
 
-**Transclusion** (prepared serially, resolved concurrently):
-- `::file ./doc.md` - Markdown transclusion with recursive processing
-- `::code ./main.rs` - Code/text transclusion with fenced block generation
-- `::toc-linking ./doc.md` - Linked heading lists from another document's raw source headings
-- `prologue` / `epilogue` - Frontmatter-driven transclusion
-- `when="..."` conditions, ancestry-based cycle detection, depth limits
-- `set=` / `set.NAME=` - Override child frontmatter before child pipeline stages run (three-layer deep-merge: child FM < object-form `set=` < property-form `set.NAME=`). Overlay does not propagate to grandchildren.
-- `--allow-invalid-frontmatter-assignment` / `--allow-reassigned-frontmatter-property` - Permissive-mode CLI flags that downgrade set-override errors to warnings
+1. **Frontmatter Interpolation (pass 1)** - Resolve `{{ variable }}` in frontmatter values against seed values, `doc.*`, `ctx.*`, `env.*`. Defers keys that reference a whole-value `$(...)`.
+2. **Schema Validation** (pre-operation stage) - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Coerces** schema-recognized top-level scalars to their declared types (default-on, e.g. the string `"true"` → real boolean) and writes the coerced values back into frontmatter, skipping `$(...)`-pending values. Problems on fields still holding `$(...)` are deferred to downstream re-validation only when frontmatter shell expansion is enabled; when it is disabled they fail fast.
+3. **Frontmatter Shell Expansion** - Execute top-level `$(cmd)` frontmatter values. Tokens in executed position follow the [`$()` token-resolution ladder](compose.md): literal → `name(...)` safe function → executable → frontmatter property → null.
+4. **Frontmatter Interpolation (pass 2)** - Resolve the keys deferred in pass 1 against the now-concrete shell-expanded values.
+5. **Text Replacement** - Replace literal strings from `replace:` map.
+6. **Page Blocks** - Evaluate `::block`/`::end-block` conditional regions.
+7. **Interpolation** - Expand `{{ variable }}` in body content.
+8. **Shell Expansion** - Execute `::shell` directives.
+9. **Shell Blocks** - Execute `::shell-block` directives.
+10. **Link Resolve** - Resolve local links to absolute paths.
+
+**Transclusion** (concurrent):
+
+- `::file`, `::code`, `::toc-linking`, `::file-links`, `prologue`/`epilogue`
 
 **Inline Post** (serial):
-1. **Cleanup** - Normalizes formatting (spacing, tables)
-2. **Normalization** - Adjusts heading levels
 
-**Finalization** (serial, root-only):
-1. **Link Normalization** - Converts absolute paths back to portable forms (relative, `~/`, or `${ENV}`)
+- Cleanup and normalization.
 
-```rust
-use darkmatter::markdown::{Markdown, compose::{ComposeOptions, ComposeOperation}};
+**Finalization** (root-only):
 
-// All operations (default)
-let mut md: Markdown = content.into();
-let report = md.compose_mut()?;
+- Link normalization (absolute → portable paths).
 
-// Full pipeline with transclusion (requires source file path)
-let md = Markdown::try_from(std::path::Path::new("docs/root.md"))?;
-let options = ComposeOptions::new()
-    .with_source_file("docs/root.md");
-let (composed, report) = md.compose_with(options)?;
+Context capture happens once at compose start, driven by `sniff` (OS, hardware,
+git repo structure, monorepo discovery, file changes, document inventory) and
+simple environment reads (`AGENT`, `MODEL`).
+Only the context groups actually referenced by the document are captured
+(demand-driven). The `--allow-ctx-override` CLI flag downgrades non-object
+`ctx` frontmatter errors to warnings.
 
-// Only specific operations
-let options = ComposeOptions::new()
-    .only(&[ComposeOperation::Interpolation, ComposeOperation::Cleanup]);
+See `compose.md` for the full API, interpolation syntax, and transclusion details.
+
+## Schema Validation
+
+Darkmatter defines, detects, and evaluates schemas for Markdown frontmatter via **SimplifiedSchema** — a single-line YAML grammar that compiles to Draft 2020-12 JSON Schema. Key surfaces:
+
+- `$schema` frontmatter property (inline, file reference, or root-level union).
+- `md schema validate`, `md schema detect`, and `md schema about` CLI subcommands.
+- `DarkmatterSchemas` library API with baseline merging and LRU validator cache.
+- Always-on compose pipeline stage (after `--set`/`--state` and interpolation, before shell expansion) that also **coerces** schema-recognized scalars to their declared types and writes them back (default-on; `$(...)`-pending values are skipped and coerced at post-shell re-validation).
+- `ComposeOptions::with_baseline_schema(...)` for programmatic baseline injection.
+- Typed schema-language descriptor catalog (`schema_type_descriptors()`, `schema_constraint_descriptors()`, `schema_shape_descriptors()`, `inline_object_rule_descriptors()`, `coercion_rule_descriptors()`, `validation_behavior_descriptors()`) — the authoritative source for `md schema about` and the same surface library callers render their own reports from.
+
+See `darkmatter/docs/topics/schema-definition.md` for the full topic documentation.
+
+## Remote URL Referencing
+
+Remote URL composition is supported for HTTP(S) `::file` / `::code` targets
+and read-side expression function file arguments. Ordinary rendered HTTP(S)
+links are preserved and not fetched.
+
+- All network egress goes through `biscuit-file`'s `FetchPolicy`, which is
+  deny-all by default.
+- CLI callers allow exact hosts with `md compose --allow-host <host>`.
+- Persistent remote artifacts require `--cache-root` or
+  `ComposeOptions::with_cache_root(...)`.
+- Remote freshness is controlled by `--remote-freshness`,
+  `--remote-refresh`, `--remote-ttl`, and `RemoteReadConfig`.
+- The side-effect `EffectEngine::http_post` uses the same shared fetch policy
+  for host allowlist enforcement.
+- Remote URL arguments to read-side functions work only on surfaces with a
+  remote runtime — body interpolation. The **frontmatter** context (both the
+  pre-shell and post-shell interpolation passes, and the `$()` shell ternary
+  condition/branch) is local-only, so a remote URL there **fails loudly**.
+  `absolute` and `relative` are local-only path transforms — never remote,
+  never part of remote-fetch discovery.
+
+See `darkmatter/docs/topics/remote-url-references.md` for public guidance.
+
+## Disclosure Blocks
+
+Darkmatter supports render-time disclosure blocks using the `::disclosure` / `::details` / `::end-disclosure` directive triple. The syntax is a block-level extension; directives must appear at line boundaries and be followed by ASCII whitespace or end-of-line.
+
+```md
+::disclosure License *Agreement*
+::details
+Keep your **hands** off.
+::end-disclosure
 ```
 
-### Interpolation Expressions
+- The summary region (between `::disclosure` and `::details`) is phrasing-only: no paragraph breaks, hard line breaks, or block-level elements.
+- The body region (between `::details` and `::end-disclosure`) is full block-level Markdown and may contain nested disclosures.
+- `::file` and `::code` transclusion can wrap content in a disclosure block with `disclosure="Summary text"` or `disclosure=true` (default summary is `"Details"`).
 
-| Expression | Example | Description |
-|------------|---------|-------------|
-| Variable | `{{ name }}` | Frontmatter value |
-| Nested | `{{ user.email }}` | Nested object access |
-| Context | `{{ ctx.today }}` | Runtime context (today, year, etc.) |
-| Environment | `{{ env.HOME }}` | Environment variable |
-| Fallback | `{{ color || "unknown" }}` | Default if missing |
-| Ternary | `{{ x ? "yes" : "no" }}` | Conditional |
-| Comparison | `{{ count > 0 ? "has" : "empty" }}` | Numeric comparison |
-| Functions | `{{ length(items) }}` | Helper functions |
+Render-tree representation: `renderable::tree::NodeKind::Disclosure { summary, children, layout, style }`, where `summary` and `children` are slices of `RenderNode` and `style` carries inline opener hints. Target behavior:
 
-### Helper Functions
+| Target | Behavior |
+|--------|----------|
+| Terminal | Summary rendered normally; body rendered as a block quote with dim and italic text. |
+| Markdown (dialect) | DSL emitted verbatim: `::disclosure`, `::details`, `::end-disclosure`. |
+| MarkdownPlus | Summary and body rendered to Markdown, then wrapped in `<details><summary>…</summary>…</details>`. |
+| Browser | Summary and body rendered to HTML, then wrapped in native `<details>`/`<summary>` elements; no JavaScript. |
+| JSON | Serialized natively through `Markdown::as_document()` as `NodeKind::Disclosure`. |
 
-- `length(x)` - String/array/object length
-- `number(x, default)` - Parse as number
-- `round(x, default)` - Round to integer
+### Styling
 
-### Expression Module
+Disclosures honor `style.disclosure.*` frontmatter using the same `CommonStyle` shape as tables and block-quotes (`width`, `max-width`, `alignment`, `color`, `bg-color`). Kebab-case keys are canonical; snake-case aliases (`max_width`, `bg_color`) emit a `Deprecated` warning and `--strict-style` rejects them. `width` and `max-width` are mutually exclusive.
 
-The `compose::expression` module is the canonical home for expression parsing and evaluation infrastructure:
+Inline opener style tokens take precedence over frontmatter:
 
-- **`ast::Expr`** — AST nodes for parsed expressions
-- **`lexer::Lexer`** — Tokenizes expression strings
-- **`parser::Parser`** — Builds AST from tokens (supports interpolation and condition modes)
-- **`EvaluationLookup`** — Trait for variable resolution used by both interpolation and condition evaluation
-- **`evaluate`** — Core expression evaluator shared by interpolation and condition evaluation
-- **Shared helpers** — `is_truthy`, `to_number`, `scalar_string` for JSON value manipulation
-
-`compose::interpolation` re-exports these types for backward compatibility (`InterpolationLookup` is an alias for `EvaluationLookup`).
-
-### Shortcut API
-
-For external callers who only need the boolean DSL without constructing a full `ComposeContext` + `EffectiveState`, use `compose::conditions::evaluate_condition_against`:
-
-```rust
-use darkmatter::markdown::compose::conditions::evaluate_condition_against;
-use serde_json::json;
-use std::path::Path;
-
-let data = json!({ "draft": true, "audience": "internal" });
-let result = evaluate_condition_against(
-    "draft && audience == 'internal'",
-    &data,
-    Path::new("."),
-)?;
+```md
+::disclosure max-width=60ch color=red-500 License Agreement
+::details
+Keep your **hands** off.
+::end-disclosure
 ```
 
-This shortcut resolves:
-- Top-level and nested paths against the provided `data`
-- `env.*` against `std::env`
-- `ctx.*` via lazy runtime context capture (only the groups actually referenced are captured)
-- Missing unprefixed keys fall back to `ctx.*` (same behavior as `EffectiveState`)
+Recognized inline keys are `width`, `max-width`/`max_width`, `alignment`, `color`, `bg-color`/`bg_color`. Unrecognized or invalid tokens become part of the summary text.
 
-`ConditionError` implements `biscuit_terminal::errors::BlockError`, so failures render as rich status blocks. Context capture is lazy and short-circuit aware: `false_flag && ctx.repo == "x"` does not trigger repo context capture.
+Malformed disclosures raise `MarkdownError::MalformedDisclosure { reason, range }`.
 
-`ConditionError` implements `biscuit_terminal::errors::BlockError`, so failures render as rich status blocks. Context capture is lazy and short-circuit aware: `false_flag && ctx.repo == "x"` does not trigger repo context capture.
+## Progressive Disclosure
 
-### Shell Expansion Notes
+Open only the topic file needed for the task:
 
-- Body `::shell` and top-level frontmatter `$(...)` share policy loading, whitelist/blacklist checks, approval, and timeout behavior.
-- Frontmatter shell expansion stores trimmed `stdout` only and treats malformed matching expressions as hard errors.
-- Independent top-level frontmatter shell commands execute concurrently after approval/policy resolution.
-- `--allow-shell-timeout` / `ComposeOptions::with_allow_shell_timeout(true)` convert timeouts into empty-string replacements plus compose warnings.
+| Topic | File |
+|-------|------|
+| Compose pipeline | `compose.md` |
+| Expressions (read-side functions, `doc.*`/`ctx.*`/`env.*` namespaces, `$()` token resolution, authoring guide) | `darkmatter/docs/topics/darkmatter-expressions.md` |
+| Context variables (`ctx.*`: date/time, repo, file changes, OS, hardware, docs, agent/model) | `darkmatter/docs/topics/context-variables.md` |
+| Schema validation | `darkmatter/docs/topics/schema-definition.md` |
+| Terminal rendering options | `terminal.md` |
+| Frontmatter model | `frontmatter.md` |
+| Error/status block conventions | `errors.md` |
+| Document comparison | `comparison.md` |
+| Markdown hashing (`md hash`: kinds, `--save`, `--diff`, env vars) | `darkmatter/docs/cli/hash.md` |
+| Module layout | `structure.md` |
+| Parser details | `pulldown-cmark.md` |
 
-### Shell Blocks
+For render-tree work, switch to the `renderable` skill for the IR model and
+the `biscuit-terminal` skill for terminal tree rendering.
 
-`::shell-block` / `::end-block` directives execute multiple approved commands sequentially and render their combined output. Unlike `::shell`, shell blocks use key-value parameter syntax (`when_error="text"`, `timeout=5`).
+## Current Rendering Notes
 
-- Each non-empty line is a logical command; blank lines are ignored
-- Trailing backslash `\` joins with the next non-blank line
-- Commands are prepared (approval + policy checks) before any execute
-- Output is trimmed, empty outputs are dropped, and one blank line separates non-empty outputs
-- Error handling options (`when_error`, `when_exit_code`, `stderr_contains`, etc.) apply per command
-- Unhandled failures preserve partial output from earlier successful commands in the error
-- Shell blocks can nest inside page blocks; if the parent page block is skipped, commands never execute
-
-## Detailed Topics
-
-- [Compose Pipeline](./compose.md) - Text replacement, interpolation, cleanup
-- [Terminal Output](./terminal.md) - ANSI rendering, themes, options
-- [Frontmatter](./frontmatter.md) - YAML parsing, merge strategies
-- [Document Comparison](./comparison.md) - Structural diff, change classification
-- [Error Conventions](./errors.md) - `BlockError` body contract, `SourceContext`, snapshot tests
-- [Module Structure](./structure.md) - Package organization and dependencies
-
-## CLI
-
-```bash
-md doc.md                        # Render to terminal (auto mode)
-md doc.md --output html          # HTML output
-md doc.md --output json          # AST JSON output
-md doc.md --output markdown      # Plain markdown text
-md doc.md --clean                # Normalize formatting (stdout)
-md doc.md --clean-save           # Normalize and save back to file
-md doc.md --output html --show   # Open in default app
-md toc doc.md                    # Table of contents
-md delta old.md new.md           # Document comparison
-md -v delta old.md new.md        # Verbose comparison (-v is top-level)
-md graph doc.md                  # Dependency graph visualization
-md graph doc.md --follow         # Recurse into transclusions
-md graph doc.md --validate       # Inline validation overlays
-```
-
-### FileTree Component
-
-`FileTree` is a `Renderable` component that visualizes a Markdown file's dependency surface:
-- References (hyperlinks, images, CSS/script imports) above the file line
-- Transclusions below the file line with section-aware captions
-- Optional recursive expansion via `.follow_transclusions()`
-- Optional validation overlays via `.validate()`
-
-Located in `darkmatter/lib/src/markdown/reference/file_tree/`.
-
-### Horizontal Rules
-
-Darkmatter styles CommonMark `---` / `___` / `***` horizontal rules from page-level `hr` frontmatter defaults, with optional per-rule attribute-block overrides (YAML flow-mapping syntax), and dispatches rendering to biscuit-terminal's `HorizontalRule` (`Renderable` + `BrowserRenderable`).
-
-- **Markdown syntax**: `--- { style: waves, width: "50%" }`
-- **Supported attributes** (all optional):
-    - `style`: `dashes` (default), `dots`, `waves`, `line-star`, `line-circle`, `inset-line`, `curtain-rod`
-    - `alignment`: `full` (default), `centered`, `left`, `right`
-    - `weight`: `thin`, `medium` (default), `thick`
-    - `width`: CSS-like string (`"75%"`, `"200px"`)
-    - `color`: CSS color name or `#rrggbb`
-- **Preferred page defaults:** put these fields under frontmatter `hr:`; per-rule attributes override only specified keys.
-- **Validation:** unknown enum values or unknown attribute keys fall back to the component default and emit `tracing::warn!` (visible via `RUST_LOG=darkmatter=warn`).
-- **Bare `---`:** produces a configured rule when `hr:` frontmatter is present, otherwise the default dashed rule.
-- **Terminal rendering tiers:**
-  1. **Tier 1 (SVG → PNG via `resvg` + `TerminalImage`):** primary path for Kitty-compatible image terminals. When no `color` is specified, the image tier detects the terminal's color mode and uses `white` for dark terminals and `black` for light terminals, avoiding invisible black-on-dark output.
-  2. **Tier 2 (Unicode):** fallback when image rendering is unavailable and the locale signals UTF-8.
-  3. **Tier 3 (ASCII):** fallback otherwise.
-- **Browser rendering:** SVG with `--hr-weight`, `--hr-color`, `--hr-width` CSS variables; per-instance overrides via `render_to_browser_with_inline_variables`.
-
-Located in `darkmatter/lib/src/markdown/inline/types.rs`, `darkmatter/lib/src/markdown/block/rule_processor.rs`, and `darkmatter/lib/src/markdown/output/`.
-
-### Shared Code-Block Helpers
-
-`darkmatter/lib/src/markdown/output/code_block.rs` contains `pub(crate)` helpers used by both terminal and HTML rendering:
-
-- `render_terminal_code_block` - ANSI-highlighted code with padding, line numbers, and highlighted ranges
-- `render_html_code_block` - `<div class="code-block">` wrapper with optional line-number table or `<pre><code>` output
-- `find_syntax` - Language lookup by extension, name, or alias (shared `syntect` behaviour)
-
-These helpers ensure Markdown code fences and `YamlBlock` use identical syntax-highlighting logic.
-
-### YamlBlock Component
-
-`YamlBlock` is a typed, validated YAML payload that renders as a syntax-highlighted `yaml` code block in both terminal and browser output.
-
-- **Constructors:**
-    - `YamlBlock::new(yaml)` — from raw YAML string; validates via `serde_yaml_ng`
-    - `YamlBlock::from_yaml_file(path)` — from a YAML file on disk
-    - `YamlBlock::from_markdown_content(md)` — extracts only the frontmatter; yields `{}` if none
-    - `YamlBlock::from_markdown_file(path)` — from a Markdown file on disk
-- **Validation:** all constructors parse YAML through `serde_yaml_ng::from_str` and fail fast; the parsed `Value` is not retained
-- **Rendering:** implements `Renderable` and `BrowserRenderable` from `biscuit-terminal`, delegating to the shared code-block helpers with `language = "yaml"`
-- **No tree view or custom YAML renderer** — produces a standard highlighted code block
-
-Located in `darkmatter/lib/src/markdown/yaml_block.rs`.
-
-
-
-## See Also
-
-- [biscuit-terminal skill](../biscuit-terminal/SKILL.md) - Terminal rendering dependency
+- Public `Markdown::as_html` and `Markdown::as_terminal` (and
+  `DarkmatterPage::render`) route through the render-tree document renderers;
+  the legacy `pulldown-cmark` event-stream serializers and `RuleProcessor` have
+  been deleted (tree-cutover Phase 5).
+- `darkmatter::markdown::render_tree::fold_markdown_to_document` is the
+  Markdown-to-`Document` bridge every public render path folds through.
+- `YamlBlock` is a deprecated thin compatibility wrapper around
+  [`CodeBlock::yaml`](darkmatter/lib/src/markdown/code_block.rs); both
+  render through the same shared code-block helpers, so terminal and
+  browser output is byte-for-byte equal for the same payload. New code
+  should use [`CodeBlock`](darkmatter/lib/src/markdown/code_block.rs)
+  directly with `CodeBlock::yaml`, `CodeBlock::rust`, `CodeBlock::json`,
+  `CodeBlock::toml`, `CodeBlock::from_source_file`, or
+  `CodeBlock::new(code, Some("lang"))`; `YamlBlock`'s validation
+  constructors remain (with a deprecation warning) for callers that need
+  upfront YAML validation. The CLI exposes the same surface as
+  `md code-block <file-or-content> --language LANG [--theme THEME] [--title TITLE] [--line-numbering] [--highlight RANGE] --output terminal|html|markdown`,
+  which constructs a `CodeBlock` directly without routing through the
+  Markdown fold.
+- Code-block themes resolve against the inverted page color mode for contrast
+  **by default**; ordinary prose follows the real mode. The code panel's mode is
+  derived from the terminal (the same source as the page), not a separate
+  env-only detector. The inversion is configurable via the `CodeBlockMode` enum
+  (`inverse` (default) / `dark` / `light` / `same`) — exposed as the global
+  `md --code-block <...>` flag and `DarkmatterPage::with_code_block_mode(...)`.
+  `CodeBlockMode` is honored on **both** terminal and browser: the browser code
+  path resolves through `HtmlOptions::code_block_mode`, and the injected
+  `.code-block` stylesheet background is computed against the same mode so
+  markup and stylesheet agree. A direct `CodeBlock::with_theme(theme)` /
+  `md code-block --theme` override wins over the page/context theme on both
+  surfaces. See `darkmatter/docs/rendering/code-highlighting.md`.
+- Horizontal rules: canonical styling is `style.hr.*` with `apply_hr_style`;
+  top-level `hr:` and inline `{ style: ... }` remain deprecated aliases.
+- The darkmatter cutover is complete: deprecated `PageMargin`, `PagePadding`,
+  `PageAlignment`, `PageFill`, `WidthUnit`, and `PageComponent::Lists` have
+  been deleted. `style:` frontmatter lowers **directly** into a per-component
+  `ComponentPolicy` — a `renderable::layout::Layout` plus `color` / `bg_color`
+  carried as alpha-bearing `renderable::style::PaintColor`. The parsed
+  `StyleColor` is lowered to `PaintColor` at the parser/apply boundary
+  (`style/apply.rs`), so opacity rides in the paint's alpha channel; no
+  `StyleColor` survives on post-construction component types.
+- Production rendering is **one context-aware fold followed by one target fold**.
+  Darkmatter's `render_tree::build_context` (`TreeBuildContext`) bakes component
+  policy, page-inheriting color, alpha paint, hyperlink/image text layout,
+  structured link/image browser attrs, and HR defaults onto the nodes during
+  construction; the target fold then resolves all width, padding, alignment, and
+  CSS. The old post-fold `decorate` pass (`decorate_document` / `component_for`)
+  and the `darkmatter.style` / `darkmatter.li` render hints are **deleted** — the
+  browser fold lowers alpha straight to `rgba(...)` with no HTML rewrite, and a
+  malformed fenced code-block directive remains a fatal
+  `MarkdownError::InvalidLineRange` via the `validate_code_directives` preflight
+  the HTML entry points run over the folded tree. `DarkmatterPage` survives as a
+  slim, renderable-typed page frame — the constrained **Option A** boundary
+  signed off by the CSS Box Architecture closeout
+  (`renderable/features/_completed/2026-06-06-tree-closeout`): a viewport-level assembler (page
+  width/margin/padding, full-page background, max-width centering,
+  `PageBackground::Pronounced` code-theme contrast, browser page-wrapper metadata
+  + stylesheet assembly) that wraps the *folded output*, carrying no component
+  policy, inspecting no component node kinds, and mutating no component content.

@@ -58,9 +58,17 @@ impl Drop for ScopedEnv {
 // Color depth tests
 // =============================================================================
 
+// COLORTERM-based assertions must neutralize NO_COLOR / CLICOLOR_FORCE /
+// FORCE_COLOR because biscuit-terminal honors those overrides before it
+// looks at COLORTERM. A developer with NO_COLOR=1 exported in their shell
+// would otherwise see ColorDepth::None and these tests would fail through
+// no fault of the code under test.
 #[test]
 #[serial]
 fn test_color_depth_truecolor() {
+    let _no_color = ScopedEnv::remove("NO_COLOR");
+    let _clicolor_force = ScopedEnv::remove("CLICOLOR_FORCE");
+    let _force_color = ScopedEnv::remove("FORCE_COLOR");
     let _env = ScopedEnv::set("COLORTERM", "truecolor");
     assert_eq!(color_depth(), TRUE_COLOR_DEPTH);
 }
@@ -68,6 +76,9 @@ fn test_color_depth_truecolor() {
 #[test]
 #[serial]
 fn test_color_depth_24bit() {
+    let _no_color = ScopedEnv::remove("NO_COLOR");
+    let _clicolor_force = ScopedEnv::remove("CLICOLOR_FORCE");
+    let _force_color = ScopedEnv::remove("FORCE_COLOR");
     let _env = ScopedEnv::set("COLORTERM", "24bit");
     assert_eq!(color_depth(), TRUE_COLOR_DEPTH);
 }
@@ -75,6 +86,9 @@ fn test_color_depth_24bit() {
 #[test]
 #[serial]
 fn test_color_depth_case_insensitive() {
+    let _no_color = ScopedEnv::remove("NO_COLOR");
+    let _clicolor_force = ScopedEnv::remove("CLICOLOR_FORCE");
+    let _force_color = ScopedEnv::remove("FORCE_COLOR");
     let _env = ScopedEnv::set("COLORTERM", "TrueColor");
     assert_eq!(color_depth(), TRUE_COLOR_DEPTH);
 }

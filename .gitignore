@@ -65,17 +65,18 @@ trace/*
 
 ~$*.docx
 **/debug/*
-Cargo.lock
-**/Cargo.lock/*
+**/Cargo.lock
 
 # Insta pending snapshots (transient — should never be committed)
 **/*.snap.new
 **/*.pending-snap
 
+.opencode/package-lock.json
 # Timing artifacts emitted by `just _lint` / `just _test` recipes
 **/lint-*-timing.jsonl
 **/test-*-timing.jsonl
 
-.opencode/package-lock.json
 **/lint-*timing.jsonl
 **/test-*timing.jsonl
+.claudine/tmp/
+**/tmp-stream*

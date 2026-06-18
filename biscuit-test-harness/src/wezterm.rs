@@ -18,17 +18,22 @@ use std::env;
 use std::ffi::OsString;
 use std::io;
 use std::process::{Command, Stdio};
+use std::sync::Once;
 use std::time::Duration;
 
 use super::{
     CAPTURE_TIMEOUT, CLEANUP_TIMEOUT, CapturedFrame, QUERY_TIMEOUT, SEND_TIMEOUT, SPAWN_TIMEOUT,
-    SpawnVisibility, TerminalHarness, run_with_stdin_timeout, run_with_timeout, wait_for_prompt,
+    SpawnVisibility, TerminalHarness, current_process_id, pid_from_tag, process_is_alive,
+    run_with_stdin_timeout, run_with_timeout, wait_for_prompt,
 };
 
 /// Workspace name used when [`SpawnVisibility::Background`] is in
 /// effect. Picked to be distinct from any name a developer is likely
 /// to use interactively so the window is created out-of-sight.
 const BACKGROUND_WORKSPACE: &str = "biscuit-bg";
+const PANE_TITLE_PREFIX: &str = "biscuit-test-pane-";
+const LEGACY_BACKGROUND_PANE_LIMIT: usize = 64;
+static CLEANUP_ONCE: Once = Once::new();
 
 /// Geometry returned by [`WezTermHarness::pane_size`].
 ///
@@ -63,10 +68,20 @@ impl PaneSize {
     }
 }
 
+/// Environment variable read by [`WezTermHarness::shared_or_spawn`] to
+/// attach to a pane that was pre-spawned by an outer process (e.g. the
+/// `_test_l2` recipe via `biscuit-harness-broker`) instead of paying the
+/// 2-3 s cost of spawning a fresh pane in every nextest child process.
+pub const SHARED_PANE_ENV: &str = "BISCUIT_SHARED_WEZTERM_PANE_ID";
+
 /// Harness that talks to a running WezTerm GUI via `wezterm cli`.
 pub struct WezTermHarness {
     pane_id: Option<String>,
     spawn_visibility: SpawnVisibility,
+    /// When `true`, [`Drop`] kills the pane via `wezterm cli kill-pane`.
+    /// When `false` (set by [`WezTermHarness::attach`]) the pane is left
+    /// alone because some outer scope owns it.
+    owned: bool,
 }
 
 impl WezTermHarness {
@@ -77,7 +92,43 @@ impl WezTermHarness {
         Self {
             pane_id: None,
             spawn_visibility: SpawnVisibility::default(),
+            owned: true,
         }
+    }
+
+    /// Returns a harness that references an existing pane by id without
+    /// taking ownership: the [`Drop`] impl is a no-op so the pane
+    /// survives this harness going out of scope.
+    ///
+    /// Used by [`shared_or_spawn`](Self::shared_or_spawn) and by
+    /// `biscuit-harness-broker kill` to act on panes whose lifecycle is
+    /// managed by an outer process.
+    pub fn attach(pane_id: impl Into<String>) -> Self {
+        Self {
+            pane_id: Some(pane_id.into()),
+            spawn_visibility: SpawnVisibility::default(),
+            owned: false,
+        }
+    }
+
+    /// If [`SHARED_PANE_ENV`] is set, returns a borrowed
+    /// [`attach`](Self::attach)-style harness pointing at the pre-spawned
+    /// pane. Otherwise spawns a fresh background pane (owned).
+    ///
+    /// ## Errors
+    ///
+    /// Propagates whatever [`spawn_shell`](TerminalHarness::spawn_shell)
+    /// returns when no shared pane id is available.
+    pub fn shared_or_spawn() -> io::Result<Self> {
+        if let Ok(id) = env::var(SHARED_PANE_ENV) {
+            let trimmed = id.trim();
+            if !trimmed.is_empty() {
+                return Ok(Self::attach(trimmed));
+            }
+        }
+        let mut h = Self::new();
+        h.spawn_shell()?;
+        Ok(h)
     }
 
     /// Builder-style override of the default
@@ -86,7 +137,24 @@ impl WezTermHarness {
     /// [`focus_spawned_pane`](Self::focus_spawned_pane) — those need
     /// the window to be on the active workspace before AXRaise can
     /// reach it.
+    ///
+    /// ## Invariant
+    ///
+    /// L2 (shared) tests MUST keep the default
+    /// [`SpawnVisibility::Background`] so test runs do not steal focus
+    /// from the developer's foreground app. Only L3 tests (which own
+    /// their own per-test harness and need OS keyboard injection)
+    /// should override to [`SpawnVisibility::Foreground`]. Attached
+    /// (shared-pane) harnesses panic from this setter in debug builds
+    /// because the broker-spawned pane was already created in
+    /// background mode and cannot be re-spawned with a different
+    /// visibility.
     pub fn with_spawn_visibility(mut self, visibility: SpawnVisibility) -> Self {
+        debug_assert!(
+            self.owned,
+            "with_spawn_visibility on an attached (shared) WezTermHarness has no effect — \
+             the pane was already spawned by biscuit-harness-broker in Background mode",
+        );
         self.spawn_visibility = visibility;
         self
     }
@@ -95,6 +163,12 @@ impl WezTermHarness {
     /// WezTerm GUI socket are available.
     pub fn available() -> bool {
         env::var_os("WEZTERM_UNIX_SOCKET").is_some() && which("wezterm")
+    }
+
+    /// Returns the active pane id (panicking if the harness has not
+    /// spawned or attached yet).
+    pub fn pane_id_str(&self) -> &str {
+        self.pane_id()
     }
 
     /// Borrows the active pane id, panicking with a clear message when
@@ -122,7 +196,21 @@ impl WezTermHarness {
     /// pane id (already unique within a WezTerm instance) so concurrent
     /// runs of the same harness don't collide.
     fn unique_window_title(&self) -> String {
-        format!("biscuit-test-pane-{}", self.pane_id())
+        format!(
+            "{PANE_TITLE_PREFIX}{}-{}",
+            current_process_id(),
+            self.pane_id()
+        )
+    }
+
+    fn tag_spawned_pane(&self) {
+        let id = self.pane_id();
+        let title = self.unique_window_title();
+        let mut cmd = Command::new("wezterm");
+        cmd.args(["cli", "set-tab-title", "--pane-id", id, &title])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
     }
 
     /// Returns the spawned pane's geometry as `(rows, cols, pixel_width,
@@ -210,6 +298,37 @@ impl WezTermHarness {
     /// the same broken behaviour as before. We surface this as an
     /// `io::Error` so the failure mode is explicit.
     pub fn focus_spawned_pane(&self) -> io::Result<Option<(i32, i32)>> {
+        match self.raise_and_window_bounds()? {
+            Some((x, y, w, h)) => {
+                let click_x = x + w / 2;
+                let click_y = y + h / 2;
+                eprintln!(
+                    "[focus_spawned_pane] WezTerm window pos=({x},{y}) size=({w},{h}) → click target ({click_x},{click_y})"
+                );
+                std::thread::sleep(Duration::from_millis(200));
+                Ok(Some((click_x, click_y)))
+            }
+            None => {
+                std::thread::sleep(Duration::from_millis(400));
+                Ok(None)
+            }
+        }
+    }
+
+    /// Raises the spawned pane's WezTerm window to the front and returns its
+    /// screen bounds as `(x, y, width, height)` in points.
+    ///
+    /// Stamps the pane with a unique title, activates the pane, then (macOS
+    /// only) raises the owning window via System Events and reads its position
+    /// and size. Returns `Ok(None)` off macOS, or when the window position
+    /// could not be resolved.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error when the `wezterm cli` title/activate calls fail, or
+    /// when the System Events AXRaise call fails (e.g. missing Accessibility
+    /// permission for the parent terminal app).
+    fn raise_and_window_bounds(&self) -> io::Result<Option<(i32, i32, i32, i32)>> {
         let id = self.pane_id();
         let title = self.unique_window_title();
 
@@ -299,18 +418,74 @@ impl WezTermHarness {
                 .filter_map(|s| s.parse().ok())
                 .collect();
             if parts.len() == 4 {
-                let (x, y, w, h) = (parts[0], parts[1], parts[2], parts[3]);
-                let click_x = x + w / 2;
-                let click_y = y + h / 2;
-                eprintln!(
-                    "[focus_spawned_pane] WezTerm window pos=({x},{y}) size=({w},{h}) → click target ({click_x},{click_y})"
-                );
-                std::thread::sleep(Duration::from_millis(200));
-                return Ok(Some((click_x, click_y)));
+                return Ok(Some((parts[0], parts[1], parts[2], parts[3])));
             }
         }
 
-        std::thread::sleep(Duration::from_millis(400));
+        Ok(None)
+    }
+
+    /// Raises the spawned pane's window and screen-captures it to PNG bytes via
+    /// macOS `screencapture -R`.
+    ///
+    /// Intended for the Level-2 terminal-image test, where text capture cannot
+    /// prove an inline image was painted: the caller samples the returned pixels
+    /// for the distinctive fill color it rendered.
+    ///
+    /// ## Returns
+    ///
+    /// `Ok(Some(png_bytes))` on a successful capture, or `Ok(None)` when
+    /// window-region capture is unavailable — off macOS, when the window bounds
+    /// cannot be resolved, or when `screencapture` fails. A `None` is a signal
+    /// to skip pixel assertions cleanly, mirroring the rest of the harness.
+    ///
+    /// ## Notes
+    ///
+    /// macOS only. Requires Screen Recording permission for the parent process;
+    /// without it `screencapture` yields a black frame. The caller distinguishes
+    /// that (a near-black capture) from a genuine paint failure and skips on it.
+    #[cfg(target_os = "macos")]
+    pub fn capture_window_png(&self) -> io::Result<Option<Vec<u8>>> {
+        // A raise/bounds failure (window not matched, Accessibility permission
+        // not granted) is a reason to skip the pixel assertion, not to fail —
+        // degrade it to `None` rather than propagating the error.
+        let Ok(Some((x, y, w, h))) = self.raise_and_window_bounds() else {
+            return Ok(None);
+        };
+        if w <= 0 || h <= 0 {
+            return Ok(None);
+        }
+        // Let the compositor settle after the raise before grabbing pixels.
+        std::thread::sleep(Duration::from_millis(300));
+
+        let tmp = env::temp_dir().join(format!("biscuit-wezcap-{}.png", self.pane_id()));
+        let mut cmd = Command::new("screencapture");
+        cmd.args(["-x", "-o"])
+            .arg(format!("-R{x},{y},{w},{h}"))
+            .arg(&tmp)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let out = run_with_timeout(&mut cmd, QUERY_TIMEOUT)?;
+        if !out.status.success() {
+            return Ok(None);
+        }
+        match std::fs::read(&tmp) {
+            Ok(bytes) => {
+                let _ = std::fs::remove_file(&tmp);
+                if bytes.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(bytes))
+                }
+            }
+            Err(_) => Ok(None),
+        }
+    }
+
+    /// Non-macOS stub: window-region screen capture is unsupported, so callers
+    /// skip the pixel assertion. See the macOS implementation for details.
+    #[cfg(not(target_os = "macos"))]
+    pub fn capture_window_png(&self) -> io::Result<Option<Vec<u8>>> {
         Ok(None)
     }
 }
@@ -323,8 +498,23 @@ impl Default for WezTermHarness {
 
 impl Drop for WezTermHarness {
     fn drop(&mut self) {
-        self.kill_pane();
+        if self.owned {
+            self.kill_pane();
+        }
     }
+}
+
+/// Kills the pane with the given id by shelling out to
+/// `wezterm cli kill-pane`. Used by `biscuit-harness-broker kill` so the
+/// `_test_l2` recipe can tear down shared panes whose `WezTermHarness`
+/// instances were leaked in a different process. Best-effort: any error
+/// is swallowed.
+pub fn kill_pane_by_id(pane_id: &str) {
+    let mut cmd = Command::new("wezterm");
+    cmd.args(["cli", "kill-pane", "--pane-id", pane_id])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
 }
 
 impl TerminalHarness for WezTermHarness {
@@ -338,6 +528,9 @@ impl TerminalHarness for WezTermHarness {
     fn spawn_shell(&mut self) -> io::Result<()> {
         if !Self::available() {
             return Err(io::Error::other("WezTerm not available"));
+        }
+        if self.spawn_visibility == SpawnVisibility::Background {
+            CLEANUP_ONCE.call_once(cleanup_stale_wezterm_panes);
         }
         let shell = super::detect_shell();
         let mut cmd = Command::new("wezterm");
@@ -377,6 +570,7 @@ impl TerminalHarness for WezTermHarness {
             return Err(io::Error::other("wezterm cli spawn returned empty pane id"));
         }
         self.pane_id = Some(pane_id);
+        self.tag_spawned_pane();
         wait_for_prompt(self)?;
         Ok(())
     }
@@ -388,6 +582,9 @@ impl TerminalHarness for WezTermHarness {
     fn spawn_program(&mut self, program: &str, args: &[&str]) -> io::Result<()> {
         if !Self::available() {
             return Err(io::Error::other("WezTerm not available"));
+        }
+        if self.spawn_visibility == SpawnVisibility::Background {
+            CLEANUP_ONCE.call_once(cleanup_stale_wezterm_panes);
         }
         let mut cmd = Command::new("wezterm");
         cmd.args(["cli", "spawn", "--new-window"]);
@@ -411,6 +608,7 @@ impl TerminalHarness for WezTermHarness {
             return Err(io::Error::other("wezterm cli spawn returned empty pane id"));
         }
         self.pane_id = Some(pane_id);
+        self.tag_spawned_pane();
         std::thread::sleep(Duration::from_millis(400));
         Ok(())
     }
@@ -443,6 +641,78 @@ impl TerminalHarness for WezTermHarness {
         let raw = String::from_utf8_lossy(&out.stdout).into_owned();
         Ok(CapturedFrame::from_raw(raw))
     }
+}
+
+/// Removes stale panes from the harness-owned WezTerm background
+/// workspace.
+///
+/// New panes are tagged with `biscuit-test-pane-<pid>-<pane_id>` and are
+/// removed only when `<pid>` is no longer alive. Older harness versions did
+/// not tag background panes; when the background workspace has grown past a
+/// conservative limit, this function also removes untagged panes from that
+/// workspace to recover from historical leaks.
+pub fn cleanup_stale_wezterm_panes() {
+    if !WezTermHarness::available() {
+        return;
+    }
+    let mut cmd = Command::new("wezterm");
+    cmd.args(["cli", "list", "--format", "json"]);
+    let Ok(out) = run_with_timeout(&mut cmd, QUERY_TIMEOUT) else {
+        return;
+    };
+    if !out.status.success() {
+        return;
+    }
+    let Ok(entries) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else {
+        return;
+    };
+    let Some(entries) = entries.as_array() else {
+        return;
+    };
+
+    let background_count = entries
+        .iter()
+        .filter(|entry| string_field(entry, "workspace") == Some(BACKGROUND_WORKSPACE))
+        .count();
+    let sweep_legacy = background_count > LEGACY_BACKGROUND_PANE_LIMIT
+        || env::var("BISCUIT_TEST_HARNESS_SWEEP_LEGACY_WEZTERM").as_deref() == Ok("1");
+
+    for entry in entries {
+        if string_field(entry, "workspace") != Some(BACKGROUND_WORKSPACE) {
+            continue;
+        }
+        let Some(pane_id) = entry.get("pane_id").and_then(|v| v.as_u64()) else {
+            continue;
+        };
+        let title = string_field(entry, "tab_title")
+            .filter(|s| !s.is_empty())
+            .or_else(|| string_field(entry, "window_title").filter(|s| !s.is_empty()))
+            .or_else(|| string_field(entry, "title").filter(|s| !s.is_empty()));
+
+        let should_kill = match title {
+            Some(title) if title.starts_with(PANE_TITLE_PREFIX) => {
+                pid_from_tag(title, PANE_TITLE_PREFIX)
+                    .map(|pid| pid != current_process_id() && !process_is_alive(pid))
+                    .unwrap_or(false)
+            }
+            _ => sweep_legacy,
+        };
+        if should_kill {
+            kill_wezterm_pane(pane_id);
+        }
+    }
+}
+
+fn string_field<'a>(entry: &'a serde_json::Value, field: &str) -> Option<&'a str> {
+    entry.get(field).and_then(|v| v.as_str())
+}
+
+fn kill_wezterm_pane(pane_id: u64) {
+    let mut cmd = Command::new("wezterm");
+    cmd.args(["cli", "kill-pane", "--pane-id", &pane_id.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
 }
 
 fn which(bin: &str) -> bool {

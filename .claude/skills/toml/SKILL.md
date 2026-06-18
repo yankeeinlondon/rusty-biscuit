@@ -1,6 +1,6 @@
 ---
 name: toml
-description: Parse and serialize TOML config files in Rust with serde, defaults, and helpful error messages
+description: Expert knowledge for parsing and serializing TOML in Rust with the toml crate and serde, including defaults and helpful error messages. Use when reading or writing TOML config files, mapping TOML to serde structs, or producing user-friendly TOML parse errors.
 ---
 
 # TOML Crate Skill

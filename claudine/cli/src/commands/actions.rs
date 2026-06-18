@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 use clap::Args;
 use color_eyre::eyre::Result;
 
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableColumn};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::WordWrap;
@@ -57,7 +58,8 @@ fn run_simple(config: &ClaudineConfig, term: &Terminal) -> Result<()> {
         log::data("No configured actions found.");
         log::data("");
         log::data(
-            "{{dim}}Run {{blue}}claudine config{{reset}}{{dim}} to configure event hooks.{{reset}}",
+            &Prose::new("<dim>Run <blue>claudine config</blue> to configure event hooks.</dim>")
+                .render(term),
         );
         return Ok(());
     }
@@ -177,7 +179,8 @@ fn run_verbose(config: &ClaudineConfig, term: &Terminal) -> Result<()> {
         log::data("No configured actions found.");
         log::data("");
         log::data(
-            "{{dim}}Run {{blue}}claudine config{{reset}}{{dim}} to configure event hooks.{{reset}}",
+            &Prose::new("<dim>Run <blue>claudine config</blue> to configure event hooks.</dim>")
+                .render(term),
         );
         return Ok(());
     }

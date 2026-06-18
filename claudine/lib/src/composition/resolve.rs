@@ -4,10 +4,23 @@ use std::fs;
 use std::path::Path;
 
 use biscuit_file::FileReference;
-use darkmatter::markdown::Markdown;
+use darkmatter::markdown::{Markdown, MarkdownError};
 
 use super::error::CompositionError;
 use super::types::ResolvedCompositionSource;
+
+/// Map a Markdown load failure to the most actionable `CompositionError`.
+///
+/// A malformed-frontmatter failure routes to [`CompositionError::FrontmatterParse`]
+/// (which carries the typed error for rich rendering); any other failure
+/// (e.g. a read error from `try_from`) falls back to the flat
+/// [`CompositionError::MarkdownLoad`] string.
+fn map_load_error(path: &Path, err: MarkdownError) -> CompositionError {
+    match err {
+        MarkdownError::FrontmatterParse { .. } => CompositionError::FrontmatterParse(err),
+        other => CompositionError::MarkdownLoad(format!("{}: {other}", path.display())),
+    }
+}
 
 /// Resolve a file reference string to a loaded Markdown document.
 ///
@@ -21,6 +34,10 @@ use super::types::ResolvedCompositionSource;
 pub fn resolve_composition_source(
     file_ref: &str,
 ) -> Result<ResolvedCompositionSource, CompositionError> {
+    // Phase 3 (2026-05-09-slow-prep): instrument the file-reference
+    // resolution phase so trace inspection / `--perf` reporting can see
+    // when the `biscuit-file` resolver dominates compose prep cost.
+    let _span = tracing::info_span!("compose_prep.file_reference", file = %file_ref).entered();
     let reference = FileReference::new(file_ref)
         .map_err(|e| CompositionError::InvalidReference(format!("{file_ref}: {e}")))?
         .with_package_area_magic_path();
@@ -43,7 +60,13 @@ pub fn resolve_composition_source(
 
     let original_text = fs::read_to_string(&resolved_path)
         .map_err(|e| CompositionError::MarkdownLoad(format!("{}: {e}", resolved_path.display())))?;
-    let markdown: Markdown = original_text.clone().into();
+
+    // Parse fallibly so malformed frontmatter surfaces as a real error. The
+    // infallible `From<String>` drops a `FrontmatterParse` error and returns an
+    // empty-frontmatter document, which downstream looks like a *missing*
+    // `prompt` property — hiding the actual YAML syntax error from the user.
+    let markdown =
+        Markdown::try_from(resolved_path.as_path()).map_err(|e| map_load_error(&resolved_path, e))?;
 
     Ok(ResolvedCompositionSource {
         original_ref: file_ref.to_string(),
@@ -116,6 +139,26 @@ mod tests {
     fn resolve_missing_file() {
         let err = resolve_composition_source("/nonexistent/path/test.md").unwrap_err();
         assert!(matches!(err, CompositionError::FileNotFound(_)));
+    }
+
+    #[test]
+    fn resolve_malformed_frontmatter_reports_parse_error_not_missing_prompt() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("metadata.md");
+        // Block-scalar body indented 4 spaces on the first line, then 3 on a
+        // later line — YAML closes the scalar early and chokes. Previously this
+        // surfaced as a misleading `PromptPropertyMissing`.
+        fs::write(
+            &file,
+            "---\nprompt: |-\n    First line sets indent to four.\n   Three spaces breaks it.\n---\n",
+        )
+        .unwrap();
+
+        let err = resolve_composition_source(file.to_str().unwrap()).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::FrontmatterParse(_)),
+            "expected FrontmatterParse, got: {err:?}"
+        );
     }
 
     #[test]

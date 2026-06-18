@@ -145,6 +145,12 @@ sniff repo packages --verbose        # Annotate each entry with its root dir
 sniff repo package                   # Package name for current directory
 sniff repo package-area              # Package area for current directory
 sniff repo dirty-packages            # Packages with uncommitted changes
+sniff repo worktrees                 # List all worktrees (marks current with *)
+sniff repo worktrees --md            # Markdown unordered list (one `- name` per line)
+sniff repo worktrees --list          # Newline-delimited list (one name per line)
+sniff repo worktrees --csv           # Comma-separated names on a single line
+sniff repo worktrees --verbose       # Name, branch, and path for each worktree
+sniff repo worktrees --json          # JSON output with full worktree metadata
 sniff repo has-merge-conflict        # Check for merge conflicts
 ```
 
@@ -239,7 +245,7 @@ actually report the extra data:
 sniff repo git-status --refresh-remotes
 
 # Query registries for latest dependency versions
-sniff repo --latest-versions -v
+sniff repo structure --latest-versions -v
 
 # Combine both on the aggregate filesystem report
 sniff filesystem --refresh-remotes --latest-versions
@@ -251,7 +257,7 @@ sniff filesystem --refresh-remotes --latest-versions
 - Commit synchronization status across remotes
 - Detection of whether local branch is behind remote
 
-- `sniff repo --latest-versions` and `sniff filesystem --latest-versions` add:
+- `sniff repo structure --latest-versions` and `sniff filesystem --latest-versions` add:
 
 - Latest version information for dependencies from package registries
 - Package-level update summaries in text output
@@ -461,6 +467,7 @@ table summarises the contract; see the per-subcommand docs under
 | `repo root` | `{ root: "<abs-path>" }` |
 | `repo remote <url-or-name>` | `RemoteReport` JSON |
 | `repo pr` | Array of `PullRequest` JSON objects |
+| `repo worktrees` | `{ worktrees: [{ name, branch, path, current, detached }] }` |
 | `repo unstaged-files` / `untracked-files` | Array of `FileChange` objects |
 
 `--perf --json` injects a top-level `performance` field into any
@@ -874,7 +881,7 @@ sniff language -v
 sniff repo git-status --refresh-remotes
 
 # Inspect dependencies with latest versions
-sniff repo --latest-versions --json | jq '.packages[].dependencies'
+sniff repo structure --latest-versions --json | jq '.packages[].dependencies'
 
 # Recent commits and changes
 sniff repo recent-commits 1w

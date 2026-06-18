@@ -6,10 +6,12 @@ use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::pad::{PadLeft, PadRight};
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::utils::escape_codes;
-use biscuit_terminal::utils::layout::{Layout, WordWrap};
+use biscuit_terminal::utils::layout::{Layout, LayoutTerminalExt, WordWrap};
 use biscuit_terminal::utils::word_wrap::word_wrap;
+use renderable::browser::BrowserRenderable;
+use renderable::markdown::MarkdownRenderable;
 use std::rc::Rc;
 
 // ---------------------------------------------------------------------------
@@ -38,38 +40,83 @@ fn bench_strip_escape_codes(c: &mut Criterion) {
 }
 
 // ---------------------------------------------------------------------------
-// Prose rendering
+// Prose rendering (cross-target hot path)
 // ---------------------------------------------------------------------------
+//
+// Prose is the 132-file inline-text hot primitive. After its full collapse
+// onto the shared render tree (`2026-06-02-prose-tree`) it renders to every
+// target through the tree renderers, so its cost is tracked across terminal,
+// browser, Markdown, and MarkdownPlus over three corpus shapes. The recorded
+// baseline lives in
+// `renderable/features/_completed/2026-05-20-darkmatter-tree/baselines.md`.
+// Each bench measures the full parse + render hot path (`Prose::new` builds the
+// `RenderNode` tree once, then the shared renderer folds it) — the shape real
+// callers hit.
 
-fn bench_prose_render(c: &mut Criterion) {
-    let simple = "Hello world, this is a simple prose string.";
-    let tokens = "Hello {{bold}}world{{reset}}! This is {{red}}important{{reset}} text with {{italic}}emphasis{{reset}}.";
-    let long_tokens = (0..20)
+/// Small corpus: a single short CLI line with light styling — the common
+/// one-liner status shape.
+fn corpus_small() -> String {
+    "Build <bold>complete</bold>: 3 passed, <red>1 failed</red>.".to_string()
+}
+
+/// Medium corpus: a multi-clause report block mixing weight, dim, color, and
+/// a Markdown link per clause — a typical status/report paragraph.
+fn corpus_medium() -> String {
+    (0..12)
         .map(|i| {
-            format!("Item {{bold}}{i}{{reset}}: description of item {i} with {{red}}color{{reset}}")
+            format!(
+                "Item <bold>{i}</bold>: <dim>step {i}</dim> finished with \
+                 <red>code {i}</red>, see [report](https://example.com/run/{i})"
+            )
         })
         .collect::<Vec<_>>()
-        .join(". ");
+        .join(". ")
+}
+
+/// Tag-dense corpus: deeply nested spans, every emphasis / color / underline /
+/// inverse variant, links, escaped literal markup, and a trailing fenced code
+/// block — the adversarial maximum-work shape for the parser and the tree fold.
+fn corpus_tag_dense() -> String {
+    let mut parts: Vec<String> = (0..16)
+        .map(|i| {
+            format!(
+                "<red><b>err{i}</b> <i>at</i> <u>line {i}</u></red> \
+                 <inverse>HOT</inverse> <bg-rgb 1,2,3>note</bg-rgb> \
+                 <a href=\"https://example.com/a_b/{i}\">link{i}</a> \
+                 <dim>\\<ENV{i}\\></dim>"
+            )
+        })
+        .collect();
+    parts.push("```rust\nlet x = 1; // not a <tag>\n```".to_string());
+    parts.join(" ")
+}
+
+fn bench_prose_render(c: &mut Criterion) {
+    let corpora = [
+        ("small", corpus_small()),
+        ("medium", corpus_medium()),
+        ("tag_dense", corpus_tag_dense()),
+    ];
 
     let mut group = c.benchmark_group("prose_render");
-    group.bench_function("simple_text", |b| {
-        b.iter(|| {
-            let prose = Prose::new(black_box(simple));
-            prose.render_optimistic(Some(80))
-        })
-    });
-    group.bench_function("with_tokens", |b| {
-        b.iter(|| {
-            let prose = Prose::new(black_box(tokens));
-            prose.render_optimistic(Some(80))
-        })
-    });
-    group.bench_function("long_tokens_20", |b| {
-        b.iter(|| {
-            let prose = Prose::new(black_box(&long_tokens));
-            prose.render_optimistic(Some(80))
-        })
-    });
+    for (size, input) in &corpora {
+        group.bench_function(format!("terminal_{size}"), |b| {
+            b.iter(|| Prose::new(black_box(input.as_str())).render_optimistic(Some(80)))
+        });
+        group.bench_function(format!("browser_{size}"), |b| {
+            b.iter(|| {
+                Prose::new(black_box(input.as_str()))
+                    .render_html_fragment()
+                    .render()
+            })
+        });
+        group.bench_function(format!("markdown_{size}"), |b| {
+            b.iter(|| Prose::new(black_box(input.as_str())).render_markdown())
+        });
+        group.bench_function(format!("markdown_plus_{size}"), |b| {
+            b.iter(|| Prose::new(black_box(input.as_str())).render_markdown_plus())
+        });
+    }
     group.finish();
 }
 
@@ -80,7 +127,7 @@ fn bench_prose_render(c: &mut Criterion) {
 fn bench_word_wrap(c: &mut Criterion) {
     let short = "A short line that fits.";
     let paragraph = "This is a longer paragraph that will definitely need to be wrapped because it exceeds eighty columns when rendered in a typical terminal window and contains multiple clauses separated by conjunctions.";
-    let multiline = "First line of content here.\nSecond line with more text that may wrap.\nThird line is short.\nFourth line has {{bold}}tokens{{reset}} interspersed throughout the content for styling.";
+    let multiline = "First line of content here.\nSecond line with more text that may wrap.\nThird line is short.\nFourth line has <bold>tokens</bold> interspersed throughout the content for styling.";
 
     let mut group = c.benchmark_group("word_wrap");
     group.bench_function("short_no_wrap", |b| {
@@ -110,8 +157,9 @@ fn bench_layout_apply(c: &mut Criterion) {
     });
     group.bench_function("with_margins", |b| {
         let layout = Layout {
-            left_margin: biscuit_terminal::utils::layout::Margin::Chars(4),
-            right_margin: biscuit_terminal::utils::layout::Margin::Chars(4),
+            margin: biscuit_terminal::utils::layout::Edges::x(
+                biscuit_terminal::utils::layout::Length::ch(4),
+            ),
             ..Default::default()
         };
         b.iter(|| layout.apply_layout(black_box(content), 80))
@@ -137,7 +185,7 @@ fn bench_component_render(c: &mut Criterion) {
         b.iter(|| {
             let prose = Prose::new("To be or not to be, that is the question.");
             let quote = BlockQuote::new(
-                RenderableContent::Component(Rc::new(prose)),
+                RenderableTerminalContent::Component(Rc::new(prose)),
                 Some("Shakespeare"),
             );
             quote.render_optimistic(Some(80))
@@ -146,9 +194,9 @@ fn bench_component_render(c: &mut Criterion) {
 
     group.bench_function("unordered_list_5", |b| {
         b.iter(|| {
-            let items: Vec<RenderableContent> = (1..=5)
+            let items: Vec<RenderableTerminalContent> = (1..=5)
                 .map(|i| {
-                    RenderableContent::Component(Rc::new(Prose::new(format!(
+                    RenderableTerminalContent::Component(Rc::new(Prose::new(format!(
                         "Item number {i} with some descriptive text"
                     ))))
                 })

@@ -43,7 +43,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use darkmatter::markdown::compose::expression::{CtxLookup, EvaluationLookup};
+use darkmatter::markdown::compose::expression::{CtxLookup, EvaluationLookup, ResolutionContext};
 use serde_json::{Map, Value};
 
 use crate::events::EventMeta;
@@ -77,7 +77,6 @@ impl<'a> EventMetaExpressionLookup<'a> {
         Self { meta }
     }
 
-    /// Borrow the underlying [`EventMeta`].
     pub fn meta(&self) -> &'a EventMeta {
         self.meta
     }
@@ -85,6 +84,17 @@ impl<'a> EventMetaExpressionLookup<'a> {
 
 impl<'a> EvaluationLookup for EventMetaExpressionLookup<'a> {
     fn get(&self, path: &str) -> Option<Value> {
+        // Reserved `doc` namespace: bare `doc` is the whole event object;
+        // `doc.<path>` resolves the underlying event field. Intercepted before
+        // normal key lookup and the `ctx.*` short-circuit so a missing
+        // `doc.<path>` never collapses into another namespace.
+        if path == "doc" {
+            return Some(event_doc_object(self.meta));
+        }
+        if let Some(rest) = path.strip_prefix("doc.") {
+            return nested_pointer(&event_doc_object(self.meta), rest);
+        }
+
         if let Some(env_key) = path.strip_prefix("env.") {
             return resolve_env(env_key);
         }
@@ -124,26 +134,33 @@ impl<'a> EvaluationLookup for EventMetaExpressionLookup<'a> {
 /// Composite lookup used for hook `when` evaluation.
 ///
 /// Resolves `ctx.*` via Darkmatter's lazy context capture and delegates
-/// every other path to [`EventMetaExpressionLookup`]. This is the only
-/// surface where `ctx.*` is honored — templates, matchers, and harness
-/// validation deliberately leave `ctx.*` unresolved.
+/// every other path to [`EventMetaExpressionLookup`] (including the reserved
+/// `doc` namespace). This is the only surface where `ctx.*` is honored —
+/// templates, matchers, and harness validation deliberately leave `ctx.*`
+/// unresolved.
+///
+/// The lookup also exposes a [`ResolutionContext`] rooted at `work_dir` so
+/// read-side expression functions (`file_exists`, `absolute`, `relative`, …)
+/// in hook `when=` conditions resolve against the hook's base directory.
 #[derive(Debug)]
 pub struct EventMetaConditionLookup<'a> {
     inner: EventMetaExpressionLookup<'a>,
     ctx: CtxLookup<'a>,
+    base_dir: &'a Path,
 }
 
 impl<'a> EventMetaConditionLookup<'a> {
     /// Wrap an [`EventMeta`] reference and working directory for use with
-    /// Darkmatter's evaluator, including `ctx.*` resolution.
+    /// Darkmatter's evaluator, including `ctx.*` resolution and a `work_dir`-
+    /// rooted resolution context for read-side functions.
     pub fn new(meta: &'a EventMeta, work_dir: &'a Path) -> Self {
         Self {
             inner: EventMetaExpressionLookup::new(meta),
             ctx: CtxLookup::new(work_dir),
+            base_dir: work_dir,
         }
     }
 
-    /// Borrow the underlying [`EventMeta`].
     pub fn meta(&self) -> &'a EventMeta {
         self.inner.meta()
     }
@@ -155,6 +172,10 @@ impl<'a> EvaluationLookup for EventMetaConditionLookup<'a> {
             return self.ctx.get(path);
         }
         self.inner.get(path)
+    }
+
+    fn resolution_context(&self) -> Option<ResolutionContext> {
+        Some(ResolutionContext::new(self.base_dir.to_path_buf()))
     }
 }
 
@@ -214,6 +235,127 @@ fn resolve_top_level(meta: &EventMeta, path: &str) -> Option<Value> {
         "extra" => Some(extra_as_value(&meta.extra)),
         _ => None,
     }
+}
+
+/// Build the reserved `doc` object for the event surface: every resolvable
+/// top-level event field plus the grouped environment paths (`os`, `hardware`,
+/// `git`, `project`) as a JSON object. This mirrors darkmatter's `doc`
+/// namespace (the whole root object) where the event payload is the document.
+/// Process environment (`env.*`) is deliberately excluded.
+fn event_doc_object(meta: &EventMeta) -> Value {
+    const TOP_LEVEL_KEYS: [&str; 14] = [
+        "provider",
+        "event",
+        "timestamp",
+        "session_id",
+        "cwd",
+        "tool_name",
+        "tool_input",
+        "tool_response",
+        "error",
+        "prompt",
+        "agent_type",
+        "notification_type",
+        "notification_message",
+        "extra",
+    ];
+    let mut map = Map::new();
+    for key in TOP_LEVEL_KEYS {
+        if let Some(value) = resolve_top_level(meta, key) {
+            map.insert(key.to_string(), value);
+        }
+    }
+    map.insert("os".to_string(), os_doc_object(meta));
+    map.insert("hardware".to_string(), hardware_doc_object(meta));
+    if let Some(git) = git_doc_object(meta) {
+        map.insert("git".to_string(), git);
+    }
+    if let Some(project) = project_doc_object(meta) {
+        map.insert("project".to_string(), project);
+    }
+    Value::Object(map)
+}
+
+fn os_doc_object(meta: &EventMeta) -> Value {
+    let mut map = Map::new();
+    map.insert(
+        "name".to_string(),
+        resolve_env_path(meta, "os.name").unwrap_or(Value::Null),
+    );
+    map.insert(
+        "type".to_string(),
+        resolve_env_path(meta, "os.type").unwrap_or(Value::Null),
+    );
+    map.insert(
+        "version".to_string(),
+        resolve_env_path(meta, "os.version").unwrap_or(Value::Null),
+    );
+    map.insert(
+        "hostname".to_string(),
+        resolve_env_path(meta, "os.hostname").unwrap_or(Value::Null),
+    );
+    Value::Object(map)
+}
+
+fn hardware_doc_object(meta: &EventMeta) -> Value {
+    let mut map = Map::new();
+    map.insert(
+        "arch".to_string(),
+        resolve_env_path(meta, "hardware.arch").unwrap_or(Value::Null),
+    );
+    map.insert(
+        "cpu".to_string(),
+        resolve_env_path(meta, "hardware.cpu").unwrap_or(Value::Null),
+    );
+    map.insert(
+        "cores".to_string(),
+        resolve_env_path(meta, "hardware.cores").unwrap_or(Value::Null),
+    );
+    Value::Object(map)
+}
+
+fn git_doc_object(meta: &EventMeta) -> Option<Value> {
+    let fields: [(&str, Option<Value>); 8] = [
+        ("branch", resolve_env_path(meta, "git.branch")),
+        ("is_dirty", resolve_env_path(meta, "git.is_dirty")),
+        ("head_sha", resolve_env_path(meta, "git.head_sha")),
+        ("head_message", resolve_env_path(meta, "git.head_message")),
+        ("remote", resolve_env_path(meta, "git.remote")),
+        ("hosting", resolve_env_path(meta, "git.hosting")),
+        ("repo_name", resolve_env_path(meta, "git.repo_name")),
+        ("repo_org", resolve_env_path(meta, "git.repo_org")),
+    ];
+    if fields.iter().all(|(_, value)| value.is_none()) {
+        return None;
+    }
+    let mut map = Map::new();
+    for (key, value) in fields {
+        if let Some(value) = value {
+            map.insert(key.to_string(), value);
+        }
+    }
+    Some(Value::Object(map))
+}
+
+fn project_doc_object(meta: &EventMeta) -> Option<Value> {
+    let fields: [(&str, Option<Value>); 3] = [
+        ("language", resolve_env_path(meta, "project.language")),
+        ("is_monorepo", resolve_env_path(meta, "project.is_monorepo")),
+        (
+            "monorepo_tool",
+            resolve_env_path(meta, "project.monorepo_tool"),
+        ),
+    ];
+    if fields.iter().all(|(_, value)| value.is_none()) {
+        return None;
+    }
+    let mut map = Map::new();
+    for (key, value) in fields {
+        if let Some(value) = value {
+            map.insert(key.to_string(), value);
+        }
+    }
+    Some(Value::Object(map))
 }
 
 fn extra_as_value(extra: &HashMap<String, Value>) -> Value {
@@ -391,7 +533,9 @@ mod tests {
                 primary_language: Some("Rust".to_string()),
                 package_area: Some("claudine".to_string()),
                 package: Some("claudine-cli".to_string()),
+                claudine_pid: None,
             },
+            agent_pid: None,
         }
     }
 
@@ -822,6 +966,89 @@ mod tests {
         );
 
         assert_eq!(value, json!("fast"));
+    }
+
+    #[test]
+    fn doc_namespace_resolves_event_surface() {
+        let meta = sample_meta();
+        let lookup = EventMetaExpressionLookup::new(&meta);
+
+        // doc.<path> traverses the same object returned by bare doc.
+        assert_eq!(lookup.get("doc.git.branch"), Some(json!("main")));
+        assert_eq!(lookup.get("doc.extra.status"), Some(json!("success")));
+        assert_eq!(lookup.get("doc.tool_name"), Some(json!("Bash")));
+
+        // missing doc.* values do not fall back to another namespace.
+        assert_eq!(lookup.get("doc.missing"), None);
+        // env is process environment, not part of the doc object.
+        assert_eq!(lookup.get("doc.env.PATH"), None);
+
+        // bare doc returns the whole event object, including grouped env paths.
+        let obj = lookup.get("doc").expect("bare doc resolves");
+        assert!(obj.is_object());
+        assert_eq!(obj.get("provider"), Some(&json!("claude")));
+        assert_eq!(obj.get("tool_name"), Some(&json!("Bash")));
+        assert_eq!(obj.pointer("/git/branch"), Some(&json!("main")));
+        assert_eq!(obj.pointer("/os/type"), Some(&json!("macos")));
+        assert_eq!(obj.pointer("/hardware/cores"), Some(&json!(16)));
+        assert_eq!(obj.pointer("/project/language"), Some(&json!("Rust")));
+    }
+
+    #[test]
+    fn doc_dotted_path_matches_bare_doc_traversal() {
+        let meta = sample_meta();
+        let lookup = EventMetaExpressionLookup::new(&meta);
+
+        let doc = lookup.get("doc").expect("bare doc resolves");
+        assert_eq!(lookup.get("doc.git.branch"), nested_pointer(&doc, "git.branch"));
+        assert_eq!(lookup.get("doc.os.type"), nested_pointer(&doc, "os.type"));
+    }
+
+    #[test]
+    fn doc_env_does_not_resolve_even_when_env_does() {
+        let key = "CLAUDINE_DOC_ENV_TEST_VAR";
+        // SAFETY: tests run sequentially within this module by default; the
+        // env var is unique per test scope and is removed before exit.
+        unsafe {
+            std::env::set_var(key, "value-here");
+        }
+        let meta = sample_meta();
+        let lookup = EventMetaExpressionLookup::new(&meta);
+
+        // The env.* namespace resolves, but doc.env.* must not leak into it.
+        assert_eq!(lookup.get(&format!("env.{key}")), Some(json!("value-here")));
+        assert_eq!(lookup.get(&format!("doc.env.{key}")), None);
+
+        unsafe {
+            std::env::remove_var(key);
+        }
+    }
+
+    #[test]
+    fn condition_lookup_doc_namespace_resolves() {
+        let meta = sample_meta();
+        let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+
+        assert_eq!(lookup.get("doc.tool_name"), Some(json!("Bash")));
+        assert!(lookup.get("doc").is_some_and(|value| value.is_object()));
+    }
+
+    #[test]
+    fn condition_lookup_read_side_function_resolves_against_base_dir() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("artifact"), "ready").unwrap();
+        let meta = sample_meta();
+        let lookup = EventMetaConditionLookup::new(&meta, dir.path());
+
+        assert!(lookup.resolution_context().is_some());
+        assert_eq!(
+            parse_and_evaluate("file_exists('artifact')", ParseMode::Condition, &lookup),
+            json!(true)
+        );
+        assert_eq!(
+            parse_and_evaluate("file_exists('missing')", ParseMode::Condition, &lookup),
+            json!(false)
+        );
     }
 
     #[test]

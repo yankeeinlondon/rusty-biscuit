@@ -18,4 +18,21 @@ Darkmatter provides a large variety of ways of performing transclusion but the m
 
 > this simple directive will bring the content from the two referenced files _into_ the base document.
 
+The `::file-links` directive discovers document files and renders them as a
+linked file tree. See [File Links](../inline/file-links.md) for syntax and
+options.
+
+`::file` and `::code` also accept HTTP(S) URLs when the target host is allowed
+by compose remote policy:
+
+```md
+::file https://example.com/shared/intro.md
+::code https://example.com/snippets/demo.rs
+```
+
+Remote URL reads are deny-all by default. In the CLI, allow hosts with
+`--allow-host`; cache remote artifacts with `--cache-root`; and control stale
+behavior with `--remote-freshness`, `--remote-ttl`, and `--remote-refresh`.
+See [Remote URL References](../topics/remote-url-references.md) for details.
+
 To make this transclusion grammar more powerful, **Darkmatter** adds in _conditional_ logic and other parameters the allow you to fine tune the operations effect based on the state of Frontmatter, ENV variables or other context variables.

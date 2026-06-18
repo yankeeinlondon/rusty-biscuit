@@ -1097,7 +1097,7 @@ mod tests {
             assert!(args.contains(&OsString::from("-v")));
 
             // Speed effect should come after the source file
-            let speed_pos = args.iter().position(|a| *a == OsString::from("speed"));
+            let speed_pos = args.iter().position(|a| a.to_str() == Some("speed"));
             let source_pos = args
                 .iter()
                 .position(|a| a.to_str() == Some("/tmp/test.wav"));

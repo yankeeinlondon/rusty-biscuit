@@ -741,12 +741,13 @@ mod tests {
     // ===========================================
 
     #[test]
+    #[allow(clippy::manual_clamp, clippy::unnecessary_min_or_max)]
     fn test_count_clamping_logic() {
         // This tests the clamping logic: count.min(20).max(1)
-        assert_eq!(Some(25u32).unwrap_or(10).min(20).max(1), 20);
-        assert_eq!(Some(0u32).unwrap_or(10).min(20).max(1), 1);
-        assert_eq!(Some(10u32).unwrap_or(10).min(20).max(1), 10);
-        assert_eq!(None::<u32>.unwrap_or(10).min(20).max(1), 10);
+        assert_eq!(25u32.min(20).max(1), 20);
+        assert_eq!(0u32.min(20).max(1), 1);
+        assert_eq!(10u32.min(20).max(1), 10);
+        assert_eq!(10.min(20).max(1), 10);
     }
 
     // ===========================================

@@ -13,8 +13,15 @@
 //! directive itself. When the directive is at column 1 (no leading whitespace),
 //! the parser scans backward to the previous non-empty line and uses its
 //! indentation as a fallback. This ensures that `::toc-linking` inside list
-//! items, blockquotes, or other indented containers produces correctly nested
+//! items and other whitespace-indented containers produces correctly nested
 //! output.
+//!
+//! ## Limitations
+//!
+//! Directives inside blockquotes (`> ::toc-linking ...`) are not recognized
+//! because the parser requires the line to start with `::toc-linking` after
+//! trimming whitespace. Blockquote support would require changes to the
+//! directive detection logic.
 //!
 //! ## Examples
 //!
@@ -47,6 +54,8 @@ use biscuit_terminal::errors::SourceContext;
 use filter::HeadingFilter;
 use parser::parse_toc_linking_directives;
 use render::render_toc_links;
+
+pub(crate) use crate::markdown::compose::indent::indent_text;
 use tracing::trace;
 
 #[cfg(test)]
@@ -67,7 +76,13 @@ pub(crate) fn resolve_target_chain(
     trace!(target = %directive.targets.join(" > "), "toc_linking: resolving target chain");
 
     for target in &directive.targets {
-        match resolve_file(target, transclusion_options, source, directive.line, ctx.clone()) {
+        match resolve_file(
+            target,
+            transclusion_options,
+            source,
+            directive.line,
+            ctx.clone(),
+        ) {
             Ok(path) => return Ok(Some((target.clone(), path))),
             Err(_) => continue,
         }
@@ -84,6 +99,10 @@ pub(crate) fn resolve_target_chain(
 }
 
 /// Renders the markdown replacement for one resolved toc-linking directive.
+///
+/// The `indent` parameter is the leading whitespace of the directive line.
+/// When `indent` is empty, `inferred_indent` is used as a fallback (e.g.
+/// when the directive is at column 1 inside a list item continuation).
 pub(crate) fn render_resolved_directive(
     display_target: &str,
     headings: &[MarkdownTocNode],
@@ -158,7 +177,12 @@ pub(crate) fn process_toc_linking(
             )?;
             replacements.push((directive.span.clone(), replacement));
         } else {
-            let replacement = directive.options.empty_text.clone().unwrap_or_default();
+            let empty_text = directive.options.empty_text.clone().unwrap_or_default();
+            let replacement = indent_text(
+                &empty_text,
+                &directive.indent,
+                directive.inferred_indent.as_deref(),
+            );
             replacements.push((directive.span.clone(), replacement));
         }
     }
@@ -389,13 +413,17 @@ mod tests {
         write_file(
             dir.path(),
             "api.md",
-            "# API\n\n## Getting Started\n\nIntro.\n",
+            "# API\n\n## Getting Started\n\nIntro.\n\n## Configuration\n\nConfig.\n",
         );
 
         let source_path = dir.path().join("source.md");
         write_file(dir.path(), "source.md", "");
 
-        let content = "- Item\n  ::toc-linking ./api.md\n".to_string();
+        // True column-1 directive inside a CommonMark lazy continuation
+        // of a list item — the directive has no leading whitespace, but
+        // the previous line is `- Item`, so the output must indent to
+        // the item's content column (2 spaces).
+        let content = "- Item\n::toc-linking ./api.md\n".to_string();
         let source = ComposeSource::File(source_path);
         let options = TransclusionOptions {
             source: source.clone(),
@@ -404,16 +432,50 @@ mod tests {
 
         let (result, count) = process_toc_linking(&content, &source, &options, false).unwrap();
         assert_eq!(count, 1);
-        // Output should be indented to match the list item (2 spaces)
         for line in result.lines() {
-            if line.contains("[Getting Started]") {
+            if line.contains("[Getting Started]") || line.contains("[Configuration]") {
                 assert!(
                     line.starts_with("  "),
-                    "Expected line to start with 2 spaces: {}",
+                    "Expected line to be indented to list content column: {:?}",
                     line
                 );
             }
         }
+
+        use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+        let parser = Parser::new_ext(&result, Options::all());
+        let events: Vec<Event> = parser.collect();
+
+        let list_starts: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, Event::Start(Tag::List(_))))
+            .collect();
+        assert!(
+            list_starts.len() >= 2,
+            "Expected at least 2 list levels (outer item + nested TOC), got {}.\nResult:\n{}",
+            list_starts.len(),
+            result
+        );
+
+        let mut list_depth = 0;
+        let mut found_toc_link_in_nested_list = false;
+        for event in &events {
+            match event {
+                Event::Start(Tag::List(_)) => list_depth += 1,
+                Event::End(TagEnd::List(_)) => list_depth -= 1,
+                Event::Start(Tag::Link { dest_url, .. })
+                    if list_depth >= 2 && dest_url.contains("api.md") =>
+                {
+                    found_toc_link_in_nested_list = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            found_toc_link_in_nested_list,
+            "Expected TOC entries to be children of the outer list item, not siblings.\nResult:\n{}",
+            result
+        );
     }
 
     #[test]
@@ -549,6 +611,64 @@ mod tests {
     }
 
     #[test]
+    fn cache_reuse_preserves_per_directive_indentation() {
+        // Two directives targeting the same file with the same options at
+        // different indentation levels must each render at their own
+        // indentation, even when the second lookup is a cache hit.
+        let dir = TempDir::new().unwrap();
+        write_file(
+            dir.path(),
+            "api.md",
+            "# API\n\n## Getting Started\n\nIntro.\n\n## Configuration\n\nConfig.\n",
+        );
+
+        let source_content =
+            "::toc-linking ./api.md\n\n- Item\n    ::toc-linking ./api.md\n".to_string();
+        let source_path = write_file(dir.path(), "source.md", &source_content);
+
+        let md: Markdown = std::fs::read_to_string(&source_path)
+            .unwrap()
+            .as_str()
+            .into();
+        let options = ComposeOptions::new()
+            .with_source_file(&source_path)
+            .disable(crate::markdown::compose::ComposeOperation::PageBlocks)
+            .disable(crate::markdown::compose::ComposeOperation::BlockTransclusion)
+            .disable(crate::markdown::compose::ComposeOperation::FrontmatterTransclusion)
+            .disable(crate::markdown::compose::ComposeOperation::CodeTransclusion);
+
+        let (result, report) = md.compose_with(options).unwrap();
+        assert_eq!(report.toc_links_generated, 2);
+
+        let mut root_count = 0usize;
+        let mut indented_count = 0usize;
+        for line in result.content.lines() {
+            if line.contains("[Getting Started]") || line.contains("[Configuration]") {
+                if line.starts_with("    - [") {
+                    indented_count += 1;
+                } else if line.starts_with("- [") {
+                    root_count += 1;
+                } else {
+                    panic!(
+                        "TOC line has unexpected indentation: {:?}\nFull output:\n{}",
+                        line, result.content
+                    );
+                }
+            }
+        }
+        assert!(
+            root_count >= 2,
+            "Expected the root-level directive to emit unindented links, got {root_count}.\nFull output:\n{}",
+            result.content
+        );
+        assert!(
+            indented_count >= 2,
+            "Expected the indented directive to emit 4-space-indented links, got {indented_count}.\nFull output:\n{}",
+            result.content
+        );
+    }
+
+    #[test]
     fn ac4_roundtrip_commonmark_list_nesting() {
         let dir = TempDir::new().unwrap();
         write_file(
@@ -574,44 +694,37 @@ mod tests {
         let parser = Parser::new_ext(&result, Options::all());
         let events: Vec<Event> = parser.collect();
 
-        let mut in_outer_list = false;
-        let mut in_outer_item = false;
-        let mut in_inner_list = false;
+        // Expect 3 list levels: outer (- Item), inner (- Subitem), toc links
+        let list_starts: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, Event::Start(Tag::List(_))))
+            .collect();
+        assert!(
+            list_starts.len() >= 3,
+            "Expected at least 3 list levels (outer, subitem, toc), found {}. Result:\n{}",
+            list_starts.len(),
+            result
+        );
 
+        // Verify that a TOC link appears inside a deeply nested list
+        let mut list_depth = 0;
+        let mut found_toc_link_in_nested_list = false;
         for event in &events {
             match event {
-                Event::Start(Tag::List(_)) if !in_outer_list => {
-                    in_outer_list = true;
-                }
-                Event::Start(Tag::List(_)) if in_outer_item => {
-                    in_inner_list = true;
-                }
-                Event::Start(Tag::Item) if in_outer_list && !in_inner_list => {
-                    in_outer_item = true;
-                }
-                Event::End(TagEnd::Item) if in_outer_item && !in_inner_list => {
-                    in_outer_item = false;
-                }
-                Event::End(TagEnd::List(_)) if in_inner_list => {
-                    in_inner_list = false;
-                }
-                Event::End(TagEnd::List(_)) if in_outer_list => {
-                    in_outer_list = false;
+                Event::Start(Tag::List(_)) => list_depth += 1,
+                Event::End(TagEnd::List(_)) => list_depth -= 1,
+                Event::Start(Tag::Link { dest_url, .. })
+                    if list_depth >= 3 && dest_url.contains("api.md") =>
+                {
+                    found_toc_link_in_nested_list = true;
                 }
                 _ => {}
             }
         }
-
         assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, Event::Start(Tag::List(_)))),
-            "Expected at least one List in parsed output"
+            found_toc_link_in_nested_list,
+            "Expected TOC links to be nested inside at least 3 levels of lists. Result:\n{}",
+            result
         );
-
-        let inner_list_exists = events
-            .iter()
-            .any(|e| matches!(e, Event::Start(Tag::List(_))));
-        assert!(inner_list_exists, "Expected nested list structure");
     }
 }

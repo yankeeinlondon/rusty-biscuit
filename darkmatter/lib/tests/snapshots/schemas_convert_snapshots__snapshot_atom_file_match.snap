@@ -1,0 +1,27 @@
+---
+source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+assertion_line: 110
+expression: "convert_atom(\"file(match('*.md', '!_*.md'))\")"
+---
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "field": {
+      "anyOf": [
+        {
+          "const": ""
+        },
+        {
+          "format": "darkmatter-file",
+          "type": "string",
+          "x-darkmatter-match": [
+            "*.md",
+            "!_*.md"
+          ]
+        }
+      ]
+    }
+  },
+  "type": "object"
+}

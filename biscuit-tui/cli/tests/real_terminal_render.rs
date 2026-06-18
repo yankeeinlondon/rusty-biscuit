@@ -1,8 +1,11 @@
 //! Real-terminal rendering tests.
 //!
-//! See `cli/tests/common/real_terminal/mod.rs` for the harness contract
-//! and Level-1 / Level-2 / Level-3 vocabulary. The tests in this file
-//! are deliberately written so that:
+//! The harness contract, the Level-1 / Level-2 / Level-3 vocabulary, the
+//! harness variants (and when to use each), and the environment each
+//! requires are documented in the shared harness crate's README:
+//! `biscuit-test-harness/README.md`. `cli/tests/common/real_terminal/mod.rs`
+//! is a thin re-export shim over that crate. The tests in this file are
+//! deliberately written so that:
 //!
 //! - they **skip cleanly** (printing `skipping: requires <tool>`) when
 //!   the host lacks the required terminal — no `#[ignore]` markers,
@@ -11,6 +14,31 @@
 //!   `cargo test` on a developer machine that has WezTerm/Kitty/tmux
 //!   installed exercises the real path. This is what the user
 //!   asked for: "if the host has the terminal then the test is run."
+//!
+//! ## Shared harness reuse
+//!
+//! Level-2 tests in this file reuse a single shell pane per terminal
+//! backend. Each test sends `clear` followed by the `question` binary
+//! as a shell command, captures the rendered output (and/or sends
+//! keys), then terminates the question process with `Ctrl+C` so the
+//! shell returns to a prompt before the next test runs.
+//!
+//! Spawning a fresh WezTerm/Kitty/tmux pane costs 2–3 seconds. Under
+//! `cargo test` (single-process, libtest), the per-binary
+//! [`SharedHarness`] static amortizes that cost across every test in
+//! this file. Under `just test-l2`/`cargo nextest run` (process-per-
+//! test), `biscuit-harness-broker spawn` pre-spawns one pane per
+//! backend before nextest starts, exports its id via
+//! `BISCUIT_SHARED_*_ID`, and the per-test
+//! `<Backend>Harness::shared_or_spawn()` calls attach to the existing
+//! pane instead of spawning fresh. The `#[serial(level2)]` attribute
+//! serialises tests within a single process so they never contend for
+//! the shared pane; the recipe runs nextest with `-j 1` for the same
+//! reason across processes.
+//!
+//! Level-3 tests (OS keyboard injection via cliclick) still own their
+//! own foreground-visible harness because `focus_spawned_pane` / AXRaise
+//! requires the spawn to be on the active workspace.
 
 #![cfg(unix)]
 
@@ -19,10 +47,13 @@ mod common;
 
 use std::time::Duration;
 
+use biscuit_test_harness::shared::SharedHarness;
 use common::real_terminal::{
     SpawnVisibility, TerminalHarness, cliclick, kitty::KittyHarness, tmux::TmuxHarness,
     wezterm::WezTermHarness,
 };
+use serial_test::serial;
+use test_toolkit::{Level, require_level};
 
 fn question_binary() -> String {
     assert_cmd::cargo::cargo_bin("question")
@@ -31,28 +62,98 @@ fn question_binary() -> String {
         .to_string()
 }
 
+/// Quotes a single argument for safe inclusion in a `sh`/`bash`
+/// command line. Wraps in single quotes and escapes any embedded
+/// single-quote characters.
+fn sh_quote(arg: &str) -> String {
+    let mut out = String::with_capacity(arg.len() + 2);
+    out.push('\'');
+    for ch in arg.chars() {
+        if ch == '\'' {
+            out.push_str("'\\''");
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push('\'');
+    out
+}
+
+/// Builds a shell command string for the `question` binary plus
+/// arguments, terminating with a newline so the shell executes it.
+fn question_command(args: &[&str]) -> String {
+    let mut cmd = sh_quote(&question_binary());
+    for a in args {
+        cmd.push(' ');
+        cmd.push_str(&sh_quote(a));
+    }
+    cmd.push('\n');
+    cmd
+}
+
+/// How long to wait after launching the `question` binary in a shared
+/// pane before capturing. The TUI takes a few hundred milliseconds to
+/// alt-screen and render its first frame.
+const QUESTION_RENDER_MS: u64 = 800;
+
+/// Sends `Ctrl+C` to whatever is currently running in `harness` so the
+/// shared pane returns to a shell prompt before the next test runs.
+///
+/// `byte 0x03` is the literal Ctrl-C control byte; both WezTerm and
+/// Kitty accept it through `send_text`. For tmux, [`tmux_cleanup`]
+/// routes through `send-keys C-c` to avoid argument-encoding issues.
+fn cleanup_via_ctrl_c<H: TerminalHarness>(harness: &mut H) {
+    let _ = harness.send_text(b"\x03");
+    std::thread::sleep(Duration::from_millis(250));
+}
+
+/// Like [`cleanup_via_ctrl_c`] but uses tmux's symbolic key path so the
+/// chord is routed through tmux's translator (tmux's `send-keys -l`
+/// path does not accept raw control bytes).
+fn tmux_cleanup(harness: &mut TmuxHarness) {
+    let _ = harness.send_key("C-c");
+    std::thread::sleep(Duration::from_millis(250));
+}
+
+// ---------------------------------------------------------------------------
+// Process-shared shell panes — one per backend.
+//
+// `SharedHarness` constructs each pane lazily on first use and registers
+// an atexit hook so the underlying WezTerm/Kitty/tmux session is torn
+// down when the test binary exits.
+// ---------------------------------------------------------------------------
+
+static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
+static SHARED_KITTY: SharedHarness<KittyHarness> = SharedHarness::new();
+static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
+
 // ---------------------------------------------------------------------------
 // Level 2 — render-in-real-terminal smoke tests
 //
-// Each spawns the binary in a real terminal/multiplexer, captures the
-// rendered pane text, and asserts that option labels appear. The PTY
-// suite cannot prove glyph-width / SGR / scroll behaviour matches what
-// a user actually sees; these can.
+// Each launches `question` in the shared shell pane for its backend,
+// captures the rendered output, asserts that option labels appear, and
+// terminates the binary so the next test starts from a clean prompt.
 // ---------------------------------------------------------------------------
 
 #[test]
+#[serial(level2)]
 fn level2_wezterm_renders_option_labels() {
-    if !WezTermHarness::available() {
-        eprintln!("skipping: requires WezTerm (set WEZTERM_UNIX_SOCKET + wezterm in PATH)");
-        return;
-    }
-    let bin = question_binary();
-    let mut harness = WezTermHarness::new();
+    require_level!(Level::L2, WezTermHarness::available(), "WezTerm");
+
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+
+    harness.send_text(b"clear\n").expect("clear");
+    harness.settle();
     harness
-        .spawn_program(&bin, &["choose-one", "Red", "Green", "Blue"])
-        .expect("spawn question in wezterm");
-    std::thread::sleep(Duration::from_millis(400));
+        .send_text(question_command(&["choose-one", "Red", "Green", "Blue"]).as_bytes())
+        .expect("launch question");
+    std::thread::sleep(Duration::from_millis(QUESTION_RENDER_MS));
+
     let frame = harness.capture().expect("capture wezterm pane");
+    cleanup_via_ctrl_c(harness);
+
     assert!(
         frame.plain.contains("Red")
             && frame.plain.contains("Green")
@@ -63,18 +164,24 @@ fn level2_wezterm_renders_option_labels() {
 }
 
 #[test]
+#[serial(level2)]
 fn level2_kitty_renders_option_labels() {
-    if !KittyHarness::available() {
-        eprintln!("skipping: requires kitty (KITTY_LISTEN_ON + remote_control enabled)");
-        return;
-    }
-    let bin = question_binary();
-    let mut harness = KittyHarness::new();
+    require_level!(Level::L2, KittyHarness::available(), "kitty");
+
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let harness = guard.as_mut().expect("shared Kitty harness present");
+
+    harness.send_text(b"clear\n").expect("clear");
+    harness.settle();
     harness
-        .spawn_program(&bin, &["choose-one", "Red", "Green", "Blue"])
-        .expect("spawn question in kitty");
-    std::thread::sleep(Duration::from_millis(400));
+        .send_text(question_command(&["choose-one", "Red", "Green", "Blue"]).as_bytes())
+        .expect("launch question");
+    std::thread::sleep(Duration::from_millis(QUESTION_RENDER_MS));
+
     let frame = harness.capture().expect("capture kitty window");
+    cleanup_via_ctrl_c(harness);
+
     assert!(
         frame.plain.contains("Red")
             && frame.plain.contains("Green")
@@ -85,18 +192,24 @@ fn level2_kitty_renders_option_labels() {
 }
 
 #[test]
+#[serial(level2)]
 fn level2_tmux_renders_option_labels() {
-    if !TmuxHarness::available() {
-        eprintln!("skipping: requires tmux on PATH");
-        return;
-    }
-    let bin = question_binary();
-    let mut harness = TmuxHarness::new();
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("shared tmux harness present");
+
+    harness.send_text(b"clear\n").expect("clear");
+    harness.settle();
     harness
-        .spawn_program(&bin, &["choose-one", "Red", "Green", "Blue"])
-        .expect("spawn question in tmux");
-    std::thread::sleep(Duration::from_millis(400));
+        .send_text(question_command(&["choose-one", "Red", "Green", "Blue"]).as_bytes())
+        .expect("launch question");
+    std::thread::sleep(Duration::from_millis(QUESTION_RENDER_MS));
+
     let frame = harness.capture().expect("capture tmux pane");
+    tmux_cleanup(harness);
+
     assert!(
         frame.plain.contains("Red")
             && frame.plain.contains("Green")
@@ -116,33 +229,40 @@ fn level2_tmux_renders_option_labels() {
 // ---------------------------------------------------------------------------
 
 #[test]
+#[serial(level2)]
 fn level2_tmux_ctrl_space_reveals_badges() {
-    if !TmuxHarness::available() {
-        eprintln!("skipping: requires tmux on PATH");
-        return;
-    }
-    let bin = question_binary();
-    let mut harness = TmuxHarness::new();
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("shared tmux harness present");
+
+    harness.send_text(b"clear\n").expect("clear");
+    harness.settle();
     // Options with explicit hotkey prefixes — only options that opt
     // in via `[CTRL+x]` get badges.
     harness
-        .spawn_program(
-            &bin,
-            &[
+        .send_text(
+            question_command(&[
                 "choose-one",
                 "[CTRL+r] Red",
                 "[CTRL+g] Green",
                 "[CTRL+b] Blue",
-            ],
+            ])
+            .as_bytes(),
         )
-        .expect("spawn question in tmux");
-    std::thread::sleep(Duration::from_millis(400));
+        .expect("launch question");
+    std::thread::sleep(Duration::from_millis(QUESTION_RENDER_MS));
+
     // `tmux send-keys C-space` routes through tmux's key-name
     // translation. Sending the raw NUL byte via `send_text -l` is
     // rejected by `Command::arg` (no nul in process arguments).
     harness.send_key("C-space").expect("send Ctrl+Space");
     std::thread::sleep(Duration::from_millis(300));
+
     let frame = harness.capture().expect("capture tmux pane");
+    tmux_cleanup(harness);
+
     let has_badge =
         frame.plain.contains("^R") || frame.plain.contains("^G") || frame.plain.contains("^B");
     assert!(
@@ -184,29 +304,33 @@ fn sgr_param_present(haystack: &str, param: &str) -> bool {
 }
 
 #[test]
+#[serial(level2)]
 fn level2_tmux_ctrl_held_badge_uses_orange_bold_black_sgr() {
-    if !TmuxHarness::available() {
-        eprintln!("skipping: requires tmux on PATH");
-        return;
-    }
-    let bin = question_binary();
-    let mut harness = TmuxHarness::new();
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("shared tmux harness present");
+
+    harness.send_text(b"clear\n").expect("clear");
+    harness.settle();
     harness
-        .spawn_program(
-            &bin,
-            &[
+        .send_text(
+            question_command(&[
                 "choose-one",
                 "--hotkey-badges",
                 "ctrl",
                 "[CTRL+r] Red",
                 "[CTRL+g] Green",
                 "[CTRL+b] Blue",
-            ],
+            ])
+            .as_bytes(),
         )
-        .expect("spawn question in tmux");
-    std::thread::sleep(Duration::from_millis(400));
+        .expect("launch question");
+    std::thread::sleep(Duration::from_millis(QUESTION_RENDER_MS));
 
     let frame = harness.capture().expect("capture tmux pane");
+    tmux_cleanup(harness);
 
     // Guardrail: the badge text must actually be on screen before we
     // try to inspect its styling. If this fails the rest of the test's
@@ -247,29 +371,35 @@ fn level2_tmux_ctrl_held_badge_uses_orange_bold_black_sgr() {
 }
 
 #[test]
+#[serial(level2)]
 fn level2_tmux_ctrl_c_exits_130() {
-    if !TmuxHarness::available() {
-        eprintln!("skipping: requires tmux on PATH");
-        return;
-    }
-    let bin = question_binary();
-    let mut harness = TmuxHarness::new();
-    harness
-        .spawn_program(
-            "sh",
-            &[
-                "-c",
-                r#""$0" choose-one Red Green Blue; code=$?; printf '\nEXIT:%s\n' "$code"; sleep 2"#,
-                &bin,
-            ],
-        )
-        .expect("spawn question in tmux");
-    std::thread::sleep(Duration::from_millis(400));
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("shared tmux harness present");
+
+    harness.send_text(b"clear\n").expect("clear");
+    harness.settle();
+    // Run the binary inline so the parent shell sees `$?` after it
+    // exits via Ctrl+C. The shell prints `EXIT:<code>` on its own
+    // line which we then assert on. We do NOT sleep after the printf
+    // — the shared shell returns to its prompt naturally and the
+    // next test starts with a `clear`.
+    let bin = sh_quote(&question_binary());
+    let cmd = format!(
+        "{bin} choose-one Red Green Blue; printf '\\nEXIT:%s\\n' \"$?\"\n"
+    );
+    harness.send_text(cmd.as_bytes()).expect("launch question");
+    std::thread::sleep(Duration::from_millis(QUESTION_RENDER_MS));
 
     harness.send_key("C-c").expect("send Ctrl+C");
     std::thread::sleep(Duration::from_millis(500));
 
     let frame = harness.capture().expect("capture tmux pane");
+    // No further cleanup required: question exited from Ctrl+C and
+    // the shell printed EXIT:130 then returned to a prompt.
+
     assert!(
         frame.plain.contains("EXIT:130"),
         "Ctrl+C from tmux MUST make question choose-one exit 130; got: {:?}",
@@ -278,48 +408,56 @@ fn level2_tmux_ctrl_c_exits_130() {
 }
 
 // ---------------------------------------------------------------------------
-// Level 2 — bare Ctrl via raw kitty bytes through `wezterm cli send-text`
+// Level 2 — bare-Ctrl kitty-byte handler (NOT a user-keypress proof)
 //
-// This is the *most reliable* way to verify that the binary correctly
-// handles WezTerm's bare-modifier kitty encoding inside a real
-// terminal pane. We send the literal escape sequence WezTerm would
-// emit for a Ctrl press / release through `wezterm cli send-text`,
-// capture the rendered pane, and assert badges appear during the
-// "press" window. This bypasses macOS keyboard simulation entirely.
+// This test verifies a narrow internal contract: given the literal
+// kitty escape sequence that WezTerm *would* emit for a bare-Ctrl
+// press/release (with `REPORT_EVENT_TYPES` + `REPORT_ALL_KEYS_AS_ESCAPE_CODES`
+// pushed), the binary correctly transitions between `CtrlHeld` /
+// `Hidden` and surfaces the `^R` / `^G` / `^B` badge. We deliver the
+// bytes through `wezterm cli send-text`, bypassing the OS keyboard
+// entirely.
 //
-// What it proves: with `REPORT_EVENT_TYPES` +
-// `REPORT_ALL_KEYS_AS_ESCAPE_CODES` pushed, the binary turns the
-// kitty press/release sequences into the `CtrlHeld` / `Hidden` state
-// transitions that drive the badge renderer.
+// What this Level-2 test proves: the binary's modifier-only handler
+// and badge renderer behave correctly when fed the expected bytes.
 //
-// What it does NOT prove: that WezTerm itself actually *emits* those
-// bytes when the user physically presses bare Ctrl. That's the
-// terminal's responsibility and depends on `enable_kitty_keyboard`
-// in the user's `wezterm.lua`. See the Level-3 cliclick test below
-// for the (limited) attempt to verify that path.
+// What this Level-2 test does NOT prove (and is **not** a substitute
+// for Level 3): that WezTerm emits those bytes when a user physically
+// holds bare Ctrl. That path depends on (a) macOS dispatching a
+// `flagsChanged` event, (b) WezTerm's keymap not intercepting Ctrl,
+// and (c) `enable_kitty_keyboard = true` in the user's `wezterm.lua`.
+// Per the testing-best-practices rubric, the user-observable claim
+// "press Ctrl → badges appear" requires Level-3 OS keyboard injection,
+// and no userspace tool on macOS can synthesise the `flagsChanged`
+// event needed to drive that path. See `level3_wezterm_bare_ctrl_reveals_badges`
+// below — it is `#[ignore]` for exactly that reason — and the
+// **Production readiness** note in `biscuit-tui/docs/components/choose_one.md`.
 // ---------------------------------------------------------------------------
 
 #[test]
+#[serial(level2)]
 #[cfg(target_os = "macos")]
 fn level2_wezterm_bare_ctrl_kitty_bytes_reveal_badges() {
-    if !WezTermHarness::available() {
-        eprintln!("skipping: requires WezTerm");
-        return;
-    }
-    let bin = question_binary();
-    let mut harness = WezTermHarness::new();
+    require_level!(Level::L2, WezTermHarness::available(), "WezTerm");
+
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+
+    harness.send_text(b"clear\n").expect("clear");
+    harness.settle();
     harness
-        .spawn_program(
-            &bin,
-            &[
+        .send_text(
+            question_command(&[
                 "choose-one",
                 "[CTRL+r] Red",
                 "[CTRL+g] Green",
                 "[CTRL+b] Blue",
-            ],
+            ])
+            .as_bytes(),
         )
-        .expect("spawn question in wezterm");
-    std::thread::sleep(Duration::from_millis(400));
+        .expect("launch question");
+    std::thread::sleep(Duration::from_millis(QUESTION_RENDER_MS));
 
     // Kitty keyboard-protocol bytes for "Left Ctrl press" — exactly
     // what WezTerm should emit when bare Ctrl is held under our flags.
@@ -330,9 +468,11 @@ fn level2_wezterm_bare_ctrl_kitty_bytes_reveal_badges() {
 
     let frame = harness.capture().expect("capture during Ctrl 'hold'");
 
-    // Send the release so the binary returns to Hidden state cleanly
-    // before the next test runs.
+    // Send the release so the binary returns to Hidden state cleanly,
+    // then Ctrl+C to exit the binary so the next test sees a clean
+    // shell prompt.
     let _ = harness.send_text(b"\x1b[57442;1:3u");
+    cleanup_via_ctrl_c(harness);
 
     let has_badge =
         frame.plain.contains("^R") || frame.plain.contains("^G") || frame.plain.contains("^B");
@@ -367,6 +507,11 @@ fn level2_wezterm_bare_ctrl_kitty_bytes_reveal_badges() {
 // may close the gap. The test itself is not broken — it correctly
 // asserts the right end-state — and `RUN_LEVEL3=1` lets a developer
 // run it interactively.
+//
+// Level-3 tests do NOT share the level-2 pane: they require
+// `SpawnVisibility::Foreground` so AXRaise can route OS events to the
+// pane. The level-2 shared pane is background-spawned and would be
+// invisible to AXRaise.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -386,18 +531,11 @@ fn level2_wezterm_bare_ctrl_kitty_bytes_reveal_badges() {
 #[test]
 #[cfg(target_os = "macos")]
 fn level3_wezterm_arrow_down_moves_active_marker() {
-    if !level3_enabled() {
-        eprintln!("skipping: set RUN_LEVEL3=1 to enable Level-3 OS keyboard injection");
-        return;
-    }
-    if !WezTermHarness::available() {
-        eprintln!("skipping: requires WezTerm");
-        return;
-    }
-    if !cliclick::available() {
-        eprintln!("skipping: requires cliclick");
-        return;
-    }
+    require_level!(
+        Level::L3,
+        WezTermHarness::available() && cliclick::available(),
+        "WezTerm + cliclick",
+    );
     let bin = question_binary();
     let mut harness = WezTermHarness::new().with_spawn_visibility(SpawnVisibility::Foreground);
     harness
@@ -468,10 +606,6 @@ fn level3_wezterm_arrow_down_moves_active_marker() {
     );
 }
 
-fn level3_enabled() -> bool {
-    std::env::var("RUN_LEVEL3").as_deref() == Ok("1")
-}
-
 // ---------------------------------------------------------------------------
 // Level 3 — bare Ctrl via cliclick (macOS) — KNOWN-LIMITED, IGNORED
 //
@@ -497,13 +631,16 @@ fn level3_enabled() -> bool {
 // `kCGHIDEventTap`. That is a meaningful piece of new code, not a
 // test-harness tweak.
 //
-// Until/unless that gets built, the **canonical** verification for
-// the binary's bare-Ctrl handling is the Level-2 raw-bytes test
-// `level2_wezterm_bare_ctrl_kitty_bytes_reveal_badges`, which pipes
-// the literal kitty escape `\x1b[57442;1u` directly into a real
-// WezTerm pane via `wezterm cli send-text` and asserts the badge
-// appears. That test runs deterministically on every CI host with
-// WezTerm available.
+// Verification-level honesty: per the testing-best-practices rubric,
+// "press Ctrl → badges appear" is a user-observable keyboard claim
+// and therefore requires Level-3 OS keyboard injection. The Level-2
+// raw-bytes test (`level2_wezterm_bare_ctrl_kitty_bytes_reveal_badges`)
+// proves the binary's *internal* kitty-byte handler is correct but
+// is NOT a substitute for Level-3 verification of the end-to-end UX.
+// Bare-modifier press visibility is therefore documented as
+// **best-effort / not production-verified on macOS** in
+// `biscuit-tui/docs/components/choose_one.md` until a flagsChanged-capable
+// injector is wired up and this `#[ignore]` is removed.
 //
 // We keep this test in source (rather than deleting it) because the
 // supporting harness is sound — the only missing piece is OS event
@@ -516,22 +653,11 @@ fn level3_enabled() -> bool {
             level2_wezterm_bare_ctrl_kitty_bytes_reveal_badges for canonical verification"]
 #[cfg(target_os = "macos")]
 fn level3_wezterm_bare_ctrl_reveals_badges() {
-    if !level3_enabled() {
-        eprintln!(
-            "skipping: set RUN_LEVEL3=1 to enable Level-3 OS keyboard injection \
-             (requires focus stability — the spawned WezTerm window must stay \
-             frontmost during the test)"
-        );
-        return;
-    }
-    if !WezTermHarness::available() {
-        eprintln!("skipping: requires WezTerm (set WEZTERM_UNIX_SOCKET + wezterm in PATH)");
-        return;
-    }
-    if !cliclick::available() {
-        eprintln!("skipping: requires cliclick (brew install cliclick)");
-        return;
-    }
+    require_level!(
+        Level::L3,
+        WezTermHarness::available() && cliclick::available(),
+        "WezTerm + cliclick",
+    );
     let bin = question_binary();
     let mut harness = WezTermHarness::new().with_spawn_visibility(SpawnVisibility::Foreground);
     // Options carry explicit `[CTRL+x]` prefixes — that's the only
@@ -672,18 +798,11 @@ fn level3_wezterm_bare_ctrl_reveals_badges() {
 #[test]
 #[cfg(target_os = "macos")]
 fn level3_wezterm_ctrl_r_chord_selects_red() {
-    if !level3_enabled() {
-        eprintln!("skipping: set RUN_LEVEL3=1 to enable Level-3 OS keyboard injection");
-        return;
-    }
-    if !WezTermHarness::available() {
-        eprintln!("skipping: requires WezTerm");
-        return;
-    }
-    if !cliclick::available() {
-        eprintln!("skipping: requires cliclick");
-        return;
-    }
+    require_level!(
+        Level::L3,
+        WezTermHarness::available() && cliclick::available(),
+        "WezTerm + cliclick",
+    );
     let bin = question_binary();
     let mut harness = WezTermHarness::new().with_spawn_visibility(SpawnVisibility::Foreground);
     // Options MUST carry explicit `[CTRL+x]` prefixes — a plain
@@ -762,6 +881,109 @@ fn level3_wezterm_ctrl_r_chord_selects_red() {
             assert!(
                 !frame.plain.contains("Enter=Submit"),
                 "Ctrl+R should have submitted; prompt still visible: {:?}",
+                frame.plain
+            );
+        }
+        Err(other) => panic!("unexpected capture error: {other}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Level 3 — Alt chord injection (Alt+R) via cliclick (macOS)
+//
+// Companion to `level3_wezterm_ctrl_r_chord_selects_red`: same
+// click+chord shape, but with the Alt/Option modifier. This proves
+// the OS → WezTerm → binary path for Alt-letter hotkeys, which the
+// docs claim to support alongside Ctrl chords.
+//
+// Like the Ctrl chord, an Alt chord rides along with the letter
+// keyDown as a normal CGEvent (modifier flag set on the same event),
+// so cliclick can synthesise it without needing a flagsChanged
+// dispatch. This is structurally identical to the Ctrl test and
+// avoids the `#[ignore]` fate of the bare-Alt path.
+//
+// Options carry explicit `[ALT+x]` prefixes; without them, Alt+R
+// has nothing bound and the prompt would not submit.
+// ---------------------------------------------------------------------------
+
+#[test]
+#[cfg(target_os = "macos")]
+fn level3_wezterm_alt_r_chord_selects_red() {
+    require_level!(
+        Level::L3,
+        WezTermHarness::available() && cliclick::available(),
+        "WezTerm + cliclick",
+    );
+    let bin = question_binary();
+    let mut harness = WezTermHarness::new().with_spawn_visibility(SpawnVisibility::Foreground);
+    harness
+        .spawn_program(
+            &bin,
+            &[
+                "choose-one",
+                "[ALT+r] Red",
+                "[ALT+g] Green",
+                "[ALT+b] Blue",
+            ],
+        )
+        .expect("spawn question in wezterm");
+    std::thread::sleep(Duration::from_millis(400));
+
+    // Baseline: prove the prompt is up before injection.
+    let baseline = harness.capture().expect("baseline capture");
+    assert!(
+        baseline.plain.contains("Red"),
+        "spawned binary did not render before chord injection"
+    );
+
+    let coords = harness
+        .focus_spawned_pane()
+        .expect("focus spawned wezterm pane")
+        .expect("AXRaise yielded no window coords (non-macOS or AX failure)");
+
+    cliclick::click_then_alt_chord(coords.0, coords.1, "r")
+        .expect("invoke cliclick click+alt-chord");
+
+    if let Ok(out) = std::process::Command::new("osascript")
+        .args([
+            "-e",
+            r#"tell application "System Events"
+                   set frontApp to name of first application process whose frontmost is true
+                   set focusedTitle to "<no AXFocusedWindow>"
+                   set mainTitle to "<no AXMain>"
+                   try
+                       tell first process whose name contains "wezterm"
+                           try
+                               set focusedTitle to title of (value of attribute "AXFocusedWindow")
+                           end try
+                           try
+                               set mainTitle to title of (first window whose value of attribute "AXMain" is true)
+                           end try
+                       end tell
+                   end try
+                   return frontApp & " | focused: " & focusedTitle & " | main: " & mainTitle
+               end tell"#,
+        ])
+        .output()
+    {
+        eprintln!(
+            "[post-chord] {}",
+            String::from_utf8_lossy(&out.stdout).trim()
+        );
+    }
+
+    std::thread::sleep(Duration::from_millis(500));
+
+    // Successful submission tears down the pane — same shape as the
+    // Ctrl+R companion test.
+    match harness.capture() {
+        Err(e) if format!("{e}").contains("no such pane") => {
+            // Pane destroyed → submission completed cleanly.
+        }
+        Ok(frame) => {
+            assert!(
+                !frame.plain.contains("Enter=Submit"),
+                "Alt+R should have submitted; prompt still visible: {:?}",
                 frame.plain
             );
         }

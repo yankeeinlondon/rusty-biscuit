@@ -2,6 +2,8 @@
 source: darkmatter/lib/tests/error_snapshots/transclusion.rs
 expression: out
 ---
-⨫ TransclusionError: remote transclusion disabled
+⤫ TransclusionError: remote transclusion disabled
+┃ 
 ┃ The URL https://example.com/doc.md was blocked by policy.
-Enable allow_remote: true in frontmatter or CLI options.
+┃ 
+┃ Enable allow_remote: true in frontmatter or CLI options.

@@ -1073,7 +1073,7 @@ mod tests {
             assert!(result.failed.is_empty());
 
             // Symlink should be gone
-            assert!(!link.symlink_metadata().is_ok());
+            assert!(link.symlink_metadata().is_err());
         }
     }
 

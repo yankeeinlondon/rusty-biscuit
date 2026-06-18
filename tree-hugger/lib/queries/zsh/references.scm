@@ -1,13 +1,13 @@
 ; Zsh identifier references
 ; Captures identifier usages (not definitions) for semantic analysis
 
-; Variable references via expansion
-(simple_expansion
-  (variable_name) @reference)
+; Variable references via expansion ($foo)
+(variable_ref
+  (simple_variable_name) @reference)
 
-; Variable references in expansions
+; Variable references in braced expansions (${foo})
 (expansion
-  (variable_name) @reference)
+  name: (simple_variable_name) @reference)
 
 ; Command names (potential function references)
 (command_name) @reference

@@ -162,29 +162,29 @@ fn parse_block_options(
             break;
         }
 
-        let key = cursor.read_identifier(line).map_err(|e| {
-            PageBlockError::ParseDirective {
+        let key = cursor
+            .read_identifier(line)
+            .map_err(|e| PageBlockError::ParseDirective {
                 ctx: Box::new(ctx.clone()),
                 line: e.line,
                 message: e.message,
-            }
-        })?;
+            })?;
         cursor.skip_ws();
-        cursor.expect_char('=', line).map_err(|e| {
-            PageBlockError::ParseDirective {
+        cursor
+            .expect_char('=', line)
+            .map_err(|e| PageBlockError::ParseDirective {
                 ctx: Box::new(ctx.clone()),
                 line: e.line,
                 message: e.message,
-            }
-        })?;
+            })?;
         cursor.skip_ws();
-        let value = cursor.read_value(line).map_err(|e| {
-            PageBlockError::ParseDirective {
+        let value = cursor
+            .read_value(line)
+            .map_err(|e| PageBlockError::ParseDirective {
                 ctx: Box::new(ctx.clone()),
                 line: e.line,
                 message: e.message,
-            }
-        })?;
+            })?;
 
         match key.as_str() {
             "when" => {
@@ -275,7 +275,10 @@ mod tests {
         let err = result.unwrap_err();
         assert!(matches!(
             err,
-            PageBlockError::UnterminatedBlock { opening_line: 1, .. }
+            PageBlockError::UnterminatedBlock {
+                opening_line: 1,
+                ..
+            }
         ));
     }
 

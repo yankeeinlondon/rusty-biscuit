@@ -7,8 +7,8 @@
 //! ## Examples
 //!
 //! ```
-//! use tui_chrome::prelude::*;
-//! use tui_chrome::components::input_table::{
+//! use biscuit_tui::prelude::*;
+//! use biscuit_tui::components::input_table::{
 //!     BooleanSwitchConfig, InputTable, InputTableColumn, InputTableState,
 //!     TextInputConfig,
 //! };
@@ -75,8 +75,8 @@ impl InputTableState {
     /// ## Examples
     ///
     /// ```
-    /// use tui_chrome::prelude::*;
-    /// use tui_chrome::components::input_table::{
+    /// use biscuit_tui::prelude::*;
+    /// use biscuit_tui::components::input_table::{
     ///     CellValue, InputTable, InputTableColumn, InputTableState, Row,
     ///     RowCell, TextInputConfig,
     /// };

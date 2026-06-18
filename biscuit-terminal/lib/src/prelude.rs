@@ -1,6 +1,7 @@
 pub use crate::components::block_quote::BlockQuote;
 pub use crate::components::compose::Compose;
 pub use crate::components::filesystem::{FileMetrics, FileSystem, FileSystemError, MetricKind};
+#[cfg(feature = "image")]
 pub use crate::components::graph_expression::{
     GraphExpression, GraphInputSyntax, GraphOrientation, GraphRenderError,
 };
@@ -10,14 +11,20 @@ pub use crate::components::horizontal_rule::{
 pub use crate::components::image_options::{TerminalImageOptions, TerminalImageOptionsBuilder};
 pub use crate::components::inline_content::InlineContent;
 pub use crate::components::list::{OrderedList, UnorderedList};
+#[cfg(feature = "image")]
 pub use crate::components::mermaid::{
     MermaidConfig, MermaidDiagram, MermaidRenderError, MermaidRenderResult, MermaidTheme,
     QuadrantTheme,
 };
+pub use crate::components::metrics_tree::{
+    MetricMarker, MetricNode, MetricShare, MetricValue, MetricsTree,
+};
 pub use crate::components::pad::{PadLeft, PadRight};
 pub use crate::components::progress::Progress;
 pub use crate::components::prose::Prose;
-pub use crate::components::renderable::{BrowserRenderable, Renderable, RenderableContent};
+pub use crate::components::renderable::{
+    BrowserRenderable, RenderableTerminalContent, TerminalRenderable,
+};
 pub use crate::components::section::{HeadingLevel, Section};
 pub use crate::components::status::{Status, StatusState, StatusTheme};
 pub use crate::components::status_block::StatusBlock;
@@ -43,5 +50,5 @@ pub use crate::utils::escape_codes::{
     strip_color_codes, strip_cursor_movement_codes, strip_escape_codes, strip_osc8_links,
     strip_query_codes,
 };
-pub use crate::utils::layout::{Alignment, Layout, Margin, RowFill};
+pub use crate::utils::layout::{Alignment, Edges, Layout, LayoutTerminalExt, Length, TargetValue};
 pub use crate::utils::wrap_policy::WordWrap;

@@ -36,20 +36,39 @@
 
 mod common;
 
-use biscuit_test_harness::{TerminalHarness, skip_with_reason};
+use biscuit_test_harness::TerminalHarness;
+use biscuit_test_harness::kitty::KittyHarness;
+use biscuit_test_harness::shared::SharedHarness;
+use biscuit_test_harness::tmux::TmuxHarness;
+use biscuit_test_harness::wezterm::WezTermHarness;
 use common::pane_geometry::{extract_kitty_apc_columns, parse_debug_image_width};
-use common::send_bt_command;
+use common::{capture_until, send_bt_command};
 use serial_test::serial;
 use sha2::{Digest, Sha256};
 use std::time::Duration;
+use test_toolkit::{Level, require_level};
 
-/// Extra settle time after spawning a WezTerm shell to avoid racing
-/// shell initialization (custom prompts, completions, etc.).
-const SHELL_READY_MS: u64 = 1500;
+/// Process-shared Kitty window reused across the Kitty-targeting tests
+/// in this file. A `clear` is sent before each command so prior renders
+/// cannot leak into the capture window.
+static SHARED_KITTY: SharedHarness<KittyHarness> = SharedHarness::new();
 
-/// Extra settle time for diagram renders, which involve SVG generation
-/// and rasterization and can take 500 ms+ on first run.
-const DIAGRAM_SETTLE_MS: u64 = 1200;
+/// Process-shared WezTerm pane reused across the WezTerm-targeting
+/// tests in this file.
+static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
+
+/// Process-shared tmux session reused across the tmux fallback test(s)
+/// in this file.
+static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
+
+/// Upper bound on how long a diagram render may take before its
+/// terminal evidence (APC graphics bytes or `--meta` JSON) appears.
+///
+/// SVG generation plus rasterization can take 500 ms+ on a cold cache.
+/// This is a *poll deadline*, not a blind sleep — [`capture_until`]
+/// returns as soon as the evidence shows up, so the common (warm)
+/// render costs only a poll interval, not the full bound.
+const DIAGRAM_RENDER_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// One row of the Phase-4 coverage matrix: a diagram subcommand and the
 /// argument string that produces a valid render.
@@ -122,20 +141,24 @@ fn case_for(cmd: &str) -> &'static DiagramCase {
 /// protocol, verifying `\x1b_G` APC bytes appear in the captured raw
 /// pane output.
 fn assert_renders_in_kitty(case: &DiagramCase) {
-    use biscuit_test_harness::kitty::KittyHarness;
+    require_level!(
+        Level::L2,
+        KittyHarness::available(),
+        "Kitty remote control (set KITTY_LISTEN_ON)",
+    );
 
-    if !KittyHarness::available() {
-        skip_with_reason("Kitty remote control (set KITTY_LISTEN_ON)");
-        return;
-    }
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let harness = guard.as_mut().expect("shared Kitty harness present");
+    // Reset the pane so prior tests' rendered output cannot leak into
+    // this run's capture window.
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
-    let mut harness = KittyHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-
-    send_bt_command(&mut harness, &format!("{} {}", case.cmd, case.arg));
-    std::thread::sleep(Duration::from_millis(DIAGRAM_SETTLE_MS));
-
-    let frame = harness.capture().expect("capture failed");
+    send_bt_command(harness, &format!("{} {}", case.cmd, case.arg));
+    let frame = capture_until(harness, DIAGRAM_RENDER_TIMEOUT, |f| {
+        f.raw.contains("\x1b_G")
+    });
     assert!(
         frame.raw.contains("\x1b_G"),
         "expected raw output to contain Kitty graphics protocol APC \
@@ -154,21 +177,25 @@ fn assert_renders_in_kitty(case: &DiagramCase) {
 /// `render_time_ms`) that the CLI emits to stderr — proving the image
 /// pipeline executed end-to-end (not the fenced-block fallback).
 fn assert_renders_in_wezterm(case: &DiagramCase) {
-    use biscuit_test_harness::wezterm::WezTermHarness;
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    // Reset the pane so prior tests' rendered output cannot leak into
+    // this run's capture window.
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
-
-    send_bt_command(&mut harness, &format!("{} --meta {}", case.cmd, case.arg));
-    std::thread::sleep(Duration::from_millis(DIAGRAM_SETTLE_MS));
-
-    let frame = harness.capture().expect("capture failed");
+    send_bt_command(harness, &format!("{} --meta {}", case.cmd, case.arg));
+    let frame = capture_until(harness, DIAGRAM_RENDER_TIMEOUT, |f| {
+        let joined: String = f.plain.lines().collect();
+        joined.contains("\"filename\"") && joined.contains("\"render_time_ms\"")
+    });
     let joined: String = frame.plain.lines().collect();
 
     // The presence of meta JSON in stderr proves the renderer ran the
@@ -345,25 +372,26 @@ fn level2_graph_expression_renders_in_wezterm() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_diagram_width_respects_pane_columns() {
-    use biscuit_test_harness::wezterm::WezTermHarness;
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
-
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
     let pane_size = harness.pane_size().expect("pane_size failed");
     let pane_cols = pane_size.cols;
     assert!(pane_cols > 0, "pane_size.cols was zero");
 
-    send_bt_command(&mut harness, "pie-chart --debug --width 50% \"A: 1\"");
-    std::thread::sleep(Duration::from_millis(DIAGRAM_SETTLE_MS));
-
-    let frame = harness.capture().expect("capture failed");
+    send_bt_command(harness, "pie-chart --debug --width 50% \"A: 1\"");
+    let frame = capture_until(harness, DIAGRAM_RENDER_TIMEOUT, |f| {
+        parse_debug_image_width(&f.plain).is_some()
+    });
     let actual = parse_debug_image_width(&frame.plain).unwrap_or_else(|| {
         panic!(
             "could not parse `image width:` line from `bt pie-chart --debug` output.\n\
@@ -400,23 +428,25 @@ fn level2_diagram_width_respects_pane_columns() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_diagram_width_kitty_apc_columns() {
-    use biscuit_test_harness::kitty::KittyHarness;
+    require_level!(
+        Level::L2,
+        KittyHarness::available(),
+        "Kitty remote control (set KITTY_LISTEN_ON)",
+    );
 
-    if !KittyHarness::available() {
-        skip_with_reason("Kitty remote control (set KITTY_LISTEN_ON)");
-        return;
-    }
-
-    let mut harness = KittyHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let harness = guard.as_mut().expect("shared Kitty harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
     let pane_cols = harness.pane_cols().expect("pane_cols failed");
     assert!(pane_cols > 0, "kitty pane_cols was zero");
 
-    send_bt_command(&mut harness, "pie-chart --width 50% \"A: 1\"");
-    std::thread::sleep(Duration::from_millis(DIAGRAM_SETTLE_MS));
-
-    let frame = harness.capture().expect("capture failed");
+    send_bt_command(harness, "pie-chart --width 50% \"A: 1\"");
+    let frame = capture_until(harness, DIAGRAM_RENDER_TIMEOUT, |f| {
+        extract_kitty_apc_payload(&f.raw).is_some()
+    });
     let payload = extract_kitty_apc_payload(&frame.raw).unwrap_or_else(|| {
         panic!(
             "could not extract Kitty APC payload from --width 50% render.\n\
@@ -440,9 +470,10 @@ fn level2_diagram_width_kitty_apc_columns() {
         // explicit `c=` parameter. In that case fall back to the same
         // `--debug` parsing strategy used by the WezTerm test, run
         // under the Kitty harness so the protocol path is unchanged.
-        send_bt_command(&mut harness, "pie-chart --debug --width 50% \"A: 1\"");
-        std::thread::sleep(Duration::from_millis(DIAGRAM_SETTLE_MS));
-        let frame_dbg = harness.capture().expect("capture (debug) failed");
+        send_bt_command(harness, "pie-chart --debug --width 50% \"A: 1\"");
+        let frame_dbg = capture_until(harness, DIAGRAM_RENDER_TIMEOUT, |f| {
+            parse_debug_image_width(&f.plain).is_some()
+        });
         let actual = parse_debug_image_width(&frame_dbg.plain).unwrap_or_else(|| {
             panic!(
                 "Kitty APC payload had no `c=` parameter AND `--debug` did not emit \
@@ -480,19 +511,24 @@ fn level2_diagram_width_kitty_apc_columns() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_inverse_flag_changes_background_in_capture() {
-    use biscuit_test_harness::kitty::KittyHarness;
+    require_level!(
+        Level::L2,
+        KittyHarness::available(),
+        "Kitty remote control (set KITTY_LISTEN_ON)",
+    );
 
-    if !KittyHarness::available() {
-        skip_with_reason("Kitty remote control (set KITTY_LISTEN_ON)");
-        return;
-    }
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let harness = guard.as_mut().expect("shared Kitty harness present");
 
-    // Default render
-    let mut h1 = KittyHarness::new();
-    h1.spawn_shell().expect("spawn_shell failed");
-    send_bt_command(&mut h1, "flowchart \"A --> B\"");
-    std::thread::sleep(Duration::from_millis(DIAGRAM_SETTLE_MS));
-    let frame1 = h1.capture().expect("capture failed");
+    // Default render. Clear so the prior test's APC payload cannot leak
+    // into the capture window.
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
+    send_bt_command(harness, "flowchart \"A --> B\"");
+    let frame1 = capture_until(harness, DIAGRAM_RENDER_TIMEOUT, |f| {
+        extract_kitty_apc_payload(&f.raw).is_some()
+    });
     let payload1 = extract_kitty_apc_payload(&frame1.raw).unwrap_or_else(|| {
         panic!(
             "could not extract Kitty APC payload from default render.\n\
@@ -501,12 +537,14 @@ fn level2_inverse_flag_changes_background_in_capture() {
         )
     });
 
-    // Inverse render
-    let mut h2 = KittyHarness::new();
-    h2.spawn_shell().expect("spawn_shell failed");
-    send_bt_command(&mut h2, "flowchart --inverse \"A --> B\"");
-    std::thread::sleep(Duration::from_millis(DIAGRAM_SETTLE_MS));
-    let frame2 = h2.capture().expect("capture failed");
+    // Inverse render. Clear again so the default-render APC bytes do
+    // not survive into this command's capture window.
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
+    send_bt_command(harness, "flowchart --inverse \"A --> B\"");
+    let frame2 = capture_until(harness, DIAGRAM_RENDER_TIMEOUT, |f| {
+        extract_kitty_apc_payload(&f.raw).is_some()
+    });
     let payload2 = extract_kitty_apc_payload(&frame2.raw).unwrap_or_else(|| {
         panic!(
             "could not extract Kitty APC payload from --inverse render.\n\
@@ -534,20 +572,21 @@ fn level2_inverse_flag_changes_background_in_capture() {
 /// emit a ` ```mermaid ` block AND the capture must contain zero
 /// Kitty APC or iTerm2 OSC image bytes.
 #[test]
+#[serial(level2_terminal)]
 fn level2_diagram_fallback_when_no_image_protocol() {
-    use biscuit_test_harness::tmux::TmuxHarness;
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    if !TmuxHarness::available() {
-        skip_with_reason("tmux");
-        return;
-    }
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("shared tmux harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
-    let mut harness = TmuxHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
+    send_bt_command(harness, "flowchart \"A --> B\"");
 
-    send_bt_command(&mut harness, "flowchart \"A --> B\"");
-
-    let frame = harness.capture().expect("capture failed");
+    let frame = capture_until(harness, DIAGRAM_RENDER_TIMEOUT, |f| {
+        f.plain.contains("```mermaid")
+    });
     assert!(
         frame.plain.contains("```mermaid"),
         "expected fallback fenced code block in tmux (no image protocol). plain:\n{}",

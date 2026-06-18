@@ -1,13 +1,13 @@
 # TUI Chrome Components
 
-The `tui-chrome` library provides composable, Ratatui-based input widgets for terminal user interfaces. Every component follows the same pattern: a zero-sized `StatefulWidget` marker paired with a component-specific `*State` struct owned by the caller. All widgets implement `HandleEvent` so they can be driven by `run_standalone` or embedded in an application event loop.
+The `biscuit-tui` library provides composable, Ratatui-based input widgets for terminal user interfaces. Every component follows the same pattern: a zero-sized `StatefulWidget` marker paired with a component-specific `*State` struct owned by the caller. All widgets implement `HandleEvent` so they can be driven by `run_standalone` or embedded in an application event loop.
 
 ## Getting Started
 
-Add `tui-chrome` to your project and import the prelude for common types:
+Add `biscuit-tui` to your project and import the prelude for common types:
 
 ```rust
-use tui_chrome::prelude::*;
+use biscuit_tui::prelude::*;
 ```
 
 The quickest way to see a component in action is via the `question` CLI (installed from the `biscuit-tui` crate):
@@ -46,7 +46,7 @@ Widgets that compose or wrap other components to build more complex UIs.
 
 ## Shared Concepts
 
-All components share these cross-cutting primitives from `tui_chrome::core`:
+All components share these cross-cutting primitives from `biscuit_tui::core`:
 
 - **`Label` / `LabelPosition`** — optional label rendered `Above`, `Below`, `Left`, or `Right` relative to the widget body
 - **`ComponentTheme`** — centralised visual constants (colors, switch thumb character, help hint text)
@@ -72,7 +72,7 @@ The choice components (`ChooseOne`, `ChooseMany`) also share:
 - **`ActiveChoiceColor`** — background colour for the actively hovered option.
 - **`SortOrder`** / **`OptionSort`** — option ordering (`Natural`, `Inverse`/`Reverse`, `Asc`, `Desc`).
 
-The `tui_chrome::helpers` module provides builder functions for constructing choice inputs from CSV, Markdown lists, and dictionaries (`choose_one_from_csv`, `choose_many_from_markdown_list`, etc.).
+The `biscuit_tui::helpers` module provides builder functions for constructing choice inputs from CSV, Markdown lists, and dictionaries (`choose_one_from_csv`, `choose_many_from_markdown_list`, etc.).
 
 ## CLI Overview
 

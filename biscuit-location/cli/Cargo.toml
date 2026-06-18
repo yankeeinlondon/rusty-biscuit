@@ -22,3 +22,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 assert_cmd = "2"
 insta = { version = "1", features = ["json"] }
 predicates = "3"
+
+# Opt-out of benchmarking: this is a thin CLI wrapper; benchmarks belong
+# on the underlying library crate.
+[package.metadata.benchmarks]
+required = false
+reason = "Thin CLI wrapper around biscuit-location; no measurable hot paths."

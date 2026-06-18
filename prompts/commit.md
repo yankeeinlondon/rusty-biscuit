@@ -1,8 +1,11 @@
 ---
 lessons_learned: "@.claudine/memory/commits.md"
-timeout: 12m
-step_timeout: 8m
+timeout: 15m
+step_timeout: 12m
 show_system_prompt: false
+operation: commit
+agent: opencode
+model: minimax/MiniMax-M3
 ---
 # Commit Staged Files
 
@@ -18,15 +21,29 @@ show_system_prompt: false
 > 1. If the change appears to have no relationship to any particular package in the monorepo.
 > 2. If there are bunch of small changes which are all related to the same underlying event or cause and the changes do not touch any source code
 
-The valid operations we use include: fix, docs, chore, feat, refactor, style, perf, test, ci, style.
+The valid operations we use include: fix, docs, chore, feat, refactor, style, perf, test, ci, style, planning.
 
+> **Note:**
+> - when you detect that a directory of files with a "spec.md" are being **moved INTO** a directory containing `_completed` in the directory path:
+>     - mark the operation as "planning"
+>     - this movement indicates that the feature/fixture/review has now been completed; it is kept in git but moved out of the hotpath of actively planned items
+> - when you detect that a directory of files with a "spec.md" are being **moved OUT OF** a directory containing `_unscheduled` in the directory path:
+>     - mark the operation as "planning"
+>     - this indicates that a specification that had no immediacy before has been scheduled to be implemented very soon
 > **Note:** the action 'refactor' should be reserved for commits which have at least some source code files.
 
 ## Package in this Monorepo
 
 This monorepo has the following packages:
 
-::shell sniff repo packages
+::shell sniff repo packages 
+
+::block when="ctx.current_package_area"
+However you've started this session in the "{{ctx.current_package_area}}" package area so the most relevant packages to focus on are:
+
+::shell sniff repo packages --package-area '{{ctx.current_package_area}}'
+
+::end-block
 
 Of these packages, the following ones appear to have changes _staged_ for commit:
 
@@ -55,7 +72,7 @@ The lessons learned are found in {{lessons_learned}}
 
 The following files have been staged for commit:
 
-::shell sniff repo staged-files -v --plain
+::shell sniff repo staged-files -v --plain --on-error '**No staged files**; nothing to do!' --no-error
 
 ## Task
 
@@ -89,13 +106,25 @@ Your task is to:
 
       - the subagent is then responsible for:
           - reviewing the changes and drafting a useful commit message following the format above,
-          - committing ONLY the files assigned to them (using `git commit --only -m "message" -- path1 path2`),
+          - committing ONLY the files assigned to them. **Never pass the message inline with `-m "…"`.** Commit bodies routinely contain backticks (inline code like `` `::end-block` ``), `$`, and other shell metacharacters; inside a double-quoted `-m` string the shell evaluates those (backticks are command substitution even within double quotes), which corrupts the message and makes OpenCode's snapshot subsystem try to `git add` the extracted tokens as pathspecs (`fatal: pathspec '::end-block' did not match any files`). Instead, feed the message on stdin via a **single-quoted heredoc** so nothing is expanded:
+
+            ```
+            git commit --only -F - -- path1 path2 <<'COMMIT_MSG'
+            refactor(darkmatter): scope block-quote support to ::shell-block
+
+            - Add `quoted` field to stack entries
+            - `::end-block` only closes matching quoted openers
+            COMMIT_MSG
+            ```
+
+            The `'COMMIT_MSG'` delimiter must be single-quoted — that is what disables expansion. `-F -` reads the message from stdin; the `-- path1 path2` pathspecs still restrict the commit to the assigned files.
           - **retrying on git lock contention.** Because multiple subagents commit in parallel against the same worktree, `git commit` can fail with `fatal: Unable to create '.git/index.lock': File exists.` (or the equivalent `refs/heads/<branch>.lock` variant). This is not corruption — git's locks are fail-fast, not queuing. On such a failure, wait 1–3 seconds and retry the same `git commit --only …` command. Retry up to 5 times with short backoff before giving up and reporting failure to the orchestrator.
           - and finally, to let the orchestrator know of any problems they ran into and how they were able to overcome these issues
    - NOTE: if the subagent is not able to make a commit for any reason then this needs to be communicated back to the orchestrator with details on why they weren't able to commit.
    - the subagent SHOULD NOT push commits to any remote!
    - the subagent SHOULD be reminded that they are running in a non-interactive session so there is no way to get feedback from the user and attempts should be made to achieve the goals without asking for additional context
 6. once all the subagents have completed their tasks, you will run `sniff repo` to provide the user a summary of the state of the repo
+   - **DO NOT `cd` anywhere before running this command.** The wrapper has already placed you in the correct git worktree's root. Prefixing with `cd /Users/.../rusty-biscuit` (or any other path) will move you to the worktrees-*parent* directory (the one that holds all linked worktrees of this repo), which is OUTSIDE the worktree, triggers OpenCode's `external_directory: ask` permission, and produces noise in the trace. Run plainly: `sniff repo` — `sniff` is already worktree-aware and resolves the correct git root from cwd.
 7. then you will review the "lessons learned" that the subagents provided to you and determine if these are both:
    1. important and worthy of saving to the lessons learned memory file, and
    2. not already represented in the lessons-learned file

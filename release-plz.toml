@@ -1,5 +1,7 @@
-# release-plz configuration for dockhand monorepo
+# release-plz configuration for rusty-biscuit monorepo
 # Documentation: https://release-plz.dev/docs/config
+#
+# Crate→directory mapping is authoritative via `sniff repo packages -v`.
 
 [workspace]
 # PR configuration
@@ -58,15 +60,11 @@ name = "darkmatter"
 changelog_path = "darkmatter/CHANGELOG.md"
 
 [[package]]
-name = "shared"
-changelog_path = "biscuit/CHANGELOG.md"
-
-[[package]]
 name = "research-cli"
 changelog_path = "research/cli/CHANGELOG.md"
 
 [[package]]
-name = "research-lib"
+name = "research"
 changelog_path = "research/lib/CHANGELOG.md"
 
 [[package]]
@@ -78,7 +76,7 @@ name = "sniff-cli"
 changelog_path = "sniff/cli/CHANGELOG.md"
 
 [[package]]
-name = "sniff-lib"
+name = "sniff"
 changelog_path = "sniff/lib/CHANGELOG.md"
 
 [[package]]
@@ -91,15 +89,15 @@ changelog_path = "unchained-ai/gen/CHANGELOG.md"
 
 [[package]]
 name = "model_id"
-changelog_path = "model_id/CHANGELOG.md"
-
-[[package]]
-name = "schematic"
-changelog_path = "schematic/CHANGELOG.md"
+changelog_path = "unchained-ai/model_id/CHANGELOG.md"
 
 # Placeholder packages - exclude from releases
 [[package]]
-name = "tui"
+name = "biscuit-tui"
+release = false
+
+[[package]]
+name = "biscuit-tui-cli"
 release = false
 
 [[package]]

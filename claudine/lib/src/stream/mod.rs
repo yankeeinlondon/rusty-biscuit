@@ -1,3 +1,9 @@
+//! Structured stream parsing and per-provider protocol handling.
+//!
+//! See [`claudine/docs/topics/stream-parsing.md`](../../../docs/topics/stream-parsing.md)
+//! for the protocol model, semantic event taxonomy, per-provider
+//! adapters, and the wrapper-time rendering pipeline.
+
 pub mod badges;
 pub mod logs;
 pub mod parser;

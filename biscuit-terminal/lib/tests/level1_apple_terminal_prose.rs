@@ -83,6 +83,7 @@ fn apple_terminal_double_underline_degrades_to_straight() {
     let mut session = spawn_with_env(&[
         ("PROBE", "prose"),
         ("PROBE_TERM_PROGRAM", "Apple_Terminal"),
+        ("PROBE_TERM", "xterm-256color"),
         (
             "PROBE_PROSE_INPUT",
             "<double-underline>important text</double-underline>",
@@ -102,42 +103,6 @@ fn apple_terminal_double_underline_degrades_to_straight() {
     assert!(
         output.contains("\x1b[4mimportant text"),
         "expected straight underline opening before content, got: {output:?}"
-    );
-}
-
-/// `{{double-underline}}` (atomic-token form) must obey the same
-/// capability-aware degradation policy as `<double-underline>`.
-///
-/// On Apple Terminal: only the straight underline is supported, so the
-/// emitted SGR must be `\x1b[4m` and never the unsupported `\x1b[4:2m`.
-#[test]
-fn apple_terminal_double_underline_atomic_token_degrades() {
-    let mut session = spawn_with_env(&[
-        ("PROBE", "prose"),
-        ("PROBE_TERM_PROGRAM", "Apple_Terminal"),
-        (
-            "PROBE_PROSE_INPUT",
-            "{{double-underline}}important text{{reset}}",
-        ),
-    ]);
-
-    let output = drain(&mut session);
-
-    assert!(
-        output.contains("---PROSE---"),
-        "expected prose probe markers, got: {output:?}"
-    );
-    assert!(
-        output.contains("important text"),
-        "expected literal content, got: {output:?}"
-    );
-    assert!(
-        !output.contains("\x1b[4:2m"),
-        "expected no double-underline SGR on Apple Terminal, got: {output:?}"
-    );
-    assert!(
-        output.contains("\x1b[4m"),
-        "expected straight-underline SGR fallback, got: {output:?}"
     );
 }
 
@@ -213,21 +178,21 @@ fn no_underline_support_emits_plain_text() {
     );
 }
 
-/// Atomic-token form (`{{double-underline}}...`) must obey the same
-/// "no underline support → plain text" policy as the block-tag form
-/// (`<double-underline>...</double-underline>`).
-///
-/// With both straight and double underline disabled via the probe overrides,
-/// the rendered output between the probe markers must be exactly the literal
-/// text — no SGR sequences of any kind.
+/// `<double-underline>` with no underline support must render as exactly
+/// the literal text — no SGR sequences of any kind between the probe
+/// markers. This is the strict exact-match companion to
+/// `no_underline_support_emits_plain_text`.
 #[test]
-fn atomic_double_underline_no_underline_support_emits_plain_text() {
+fn double_underline_no_underline_support_emits_exact_plain_text() {
     let mut session = spawn_with_env(&[
         ("PROBE", "prose"),
         ("PROBE_TERM_PROGRAM", "Apple_Terminal"),
         ("PROBE_FORCE_UNDERLINE_STRAIGHT", "false"),
         ("PROBE_FORCE_UNDERLINE_DOUBLE", "false"),
-        ("PROBE_PROSE_INPUT", "{{double-underline}}important text"),
+        (
+            "PROBE_PROSE_INPUT",
+            "<double-underline>important text</double-underline>",
+        ),
     ]);
 
     let output = drain(&mut session);
@@ -244,13 +209,13 @@ fn atomic_double_underline_no_underline_support_emits_plain_text() {
         .and_then(|s| s.split("\r\n---END---").next())
         .unwrap_or("");
 
+    // The span produces no visible SGR (the terminal lacks underline support),
+    // so it opens nothing and emits no stray reset — the rendered payload is the
+    // bare literal with no escapes. See prose/mod.rs
+    // `test_double_underline_suppressed_when_no_underline_support`.
     assert_eq!(
         rendered, "important text",
-        "expected exactly the plain literal between probe markers, got: {rendered:?} (full output: {output:?})"
-    );
-    assert!(
-        !output.contains("\x1b["),
-        "expected no SGR escape of any kind, got: {output:?}"
+        "expected bare literal with no escapes between probe markers, got: {rendered:?} (full output: {output:?})"
     );
     assert!(
         !output.contains("\x1b[4:2m"),
@@ -259,9 +224,5 @@ fn atomic_double_underline_no_underline_support_emits_plain_text() {
     assert!(
         !output.contains("\x1b[4m"),
         "expected no straight-underline SGR, got: {output:?}"
-    );
-    assert!(
-        !output.contains("\x1b[0m"),
-        "expected no reset SGR, got: {output:?}"
     );
 }

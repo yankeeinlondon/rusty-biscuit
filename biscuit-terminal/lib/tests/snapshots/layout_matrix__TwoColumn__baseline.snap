@@ -1,0 +1,9 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: block
+---
+VIA_RENDER
+Left column content.                     Right column content.
+---
+VIA_TREE_DIRECT
+Left column content.                     Right column content.

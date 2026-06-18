@@ -1,15 +1,18 @@
+use crate::components::prose::Prose;
+use crate::components::renderable::TerminalRenderable;
 use crate::utils::{block_constraint::visible_width, layout::Alignment};
 
 use super::types::Currency;
 
 /// Content for a table cell.
 ///
-/// This enum supports four cell types that each have distinct rendering behavior:
+/// This enum supports five cell types that each have distinct rendering behavior:
 ///
 /// - **Text**: Renders as-is, supports word wrapping and alignment
 /// - **Integer**: Formats with thousands separators (e.g., `1,234,567`)
 /// - **Float**: Formats with two decimal places (e.g., `12,345.67`)
 /// - **Currency**: Formats with currency symbol prefix and two decimal places (e.g., `$1,234.56`)
+/// - **StyledProse**: Embeds a [`Prose`] whose inline styles, links, and emphasis are preserved in the table cell
 ///
 /// ## Examples
 ///
@@ -51,6 +54,15 @@ pub enum TableCellContent {
     Float(f64),
     /// Currency value with symbol prefix
     Currency(Currency, f64),
+    /// Styled inline content backed by a [`Prose`].
+    ///
+    /// The payload is boxed deliberately: [`Prose`] embeds a full
+    /// [`Layout`](crate::utils::layout::Layout), so an inline `Prose` would make
+    /// this enum an order of magnitude larger than its other (≤24-byte) variants
+    /// and trip `clippy::large_enum_variant` for every cell in the
+    /// `Vec<Vec<TableCellContent>>` grid. `From<Prose>` boxes for callers, so the
+    /// allocation is invisible at the construction site.
+    StyledProse(Box<Prose>),
 }
 
 impl From<String> for TableCellContent {
@@ -77,6 +89,12 @@ impl From<f64> for TableCellContent {
     }
 }
 
+impl From<Prose> for TableCellContent {
+    fn from(prose: Prose) -> Self {
+        TableCellContent::StyledProse(Box::new(prose))
+    }
+}
+
 impl std::fmt::Display for TableCellContent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -84,6 +102,9 @@ impl std::fmt::Display for TableCellContent {
             TableCellContent::Integer(n) => write!(f, "{}", format_integer(*n)),
             TableCellContent::Float(n) => write!(f, "{}", format_float(*n)),
             TableCellContent::Currency(c, amt) => write!(f, "{}", format_currency(c, *amt)),
+            TableCellContent::StyledProse(prose) => {
+                write!(f, "{}", prose.render_optimistic(None))
+            }
         }
     }
 }
@@ -161,7 +182,7 @@ pub(super) fn format_currency(currency: &Currency, value: f64) -> String {
 /// If `width_for_alignment` is provided, alignment offsets use this width instead
 /// of the actual content width. This ensures consistent alignment across rows with
 /// mixed-width content (e.g., emoji vs symbols).
-pub(super) fn pad_cell(
+pub(crate) fn pad_cell(
     content: &str,
     width: usize,
     alignment: Alignment,

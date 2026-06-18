@@ -1,0 +1,9 @@
+---
+source: darkmatter/lib/tests/error_snapshots/transclusion.rs
+expression: out
+---
+⤫ TransclusionError: file reference failure
+┃ 
+┃ file reference syntax is invalid: unclosed brace
+┃ 
+┃ Check repository-root (`@/`) or package (`!`) prefix usage.

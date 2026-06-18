@@ -3,6 +3,12 @@ name = "biscuit-hash"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "biscuit_hash"
+path = "src/lib.rs"
+# Disable the default bench harness so `cargo bench` only runs Criterion targets.
+bench = false
+
 [features]
 default = ["xx_hash"]
 xx_hash = ["dep:xxhash-rust"]
@@ -20,3 +26,10 @@ blake3 = { version = "1.8.3", optional = true }
 argon2 = { version = "0.5.3", features = ["rand"], optional = true }
 rand = { version = "0.8", optional = true }
 thiserror = { version = "2", optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "hashing"
+harness = false

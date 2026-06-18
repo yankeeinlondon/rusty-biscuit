@@ -1,0 +1,25 @@
+---
+source: darkmatter/lib/tests/layout_matrix.rs
+expression: block
+---
+BESPOKE
+
+
+                                                                           yaml 
+                                                                                
+ name: rusty-biscuit                                                            
+ version: 0.1.0                                                                 
+ tags:                                                                          
+   - cli                                                                        
+   - terminal
+---
+TREE
+
+
+                                                                           yaml 
+                                                                                
+ name: rusty-biscuit                                                            
+ version: 0.1.0                                                                 
+ tags:                                                                          
+   - cli                                                                        
+   - terminal

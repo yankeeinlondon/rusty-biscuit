@@ -1,4 +1,4 @@
-//! The canonical event outcome for every tui-chrome component.
+//! The canonical event outcome for every biscuit-tui component.
 //!
 //! Every input component exposes a `handle_event` method (or an
 //! equivalent) that returns an [`EventOutcome`]. The variants are

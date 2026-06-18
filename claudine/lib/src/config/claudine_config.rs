@@ -180,10 +180,29 @@ pub struct ClaudineConfig {
     /// Default sound effects for outcome categories.
     #[serde(default)]
     pub default_sounds: DefaultSounds,
+
+    /// Whether to prompt for missing required schema properties.
+    ///
+    /// When `true` (the default), composition operations enter Interactive
+    /// Mode to collect missing required values when stdin and stderr are
+    /// TTYs. When `false`, missing required values fail with a
+    /// `MissingProperties` error instead.
+    ///
+    /// User-scope only; repo configs may not declare this field.
+    #[serde(default = "default_prompt_for_missing", skip_serializing_if = "is_true")]
+    pub prompt_for_missing: bool,
 }
 
 fn default_logging() -> bool {
     true
+}
+
+fn default_prompt_for_missing() -> bool {
+    true
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 fn default_protect() -> ProtectConfig {
@@ -264,6 +283,7 @@ impl Default for ClaudineConfig {
             canonical_provider: None,
             models: HashMap::new(),
             default_sounds: DefaultSounds::default(),
+            prompt_for_missing: true,
         }
     }
 }
@@ -280,15 +300,12 @@ impl ClaudineConfig {
     ///
     /// Returns [`ClaudineError::ConfigValidation`] if any check fails.
     pub fn validate(&self) -> Result<()> {
-        // Validate protect config
         self.protect.validate()?;
 
-        // Validate messenger active_config reference
         if let Some(messenger) = &self.messenger {
             messenger.validate()?;
         }
 
-        // Validate default sound effect names
         validate_sound_name("default_sounds.success", &self.default_sounds.success)?;
         validate_sound_name("default_sounds.attention", &self.default_sounds.attention)?;
         validate_sound_name("default_sounds.error", &self.default_sounds.error)?;
@@ -928,6 +945,7 @@ mod tests {
                 attention: Some("bong".to_string()),
                 error: Some("space-alarm".to_string()),
             },
+            prompt_for_missing: true,
         };
 
         // First validation pass
@@ -1157,6 +1175,70 @@ mod tests {
         let msg = result.unwrap_err().to_string();
         assert!(
             msg.contains("models"),
+            "error should mention the unknown field: {msg}"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // prompt_for_missing
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn prompt_for_missing_defaults_to_true_when_absent() {
+        let config: ClaudineConfig = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert!(config.prompt_for_missing);
+    }
+
+    #[test]
+    fn prompt_for_missing_deserializes_false() {
+        let config: ClaudineConfig =
+            serde_json::from_value(serde_json::json!({ "prompt_for_missing": false })).unwrap();
+        assert!(!config.prompt_for_missing);
+    }
+
+    #[test]
+    fn prompt_for_missing_omitted_when_true() {
+        let config = ClaudineConfig::default();
+        let json = serde_json::to_value(&config).unwrap();
+        assert!(
+            json.get("prompt_for_missing").is_none(),
+            "prompt_for_missing should be omitted when true (the default)"
+        );
+    }
+
+    #[test]
+    fn prompt_for_missing_serialized_when_false() {
+        let config = ClaudineConfig {
+            prompt_for_missing: false,
+            ..ClaudineConfig::default()
+        };
+        let json = serde_json::to_value(&config).unwrap();
+        assert_eq!(
+            json.get("prompt_for_missing").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn prompt_for_missing_round_trips() {
+        let config = ClaudineConfig {
+            prompt_for_missing: false,
+            ..ClaudineConfig::default()
+        };
+        let json = serde_json::to_value(&config).unwrap();
+        let back: ClaudineConfig = serde_json::from_value(json).unwrap();
+        assert!(!back.prompt_for_missing);
+    }
+
+    #[test]
+    fn repo_override_rejects_prompt_for_missing_field() {
+        let result = serde_json::from_value::<RepoOverrideConfig>(serde_json::json!({
+            "prompt_for_missing": false
+        }));
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("prompt_for_missing"),
             "error should mention the unknown field: {msg}"
         );
     }

@@ -1,11 +1,11 @@
-//! Convenience re-exports for the most commonly used tui-chrome
+//! Convenience re-exports for the most commonly used biscuit-tui
 //! types.
 //!
 //! Glob-importing this module is the easiest way to start building
 //! with the library:
 //!
 //! ```
-//! use tui_chrome::prelude::*;
+//! use biscuit_tui::prelude::*;
 //! ```
 
 pub use crate::components::{

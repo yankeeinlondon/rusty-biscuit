@@ -1,14 +1,20 @@
-pub mod diff;
+pub mod api;
 pub mod discovery;
+pub mod open;
 pub mod recent_commits;
 pub mod remote_refresh;
 pub mod status;
 pub mod types;
 pub mod worktree;
 
+pub use api::{
+    commit_browser_url, commit_by_sha_at, commit_files_at, commits_for_branch_at,
+    commits_for_path_at, merge_conflicts_at, preferred_remote_url, remote_url, repo_root,
+};
+
 pub use discovery::{
     DeltaKind, detect_git, detect_git_with_request, get_commit_by_sha, get_commit_files,
-    get_commits_for_path,
+    get_commit_files_with_cache, get_commits_for_branch, get_commits_for_path,
 };
 pub use recent_commits::{
     CommitDesc, CommitDescSet, CommitFileChange, PeriodSpecifier, get_recent_commits_by_count,
@@ -22,4 +28,6 @@ pub use types::{
     RefDecoration, RefKind, RemoteInfo, RemoteTrackingStatus, RepoStatus, UntrackedFile,
     WorktreeInfo,
 };
-pub use worktree::{get_current_worktree_info, get_current_worktree_name};
+pub use worktree::{
+    WorktreeEntry, get_current_worktree_info, get_current_worktree_name, list_worktrees,
+};

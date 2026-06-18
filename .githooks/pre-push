@@ -1,0 +1,71 @@
+#!/bin/sh
+# Rusty Biscuit pre-push hook
+#
+# Behavior is controlled by the RUSTY_BISCUIT_PRE_PUSH environment variable:
+#   off    - skip tests entirely
+#   warn   - run tests, print failures in red, but allow the push (default)
+#   strict - run tests, block the push on failure
+#
+# Link this hook into your local git hooks:
+#   ln -s ../../.githooks/pre-push .git/hooks/pre-push
+
+# Mode selection — resolved first so `off` short-circuits before any work.
+MODE="${RUSTY_BISCUIT_PRE_PUSH:-warn}"
+
+case "$MODE" in
+    off)
+        exit 0
+        ;;
+    warn|strict)
+        ;;
+    *)
+        printf "\033[31mUnknown RUSTY_BISCUIT_PRE_PUSH value: %s\033[0m\n" "$MODE" >&2
+        printf "Expected: off, warn, or strict\n" >&2
+        exit 1
+        ;;
+esac
+
+# Areas to test during pre-push
+# Override: set RUSTY_BISCUIT_PRE_PUSH_AREAS to a space-separated list
+AREAS="${RUSTY_BISCUIT_PRE_PUSH_AREAS:-}"
+
+# If not explicitly overridden, try dynamic detection against the upstream branch
+if [ -z "$AREAS" ]; then
+    AREAS=$(just changed-areas 2>/dev/null) || true
+fi
+
+# Final fallback to the historical defaults
+if [ -z "$AREAS" ]; then
+    AREAS="claudine darkmatter"
+fi
+
+# Run tests via just
+echo ""
+echo "Running pre-push tests for: $AREAS"
+echo "------------------------------------------------"
+echo ""
+
+# shellcheck disable=SC2086
+just pre-push $AREAS
+EXIT_CODE=$?
+
+if [ "$EXIT_CODE" -ne 0 ]; then
+    echo ""
+    printf "\033[31mPre-push tests failed (exit %d)\033[0m\n" "$EXIT_CODE"
+    echo ""
+    if [ "$MODE" = "warn" ]; then
+        echo "Continuing push in warn mode. To bypass this hook entirely, use 'git push --no-verify'." >&2
+        echo ""
+        exit 0
+    else
+        echo "Push blocked by strict mode. To bypass this hook, use 'git push --no-verify'." >&2
+        echo ""
+        exit "$EXIT_CODE"
+    fi
+fi
+
+echo ""
+echo "Pre-push tests passed."
+echo ""
+
+exit 0

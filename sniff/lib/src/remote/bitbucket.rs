@@ -4,9 +4,8 @@
 //! generated schematic-schema client.
 
 use async_trait::async_trait;
-use schematic_define::{AuthStrategy, UpdateStrategy};
 use schematic_schema::bitbucket::*;
-use schematic_schema::shared::SchematicError;
+use schematic_schema::shared::{AuthStrategy, SchematicError, UpdateStrategy};
 
 use super::{
     provider::RemoteRepoProvider,
@@ -739,6 +738,8 @@ impl RemoteRepoProvider for BitbucketRemote {
                     workspace, repo_slug
                 )),
                 started_at: None,
+                head_branch: None,
+                event: None,
             }))
         } else {
             Ok(None)

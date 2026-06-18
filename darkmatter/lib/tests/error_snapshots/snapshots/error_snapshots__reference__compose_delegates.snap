@@ -2,6 +2,8 @@
 source: darkmatter/lib/tests/error_snapshots/reference.rs
 expression: out
 ---
-⨫ MarkdownError: transform failed
+⤫ MarkdownError: transform failed
+┃ 
 ┃ stalled
-Review the transform pipeline inputs and any configured rules.
+┃ 
+┃ Review the transform pipeline inputs and any configured rules.

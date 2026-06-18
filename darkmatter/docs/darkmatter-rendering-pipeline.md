@@ -31,6 +31,7 @@ Every target output will have different capabilities but outside of the **AST** 
 
 
 - [Table Rendering](./rendering/table-rendering.md)      
+- [Block Quotes](./rendering/block-quote.md)
 - [YouTube Embedding](./rendering/youtube-embedding.md)  
 - [Popover](./rendering/popover.md)                      
 - [List Expansion](./rendering/list-expansion.md)        
@@ -60,39 +61,44 @@ All of the operations, in the order in which they are executed
 
 ## CURRENT STATE NOTES
 
-- the CLI currently always runs the compose pipeline before rendering (this is probably largely a good idea)
-- The current library path is a single-pass, event-driven renderer, not an AST-to-HTML pipeline (this was intended and probably still makes sense)
+The render path runs on the canonical `renderable` render tree. The legacy
+single-pass, event-stream HTML/terminal serializers (`output::as_html`'s manual
+event loop, `MarkProcessor`, `RuleProcessor`) have been **deleted**.
 
-- The public entry point is Markdown::as_html() in markdown/mod.rs (line 502). 
-- It just delegates to output::as_html() in output/html.rs (line 108). 
-- It renders md.content(), so YAML frontmatter has already been split off and is not included in the HTML body; that comes from Markdown::content() (line 140).
-
-- `as_html()` (line 108) creates a CodeHighlighter and, if enabled, prepends an inline `<style>` block from generate_styles() line 569.
-
-- It parses the markdown body with `pulldown-cmark`, but only with ENABLE_STRIKETHROUGH turned on in this renderer path, at output/html.rs (line 119). 
-- It does not use the shared markdown_parse_options() helper that enables tables elsewhere in the crate at markdown/mod.rs (line 773).
-
-- That parser is wrapped in MarkProcessor (line 94), which rewrites ==highlight== text into custom start/end mark events while skipping code spans and code blocks; see inline/mod.rs (line 127).
-
-- The renderer then streams through those events and manually appends HTML strings. The handled block/inline elements are headings, paragraphs, strong/emphasis/strikethrough, lists, blockquotes, links, inline code, images, text, and line breaks; that logic is in output/html.rs (line 134).
-
-- Fenced code blocks are buffered until the closing fence. Their info string is parsed with parse_code_info, then either:
-
-    - rendered as syntax-highlighted HTML via highlight_code_block() (line 447), which uses syntect and emits inline `<span style="color: ...">` fragments, optionally with a line-number table, or
-    - treated as Mermaid if the language is mermaid and mermaid_mode is enabled, at output/html.rs (line 150).
-    - Links and images get extra Darkmatter-specific handling:
-
-- links parse structured metadata out of the markdown title via `Link::with_title_parsed(...)`, then emit attributes like class, style, target, title, and data-*; see output/html.rs (line 272).
-- images are reconstructed into an ImageRef when possible, then rendered with ImageRef::to_html(); see output/html.rs (line 329).
-A few important current-state caveats:
-
-- The result is an HTML fragment, not a full document. 
-    - The CLI just writes that fragment directly as the .html artifact in darkmatter/cli/src/output.rs (line 63).
-    - Raw HTML inside markdown is escaped, not passed through, at output/html.rs (line 380).
-    - HtmlOptions.prose_theme exists, but this renderer does not currently use it; only code highlighting is theme-driven in practice.
-    - Mermaid is special-cased, but the HTML renderer only inserts Mermaid::render_for_html().body and later appends its own generic script block. It does not use the Mermaid renderer’s head output, even though that method produces one at mermaid/mod.rs (line 265).
-
-
+- The CLI always runs the compose pipeline before rendering.
+- The public entry points are `Markdown::as_html` and `Markdown::as_terminal`
+  (`markdown/mod.rs`), plus `DarkmatterPage::render` / `render_to_browser`
+  (`layout/page.rs`). All of them render `md.content()`, so YAML frontmatter is
+  already split off and attached to the `Document`'s metadata above the fold.
+- Every path folds the `pulldown-cmark` 0.13 event stream into a complete
+  `renderable::tree::Document` via darkmatter's **context-aware** fold
+  (`render_tree::build_context`, a `TreeBuildContext`), then runs **one target
+  fold** (terminal / browser / Markdown) over it. There is no post-fold
+  decoration pass and no post-render HTML rewriting.
+- Component policy, page-inheriting color, alpha-bearing `PaintColor`,
+  hyperlink/image text layout, structured link/image browser attrs, and HR
+  defaults are all baked onto the tree nodes **during construction** by the build
+  context — see [Render-Tree Fold](./render-tree-fold.md).
+- Structured link/image metadata (class, target, `data-*`, per-node CSS) is
+  parsed once during construction into typed `NodeAttrs::browser` attrs and
+  lowered by the browser fold to `<a>` / `<img>` attributes; a validated
+  `inline_style` replaces the derived `Style` declaration for the same property.
+- Fenced code blocks fold to `NodeKind::Code` and are syntax-highlighted by the
+  shared code renderer (syntect-backed). A malformed fenced code-block directive
+  is a fatal `MarkdownError::InvalidLineRange` via the `validate_code_directives`
+  preflight the HTML entry points run over the folded tree. Mermaid fences route
+  through `biscuit-terminal` (terminal) / darkmatter's `Mermaid` (HTML).
+- Disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`) are
+  recognized by the block-extension processor and folded to `NodeKind::Disclosure`
+  so every target can render them natively. See [Disclosure Blocks](./rendering/disclosure.md).
+- Code highlighting resolves the mode-agnostic `ThemePair` (`code_theme`) to a
+  concrete light/dark theme via `color_mode`. Both the HTML and terminal paths
+  invert the code theme for page contrast (`ColorMode::inverted()`), so a dark
+  page gets a light code panel on either target. See
+  [Code Highlighting](./rendering/code-highlighting.md).
+- The HTML browser fold produces a fragment; `DarkmatterPage::render_to_browser`
+  and `HtmlPage` assembly compose the full document. Raw HTML handling follows
+  the renderable browser renderer's `RawHtmlPolicy`.
 
 ### Render Path
 
@@ -109,22 +115,15 @@ flowchart TD
     E --> G["load_markdown(input)"]
     G --> H["cleanup_with_indent(...)"]
     H --> I["detect prose theme, code theme, color mode"]
-    I --> J{"OutputFormat::Html?"}
+    I --> J["apply style: frontmatter onto DarkmatterPage"]
+    J --> K{"OutputFormat::Html?"}
 
-    J -- "Yes" --> K["html_artifact(&md, prose_theme, code_theme, color_mode)"]
-    K --> L["build HtmlOptions"]
-    L --> M["md.as_html(options)"]
-    M --> N["Markdown::as_html()"]
-    N --> O["output::as_html()"]
+    K -- "Yes" --> L["page.render_to_browser(md) / md.as_html(options)"]
+    K -- "Terminal" --> M["page.render(md) / md.as_terminal(options)"]
 
-    O --> P["create output string and optional style block"]
-    P --> Q["parse markdown with pulldown-cmark"]
-    Q --> R["wrap parser with MarkProcessor"]
-    R --> S["single-pass event loop writes HTML"]
-    S --> T["highlight fenced code or render mermaid"]
-    T --> U["append mermaid script if needed"]
-    U --> V["return final HTML string"]
-
-    V --> W["OutputArtifact { content, extension: html }"]
-    W --> X["emit_or_show_artifact()"]
+    L --> N["context-aware fold -> complete renderable Document"]
+    M --> N
+    N --> O["one target fold (browser HTML / terminal string)"]
+    O --> P["OutputArtifact { content, extension }"]
+    P --> Q["emit_or_show_artifact()"]
 ```

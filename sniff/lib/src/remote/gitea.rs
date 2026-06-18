@@ -8,9 +8,8 @@
 //! access [Codeberg](https://codeberg.org), a popular public Gitea instance.
 
 use async_trait::async_trait;
-use schematic_define::{AuthStrategy, UpdateStrategy};
 use schematic_schema::gitea::*;
-use schematic_schema::shared::SchematicError;
+use schematic_schema::shared::{AuthStrategy, SchematicError, UpdateStrategy};
 
 use super::{
     provider::RemoteRepoProvider,
@@ -645,6 +644,8 @@ impl RemoteRepoProvider for GiteaRemote {
                 conclusion: None,
                 html_url: Some(format!("{}/{}/{}/actions", web_base, owner, repo)),
                 started_at: None,
+                head_branch: None,
+                event: None,
             }));
         }
 
@@ -663,6 +664,8 @@ impl RemoteRepoProvider for GiteaRemote {
                 conclusion: None,
                 html_url: None, // Drone runs on separate infrastructure
                 started_at: None,
+                head_branch: None,
+                event: None,
             }));
         }
 
@@ -681,6 +684,8 @@ impl RemoteRepoProvider for GiteaRemote {
                 conclusion: None,
                 html_url: None, // Woodpecker runs on separate infrastructure
                 started_at: None,
+                head_branch: None,
+                event: None,
             }));
         }
 
@@ -699,6 +704,8 @@ impl RemoteRepoProvider for GiteaRemote {
                 conclusion: None,
                 html_url: None,
                 started_at: None,
+                head_branch: None,
+                event: None,
             }));
         }
 

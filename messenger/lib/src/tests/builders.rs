@@ -196,7 +196,10 @@ fn prepared_message_render_body_for_provider_none() {
 fn summarized_message_builder() {
     let msg = Message::summarized("plain hi", "**bold** hi");
     match msg.body {
-        Some(MessageBody::Summarized { ref summary, ref markdown }) => {
+        Some(MessageBody::Summarized {
+            ref summary,
+            ref markdown,
+        }) => {
             assert_eq!(summary, "plain hi");
             assert_eq!(markdown, "**bold** hi");
         }

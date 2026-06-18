@@ -1,9 +1,21 @@
 use terminal_size::{Height, Width, terminal_size};
 
-/// Check if stdout is connected to a TTY (terminal).
+/// Check whether this process is attached to a TTY on **either** stdout
+/// **or** stderr.
 ///
-/// Returns `false` when output is piped or redirected to a file.
-/// Useful for deciding whether to use colors/formatting.
+/// Most CLI rendering libraries write to one of the two standard output
+/// streams: typed/machine-readable output to stdout, human-facing status
+/// and prompts to stderr. A terminal-aware library cannot know which
+/// stream a downstream caller will ultimately use, so the right question
+/// to answer here is "does this process have *a* terminal available?",
+/// not "is stdout specifically a terminal?".
+///
+/// Checking only stdout produced false negatives whenever a CLI piped its
+/// stdout (e.g., `claudine ... | jq`, log capture, wrapper subprocesses)
+/// while still rendering rich output to stderr — capability detection
+/// fell back to "no terminal" and downstream Renderables degraded to
+/// ASCII even though the user was looking at a fully capable graphics
+/// terminal on their stderr.
 ///
 /// ## Examples
 ///
@@ -11,14 +23,14 @@ use terminal_size::{Height, Width, terminal_size};
 /// use biscuit_terminal::discovery::detection::is_tty;
 ///
 /// if is_tty() {
-///     println!("\x1b[32mColored output\x1b[0m");
+///     eprintln!("\x1b[32mColored output\x1b[0m");
 /// } else {
-///     println!("Plain output (piped or redirected)");
+///     eprintln!("Plain output (piped or redirected)");
 /// }
 /// ```
 pub fn is_tty() -> bool {
     use std::io::IsTerminal;
-    std::io::stdout().is_terminal()
+    std::io::stdout().is_terminal() || std::io::stderr().is_terminal()
 }
 
 /// Get the terminal width in columns.

@@ -10,6 +10,7 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposePerfReport;
 use serde::{Deserialize, Serialize};
 
+use super::launch_workspace::LaunchWorkspaceContext;
 use super::lifecycle::LifecycleConfig;
 use crate::harness::shell::CachedApprovalDecision;
 use crate::provider::Provider;
@@ -52,6 +53,54 @@ pub struct LoopConfig {
     pub max_iterations: Option<usize>,
     /// Optional per-document failure behavior.
     pub fail_fast: Option<bool>,
+    /// Optional per-document policy for what to do when a completed iteration
+    /// reports a provider rate-limit signal. `None` falls back to
+    /// [`OnRateLimit::Pause`].
+    pub on_rate_limit: Option<OnRateLimit>,
+}
+
+/// Policy for how the loop engine reacts to a rate-limit signal observed on
+/// a completed iteration.
+///
+/// The signal is read from [`crate::stream::summary::RateLimitInfo`] when
+/// `is_throttled == Some(true)`. The policy is resolved from
+/// `LoopExecutionOptions.on_rate_limit` (CLI) > `LoopConfig.on_rate_limit`
+/// (frontmatter) > [`OnRateLimit::Pause`] (default).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OnRateLimit {
+    /// Sleep until `reset_at` + a small safety margin, then proceed to the
+    /// next iteration. If `reset_at` is missing or already past, behave as
+    /// [`OnRateLimit::Abort`] (no unbounded sleep).
+    #[default]
+    Pause,
+    /// Halt the loop with a structured [`super::error::CompositionError::LoopRateLimited`].
+    Abort,
+    /// Proceed to the next iteration without pausing. Reserved for soft
+    /// per-request limits that won't recur; not recommended.
+    Continue,
+}
+
+impl OnRateLimit {
+    /// Parse from the frontmatter string form.
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "pause" => Ok(Self::Pause),
+            "abort" => Ok(Self::Abort),
+            "continue" => Ok(Self::Continue),
+            other => Err(format!(
+                "must be one of `pause`, `abort`, `continue`, got `{other}`"
+            )),
+        }
+    }
+
+    /// Return the canonical string form (matches the frontmatter accepted form).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pause => "pause",
+            Self::Abort => "abort",
+            Self::Continue => "continue",
+        }
+    }
 }
 
 /// A loop condition. `while` continues while truthy; `until` continues until truthy.
@@ -117,12 +166,16 @@ pub enum AmbientVariable {
 
 impl AmbientVariable {
     /// Reserved ambient variable names.
+    ///
+    /// All loop ambient variables are namespaced under the `_loop_` prefix
+    /// to avoid shadowing user-defined frontmatter properties named
+    /// `iteration`, `is_first`, `last_output`, etc.
     pub const NAMES: &[&str] = &[
-        "iteration",
-        "is_first",
-        "is_last",
-        "last_output",
-        "last_exit_code",
+        "_loop_count",
+        "_loop_is_first",
+        "_loop_is_last",
+        "_loop_last_output",
+        "_loop_last_exit_code",
     ];
 
     /// Returns true when `name` is a reserved ambient variable.
@@ -133,11 +186,11 @@ impl AmbientVariable {
     /// Return the frontmatter/template key for this ambient variable.
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Iteration => "iteration",
-            Self::IsFirst => "is_first",
-            Self::IsLast => "is_last",
-            Self::LastOutput => "last_output",
-            Self::LastExitCode => "last_exit_code",
+            Self::Iteration => "_loop_count",
+            Self::IsFirst => "_loop_is_first",
+            Self::IsLast => "_loop_is_last",
+            Self::LastOutput => "_loop_last_output",
+            Self::LastExitCode => "_loop_last_exit_code",
         }
     }
 }
@@ -182,6 +235,39 @@ impl fmt::Display for ResolutionMode {
     }
 }
 
+/// Why a composition session is interactive or non-interactive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionInteractivitySource {
+    /// The `--no-interactive` CLI flag was provided.
+    NoInteractiveFlag,
+    /// The `-i` / `--interactive` CLI flag was provided.
+    InteractiveFlag,
+    /// The source document's `interactive` frontmatter property set the mode.
+    Frontmatter,
+    /// The default non-interactive session mode was used.
+    Default,
+}
+
+impl fmt::Display for SessionInteractivitySource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoInteractiveFlag => write!(f, "--no-interactive"),
+            Self::InteractiveFlag => write!(f, "--interactive"),
+            Self::Frontmatter => write!(f, "frontmatter"),
+            Self::Default => write!(f, "default"),
+        }
+    }
+}
+
+/// Resolved interactivity for a composition session, including its source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedSessionInteractivity {
+    /// Whether the session should be interactive.
+    pub value: bool,
+    /// Why `value` was chosen.
+    pub source: SessionInteractivitySource,
+}
+
 /// Snapshot of installed providers at command start.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstalledProviderSnapshot {
@@ -191,6 +277,15 @@ pub struct InstalledProviderSnapshot {
     pub excluded: BTreeSet<Provider>,
     /// All installed providers (including excluded ones).
     pub all_installed: Vec<Provider>,
+    /// Resolved binary paths for each installed provider.
+    pub binary_paths: BTreeMap<Provider, PathBuf>,
+}
+
+impl InstalledProviderSnapshot {
+    /// Return the resolved binary path for a provider, if known.
+    pub fn binary_path(&self, provider: Provider) -> Option<&std::path::Path> {
+        self.binary_paths.get(&provider).map(|p| p.as_path())
+    }
 }
 
 /// Why a provider was chosen.
@@ -301,6 +396,59 @@ pub enum AgentHint {
     List(Vec<Provider>),
 }
 
+/// Classified outcome of resolving a frontmatter `agent` value against the
+/// known provider catalog and the installed-provider snapshot.
+///
+/// This is the data model for both the dry-run metadata table and the live
+/// execution path: every variant corresponds to a specific user-facing
+/// message and a specific TTY/no-TTY behavior.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentResolutionState {
+    /// No `agent` hint was provided by the caller or the document.
+    NoAgent,
+    /// A single valid, installed provider was selected.
+    Selected {
+        /// The provider that will run the composition.
+        provider: Provider,
+    },
+    /// A single value was given but it does not match any known provider.
+    SingleInvalid {
+        /// The invalid value exactly as it appeared in frontmatter.
+        hint: String,
+    },
+    /// A single known provider was requested but is not installed on this host.
+    SingleNotInstalled {
+        /// The requested provider.
+        provider: Provider,
+    },
+    /// A list-valued hint resolved to two or more installed providers.
+    ListMultipleInstalled {
+        /// Installed providers from the suggestion list, in declaration order.
+        installed: Vec<Provider>,
+        /// Known-but-not-installed providers from the list, in declaration order.
+        not_installed: Vec<Provider>,
+        /// Values that did not match the provider catalog, in declaration order.
+        invalid: Vec<String>,
+    },
+    /// A list-valued hint resolved to exactly one installed provider.
+    ListOneInstalled {
+        /// The single installed provider that will be auto-selected.
+        selected: Provider,
+        /// Known-but-not-installed providers from the list, in declaration order.
+        not_installed: Vec<Provider>,
+        /// Values that did not match the provider catalog, in declaration order.
+        invalid: Vec<String>,
+    },
+    /// A list-valued hint resolved to zero installed providers (all invalid,
+    /// all not-installed, or a mix with nothing runnable).
+    ZeroInstalledList {
+        /// Known-but-not-installed providers from the list, in declaration order.
+        not_installed: Vec<Provider>,
+        /// Values that did not match the provider catalog, in declaration order.
+        invalid: Vec<String>,
+    },
+}
+
 /// A typed hint for which model(s) to use, parsed from frontmatter `model`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelHint {
@@ -317,6 +465,25 @@ pub struct EffectiveSelectionHints {
     pub agent: Option<AgentHint>,
     /// Parsed `model` frontmatter property.
     pub model: Option<ModelHint>,
+    /// Parsed `interactive` frontmatter property.
+    ///
+    /// `None` means absent or explicitly `null`, preserving today's default
+    /// non-interactive behavior.
+    pub interactive: Option<bool>,
+    /// `agent` strings that did not match the known provider catalog.
+    ///
+    /// Kept separate from [`Self::agent`] so existing resolution code can
+    /// continue to operate on valid providers only while the new rendering
+    /// and live-path code surfaces invalid values as styled non-fatal state.
+    pub agent_invalid: Vec<String>,
+    /// Whether the source `agent` frontmatter value was an array.
+    ///
+    /// Preserved independently of [`Self::agent`] because a list whose only
+    /// entries are invalid produces `agent: None`, which would otherwise be
+    /// indistinguishable from a single invalid scalar. Classification needs
+    /// this to route a single-entry all-invalid list to the zero-installed
+    /// list state rather than the single-invalid state.
+    pub agent_was_list: bool,
 }
 
 /// A composition prepared with effective (composed) frontmatter.
@@ -348,6 +515,11 @@ pub struct PreparedComposition {
     pub lifecycle: LifecycleConfig,
     /// Darkmatter composition performance report, when enabled.
     pub compose_perf: Option<ComposePerfReport>,
+    /// Optional schema properties whose effective value failed validation
+    /// and were elided during prepare (pre-validation, drop-and-retry, or
+    /// post-shell re-validation). The CLI renders one user-visible warning
+    /// per entry so silently dropped values are surfaced before launch.
+    pub dropped_optionals: Vec<super::error::DroppedOptional>,
 }
 
 /// How the composition result should be applied after provider execution.
@@ -455,6 +627,8 @@ pub struct CompositionExecutionRequest {
     pub strict: bool,
     /// Whether the provider session should be interactive (`-i`).
     pub session_interactive: bool,
+    /// Why the session is interactive or non-interactive.
+    pub session_interactive_source: SessionInteractivitySource,
     /// Show only header; suppress env details and info.
     pub quiet: bool,
     /// Suppress all preflight output.
@@ -472,6 +646,44 @@ pub struct CompositionExecutionRequest {
     /// Whether this request is part of a sequence run. When `true`, the
     /// execution header shows a `Sequence` badge.
     pub sequence: bool,
+    /// Pre-computed installed-provider snapshot, supplied by callers that
+    /// already ran host detection during prep (e.g. `CompositionPrepContext`).
+    /// When `Some`, the executor skips the `InstalledAiClients::new()` scan
+    /// and uses this snapshot for both provider selection and binary path
+    /// resolution.
+    pub installed_snapshot: Option<InstalledProviderSnapshot>,
+    /// Pre-computed launch-CWD `LaunchWorkspaceContext`, supplied by callers
+    /// that already ran a shared `sniff::detect_with_plan` scan during prep
+    /// (e.g. `CompositionPrepContext`). When `Some`, the executor reuses it
+    /// instead of calling `resolve_launch_workspace_context` again for both
+    /// the header env plan and the child env build.
+    pub prep_launch_workspace: Option<LaunchWorkspaceContext>,
+    /// Pre-computed launch-CWD `LaunchContext`, supplied by callers that
+    /// already ran a shared `sniff::detect_with_plan` scan during prep
+    /// (e.g. `CompositionPrepContext`). When `Some`, the executor reuses
+    /// it instead of calling `LaunchContext::from_cwd` again.
+    pub prep_launch_context: Option<crate::system_prompt::LaunchContext>,
+    /// Pre-computed launch-CWD `EnvironmentContext` derived from the
+    /// same shared sniff scan. When `Some` and the effective env-detect
+    /// root matches the launch CWD, the executor reuses it instead of
+    /// calling `detect_environment_fast` again.
+    pub prep_env_context: Option<crate::events::EnvironmentContext>,
+    /// Captured error message from the shared prep-time sniff scan, if
+    /// it failed. The shared scan defaults to an empty
+    /// [`crate::system_prompt::LaunchContext`] on failure to keep
+    /// best-effort callers happy, so the executor reads this field to
+    /// preserve the legacy hard-fail contract for `--repo`. `None` (or
+    /// no prep context at all) means no failure happened during prep.
+    pub prep_launch_detection_error: Option<String>,
+    /// Whether the caller already emitted the execution header up front.
+    ///
+    /// `compose` / `inline-compose` resolve the agent eagerly (prompting
+    /// when ambiguous) and render the execution line *before* the
+    /// expensive prepare/compose work, so the user sees it immediately.
+    /// When `true`, the executor must not re-emit the header. When
+    /// `false` (the dry-run-unresolved corner and sequence steps) the
+    /// executor emits it after resolving the target itself.
+    pub header_emitted: bool,
 }
 
 /// Describes where the sequence definition was found.

@@ -1,0 +1,7 @@
+---
+source: darkmatter/lib/tests/layout_snapshots.rs
+expression: pinned
+---
+[1m# Hello World[0m
+
+Some prose here.

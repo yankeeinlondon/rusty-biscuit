@@ -35,7 +35,7 @@ The design keeps the existing wrapper profiles as the launch mechanism. It adds 
 
 1. No change to the direct wrapper subcommands such as `claudine codex ...`; this design is for composition flows only.
 2. No sequence parallelism.
-3. No bespoke full-screen Ratatui editor in v1; instead this feature reuses the **`InputTable`** component from `tui-chrome` (workspace crate, lives at `biscuit-tui/lib/`) for the sequence review screen, and **`ChooseOne`** for the one-shot picker. No custom widget code is introduced.
+3. No bespoke full-screen Ratatui editor in v1; instead this feature reuses the **`InputTable`** component from `biscuit-tui` (workspace crate, lives at `biscuit-tui/lib/`) for the sequence review screen, and **`ChooseOne`** for the one-shot picker. No custom widget code is introduced.
 4. No attempt to add new Roo wrapper support as part of this feature.
 
 ## Current Baseline
@@ -132,10 +132,10 @@ The resolution rules belong in library code. The actual picker and review UI bel
 Decision:
 
 - library code computes plans, rankings, and resolved targets
-- CLI code renders the picker and review UI from those plans using `tui-chrome` components (`ChooseOne` for the one-shot picker, `InputTable` for the sequence review), driven via `tui_chrome::run_standalone`
+- CLI code renders the picker and review UI from those plans using `biscuit-tui` components (`ChooseOne` for the one-shot picker, `InputTable` for the sequence review), driven via `tui_chrome::run_standalone`
 - sequence review state is CLI-owned, but backed by typed library structs
 
-This keeps TTY code out of `claudine/lib` and makes the resolver unit-testable without a terminal. It also avoids inventing custom widget code: rendering and event handling are inherited from `tui-chrome`.
+This keeps TTY code out of `claudine/lib` and makes the resolver unit-testable without a terminal. It also avoids inventing custom widget code: rendering and event handling are inherited from `biscuit-tui`.
 
 ## Proposed Architecture
 
@@ -569,7 +569,7 @@ The sequence resolver must therefore operate on prepared per-step frontmatter, n
 
 ### Interactive review
 
-The review screen is a `tui-chrome` `InputTable` constructed from the per-step `SequenceStepDraft` values. This delivers the spec's end-state UX (an in-place navigable/editable table) directly, with no `inquire`-based MVP step.
+The review screen is a `biscuit-tui` `InputTable` constructed from the per-step `SequenceStepDraft` values. This delivers the spec's end-state UX (an in-place navigable/editable table) directly, with no `inquire`-based MVP step.
 
 Column layout per row:
 

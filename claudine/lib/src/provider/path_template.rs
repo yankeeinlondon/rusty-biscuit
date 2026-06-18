@@ -158,25 +158,11 @@ impl PathTemplate {
         }
     }
 
-    /// Resolves this template against a home directory only.
-    ///
-    /// Convenience wrapper around [`PathTemplate::resolve`] for the common
-    /// case where the only required dynamic segment is
-    /// [`PathSegment::HomeDir`]. Returns the resolved path, or, when the
-    /// template requires unsupplied context segments, falls back to a
-    /// best-effort [`PathBuf`] derived from the raw template form so callers
-    /// can still surface a stable diagnostic value.
-    ///
-    /// ## Examples
-    ///
-    /// ```ignore
-    /// use std::path::Path;
-    /// use claudine::provider::PathTemplate;
-    ///
-    /// let template = PathTemplate::Static("~/.claude/settings.json");
-    /// let resolved = template.resolve_with_home(Path::new("/Users/me"));
-    /// assert_eq!(resolved, Path::new("/Users/me/.claude/settings.json"));
-    /// ```
+    /// Convenience wrapper around [`PathTemplate::resolve`] for templates
+    /// whose only required dynamic segment is [`PathSegment::HomeDir`]. When
+    /// the template requires segments not present in the resulting
+    /// [`PathContext`], falls back to a best-effort path built from the raw
+    /// template so callers always receive a stable diagnostic value.
     pub fn resolve_with_home(&self, home: &Path) -> PathBuf {
         let ctx = PathContext {
             home: Some(home),

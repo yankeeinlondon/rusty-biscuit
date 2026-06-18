@@ -420,7 +420,7 @@ pub fn run_postman_export(
     dry_run: bool,
     verbose: u8,
 ) -> Result<(), GeneratorError> {
-    use crate::postman_output::write_postman;
+    use crate::export::postman::write_postman;
 
     if verbose > 0 {
         println!("{}", "Exporting Postman collection...".dimmed());
@@ -467,7 +467,7 @@ pub fn run_openapi_export_grouped(
     dry_run: bool,
     verbose: u8,
 ) -> Result<(), GeneratorError> {
-    use crate::openapi_output::write_openapi_grouped;
+    use crate::export::openapi::write_openapi_grouped;
 
     if verbose > 0 {
         println!(
@@ -649,7 +649,7 @@ pub fn run_generate_all(opts: &GenerateOpts<'_>) -> Result<(), GeneratorError> {
 
                 run_postman_export(&module_apis[0], postman_dir, opts.dry_run, opts.verbose)?;
             } else {
-                use crate::postman_output::write_postman_grouped;
+                use crate::export::postman::write_postman_grouped;
 
                 postman_files.insert(format!("{}.postman_collection.json", module_name));
 

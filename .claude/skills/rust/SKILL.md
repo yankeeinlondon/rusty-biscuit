@@ -1,8 +1,8 @@
 ---
 name: rust
-description: Expert knowledge for Rust systems programming covering ownership, borrowing, type safety, error handling, async patterns, performance optimization, and the 2024 edition improvements for building safe, concurrent, and high-performance applications
-last_updated: 2025-12-20T00:00:00Z
-hash: 987826de0dddb854
+description: Expert knowledge for Rust systems programming — ownership, borrowing, type safety, error handling, async patterns, performance optimization, and 2024-edition improvements. Use when writing or reviewing idiomatic Rust, resolving borrow-checker or lifetime issues, structuring error handling, or optimizing performance.
+last_updated: 2026-06-02T00:00:00Z
+hash: 352b2caf7cdd68a6-fa9b36d77c452cdc
 ---
 
 # Rust
@@ -18,7 +18,7 @@ Expert guidance for Rust systems programming. Rust shifts runtime worries (memor
 - **Minimize unsafe** - Only use when absolutely necessary (FFI, extreme performance), isolate in small modules
 - **Iterators over loops** - Rust iterators allow compiler optimizations that manual loops don't
 - **Static dispatch by default** - Use `<T: Trait>` for speed, `&dyn Trait` only when binary size matters
-- **Use the tooling** - Clippy catches 700+ mistakes, rustfmt ensures consistency, cargo audit finds vulnerabilities
+- **Use the tooling** - Clippy catches 700+ mistakes and cargo audit finds vulnerabilities; run formatting as a separate periodic pass, not during implementation (see [In this monorepo](#in-this-monorepo))
 
 ## Quick Reference
 
@@ -61,8 +61,8 @@ enum MyError {
     Invalid(String),
 }
 
-// Application: anyhow for unified error handling
-use anyhow::Result;
+// Application/CLI: color-eyre for rich, unified error reports
+use color_eyre::eyre::Result;
 
 fn process() -> Result<()> {
     let data = read_file()?;
@@ -70,6 +70,23 @@ fn process() -> Result<()> {
     Ok(())
 }
 ```
+
+### Borrow-or-Own with Cow
+
+```rust
+// Allocate only when the input actually changes
+use std::borrow::Cow;
+
+fn normalize(input: &str) -> Cow<'_, str> {
+    if input.contains(' ') {
+        Cow::Owned(input.replace(' ', "_")) // allocates
+    } else {
+        Cow::Borrowed(input)                // zero-copy
+    }
+}
+```
+
+See [Best Practices → Borrowing for Performance](./best-practices.md#borrowing-for-performance) for when this pays off — and when it doesn't.
 
 ## Topics
 
@@ -85,26 +102,7 @@ fn process() -> Result<()> {
 
 ### State Machine with Zero-Sized Types
 
-```rust
-struct Locked;
-struct Unlocked;
-
-struct Door<State> {
-    _state: PhantomData<State>,
-}
-
-impl Door<Locked> {
-    fn unlock(self) -> Door<Unlocked> {
-        Door { _state: PhantomData }
-    }
-}
-
-impl Door<Unlocked> {
-    fn lock(self) -> Door<Locked> {
-        Door { _state: PhantomData }
-    }
-}
-```
+Encode states as ZSTs so invalid transitions fail to compile, with zero runtime cost. See [Best Practices → Zero-Sized Types](./best-practices.md#zero-sized-types-zsts) for a worked `Safe<Locked>` / `Safe<Unlocked>` example.
 
 ### Async Closures (2024 Edition)
 
@@ -126,6 +124,44 @@ let async_op = async || {
 | **Rustfmt** | Code formatter | `cargo fmt` |
 | **Cargo Audit** | Security vulnerability scanner | `cargo audit` |
 | **Flamegraph** | Performance profiling | `cargo flamegraph` |
+
+> **In this monorepo:** drive builds and tests through `just` and `cargo … -p <pkg>`; `cargo fmt` runs only as a periodic standalone pass. See [In this monorepo](#in-this-monorepo).
+
+## In this monorepo
+
+The generic advice above is overridden here by rusty-biscuit conventions.
+
+### Build, test, format
+
+- Prefer `just` recipes: `just test | lint | build | doctest`. The root `justfile` covers a curated area list (not every workspace member).
+- Never run a bare `cargo build` / `cargo test` at the repo root — scope to a package: `cargo build -p <pkg>`. There are 48 workspace members and the target dir is large.
+- Tests run under **nextest** with an L1/L2/L3 level taxonomy — see the `rust-testing` skill for `require_level!` and the canonical recipes.
+- **`cargo fmt` is a periodic standalone pass — never run it during implementation or testing.** It produces large, noisy diffs that bury behavior changes.
+
+### Error handling
+
+- Libraries: `thiserror` (as above).
+- Binaries / CLIs: **`color-eyre`**, not `anyhow` — it is the repo standard for rich, colorized error reports.
+
+### Rustdoc & comments
+
+- No `# H1` inside `///` — rustdoc already titles the item.
+- `## H2` sections, in order: `Examples` → `Returns` → `Errors` → `Panics` → `Safety` → `Notes`.
+- Comments should carry what the code cannot (contracts, invariants, the surprising *why*). Remove on sight: HOW-narration, tautological examples, format/glyph narration, and stale comments. Full rules: [`docs/comment-quality.md`](../../../docs/comment-quality.md) and the rustdoc section of the repo `CLAUDE.md`.
+
+### Hashing
+
+Use **biscuit-hash** (xxHash) for general content. For Markdown documents use the **Darkmatter** hasher (`md hash <file>`), which segments frontmatter from body.
+
+### Related skills
+
+When working in a specific domain, reach for the specialized skill:
+
+- **Testing**: `rust-testing`, `nextest`
+- **Errors**: `thiserror`, `color-eyre`
+- **CLIs**: `clap`
+- **Serialization**: `serde`
+- **Async**: `tokio`
 
 ## Resources
 

@@ -1,263 +1,248 @@
 ---
 name: rust-testing
-description: Expert guidance for testing Rust code including unit tests, integration tests, property-based testing with proptest, mocking with mockall, benchmarking with criterion, and test runners like cargo-nextest
-hash: a7d02c40efcd27f4
+description: |-
+  Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
+  `require_level!` gating, nextest filtersets, and fuzzing. Load this
+  before writing or reviewing tests in the rusty-biscuit workspace.
+hash: 1acc7c1c76b11142-9d61f99b8c9672e3
+last_updated: 2026-06-06
 ---
+# Rust Testing — Rusty Biscuit Monorepo
 
-# Rust Testing
+## Decision Tree: "What tier should my test live in?"
 
-Comprehensive testing patterns for Rust using the built-in framework, cargo-nextest, proptest, mockall, criterion, and related tools.
+Start at the **requirement**, not the code:
 
-## Core Principles
-
-- Place unit tests in `#[cfg(test)] mod tests` within the same file as the code
-- Place integration tests in `tests/` directory at project root (each file is a separate crate)
-- Use `use super::*;` to access private functions in unit tests
-- Prefer trait-based design for mockability
-- Use descriptive test names: `fn it_returns_error_for_invalid_input()`
-- Structure tests with AAA pattern: Arrange, Act, Assert
-- Run `cargo nextest run` instead of `cargo test` for better performance and output
-- Verify the active Rust toolchain before trusting test results in multi-toolchain environments
-
-## Quick Reference
-
-### Project Structure
-
-```
-my_project/
-├── src/
-│   └── lib.rs          # Unit tests with #[cfg(test)]
-├── tests/
-│   ├── common/
-│   │   └── mod.rs      # Shared test utilities
-│   └── integration.rs  # Integration tests (public API only)
-├── benches/
-│   └── bench.rs        # Criterion benchmarks
-└── Cargo.toml
+```text
+Does the test need a real terminal, browser, or device to verify behaviour?
+├── NO  → Is it slow (>5 s) or does it hammer an external API?
+│   ├── NO  → L1 (default). Name it normally.
+│   └── YES → L1 with `slow_` prefix so sanity skips it.
+├── YES → Is it a headless browser test?
+│   ├── YES → Browser tier. Name it `browser_*`.
+│   └── NO  → Does it need OS keyboard/mouse injection?
+│       ├── YES → L3. Name it `level3_*`. Requires RUN_LEVEL3=1.
+│       └── NO  → L2. Name it `level2_*`. Requires a harness (tmux/WezTerm/Chrome).
 ```
 
-### Large CLI/TUI Layout
+If the only meaningful coverage of a public API requires a real resource,
+document the exception in `docs/testing-strategy.md`; do not force it into
+`sanity`.
 
-```
-my_cli/
-├── src/
-│   ├── main.rs
-│   ├── output.rs
-│   └── tui/
-│       ├── app.rs
-│       ├── reducers.rs
-│       └── widgets/
-├── tests/
-│   ├── common/
-│   │   └── mod.rs      # Shared tempdir / file / git / ANSI helpers
-│   ├── command_routing.rs
-│   └── workflow_tests.rs
-└── benches/
-    └── hot_paths.rs
+## Test Levels
+
+| Level   | Prefix     | Resource            | Skip when absent     | Hard-fail env                   |
+|---------|------------|---------------------|----------------------|---------------------------------|
+| L1      | (none)     | In-process only     | Never                | —                               |
+| L2      | `level2_`  | Real terminal / PTY | Harness missing      | `BISCUIT_TEST_LEVEL_REQUIRED=2` |
+| L3      | `level3_`  | OS keyboard/mouse   | `RUN_LEVEL3` unset   | `BISCUIT_TEST_LEVEL_REQUIRED=3` |
+| Browser | `browser_` | Chrome/Chromium     | Browser missing      | `BISCUIT_BROWSER_REQUIRED=1`    |
+| Real    | `real_`    | External device/API | Resource missing     | Per-package env vars            |
+| Slow    | `slow_`    | None (slow L1)      | Excluded from sanity | —                               |
+
+## Gating Tests
+
+Use `test_toolkit::require_level!` at the top of a test body:
+
+```rust
+use test_toolkit::{require_level, Level};
+
+#[test]
+#[serial_test::serial]
+fn level2_renders_in_real_terminal() {
+    require_level!(Level::L2, WezTermHarness::available(), "WezTerm");
+    // ... test body
+}
 ```
 
-### Essential Commands
+For browser tests:
+
+```rust
+#[tokio::test]
+#[serial_test::serial(browser)]
+async fn browser_computed_style_matches() {
+    if !biscuit_browser_harness::require_browser() { return; }
+    // ... test body
+}
+```
+
+## Canonical Just Recipes
+
+Every curated package area defines these 12 recipes:
+
+| Recipe         | Meaning                                                                                                                                                                                                                                                                                                                                      |
+|----------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `sanity`       | Fast confidence (≤15 s). `cargo nextest run --lib --bins -E '!set:slow'`.                                                                                                                                                                                                                                                                    |
+| `test`         | Full L1 suite.                                                                                                                                                                                                                                                                                                                               |
+| `test-l2`      | Real-terminal tests. Pre-spawns one shared pane per backend via `biscuit-harness-broker`, exports `BISCUIT_SHARED_*_ID` env vars, runs nextest with `-j 1`, tears panes down in a trap. Tests use `<Backend>Harness::shared_or_spawn()` to attach to the pre-spawned pane and fall back to per-process spawning when the env var is missing. |
+| `test-l3`      | OS keyboard/mouse tests.                                                                                                                                                                                                                                                                                                                     |
+| `test-browser` | Headless browser tests. Runs `-j 1` (one Chrome at a time); the tier gets a 5s `leak-timeout` override for Chrome teardown.                                                                                                                                                                                                                                                                                                                      |
+| `test-real`    | External resource tests.                                                                                                                                                                                                                                                                                                                     |
+| `lint`         | Clippy + fmt check.                                                                                                                                                                                                                                                                                                                          |
+| `bench`        | Criterion benchmarks (no-op if opted out).                                                                                                                                                                                                                                                                                                   |
+| `coverage`     | Per-package LCOV.                                                                                                                                                                                                                                                                                                                            |
+| `doctest`      | `cargo test --doc`.                                                                                                                                                                                                                                                                                                                          |
+| `fuzz`         | `cargo +nightly fuzz run` (no-op if no targets).                                                                                                                                                                                                                                                                                             |
+| `all`          | `sanity → lint → doctest → test → test-l2 → test-browser`.                                                                                                                                                                                                                                                                                   |
+
+Delegate to shared recipes in `just/devops.just` (e.g. `@just _test my-crate`).
+
+At the repository root, `just test` delegates to `_test_workspace`. It uses
+Cargo metadata as the package source of truth, runs every workspace package,
+continues after ordinary failures, and reports failed packages at the end.
+Ctrl+C aborts the remaining packages and preserves exit code `130`. Optional
+selectors may be exact package names or package-area paths.
+
+Run `just check-test-interrupts` to verify that every package-area `test`
+recipe also preserves Ctrl+C as exit `130`.
+
+## Running L2 Tests (read before you run)
+
+`level2_*` tests spawn **real terminal windows / panes**. Run them **only** via
+`just test-l2`, never `cargo test` / `cargo nextest run -E 'test(/level2_/)'`
+directly. The recipe pre-spawns **one shared pane per backend** and runs nextest
+**`-j 1`**; bypassing it spawns windows in parallel, races on global GUI state,
+leaks windows on timeout/panic, and produces ambiguous `osascript`/PTY failures
+that look like — but are not — code regressions.
+
+- A wall of single-backend failures (e.g. every `*_in_wezterm`) usually means
+  that emulator is **absent/unscriptable here**, not that the renderer broke —
+  confirm the same test on an available backend (`_in_kitty`, `_apple_terminal`).
+- The Apple Terminal backend is GUI-automated and especially fragile (focus,
+  `do script` window reuse, orphan leaks). Before touching it or debugging an
+  `level2_apple_terminal_*` failure, read **`apple-terminal-harness-pitfalls.md`**.
+- Spawning must **never steal foreground focus** and must **never close a window
+  it did not create** — these are hard harness invariants.
+
+## Nextest Filtersets
+
+The `.config/nextest.toml` does not yet define named filterset aliases (nextest
+feature limitation). The shared `_sanity`, `_test_l2`, etc. recipes pass the
+filter expression directly:
+
+- `sanity`: `-E '!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/) + test(/slow_/))'`
+- `test-l2`: `-E 'test(/level2_/)'`
+- `test-l3`: `-E 'test(/level3_/)'`
+- `test-browser`: `-E 'test(/browser_/)'`
+- `test-real`: `-E 'test(/real_/)'`
+
+## Leaked Process Detection
+
+Two complementary layers catch tests that spawn child processes and fail to
+reap them:
+
+1. **nextest `LEAK` (per test, all platforms).** `.config/nextest.toml` sets
+   `leak-timeout = { period = "100ms", result = "fail" }` on both profiles, so a
+   test that exits while a child still holds its stdout/stderr **fails the run**.
+   Clean tests are not slowed — only a leak waits the window out. Drop
+   `result = "fail"` to downgrade leaks to a non-fatal warning.
+   - **Browser-tier override.** `test(/browser_/)` raises `leak-timeout` to
+     `5s`. Headless Chrome's helper/crashpad processes inherit the test's
+     stdout and need longer than 100ms to reap; without the grace they trip
+     spurious `LEAK-FAIL`s even though the test exits cleanly. `result = "fail"`
+     is kept so a genuinely runaway browser still fails. The tier also runs
+     `-j 1` (see below) so only one Chrome tears down at a time —
+     `#[serial(browser)]` cannot serialize them under nextest's
+     process-per-test model.
+2. **`just test-leaks` (post-run sweep, all platforms).** Wraps `just test` in
+   `leak-sweep` (`tools/test-toolkit`, `--features leak-sweep`). It diffs the
+   process list before/after the whole run and reports survivors whose
+   executable or command line is under the repo (exit code `99`). Catches
+   detached orphans that closed the test's pipes — which `LEAK` cannot see.
+   Attribution is by workspace path, not parent PID (orphan reparenting is
+   OS-specific).
+
+## Environment Contract
+
+| Variable                          | Purpose                                      |
+|-----------------------------------|----------------------------------------------|
+| `BISCUIT_TEST_LEVEL=1\|2\|3`        | Max level to run; higher tiers skip cleanly. |
+| `BISCUIT_TEST_LEVEL_REQUIRED=2\|3` | Missing harness panics instead of skipping.  |
+| `BISCUIT_BROWSER_REQUIRED=1`      | Missing Chrome panics instead of skipping.   |
+| `RUN_LEVEL3=1`                    | Opt-in for OS-keyboard-injection tests.      |
+
+## Fixtures and Env Guards
+
+Use `test_toolkit::EnvGuard` for process-env setup/teardown and
+`#[serial_test::serial]` when mutating global state:
+
+```rust
+use test_toolkit::{trace_phase, EnvGuard};
+use rstest::{fixture, rstest};
+
+#[fixture]
+fn dry_run() -> EnvGuard {
+    EnvGuard::set_safe("PLAYA_DRY_RUN", "1")
+}
+
+#[rstest]
+#[tokio::test]
+#[serial_test::serial]
+async fn dispatch_with_dry_run(#[from(dry_run)] _g: EnvGuard) {
+    // ...
+}
+```
+
+## Browser Tests
+
+Assert on **computed styles**, not source substrings or screenshots:
+
+```rust
+let mut h = ChromeHarness::new();
+h.spawn().await?;
+h.render_html(&wrap_fragment("<div class='x'>hi</div>", "#fff")).await?;
+let bg = h.computed_style(".x", "background-color").await?;
+assert_eq!(bg, "rgb(17, 27, 39)");
+```
+
+## Fuzzing
+
+Fuzz targets live in `<crate>/fuzz/` and require nightly Rust. Run locally:
 
 ```bash
-cargo test                      # Run all tests
-cargo test test_name            # Filter by name
-cargo test -- --nocapture       # Show println! output
-cargo nextest run               # Faster test runner
-cargo nextest run -E 'test(auth)'  # Filter with expressions
-cargo bench                     # Run criterion benchmarks
-cargo +nightly test             # Pin a newer toolchain when default cargo is too old
-cargo +stable nextest run       # Pin stable explicitly when shell cargo is inconsistent
-cargo nextest run -p my_crate   # Package-scoped monorepo verification
+cd biscuit-file/lib/fuzz
+cargo +nightly fuzz run pdf_extract -- -runs=1000
 ```
 
-## Toolchain Troubleshooting
-
-In multi-toolchain environments, the unqualified `cargo` on `PATH` may not be the toolchain you think it is. Before reporting test results or acting on build failures, verify the active toolchain:
-
-```bash
-cargo --version
-rustc --version
-rustup toolchain list
-which cargo
-```
-
-If the workspace uses Rust 2024 edition or dependencies with a newer MSRV than the default toolchain, pin the command explicitly:
-
-```bash
-cargo +stable test
-cargo +1.86.0 test
-cargo +nightly test
-cargo +nightly nextest run
-```
-
-Use this when you see failures like:
-
-- Cargo cannot parse `edition = "2024"`
-- dependencies require a newer `rustc`
-- repeated runs resolve to different Cargo/Rust versions
-
-When you need to pin a toolchain to get reliable results, include the exact command and toolchain version in your report.
-
-## Topics
-
-### Test Types
-
-- [Unit Tests](./unit-tests.md) - Testing isolated functions and private code
-- [Integration Tests](./integration-tests.md) - Testing public API as external consumer
-- [Documentation Tests](./doc-tests.md) - Executable examples in doc comments
-
-### Advanced Testing
-
-- [Property-Based Testing](./property-testing.md) - Proptest for invariant verification
-- [Mocking](./mocking.md) - Mockall for isolating dependencies
-- [Benchmarking](./benchmarking.md) - Criterion for performance measurement
-- [CLI Output Testing](./cli-output-testing.md) - stdout/stderr, ANSI, and shell completion checks
-- [TUI Testing](./tui-testing.md) - Ratatui `TestBackend` rendering and event-path tests
-
-### Tools
-
-- [cargo-nextest](./nextest.md) - Enhanced test runner
-- [Fuzz Testing](./fuzzing.md) - cargo-fuzz for security testing
-- [Snapshot Testing](./snapshots.md) - Insta for complex output verification
-- [Snapshot Redaction](./snapshot-redaction.md) - Stable snapshots for temp paths, IDs, ANSI, and timestamps
-
-## Common Patterns
-
-### Basic Unit Test
-
-```rust
-pub fn add(a: i32, b: i32) -> i32 {
-    a + b
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn add_returns_sum() {
-        assert_eq!(add(2, 3), 5);
-    }
-
-    #[test]
-    fn add_handles_negative() {
-        assert_eq!(add(-1, 1), 0);
-    }
-}
-```
-
-### Test with Result Return
-
-```rust
-#[test]
-fn parse_config() -> Result<(), Box<dyn std::error::Error>> {
-    let config = Config::from_str("key=value")?;
-    assert_eq!(config.get("key"), Some("value"));
-    Ok(())
-}
-```
-
-### Shared CLI Integration Helpers
-
-```rust
-// tests/common/mod.rs
-pub struct TestWorkspace {
-    root: std::path::PathBuf,
-}
-
-pub fn write(path: &std::path::Path, content: &str) {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).unwrap();
-    }
-    std::fs::write(path, content).unwrap();
-}
-
-pub fn strip_ansi(input: &str) -> String {
-    biscuit_terminal::prelude::strip_escape_codes(input)
-}
-```
-
-```rust
-// tests/command_routing.rs
-mod common;
-
-use assert_cmd::cargo::cargo_bin_cmd;
-
-#[test]
-fn command_writes_machine_output_to_stdout() {
-    let output = cargo_bin_cmd!("my-cli")
-        .args(["completions", "bash"])
-        .assert()
-        .success()
-        .get_output()
-        .clone();
-
-    assert!(!output.stdout.is_empty());
-    assert!(output.stderr.is_empty());
-}
-```
-
-### Ratatui Render Test
-
-```rust
-use insta::assert_debug_snapshot;
-use ratatui::{Terminal, backend::TestBackend};
-
-#[test]
-fn widget_render_matches_snapshot() {
-    let backend = TestBackend::new(80, 20);
-    let mut terminal = Terminal::new(backend).unwrap();
-
-    terminal.draw(|frame| render(frame, frame.area(), &app)).unwrap();
-
-    let buffer = terminal.backend().buffer().clone();
-    assert_debug_snapshot!(buffer);
-}
-```
-
-### ANSI / Plain Output Assertions
-
-```rust
-let output = cargo_bin_cmd!("my-cli")
-    .env("NO_COLOR", "1")
-    .args(["providers"])
-    .assert()
-    .success()
-    .get_output()
-    .clone();
-
-let stdout = String::from_utf8(output.stdout).unwrap();
-assert_eq!(stdout, strip_ansi(&stdout));
-```
-
-Use `FORCE_COLOR=1` when you need styled output in non-TTY integration tests, and `--plain` when the CLI exposes an explicit no-ANSI mode that should override env-based color forcing.
-
-### Expected Panic
-
-```rust
-#[test]
-#[should_panic(expected = "index out of bounds")]
-fn panics_on_invalid_index() {
-    let v = vec![1, 2, 3];
-    let _ = v[10];
-}
-```
+Fuzz is **not** part of `sanity`, `test`, or PR gates. It runs nightly in CI.
 
 ## Key Crates
 
-| Crate | Purpose | Cargo.toml |
-|-------|---------|------------|
-| proptest | Property-based testing | `proptest = "1"` |
-| mockall | Mock generation | `mockall = "0.13"` |
-| criterion | Benchmarking | `criterion = "0.5"` |
-| rstest | Fixtures and parameterized tests | `rstest = "0.18"` |
-| pretty_assertions | Better diff output | `pretty_assertions = "1"` |
-| insta | Snapshot testing | `insta = "1"` |
-| testcontainers | Docker-based integration tests | `testcontainers = "0.15"` |
+| Crate                     | Purpose                                                                                                                                                         |
+|---------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `test_toolkit`            | `require_level!`, `EnvGuard`, `trace_phase!`                                                                                                                    |
+| `biscuit_test_harness`    | Terminal harnesses (WezTerm, Kitty, tmux, Apple Terminal); `SharedHarness` + per-backend `shared_or_spawn()`; `biscuit-harness-broker` binary used by `test-l2`. For backend selection and API, load the `biscuit-test-harness` skill via the Skill tool. |
+| `biscuit_browser_harness` | Headless Chrome harness (`ChromeHarness`, `require_browser`)                                                                                                    |
+| `criterion`               | Benchmarking                                                                                                                                                    |
+| `rstest`                  | Fixtures and parameterization                                                                                                                                   |
+| `serial_test`             | Serialize env/stateful tests                                                                                                                                    |
+| `pretty_assertions`       | Better diffs                                                                                                                                                    |
+| `insta`                   | Snapshot testing                                                                                                                                                |
+
+## Topic Pages
+
+Open the topic file when the task matches:
+
+| Topic                                                                | File                                    |
+|----------------------------------------------------------------------|-----------------------------------------|
+| L2 WezTerm capture gotchas (SGR collapsing, semicolon vs colon form). For backend selection / harness API, load the `biscuit-test-harness` skill via the Skill tool. | `wezterm-harness-pitfalls.md`           |
+| L2 Apple Terminal pitfalls (`do script` reuse, focus-steal, **resolved:** orphan leaks, plain-text capture) | `apple-terminal-harness-pitfalls.md`    |
+| CLI output (channels, color modes, completions, snapshots)           | `cli-output-testing.md`                 |
+| TUI rendering and event/reducer tests                                | `tui-testing.md`                        |
+| Browser tests (computed-style assertions)                            | `browser-testing.md`                    |
+| Integration tests                                                    | `integration-tests.md`                  |
+| Unit tests                                                           | `unit-tests.md`                         |
+| Snapshots and redaction                                              | `snapshots.md`, `snapshot-redaction.md` |
+| Doc tests                                                            | `doc-tests.md`                          |
+| Mocking                                                              | `mocking.md`                            |
+| Property testing                                                     | `property-testing.md`                   |
+| Fuzzing                                                              | `fuzzing.md`                            |
+| Performance testing tool choice (Criterion vs Divan)                 | `performance-testing.md`                |
+| Criterion benchmarking (getting started → deep dive → Bencher)       | `criterion.md`                          |
+| Nextest details                                                      | `nextest.md`                            |
 
 ## Resources
 
-- [Rust Book - Testing](https://doc.rust-lang.org/book/ch11-00-testing.html)
-- [cargo-nextest](https://nexte.st/)
-- [Proptest Book](https://proptest-rs.github.io/proptest/proptest/index.html)
-- [Criterion User Guide](https://bheisler.github.io/criterion.rs/book/)
+- `docs/testing-strategy.md` — human-facing deep dive
+- `just/devops.just` — shared `_*` lifecycle recipes
+- `.config/nextest.toml` — slow-timeout and retry config

@@ -17,26 +17,15 @@ use crate::completion::fuzzy::{self, DirMatchMode, PartialLen};
 use crate::completion::scopes::{self, ComposeMode, Scope, ScopeContext, ScopeSet};
 use crate::completion::walker;
 
-/// Magic (`@...`): resolve against the magic scope priority order (see
-/// [`ScopeSet::iter_magic_scopes`]). The first scope whose walked tree
-/// yields a matching file wins the **file tier**; subsequent file tiers
-/// are shadowed. Directories surface independently from the repo-wide
-/// directory walk (see [`gather_repo_dirs`]) — they mirror Word-mode
-/// directory behaviour and are not affected by the file-tier shadowing
-/// rule. Spec §5.5 file table:
+/// Entry point for magic (`@...`) resolution. See the module docs for
+/// the shadow rule, and spec §5.5 for the full source-tier → insert-form
+/// table.
 ///
-/// | Source tier | Inserted token |
-/// |---|---|
-/// | Repo / pkg-area / pkg / repo.claudine / extras | `prompts/plan.md` (or `docs/plan.md`, `.claudine/prompts/plan.md`) |
-/// | User global | `~/.claudine/prompts/plan.md` |
-///
-/// The `dir` argument carries the path portion of a path-shaped magic
-/// partial (e.g. `@prompts/plan` → `dir = "prompts"`). When non-empty, the
-/// walk root is constrained via [`resolve_magic_walk_root`] so the typed
-/// path prefix narrows the search before fuzzy matching the final
-/// segment. The same constraint is applied to the directory walk so
-/// `@prompts/pl` surfaces `prompts/planning/` rather than every
-/// `pl*`-named directory at the repo root.
+/// `dir` carries the path portion of a path-shaped magic partial (e.g.
+/// `@prompts/plan` → `dir = "prompts"`). When non-empty, the walk root is
+/// constrained via [`resolve_magic_walk_root`] so the typed prefix
+/// narrows the search before fuzzy matching; the same constraint applies
+/// to the directory pass.
 pub(super) fn gather_magic(
     mode: ComposeMode,
     ctx: &ScopeContext,

@@ -1,9 +1,9 @@
 use color_eyre::eyre::Result;
 
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
-use biscuit_terminal::utils::layout::{Alignment, Margin};
+use biscuit_terminal::utils::layout::{Alignment, Length, Edges};
 use claudine::events::{NativeEventName, event_native_mapping_matrix};
 use claudine::provider::Provider;
 
@@ -25,7 +25,7 @@ pub(super) fn run_mapping() -> Result<()> {
 
     log::data("");
     let legend =
-        Prose::new("{{dim}}- Legend: (blank) = not supported or no specific native name{{reset}}");
+        Prose::new("<dim>- Legend: (blank) = not supported or no specific native name</dim>");
     log::data(&format!(
         " {}",
         legend.render(&crate::log::optimistic_terminal(Some(100)))
@@ -43,7 +43,7 @@ fn build_mapping_table(providers: &[Provider]) -> Table {
     }
 
     let mut table = Table::new().with_columns(columns);
-    table.layout_mut().left_margin = Margin::Chars(1);
+    table.layout_mut().margin = Edges::x(Length::ch(1));
 
     for matrix_row in event_native_mapping_matrix(providers) {
         let mut row: Vec<TableCellContent> = vec![matrix_row.event.as_pascal_case().into()];

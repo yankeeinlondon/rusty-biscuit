@@ -1,3 +1,10 @@
+//! Standalone deny catalog for bash commands, write/edit paths, and MCP
+//! responses. Default-allow with a curated set of deny rules.
+//!
+//! See [`claudine/docs/topics/protect-service.md`](../../../docs/topics/protect-service.md)
+//! for the rule groups, scan surfaces, merge semantics, and dispatch
+//! integration.
+
 pub mod catalog;
 pub mod config;
 pub mod decision;

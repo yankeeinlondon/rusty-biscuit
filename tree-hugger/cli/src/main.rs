@@ -1,22 +1,40 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::ffi::OsStr;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
-use clap_complete::{Generator, Shell};
-use ignore::WalkBuilder;
-use ignore::overrides::OverrideBuilder;
+use biscuit_terminal::discovery::detection::ColorDepth;
+use biscuit_terminal::prelude::{Prose, Terminal, TerminalRenderable, WordWrap, strip_escape_codes};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
+use clap_complete::Shell;
+use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};
+use clap_complete::env::{CompleteEnv, Shells};
 use owo_colors::{OwoColorize, Style};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
-use tree_hugger::cache::{AnalyzerFingerprint, FileCacheKey, InMemorySymbolCache, SymbolSnapshot};
+use tree_hugger::adapter::{
+    AdapterConfig, AdapterMetadata, ExternalDiagnosticAdapter, OxlintAdapter,
+};
+use tree_hugger::cache::{
+    AnalyzerFingerprint, CacheConfig, FileCacheKey, InMemorySymbolCache, InProcessCache,
+    PersistentCache, SymbolSnapshot,
+};
 use tree_hugger::{
     CodeRange, Diagnostic, DiagnosticKind, DiagnosticSeverity, FieldInfo, FileSummary,
     FileSymbolIndex, FunctionSignature, ImportSymbol, LintDiagnostic, ParameterInfo,
-    ProgrammingLanguage, SchemaVersion, SourceContext, SymbolInfo, SymbolKind, SyntaxDiagnostic,
-    TreeFile, TreeHuggerError, TypeMetadata, VariantInfo, find_git_root, find_package_root,
+    ProgrammingLanguage, RuleRegistry, RuleSelector, SchemaVersion, SourceContext, SymbolInfo,
+    SymbolKind, SyntaxDiagnostic, TreeFile, TreeHuggerError, TypeMetadata, VariantInfo,
+    find_git_root, find_package_root,
 };
+use tree_hugger::god_files::{GodAnalysis, GodFiles, RefactorHint, RiskBand, SymbolBlock};
+mod import_format;
+mod prelude;
+mod scanner;
+
+use import_format::*;
+use prelude::*;
+use scanner::*;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -25,18 +43,6 @@ use tree_hugger::{
     about = "Tree Hugger diagnostics and symbol tooling"
 )]
 struct Cli {
-    /// Glob patterns for files to exclude from scanning
-    #[arg(long, value_name = "GLOB", global = true, display_order = 10)]
-    exclude_files: Vec<String>,
-
-    /// Glob patterns for symbol names to exclude from output
-    #[arg(long, value_name = "GLOB", global = true, display_order = 11)]
-    exclude_symbols: Vec<String>,
-
-    /// Force a specific language
-    #[arg(long, value_enum, global = true)]
-    language: Option<LanguageArg>,
-
     /// Output as JSON
     #[arg(long, global = true)]
     json: bool,
@@ -45,28 +51,58 @@ struct Cli {
     #[arg(long, global = true)]
     plain: bool,
 
+    #[command(subcommand)]
+    command: Command,
+}
+
+/// Scan options shared by symbol-listing subcommands.
+#[derive(clap::Args, Debug, Clone)]
+struct ScanOptions {
+    /// Glob patterns for files to exclude from scanning
+    #[arg(
+        long,
+        value_name = "GLOB",
+        display_order = 10,
+        value_hint = ValueHint::AnyPath,
+        add = ArgValueCompleter::new(complete_source_path),
+    )]
+    exclude_files: Vec<String>,
+
+    /// Glob patterns for symbol names to exclude from output
+    #[arg(long, value_name = "GLOB", display_order = 11)]
+    exclude_symbols: Vec<String>,
+
+    /// Force a specific language. Explicitly named files are parsed with this
+    /// language even when their extension maps elsewhere or is absent; directory
+    /// scans are restricted to this language's extensions.
+    #[arg(long, value_enum)]
+    language: Option<LanguageArg>,
+
+    /// Disable persistent and in-process caching.
+    ///
+    /// All files are re-parsed and re-analyzed on every invocation.
+    #[arg(long)]
+    no_cache: bool,
+
     /// Show symbol-level documentation comments in output
-    #[arg(long, global = true)]
+    #[arg(long)]
     comments: bool,
 
     /// Group symbol output by file path
-    #[arg(long, global = true)]
+    #[arg(long)]
     group_by_file: bool,
 
     /// Group symbol output by module path (directory/module scope)
-    #[arg(long, global = true)]
+    #[arg(long)]
     group_by_module: bool,
 
     /// Sort symbols by kind before name
-    #[arg(long, global = true)]
+    #[arg(long)]
     sort_by_kind: bool,
 
     /// Sort symbols by module before other sort keys
-    #[arg(long, global = true)]
+    #[arg(long)]
     sort_by_module: bool,
-
-    #[command(subcommand)]
-    command: Command,
 }
 
 impl Cli {
@@ -97,7 +133,12 @@ struct CommonArgs {
     /// `*width*` => wildcard match.
     ///
     /// `parse_width_spec!` => exact symbol name match.
-    #[arg(value_name = "FILTER", num_args = 0..)]
+    #[arg(
+        value_name = "FILTER",
+        num_args = 0..,
+        value_hint = ValueHint::AnyPath,
+        add = ArgValueCompleter::new(complete_source_path),
+    )]
     filters: Vec<String>,
 
     /// Show only exported (public) symbols
@@ -107,6 +148,9 @@ struct CommonArgs {
     /// Show only symbols explicitly exported by the prelude module
     #[arg(long, conflicts_with = "exported", display_order = 31)]
     prelude: bool,
+
+    #[clap(flatten)]
+    scan: ScanOptions,
 }
 
 /// Arguments for the classes command
@@ -123,7 +167,12 @@ struct ClassArgs {
     /// `*Widget*` => wildcard match.
     ///
     /// `Widget!` => exact class name match.
-    #[arg(value_name = "FILTER", num_args = 0..)]
+    #[arg(
+        value_name = "FILTER",
+        num_args = 0..,
+        value_hint = ValueHint::AnyPath,
+        add = ArgValueCompleter::new(complete_source_path),
+    )]
     filters: Vec<String>,
 
     /// Filter by class name
@@ -145,13 +194,21 @@ struct ClassArgs {
     /// Show only classes explicitly exported by the prelude module
     #[arg(long, conflicts_with = "exported")]
     prelude: bool,
+
+    #[clap(flatten)]
+    scan: ScanOptions,
 }
 
 /// Arguments for the lint command
 #[derive(clap::Args, Debug, Clone)]
 struct LintArgs {
     /// File filters (glob patterns or paths)
-    #[arg(value_name = "FILTER", num_args = 0..)]
+    #[arg(
+        value_name = "FILTER",
+        num_args = 0..,
+        value_hint = ValueHint::AnyPath,
+        add = ArgValueCompleter::new(complete_source_path),
+    )]
     filters: Vec<String>,
 
     /// Show only lint diagnostics (pattern-based and semantic rules)
@@ -161,6 +218,44 @@ struct LintArgs {
     /// Show only syntax diagnostics (parse errors)
     #[arg(long, conflicts_with = "lint_only")]
     syntax_only: bool,
+
+    /// Treat selected rules or categories as errors.
+    ///
+    /// Accepts rule IDs (e.g. `unwrap-call`) or category selectors
+    /// (e.g. `category:correctness`). Use `all` to deny everything.
+    #[arg(long, value_name = "RULE|CATEGORY", display_order = 40)]
+    deny: Vec<String>,
+
+    /// Treat selected rules or categories as warnings.
+    ///
+    /// Accepts rule IDs or category selectors. Overrides default severity.
+    #[arg(long, value_name = "RULE|CATEGORY", display_order = 41)]
+    warn: Vec<String>,
+
+    /// Treat selected rules or categories as info (suppressed from exit code).
+    ///
+    /// Accepts rule IDs or category selectors.
+    #[arg(long, value_name = "RULE|CATEGORY", display_order = 42)]
+    allow: Vec<String>,
+
+    /// Promote all warnings to errors (does not enable experimental rules).
+    #[arg(long, display_order = 43)]
+    strict: bool,
+
+    /// Enable experimental semantic rules (undefined-symbol, unused-symbol,
+    /// undefined-module).
+    ///
+    /// These rules are gated because they have high false-positive rates
+    /// without project context.
+    #[arg(long, display_order = 44)]
+    experimental_semantics: bool,
+
+    /// List registered lint rules and exit.
+    #[arg(long, display_order = 45)]
+    list_rules: bool,
+
+    #[clap(flatten)]
+    scan: ScanOptions,
 }
 
 /// Arguments for the completions command
@@ -169,6 +264,18 @@ struct CompletionsArgs {
     /// The shell to generate completions for
     #[arg(value_enum)]
     shell: Shell,
+}
+
+/// Arguments for the god-files command
+#[derive(clap::Args, Debug, Clone)]
+struct GodFilesArgs {
+    /// Directory to scan (defaults to current directory)
+    #[arg(value_name = "DIR", value_hint = ValueHint::DirPath)]
+    dir: Option<PathBuf>,
+
+    /// Show only high-risk files
+    #[arg(long)]
+    high_risk: bool,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -186,13 +293,19 @@ enum Command {
     /// Run lint diagnostics on the file(s)
     Lint(LintArgs),
     /// Generate shell completions
+    ///
+    /// Emits a dynamic-completion registration script. The script delegates
+    /// each completion request back to the `hug` binary at runtime, so
+    /// completions stay in sync with the installed CLI and can return
+    /// context-aware candidates (e.g. only source files in the current
+    /// directory).
     #[command(after_help = "\
 Examples:
   # Bash (add to ~/.bashrc)
-  hug completions bash >> ~/.bashrc
+  echo 'source <(hug completions bash)' >> ~/.bashrc
 
-  # Zsh (add to ~/.zshrc, ensure fpath includes the directory)
-  hug completions zsh > ~/.zfunc/_hug
+  # Zsh (add to ~/.zshrc)
+  echo 'source <(hug completions zsh)' >> ~/.zshrc
 
   # Fish
   hug completions fish > ~/.config/fish/completions/hug.fish
@@ -201,6 +314,8 @@ Examples:
   hug completions powershell >> $PROFILE
 ")]
     Completions(CompletionsArgs),
+    /// Identify oversized source files that are strong candidates for refactoring
+    GodFiles(GodFilesArgs),
 }
 
 impl Command {
@@ -213,7 +328,7 @@ impl Command {
             | Self::Imports(args) => &args.filters,
             Self::Lint(args) => &args.filters,
             Self::Classes(args) => &args.filters,
-            Self::Completions(_) => &[],
+            Self::Completions(_) | Self::GodFiles(_) => &[],
         }
     }
 
@@ -222,7 +337,7 @@ impl Command {
         match self {
             Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => args.exported,
             Self::Classes(args) => args.exported,
-            Self::Imports(_) | Self::Lint(_) | Self::Completions(_) => false,
+            Self::Imports(_) | Self::Lint(_) | Self::Completions(_) | Self::GodFiles(_) => false,
         }
     }
 
@@ -231,7 +346,7 @@ impl Command {
         match self {
             Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => args.prelude,
             Self::Classes(args) => args.prelude,
-            Self::Imports(_) | Self::Lint(_) | Self::Completions(_) => false,
+            Self::Imports(_) | Self::Lint(_) | Self::Completions(_) | Self::GodFiles(_) => false,
         }
     }
 
@@ -245,20 +360,31 @@ impl Command {
             Self::Lint(args) => Some(CommandKind::Lint {
                 lint_only: args.lint_only,
                 syntax_only: args.syntax_only,
+                deny: parse_selectors(&args.deny),
+                warn: parse_selectors(&args.warn),
+                allow: parse_selectors(&args.allow),
+                strict: args.strict,
+                experimental_semantics: args.experimental_semantics,
+                list_rules: args.list_rules,
             }),
             Self::Classes(args) => Some(CommandKind::Classes {
                 name_filter: args.name.clone(),
                 static_only: args.static_only,
                 instance_only: args.instance_only,
             }),
-            Self::Completions(_) => None,
+            Self::Completions(_) | Self::GodFiles(_) => None,
         }
     }
 }
 
+/// Parses rule selectors from CLI argument strings.
+fn parse_selectors(args: &[String]) -> Vec<RuleSelector> {
+    args.iter().filter_map(|s| RuleSelector::parse(s)).collect()
+}
+
 /// The kind of command being executed (without the arguments).
 #[derive(Debug, Clone)]
-enum CommandKind {
+pub(crate) enum CommandKind {
     Functions,
     Types,
     Symbols,
@@ -266,12 +392,76 @@ enum CommandKind {
     Lint {
         lint_only: bool,
         syntax_only: bool,
+        deny: Vec<RuleSelector>,
+        warn: Vec<RuleSelector>,
+        allow: Vec<RuleSelector>,
+        strict: bool,
+        experimental_semantics: bool,
+        list_rules: bool,
     },
     Classes {
         name_filter: Option<String>,
         static_only: bool,
         instance_only: bool,
     },
+}
+
+#[derive(Debug, Clone, Default)]
+struct AnalysisOptions {
+    experimental_semantics: bool,
+    deny: Vec<RuleSelector>,
+    warn: Vec<RuleSelector>,
+    allow: Vec<RuleSelector>,
+    strict: bool,
+    use_external_adapters: bool,
+}
+
+impl AnalysisOptions {
+    fn from_command(command: &CommandKind) -> Self {
+        match command {
+            CommandKind::Lint {
+                deny,
+                warn,
+                allow,
+                strict,
+                experimental_semantics,
+                ..
+            } => Self {
+                experimental_semantics: *experimental_semantics,
+                deny: deny.clone(),
+                warn: warn.clone(),
+                allow: allow.clone(),
+                strict: *strict,
+                use_external_adapters: true,
+            },
+            _ => Self::default(),
+        }
+    }
+
+    fn fingerprint(&self) -> String {
+        format!(
+            "experimental_semantics={};deny={};warn={};allow={};strict={};external_adapters={}",
+            self.experimental_semantics,
+            selectors_fingerprint(&self.deny),
+            selectors_fingerprint(&self.warn),
+            selectors_fingerprint(&self.allow),
+            self.strict,
+            self.use_external_adapters,
+        )
+    }
+}
+
+fn selectors_fingerprint(selectors: &[RuleSelector]) -> String {
+    let mut values = selectors
+        .iter()
+        .map(|selector| match selector {
+            RuleSelector::All => "all".to_string(),
+            RuleSelector::Rule(rule) => format!("rule:{rule}"),
+            RuleSelector::Category(category) => format!("category:{category}"),
+        })
+        .collect::<Vec<_>>();
+    values.sort();
+    values.join(",")
 }
 
 /// Filter mode for symbol output.
@@ -283,30 +473,6 @@ enum SymbolFilter {
     Exported,
     /// Show only symbols whose name appears in the prelude
     Prelude(PreludeFilter),
-}
-
-/// Resolved prelude export filter data.
-#[derive(Debug, Clone)]
-struct PreludeFilter {
-    /// Symbol names explicitly listed by prelude exports (plus PRELUDE env var).
-    names: HashSet<String>,
-    /// Resolved prelude export symbols keyed by prelude file path.
-    exports_by_file: HashMap<PathBuf, Vec<SymbolInfo>>,
-}
-
-#[derive(Debug, Clone)]
-struct ResolvedPreludeMetadata {
-    kind: SymbolKind,
-    doc_comment: Option<String>,
-    file: Option<PathBuf>,
-    range: Option<CodeRange>,
-}
-
-/// Classification of positional filter tokens.
-#[derive(Debug, Clone, Default)]
-struct ScanFilters {
-    file_filters: Vec<String>,
-    symbol_globs: Vec<String>,
 }
 
 /// Ordering/grouping switches for symbol rendering.
@@ -340,6 +506,20 @@ struct JsonOutput {
     language: ProgrammingLanguage,
     files: Vec<FileSummary>,
     symbol_indexes: Vec<tree_hugger::FileSymbolIndex>,
+    adapter_metadata: Vec<AdapterMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RuleListItem {
+    id: String,
+    title: String,
+    category: String,
+    default_severity: DiagnosticSeverity,
+    confidence: String,
+    enabled_by_default: bool,
+    requires_experimental_semantics: bool,
+    languages: Vec<ProgrammingLanguage>,
+    aliases: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -361,17 +541,26 @@ struct OutputConfig {
 
 static SOURCE_LINE_CACHE: OnceLock<Mutex<HashMap<PathBuf, Vec<String>>>> = OnceLock::new();
 
+/// Whether `CLICOLOR_FORCE` requests colored output regardless of TTY.
+///
+/// Follows the common convention: any value other than unset or `0` forces
+/// color on. Lets non-interactive callers (and tests) opt into styled output.
+fn color_forced() -> bool {
+    std::env::var("CLICOLOR_FORCE").is_ok_and(|value| value != "0")
+}
+
 impl OutputConfig {
     fn new(format: OutputFormat, show_comments: bool) -> Self {
         match format {
             OutputFormat::Pretty => {
-                // Check NO_COLOR environment variable and TTY
+                // Color is enabled for an interactive TTY (honoring NO_COLOR),
+                // or forced on regardless of TTY by CLICOLOR_FORCE.
                 let no_color = std::env::var("NO_COLOR").is_ok();
                 let is_tty = std::io::stdout().is_terminal();
-                let use_colors = !no_color && is_tty;
+                let use_colors = color_forced() || (!no_color && is_tty);
                 Self {
                     use_colors,
-                    use_hyperlinks: use_colors && is_tty,
+                    use_hyperlinks: use_colors,
                     show_comments,
                 }
             }
@@ -654,45 +843,153 @@ impl From<LanguageArg> for ProgrammingLanguage {
 }
 
 fn main() -> Result<(), TreeHuggerError> {
+    // Handle dynamic completion requests (COMPLETE=<shell> hug ...). This must
+    // run before any other stdout writes; it exits the process if a completion
+    // request was served.
+    CompleteEnv::with_factory(Cli::command).complete();
+
     let cli = Cli::parse();
 
     // Handle completions command early (doesn't need file processing)
     if let Command::Completions(args) = &cli.command {
-        print_completions(args.shell, &mut Cli::command());
+        if let Err(err) = print_completions(args.shell) {
+            eprintln!("failed to write completions: {err}");
+            std::process::exit(1);
+        }
         return Ok(());
     }
 
-    let language = cli.language.map(ProgrammingLanguage::from);
-    let filters = cli.command.filters();
     let output_format = cli.output_format();
-    let output_config = OutputConfig::new(output_format, cli.comments);
-    let render_options = SymbolRenderOptions {
-        group_by_file: cli.group_by_file,
-        group_by_module: cli.group_by_module,
-        sort_by_kind: cli.sort_by_kind,
-        sort_by_module: cli.sort_by_module,
-    };
 
     let root_dir = current_dir()?;
     let git_root = find_git_root(&root_dir).unwrap_or_else(|_| root_dir.clone());
     let pkg_root = find_package_root(&root_dir, &git_root);
     let display_root = Some(git_root.clone());
 
+    // Handle god-files command early (separate analysis pipeline)
+    if let Command::GodFiles(args) = &cli.command {
+        let dir = args.dir.as_deref().unwrap_or_else(|| Path::new("."));
+        // Reject an invalid scan root up front. A missing path or a non-directory
+        // is an invocation error, not a successful empty scan; collapsing it into
+        // a 0/0 report would hide CI/configuration mistakes.
+        if !dir.is_dir() {
+            let reason = if dir.exists() {
+                "god-files scan path is not a directory"
+            } else {
+                "god-files scan directory does not exist"
+            };
+            return Err(TreeHuggerError::Io {
+                path: dir.to_path_buf(),
+                source: std::io::Error::other(reason),
+            });
+        }
+        let god_files = GodFiles::new(dir);
+        let analyses = god_files.analysis();
+        let output_config = OutputConfig::new(output_format, false);
+
+        match output_format {
+            OutputFormat::Json => {
+                // `--high-risk` filters the emitted set for every output format,
+                // not just the rendered report (spec §5.1).
+                let emitted: Vec<&GodAnalysis> = if args.high_risk {
+                    analyses
+                        .iter()
+                        .filter(|a| a.risk == RiskBand::High)
+                        .collect()
+                } else {
+                    analyses.iter().collect()
+                };
+                let json =
+                    serde_json::to_string_pretty(&emitted).map_err(|source| TreeHuggerError::Io {
+                        path: PathBuf::from("<stdout>"),
+                        source: std::io::Error::other(source),
+                    })?;
+                println!("{json}");
+            }
+            OutputFormat::Pretty | OutputFormat::Plain => {
+                render_god_files(analyses, &output_config, args.high_risk);
+            }
+        }
+        return Ok(());
+    }
+
     let command_kind = cli.command.kind().expect("completions already handled");
-    let scan_filters = classify_filters(filters, &command_kind);
-    let excluded_symbol_globs = cli
-        .exclude_symbols
+    let analysis_options = AnalysisOptions::from_command(&command_kind);
+
+    if matches!(
+        command_kind,
+        CommandKind::Lint {
+            list_rules: true,
+            ..
+        }
+    ) {
+        render_rule_list(output_format)?;
+        return Ok(());
+    }
+
+    // Extract scan options from the subcommand args. God-files and completions
+    // are handled earlier; every remaining subcommand carries a `ScanOptions`.
+    let (language, exclude_files, exclude_symbols, comments, no_cache, group_by_file, group_by_module, sort_by_kind, sort_by_module) = match &cli.command {
+        Command::Functions(args)
+        | Command::Types(args)
+        | Command::Symbols(args)
+        | Command::Imports(args) => (
+            args.scan.language.map(ProgrammingLanguage::from),
+            &args.scan.exclude_files,
+            &args.scan.exclude_symbols,
+            args.scan.comments,
+            args.scan.no_cache,
+            args.scan.group_by_file,
+            args.scan.group_by_module,
+            args.scan.sort_by_kind,
+            args.scan.sort_by_module,
+        ),
+        Command::Classes(args) => (
+            args.scan.language.map(ProgrammingLanguage::from),
+            &args.scan.exclude_files,
+            &args.scan.exclude_symbols,
+            args.scan.comments,
+            args.scan.no_cache,
+            args.scan.group_by_file,
+            args.scan.group_by_module,
+            args.scan.sort_by_kind,
+            args.scan.sort_by_module,
+        ),
+        Command::Lint(args) => (
+            args.scan.language.map(ProgrammingLanguage::from),
+            &args.scan.exclude_files,
+            &args.scan.exclude_symbols,
+            args.scan.comments,
+            args.scan.no_cache,
+            args.scan.group_by_file,
+            args.scan.group_by_module,
+            args.scan.sort_by_kind,
+            args.scan.sort_by_module,
+        ),
+        _ => unreachable!(),
+    };
+    let filters = cli.command.filters();
+    let output_config = OutputConfig::new(output_format, comments);
+    let render_options = SymbolRenderOptions {
+        group_by_file,
+        group_by_module,
+        sort_by_kind,
+        sort_by_module,
+    };
+
+    let scan_filters = classify_filters(filters, &command_kind, language);
+    let excluded_symbol_globs = exclude_symbols
         .iter()
         .filter_map(|glob| normalize_excluded_symbol_glob(glob))
         .collect::<Vec<_>>();
 
     let mut files = if scan_filters.file_filters.is_empty() {
-        collect_files(&pkg_root, &[], &cli.exclude_files, language)?
+        collect_files(&pkg_root, &[], exclude_files, language)?
     } else {
         collect_files(
             &pkg_root,
             &scan_filters.file_filters,
-            &cli.exclude_files,
+            exclude_files,
             language,
         )?
     };
@@ -719,6 +1016,19 @@ fn main() -> Result<(), TreeHuggerError> {
     }
 
     let analysis_cache = InMemorySymbolCache::new(files.len().max(1));
+    let in_process_cache = InProcessCache::with_config(CacheConfig {
+        enabled: !no_cache,
+        persistent: false,
+        capacity: files.len().max(1),
+    });
+    let persistent_cache = if no_cache {
+        None
+    } else {
+        let project_id = pkg_root
+            .to_string_lossy()
+            .replace(['/', '\\', ':', ' ', '.'], "_");
+        Some(PersistentCache::default_cache(&project_id, true))
+    };
 
     // Handle classes command separately due to different output structure
     if let CommandKind::Classes {
@@ -732,7 +1042,13 @@ fn main() -> Result<(), TreeHuggerError> {
 
         for file in files {
             let tree_file = TreeFile::with_language(&file, language)?;
-            let index = analyze_tree_file(&tree_file, &analysis_cache)?;
+            let index = analyze_tree_file(
+                tree_file,
+                &analysis_options,
+                &analysis_cache,
+                &in_process_cache,
+                &persistent_cache,
+            )?;
             let mut class_summaries = extract_class_summaries(
                 &index,
                 name_filter.as_deref(),
@@ -767,11 +1083,7 @@ fn main() -> Result<(), TreeHuggerError> {
             }
 
             if !class_summaries.is_empty() {
-                all_class_summaries.push((
-                    tree_file.file.clone(),
-                    tree_file.language,
-                    class_summaries,
-                ));
+                all_class_summaries.push((index.file.clone(), index.language, class_summaries));
             }
         }
 
@@ -803,18 +1115,32 @@ fn main() -> Result<(), TreeHuggerError> {
 
     let mut summaries = Vec::new();
     let mut symbol_indexes = Vec::new();
+    let mut adapter_metadata = Vec::new();
     for file in files {
         let tree_file = TreeFile::with_language(&file, language)?;
-        let index = analyze_tree_file(&tree_file, &analysis_cache)?;
+        let index = analyze_tree_file(
+            tree_file,
+            &analysis_options,
+            &analysis_cache,
+            &in_process_cache,
+            &persistent_cache,
+        )?;
         if matches!(output_format, OutputFormat::Json) {
             symbol_indexes.push(index.clone());
         }
-        let summary = summarize_file(
+        let mut summary = summarize_file(
             &index,
             &command_kind,
             &symbol_filter,
             &scan_filters.symbol_globs,
             &excluded_symbol_globs,
+        )?;
+        add_external_lint_diagnostics(
+            &mut summary,
+            &command_kind,
+            &pkg_root,
+            &analysis_options,
+            &mut adapter_metadata,
         )?;
         summaries.push(summary);
     }
@@ -829,8 +1155,9 @@ fn main() -> Result<(), TreeHuggerError> {
                 schema_version: SchemaVersion::V2_0,
                 root_dir,
                 language: package_language,
-                files: summaries,
+                files: summaries.clone(),
                 symbol_indexes,
+                adapter_metadata: adapter_metadata.clone(),
             };
 
             let json =
@@ -841,6 +1168,7 @@ fn main() -> Result<(), TreeHuggerError> {
             println!("{json}");
         }
         OutputFormat::Pretty | OutputFormat::Plain => {
+            render_adapter_warnings(&adapter_metadata, &output_config);
             if matches!(
                 command_kind,
                 CommandKind::Functions | CommandKind::Types | CommandKind::Symbols
@@ -854,15 +1182,70 @@ fn main() -> Result<(), TreeHuggerError> {
                     render_options,
                 );
             } else {
-                for summary in summaries {
-                    render_summary(
-                        &summary,
+                // Multi-file lint scans hide clean files; a single explicit
+                // target still shows `(no diagnostics)` as confirmation.
+                let suppress_clean_lint =
+                    matches!(command_kind, CommandKind::Lint { .. }) && summaries.len() > 1;
+                let mut rendered_any = false;
+                for summary in &summaries {
+                    rendered_any |= render_summary(
+                        summary,
                         &command_kind,
                         &output_config,
                         display_root.as_deref(),
+                        suppress_clean_lint,
                     );
                 }
+                if suppress_clean_lint && !rendered_any {
+                    let msg = format!("No lint diagnostics in {} files.", summaries.len());
+                    if output_config.use_colors {
+                        println!("{}", msg.green());
+                    } else {
+                        println!("{msg}");
+                    }
+                }
             }
+        }
+    }
+
+    // Report cache stats
+    let cache_stats = in_process_cache.stats();
+    if cache_stats.parse_hits > 0 || cache_stats.symbol_hits > 0 {
+        if output_config.use_colors {
+            eprintln!(
+                "{} cache: {} parse hits, {} symbol hits, {} entries",
+                "▸".dimmed(),
+                cache_stats.parse_hits,
+                cache_stats.symbol_hits,
+                cache_stats.entries
+            );
+        } else {
+            eprintln!(
+                "cache: {} parse hits, {} symbol hits, {} entries",
+                cache_stats.parse_hits, cache_stats.symbol_hits, cache_stats.entries
+            );
+        }
+    }
+
+    // Exit with non-zero if lint found errors
+    if matches!(command_kind, CommandKind::Lint { .. }) {
+        let error_count: usize = summaries
+            .iter()
+            .map(|summary| {
+                summary
+                    .lint
+                    .iter()
+                    .filter(|d| d.severity == DiagnosticSeverity::Error)
+                    .count()
+                    + summary
+                        .syntax
+                        .iter()
+                        .filter(|d| d.severity == DiagnosticSeverity::Error)
+                        .count()
+            })
+            .sum();
+        if error_count > 0 {
+            std::process::exit(1);
         }
     }
 
@@ -876,505 +1259,119 @@ fn current_dir() -> Result<PathBuf, TreeHuggerError> {
     })
 }
 
-/// Prints shell completions to stdout.
-fn print_completions<G: Generator>(generator: G, cmd: &mut clap::Command) {
-    clap_complete::generate(
-        generator,
-        cmd,
-        cmd.get_name().to_string(),
+/// Directory names skipped when completing filter paths (build/dep output).
+const COMPLETION_SKIPPED_DIRS: &[&str] =
+    &["target", "node_modules", "dist", "build", "vendor", ".git"];
+
+/// Dynamic completer for FILTER positionals.
+///
+/// Lists entries under the directory implied by `current` (or the cwd when
+/// `current` has no directory component), keeping only:
+///
+/// - directories `hug` would descend into (skipping build output / dotfiles)
+/// - files whose extension maps to a supported [`ProgrammingLanguage`]
+fn complete_source_path(current: &OsStr) -> Vec<CompletionCandidate> {
+    let value = Path::new(current);
+    let (prefix, partial) = split_completion_input(value);
+    let partial = partial.to_string_lossy();
+
+    let search_root = if prefix.as_os_str().is_empty() {
+        match std::env::current_dir() {
+            Ok(cwd) => cwd,
+            Err(_) => return Vec::new(),
+        }
+    } else if prefix.is_absolute() {
+        prefix.to_path_buf()
+    } else {
+        match std::env::current_dir() {
+            Ok(cwd) => cwd.join(prefix),
+            Err(_) => return Vec::new(),
+        }
+    };
+
+    let mut candidates = Vec::new();
+    let Ok(entries) = std::fs::read_dir(&search_root) else {
+        return candidates;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let raw = entry.file_name();
+        let Some(name) = raw.to_str() else {
+            continue;
+        };
+        if !name.starts_with(partial.as_ref()) {
+            continue;
+        }
+        if name.starts_with('.') {
+            continue;
+        }
+
+        let path = entry.path();
+        if path.is_dir() {
+            if COMPLETION_SKIPPED_DIRS.contains(&name) {
+                continue;
+            }
+            let mut suggestion = prefix.join(&raw).into_os_string();
+            suggestion.push("/");
+            candidates.push(CompletionCandidate::new(suggestion));
+        } else if ProgrammingLanguage::from_path(&path).is_some() {
+            let suggestion = prefix.join(&raw).into_os_string();
+            candidates.push(CompletionCandidate::new(suggestion));
+        }
+    }
+    candidates.sort_by(|a, b| a.get_value().cmp(b.get_value()));
+    candidates
+}
+
+/// Splits a partial path into `(directory_prefix, name_partial)`.
+///
+/// Mirrors clap_complete's internal helper: a trailing `/` keeps the whole
+/// value as the directory and uses an empty partial; otherwise the final
+/// component is the partial filename.
+fn split_completion_input(path: &Path) -> (&Path, &OsStr) {
+    let ends_with_sep = path
+        .as_os_str()
+        .as_encoded_bytes()
+        .last()
+        .is_some_and(|b| *b == b'/' || *b == b'\\');
+    if ends_with_sep || path.as_os_str().is_empty() {
+        (path, OsStr::new(""))
+    } else {
+        let parent = path.parent().unwrap_or_else(|| Path::new(""));
+        let name = path.file_name().unwrap_or_else(|| OsStr::new(""));
+        (parent, name)
+    }
+}
+
+/// Writes the dynamic-completion registration script for `shell` to stdout.
+///
+/// The emitted script registers a hook that re-invokes this binary with
+/// `COMPLETE=<shell>` set, so completion logic stays in sync with the CLI
+/// definition (no stale static scripts).
+fn print_completions(shell: Shell) -> std::io::Result<()> {
+    let shell_name = shell.to_string();
+    let shells = Shells::builtins();
+    let completer = shells
+        .completer(&shell_name)
+        .expect("clap_complete::Shell variant has a builtin EnvCompleter");
+
+    let mut cmd = Cli::command();
+    cmd.build();
+    let name = cmd.get_name().to_owned();
+    let bin = cmd
+        .get_bin_name()
+        .map(str::to_owned)
+        .unwrap_or_else(|| name.clone());
+    let completer_path = std::env::current_exe()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| bin.clone());
+
+    completer.write_registration(
+        "COMPLETE",
+        &name,
+        &bin,
+        &completer_path,
         &mut std::io::stdout(),
-    );
-}
-
-/// Resolves symbol names and direct export entries from a prelude module.
-///
-/// Resolves prelude exports from `{root}/src/prelude.rs`,
-/// `{root}/src/prelude/mod.rs`, and direct child package roots such as
-/// `{root}/lib/src/prelude.rs`.
-///
-/// Parses public `use` exports and merges any additional names from the
-/// `PRELUDE` environment variable (comma-separated).
-fn resolve_prelude_symbols(root_dir: &Path) -> Result<PreludeFilter, TreeHuggerError> {
-    let mut names = HashSet::new();
-    let mut exports_by_file: HashMap<PathBuf, Vec<SymbolInfo>> = HashMap::new();
-    let mut rust_symbol_cache: HashMap<PathBuf, Vec<SymbolInfo>> = HashMap::new();
-
-    for candidate in discover_prelude_files(root_dir)? {
-        let tree_file = TreeFile::with_language(&candidate, None)?;
-        let source = std::fs::read_to_string(&candidate).map_err(|source| TreeHuggerError::Io {
-            path: candidate.clone(),
-            source,
-        })?;
-        let exports: Vec<ImportSymbol> = tree_file
-            .imported_symbols()?
-            .into_iter()
-            .filter(|import| is_prelude_export(import, &source))
-            .collect();
-        let mut resolved_exports = Vec::with_capacity(exports.len());
-        let package_root =
-            package_root_for_prelude_file(&candidate).unwrap_or_else(|| root_dir.to_path_buf());
-
-        for import in &exports {
-            names.insert(import.name.clone());
-            let metadata =
-                resolve_prelude_export_metadata(import, &package_root, &mut rust_symbol_cache)?
-                    .unwrap_or(ResolvedPreludeMetadata {
-                        kind: SymbolKind::Unknown,
-                        doc_comment: None,
-                        file: None,
-                        range: None,
-                    });
-            resolved_exports.push(symbol_from_prelude_export(
-                import,
-                metadata.kind,
-                metadata.doc_comment,
-                metadata.file,
-                metadata.range,
-            ));
-        }
-
-        exports_by_file.insert(candidate, resolved_exports);
-    }
-
-    if let Ok(env_val) = std::env::var("PRELUDE") {
-        for name in env_val.split(',') {
-            let trimmed = name.trim();
-            if !trimmed.is_empty() {
-                names.insert(trimmed.to_string());
-            }
-        }
-    }
-
-    Ok(PreludeFilter {
-        names,
-        exports_by_file,
-    })
-}
-
-fn discover_prelude_files(root_dir: &Path) -> Result<Vec<PathBuf>, TreeHuggerError> {
-    let mut package_roots = BTreeSet::new();
-    package_roots.insert(root_dir.to_path_buf());
-
-    if let Ok(entries) = std::fs::read_dir(root_dir) {
-        for entry in entries {
-            let Ok(entry) = entry else {
-                continue;
-            };
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            if has_package_manifest(&path) {
-                package_roots.insert(path);
-            }
-        }
-    }
-
-    let mut files = Vec::new();
-    for package_root in package_roots {
-        let prelude_rs = package_root.join("src/prelude.rs");
-        if prelude_rs.is_file() {
-            files.push(prelude_rs);
-        }
-
-        let prelude_mod_rs = package_root.join("src/prelude/mod.rs");
-        if prelude_mod_rs.is_file() {
-            files.push(prelude_mod_rs);
-        }
-    }
-
-    files.sort();
-    files.dedup();
-    Ok(files)
-}
-
-fn package_root_for_prelude_file(path: &Path) -> Option<PathBuf> {
-    match path.file_name().and_then(|name| name.to_str()) {
-        Some("prelude.rs") => path.parent().and_then(Path::parent).map(Path::to_path_buf),
-        Some("mod.rs") => path
-            .parent()
-            .and_then(Path::parent)
-            .and_then(Path::parent)
-            .map(Path::to_path_buf),
-        _ => None,
-    }
-}
-
-fn has_package_manifest(path: &Path) -> bool {
-    const MANIFESTS: &[&str] = &[
-        "Cargo.toml",
-        "package.json",
-        "go.mod",
-        "pyproject.toml",
-        "setup.py",
-        "pom.xml",
-        "build.gradle",
-        "build.gradle.kts",
-        "composer.json",
-    ];
-
-    for manifest in MANIFESTS {
-        let file = path.join(manifest);
-        if !file.is_file() {
-            continue;
-        }
-
-        match *manifest {
-            "Cargo.toml" => {
-                let is_package = std::fs::read_to_string(&file)
-                    .map(|contents| contents.contains("[package]"))
-                    .unwrap_or(false);
-                if is_package {
-                    return true;
-                }
-            }
-            "package.json" => {
-                let is_package = std::fs::read_to_string(&file)
-                    .map(|contents| !contents.contains("\"workspaces\""))
-                    .unwrap_or(false);
-                if is_package {
-                    return true;
-                }
-            }
-            _ => return true,
-        }
-    }
-
-    false
-}
-
-fn is_prelude_export(import: &ImportSymbol, file_source: &str) -> bool {
-    if import.language != ProgrammingLanguage::Rust {
-        return true;
-    }
-
-    let Some(statement_range) = import.statement_range.as_ref() else {
-        return true;
-    };
-    let Some(statement) = file_source.get(statement_range.start_byte..statement_range.end_byte)
-    else {
-        return false;
-    };
-
-    is_public_rust_use_statement(statement)
-}
-
-fn is_public_rust_use_statement(statement: &str) -> bool {
-    let trimmed = statement.trim_start();
-    let Some(after_pub) = trimmed.strip_prefix("pub") else {
-        return false;
-    };
-    let after_pub = after_pub.trim_start();
-    if after_pub.starts_with("use ") {
-        return true;
-    }
-
-    if let Some(after_scope) = after_pub.strip_prefix('(')
-        && let Some(close_idx) = after_scope.find(')')
-    {
-        return after_scope[close_idx + 1..]
-            .trim_start()
-            .starts_with("use ");
-    }
-
-    false
-}
-
-fn resolve_prelude_export_metadata(
-    import: &ImportSymbol,
-    root_dir: &Path,
-    rust_symbol_cache: &mut HashMap<PathBuf, Vec<SymbolInfo>>,
-) -> Result<Option<ResolvedPreludeMetadata>, TreeHuggerError> {
-    if import.language != ProgrammingLanguage::Rust {
-        return Ok(None);
-    }
-
-    let Some(source) = import.source.as_deref() else {
-        return Ok(None);
-    };
-    let target_name = import_target_symbol_name(import);
-
-    for candidate in rust_module_source_candidates(root_dir, source) {
-        if !candidate.is_file() {
-            continue;
-        }
-
-        if !rust_symbol_cache.contains_key(&candidate) {
-            let tree_file = TreeFile::with_language(&candidate, Some(ProgrammingLanguage::Rust))?;
-            let mut symbols = tree_file.exported_symbols()?;
-            if symbols.is_empty() {
-                symbols = tree_file.symbols()?;
-            }
-            rust_symbol_cache.insert(candidate.clone(), symbols);
-        }
-
-        if let Some(symbol) = rust_symbol_cache
-            .get(&candidate)
-            .and_then(|symbols| symbols.iter().find(|symbol| symbol.name == target_name))
-        {
-            return Ok(Some(ResolvedPreludeMetadata {
-                kind: symbol.kind,
-                doc_comment: symbol.doc_comment.clone(),
-                file: Some(symbol.file.clone()),
-                range: Some(symbol.range.clone()),
-            }));
-        }
-
-        // Fallback for symbols not captured by tree-sitter symbol queries (e.g., some type aliases).
-        let source_text =
-            std::fs::read_to_string(&candidate).map_err(|source| TreeHuggerError::Io {
-                path: candidate.clone(),
-                source,
-            })?;
-        if let Some(kind) = infer_rust_decl_kind(&source_text, target_name) {
-            return Ok(Some(ResolvedPreludeMetadata {
-                kind,
-                doc_comment: None,
-                file: None,
-                range: None,
-            }));
-        }
-    }
-
-    Ok(None)
-}
-
-fn import_target_symbol_name(import: &ImportSymbol) -> &str {
-    let raw = import
-        .original_name
-        .as_deref()
-        .unwrap_or(import.name.as_str());
-    raw.rsplit("::").next().unwrap_or(raw)
-}
-
-fn infer_rust_decl_kind(source: &str, target_name: &str) -> Option<SymbolKind> {
-    let patterns = [
-        (SymbolKind::Trait, format!("pub trait {target_name}")),
-        (SymbolKind::Enum, format!("pub enum {target_name}")),
-        (SymbolKind::Type, format!("pub struct {target_name}")),
-        (SymbolKind::Type, format!("pub type {target_name}")),
-        (SymbolKind::Function, format!("pub fn {target_name}")),
-        (SymbolKind::Constant, format!("pub const {target_name}")),
-        (SymbolKind::Constant, format!("pub static {target_name}")),
-    ];
-
-    patterns
-        .iter()
-        .find_map(|(kind, marker)| source.contains(marker).then_some(*kind))
-}
-
-fn rust_module_source_candidates(root_dir: &Path, source: &str) -> Vec<PathBuf> {
-    let normalized = source
-        .trim()
-        .trim_start_matches("crate::")
-        .trim_start_matches("self::")
-        .trim_start_matches("::")
-        .trim_end_matches("::");
-
-    if normalized.is_empty() || normalized.starts_with("super::") {
-        return Vec::new();
-    }
-
-    let module = normalized.replace("::", "/");
-    vec![
-        root_dir.join("src").join(format!("{module}.rs")),
-        root_dir.join("src").join(module).join("mod.rs"),
-    ]
-}
-
-fn classify_filters(filters: &[String], command: &CommandKind) -> ScanFilters {
-    match command {
-        CommandKind::Functions
-        | CommandKind::Types
-        | CommandKind::Symbols
-        | CommandKind::Classes { .. } => {
-            let mut file_filters = Vec::new();
-            let mut symbol_globs = Vec::new();
-            for filter in filters {
-                if is_file_filter_token(filter) {
-                    file_filters.push(filter.clone());
-                } else {
-                    symbol_globs.push(normalize_symbol_glob(filter));
-                }
-            }
-            ScanFilters {
-                file_filters,
-                symbol_globs,
-            }
-        }
-        CommandKind::Imports | CommandKind::Lint { .. } => ScanFilters {
-            file_filters: filters.to_vec(),
-            symbol_globs: Vec::new(),
-        },
-    }
-}
-
-fn is_file_filter_token(token: &str) -> bool {
-    if token.contains('/') || token.contains('\\') {
-        return true;
-    }
-
-    let extension = Path::new(token).extension().and_then(|ext| ext.to_str());
-    extension
-        .and_then(ProgrammingLanguage::from_extension)
-        .is_some()
-}
-
-fn normalize_symbol_glob(token: &str) -> String {
-    if let Some(strict_name) = token.strip_suffix('!')
-        && !strict_name.is_empty()
-    {
-        // Trailing `!` switches from fuzzy auto-wrapped matching to strict exact matching.
-        // Example: `parse_width_spec!` matches only `parse_width_spec`.
-        return strict_name.to_string();
-    }
-
-    if token.contains('*') {
-        token.to_string()
-    } else {
-        format!("*{token}*")
-    }
-}
-
-fn normalize_excluded_symbol_glob(token: &str) -> Option<String> {
-    if token.is_empty() {
-        return None;
-    }
-
-    if let Some(strict_name) = token.strip_suffix('!')
-        && !strict_name.is_empty()
-    {
-        // Keep parity with positional filters: trailing `!` means strict name.
-        return Some(strict_name.to_string());
-    }
-
-    Some(token.to_string())
-}
-
-fn matches_symbol_filters(name: &str, patterns: &[String]) -> bool {
-    if patterns.is_empty() {
-        return true;
-    }
-
-    patterns
-        .iter()
-        .any(|pattern| wildcard_match(pattern.as_str(), name))
-}
-
-fn wildcard_match(pattern: &str, value: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-
-    let starts_with_wildcard = pattern.starts_with('*');
-    let ends_with_wildcard = pattern.ends_with('*');
-    let segments: Vec<&str> = pattern
-        .split('*')
-        .filter(|segment| !segment.is_empty())
-        .collect();
-    if segments.is_empty() {
-        return true;
-    }
-
-    let mut index = 0usize;
-    for (position, segment) in segments.iter().enumerate() {
-        if position == 0 && !starts_with_wildcard {
-            if !value[index..].starts_with(segment) {
-                return false;
-            }
-            index += segment.len();
-            continue;
-        }
-
-        match value[index..].find(segment) {
-            Some(found) => {
-                index += found + segment.len();
-            }
-            None => return false,
-        }
-    }
-
-    if ends_with_wildcard {
-        true
-    } else {
-        value.ends_with(segments.last().unwrap_or(&""))
-    }
-}
-
-fn apply_symbol_filters(
-    symbols: Vec<SymbolInfo>,
-    include_symbol_globs: &[String],
-    exclude_symbol_globs: &[String],
-) -> Vec<SymbolInfo> {
-    if include_symbol_globs.is_empty() && exclude_symbol_globs.is_empty() {
-        return symbols;
-    }
-
-    symbols
-        .into_iter()
-        .filter(|symbol| {
-            let included = include_symbol_globs.is_empty()
-                || matches_symbol_filters(&symbol.name, include_symbol_globs);
-            let excluded = !exclude_symbol_globs.is_empty()
-                && matches_symbol_filters(&symbol.name, exclude_symbol_globs);
-            included && !excluded
-        })
-        .collect()
-}
-
-fn collect_files(
-    root: &Path,
-    inputs: &[String],
-    excluded_files: &[String],
-    language: Option<ProgrammingLanguage>,
-) -> Result<Vec<PathBuf>, TreeHuggerError> {
-    let mut overrides = OverrideBuilder::new(root);
-    for input in inputs {
-        overrides.add(input)?;
-    }
-    for excluded_file in excluded_files {
-        overrides.add(&format!("!{}", excluded_file))?;
-    }
-
-    let overrides = overrides.build()?;
-    let mut files = Vec::new();
-
-    let walker = WalkBuilder::new(root)
-        .standard_filters(true)
-        .hidden(false)
-        .overrides(overrides)
-        .build();
-
-    for entry in walker {
-        let entry = entry.map_err(TreeHuggerError::Ignore)?;
-
-        let is_file = entry
-            .file_type()
-            .map(|file| file.is_file())
-            .unwrap_or(false);
-
-        if !is_file {
-            continue;
-        }
-
-        match language {
-            Some(lang) if ProgrammingLanguage::from_path(entry.path()) != Some(lang) => continue,
-            None if ProgrammingLanguage::from_path(entry.path()).is_none() => continue,
-            _ => {}
-        }
-
-        files.push(entry.into_path());
-    }
-
-    files.sort();
-
-    if files.is_empty() {
-        return Err(TreeHuggerError::NoSourceFiles {
-            path: root.to_path_buf(),
-        });
-    }
-
-    Ok(files)
+    )
 }
 
 fn summarize_file(
@@ -1452,31 +1449,31 @@ fn summarize_file(
                     summary.exports = exports.clone();
                 }
                 SymbolFilter::Prelude(filter) => {
-                    if filter.exports_by_file.is_empty() {
-                        // Backwards-compatible fallback for PRELUDE env-only filtering.
-                        summary.symbols = all_symbols
-                            .clone()
-                            .into_iter()
-                            .filter(|s| filter.names.contains(&s.name))
-                            .collect();
-                        summary.exports = exports
-                            .clone()
-                            .into_iter()
-                            .filter(|s| filter.names.contains(&s.name))
-                            .collect();
-                        summary.locals = locals
-                            .clone()
-                            .into_iter()
-                            .filter(|s| filter.names.contains(&s.name))
-                            .collect();
-                    } else if let Some(prelude_exports) = filter.exports_by_file.get(&index.file) {
+                    if let Some(prelude_exports) = filter.exports_by_file.get(&index.file) {
                         summary.symbols = prelude_exports.clone();
                         summary.exports = summary.symbols.clone();
                         summary.locals.clear();
                     } else {
-                        summary.symbols.clear();
-                        summary.exports.clear();
-                        summary.locals.clear();
+                        let name_filter = if filter.exports_by_file.is_empty() {
+                            &filter.names
+                        } else {
+                            &filter.env_only_names
+                        };
+                        summary.symbols = all_symbols
+                            .clone()
+                            .into_iter()
+                            .filter(|s| name_filter.contains(&s.name))
+                            .collect();
+                        summary.exports = exports
+                            .clone()
+                            .into_iter()
+                            .filter(|s| name_filter.contains(&s.name))
+                            .collect();
+                        summary.locals = locals
+                            .clone()
+                            .into_iter()
+                            .filter(|s| name_filter.contains(&s.name))
+                            .collect();
                     }
                 }
                 SymbolFilter::None => {
@@ -1496,8 +1493,24 @@ fn summarize_file(
         CommandKind::Imports => {
             summary.imports = imports;
         }
-        CommandKind::Lint { .. } => {
-            // Lint diagnostics are already populated above
+        CommandKind::Lint {
+            deny,
+            warn,
+            allow,
+            strict,
+            experimental_semantics,
+            ..
+        } => {
+            let registry = RuleRegistry::new();
+            summary.lint = apply_lint_policy(
+                &summary.lint,
+                &registry,
+                deny,
+                warn,
+                allow,
+                *strict,
+                *experimental_semantics,
+            );
         }
         CommandKind::Classes { .. } => {
             // Classes are handled separately in main()
@@ -1507,10 +1520,105 @@ fn summarize_file(
     Ok(summary)
 }
 
+fn add_external_lint_diagnostics(
+    summary: &mut FileSummary,
+    command: &CommandKind,
+    project_root: &Path,
+    options: &AnalysisOptions,
+    adapter_metadata: &mut Vec<AdapterMetadata>,
+) -> Result<(), TreeHuggerError> {
+    if !options.use_external_adapters
+        || !matches!(command, CommandKind::Lint { .. })
+        || !matches!(
+            summary.language,
+            ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript
+        )
+    {
+        return Ok(());
+    }
+
+    let adapter = OxlintAdapter::new();
+    let result = adapter
+        .run(
+            std::slice::from_ref(&summary.file),
+            project_root,
+            summary.language,
+            &AdapterConfig::default(),
+        )
+        .map_err(|source| TreeHuggerError::Io {
+            path: summary.file.clone(),
+            source: std::io::Error::other(source),
+        })?;
+
+    adapter_metadata.push(result.metadata.clone());
+
+    if !result.success {
+        return Ok(());
+    }
+
+    let registry = RuleRegistry::new();
+    let external_lint = result
+        .diagnostics
+        .into_iter()
+        .filter_map(lint_diagnostic_from_external)
+        .collect::<Vec<_>>();
+    let external_lint = apply_lint_policy(
+        &external_lint,
+        &registry,
+        &options.deny,
+        &options.warn,
+        &options.allow,
+        options.strict,
+        options.experimental_semantics,
+    );
+    summary.lint.extend(external_lint);
+    Ok(())
+}
+
+fn render_adapter_warnings(metadata: &[AdapterMetadata], config: &OutputConfig) {
+    let mut warned = HashSet::new();
+    for item in metadata.iter().filter(|item| !item.tool_available) {
+        if !warned.insert(item.tool_name.clone()) {
+            continue;
+        }
+        if config.use_colors {
+            eprintln!(
+                "{} external lint adapter '{}' is unavailable; native diagnostics were used",
+                "warning:".yellow(),
+                item.tool_name
+            );
+        } else {
+            eprintln!(
+                "warning: external lint adapter '{}' is unavailable; native diagnostics were used",
+                item.tool_name
+            );
+        }
+    }
+}
+
+fn lint_diagnostic_from_external(diagnostic: Diagnostic) -> Option<LintDiagnostic> {
+    if diagnostic.metadata.as_ref()?.source != tree_hugger::DiagnosticSource::ExternalTool {
+        return None;
+    }
+
+    Some(LintDiagnostic {
+        message: diagnostic.message,
+        range: diagnostic.range,
+        severity: diagnostic.severity,
+        rule: diagnostic.rule,
+        context: diagnostic.context,
+        metadata: diagnostic.metadata,
+    })
+}
+
 fn analyze_tree_file(
-    tree_file: &TreeFile,
+    mut tree_file: TreeFile,
+    options: &AnalysisOptions,
     cache: &InMemorySymbolCache,
+    in_process: &InProcessCache,
+    persistent: &Option<PersistentCache>,
 ) -> Result<FileSymbolIndex, TreeHuggerError> {
+    tree_file.experimental_semantics = options.experimental_semantics;
     let key = FileCacheKey {
         file_path: tree_file.file.clone(),
         language: tree_file.language,
@@ -1520,16 +1628,59 @@ fn analyze_tree_file(
             tree_hugger_version: env!("CARGO_PKG_VERSION").to_string(),
             grammar_fingerprint: tree_file.language.query_name().to_string(),
             query_fingerprint: "locals+imports+references".to_string(),
-            config_fingerprint: "default".to_string(),
+            config_fingerprint: options.fingerprint(),
         },
     };
+    let stable_key = key.stable_key();
 
-    if let Some(snapshot) = cache.get(&key) {
-        return Ok(snapshot.as_ref().clone().into());
+    // Try in-process cache first
+    if let Some(index) = in_process.get_symbol_index(&stable_key) {
+        return hydrate_diagnostics(&tree_file, index.as_ref().clone());
     }
 
+    // Try persistent cache second
+    if let Some(persistent) = persistent
+        && let Some(snapshot) = persistent.get::<SymbolSnapshot>(&stable_key)
+    {
+        let index: FileSymbolIndex = snapshot.into();
+        in_process.put_symbol_index(stable_key.clone(), symbol_cache_index(&index));
+        return hydrate_diagnostics(&tree_file, index);
+    }
+
+    // Try legacy in-memory cache third
+    if let Some(snapshot) = cache.get(&key) {
+        let index: FileSymbolIndex = snapshot.as_ref().clone().into();
+        let cache_index = symbol_cache_index(&index);
+        in_process.put_symbol_index(stable_key.clone(), cache_index.clone());
+        if let Some(persistent) = persistent {
+            let _ = persistent.put(&stable_key, &SymbolSnapshot::from(cache_index));
+        }
+        return hydrate_diagnostics(&tree_file, index);
+    }
+
+    // Miss: compute and store
     let index = tree_file.symbol_index_v2()?;
-    cache.put(SymbolSnapshot::from(index.clone()));
+    let cache_index = symbol_cache_index(&index);
+    let snapshot = SymbolSnapshot::from(cache_index.clone());
+    cache.put(snapshot.clone());
+    in_process.put_symbol_index(stable_key.clone(), cache_index);
+    if let Some(persistent) = persistent {
+        let _ = persistent.put(&stable_key, &snapshot);
+    }
+    Ok(index)
+}
+
+fn symbol_cache_index(index: &FileSymbolIndex) -> FileSymbolIndex {
+    let mut cache_index = index.clone();
+    cache_index.diagnostics.clear();
+    cache_index
+}
+
+fn hydrate_diagnostics(
+    tree_file: &TreeFile,
+    mut index: FileSymbolIndex,
+) -> Result<FileSymbolIndex, TreeHuggerError> {
+    index.diagnostics = tree_file.try_diagnostics()?;
     Ok(index)
 }
 
@@ -1567,6 +1718,9 @@ fn import_symbols_from_index(index: &FileSymbolIndex) -> Vec<ImportSymbol> {
             language: index.language,
             file: index.file.clone(),
             source: import.source.clone(),
+            // The v2 ImportRecord carries no re-export marker; the `unused-import`
+            // lint runs on the v1 `imported_symbols()` path, which sets this.
+            is_reexport: false,
         })
         .collect()
 }
@@ -1612,6 +1766,7 @@ fn diagnostics_from_index(index: &FileSymbolIndex) -> (Vec<LintDiagnostic>, Vec<
                 range: diagnostic.range.clone(),
                 severity: diagnostic.severity,
                 context: diagnostic.context.clone(),
+                metadata: diagnostic.metadata.clone(),
             }),
             DiagnosticKind::Lint | DiagnosticKind::Semantic => lint.push(LintDiagnostic {
                 message: diagnostic.message.clone(),
@@ -1619,32 +1774,12 @@ fn diagnostics_from_index(index: &FileSymbolIndex) -> (Vec<LintDiagnostic>, Vec<
                 severity: diagnostic.severity,
                 rule: diagnostic.rule.clone(),
                 context: diagnostic.context.clone(),
+                metadata: diagnostic.metadata.clone(),
             }),
         }
     }
 
     (lint, syntax)
-}
-
-fn symbol_from_prelude_export(
-    import: &ImportSymbol,
-    kind: SymbolKind,
-    doc_comment: Option<String>,
-    resolved_file: Option<PathBuf>,
-    resolved_range: Option<CodeRange>,
-) -> SymbolInfo {
-    SymbolInfo {
-        name: import.name.clone(),
-        kind,
-        range: resolved_range.unwrap_or_else(|| import.range.clone()),
-        language: import.language,
-        file: resolved_file.unwrap_or_else(|| import.file.clone()),
-        container_name: None,
-        container_kind: None,
-        doc_comment,
-        signature: None,
-        type_metadata: None,
-    }
 }
 
 fn render_symbol_doc_comment(comment: Option<&str>, config: &OutputConfig, indent: &str) {
@@ -1672,13 +1807,8 @@ fn render_symbol_doc_comment(comment: Option<&str>, config: &OutputConfig, inden
     }
 }
 
-fn render_summary(
-    summary: &FileSummary,
-    command: &CommandKind,
-    config: &OutputConfig,
-    display_root: Option<&Path>,
-) {
-    // Render file header with optional hyperlink
+/// Prints the `path (Language)` file header, with an optional hyperlink.
+fn print_file_header(summary: &FileSummary, config: &OutputConfig, display_root: Option<&Path>) {
     let file_display = display_path(&summary.file, display_root);
     let header = if config.use_hyperlinks {
         hyperlink(&summary.file, 1, &file_display)
@@ -1695,29 +1825,138 @@ fn render_summary(
     } else {
         println!("{} ({})", header, summary.language);
     }
+}
 
-    match command {
-        CommandKind::Imports => render_imports(&summary.imports, config),
-        CommandKind::Functions | CommandKind::Types | CommandKind::Symbols => {
-            render_symbols(&summary.symbols, config)
-        }
-        CommandKind::Lint {
-            lint_only,
-            syntax_only,
-        } => render_diagnostics_filtered(
+/// Renders one file's results, returning whether anything was printed.
+///
+/// When `suppress_clean_lint` is set (multi-file lint scans), a file with no
+/// visible diagnostics is skipped entirely — header included — so real findings
+/// are not buried under a `(no diagnostics)` line per clean file. A single-file
+/// lint still prints `(no diagnostics)` as explicit confirmation.
+fn render_summary(
+    summary: &FileSummary,
+    command: &CommandKind,
+    config: &OutputConfig,
+    display_root: Option<&Path>,
+    suppress_clean_lint: bool,
+) -> bool {
+    if let CommandKind::Lint {
+        lint_only,
+        syntax_only,
+        deny,
+        warn,
+        allow,
+        strict,
+        experimental_semantics,
+        ..
+    } = command
+    {
+        let registry = RuleRegistry::new();
+        let filtered = apply_lint_policy(
             &summary.lint,
+            &registry,
+            deny,
+            warn,
+            allow,
+            *strict,
+            *experimental_semantics,
+        );
+        let has_visible =
+            (!*syntax_only && !filtered.is_empty()) || (!*lint_only && !summary.syntax.is_empty());
+        if suppress_clean_lint && !has_visible {
+            return false;
+        }
+
+        print_file_header(summary, config, display_root);
+        render_diagnostics_filtered(
+            &filtered,
             &summary.syntax,
             &summary.file,
             config,
             *lint_only,
             *syntax_only,
-        ),
+        );
+        println!();
+        return true;
+    }
+
+    print_file_header(summary, config, display_root);
+    match command {
+        CommandKind::Imports => render_imports(&summary.imports, config),
+        CommandKind::Functions | CommandKind::Types | CommandKind::Symbols => {
+            render_symbols(&summary.symbols, config)
+        }
+        CommandKind::Lint { .. } => unreachable!("lint is handled above"),
         CommandKind::Classes { .. } => {
             // Classes are rendered separately
         }
     }
 
     println!();
+    true
+}
+
+fn render_rule_list(format: OutputFormat) -> Result<(), TreeHuggerError> {
+    let rules = rule_list_items();
+
+    match format {
+        OutputFormat::Json => {
+            let json =
+                serde_json::to_string_pretty(&rules).map_err(|source| TreeHuggerError::Io {
+                    path: PathBuf::from("<stdout>"),
+                    source: std::io::Error::other(source),
+                })?;
+            println!("{json}");
+        }
+        OutputFormat::Pretty | OutputFormat::Plain => {
+            for rule in rules {
+                println!(
+                    "{}\t{}\t{}\t{}\t{}\t{}",
+                    rule.id,
+                    rule.category,
+                    severity_label(rule.default_severity),
+                    rule.confidence,
+                    if rule.enabled_by_default {
+                        "default-on"
+                    } else {
+                        "default-off"
+                    },
+                    rule.title
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn rule_list_items() -> Vec<RuleListItem> {
+    let registry = RuleRegistry::new();
+    let mut ids = registry.rule_ids().cloned().collect::<Vec<_>>();
+    ids.sort();
+
+    ids.into_iter()
+        .filter_map(|id| registry.get(&id))
+        .map(|rule| RuleListItem {
+            id: rule.id.clone(),
+            title: rule.title.clone(),
+            category: rule.category.to_string(),
+            default_severity: rule.default_severity,
+            confidence: rule.confidence.to_string(),
+            enabled_by_default: rule.enabled_by_default,
+            requires_experimental_semantics: rule.requires_experimental_semantics,
+            languages: rule.languages.clone(),
+            aliases: rule.aliases.clone(),
+        })
+        .collect()
+}
+
+fn severity_label(severity: DiagnosticSeverity) -> &'static str {
+    match severity {
+        DiagnosticSeverity::Info => "info",
+        DiagnosticSeverity::Warning => "warning",
+        DiagnosticSeverity::Error => "error",
+    }
 }
 
 fn render_symbol_summaries(
@@ -2365,6 +2604,79 @@ fn render_source_context(context: &SourceContext, line_number: usize, config: &O
     }
 }
 
+/// Applies CLI policy to lint diagnostics.
+///
+/// Filters out experimental semantic rules unless `--experimental-semantics`
+/// is enabled, and adjusts severity based on `--deny`, `--warn`, `--allow`,
+/// and `--strict` selectors.
+fn apply_lint_policy(
+    lint: &[LintDiagnostic],
+    registry: &RuleRegistry,
+    deny: &[RuleSelector],
+    warn: &[RuleSelector],
+    allow: &[RuleSelector],
+    strict: bool,
+    experimental_semantics: bool,
+) -> Vec<LintDiagnostic> {
+    use tree_hugger::rule_registry::apply_policy;
+
+    lint.iter()
+        .cloned()
+        .filter_map(|mut diagnostic| {
+            let rule_id = diagnostic.rule.as_deref()?;
+            let mut rule = registry.get_or_default(rule_id);
+            if !registry.has_rule(rule_id)
+                && let Some(metadata) = &diagnostic.metadata
+            {
+                rule.default_severity = metadata.default_severity;
+                rule.confidence = metadata.confidence;
+                rule.category = metadata.category;
+            }
+
+            if rule.requires_experimental_semantics && !experimental_semantics {
+                return None;
+            }
+
+            // Off-by-default rules (e.g. the `restriction` category) are silent
+            // unless explicitly opted in by a `--warn`/`--deny` selector that
+            // targets them. `--allow` only demotes severity and `--strict` only
+            // escalates warnings; neither enables a disabled rule. Experimental
+            // rules are exempt — they are gated above by `--experimental-semantics`.
+            let explicitly_enabled = warn
+                .iter()
+                .chain(deny.iter())
+                .any(|selector| selector.matches(&rule));
+            if !rule.requires_experimental_semantics
+                && !rule.enabled_by_default
+                && !explicitly_enabled
+            {
+                return None;
+            }
+
+            let effective = apply_policy(&rule, deny, warn, allow, strict);
+            diagnostic.severity = effective;
+
+            let mut metadata = diagnostic.metadata.clone().unwrap_or_default();
+            metadata.category = rule.category;
+            metadata.confidence = rule.confidence;
+            if metadata.source != tree_hugger::DiagnosticSource::ExternalTool {
+                metadata.source = if rule.requires_experimental_semantics {
+                    tree_hugger::DiagnosticSource::SemanticAnalysis
+                } else {
+                    tree_hugger::DiagnosticSource::TreeSitterQuery
+                };
+            }
+            metadata.default_severity = rule.default_severity;
+            metadata.effective_severity = effective;
+            metadata.is_enabled_by_default = rule.enabled_by_default;
+            metadata.requires_experimental_semantics = rule.requires_experimental_semantics;
+            diagnostic.metadata = Some(metadata);
+
+            Some(diagnostic)
+        })
+        .collect()
+}
+
 /// Renders diagnostics with optional filtering by kind.
 ///
 /// When `lint_only` is true, shows only Lint and Semantic diagnostics.
@@ -2511,315 +2823,6 @@ fn render_imports(imports: &[ImportSymbol], config: &OutputConfig) {
             println!("  - {} {}", import_display, location_display);
         }
     }
-}
-
-fn group_imports(imports: &[ImportSymbol]) -> Vec<Vec<&ImportSymbol>> {
-    let mut groups: BTreeMap<(usize, usize), Vec<&ImportSymbol>> = BTreeMap::new();
-    for import in imports {
-        let key = import
-            .statement_range
-            .as_ref()
-            .map(|range| (range.start_line, range.start_column))
-            .unwrap_or((import.range.start_line, import.range.start_column));
-        groups.entry(key).or_default().push(import);
-    }
-
-    let mut result = Vec::new();
-    for (_, mut group) in groups {
-        group.sort_by_key(|import| (import.range.start_line, import.range.start_column));
-        result.push(group);
-    }
-
-    result
-}
-
-fn dedupe_import_group<'a>(imports: &'a [&'a ImportSymbol]) -> Vec<&'a ImportSymbol> {
-    let mut alias_originals = HashSet::new();
-    for import in imports {
-        if import.alias.is_some()
-            && let Some(original) = import.original_name.as_deref()
-        {
-            alias_originals.insert((import.source.as_deref(), original));
-        }
-    }
-
-    let mut result = Vec::new();
-    for import in imports {
-        let is_alias_shadow = import.alias.is_none()
-            && import.original_name.is_none()
-            && alias_originals.contains(&(import.source.as_deref(), import.name.as_str()));
-        if is_alias_shadow {
-            continue;
-        }
-        result.push(*import);
-    }
-
-    result
-}
-
-fn format_import_locations(imports: &[&ImportSymbol]) -> (String, usize) {
-    let mut positions: Vec<(usize, usize)> = imports
-        .iter()
-        .map(|import| (import.range.start_line, import.range.start_column))
-        .collect();
-    positions.sort();
-
-    let (first_line, _) = positions.first().copied().unwrap_or((1, 1));
-    let location = if positions.iter().all(|(line, _)| *line == first_line) {
-        let columns = positions
-            .iter()
-            .map(|(_, column)| column.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("[{}:{}]", first_line, columns)
-    } else {
-        let entries = positions
-            .iter()
-            .map(|(line, column)| format!("{}:{}", line, column))
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("[{}]", entries)
-    };
-
-    (location, first_line)
-}
-
-fn format_import_group_display(imports: &[&ImportSymbol]) -> String {
-    let language = imports
-        .first()
-        .map(|import| import.language)
-        .unwrap_or(ProgrammingLanguage::Rust);
-    match language {
-        ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => {
-            format_ecma_import_group(imports)
-        }
-        ProgrammingLanguage::Python => format_python_import_group(imports),
-        ProgrammingLanguage::Rust => format_rust_import_group(imports),
-        ProgrammingLanguage::Go => format_go_import_group(imports),
-        ProgrammingLanguage::Java => format_java_import_group(imports),
-        ProgrammingLanguage::CSharp => format_csharp_import_group(imports),
-        ProgrammingLanguage::Php => format_php_import_group(imports),
-        ProgrammingLanguage::Scala => format_scala_import_group(imports),
-        ProgrammingLanguage::Swift => format_swift_import_group(imports),
-        _ => format_generic_import_group(imports),
-    }
-}
-
-fn format_ecma_import_group(imports: &[&ImportSymbol]) -> String {
-    let source = imports.first().and_then(|import| import.source.as_deref());
-    let is_namespace = imports.len() == 1
-        && imports[0]
-            .original_name
-            .as_deref()
-            .is_some_and(|name| name == "*");
-
-    if is_namespace {
-        let alias = &imports[0].name;
-        if let Some(source) = source {
-            return format!("import * as {} from \"{}\"", alias, source);
-        }
-        return format!("import * as {}", alias);
-    }
-
-    let specs = imports
-        .iter()
-        .map(|import| {
-            if let Some(alias) = import.alias.as_deref() {
-                let original = import.original_name.as_deref().unwrap_or(&import.name);
-                format!("{} as {}", original, alias)
-            } else {
-                import.name.clone()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    if let Some(source) = source {
-        format!("import {{ {} }} from \"{}\"", specs, source)
-    } else {
-        format!("import {{ {} }}", specs)
-    }
-}
-
-fn format_python_import_group(imports: &[&ImportSymbol]) -> String {
-    let sources: HashSet<&str> = imports
-        .iter()
-        .filter_map(|import| import.source.as_deref())
-        .collect();
-
-    let specs = |import: &ImportSymbol| {
-        if let Some(alias) = import.alias.as_deref() {
-            let original = import.original_name.as_deref().unwrap_or(&import.name);
-            format!("{} as {}", original, alias)
-        } else {
-            import.name.clone()
-        }
-    };
-
-    if sources.len() == 1 {
-        let source = *sources.iter().next().unwrap();
-        let is_import_stmt = imports.iter().all(|import| {
-            import.source.as_deref() == Some(source)
-                && (import.name == source || import.original_name.as_deref() == Some(source))
-        });
-        let spec_list = imports
-            .iter()
-            .map(|import| specs(import))
-            .collect::<Vec<_>>()
-            .join(", ");
-        if is_import_stmt {
-            format!("import {}", spec_list)
-        } else {
-            format!("from {} import {}", source, spec_list)
-        }
-    } else {
-        let spec_list = imports
-            .iter()
-            .map(|import| specs(import))
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("import {}", spec_list)
-    }
-}
-
-fn format_rust_import_group(imports: &[&ImportSymbol]) -> String {
-    let source = imports.first().and_then(|import| import.source.as_deref());
-    let specs = imports
-        .iter()
-        .map(|import| {
-            if let Some(alias) = import.alias.as_deref() {
-                let original = import.original_name.as_deref().unwrap_or(&import.name);
-                let stripped = source
-                    .and_then(|src| original.strip_prefix(&format!("{}::", src)))
-                    .unwrap_or(original);
-                format!("{} as {}", stripped, alias)
-            } else {
-                import.name.clone()
-            }
-        })
-        .collect::<Vec<_>>();
-
-    if let Some(source) = source {
-        if specs.len() == 1 {
-            let spec = &specs[0];
-            if spec.contains("::") {
-                format!("use {}", spec)
-            } else {
-                format!("use {}::{}", source, spec)
-            }
-        } else {
-            format!("use {}::{{{}}}", source, specs.join(", "))
-        }
-    } else {
-        format!("use {}", specs.join(", "))
-    }
-}
-
-fn format_go_import_group(imports: &[&ImportSymbol]) -> String {
-    let specs = imports
-        .iter()
-        .map(|import| {
-            let path = import.source.as_deref().unwrap_or(&import.name);
-            let quoted = format!("\"{}\"", path);
-            if let Some(alias) = import.alias.as_deref() {
-                format!("{} {}", alias, quoted)
-            } else {
-                quoted
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    format!("import {}", specs)
-}
-
-fn format_java_import_group(imports: &[&ImportSymbol]) -> String {
-    let specs = imports
-        .iter()
-        .map(|import| {
-            if import.original_name.as_deref() == Some("*") {
-                if let Some(source) = import.source.as_deref() {
-                    format!("{}.*", source)
-                } else {
-                    "*".to_string()
-                }
-            } else if let Some(source) = import.source.as_deref() {
-                format!("{}.{}", source, import.name)
-            } else {
-                import.name.clone()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    format!("import {}", specs)
-}
-
-fn format_csharp_import_group(imports: &[&ImportSymbol]) -> String {
-    let specs = imports
-        .iter()
-        .map(|import| import.source.as_deref().unwrap_or(&import.name).to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    format!("using {}", specs)
-}
-
-fn format_php_import_group(imports: &[&ImportSymbol]) -> String {
-    let specs = imports
-        .iter()
-        .map(|import| {
-            let base = import.source.as_deref().unwrap_or(&import.name);
-            if let Some(alias) = import.alias.as_deref() {
-                format!("{} as {}", base, alias)
-            } else {
-                base.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    format!("use {}", specs)
-}
-
-fn format_scala_import_group(imports: &[&ImportSymbol]) -> String {
-    if let Some(source) = imports.first().and_then(|import| import.source.as_deref()) {
-        return format!("import {}", source);
-    }
-
-    let specs = imports
-        .iter()
-        .map(|import| {
-            if let Some(alias) = import.alias.as_deref() {
-                let original = import.original_name.as_deref().unwrap_or(&import.name);
-                format!("{} => {}", original, alias)
-            } else {
-                import.name.clone()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    format!("import {}", specs)
-}
-
-fn format_swift_import_group(imports: &[&ImportSymbol]) -> String {
-    let specs = imports
-        .iter()
-        .map(|import| import.source.as_deref().unwrap_or(&import.name).to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    format!("import {}", specs)
-}
-
-fn format_generic_import_group(imports: &[&ImportSymbol]) -> String {
-    let specs = imports
-        .iter()
-        .map(|import| import.name.clone())
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("import {}", specs)
 }
 
 /// Extracts class summaries from a file.
@@ -3104,5 +3107,283 @@ fn render_field_section(
         }
 
         render_symbol_doc_comment(field.doc_comment.as_deref(), config, "        ");
+    }
+}
+
+// ============================================================================
+// God-files rendering
+// ============================================================================
+
+/// Build the [`Terminal`] used to render the god-files report.
+///
+/// A non-styling terminal (no color, no OSC8) is used for `--plain`/`--json`
+/// so `Prose` emits clean, escape-free bytes; the styled path detects real
+/// capabilities so color and hyperlink degradation are capability-aware.
+fn god_terminal(config: &OutputConfig) -> Terminal {
+    if !config.use_colors {
+        Terminal::builder()
+            .is_tty(false)
+            .color_depth(ColorDepth::None)
+            .osc_link_support(false)
+            .build()
+    } else if color_forced() {
+        // Forced color may run without a real TTY (CI, captured output, tests);
+        // an optimistic terminal guarantees full color + OSC8 capabilities.
+        Terminal::new_optimistic(120)
+    } else {
+        Terminal::new()
+    }
+}
+
+/// Render a single line of `Prose` markup at a fixed indentation.
+///
+/// Indentation is applied outside the markup so leading whitespace is never
+/// consumed by the markup parser, and word-wrap is disabled to preserve the
+/// report's hand-laid columns. `plain` strips any residual escapes (emphasis
+/// SGR is not gated by color depth) so `--plain`/`--json` output is clean.
+fn prose_line(term: &Terminal, plain: bool, indent: usize, markup: &str) {
+    let rendered = Prose::new(markup)
+        .with_word_wrap(WordWrap::None)
+        .render(term);
+    let rendered = if plain {
+        strip_escape_codes(rendered)
+    } else {
+        rendered
+    };
+    println!("{}{}", " ".repeat(indent), rendered);
+}
+
+/// Build a percent-encoded `file://` URL for an absolute path.
+fn file_url(absolute_path: &str) -> String {
+    const FILE_URL_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'/').remove(b':');
+    let encoded = utf8_percent_encode(absolute_path, FILE_URL_ENCODE_SET);
+    format!("file://{encoded}")
+}
+
+/// Render the full god-files report via biscuit-terminal `Prose`.
+fn render_god_files(analyses: &[GodAnalysis], config: &OutputConfig, high_risk_only: bool) {
+    let term = god_terminal(config);
+    let plain = !config.use_colors;
+
+    let high_count = analyses.iter().filter(|a| a.risk == RiskBand::High).count();
+    let moderate_count = analyses
+        .iter()
+        .filter(|a| a.risk == RiskBand::Moderate)
+        .count();
+
+    // Report heading: two count lines, always printed (including the 0/0 case
+    // for an empty scan), so the band totals are always visible.
+    prose_line(
+        &term,
+        plain,
+        0,
+        &format!(
+            "- There are <yellow>{moderate_count}</yellow> files with moderate risk of being considered _god files_"
+        ),
+    );
+    prose_line(
+        &term,
+        plain,
+        0,
+        &format!(
+            "- There are <red>{high_count}</red> files with <b>high risk</b> of being considered _god files_"
+        ),
+    );
+
+    // High-risk section (omitted entirely when empty).
+    if high_count > 0 {
+        println!();
+        prose_line(&term, plain, 0, "<b><uu>High risk</uu></b>");
+        for analysis in analyses.iter().filter(|a| a.risk == RiskBand::High) {
+            render_god_analysis(&term, plain, analysis);
+        }
+    }
+
+    // Moderate-risk section. Suppressed in full (heading and bodies) under
+    // `--high-risk`; otherwise omitted only when empty.
+    if !high_risk_only && moderate_count > 0 {
+        println!();
+        prose_line(&term, plain, 0, "<b><uu>Moderate risk</uu></b>");
+        for analysis in analyses.iter().filter(|a| a.risk == RiskBand::Moderate) {
+            render_god_analysis(&term, plain, analysis);
+        }
+    }
+}
+
+/// Render a single god-file analysis.
+fn render_god_analysis(term: &Terminal, plain: bool, analysis: &GodAnalysis) {
+    let color = match analysis.risk {
+        RiskBand::High => "red",
+        RiskBand::Moderate => "yellow",
+    };
+
+    let rel = Prose::escape_text(&analysis.relative_path.display().to_string());
+    let label = if term.osc_link_support {
+        let url = file_url(analysis.file.raw());
+        format!("<a href={}>{rel}</a>", Prose::quoted_attr(&url))
+    } else {
+        rel
+    };
+
+    prose_line(
+        term,
+        plain,
+        0,
+        &format!(
+            "- the {label} file is <b><{color}>{sloc}</{color}></b> lines of code",
+            sloc = analysis.effective_sloc
+        ),
+    );
+
+    // Diagnostic note for degraded (e.g. unparseable) analyses.
+    if let Some(note) = &analysis.note {
+        prose_line(
+            term,
+            plain,
+            2,
+            &format!("- <dim>note: {}</dim>", Prose::escape_text(note)),
+        );
+    }
+
+    // Largest blocks.
+    if !analysis.blocks.is_empty() {
+        prose_line(
+            term,
+            plain,
+            2,
+            "- the largest blocks in this file are composed by these symbols:",
+        );
+        for block in &analysis.blocks {
+            render_symbol_block(term, plain, block);
+        }
+        if analysis.blocks_truncated > 0 {
+            prose_line(
+                term,
+                plain,
+                4,
+                &format!("- <dim>…and {} more</dim>", analysis.blocks_truncated),
+            );
+        }
+    }
+
+    // Compact signals line.
+    prose_line(
+        term,
+        plain,
+        2,
+        &format!(
+            "- <dim>top-level symbols: {tl} · max depth: {depth} · imports: {imports} · TODO/FIXME: {todo} · comments: {density:.0}%</dim>",
+            tl = analysis.top_level_symbol_count,
+            depth = analysis.max_nesting_depth,
+            imports = analysis.import_fan_out,
+            todo = analysis.todo_fixme_count,
+            density = analysis.comment_density * 100.0,
+        ),
+    );
+
+    // Refactor hints.
+    for hint in &analysis.refactor_hints {
+        prose_line(
+            term,
+            plain,
+            2,
+            &format!("- <dim>{}</dim>", format_refactor_hint(hint)),
+        );
+    }
+}
+
+/// Render a single symbol block line plus any container call-out.
+fn render_symbol_block(term: &Terminal, plain: bool, block: &SymbolBlock) {
+    let kind = block.kind.to_string();
+    let kind_markup = match color_tag_for_kind(block.kind) {
+        Some(tag) => format!("<{tag}>{kind}</{tag}>"),
+        None => kind,
+    };
+    let name = Prose::escape_text(&block.name);
+
+    let members = match &block.many_members {
+        Some(callout) => format!("  ({} members)", callout.member_count),
+        None => String::new(),
+    };
+    let doc = match &block.doc_summary {
+        Some(summary) => format!(" <dim>— {}</dim>", Prose::escape_text(summary)),
+        None => String::new(),
+    };
+
+    prose_line(
+        term,
+        plain,
+        4,
+        &format!(
+            "- {kind_markup} <b>{name}</b>  <dim>[{start}–{end}]</dim>  {sloc} sloc{members}{doc}",
+            start = block.start_line,
+            end = block.end_line,
+            sloc = block.sloc,
+        ),
+    );
+
+    if let Some(callout) = &block.many_members {
+        for member in &callout.members {
+            let m_kind = member.kind.to_string();
+            let m_kind_markup = match color_tag_for_kind(member.kind) {
+                Some(tag) => format!("<{tag}>{m_kind}</{tag}>"),
+                None => m_kind,
+            };
+            let m_name = Prose::escape_text(&member.name);
+            prose_line(
+                term,
+                plain,
+                6,
+                &format!("- {m_kind_markup} {m_name}  {} sloc", member.sloc),
+            );
+        }
+        let remaining = callout.member_count.saturating_sub(callout.members.len());
+        if remaining > 0 {
+            prose_line(term, plain, 6, &format!("- <dim>…and {remaining} more</dim>"));
+        }
+    }
+}
+
+/// Prose color tag for a symbol kind, mirroring [`style_for_kind`].
+fn color_tag_for_kind(kind: SymbolKind) -> Option<&'static str> {
+    match kind {
+        SymbolKind::Function | SymbolKind::Method => Some("green"),
+        SymbolKind::Type | SymbolKind::Class | SymbolKind::Interface => Some("magenta"),
+        SymbolKind::Enum | SymbolKind::Field => Some("cyan"),
+        SymbolKind::Trait | SymbolKind::Namespace | SymbolKind::Module => Some("yellow"),
+        SymbolKind::Variable | SymbolKind::Parameter => Some("blue"),
+        SymbolKind::Macro => Some("red"),
+        SymbolKind::Constant => Some("bright-blue"),
+        SymbolKind::Unknown => None,
+    }
+}
+
+/// Format a refactor hint as a short human-readable sentence (spec §5.3).
+fn format_refactor_hint(hint: &RefactorHint) -> String {
+    match hint {
+        RefactorHint::DominatedBySingleSymbol { name, share } => {
+            format!(
+                "likely refactor: `{}` holds {:.0}% of the code — split by responsibility",
+                Prose::escape_text(name),
+                share * 100.0
+            )
+        }
+        RefactorHint::ManyUnrelatedTopLevel { count } => {
+            format!("likely refactor: {count} unrelated top-level symbols — split by responsibility")
+        }
+        RefactorHint::DeeplyNested { depth } => {
+            format!("likely refactor: deeply nested (depth {depth}) — extract / flatten")
+        }
+        RefactorHint::HighCoupling { import_fan_out } => {
+            format!(
+                "likely refactor: high coupling ({import_fan_out} imports) — expect wide refactor blast radius"
+            )
+        }
+        RefactorHint::LowCodeDensity { comment_density } => {
+            format!(
+                "likely refactor: low code density ({:.0}% comments) — mostly comments/docs",
+                comment_density * 100.0
+            )
+        }
     }
 }

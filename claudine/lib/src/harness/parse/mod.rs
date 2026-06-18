@@ -280,3 +280,127 @@ pub fn inline_writability_pre_check(source_path: &Path) -> ValidationRule {
         source: None,
     }
 }
+
+/// Whether the effective plan is for inline composition (which needs the
+/// system-owned writability pre-check) or direct composition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EffectivePlanMode {
+    /// Direct composition: no file mutation, no writability pre-check.
+    Direct,
+    /// Inline composition: prepend the system-owned writability pre-check.
+    Inline,
+}
+
+/// Finalize a parsed harness plan into the effective plan used by the
+/// execution loop.
+///
+/// For inline composition, this prepends a system-owned writability
+/// pre-check so handler recovery paths can respond to permission failures.
+/// For direct composition, the plan is returned unchanged.
+///
+/// Preserves author rule order: the system rule is inserted at the front,
+/// and any authored `pre_checks` keep their relative order after it.
+pub fn finalize_effective_plan(
+    mut plan: HarnessPlan,
+    mode: EffectivePlanMode,
+    source_path: &Path,
+) -> HarnessPlan {
+    if matches!(mode, EffectivePlanMode::Inline) {
+        plan.pre_checks.insert(0, inline_writability_pre_check(source_path));
+    }
+    plan
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use serde_json::json;
+
+    use super::*;
+
+    fn test_source_path() -> PathBuf {
+        PathBuf::from("/tmp/test-prompt.md")
+    }
+
+    fn bare_plan(source_path: &Path) -> HarnessPlan {
+        HarnessPlan {
+            source_path: source_path.to_path_buf(),
+            timeout: None,
+            step_timeout: None,
+            timeout_warn: None,
+            step_timeout_warn: None,
+            pre_checks: Vec::new(),
+            post_checks: Vec::new(),
+            handlers: Default::default(),
+            programmatic_handler: None,
+        }
+    }
+
+    #[test]
+    fn direct_bare_plan_unchanged() {
+        let source = test_source_path();
+        let plan = bare_plan(&source);
+        let effective = finalize_effective_plan(plan, EffectivePlanMode::Direct, &source);
+
+        assert_eq!(effective.timeout, None);
+        assert_eq!(effective.step_timeout, None);
+        assert_eq!(effective.timeout_warn, None);
+        assert_eq!(effective.step_timeout_warn, None);
+        assert!(effective.pre_checks.is_empty());
+        assert!(effective.post_checks.is_empty());
+        assert!(effective.programmatic_handler.is_none());
+    }
+
+    #[test]
+    fn inline_bare_plan_adds_writability_pre_check() {
+        let source = test_source_path();
+        let plan = bare_plan(&source);
+        let effective = finalize_effective_plan(plan, EffectivePlanMode::Inline, &source);
+
+        assert_eq!(effective.pre_checks.len(), 1);
+        let rule = &effective.pre_checks[0];
+        assert_eq!(rule.id.0, u32::MAX);
+        assert!(matches!(rule.event, ValidationEvent::HasWritePermission));
+        assert!(matches!(
+            &rule.kind,
+            ValidationKind::HasWritePermission { file } if file == &source
+        ));
+        assert!(rule.source.is_none());
+        assert!(effective.post_checks.is_empty());
+    }
+
+    #[test]
+    fn inline_parsed_plan_preserves_author_order() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("prompt.md");
+        let frontmatter = "---\npre_checks:\n  - file_exists: a.txt\n  - file_exists: b.txt\n---\n";
+        std::fs::write(&source, frontmatter).unwrap();
+
+        let ctx = HarnessResolutionContext {
+            source_path: &source,
+            repo_root: Some(tmp.path()),
+        };
+        let frontmatter_value = json!({
+            "pre_checks": [
+                { "file_exists": "a.txt" },
+                { "file_exists": "b.txt" },
+            ]
+        });
+
+        let plan = parse_harness_plan(&frontmatter_value, &source, &ctx).unwrap();
+        assert_eq!(plan.pre_checks.len(), 2);
+        assert_eq!(plan.pre_checks[0].id.0, 0);
+        assert_eq!(plan.pre_checks[1].id.0, 1);
+
+        let effective = finalize_effective_plan(plan, EffectivePlanMode::Inline, &source);
+        assert_eq!(effective.pre_checks.len(), 3);
+        assert_eq!(effective.pre_checks[0].id.0, u32::MAX);
+        assert!(matches!(
+            effective.pre_checks[0].kind,
+            ValidationKind::HasWritePermission { .. }
+        ));
+        assert_eq!(effective.pre_checks[1].id.0, 0);
+        assert_eq!(effective.pre_checks[2].id.0, 1);
+    }
+}

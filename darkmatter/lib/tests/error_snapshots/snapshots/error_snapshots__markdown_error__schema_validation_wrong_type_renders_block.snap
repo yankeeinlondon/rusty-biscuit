@@ -1,0 +1,11 @@
+---
+source: darkmatter/lib/tests/error_snapshots/markdown_error.rs
+expression: out
+---
+⤫ MarkdownError: schema validation failed
+┃ 
+┃ /tmp/test/config.md
+┃ type count: 42 is not of type "string" at 4:8
+┃ 
+┃ Correct the frontmatter so it satisfies the declared $schema (or
+┃ baseline schema).

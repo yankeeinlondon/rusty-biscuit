@@ -254,6 +254,13 @@ fn is_lua_error_call(node: Node, source: &str) -> bool {
 /// Returns nodes that appear after the terminal statement within the same block.
 /// This function walks up the parent chain to find the containing block, then
 /// looks for siblings after the statement containing the terminal expression.
+///
+/// ## Same-block post-terminal contract
+///
+/// Dead code is detected only within the same block as the terminal statement.
+/// A terminal statement inside a nested control-flow construct (e.g., an
+/// `if` branch, a `match` arm, or a closure) only affects its own immediate
+/// block, not the enclosing function or method body.
 pub fn find_dead_code_after<'tree>(
     terminal: Node<'tree>,
     _language: ProgrammingLanguage,
@@ -271,6 +278,13 @@ pub fn find_dead_code_after<'tree>(
         };
 
         let parent_kind = parent.kind();
+
+        // Stop at control-flow boundaries: a terminal inside an if/match/loop
+        // arm only affects that arm, not the enclosing function.
+        if is_control_flow_boundary(parent_kind) {
+            return dead_nodes;
+        }
+
         let is_block = parent_kind.contains("block")
             || parent_kind.contains("body")
             || parent_kind.contains("compound")
@@ -303,6 +317,33 @@ pub fn find_dead_code_after<'tree>(
         // Move up the tree: current becomes the node we just checked
         current = parent;
     }
+}
+
+/// Checks if a node kind represents a control-flow boundary.
+///
+/// Terminal statements inside these constructs do not propagate dead-code
+/// detection to their enclosing scope.
+fn is_control_flow_boundary(kind: &str) -> bool {
+    matches!(
+        kind,
+        "if_expression"
+            | "if_statement"
+            | "match_expression"
+            | "match_arm"
+            | "for_expression"
+            | "for_statement"
+            | "while_expression"
+            | "while_statement"
+            | "loop_expression"
+            | "do_statement"
+            | "closure_expression"
+            | "arrow_function"
+            | "function_expression"
+            | "lambda"
+            | "try_statement"
+            | "catch_clause"
+            | "finally_clause"
+    )
 }
 
 #[cfg(test)]

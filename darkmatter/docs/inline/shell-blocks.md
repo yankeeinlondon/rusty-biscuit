@@ -31,10 +31,11 @@ Shell blocks use **key-value** parameter syntax (not flag syntax like `::shell`)
 | `enrich_error` | `enrich_error="extra context"` | Add context to unhandled error messages |
 | `enrich_error_on` | `enrich_error_on="1,context"` | Add context only for exit code 1 |
 | `timeout` | `timeout=5` | Override default timeout (seconds) for all commands in block |
+| `no_cache` | `no_cache=true` | Bypass the per-compose command cache; every command in the block executes fresh at each occurrence |
 
 > **Note:** Do not use `--param` or `::param:value` syntax. Shell blocks require
 > `param="value"` syntax. Using the wrong style will produce a targeted error
-> hint.
+> hint — `::shell-block --no-cache` is a parse error; use `no_cache=true`.
 
 ## Command Body Rules
 
@@ -46,13 +47,18 @@ Shell blocks use **key-value** parameter syntax (not flag syntax like `::shell`)
 
 ## Output Rendering
 
-The combined output of all commands follows these rules:
+Each command's combined output (stdout + stderr) is concatenated **verbatim**.
+The only transformation a shell block applies to captured output is the
+container indentation re-applied at the splice boundary, so output stays nested
+under a surrounding list item or block quote. Nothing is trimmed, dropped, or
+otherwise normalized:
 
-- Each command's output is trimmed
-- Empty command outputs are dropped entirely
-- One newline is appended after each non-empty command output
-- One blank line is inserted between non-empty command outputs
-- If all outputs are empty, the block renders as empty string
+- Leading and trailing whitespace, line endings, embedded code fences, and
+  Unicode content are preserved byte-for-byte.
+- Separation between commands comes from each command's own trailing newline,
+  not an inserted blank line. A command that emits no trailing newline has the
+  next command's output appended directly.
+- If every command produces empty output, the block renders as an empty string.
 
 ## Example
 
@@ -63,11 +69,10 @@ echo "Second command"
 ::end-block
 ```
 
-Renders as:
+Renders as (each `echo` supplies its own trailing newline):
 
 ```
 First command
-
 Second command
 ```
 
@@ -138,9 +143,9 @@ echo "detailed info"
 |---------|-----------|----------------|
 | Commands | Single | Multiple |
 | Parameters | Flag syntax (`--param`) | Key-value (`param="value"`) |
-| Output | Combined stdout + stderr | Trimmed, blank-line separated |
+| Output | Combined stdout + stderr | Per-command combined output, concatenated verbatim |
 | Error scope | Per-command | Per-command within block |
-| Empty output | Removed entirely | Dropped (no placeholder) |
+| Empty output | Removed entirely | Contributes nothing (no placeholder) |
 
 ---
 

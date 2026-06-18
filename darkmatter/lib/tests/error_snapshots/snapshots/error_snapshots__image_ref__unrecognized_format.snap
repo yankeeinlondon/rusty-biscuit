@@ -2,7 +2,9 @@
 source: darkmatter/lib/tests/error_snapshots/image_ref.rs
 expression: out
 ---
-⨫ ImageRefError: unrecognized image format
+⤫ ImageRefError: unrecognized image format
+┃ 
 ┃ Input did not look like an HTML `<img ... />` tag or a Markdown `!alt`
-┃ reference.</img>
-Use !alt for Markdown or &lt;img src="..." alt="..." /&gt; for HTML.
+┃ reference.
+┃ 
+┃ Use !alt for Markdown or &lt;img src="..." alt="..." /&gt; for HTML.

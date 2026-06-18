@@ -12,7 +12,7 @@
 use std::error::Error as StdError;
 
 use crate::components::prose::Prose;
-use crate::components::renderable::Renderable;
+use crate::components::renderable::TerminalRenderable;
 use crate::components::status::StatusState;
 use crate::components::status_block::StatusBlock;
 use crate::terminal::Terminal;
@@ -196,7 +196,7 @@ pub fn as_block_error<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::components::renderable::Renderable;
+    use crate::components::renderable::TerminalRenderable;
     use crate::discovery::detection::ColorDepth;
     use crate::utils::color::{Color, Tailwind};
     use crate::utils::escape_codes::strip_escape_codes;

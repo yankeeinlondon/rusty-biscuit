@@ -21,17 +21,50 @@ pub enum MergeStrategy {
 
 /// Wrapper type for frontmatter with typed accessors.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Frontmatter(FrontmatterMap);
+pub struct Frontmatter {
+    map: FrontmatterMap,
+    /// Raw YAML text between the leading `---` markers, preserved verbatim
+    /// when the frontmatter was parsed from source. `None` for
+    /// programmatically constructed frontmatter. Used by the schemas
+    /// subsystem to produce accurate source line/column positions for
+    /// validation problems.
+    raw_source: Option<String>,
+}
 
 impl Frontmatter {
     /// Creates a new empty frontmatter.
     pub fn new() -> Self {
-        Self(FrontmatterMap::new())
+        Self {
+            map: FrontmatterMap::new(),
+            raw_source: None,
+        }
     }
 
     /// Creates frontmatter from a map.
     pub fn from_map(map: FrontmatterMap) -> Self {
-        Self(map)
+        Self {
+            map,
+            raw_source: None,
+        }
+    }
+
+    /// Creates frontmatter from a map, retaining the raw YAML source text
+    /// (the body between the leading `---` markers, without the markers
+    /// themselves). This is what `parse_frontmatter` uses so downstream
+    /// subsystems can report positions against the original source rather
+    /// than a canonicalised re-serialisation.
+    pub fn from_map_with_source(map: FrontmatterMap, raw_source: String) -> Self {
+        Self {
+            map,
+            raw_source: Some(raw_source),
+        }
+    }
+
+    /// Returns the raw YAML source between the leading `---` markers, when
+    /// the frontmatter was parsed from source. `None` for programmatically
+    /// constructed frontmatter.
+    pub fn raw_source(&self) -> Option<&str> {
+        self.raw_source.as_deref()
     }
 
     /// Gets a typed value from frontmatter.
@@ -47,7 +80,7 @@ impl Frontmatter {
     /// assert_eq!(title, Some("Hello".to_string()));
     /// ```
     pub fn get<T: DeserializeOwned>(&self, key: &str) -> MarkdownResult<Option<T>> {
-        match self.0.get(key) {
+        match self.map.get(key) {
             Some(value) => {
                 let result = serde_json::from_value(value.clone())?;
                 Ok(Some(result))
@@ -59,7 +92,7 @@ impl Frontmatter {
     /// Inserts a value into frontmatter.
     pub fn insert<T: Serialize>(&mut self, key: &str, value: T) -> MarkdownResult<()> {
         let json_value = serde_json::to_value(value)?;
-        self.0.insert(key.to_string(), json_value);
+        self.map.insert(key.to_string(), json_value);
         Ok(())
     }
 
@@ -89,7 +122,7 @@ impl Frontmatter {
 
         for (key, value) in other_map {
             use indexmap::map::Entry;
-            match self.0.entry(key) {
+            match self.map.entry(key) {
                 Entry::Occupied(mut entry) => match strategy {
                     MergeStrategy::ErrorOnConflict => {
                         return Err(MarkdownError::FrontmatterMerge(format!(
@@ -136,7 +169,7 @@ impl Frontmatter {
         let defaults_map: FrontmatterMap = serde_json::from_value(defaults_value)?;
 
         for (key, value) in defaults_map {
-            self.0.entry(key).or_insert(value);
+            self.map.entry(key).or_insert(value);
         }
 
         Ok(())
@@ -144,27 +177,27 @@ impl Frontmatter {
 
     /// Returns a reference to the underlying map.
     pub fn as_map(&self) -> &FrontmatterMap {
-        &self.0
+        &self.map
     }
 
     /// Returns a mutable reference to the underlying map.
     pub fn as_map_mut(&mut self) -> &mut FrontmatterMap {
-        &mut self.0
+        &mut self.map
     }
 
     /// Consumes self and returns the underlying map.
     pub fn into_map(self) -> FrontmatterMap {
-        self.0
+        self.map
     }
 
     /// Returns true if frontmatter is empty.
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.map.is_empty()
     }
 
     /// Returns the number of frontmatter fields.
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.map.len()
     }
 }
 
@@ -220,7 +253,10 @@ pub(super) fn parse_frontmatter(
     let content_lines = &lines[closing_idx + 1..];
     let remaining_content = content_lines.join("\n");
 
-    Ok((Frontmatter::from_map(frontmatter_map), remaining_content))
+    Ok((
+        Frontmatter::from_map_with_source(frontmatter_map, yaml_content),
+        remaining_content,
+    ))
 }
 
 // UTF-8-boundary audit (2026-04-24): the byte-indexed scanners in this file

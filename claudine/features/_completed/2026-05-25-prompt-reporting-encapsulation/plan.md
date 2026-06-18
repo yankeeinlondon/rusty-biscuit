@@ -1,0 +1,155 @@
+---
+phases: 5
+created: 2026-05-25
+start_phase: 1
+source_files_during_phase_1:
+  - claudine/lib/src/system_prompt/types.rs
+  - claudine/lib/src/system_prompt/mod.rs
+  - claudine/lib/src/system_prompt/prepare.rs
+  - claudine/lib/src/prompt_reporting/system_prompt.rs
+  - claudine/cli/src/output/mod.rs
+  - claudine/cli/src/commands/wrap/system_prompt.rs
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/src/commands/wrap/composition/mod.rs
+  - claudine/cli/tests/system_prompt_perf_bench.rs
+  - claudine/cli/tests/wrap_commands.rs
+  - biscuit-terminal/lib/src/render_tree/options.rs
+  - biscuit-terminal/lib/src/terminal.rs
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/src/markdown/highlighting/mod.rs
+  - darkmatter/lib/src/markdown/render_tree/fold.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - claudine/lib/src/prompt_reporting/types.rs
+  - claudine/lib/src/prompt_reporting/frontmatter.rs
+  - claudine/lib/src/prompt_reporting/precedence.rs
+  - claudine/lib/src/prompt_reporting/mod.rs
+  - biscuit-tui/lib/src/core/standalone/mod.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/lib/src/prompt_reporting/system_prompt.rs
+  - claudine/lib/src/prompt_reporting/user_prompt.rs
+  - claudine/lib/src/prompt_reporting/formatting.rs
+  - claudine/lib/src/prompt_reporting/mod.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - claudine/cli/src/output/mod.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - claudine/lib/src/prompt_reporting/types.rs
+  - claudine/lib/src/prompt_reporting/precedence.rs
+  - claudine/lib/src/prompt_reporting/system_prompt.rs
+  - claudine/lib/src/prompt_reporting/user_prompt.rs
+  - claudine/lib/src/prompt_reporting/mod.rs
+  - claudine/lib/src/prompt_reporting/tokens.rs
+  - claudine/lib/src/prompt_reporting/formatting.rs
+  - claudine/lib/src/prompt_reporting/truncation.rs
+docs_updated_during_phase_5:
+  - claudine/docs/topics/frontmatter-properties.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_code:
+  - claudine/lib/src/system_prompt/types.rs
+  - claudine/lib/src/system_prompt/mod.rs
+  - claudine/lib/src/system_prompt/prepare.rs
+  - claudine/lib/src/prompt_reporting/types.rs
+  - claudine/lib/src/prompt_reporting/frontmatter.rs
+  - claudine/lib/src/prompt_reporting/precedence.rs
+  - claudine/lib/src/prompt_reporting/system_prompt.rs
+  - claudine/lib/src/prompt_reporting/user_prompt.rs
+  - claudine/lib/src/prompt_reporting/formatting.rs
+  - claudine/lib/src/prompt_reporting/mod.rs
+  - claudine/lib/src/prompt_reporting/tokens.rs
+  - claudine/lib/src/prompt_reporting/truncation.rs
+  - claudine/cli/src/output/mod.rs
+  - claudine/cli/src/commands/wrap/system_prompt.rs
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/src/commands/wrap/composition/mod.rs
+  - claudine/cli/tests/system_prompt_perf_bench.rs
+  - claudine/cli/tests/wrap_commands.rs
+  - biscuit-terminal/lib/src/render_tree/options.rs
+  - biscuit-terminal/lib/src/terminal.rs
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/src/markdown/highlighting/mod.rs
+  - darkmatter/lib/src/markdown/render_tree/fold.rs
+  - biscuit-tui/lib/src/core/standalone/mod.rs
+documentation:
+  - claudine/docs/topics/frontmatter-properties.md
+packages:
+  - claudine
+  - claudine-cli
+  - biscuit-terminal
+  - darkmatter
+---
+
+# Plan: Prompt Reporting Encapsulation (Stage 0)
+
+Encapsulate the prompt reporting logic into two primary report types and a unified `ReportMode` enum, reducing public surface and simplifying call sites.
+
+## Phase 1: Mechanical Rename of `EffectiveSystemPrompt`
+
+Rename the core system prompt type to better reflect its role and align with future stages.
+
+- [x] Rename `EffectiveSystemPrompt` to `ResolvedSystemPrompt` in `claudine/lib/src/system_prompt/types.rs`.
+- [x] Update all references in `claudine/lib/src/system_prompt/prepare.rs`.
+- [x] Update all references in `claudine/lib/src/prompt_reporting/system_prompt.rs`.
+- [x] Update all references in `claudine/cli/src/commands/wrap/mod.rs`.
+- [x] Update all references in `claudine/cli/src/commands/wrap/system_prompt.rs`.
+- [x] Update all references in `claudine/cli/src/commands/wrap/composition/mod.rs`.
+- [x] Update all references in `claudine/cli/src/output/mod.rs`.
+- [x] Update all references in `claudine/cli/tests/system_prompt_perf_bench.rs`.
+- [x] **Validation:** Run `cargo check -p claudine` and `cargo check -p claudine-cli` to ensure no broken references.
+
+## Phase 2: Unified Verbosity and Precedence
+
+Introduce the `ReportMode` enum and update the precedence resolvers to return it.
+
+- [x] Define `ReportMode` enum in `claudine/lib/src/prompt_reporting/types.rs`.
+    - Variants: `Silent`, `Summary`, `Partial { truncation: TruncationMode }`, `Full`.
+- [x] Update `claudine/lib/src/prompt_reporting/frontmatter.rs` to return `Option<ReportMode>`.
+    - Map `"silent"` → `Silent`, `"quiet"` → `Summary`, `"verbose"` → `Full`.
+- [x] Update `claudine/lib/src/prompt_reporting/precedence.rs` to use `ReportMode`.
+    - Implement `resolve_system_prompt_report_mode`.
+    - Implement `resolve_agent_prompt_report_mode`.
+- [x] **Validation:** Run `cargo test -p claudine --lib prompt_reporting::precedence` and `prompt_reporting::frontmatter`.
+
+## Phase 3: Report Type Implementation
+
+Implement the encapsulated report types and move internal logic to private helpers.
+
+- [x] Implement `SystemPromptReport` in `claudine/lib/src/prompt_reporting/system_prompt.rs`.
+    - Include `new` and `render` methods.
+    - Encapsulate `report_system_prompt` and `report_system_prompt_empty` logic.
+- [x] Implement `AgentPromptReport` in `claudine/lib/src/prompt_reporting/user_prompt.rs`.
+    - Include `new` and `render` methods.
+    - Note: This replaces `UserPromptReportConfig` and associated helpers.
+- [x] Make all header/summary/body builders and block-quote helpers module-private in `prompt_reporting`.
+- [x] **Validation:** Ensure `claudine` library compiles with `cargo check -p claudine`.
+
+## Phase 4: CLI Call-site Migration
+
+Simplify the CLI output logic by using the new encapsulated API.
+
+- [x] Update `claudine/cli/src/output/mod.rs`:
+    - Refactor `log_system_prompt_with_scope` to use `SystemPromptReport`.
+    - Refactor `log_compose_prompt` to use `AgentPromptReport`.
+    - Remove dual-entry-point branching and complex boolean logic.
+- [x] **Validation:** Run `cargo check -p claudine-cli`.
+
+## Phase 5: Final Cleanup and Verification
+
+Clean up public exports and verify the complete system.
+
+- [x] Update `claudine/lib/src/prompt_reporting/mod.rs` to limit re-exports to the 7 symbols identified in the spec.
+- [x] Remove deprecated types: `SystemPromptReportConfig`, `UserPromptReportConfig`, `PromptReportFormat`, `PromptVerbosity`.
+- [x] Run all tests in the `claudine` workspace.
+- [x] Verify documentation with `cargo doc -p claudine` (ensure no broken intra-doc links).
+- [x] **Checkpoint:** All acceptance criteria from the spec are met.

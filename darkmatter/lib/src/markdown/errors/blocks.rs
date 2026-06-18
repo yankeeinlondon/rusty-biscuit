@@ -19,6 +19,9 @@ use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::components::status_block::StatusBlock;
 use biscuit_terminal::errors::{ErrorHeader, SourceContext, StatusBlockExt};
 
+use crate::markdown::highlighting::highlight_yaml_lines;
+use crate::markdown::schemas::{ValidationProblem, ValidationProblemKind};
+
 /// Build the [`StatusBlock`] for [`MarkdownError::FileLoad`].
 pub(crate) fn file_load_block(source: &std::io::Error) -> StatusBlock {
     let kind = format!("{:?}", source.kind());
@@ -59,13 +62,25 @@ pub(crate) fn url_fetch_block(source: &reqwest::Error) -> StatusBlock {
 /// exactly which line broke parsing without re-running the command.
 pub(crate) fn frontmatter_parse_block(ctx: SourceContext, source: &YamlParseError) -> StatusBlock {
     let location = source.location();
-    let location_line = location.map(|loc| loc.line());
 
-    let mut body = vec![Prose::new(format!("<dim>YAML:</dim> {source}"))];
+    let mut body = Vec::new();
 
-    if let Some(line) = location_line {
+    // Name the offending file when the context carries a real path (loads from
+    // disk do; in-memory/stdin parses leave it as "unknown"). Directory hashing
+    // hashes many files, so identifying which one failed is the actionable bit.
+    if ctx.display != std::path::Path::new("unknown") {
+        body.push(ctx.linked_path_prose());
+    }
+
+    body.push(Prose::new(format!("<dim>YAML:</dim> {source}")));
+
+    if let Some(loc) = location {
         body.push(Prose::new("Frontmatter parsing failed here:"));
-        body.push(ctx.excerpt_prose(line, 1, "yaml"));
+        body.push(frontmatter_excerpt_prose(
+            &ctx,
+            frontmatter_doc_line(&ctx, loc.line()),
+            1,
+        ));
     }
 
     StatusBlock::new(StatusState::Error)
@@ -75,6 +90,68 @@ pub(crate) fn frontmatter_parse_block(ctx: SourceContext, source: &YamlParseErro
         ))
         .body(body)
         .hint("Check the YAML between the leading `---` markers for syntax errors.")
+}
+
+/// Translate a `serde_yaml_ng` error line into a 1-based line in the full
+/// source document.
+///
+/// `serde_yaml_ng` reports the line relative to the YAML it was handed — the
+/// text *between* the `---` markers, with the opening delimiter already
+/// stripped. When the context's content includes that delimiter (the on-disk
+/// load path), the excerpt numbers lines document-absolutely, so the
+/// YAML-relative line must be shifted past the opening `---`. When no
+/// frontmatter delimiters are detected (e.g. a bare-YAML context), the reported
+/// line already addresses the right content line and is returned unchanged.
+fn frontmatter_doc_line(ctx: &SourceContext, yaml_line: usize) -> usize {
+    match ctx.frontmatter.as_ref() {
+        Some(range) => {
+            let opening_delim_line = ctx.content[..range.start]
+                .bytes()
+                .filter(|&b| b == b'\n')
+                .count()
+                + 1;
+            opening_delim_line + yaml_line
+        }
+        None => yaml_line,
+    }
+}
+
+/// Render a syntax-highlighted, gutter-numbered excerpt centered on `line`
+/// (1-based, document-absolute) with `context` lines above and below.
+///
+/// The offending line carries a leading `>` gutter marker. YAML content is
+/// highlighted through [`highlight_yaml_lines`] — a lexical highlighter that
+/// tolerates the malformed input that produced the error — then escaped so
+/// literal `<`, `{`, etc. in the source render verbatim instead of being parsed
+/// as Prose markup ([`Prose::escape_text`] passes the highlighter's ANSI
+/// sequences through untouched). Falls back to unstyled text when the
+/// highlighter does not return one line per input line.
+fn frontmatter_excerpt_prose(ctx: &SourceContext, line: usize, context: usize) -> Prose {
+    use std::fmt::Write as _;
+
+    let lines: Vec<&str> = ctx.content.lines().collect();
+    let total = lines.len();
+    let start = line.saturating_sub(context + 1).min(total);
+    let end = (line + context).min(total);
+    let gutter_width = end.to_string().len();
+
+    let window = &lines[start..end];
+    let highlighted = highlight_yaml_lines(&window.join("\n"));
+    let use_highlight = highlighted.len() == window.len();
+
+    let mut buf = String::new();
+    for (idx, raw) in window.iter().enumerate() {
+        let n = start + idx + 1;
+        let marker = if n == line { ">" } else { " " };
+        let content = if use_highlight {
+            Prose::escape_text(&highlighted[idx])
+        } else {
+            Prose::escape_text(raw)
+        };
+        let _ = writeln!(buf, "<dim>{marker} {n:>gutter_width$} │</dim> {content}");
+    }
+
+    Prose::new(buf.trim_end_matches('\n').to_string())
 }
 
 /// Build the [`StatusBlock`] for [`MarkdownError::FrontmatterMerge`].
@@ -133,11 +210,155 @@ pub(crate) fn transform_block(message: &str) -> StatusBlock {
         .hint("Review the transform pipeline inputs and any configured rules.")
 }
 
+/// Build the [`StatusBlock`] for [`MarkdownError::RenderTree`].
+pub(crate) fn render_tree_block(message: &str) -> StatusBlock {
+    StatusBlock::new(StatusState::Error)
+        .error_header(ErrorHeader::new("MarkdownError", "render failed"))
+        .body(message.to_string())
+        .hint("The document produced a render tree the target renderer rejected.")
+}
+
+/// Build the [`StatusBlock`] for [`MarkdownError::MalformedStoredHash`].
+pub(crate) fn malformed_stored_hash_block(property: &str, reason: &str) -> StatusBlock {
+    let body = format!(
+        "<dim>Property:</dim> <inverse>{}</inverse>\n{}",
+        Prose::escape_text(property),
+        Prose::escape_text(reason),
+    );
+    StatusBlock::new(StatusState::Error)
+        .error_header(ErrorHeader::new("MarkdownError", "malformed stored hash"))
+        .body(body)
+        .hint("Fix or remove the `hash` frontmatter property, or rerun `md hash --save` to rewrite it.")
+}
+
+/// Build the [`StatusBlock`] for [`MarkdownError::MalformedDisclosure`].
+pub(crate) fn malformed_disclosure_block(reason: &str, range: &std::ops::Range<usize>) -> StatusBlock {
+    let body = format!(
+        "<dim>Reason:</dim> {}\n<dim>Range:</dim> {}..{}",
+        Prose::escape_text(reason),
+        range.start,
+        range.end
+    );
+    StatusBlock::new(StatusState::Error)
+        .error_header(ErrorHeader::new("MarkdownError", "malformed disclosure block"))
+        .body(body)
+        .hint("Disclosure blocks need `::disclosure`, `::details`, and `::end-disclosure`; the summary must contain only phrasing content.")
+}
+
+/// Build the [`StatusBlock`] for [`MarkdownError::SchemaValidationFailed`].
+///
+/// When `problems` is empty the failure represents a schema *preparation*
+/// error (malformed `$schema`, unresolved reference, baseline build failure,
+/// etc.) rather than an instance validation failure. In that case the
+/// `summary` carries the underlying diagnostic and is rendered as a body
+/// line so authors see the root cause instead of an empty problem list.
+pub(crate) fn schema_validation_failed_block(
+    path: &std::path::Path,
+    problems: &[ValidationProblem],
+    summary: &str,
+    description: &Option<String>,
+) -> StatusBlock {
+    let path_attr = Prose::quoted_attr(&path.to_string_lossy());
+    let path_escaped = Prose::escape_text(&path.to_string_lossy());
+
+    let mut body_lines: Vec<String> = Vec::new();
+
+    // OSC8 link to the source file
+    body_lines.push(format!(
+        "<blue><a href={}>{}</a></blue>",
+        path_attr, path_escaped
+    ));
+
+    // Description line when present
+    if let Some(desc) = description {
+        body_lines.push(format!("<i><dim>{}</dim></i>", Prose::escape_text(desc)));
+    }
+
+    // Preparation failures arrive with an empty problem list; render the
+    // summary so authors see the actual diagnostic (e.g. "schema could not
+    // be prepared: ...") instead of just the path.
+    if problems.is_empty() {
+        let hint = if summary.is_empty() {
+            "schema could not be prepared"
+        } else {
+            summary
+        };
+        let (label, detail) = match hint.split_once(':') {
+            Some((head, tail)) => (head.trim(), tail.trim()),
+            None => ("schema preparation failed", hint),
+        };
+        body_lines.push(format!(
+            "<red>{}</red>: {}",
+            Prose::escape_text(label),
+            Prose::escape_text(detail),
+        ));
+
+        return StatusBlock::new(StatusState::Error)
+            .error_header(ErrorHeader::new(
+                "MarkdownError",
+                "schema validation failed",
+            ))
+            .body(body_lines.join("\n"))
+            .hint(
+                "Check that the document's $schema (or the baseline schema) is well-formed and resolvable.",
+            );
+    }
+
+    // One bullet per problem. The category label is chosen from
+    // `ValidationProblem::kind` rather than inferred from `property.is_some()`
+    // or substring-matched against `message`, so the renderer cannot drift
+    // when the underlying validator surfaces new error shapes.
+    for problem in problems {
+        let loc = match (problem.line, problem.column) {
+            (Some(l), Some(c)) => format!(" at {l}:{c}"),
+            (Some(l), None) => format!(" at {l}:1"),
+            _ => String::new(),
+        };
+
+        let arm = match problem.arm_index {
+            Some(idx) => format!(" (schema arm {idx})"),
+            None => String::new(),
+        };
+
+        let target = if let Some(ref prop) = problem.property {
+            Prose::escape_text(prop)
+        } else {
+            let trimmed = problem.path.trim_start_matches('/');
+            if trimmed.is_empty() {
+                "<root>".to_string()
+            } else {
+                Prose::escape_text(trimmed.split('/').next().unwrap_or(trimmed))
+            }
+        };
+
+        let bullet = match problem.kind {
+            ValidationProblemKind::Missing => format!(
+                "<red>missing</red> <inverse>{target}</inverse>: required but not provided{loc}{arm}"
+            ),
+            ValidationProblemKind::Type => format!(
+                "<red>type</red> <inverse>{target}</inverse>: {}{loc}{arm}",
+                Prose::escape_text(&problem.message)
+            ),
+            ValidationProblemKind::Invalid => format!(
+                "<red>invalid</red> <inverse>{target}</inverse>: {}{loc}{arm}",
+                Prose::escape_text(&problem.message)
+            ),
+        };
+
+        body_lines.push(bullet);
+    }
+
+    StatusBlock::new(StatusState::Error)
+        .error_header(ErrorHeader::new("MarkdownError", "schema validation failed"))
+        .body(body_lines.join("\n"))
+        .hint("Correct the frontmatter so it satisfies the declared $schema (or baseline schema).")
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 
     use super::*;
@@ -159,11 +380,7 @@ mod tests {
     #[test]
     fn frontmatter_parse_block_renders_yaml_error() {
         let yaml = ": [broken";
-        let ctx = SourceContext::new(
-            PathBuf::from("/test.md"),
-            PathBuf::from("test.md"),
-            yaml,
-        );
+        let ctx = SourceContext::new(PathBuf::from("/test.md"), PathBuf::from("test.md"), yaml);
         let err = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml).unwrap_err();
         let out = render_block(&frontmatter_parse_block(ctx, &err));
         assert!(out.contains("MarkdownError"), "missing header type: {out}");
@@ -184,11 +401,7 @@ mod tests {
     #[test]
     fn frontmatter_parse_block_includes_offending_line() {
         let yaml = "phases: 5\nfindings:\n  - id: '@' magic lookup emits results\n";
-        let ctx = SourceContext::new(
-            PathBuf::from("/test.md"),
-            PathBuf::from("test.md"),
-            yaml,
-        );
+        let ctx = SourceContext::new(PathBuf::from("/test.md"), PathBuf::from("test.md"), yaml);
         let err = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml).unwrap_err();
         let out = render_block(&frontmatter_parse_block(ctx, &err));
 
@@ -197,6 +410,65 @@ mod tests {
             "missing offending line snippet: {out}",
         );
         assert!(out.contains(">"), "missing gutter marker: {out}");
+    }
+
+    /// Regression: when the context holds the full document (the on-disk load
+    /// path), `serde_yaml_ng`'s YAML-relative line must be shifted past the
+    /// opening `---` so the gutter marks the real document line — not the
+    /// delimiter. Mirrors the `prompt: |--` case from the field report.
+    #[test]
+    fn frontmatter_parse_block_marks_document_line_not_yaml_line() {
+        // Full document INCLUDING delimiters; serde only parses the inner YAML.
+        let doc = "---\nprompt: |--\nbody: ok\n---\n";
+        let inner = "prompt: |--\nbody: ok";
+        let ctx = SourceContext::new(PathBuf::from("/test.md"), PathBuf::from("test.md"), doc);
+        assert!(
+            ctx.frontmatter.is_some(),
+            "delimiters should be detected for the offset shift"
+        );
+        let err = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(inner).unwrap_err();
+        let out = render_block(&frontmatter_parse_block(ctx, &err));
+
+        // The offending `prompt: |--` is document line 2; the gutter marks it.
+        assert!(
+            out.contains("> 2 │ prompt: |--"),
+            "expected marker on document line 2: {out}",
+        );
+        // The line FOLLOWING the error is shown as trailing context.
+        assert!(
+            out.contains("3 │ body: ok"),
+            "expected following line shown: {out}",
+        );
+        // The opening delimiter shows as the preceding context line.
+        assert!(out.contains("1 │ ---"), "expected preceding line shown: {out}");
+    }
+
+    /// The excerpt body carries syntax-highlight SGR (best-effort, tolerant of
+    /// the malformed line) while the stripped output still shows a correctly
+    /// numbered gutter and the following line.
+    #[test]
+    fn frontmatter_excerpt_prose_highlights_and_marks_line() {
+        use biscuit_terminal::terminal::Terminal;
+
+        let doc = "---\nprompt: |--\nbody: ok\n---\n";
+        let ctx = SourceContext::new(PathBuf::from("/t.md"), PathBuf::from("t.md"), doc);
+        // Document line 2 is `prompt: |--`.
+        let raw = frontmatter_excerpt_prose(&ctx, 2, 1).render(&Terminal::new_optimistic(80));
+
+        assert!(
+            raw.contains("\x1b[38;2;"),
+            "expected truecolor highlight SGR in excerpt: {raw:?}",
+        );
+
+        let plain = strip_escape_codes(&raw);
+        assert!(
+            plain.contains("> 2 │ prompt: |--"),
+            "expected gutter marker on doc line 2: {plain:?}",
+        );
+        assert!(
+            plain.contains("3 │ body: ok"),
+            "expected following line in excerpt: {plain:?}",
+        );
     }
 
     #[test]
@@ -264,6 +536,46 @@ mod tests {
         assert!(out.contains("pipeline stalled"), "missing message: {out}");
     }
 
+    #[test]
+    fn malformed_stored_hash_block_renders_property_and_reason() {
+        let out = render_block(&malformed_stored_hash_block(
+            "hash",
+            "expected one of: fm, body, simple, structured, detailed",
+        ));
+        assert!(out.contains("MarkdownError"), "missing header type: {out}");
+        assert!(out.contains("malformed stored hash"), "missing summary: {out}");
+        assert!(out.contains("hash"), "missing property: {out}");
+        assert!(
+            out.contains("expected one of"),
+            "missing reason: {out}"
+        );
+    }
+
+    /// Preparation failures (malformed `$schema`, unresolved baseline) arrive
+    /// with an empty problem list and stash the underlying diagnostic in
+    /// `summary`. The rendered block must surface that summary so the user
+    /// sees the actual root cause instead of just the path.
+    #[test]
+    fn schema_validation_failed_block_renders_summary_when_problems_empty() {
+        let path = std::path::PathBuf::from("/tmp/test/bad-schema.md");
+        let summary = "schema could not be prepared: could not resolve ./missing.yaml";
+        let block = schema_validation_failed_block(&path, &[], summary, &None);
+        let out = render_block(&block);
+        assert!(out.contains("schema could not be prepared"), "missing summary: {out}");
+        assert!(out.contains("could not resolve ./missing.yaml"), "missing detail: {out}");
+        assert!(out.contains("bad-schema.md"), "missing path: {out}");
+    }
+
+    /// When the summary is empty the block should still render a non-empty
+    /// body so the user understands schema preparation failed.
+    #[test]
+    fn schema_validation_failed_block_handles_empty_summary() {
+        let path = std::path::PathBuf::from("/tmp/test/empty.md");
+        let block = schema_validation_failed_block(&path, &[], "", &None);
+        let out = render_block(&block);
+        assert!(out.contains("schema could not be prepared"), "missing fallback summary: {out}");
+    }
+
     /// `reqwest::Error` cannot be constructed without firing a real HTTP
     /// request. This smoke test exercises the helper by sending a request to
     /// an address that is guaranteed to refuse connections, producing a real
@@ -271,20 +583,29 @@ mod tests {
     ///
     /// ## Notes
     ///
-    /// The request targets `http://0.0.0.0:1` which has no listener and fails
-    /// instantly. If this proves flaky in CI, the test can be replaced with a
-    /// compile-time assertion that `url_fetch_block` accepts `&reqwest::Error`.
+    /// The request targets a loopback port whose listener has been bound
+    /// then dropped, guaranteeing `ECONNREFUSED` immediately on both Linux
+    /// and macOS. `no_proxy()` skips system-proxy detection (which can be
+    /// slow on macOS via SCDynamicStore) and `tcp_nodelay`/short timeouts
+    /// ensure the test exits quickly even if the kernel queues the RST.
     #[tokio::test]
     async fn url_fetch_block_renders_with_reqwest_error() {
+        let listener =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let port = listener.local_addr().expect("local_addr").port();
+        drop(listener);
+        let url = format!("http://127.0.0.1:{port}");
         let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_millis(100))
+            .no_proxy()
+            .connect_timeout(std::time::Duration::from_millis(500))
+            .timeout(std::time::Duration::from_secs(1))
             .build()
             .expect("client builder should not fail");
-        let result = client.get("http://0.0.0.0:1").send().await;
-        let err = result.expect_err("request to 0.0.0.0:1 should fail");
+        let result = client.get(&url).send().await;
+        let err = result.expect_err("request to closed port should fail");
         let out = render_block(&url_fetch_block(&err));
         assert!(out.contains("MarkdownError"), "missing header type: {out}");
         assert!(out.contains("URL fetch failed"), "missing summary: {out}");
-        assert!(out.contains("http://0.0.0.0:1"), "missing URL: {out}");
+        assert!(out.contains(&url), "missing URL: {out}");
     }
 }

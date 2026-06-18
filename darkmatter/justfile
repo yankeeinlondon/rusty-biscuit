@@ -1,5 +1,5 @@
-set dotenv-load := true
-set positional-arguments := true
+set dotenv-load
+set positional-arguments
 # set allow-duplicate-recipes := true
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
@@ -50,25 +50,106 @@ build *args="":
     @just _build darkmatter "{{ LIB_NAME }}" {{ args }}
     @just _build darkmatter-cli "CLI_NAME" {{ args }}
 
-# Test both library and CLI.
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity {{ LIBRARY }}
+    @just _sanity {{ CLI }}
+
+# Test both library and CLI. Level-1 only: the slow tiers (real-terminal,
+# headless-browser, real-resource) are excluded here and run via their own
+# recipes (`test-l2`, `test-browser`). The `browser_render` and
+# `level2_render_tree_terminal` binary names are themselves matched by the
+# `browser_`/`level2_` filter terms, so the whole binary is skipped.
 test *args="":
-    @just _test darkmatter {{ args }}
-    @just _test darkmatter-cli {{ args }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    filter='!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/))'
+    echo
+    echo -e "Testing {{ BOLD }}{{ LIBRARY }}{{ RESET }} package"
+    echo
+    cargo nextest run -p {{ LIBRARY }} -E "$filter" {{ args }}
+    echo
+    echo -e "✅ {{ GREEN }} all tests passing in {{ BOLD }}{{ LIBRARY }}{{ RESET }}{{ GREEN }} package{{ RESET }}"
+    echo
+    echo
+    echo -e "Testing {{ BOLD }}{{ CLI }}{{ RESET }} package"
+    echo
+    cargo nextest run -p {{ CLI }} -E "$filter" {{ args }}
+    echo
+    echo -e "✅ {{ GREEN }} all tests passing in {{ BOLD }}{{ CLI }}{{ RESET }}{{ GREEN }} package{{ RESET }}"
+    echo
+    echo -e "👀 {{ BOLD }}Note:{{ RESET }} {{ BLUE }}just test{{ RESET }} runs Level-1 only; use {{ BLUE }}just test-l2{{ RESET }} / {{ BLUE }}just test-browser{{ RESET }} for the slow tiers"
+    echo
+
+# Level-2 (real-terminal) render-tree tests for both crates.
+#
+# By default, missing harnesses (WezTerm / tmux) cause the suite to skip
+# cleanly. Set `BISCUIT_TEST_LEVEL_REQUIRED=2` in the environment to convert
+# missing harnesses into hard failures (CI use).
+test-l2 *args="":
+    @echo
+    @echo -e "Running {{ BOLD }}Level-2{{ RESET }} render-tree terminal tests"
+    @echo -e "{{ DIM }}- export BISCUIT_TEST_LEVEL_REQUIRED=2 to hard-fail on missing harness{{ RESET }}"
+    @echo
+    @just _test_l2 {{ LIBRARY }} {{ args }}
+    @just _test_l2 {{ CLI }} {{ args }}
+
+# darkmatter Level-3 tests
+test-l3 *args="":
+    @just _test_l3 {{ LIBRARY }} {{ args }}
+    @just _test_l3 {{ CLI }} {{ args }}
+
+# Headless-browser tests (chromiumoxide). Selects every `browser_*` test in
+# the library crate. Skips cleanly when Chrome is absent unless
+# `BISCUIT_BROWSER_REQUIRED=1` is set.
+test-browser *args="":
+    @just _test_browser {{ LIBRARY }} {{ args }}
+
+# not applicable: darkmatter has no real-resource (device / network) tier
+test-real:
+    @echo "test-real: not applicable for darkmatter"
 
 # Lint both the library and CLI
 lint:
-    @just _lint darkmatter
-    @just _lint darkmatter-cli
+    @just _lint {{ LIBRARY }}
+    @just _lint {{ CLI }}
+
+# Per-package LCOV coverage for the library and CLI.
+coverage *args="":
+    @just _coverage {{ LIBRARY }} {{ args }}
+    @just _coverage {{ CLI }} {{ args }}
+
+# Doctests for the library and CLI.
+doctest *args="":
+    @just _doctest {{ LIBRARY }} {{ args }}
+    @just _doctest {{ CLI }} {{ args }}
+
+# Fuzz target for darkmatter markdown parser.
+fuzz *args="":
+    @just _fuzz lib markdown_parser {{ args }}
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
 
 # commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
-commit:
+commit args="":
     @echo ""
     @echo -e "Committing staged changes in the {{ BOLD }}Rusty Biscuit{{ RESET }} monorepo to git"
-    @echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{ DIM }}model{{ RESET }}"
+    @echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M3}} {{ DIM }}model{{ RESET }}"
     @echo ""
     @echo -e "{{ BOLD }}{{ BLUE }}Staged Files:{{ RESET }}"
     @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}" -y
+    @claudine compose "@prompts/commit.md" --opencode --op "commit" --quiet -y {{ args }}
     @just _speak "git commits completed in rusty-biscuit monorepo"
     @sniff repo git-status 2>/dev/null || exit 0
     @echo
@@ -91,6 +172,35 @@ install *args="":
 # Validate the source code without doing a full build
 check:
     @cargo check -p {{ LIBRARY }} -p {{ CLI }}
+
+# ---------- benchmarking + profiling ----------
+
+# run the full Criterion bench suite for darkmatter
+bench *args="":
+    @echo -e "Running Criterion benches for {{ BOLD }}{{ LIB_NAME }}{{ RESET }}"
+    @cargo bench -p {{ LIBRARY }} --benches -- {{ args }}
+
+# run only the schema validation benches (1000-doc corpus, warm + cold cache)
+bench-schema *args="":
+    @cargo bench -p {{ LIBRARY }} --bench schema_validation -- {{ args }}
+
+# run only the compose pipeline benches (per-stage isolation)
+bench-compose *args="":
+    @cargo bench -p {{ LIBRARY }} --bench compose_pipeline -- {{ args }}
+
+# run only the render pipeline benches (parse, terminal, html, highlight)
+bench-render *args="":
+    @cargo bench -p {{ LIBRARY }} --bench render_pipeline -- {{ args }}
+
+# capture a saved baseline for trend tracking (usage: `just bench-baseline main`)
+bench-baseline name:
+    @echo -e "Saving Criterion baseline {{ BOLD }}{{ name }}{{ RESET }}"
+    @cargo bench -p {{ LIBRARY }} --benches -- --save-baseline {{ name }}
+
+# compare current bench timings against a saved baseline
+bench-compare name:
+    @echo -e "Comparing against Criterion baseline {{ BOLD }}{{ name }}{{ RESET }}"
+    @cargo bench -p {{ LIBRARY }} --benches -- --baseline {{ name }}
 
 # Run the latest debug build of the Claudine CLI
 cli *args="":

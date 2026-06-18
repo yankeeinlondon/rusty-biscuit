@@ -21,6 +21,62 @@ fn discovers_rust_package() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
+fn collects_all_languages_without_override() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = TempDir::new()?;
+    let root = temp_dir.path();
+
+    fs::create_dir(root.join(".git"))?;
+    fs::create_dir_all(root.join("src"))?;
+    fs::write(root.join("Cargo.toml"), "[package]\nname = \"sample\"\n")?;
+    fs::write(root.join("src/lib.rs"), "pub fn greet() {}\n")?;
+    fs::write(root.join("src/extra.rs"), "pub fn extra() {}\n")?;
+    fs::write(root.join("script.py"), "def run():\n    pass\n")?;
+
+    let package = TreePackage::new(root)?;
+
+    // Rust dominates (2 files vs 1), so it is the primary language...
+    assert_eq!(package.language, ProgrammingLanguage::Rust);
+    // ...but the Python file is still collected (polyglot package).
+    assert_eq!(package.source_files.len(), 3);
+    assert_eq!(
+        package.languages(),
+        vec![ProgrammingLanguage::Python, ProgrammingLanguage::Rust]
+    );
+    assert_eq!(
+        package.language_of(&root.join("script.py")),
+        ProgrammingLanguage::Python
+    );
+
+    Ok(())
+}
+
+#[test]
+fn language_override_restricts_to_one_language() -> Result<(), Box<dyn std::error::Error>> {
+    use tree_hugger::TreePackageConfig;
+
+    let temp_dir = TempDir::new()?;
+    let root = temp_dir.path();
+
+    fs::create_dir(root.join(".git"))?;
+    fs::create_dir_all(root.join("src"))?;
+    fs::write(root.join("Cargo.toml"), "[package]\nname = \"sample\"\n")?;
+    fs::write(root.join("src/lib.rs"), "pub fn greet() {}\n")?;
+    fs::write(root.join("script.py"), "def run():\n    pass\n")?;
+
+    let config = TreePackageConfig {
+        language: Some(ProgrammingLanguage::Rust),
+        ..Default::default()
+    };
+    let package = TreePackage::with_config(root, config)?;
+
+    // Only the Rust file is collected when a language is forced.
+    assert_eq!(package.language, ProgrammingLanguage::Rust);
+    assert_eq!(package.source_files.len(), 1);
+
+    Ok(())
+}
+
+#[test]
 fn find_package_root_returns_subcrate_in_workspace() -> Result<(), Box<dyn std::error::Error>> {
     let temp = TempDir::new()?;
     let root = temp.path();

@@ -42,7 +42,7 @@ let plan = DetectionPlan::new()
     .without_network()                   // Skip entirely
     .filesystem(
         FilesystemRequest::new()
-            .git(GitRequest::summary())  // Branch + dirty counts
+            .git(GitRequest::summary())  // Branch + dirty flag
             .repo(RepoRequest::structure()) // Workspace tools only
             .without_docs()
     );
@@ -86,9 +86,10 @@ let result = detect_with_config(config)?;
 | `DetectionPlan` | `new()` (default full) | Composes all four domains (os, hardware, network, filesystem) |
 
 **Git preset cheat sheet:**
-- `summary()` -- branch + dirty counts only (no commits, no worktrees)
+- `minimal()` / `summary()` -- branch + dirty *flag* only (no per-category counts, no commits, no worktrees). The two presets are currently byte-identical.
 - `full()` -- 10 commits, per-file change stats, worktrees; no unified diffs, no network
 - `deep()` -- adds full unified diffs, remote refresh, branch details, and per-commit containment
+- **Every** preset (including `minimal`) runs a working-tree status walk -- there is no "repo root without status" request level; use the Tier-3 `GitRepo::discover().repo_root()` handle for that.
 
 ## Key Types
 
@@ -99,7 +100,7 @@ let result = detect_with_config(config)?;
 | `ProgramsInfo` | 8 category fields with shared `ExecutableIndex` + parallel Rayon detection |
 | `ServicesInfo` | Init system + service list (via `ServiceManager::detect()`) |
 | `Package` | Package path, languages, managers, dependencies |
-| `GitRepo` | libgit2 handle from `GitRepo::discover(path)` |
+| `GitRepo` | `gix::Repository` handle from trusted discovery. All git access (status, diff, history, refs, remotes, config, worktrees) is pure-Rust gix; git2/libgit2 is gone from production and retained only as a dev-dependency for test/bench fixtures. |
 | `get_current_worktree_name` | Early-return helper: returns the basename of the linked worktree directory, or `None` if in the main worktree |
 
 ## Shared-Work Highlights
@@ -134,6 +135,7 @@ sniff repo                 # Repository/monorepo structure
 sniff repo git-status      # Git status with commit history
 sniff repo language        # Primary programming language for the repository
 sniff repo worktree        # Linked worktree name (exit 1 if main worktree)
+sniff repo worktrees       # List all worktrees (default, --md, --list, --csv, --verbose, --json)
 sniff repo remote origin   # Inspect remote repository
 sniff repo pr              # List open pull requests
 sniff repo pr --status merged  # List merged pull requests
@@ -153,6 +155,7 @@ sniff hardware --json      # Subcommand with JSON output
 - [Services](./services.md) - Init systems, service listing
 - [Extending](./extending.md) - Add new detection capabilities
 - [Architecture](../../../sniff/docs/sniff-library-architecture.md) - Cost model, shared-work design
+- If you are working with the `gitoxide` crate -- which is used in Sniff for all **git** operations -- then make sure you use the 'rust-devops' skill!
 
 ## Resources
 

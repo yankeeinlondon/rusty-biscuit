@@ -24,7 +24,7 @@ fn parse_lists_operators_and_helpers() {
             "near position 3",
             "^",
             "&&",
-            "HasKey",
+            "has_key",
         ],
     );
     insta::assert_snapshot!("parse", out);

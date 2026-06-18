@@ -11,8 +11,10 @@
 //! [Darkmatter Expressions](../../../../docs/topics/darkmatter-expressions.md)
 //! topic for the full grammar.
 
-use super::EffectiveState;
-use super::expression::{CtxLookup, EvaluationLookup, evaluate, is_truthy, parse_condition};
+use super::expression::{
+    CtxLookup, EvaluationLookup, ResolutionContext, doc_namespace, evaluate, is_truthy,
+    parse_condition,
+};
 use biscuit_terminal::errors::SourceContext;
 use serde_json::Value;
 use std::ops::Range;
@@ -56,7 +58,7 @@ impl biscuit_terminal::errors::BlockError for ConditionError {
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
 
-        let operator_hint = "Operators: <cyan>&&  ||  !  ==  !=  >  >=  <  <=  +  -  *  /  %  []  .</cyan> | Helpers: <cyan>HasKey, Contains, Length, number, round, min, max, abs, first, last, IsString, IsNumber, IsArray, IsNull, IsObject, IsEmpty, StartsWith, EndsWith, Lower, Upper, Capitalize, KebabCase, SnakeCase, CamelCase, PascalCase, TitleCase, IsDate, IsDateTime, IsToday, IsYesterday, IsTomorrow, IsThisMonth, IsThisYear</cyan>";
+        let operator_hint = "Operators: <cyan>&&  ||  !  ==  !=  >  >=  <  <=  +  -  *  /  %  []  .</cyan> | Helpers: <cyan>has_key, contains, length, number, round, min, max, abs, first, last, is_string, is_number, is_array, is_null, is_object, is_empty, starts_with, ends_with, lower, upper, capitalize, kebab_case, snake_case, camel_case, pascal_case, title_case, is_date, is_date_time, is_today, is_yesterday, is_tomorrow, is_this_month, is_this_year</cyan>";
 
         match self {
             ConditionError::Parse {
@@ -125,9 +127,9 @@ impl biscuit_terminal::errors::BlockError for ConditionError {
 /// Returns [`ConditionError::Parse`] when the expression cannot be parsed,
 /// or [`ConditionError::Eval`] when evaluation fails (e.g. unknown function).
 /// Both variants include the source expression, line number, and source context.
-pub fn evaluate_condition(
+pub fn evaluate_condition<L: EvaluationLookup>(
     expr: &str,
-    state: &EffectiveState,
+    state: &L,
     line: usize,
     ctx: SourceContext,
 ) -> Result<bool, ConditionError> {
@@ -271,6 +273,9 @@ struct ShortcutLookup<'a> {
     data: &'a Value,
     /// Lazy-capturing `ctx.*` resolver.
     ctx: CtxLookup<'a>,
+    /// Optional document-relative context enabling read-side functions. `None`
+    /// leaves the lookup context-free.
+    resolution_context: Option<ResolutionContext>,
 }
 
 impl<'a> ShortcutLookup<'a> {
@@ -278,6 +283,11 @@ impl<'a> ShortcutLookup<'a> {
         Self {
             data,
             ctx: CtxLookup::new(work_dir),
+            // The shortcut API resolves read-side functions against `work_dir`
+            // (local-only: `absolute`/`relative`/`file_exists`/… need a base
+            // directory but no remote runtime). This is a public-API capability
+            // addition for external callers of `evaluate_condition_against`.
+            resolution_context: Some(ResolutionContext::new(work_dir.to_path_buf())),
         }
     }
 
@@ -308,6 +318,12 @@ impl<'a> ShortcutLookup<'a> {
 
 impl EvaluationLookup for ShortcutLookup<'_> {
     fn get(&self, path: &str) -> Option<Value> {
+        // Reserved `doc` namespace, intercepted before the bare-name `ctx.*`
+        // fallback so a missing `doc.*` never collapses into `ctx.*`.
+        if doc_namespace::is_doc_namespace(path) {
+            return doc_namespace::resolve_doc_namespace(path, self.data);
+        }
+
         // Handle ctx.* prefixes with lazy capture
         if path == "ctx" || path.starts_with("ctx.") {
             return self.ctx.resolve_ctx(path);
@@ -326,12 +342,16 @@ impl EvaluationLookup for ShortcutLookup<'_> {
         // Fall back to ctx.* (same behavior as EffectiveState)
         self.get(&format!("ctx.{path}"))
     }
+
+    fn resolution_context(&self) -> Option<ResolutionContext> {
+        self.resolution_context.clone()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::compose::{ComposeContext, EffectiveStateBuilder};
+    use crate::markdown::compose::{ComposeContext, EffectiveState, EffectiveStateBuilder};
     use serde_json::{Value, json};
     use std::collections::HashMap;
 
@@ -349,11 +369,7 @@ mod tests {
     }
 
     fn dummy_ctx() -> SourceContext {
-        SourceContext::new(
-            PathBuf::from("/test.md"),
-            PathBuf::from("test.md"),
-            "",
-        )
+        SourceContext::new(PathBuf::from("/test.md"), PathBuf::from("test.md"), "")
     }
 
     /// Test shim that supplies a dummy `SourceContext` so call sites stay terse.
@@ -370,14 +386,14 @@ mod tests {
     #[test]
     fn evaluates_has_key() {
         let state = test_state(json!({ "user": {"name": "Alice"} }));
-        assert!(evaluate_condition(r#"HasKey(user, "name")"#, &state, 1, dummy_ctx()).unwrap());
+        assert!(evaluate_condition(r#"has_key(user, "name")"#, &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
     fn evaluates_and_or() {
         let state = test_state(json!({ "a": true, "b": false }));
-        assert!(!evaluate_condition("And(a, b)", &state, 1, dummy_ctx()).unwrap());
-        assert!(evaluate_condition("Or(a, b)", &state, 1, dummy_ctx()).unwrap());
+        assert!(!evaluate_condition("and(a, b)", &state, 1, dummy_ctx()).unwrap());
+        assert!(evaluate_condition("or(a, b)", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
@@ -522,14 +538,16 @@ mod tests {
     fn infix_or_with_literal() {
         // a || (missing || "default") — Or short-circuits on `a`.
         let state = test_state(json!({ "a": true }));
-        assert!(evaluate_condition(r#"a || (missing || "default")"#, &state, 1, dummy_ctx()).unwrap());
+        assert!(
+            evaluate_condition(r#"a || (missing || "default")"#, &state, 1, dummy_ctx()).unwrap()
+        );
     }
 
     #[test]
     fn legacy_and_or_function_still_works() {
         let state = test_state(json!({ "a": true, "b": false }));
-        assert!(!evaluate_condition("And(a, b)", &state, 1, dummy_ctx()).unwrap());
-        assert!(evaluate_condition("Or(a, b)", &state, 1, dummy_ctx()).unwrap());
+        assert!(!evaluate_condition("and(a, b)", &state, 1, dummy_ctx()).unwrap());
+        assert!(evaluate_condition("or(a, b)", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
@@ -549,13 +567,17 @@ mod tests {
     #[test]
     fn function_and_short_circuits_on_false() {
         let state = test_state(json!({}));
-        assert!(!evaluate_condition("And(false_flag, UnknownFn(x))", &state, 1, dummy_ctx()).unwrap());
+        assert!(
+            !evaluate_condition("and(false_flag, UnknownFn(x))", &state, 1, dummy_ctx()).unwrap()
+        );
     }
 
     #[test]
     fn function_or_short_circuits_on_true() {
         let state = test_state(json!({ "truthy_flag": true }));
-        assert!(evaluate_condition("Or(truthy_flag, UnknownFn(x))", &state, 1, dummy_ctx()).unwrap());
+        assert!(
+            evaluate_condition("or(truthy_flag, UnknownFn(x))", &state, 1, dummy_ctx()).unwrap()
+        );
     }
 
     #[test]
@@ -571,9 +593,15 @@ mod tests {
     #[test]
     fn infix_with_comparison_operands() {
         let state = test_state(json!({ "count": 5, "name": "alice" }));
-        assert!(evaluate_condition(r#"count > 0 && name == "alice""#, &state, 1, dummy_ctx()).unwrap());
-        assert!(!evaluate_condition(r#"count > 0 && name == "bob""#, &state, 1, dummy_ctx()).unwrap());
-        assert!(evaluate_condition(r#"count > 10 || name == "alice""#, &state, 1, dummy_ctx()).unwrap());
+        assert!(
+            evaluate_condition(r#"count > 0 && name == "alice""#, &state, 1, dummy_ctx()).unwrap()
+        );
+        assert!(
+            !evaluate_condition(r#"count > 0 && name == "bob""#, &state, 1, dummy_ctx()).unwrap()
+        );
+        assert!(
+            evaluate_condition(r#"count > 10 || name == "alice""#, &state, 1, dummy_ctx()).unwrap()
+        );
     }
 
     // ── Shortcut API: evaluate_condition_against ──────────────────────
@@ -622,7 +650,7 @@ mod tests {
                 .unwrap()
         );
         assert!(
-            evaluate_condition_against("HasKey(user, 'name')", &data, std::path::Path::new("."))
+            evaluate_condition_against("has_key(user, 'name')", &data, std::path::Path::new("."))
                 .unwrap()
         );
     }
@@ -654,9 +682,9 @@ mod tests {
     fn shortcut_and_or_functions() {
         let data = json!({ "a": true, "b": false });
         assert!(
-            !evaluate_condition_against("And(a, b)", &data, std::path::Path::new(".")).unwrap()
+            !evaluate_condition_against("and(a, b)", &data, std::path::Path::new(".")).unwrap()
         );
-        assert!(evaluate_condition_against("Or(a, b)", &data, std::path::Path::new(".")).unwrap());
+        assert!(evaluate_condition_against("or(a, b)", &data, std::path::Path::new(".")).unwrap());
     }
 
     #[test]
@@ -739,6 +767,52 @@ mod tests {
         // We test with a datetime key since it's always available
         let result = evaluate_condition_against("year", &data, std::path::Path::new("."));
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn shortcut_doc_namespace_resolves_against_data_only() {
+        let data = json!({
+            "build": "from-data",
+            "doc": { "child": "literal-doc" },
+        });
+        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+
+        // doc.<path> resolves a data property.
+        assert_eq!(lookup.get("doc.build"), Some(json!("from-data")));
+
+        // bare doc returns the whole data object.
+        let obj = lookup.get("doc").expect("bare doc resolves");
+        assert!(obj.is_object());
+        assert_eq!(obj.get("build"), Some(&json!("from-data")));
+
+        // a literal property named `doc` is reached as doc.doc.
+        assert_eq!(lookup.get("doc.doc.child"), Some(json!("literal-doc")));
+
+        // missing doc.* values do not fall back to ctx.*.
+        assert_eq!(lookup.get("doc.year"), None);
+        // The shortcut lookup now carries a work-dir-rooted resolution context
+        // so read-side functions resolve for external callers.
+        assert!(lookup.resolution_context().is_some());
+    }
+
+    #[test]
+    fn shortcut_read_side_functions_resolve_against_work_dir() {
+        // `evaluate_condition_against` now supplies a `work_dir`-rooted
+        // resolution context, so read-side functions resolve for external
+        // callers.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("spec.md"), "# Spec").unwrap();
+        let data = json!({});
+
+        assert!(evaluate_condition_against("file_exists('spec.md')", &data, dir.path()).unwrap());
+        assert!(!evaluate_condition_against("file_exists('nope.md')", &data, dir.path()).unwrap());
+        assert!(
+            evaluate_condition_against("absolute('spec.md') != ''", &data, dir.path()).unwrap()
+        );
+        assert!(
+            evaluate_condition_against("relative('spec.md') == 'spec.md'", &data, dir.path())
+                .unwrap()
+        );
     }
 
     // ── Lazy Context Resolution ─────────────────────────────────────────
@@ -933,11 +1007,11 @@ mod tests {
             let state = test_state(json!({
                 "tags": ["one", "two"], "title": "doc", "missing_field": null
             }));
-            assert!(eval_cond("IsArray(tags)", &state, 1).unwrap());
-            assert!(eval_cond("IsString(title)", &state, 1).unwrap());
-            assert!(eval_cond("IsNull(missing_field)", &state, 1).unwrap());
-            assert!(eval_cond("IsEmpty(missing)", &state, 1).unwrap());
-            assert!(!eval_cond("IsEmpty(tags)", &state, 1).unwrap());
+            assert!(eval_cond("is_array(tags)", &state, 1).unwrap());
+            assert!(eval_cond("is_string(title)", &state, 1).unwrap());
+            assert!(eval_cond("is_null(missing_field)", &state, 1).unwrap());
+            assert!(eval_cond("is_empty(missing)", &state, 1).unwrap());
+            assert!(!eval_cond("is_empty(tags)", &state, 1).unwrap());
         }
 
         #[test]
@@ -958,17 +1032,17 @@ mod tests {
         #[test]
         fn string_predicates_in_when_clause() {
             let state = test_state(json!({ "title": "Hello World" }));
-            assert!(eval_cond(r#"StartsWith(title, "Hello")"#, &state, 1).unwrap());
-            assert!(eval_cond(r#"EndsWith(title, "World")"#, &state, 1).unwrap());
-            assert!(!eval_cond(r#"StartsWith(title, "world")"#, &state, 1).unwrap());
+            assert!(eval_cond(r#"starts_with(title, "Hello")"#, &state, 1).unwrap());
+            assert!(eval_cond(r#"ends_with(title, "World")"#, &state, 1).unwrap());
+            assert!(!eval_cond(r#"starts_with(title, "world")"#, &state, 1).unwrap());
         }
 
         #[test]
         fn string_mutations_in_when_clause() {
             let state = test_state(json!({ "title": "Hello World" }));
-            assert!(eval_cond("Lower(title) == 'hello world'", &state, 1).unwrap());
-            assert!(eval_cond("KebabCase(title) == 'hello-world'", &state, 1).unwrap());
-            assert!(eval_cond("Upper(title) == 'HELLO WORLD'", &state, 1).unwrap());
+            assert!(eval_cond("lower(title) == 'hello world'", &state, 1).unwrap());
+            assert!(eval_cond("kebab_case(title) == 'hello-world'", &state, 1).unwrap());
+            assert!(eval_cond("upper(title) == 'HELLO WORLD'", &state, 1).unwrap());
         }
 
         #[test]
@@ -978,10 +1052,10 @@ mod tests {
                 "bad_date": "06-15-2024",
                 "dt": "2024-06-15T12:30:00Z"
             }));
-            assert!(eval_cond("IsDate(good_date)", &state, 1).unwrap());
-            assert!(!eval_cond("IsDate(bad_date)", &state, 1).unwrap());
-            assert!(eval_cond("IsDateTime(dt)", &state, 1).unwrap());
-            assert!(!eval_cond("IsDate(missing)", &state, 1).unwrap());
+            assert!(eval_cond("is_date(good_date)", &state, 1).unwrap());
+            assert!(!eval_cond("is_date(bad_date)", &state, 1).unwrap());
+            assert!(eval_cond("is_date_time(dt)", &state, 1).unwrap());
+            assert!(!eval_cond("is_date(missing)", &state, 1).unwrap());
         }
 
         #[test]
@@ -1014,7 +1088,7 @@ mod tests {
             let data = json!({ "items": [1, 2, 3], "title": "Important Notes" });
             assert!(
                 evaluate_condition_against(
-                    "IsArray(items) && Length(items) >= 2",
+                    "is_array(items) && length(items) >= 2",
                     &data,
                     std::path::Path::new(".")
                 )
@@ -1022,7 +1096,7 @@ mod tests {
             );
             assert!(
                 evaluate_condition_against(
-                    r#"StartsWith(Lower(title), "important")"#,
+                    r#"starts_with(lower(title), "important")"#,
                     &data,
                     std::path::Path::new(".")
                 )
@@ -1056,10 +1130,10 @@ mod tests {
                 "[]",
                 "min, max, abs",
                 "first, last",
-                "IsString",
-                "StartsWith",
-                "KebabCase",
-                "IsDate",
+                "is_string",
+                "starts_with",
+                "kebab_case",
+                "is_date",
             ] {
                 assert!(
                     rendered.contains(needle),

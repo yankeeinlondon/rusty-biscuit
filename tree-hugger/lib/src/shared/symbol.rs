@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tree_sitter::Language;
 
+use super::DiagnosticMetadata;
+
 /// Programming languages supported by tree-hugger.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ProgrammingLanguage {
@@ -151,6 +153,37 @@ impl ProgrammingLanguage {
         }
     }
 
+    /// Returns true for all current programming-language variants.
+    ///
+    /// This predicate future-proofs against markup or data grammars
+    /// (e.g. CSS, HTML) that may be added later.
+    pub fn is_programming_language(&self) -> bool {
+        // Every supported grammar today is a programming language.
+        true
+    }
+
+    /// Returns all supported languages.
+    pub fn all() -> Vec<Self> {
+        vec![
+            Self::Rust,
+            Self::JavaScript,
+            Self::TypeScript,
+            Self::Go,
+            Self::Python,
+            Self::Java,
+            Self::Php,
+            Self::Perl,
+            Self::Bash,
+            Self::Zsh,
+            Self::C,
+            Self::Cpp,
+            Self::CSharp,
+            Self::Swift,
+            Self::Scala,
+            Self::Lua,
+        ]
+    }
+
     /// Returns the tree-sitter language for an extension.
     pub fn tree_sitter_language_for_extension(extension: &str) -> Option<Language> {
         let ext = extension.to_ascii_lowercase();
@@ -161,6 +194,33 @@ impl ProgrammingLanguage {
             "jsx" => Some(tree_sitter_javascript::LANGUAGE.into()),
             _ => Self::from_extension(&ext).map(|language| language.tree_sitter_language()),
         }
+    }
+
+    /// Returns the tree-sitter grammar and a stable grammar identifier for this
+    /// language given a path, preferring an extension-specific grammar when the
+    /// path's extension maps to this same language.
+    ///
+    /// This keeps grammar selection correct when a language is forced: forcing
+    /// `TypeScript` on a `.tsx` file still selects the TSX grammar (id `"tsx"`)
+    /// rather than the plain TypeScript grammar. When the extension maps to a
+    /// different language (or is absent), the forced language's default grammar
+    /// is used and the identifier is the language's query name.
+    ///
+    /// ## Returns
+    /// Returns the grammar to parse and query with, and a cache identifier that
+    /// is unique per grammar variant across all languages.
+    pub fn grammar_for_path(&self, path: &Path) -> (Language, &'static str) {
+        let extension = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase());
+
+        // TSX is the only grammar that diverges from its language's default.
+        if *self == Self::TypeScript && extension.as_deref() == Some("tsx") {
+            return (tree_sitter_typescript::LANGUAGE_TSX.into(), "tsx");
+        }
+
+        (self.tree_sitter_language(), self.query_name())
     }
 
     /// Detects the language and tree-sitter grammar for a file.
@@ -180,7 +240,7 @@ impl fmt::Display for ProgrammingLanguage {
 }
 
 /// Categorizes a discovered symbol.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum SymbolKind {
     Function,
     Method,
@@ -562,6 +622,11 @@ pub struct ImportSymbol {
     /// The source module path (e.g., `"fs"`, `"typing"`, `"std::io"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// Whether this import re-exports the symbol (e.g. Rust `pub use`), making it
+    /// part of the public API rather than a local-only import. Re-exports are
+    /// "used" by being exported, so the `unused-import` rule must not flag them.
+    #[serde(skip)]
+    pub is_reexport: bool,
 }
 
 /// A reference to a symbol (identifier usage).
@@ -597,6 +662,9 @@ pub struct LintDiagnostic {
     /// Source context for displaying the diagnostic with visual markers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<SourceContext>,
+    /// Diagnostic metadata for policy and display.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<DiagnosticMetadata>,
 }
 
 /// A syntax diagnostic derived from parse errors.
@@ -608,6 +676,9 @@ pub struct SyntaxDiagnostic {
     /// Source context for displaying the diagnostic with visual markers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<SourceContext>,
+    /// Diagnostic metadata for policy and display.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<DiagnosticMetadata>,
 }
 
 /// Categorizes the source of a diagnostic.
@@ -653,6 +724,9 @@ pub struct Diagnostic {
     /// Source context for displaying the diagnostic with visual markers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<SourceContext>,
+    /// Diagnostic metadata for policy and display.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<DiagnosticMetadata>,
 }
 
 impl Diagnostic {
@@ -678,6 +752,7 @@ impl Diagnostic {
             severity: lint.severity,
             rule: lint.rule,
             context: lint.context,
+            metadata: lint.metadata,
         }
     }
 
@@ -690,6 +765,7 @@ impl Diagnostic {
             severity: syntax.severity,
             rule: None,
             context: syntax.context,
+            metadata: syntax.metadata,
         }
     }
 }

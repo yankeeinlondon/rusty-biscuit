@@ -726,7 +726,7 @@ mod tests {
                     Some("native"),
                 );
             }
-            Err(MessengerError::Provider { .. }) => {
+            Err(MessengerError::Transport { .. }) => {
                 // osascript not available in this environment — expected
                 // outside macOS.
             }

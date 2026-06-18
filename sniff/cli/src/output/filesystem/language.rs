@@ -3,7 +3,7 @@ use std::path::Path;
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::FrameworkStats;
 use sniff::filesystem::repo::{Package, RepoInfo};
@@ -109,7 +109,7 @@ fn resolve_language_context<'a>(
 
 fn render_language_table_for_package(pkg: &Package, verbose: u8, term: &Terminal) -> String {
     use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
-    use biscuit_terminal::utils::layout::{Alignment, Margin};
+    use biscuit_terminal::utils::layout::{Alignment, Length, TargetValue};
 
     let mut out = String::new();
 
@@ -148,9 +148,9 @@ fn render_language_table_for_package(pkg: &Package, verbose: u8, term: &Terminal
         ])
         .prefer_cursor_alignment();
 
-    table.layout_mut().left_margin = Margin::Chars(1);
-    table.layout_mut().top_margin = Margin::Chars(1);
-    table.layout_mut().bottom_margin = Margin::Chars(1);
+    table.layout_mut().margin.left = TargetValue::universal(Length::ch(1));
+    table.layout_mut().margin.top = TargetValue::universal(Length::ch(1));
+    table.layout_mut().margin.bottom = TargetValue::universal(Length::ch(1));
 
     for lang in &pkg.languages {
         table.add_row(vec![
@@ -207,7 +207,7 @@ pub fn render_language_section(
     base_dir: Option<&Path>,
 ) -> String {
     use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
-    use biscuit_terminal::utils::layout::{Alignment, Margin};
+    use biscuit_terminal::utils::layout::{Alignment, Length, TargetValue};
 
     let mut out = String::new();
     let term = Terminal::default();
@@ -228,12 +228,12 @@ pub fn render_language_section(
             .render(&term);
             writeln!(out, "{}", header).unwrap();
 
-            let mut items: Vec<RenderableContent> = Vec::new();
+            let mut items: Vec<RenderableTerminalContent> = Vec::new();
             for pkg in packages {
                 let title = Prose::new(format!("<b>{}</b>", pkg.name)).render(&term);
                 let body = render_language_table_for_package(pkg, verbose, &term);
-                items.push(RenderableContent::String(title));
-                items.push(RenderableContent::String(body));
+                items.push(RenderableTerminalContent::String(title));
+                items.push(RenderableTerminalContent::String(body));
             }
 
             let list = UnorderedList::from(items).with_indent_children(Some(4));
@@ -256,12 +256,12 @@ pub fn render_language_section(
             .render(&term);
             writeln!(out, "{}", header).unwrap();
 
-            let mut items: Vec<RenderableContent> = Vec::new();
+            let mut items: Vec<RenderableTerminalContent> = Vec::new();
             for pkg in &area_packages {
                 let title = Prose::new(format!("<b>{}</b>", pkg.name)).render(&term);
                 let body = render_language_table_for_package(pkg, verbose, &term);
-                items.push(RenderableContent::String(title));
-                items.push(RenderableContent::String(body));
+                items.push(RenderableTerminalContent::String(title));
+                items.push(RenderableTerminalContent::String(body));
             }
 
             let list = UnorderedList::from(items).with_indent_children(Some(4));
@@ -280,7 +280,7 @@ pub fn render_language_section(
             writeln!(out, "{}", header).unwrap();
 
             let body = render_language_table_for_package(pkg, verbose, &term);
-            let items = vec![RenderableContent::String(body)];
+            let items = vec![RenderableTerminalContent::String(body)];
             let list = UnorderedList::from(items).with_indent_children(Some(4));
             write!(out, "{}", list.render(&term)).unwrap();
         }
@@ -315,7 +315,7 @@ pub fn render_language_section(
                     primary
                 ))
                 .render(&term);
-                let items = vec![RenderableContent::String(line)];
+                let items = vec![RenderableTerminalContent::String(line)];
                 let list = UnorderedList::from(items).with_indent_children(Some(4));
                 write!(out, "{}", list.render(&term)).unwrap();
             }
@@ -328,9 +328,9 @@ pub fn render_language_section(
                 ])
                 .prefer_cursor_alignment();
 
-            table.layout_mut().left_margin = Margin::Chars(1);
-            table.layout_mut().top_margin = Margin::Chars(1);
-            table.layout_mut().bottom_margin = Margin::Chars(1);
+            table.layout_mut().margin.left = TargetValue::universal(Length::ch(1));
+            table.layout_mut().margin.top = TargetValue::universal(Length::ch(1));
+            table.layout_mut().margin.bottom = TargetValue::universal(Length::ch(1));
 
             for lang in &langs.languages {
                 table.add_row(vec![

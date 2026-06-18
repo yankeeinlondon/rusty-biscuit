@@ -79,6 +79,9 @@ mod tests {
     #[test]
     fn filepath_without_underscores_unchanged() {
         let out = format_styled_filepath("foo/bar/baz.rs", "/abs/foo/bar/baz.rs");
-        assert_eq!(out, "<a href=\"/abs/foo/bar/baz.rs\"><blue><dim>foo/bar/</dim><b>baz.rs</b></blue></a>");
+        assert_eq!(
+            out,
+            "<a href=\"/abs/foo/bar/baz.rs\"><blue><dim>foo/bar/</dim><b>baz.rs</b></blue></a>"
+        );
     }
 }

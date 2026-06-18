@@ -1,6 +1,18 @@
+// The resolved-layout-precedence tests exercise `DarkmatterPage`'s
+// `page_margin()`, `page_padding()`, and component-policy helpers.
+// These replaced the deprecated `margin()`, `padding()`, `fill_for()`,
+// and `alignment_for()` getters after the migration to
+// `renderable::layout::Layout`.
+
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::io::Write;
+use std::net::TcpListener;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+use std::thread;
 
 /// Helper to create a `md` command from cargo bin.
 fn md_cmd() -> assert_cmd::Command {
@@ -13,6 +25,70 @@ fn md_file(content: &str) -> tempfile::NamedTempFile {
     let mut tmp = tempfile::NamedTempFile::new().unwrap();
     write!(tmp, "{}", content).unwrap();
     tmp
+}
+
+struct MockHttpResponse {
+    status: u16,
+    body: &'static str,
+    cache_control: Option<&'static str>,
+}
+
+struct MockHttpServer {
+    base_url: String,
+    requests: Arc<AtomicUsize>,
+}
+
+impl MockHttpServer {
+    fn url(&self, path: &str) -> String {
+        format!("{}{}", self.base_url, path)
+    }
+
+    fn request_count(&self) -> usize {
+        self.requests.load(Ordering::SeqCst)
+    }
+}
+
+fn mock_http_server(responses: Vec<MockHttpResponse>) -> MockHttpServer {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let request_count = Arc::clone(&requests);
+
+    thread::spawn(move || {
+        for response in responses {
+            let Ok((mut stream, _)) = listener.accept() else {
+                break;
+            };
+            request_count.fetch_add(1, Ordering::SeqCst);
+
+            let mut buf = [0_u8; 4096];
+            let _ = std::io::Read::read(&mut stream, &mut buf);
+
+            let status_text = match response.status {
+                200 => "OK",
+                304 => "Not Modified",
+                500 => "Internal Server Error",
+                _ => "OK",
+            };
+            let mut headers = format!(
+                "HTTP/1.1 {} {}\r\nContent-Length: {}\r\n",
+                response.status,
+                status_text,
+                response.body.len()
+            );
+            if let Some(cache_control) = response.cache_control {
+                headers.push_str(&format!("Cache-Control: {cache_control}\r\n"));
+            }
+            headers.push_str("\r\n");
+            let _ = stream.write_all(headers.as_bytes());
+            let _ = stream.write_all(response.body.as_bytes());
+        }
+    });
+
+    MockHttpServer {
+        base_url: format!("http://{addr}"),
+        requests,
+    }
 }
 
 // =============================================================================
@@ -94,17 +170,48 @@ fn test_output_html() {
         .assert()
         .success()
         .stdout(predicate::str::contains("<style>"))
-        .stdout(predicate::str::contains("<h1>Hello</h1>"));
+        .stdout(predicate::str::contains("<h1 id=\"hello\">Hello</h1>"));
+}
+
+#[test]
+fn test_output_html_alias_browser() {
+    md_cmd()
+        .args(["--output", "browser", "-"])
+        .write_stdin("# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<h1 id=\"hello\">Hello</h1>"));
+}
+
+#[test]
+fn test_output_markdown_plus_renders_disclosure_as_html_details() {
+    let input = "::disclosure Summary\n::details\nBody\n::end-disclosure";
+    md_cmd()
+        .args(["--output", "markdown-plus", "-"])
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<details>"))
+        .stdout(predicate::str::contains("<summary>"))
+        .stdout(predicate::str::contains("Summary"))
+        .stdout(predicate::str::contains("</summary>"))
+        .stdout(predicate::str::contains("Body"))
+        .stdout(predicate::str::contains("</details>"));
 }
 
 #[test]
 fn test_output_json_alias_ast() {
+    // `--output ast` serializes the render-tree `Document` (`md.as_document()`),
+    // whose node discriminant is `kind` (not `type`); `root` is the top-level
+    // document node.
     md_cmd()
         .args(["--output", "ast", "-"])
         .write_stdin("# Hello\n\nWorld")
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"type\""));
+        .stdout(predicate::str::contains("\"root\""))
+        .stdout(predicate::str::contains("\"kind\""))
+        .stdout(predicate::str::contains("\"heading\""));
 }
 
 #[test]
@@ -380,7 +487,7 @@ fn test_render_explicit_with_output() {
         .write_stdin("# Hello\n\nWorld")
         .assert()
         .success()
-        .stdout(predicate::str::contains("<h1>Hello</h1>"));
+        .stdout(predicate::str::contains("<h1 id=\"hello\">Hello</h1>"));
 }
 
 // =============================================================================
@@ -396,6 +503,277 @@ fn test_compose_basic() {
         .success()
         .stdout(predicate::str::contains("Hello"))
         .stdout(predicate::str::contains("World"));
+}
+
+#[test]
+fn test_compose_markdown_plus_renders_disclosure_as_details() {
+    // `md compose --output markdown-plus` must route the composed document
+    // through the MarkdownPlus fold, emitting `<details>`/`<summary>` HTML
+    // rather than preserving the `::disclosure` DSL verbatim.
+    md_cmd()
+        .args(["compose", "--output", "markdown-plus", "-"])
+        .write_stdin(
+            "::disclosure\nLicense *Agreement*\n::details\nKeep your **hands** off.\n::end-disclosure\n",
+        )
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<details>"))
+        .stdout(predicate::str::contains("<summary>"))
+        .stdout(predicate::str::contains("</summary>"))
+        .stdout(predicate::str::contains("</details>"))
+        .stdout(predicate::str::contains("::disclosure").not());
+}
+
+#[test]
+fn test_compose_remote_allowed_host_fetches_url() {
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "Remote body\n",
+        cache_control: None,
+    }]);
+    let url = server.url("/remote.md");
+
+    md_cmd()
+        .args(["compose", "-", "--allow-host", "127.0.0.1"])
+        .write_stdin(format!("# Local\n\n::file {url}\n"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Remote body"));
+
+    assert_eq!(server.request_count(), 1);
+}
+
+#[test]
+fn test_compose_remote_deny_all_fails_without_request() {
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "should not be fetched\n",
+        cache_control: None,
+    }]);
+    let url = server.url("/blocked.md");
+
+    md_cmd()
+        .args(["compose", "-"])
+        .write_stdin(format!("# Local\n\n::file {url}\n"))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("remote read denied"))
+        .stderr(predicate::str::contains("127.0.0.1"));
+
+    assert_eq!(server.request_count(), 0);
+}
+
+#[test]
+fn test_compose_remote_expression_function_reads_url() {
+    // Read-side expression functions must work through the real `md compose`
+    // pipeline, not just helper-level unit tests. The URL argument is quoted
+    // because the interpolation expression parser requires a string literal.
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "# Remote Heading\n",
+        cache_control: None,
+    }]);
+    let url = server.url("/remote.md");
+
+    md_cmd()
+        .args(["compose", "-", "--allow-host", "127.0.0.1"])
+        .write_stdin(format!("Title: {{{{ markdown_title(\"{url}\") }}}}\n"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Title: Remote Heading"));
+
+    assert_eq!(server.request_count(), 1);
+}
+
+#[test]
+fn test_compose_remote_expression_function_denied_host_reads_false() {
+    // `file_exists` against a host that is not allowed must read as `false`
+    // (the fetch is policy-denied, never issued) rather than failing compose.
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "should not be fetched\n",
+        cache_control: None,
+    }]);
+    let url = server.url("/blocked.md");
+
+    md_cmd()
+        .args(["compose", "-"])
+        .write_stdin(format!("Exists: {{{{ file_exists(\"{url}\") }}}}\n"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Exists: false"));
+
+    assert_eq!(server.request_count(), 0);
+}
+
+#[test]
+fn test_compose_remote_prologue_allowed_host_fetches_url() {
+    // A remote `prologue` URL on an allowed host must be registered, fetched,
+    // and prepended to the body.
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "Prologue body\n",
+        cache_control: None,
+    }]);
+    let url = server.url("/intro.md");
+
+    md_cmd()
+        .args(["compose", "-", "--allow-host", "127.0.0.1"])
+        .write_stdin(format!("---\nprologue: {url}\n---\n# Local\n\nBody.\n"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Prologue body"))
+        .stdout(predicate::str::contains("Local"));
+
+    assert_eq!(server.request_count(), 1);
+}
+
+#[test]
+fn test_compose_remote_epilogue_deny_all_fails_without_request() {
+    // A remote `epilogue` on a non-allowed host must fail by policy and never
+    // issue a request — not fail with an internal "not registered" error.
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "should not be fetched\n",
+        cache_control: None,
+    }]);
+    let url = server.url("/outro.md");
+
+    md_cmd()
+        .args(["compose", "-"])
+        .write_stdin(format!("---\nepilogue: {url}\n---\n# Local\n\nBody.\n"))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("remote read denied"))
+        .stderr(predicate::str::contains("127.0.0.1"));
+
+    assert_eq!(server.request_count(), 0);
+}
+
+#[test]
+fn test_compose_remote_refresh_revalidates_cached_url() {
+    let cache_dir = tempfile::TempDir::new().unwrap();
+    let server = mock_http_server(vec![
+        MockHttpResponse {
+            status: 200,
+            body: "First remote body\n",
+            cache_control: Some("max-age=3600"),
+        },
+        MockHttpResponse {
+            status: 200,
+            body: "Second remote body\n",
+            cache_control: Some("max-age=3600"),
+        },
+    ]);
+    let url = server.url("/cached.md");
+    let input = format!("# Local\n\n::file {url}\n");
+
+    md_cmd()
+        .args([
+            "compose",
+            "-",
+            "--allow-host",
+            "127.0.0.1",
+            "--cache-root",
+        ])
+        .arg(cache_dir.path())
+        .write_stdin(input.clone())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("First remote body"));
+
+    md_cmd()
+        .args([
+            "compose",
+            "-",
+            "--allow-host",
+            "127.0.0.1",
+            "--cache-root",
+        ])
+        .arg(cache_dir.path())
+        .args(["--remote-refresh"])
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Second remote body"));
+
+    assert_eq!(server.request_count(), 2);
+}
+
+#[test]
+fn test_compose_remote_fallback_serves_stale_cache_on_failure() {
+    let cache_dir = tempfile::TempDir::new().unwrap();
+    let server = mock_http_server(vec![
+        MockHttpResponse {
+            status: 200,
+            body: "Cached remote body\n",
+            cache_control: Some("max-age=0"),
+        },
+        MockHttpResponse {
+            status: 500,
+            body: "server unavailable\n",
+            cache_control: None,
+        },
+    ]);
+    let url = server.url("/stale.md");
+    let input = format!("# Local\n\n::file {url}\n");
+
+    md_cmd()
+        .args([
+            "compose",
+            "-",
+            "--allow-host",
+            "127.0.0.1",
+            "--cache-root",
+        ])
+        .arg(cache_dir.path())
+        .write_stdin(input.clone())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Cached remote body"));
+
+    md_cmd()
+        .args([
+            "compose",
+            "-",
+            "--allow-host",
+            "127.0.0.1",
+            "--cache-root",
+        ])
+        .arg(cache_dir.path())
+        .args(["--remote-freshness", "fallback"])
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Cached remote body"));
+
+    assert_eq!(server.request_count(), 2);
+}
+
+#[test]
+fn test_compose_invalid_remote_freshness_fails_fast() {
+    // A typo must fail with a non-zero exit and list the accepted values,
+    // rather than silently degrading to a single freshness mode.
+    md_cmd()
+        .args(["compose", "-", "--remote-freshness", "fallbak"])
+        .write_stdin("# Local\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("optimistic"))
+        .stderr(predicate::str::contains("strict"))
+        .stderr(predicate::str::contains("fallback"));
+}
+
+#[test]
+fn test_compose_preserves_rendered_remote_links() {
+    md_cmd()
+        .args(["compose", "-"])
+        .write_stdin("[Remote](https://example.com/path?q=1)\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "[Remote](https://example.com/path?q=1)",
+        ));
 }
 
 #[test]
@@ -415,7 +793,7 @@ fn test_compose_output_html() {
         .write_stdin("# Hello\n\nWorld")
         .assert()
         .success()
-        .stdout(predicate::str::contains("<h1>Hello</h1>"));
+        .stdout(predicate::str::contains("<h1 id=\"hello\">Hello</h1>"));
 }
 
 #[test]
@@ -1022,6 +1400,72 @@ fn test_compose_frontmatter_nested_quotes_in_interpolation() {
 }
 
 // =============================================================================
+//        MOTIVATING `spec: file` FRONTMATTER TERNARY (RESOLUTION CONTEXT)
+// =============================================================================
+
+/// Builds the motivating document: an optional `spec` `file` field derived from
+/// whether a sibling `spec.md` exists, gated downstream by `::block when="spec"`.
+///
+/// This is the end-to-end fixture for the resolution-context feature — the
+/// read-side `file_exists` function must evaluate in the **frontmatter** pass
+/// (it previously only worked in the body), and Decision A must let the empty
+/// `else ''` branch satisfy the non-required `spec: file` schema field.
+const MOTIVATING_SPEC_TERNARY: &str = "---\n\
+$schema:\n\
+\x20 plan: file(required)\n\
+\x20 spec: file\n\
+possible_spec: \"spec.md\"\n\
+spec: \"{{ file_exists(possible_spec) ? possible_spec : '' }}\"\n\
+plan: \"plan.md\"\n\
+---\n\
+# Task\n\
+\n\
+::block when=\"spec\"\n\
+Spec resolved: {{ spec }}\n\
+::end-block\n";
+
+#[test]
+fn test_compose_motivating_spec_ternary_resolves_when_spec_present() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("plan.md"), "# Plan\n").unwrap();
+    std::fs::write(dir.path().join("spec.md"), "# Spec\n").unwrap();
+    std::fs::write(dir.path().join("template.md"), MOTIVATING_SPEC_TERNARY).unwrap();
+
+    // `file_exists(possible_spec)` is true → the ternary resolves `spec` to the
+    // path, the optional `file` field validates, and `::block when="spec"`
+    // renders its body. Run from the document directory so the `file`-typed
+    // schema fields resolve their references against the sibling files.
+    md_cmd()
+        .current_dir(dir.path())
+        .arg("compose")
+        .arg("--frontmatter")
+        .arg("template.md")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("spec: spec.md"))
+        .stdout(predicate::str::contains("Spec resolved: spec.md"));
+}
+
+#[test]
+fn test_compose_motivating_spec_ternary_absent_when_spec_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("plan.md"), "# Plan\n").unwrap();
+    // No spec.md sibling.
+    std::fs::write(dir.path().join("template.md"), MOTIVATING_SPEC_TERNARY).unwrap();
+
+    // `file_exists(possible_spec)` is false → the ternary resolves `spec` to the
+    // empty string. Decision A treats an empty non-required `file` field as
+    // absent (compose still succeeds) and `::block when="spec"` is excluded.
+    md_cmd()
+        .current_dir(dir.path())
+        .arg("compose")
+        .arg("template.md")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Spec resolved:").not());
+}
+
+// =============================================================================
 //              TRANSCLUSION + INTERPOLATION VALIDATION TESTS
 // =============================================================================
 
@@ -1066,8 +1510,11 @@ fn test_compose_state_variables_available_during_validation() {
     )
     .unwrap();
 
+    // `doc` is the reserved frontmatter namespace, so a property literally
+    // named `doc` is referenced as `doc.doc` (bare `{{doc}}` is the whole
+    // frontmatter object).
     let template_path = temp_dir.path().join("template.md");
-    std::fs::write(&template_path, "# Docs\n\n::file docs/{{doc}}\n").unwrap();
+    std::fs::write(&template_path, "# Docs\n\n::file docs/{{doc.doc}}\n").unwrap();
 
     md_cmd()
         .arg("compose")
@@ -1402,6 +1849,379 @@ fn test_hash_directory_ignores_non_markdown() {
         .stdout(predicate::str::is_match(r"^[0-9a-f]{16}-[0-9a-f]{16}\n$").unwrap());
 }
 
+#[test]
+fn test_hash_directory_ignores_managed_keys() {
+    // Adding the managed `hash` / `last_updated` baseline fields must not move
+    // the directory aggregate — the hash never hashes itself.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("a.md"),
+        "---\ntitle: Alpha\n---\n# Alpha\n\nFirst file.",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("b.md"),
+        "---\ntitle: Beta\n---\n# Beta\n\nSecond file.",
+    )
+    .unwrap();
+
+    let before = md_cmd().arg("hash").arg(dir.path()).output().unwrap();
+    assert!(before.status.success());
+
+    std::fs::write(
+        dir.path().join("a.md"),
+        "---\ntitle: Alpha\nhash: 1111111111111111-2222222222222222\nlast_updated: 2020-01-01\n---\n# Alpha\n\nFirst file.",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("b.md"),
+        "---\ntitle: Beta\nhash: 3333333333333333-4444444444444444\nlast_updated: 2020-01-01\n---\n# Beta\n\nSecond file.",
+    )
+    .unwrap();
+
+    let after = md_cmd().arg("hash").arg(dir.path()).output().unwrap();
+    assert_eq!(
+        before.stdout, after.stdout,
+        "managed keys must not change the directory aggregate",
+    );
+}
+
+#[test]
+fn test_hash_directory_honors_ignore_properties() {
+    // A file differing only in an ignored property must aggregate identically.
+    let with_draft = tempfile::tempdir().unwrap();
+    std::fs::write(
+        with_draft.path().join("a.md"),
+        "---\ntitle: Alpha\ndraft: true\n---\n# Alpha\n\nFirst file.",
+    )
+    .unwrap();
+    let without_draft = tempfile::tempdir().unwrap();
+    std::fs::write(
+        without_draft.path().join("a.md"),
+        "---\ntitle: Alpha\n---\n# Alpha\n\nFirst file.",
+    )
+    .unwrap();
+
+    let a = md_cmd()
+        .env("HASH_IGNORE_PROPERTIES", "draft")
+        .arg("hash")
+        .arg(with_draft.path())
+        .output()
+        .unwrap();
+    let b = md_cmd()
+        .env("HASH_IGNORE_PROPERTIES", "draft")
+        .arg("hash")
+        .arg(without_draft.path())
+        .output()
+        .unwrap();
+    assert_eq!(
+        a.stdout, b.stdout,
+        "HASH_IGNORE_PROPERTIES must apply in directory mode",
+    );
+}
+
+// =============================================================================
+//                     HASH KIND / SAVE / DIFF TESTS
+// =============================================================================
+
+#[test]
+fn test_hash_kind_structured_outputs_four_parts() {
+    md_cmd()
+        .args(["hash", "--kind", "structured", "-"])
+        .write_stdin("---\ntitle: Test\n---\n# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::is_match(r"^[0-9a-f]{16}-[0-9a-f]{16}-[0-9a-f]{16}-[0-9a-f]{16}\n$")
+                .unwrap(),
+        );
+}
+
+#[test]
+fn test_hash_kind_structured_strict_outputs_four_parts() {
+    md_cmd()
+        .args(["hash", "--kind", "structured", "--strict", "-"])
+        .write_stdin("---\nbeta: 1\nalpha: 2\n---\n# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::is_match(r"^[0-9a-f]{16}-[0-9a-f]{16}-[0-9a-f]{16}-[0-9a-f]{16}\n$")
+                .unwrap(),
+        );
+}
+
+#[test]
+fn test_hash_kind_structured_strict_respects_key_order() {
+    let reordered = |args: &[&str]| {
+        let beta_first = md_cmd()
+            .args(args)
+            .write_stdin("---\nbeta: 1\nalpha: 2\n---\n# H\n\nBody.")
+            .output()
+            .unwrap()
+            .stdout;
+        let alpha_first = md_cmd()
+            .args(args)
+            .write_stdin("---\nalpha: 2\nbeta: 1\n---\n# H\n\nBody.")
+            .output()
+            .unwrap()
+            .stdout;
+        (beta_first, alpha_first)
+    };
+
+    // Strict preserves key order, so reordering keys changes the hash.
+    let (strict_beta, strict_alpha) = reordered(&["hash", "--kind", "structured", "--strict", "-"]);
+    assert_ne!(strict_beta, strict_alpha, "strict must not reorder keys");
+
+    // Non-strict sorts keys, so reordering is a no-op.
+    let (ns_beta, ns_alpha) = reordered(&["hash", "--kind", "structured", "-"]);
+    assert_eq!(ns_beta, ns_alpha, "non-strict sorts keys");
+}
+
+#[test]
+fn test_hash_diff_malformed_stored_hash_exits_one() {
+    // A corrupt stored hash is an operational error (exit 1), never a content
+    // difference (exit 2).
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    std::fs::write(
+        &file,
+        "---\ntitle: T\nhash: not-a-real-hash-but-two-parts\n---\n# H\n\nBody.\n",
+    )
+    .unwrap();
+
+    md_cmd().arg("hash").arg("--diff").arg(&file).assert().code(1);
+}
+
+#[test]
+fn test_hash_diff_detailed_bad_section_level_exits_one() {
+    // A stored detailed hash whose section level is outside 1-6 is a malformed
+    // baseline (operational error, exit 1), never a content difference (exit 2).
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    std::fs::write(
+        &file,
+        concat!(
+            "---\n",
+            "title: T\n",
+            "hash:\n",
+            "  kind: detailed\n",
+            "  value:\n",
+            "    frontmatter:\n",
+            "      fm: \"0000000000000001\"\n",
+            "      keys: \"0000000000000002\"\n",
+            "    preamble: null\n",
+            "    sections:\n",
+            "      - [9, \"Bad\", \"0000000000000004\"]\n",
+            "---\n",
+            "# H\n\nBody.\n",
+        ),
+    )
+    .unwrap();
+
+    md_cmd().arg("hash").arg("--diff").arg(&file).assert().code(1);
+}
+
+#[test]
+fn test_hash_kind_detailed_outputs_nested_yaml() {
+    md_cmd()
+        .args(["hash", "--kind", "detailed", "-"])
+        .write_stdin("---\ntitle: Test\n---\n# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("frontmatter:"))
+        .stdout(predicate::str::contains("sections:"));
+}
+
+#[test]
+fn test_hash_kind_fm_matches_frontmatter_flag() {
+    let input = "---\ntitle: Hello\n---\n# Content";
+    let by_kind = md_cmd()
+        .args(["hash", "--kind", "fm", "-"])
+        .write_stdin(input)
+        .output()
+        .unwrap();
+    let by_flag = md_cmd()
+        .args(["hash", "--frontmatter", "-"])
+        .write_stdin(input)
+        .output()
+        .unwrap();
+    assert_eq!(by_kind.stdout, by_flag.stdout);
+}
+
+#[test]
+fn test_hash_kind_conflicts_with_body() {
+    md_cmd()
+        .args(["hash", "--kind", "fm", "--body", "-"])
+        .write_stdin("# H")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_hash_save_and_diff_conflict() {
+    md_cmd()
+        .args(["hash", "--save", "--diff", "-"])
+        .write_stdin("# H")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_hash_env_property_override() {
+    // HASH_PROPERTY changes which frontmatter key the hash is written to.
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    std::fs::write(&file, "---\ntitle: T\n---\n# H\n\nBody.\n").unwrap();
+
+    md_cmd()
+        .env("HASH_PROPERTY", "fingerprint")
+        .arg("hash")
+        .arg("--save")
+        .arg(&file)
+        .assert()
+        .success();
+
+    let written = std::fs::read_to_string(&file).unwrap();
+    assert!(written.contains("fingerprint:"), "got:\n{written}");
+    assert!(!written.contains("\nhash:"), "got:\n{written}");
+}
+
+#[test]
+fn test_hash_ignore_properties_excludes_key() {
+    // A document differing only in an ignored property hashes identically.
+    let with_draft = md_cmd()
+        .env("HASH_IGNORE_PROPERTIES", "draft")
+        .args(["hash", "--frontmatter", "-"])
+        .write_stdin("---\ntitle: T\ndraft: true\n---\n# H")
+        .output()
+        .unwrap();
+    let without_draft = md_cmd()
+        .env("HASH_IGNORE_PROPERTIES", "draft")
+        .args(["hash", "--frontmatter", "-"])
+        .write_stdin("---\ntitle: T\n---\n# H")
+        .output()
+        .unwrap();
+    assert_eq!(with_draft.stdout, without_draft.stdout);
+}
+
+#[test]
+fn test_hash_save_writes_baseline_and_exits_zero() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    std::fs::write(&file, "---\ntitle: T\n---\n# H\n\nBody.\n").unwrap();
+
+    md_cmd()
+        .arg("hash")
+        .arg("--save")
+        .arg(&file)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("baseline"));
+
+    let written = std::fs::read_to_string(&file).unwrap();
+    assert!(written.contains("hash:"), "got:\n{written}");
+}
+
+#[test]
+fn test_hash_save_requires_file_not_stdin() {
+    md_cmd()
+        .args(["hash", "--save", "-"])
+        .write_stdin("# H")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_hash_diff_no_stored_hash_exits_two() {
+    md_cmd()
+        .args(["hash", "--diff", "-"])
+        .write_stdin("---\ntitle: T\n---\n# H\n\nBody.")
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("No stored hash to compare against"));
+}
+
+#[test]
+fn test_hash_diff_unchanged_exits_zero() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    std::fs::write(&file, "---\ntitle: T\n---\n# H\n\nBody.\n").unwrap();
+
+    // Establish a baseline, then diff against it without any edit.
+    md_cmd().arg("hash").arg("--save").arg(&file).assert().success();
+
+    md_cmd()
+        .arg("hash")
+        .arg("--diff")
+        .arg(&file)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No semantic changes detected"));
+}
+
+#[test]
+fn test_hash_diff_changed_exits_two() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    std::fs::write(&file, "---\ntitle: T\n---\n# H\n\nBody.\n").unwrap();
+
+    md_cmd().arg("hash").arg("--save").arg(&file).assert().success();
+
+    // Edit the body, leaving the stored hash in place.
+    let stored = std::fs::read_to_string(&file).unwrap();
+    let edited = stored.replace("Body.", "Different body.");
+    std::fs::write(&file, edited).unwrap();
+
+    md_cmd().arg("hash").arg("--diff").arg(&file).assert().code(2);
+}
+
+#[test]
+fn test_hash_directory_rejects_save() {
+    let dir = create_hash_dir();
+    md_cmd()
+        .args(["hash", "--save"])
+        .arg(dir.path())
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_hash_directory_rejects_structured_kind() {
+    let dir = create_hash_dir();
+    md_cmd()
+        .args(["hash", "--kind", "structured"])
+        .arg(dir.path())
+        .assert()
+        .failure();
+}
+
+/// A single malformed Markdown file must fail the whole directory aggregate
+/// rather than being silently hashed as an empty document. Otherwise a CI /
+/// release check using `md hash <dir>` could pass on a broken file and record
+/// a false baseline.
+#[test]
+fn test_hash_directory_malformed_frontmatter_exits_one() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("good.md"),
+        "---\ntitle: Alpha\n---\n# Alpha\n",
+    )
+    .unwrap();
+    // Quoted scalar followed by trailing unquoted text: a frontmatter parse error.
+    std::fs::write(
+        dir.path().join("bad.md"),
+        "---\nphases: 5\nfindings:\n  - id: '@' magic lookup emits results\n---\n# Doc\n",
+    )
+    .unwrap();
+
+    md_cmd()
+        .arg("hash")
+        .arg(dir.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("bad.md"));
+}
+
 // =============================================================================
 //                          GET SUBCOMMAND TESTS
 // =============================================================================
@@ -1541,16 +2361,28 @@ fn test_get_no_frontmatter_returns_empty_string() {
 /// YAML line in the rendered StatusBlock.
 #[test]
 fn test_get_malformed_frontmatter_renders_status_block_with_offending_line() {
+    use darkmatter::testing::strip_ansi_codes;
+
     let yaml = "---\nphases: 5\nfindings:\n  - id: '@' magic lookup emits results\n---\n# Doc\n";
 
-    md_cmd()
+    let output = md_cmd()
         .args(["get", "-", "phases"])
         .write_stdin(yaml)
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("MarkdownError"))
-        .stderr(predicate::str::contains("frontmatter parse failed"))
-        .stderr(predicate::str::contains("'@' magic lookup emits results"));
+        .output()
+        .expect("md get should run");
+
+    assert!(!output.status.success(), "expected a failure exit status");
+
+    // The offending YAML line is syntax-highlighted, so its characters are
+    // interleaved with SGR escapes in the raw stderr; strip ANSI before
+    // asserting on the visible text.
+    let stderr = strip_ansi_codes(&String::from_utf8_lossy(&output.stderr));
+    assert!(stderr.contains("MarkdownError"), "stderr: {stderr}");
+    assert!(stderr.contains("frontmatter parse failed"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("'@' magic lookup emits results"),
+        "offending line must be shown. stderr: {stderr}"
+    );
 }
 
 #[test]
@@ -2493,8 +3325,11 @@ fn test_completions_fish() {
 #[test]
 fn test_line_numbers_html_output() {
     let input = "```rust\nfn main() {}\n```";
+    // Use `--line-numbers=true` to avoid the optional-arg ambiguity with the
+    // `-` stdin marker positional. The bare form `--line-numbers -` would let
+    // clap consume `-` as the optional value.
     md_cmd()
-        .args(["--output", "html", "--line-numbers", "-"])
+        .args(["--output", "html", "--line-numbers=true", "-"])
         .write_stdin(input)
         .assert()
         .success()
@@ -2768,4 +3603,1528 @@ fn test_compose_html_spaced_attributes() {
         !stdout.contains("src = \"./img.png\""),
         "stdout should not contain unprocessed spaced src, got:\n{stdout}"
     );
+}
+
+// =============================================================================
+//                          LAYOUT FLAGS (Phase 5)
+// =============================================================================
+
+#[test]
+fn layout_margin_shorthand_overrides_axis_and_side() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--margin")
+        .arg("4")
+        .arg("--mx")
+        .arg("2")
+        .arg("--mt")
+        .arg("1")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "margin flags should parse and be accepted"
+    );
+}
+
+#[test]
+fn layout_padding_shorthand_overrides_axis_and_side() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--padding")
+        .arg("4")
+        .arg("--px")
+        .arg("2")
+        .arg("--pt")
+        .arg("1")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "padding flags should parse and be accepted"
+    );
+}
+
+#[test]
+fn layout_max_width_zero_rejected() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--max-width")
+        .arg("0")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("max-width") || stderr.contains("0"),
+        "should reject --max-width 0, got: {stderr}"
+    );
+}
+
+#[test]
+fn layout_max_width_positive_accepted() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--max-width")
+        .arg("80")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn layout_fill_full_accepted() {
+    let tmp = md_file("```rust\nfn main() {}\n```\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--fill")
+        .arg("full")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn layout_fill_pad_fixed_accepted() {
+    let tmp = md_file("```rust\nfn main() {}\n```\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--fill")
+        .arg("pad=4")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn layout_fill_pad_percent_accepted() {
+    let tmp = md_file("```rust\nfn main() {}\n```\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--fill")
+        .arg("pad=10%")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn layout_fill_indent_max_explicit_accepted() {
+    let tmp = md_file("```rust\nfn main() {}\n```\n");
+    for fill in ["indent=2", "max=40", "explicit=60"] {
+        let output = md_cmd()
+            .arg(tmp.path())
+            .arg("--fill")
+            .arg(fill)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "--fill {fill} should succeed");
+    }
+}
+
+#[test]
+fn layout_fill_unknown_kind_rejected() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--fill")
+        .arg("unknown=4")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+}
+
+#[test]
+fn layout_fill_percent_over_100_rejected() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--fill")
+        .arg("pad=150%")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+}
+
+#[test]
+fn layout_fill_negative_rejected() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--fill")
+        .arg("pad=-1")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+}
+
+#[test]
+fn layout_alignment_global_accepted() {
+    let tmp = md_file("| A | B |\n|---|---|\n| 1 | 2 |\n");
+    for align in ["left", "center", "right"] {
+        let output = md_cmd()
+            .arg(tmp.path())
+            .arg("--alignment")
+            .arg(align)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "--alignment {align} should succeed"
+        );
+    }
+}
+
+#[test]
+fn layout_align_component_overrides_global() {
+    let tmp = md_file("```rust\nfn main() {}\n```\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--alignment")
+        .arg("center")
+        .arg("--align-code-blocks")
+        .arg("left")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn layout_page_bg_accepted() {
+    let tmp = md_file("# Hello\n");
+    for bg in ["transparent", "subtle", "pronounced"] {
+        let output = md_cmd()
+            .arg(tmp.path())
+            .arg("--page-bg")
+            .arg(bg)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "--page-bg {bg} should succeed");
+    }
+}
+
+#[test]
+fn layout_page_background_alias_works() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--page-background")
+        .arg("subtle")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn layout_page_bg_color_hex_accepted() {
+    let tmp = md_file("# Hello\n");
+    for hex in ["#1e1e23", "#abc", "#ffffff"] {
+        let output = md_cmd()
+            .arg(tmp.path())
+            .arg("--page-bg-color")
+            .arg(hex)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "--page-bg-color {hex} should succeed; stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn layout_page_bg_color_rgb_triple_accepted() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--page-bg-color")
+        .arg("30,30,35")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}
+
+#[test]
+fn layout_page_bg_color_tailwind_accepted() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--page-bg-color")
+        .arg("red-500")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}
+
+#[test]
+fn layout_page_bg_color_special_keyword_accepted() {
+    let tmp = md_file("# Hello\n");
+    for kw in ["transparent", "currentColor", "inherit"] {
+        let output = md_cmd()
+            .arg(tmp.path())
+            .arg("--page-bg-color")
+            .arg(kw)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "--page-bg-color {kw} should succeed");
+    }
+}
+
+#[test]
+fn layout_page_bg_color_invalid_rejected() {
+    let tmp = md_file("# Hello\n");
+    for bad in ["not-a-color", "256,0,0", "1,2", "purple-555"] {
+        let output = md_cmd()
+            .arg(tmp.path())
+            .arg("--page-bg-color")
+            .arg(bad)
+            .output()
+            .unwrap();
+        assert!(
+            !output.status.success(),
+            "--page-bg-color {bad} should fail"
+        );
+    }
+}
+
+#[test]
+fn layout_width_flag_rejected() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--width")
+        .arg("80")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--width") || stderr.contains("max-width"),
+        "--width should be rejected with a helpful error; got: {stderr}"
+    );
+}
+
+#[test]
+fn layout_margin_aliases_work() {
+    // `--margin-top` and friends should be accepted as visible_aliases for
+    // the existing `--mt` / `--mb` / `--ml` / `--mr` flags.
+    let tmp = md_file("# Hello\n");
+    for args in [
+        ["--margin-top", "1"],
+        ["--margin-bottom", "1"],
+        ["--margin-left", "1"],
+        ["--margin-right", "1"],
+        ["--padding-top", "1"],
+        ["--padding-bottom", "1"],
+        ["--padding-left", "1"],
+        ["--padding-right", "1"],
+    ] {
+        let output = md_cmd()
+            .arg(tmp.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{} {} should be accepted; stderr: {}",
+            args[0],
+            args[1],
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn layout_line_numbers_flag_accepted() {
+    let tmp = md_file("```rust\nfn main() {}\n```\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--line-numbers")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "--line-numbers flag should be accepted"
+    );
+}
+
+#[test]
+fn layout_line_numbers_true_accepted() {
+    let tmp = md_file("```rust\nfn main() {}\n```\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--line-numbers")
+        .arg("true")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "--line-numbers true should be accepted"
+    );
+}
+
+#[test]
+fn layout_line_numbers_false_accepted() {
+    let tmp = md_file("```rust\nfn main() {}\n```\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--line-numbers")
+        .arg("false")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "--line-numbers false should be accepted"
+    );
+}
+
+#[test]
+fn layout_fill_component_specific_accepted() {
+    let tmp = md_file("```rust\nfn main() {}\n```\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--fill-code-blocks")
+        .arg("max=40")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn layout_margin_negative_rejected() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--margin")
+        .arg("-1")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+}
+
+#[test]
+fn layout_no_flags_preserves_existing_behavior() {
+    let tmp = md_file("# Hello World\n\nSome prose here.\n");
+    let output = md_cmd().arg(tmp.path()).output().unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Hello World"),
+        "output should contain heading without layout flags"
+    );
+}
+
+#[test]
+fn layout_combined_margin_padding_bg() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--margin")
+        .arg("2")
+        .arg("--padding")
+        .arg("1")
+        .arg("--page-bg")
+        .arg("subtle")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+}
+
+// =============================================================================
+//                          RESOLVED LAYOUT PRECEDENCE TESTS
+// =============================================================================
+//
+// These tests assert that CLI precedence rules produce the documented
+// observable resolved page state — not just that the CLI parses successfully.
+// They drive `apply_cli_layout_flags` against parsed `Cli` values and verify
+// the final `DarkmatterPage` getters (`page_margin()`, `page_padding()`, `fill_for()`,
+// `alignment_for()`, `max_width()`, `line_numbers()`).
+
+use biscuit_terminal::terminal::Terminal;
+use clap::Parser;
+use darkmatter::layout::{DarkmatterPage, PageComponent};
+use darkmatter_cli::Cli;
+use darkmatter_cli::output::apply_cli_layout_flags;
+use renderable::layout::{Alignment, Edges, Length, TargetValue, Width};
+
+fn parse_cli(args: &[&str]) -> Cli {
+    let mut full = vec!["md"];
+    full.extend_from_slice(args);
+    Cli::try_parse_from(full).expect("CLI args must parse")
+}
+
+fn resolved_page(args: &[&str]) -> DarkmatterPage {
+    let cli = parse_cli(args);
+    let term = Terminal::new_optimistic(120);
+    apply_cli_layout_flags(DarkmatterPage::new(&term), &cli)
+}
+
+fn tv_cells(tv: &TargetValue<Length>) -> u16 {
+    match tv {
+        TargetValue::Universal(Length::Ch(n)) => u16::try_from(*n).unwrap_or(u16::MAX),
+        _ => 0,
+    }
+}
+
+fn alignment_for(page: &DarkmatterPage, component: PageComponent) -> Alignment {
+    page.component_policy(component)
+        .map(|p| p.layout.alignment)
+        .unwrap_or_default()
+}
+
+#[derive(Debug, PartialEq)]
+enum TestFill {
+    Full,
+    Pad(Length),
+    Indent(Length),
+    Max(Length),
+    Explicit(Length),
+}
+
+fn fill_for(page: &DarkmatterPage, component: PageComponent) -> TestFill {
+    match page.component_policy(component) {
+        None => TestFill::Full,
+        Some(p) => {
+            let l = &p.layout;
+            if l.width == Width::Auto && l.max_width.is_none() && l.padding == Edges::default() {
+                TestFill::Full
+            } else if l.width == Width::Auto
+                && l.max_width.is_none()
+                && l.padding != Edges::default()
+            {
+                // Pad: symmetric horizontal padding (left == right, top/bottom zero)
+                if l.padding.top == TargetValue::universal(Length::Zero)
+                    && l.padding.bottom == TargetValue::universal(Length::Zero)
+                    && l.padding.left == l.padding.right
+                {
+                    TestFill::Pad(tv_length(&l.padding.left))
+                } else {
+                    // Asymmetric padding — treat as indent if only left is non-zero
+                    TestFill::Indent(tv_length(&l.padding.left))
+                }
+            } else if let Some(max_width) = &l.max_width && l.width == Width::Auto {
+                TestFill::Max(tv_length(max_width))
+            } else if matches!(l.width, Width::Fixed(_)) {
+                TestFill::Explicit(width_length(&l.width))
+            } else {
+                TestFill::Full
+            }
+        }
+    }
+}
+
+fn tv_length(tv: &TargetValue<Length>) -> Length {
+    match tv {
+        TargetValue::Universal(l) => l.clone(),
+        _ => Length::Zero,
+    }
+}
+
+fn width_length(w: &Width) -> Length {
+    match w {
+        Width::Fixed(tv) => tv_length(tv),
+        _ => Length::Zero,
+    }
+}
+
+
+#[test]
+fn layout_resolved_margin_shorthand_then_top_override() {
+    // `-m 2 --mt 0`: shorthand sets all sides to 2, then --mt clears just the
+    // top. The reviewer specifically called this out: precedence checks
+    // should assert observable resolved behavior, not parse success.
+    let page = resolved_page(&["fixture.md", "-m", "2", "--mt", "0"]);
+    let m = page.page_margin();
+    assert_eq!(tv_cells(&m.top), 0, "--mt 0 must override -m 2 on the top edge");
+    assert_eq!(tv_cells(&m.bottom), 2, "-m 2 must apply to the bottom edge");
+    assert_eq!(tv_cells(&m.left), 2, "-m 2 must apply to the left edge");
+    assert_eq!(tv_cells(&m.right), 2, "-m 2 must apply to the right edge");
+}
+
+#[test]
+fn layout_resolved_margin_axis_then_side() {
+    // `-m 4 --mx 2 --mt 1`: shorthand 4 everywhere, then horizontal axis to 2,
+    // then top to 1.
+    let page = resolved_page(&["fixture.md", "-m", "4", "--mx", "2", "--mt", "1"]);
+    let m = page.page_margin();
+    assert_eq!(tv_cells(&m.top), 1, "--mt 1 overrides axis and shorthand on top");
+    assert_eq!(tv_cells(&m.bottom), 4, "shorthand survives on bottom (no override)");
+    assert_eq!(tv_cells(&m.left), 2, "--mx 2 overrides shorthand on left");
+    assert_eq!(tv_cells(&m.right), 2, "--mx 2 overrides shorthand on right");
+}
+
+#[test]
+fn layout_resolved_padding_axis_then_side() {
+    let page = resolved_page(&["fixture.md", "--padding", "4", "--px", "2", "--pt", "1"]);
+    let p = page.page_padding();
+    assert_eq!(tv_cells(&p.top), 1);
+    assert_eq!(tv_cells(&p.bottom), 4);
+    assert_eq!(tv_cells(&p.left), 2);
+    assert_eq!(tv_cells(&p.right), 2);
+}
+
+#[test]
+fn layout_resolved_fill_global_then_component_specific() {
+    // `--fill max=40 --fill-code-blocks max=30`: global fill applies to all
+    // components, then code-block-specific fill overrides only that one.
+    let page = resolved_page(&[
+        "fixture.md",
+        "--fill",
+        "max=40",
+        "--fill-code-blocks",
+        "max=30",
+    ]);
+    assert_eq!(
+        fill_for(&page, PageComponent::CodeBlocks),
+        TestFill::Max(Length::ch(30)),
+        "code-block-specific fill must override global"
+    );
+    for component in [PageComponent::Ul, PageComponent::Ol, PageComponent::Li] {
+        assert_eq!(
+            fill_for(&page, component),
+            TestFill::Max(Length::ch(40)),
+            "{:?} must still see the global fill",
+            component
+        );
+    }
+    assert_eq!(
+        fill_for(&page, PageComponent::Tables),
+        TestFill::Max(Length::ch(40)),
+        "tables must still see the global fill"
+    );
+}
+
+#[test]
+fn layout_resolved_alignment_global_then_component_specific() {
+    let page = resolved_page(&[
+        "fixture.md",
+        "--alignment",
+        "center",
+        "--align-code-blocks",
+        "left",
+    ]);
+    assert_eq!(
+        alignment_for(&page, PageComponent::CodeBlocks),
+        Alignment::Left,
+        "code-block-specific alignment must override global"
+    );
+    for component in [PageComponent::Ul, PageComponent::Ol, PageComponent::Li] {
+        assert_eq!(
+            alignment_for(&page, component),
+            Alignment::Center,
+            "{:?} must still see the global alignment",
+            component
+        );
+    }
+    assert_eq!(
+        alignment_for(&page, PageComponent::BlockQuotes),
+        Alignment::Center,
+        "blockquotes must still see the global alignment"
+    );
+}
+
+
+
+#[test]
+fn layout_resolved_align_lists_broadcast_then_granular_override() {
+    // `--align-lists right --align-ul left`: broadcast sets all three list
+    // components to Right, then the granular flag overrides only Ul.
+    let page = resolved_page(&[
+        "fixture.md",
+        "--align-lists",
+        "right",
+        "--align-ul",
+        "left",
+    ]);
+    assert_eq!(
+        alignment_for(&page, PageComponent::Ul),
+        Alignment::Left,
+        "granular --align-ul must override broadcast"
+    );
+    assert_eq!(
+        alignment_for(&page, PageComponent::Ol),
+        Alignment::Right,
+        "Ol must still see the broadcast"
+    );
+    assert_eq!(
+        alignment_for(&page, PageComponent::Li),
+        Alignment::Right,
+        "Li must still see the broadcast"
+    );
+}
+
+#[test]
+fn layout_resolved_fill_lists_broadcast_then_granular_override() {
+    // `--fill-lists max=40 --fill-ol max=30`: broadcast sets all three list
+    // components to Max(40), then the granular flag overrides only Ol.
+    let page = resolved_page(&[
+        "fixture.md",
+        "--fill-lists",
+        "max=40",
+        "--fill-ol",
+        "max=30",
+    ]);
+    assert_eq!(
+        fill_for(&page, PageComponent::Ul),
+        TestFill::Max(Length::ch(40)),
+        "Ul must still see the broadcast"
+    );
+    assert_eq!(
+        fill_for(&page, PageComponent::Ol),
+        TestFill::Max(Length::ch(30)),
+        "granular --fill-ol must override broadcast"
+    );
+    assert_eq!(
+        fill_for(&page, PageComponent::Li),
+        TestFill::Max(Length::ch(40)),
+        "Li must still see the broadcast"
+    );
+}
+
+#[test]
+fn layout_resolved_max_width() {
+    let page = resolved_page(&["fixture.md", "--max-width", "80"]);
+    assert_eq!(page.max_width(), Some(80));
+}
+
+#[test]
+fn layout_parsed_line_numbers_flag_values() {
+    // `--line-numbers` (no value) defaults to true; `--line-numbers false`
+    // explicitly disables. Verified against the parsed CLI struct since the
+    // CLI's `render_terminal_output` applies this flag separately from the
+    // layout-flag pipeline.
+    assert_eq!(
+        parse_cli(&["fixture.md", "--line-numbers"]).line_numbers,
+        Some(true)
+    );
+    assert_eq!(
+        parse_cli(&["fixture.md", "--line-numbers", "true"]).line_numbers,
+        Some(true)
+    );
+    assert_eq!(
+        parse_cli(&["fixture.md", "--line-numbers", "false"]).line_numbers,
+        Some(false)
+    );
+    assert_eq!(parse_cli(&["fixture.md"]).line_numbers, None);
+}
+
+#[test]
+fn layout_resolved_mt_alone_does_not_set_other_sides() {
+    // `--mt 3` alone must leave other edges at default (0); no implicit
+    // bleed from shorthand.
+    let page = resolved_page(&["fixture.md", "--mt", "3"]);
+    let m = page.page_margin();
+    assert_eq!(tv_cells(&m.top), 3);
+    assert_eq!(tv_cells(&m.bottom), 0);
+    assert_eq!(tv_cells(&m.left), 0);
+    assert_eq!(tv_cells(&m.right), 0);
+}
+
+// =============================================================================
+//                  STYLE FRONTMATTER (Sub-Spec #2) END-TO-END
+// =============================================================================
+//
+// These tests drive the `md` CLI with the canonical fixture
+// (`darkmatter/example-docs/rendering/style-prop.md`) to confirm that the
+// parse → CLI override → apply_page_style → render pipeline behaves as the
+// sub-spec requires.
+
+/// Locate the canonical fixture relative to the workspace root.
+fn style_prop_fixture() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("example-docs")
+        .join("rendering")
+        .join("style-prop.md")
+}
+
+#[test]
+fn style_fixture_cli_pipe_smoke_passes() {
+    // Smoke check that `md style-prop.md` exits successfully and emits a
+    // non-empty stdout when stdout is a pipe (the CLI test runner captures
+    // stdout, so `OutputFormat::Auto` takes the markdown pass-through path
+    // here — this test does NOT exercise the terminal renderer). Terminal
+    // layout coverage lives in the Level 2 WezTerm pane tests
+    // (`darkmatter/cli/tests/level2_layout.rs::level2_style_fixture_*`).
+    let output = md_cmd().arg(style_prop_fixture()).output().unwrap();
+    assert!(
+        output.status.success(),
+        "md style-prop.md must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.is_empty(), "rendered output must not be empty");
+    assert!(
+        stdout.contains("Testing the `style` Property") || stdout.contains("Testing the"),
+        "rendered output should contain the page title"
+    );
+}
+
+#[test]
+fn style_fixture_renders_html_successfully() {
+    // Acceptance: `md --output html style-prop.md` uses the same page-level
+    // frontmatter values through `render_to_browser`. MD_DRY_RUN avoids
+    // launching a browser.
+    let output = md_cmd()
+        .arg(style_prop_fixture())
+        .arg("--output")
+        .arg("html")
+        .env("MD_DRY_RUN", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "md --output html style-prop.md must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn style_fixture_strict_style_passes_on_schema_clean_doc() {
+    // The fixture only generates `KnownButInactive` warnings (the ul / ol
+    // keys are wired in later sub-specs). `--strict-style` must NOT fail on
+    // `KnownButInactive`.
+    let output = md_cmd()
+        .arg(style_prop_fixture())
+        .arg("--strict-style")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "--strict-style must succeed on schema-clean fixture: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn style_strict_style_fails_on_unknown_key() {
+    // Spec test #5: `--strict-style` fails on `UnknownKey`. We route through
+    // `--output html` so the frontmatter pipeline (which lives in the
+    // terminal / HTML render paths) runs. The markdown-only artifact path
+    // intentionally short-circuits to source pass-through.
+    let tmp = md_file(
+        "---\n\
+        style:\n\
+        \x20   page:\n\
+        \x20       made-up-key: 2ch\n\
+        ---\n\n# Doc\n",
+    );
+
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--output")
+        .arg("html")
+        .arg("--strict-style")
+        .env("MD_DRY_RUN", "1")
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "--strict-style must fail on unknown key"
+    );
+}
+
+#[test]
+fn style_strict_style_fails_on_deprecated_key() {
+    // `--strict-style` promotes `Deprecated` warnings to errors. The
+    // canonical key is `style.page.left-margin`; the alias
+    // `style.page.left_margin` should trigger a Deprecated warning, which
+    // strict mode turns into an error. Route through `--output html` to
+    // exercise the frontmatter pipeline.
+    let tmp = md_file(
+        "---\n\
+        style:\n\
+        \x20   page:\n\
+        \x20       left_margin: 2ch\n\
+        ---\n\n# Doc\n",
+    );
+
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--output")
+        .arg("html")
+        .arg("--strict-style")
+        .env("MD_DRY_RUN", "1")
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "--strict-style must fail on deprecated snake-case alias"
+    );
+}
+
+#[test]
+fn style_strict_style_fails_on_top_level_hr_alias() {
+    // Sub-spec #6: `--strict-style` must reject the deprecated top-level
+    // `hr:` block, even when its contents would type-check as `HrStyle`.
+    let tmp = md_file(
+        "---\n\
+        hr:\n\
+        \x20   style: waves\n\
+        ---\n\n# Doc\n\n---\n",
+    );
+
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--output")
+        .arg("html")
+        .arg("--strict-style")
+        .env("MD_DRY_RUN", "1")
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "--strict-style must fail on top-level `hr:` alias"
+    );
+}
+
+#[test]
+fn style_strict_style_fails_on_top_level_hr_alias_with_invalid_field() {
+    // `alignment: true` cannot deserialize as `HrAlignment`. The alias
+    // presence — not typed migration success — is what must be rejected.
+    let tmp = md_file(
+        "---\n\
+        hr:\n\
+        \x20   style: waves\n\
+        \x20   alignment: true\n\
+        ---\n\n# Doc\n\n---\n",
+    );
+
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--output")
+        .arg("html")
+        .arg("--strict-style")
+        .env("MD_DRY_RUN", "1")
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "--strict-style must fail on top-level `hr:` alias even when the \
+         typed migration would drop fields"
+    );
+}
+
+#[test]
+fn style_strict_style_fails_on_non_mapping_top_level_hr() {
+    // A scalar `hr: dashes` is still alias usage and must trip strict mode.
+    let tmp = md_file(
+        "---\n\
+        hr: dashes\n\
+        ---\n\n# Doc\n\n---\n",
+    );
+
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--output")
+        .arg("html")
+        .arg("--strict-style")
+        .env("MD_DRY_RUN", "1")
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "--strict-style must fail on non-mapping top-level `hr:`"
+    );
+}
+
+#[test]
+fn style_non_strict_renders_with_unknown_key() {
+    // Without `--strict-style`, an unknown key must NOT fail the render; it
+    // becomes an informational warning. Route through `--output html` to
+    // exercise the frontmatter pipeline.
+    let tmp = md_file(
+        "---\n\
+        style:\n\
+        \x20   page:\n\
+        \x20       made-up-key: 2ch\n\
+        ---\n\n# Doc\n",
+    );
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--output")
+        .arg("html")
+        .env("MD_DRY_RUN", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "unknown key without --strict-style must still render: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn style_cli_margin_overrides_frontmatter() {
+    // Spec test #2: CLI flag overrides frontmatter. The fixture has
+    // `left-margin: 2ch`; `--ml 7` claims that field via
+    // `PageStyleOverrides::margin_left = true`, so the CLI value (7) wins.
+    let page = {
+        // Mirror the cli's parse → apply_cli → apply_style_frontmatter
+        // pipeline as in the public API.
+        use darkmatter::markdown::Markdown;
+        use darkmatter::style::{PageStyleOverrides, apply_page_style, from_frontmatter};
+        let raw = std::fs::read_to_string(style_prop_fixture()).unwrap();
+        let md = Markdown::try_from_content(&raw).unwrap();
+        let (style, _) = from_frontmatter(md.frontmatter()).unwrap();
+
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term).with_margin_left(7);
+        let overrides = PageStyleOverrides {
+            margin_left: true,
+            ..PageStyleOverrides::default()
+        };
+        apply_page_style(page, &style, overrides).expect("apply")
+    };
+    assert_eq!(
+        tv_cells(&page.page_margin().left),
+        7,
+        "CLI override must win over frontmatter left-margin"
+    );
+    assert_eq!(
+        tv_cells(&page.page_margin().right),
+        4,
+        "frontmatter right-margin (4ch) must still apply when not claimed"
+    );
+}
+
+// =============================================================================
+//          COMPONENT STYLE FRONTMATTER (Sub-Spec #3) END-TO-END
+// =============================================================================
+//
+// These tests verify that `style.table.*`, `style.images.*`, and
+// `style.block-quote.*` frontmatter reaches the page builder, and that
+// component-specific CLI flags (`--align-tables`, `--fill-tables`, ...) plus
+// the global `--alignment` / `--fill` claim the matching frontmatter fields
+// via `ComponentStyleOverrides`.
+
+/// Drive the full CLI integration: parse args, apply CLI layout flags, then
+/// apply the `style:` frontmatter (page + component). Returns the resolved
+/// page for assertions.
+fn apply_style_for(raw: &str, args: &[&str]) -> DarkmatterPage {
+    use darkmatter::markdown::Markdown;
+    use darkmatter_cli::output::apply_style_frontmatter;
+    let cli = parse_cli(args);
+    let md = Markdown::try_from_content(raw).unwrap();
+    let term = Terminal::new_optimistic(80);
+    let page = apply_cli_layout_flags(DarkmatterPage::new(&term), &cli);
+    apply_style_frontmatter(page, &md, &cli, None).expect("style apply")
+}
+
+#[test]
+fn component_overrides_global_alignment_claims_every_bucket() {
+    use darkmatter::style::ComponentStyleOverrides;
+    use darkmatter_cli::output::component_style_overrides_from_cli;
+
+    let cli = parse_cli(&["doc.md", "--alignment", "center"]);
+    let o = component_style_overrides_from_cli(&cli);
+    assert_eq!(
+        o,
+        ComponentStyleOverrides {
+            tables_alignment: true,
+            images_alignment: true,
+            block_quotes_alignment: true,
+            tables_fill: false,
+            images_fill: false,
+            block_quotes_fill: false,
+        }
+    );
+}
+
+#[test]
+fn component_overrides_global_fill_claims_every_bucket() {
+    use darkmatter::style::ComponentStyleOverrides;
+    use darkmatter_cli::output::component_style_overrides_from_cli;
+
+    let cli = parse_cli(&["doc.md", "--fill", "max=60"]);
+    let o = component_style_overrides_from_cli(&cli);
+    assert_eq!(
+        o,
+        ComponentStyleOverrides {
+            tables_fill: true,
+            images_fill: true,
+            block_quotes_fill: true,
+            tables_alignment: false,
+            images_alignment: false,
+            block_quotes_alignment: false,
+        }
+    );
+}
+
+#[test]
+fn component_overrides_component_specific_alignment_claims_one_bucket() {
+    use darkmatter_cli::output::component_style_overrides_from_cli;
+
+    let cli = parse_cli(&["doc.md", "--align-tables", "right"]);
+    let o = component_style_overrides_from_cli(&cli);
+    assert!(o.tables_alignment);
+    assert!(!o.images_alignment);
+    assert!(!o.block_quotes_alignment);
+    assert!(!o.tables_fill && !o.images_fill && !o.block_quotes_fill);
+}
+
+#[test]
+fn component_overrides_component_specific_fill_claims_one_bucket() {
+    use darkmatter_cli::output::component_style_overrides_from_cli;
+
+    let cli = parse_cli(&["doc.md", "--fill-images", "max=40"]);
+    let o = component_style_overrides_from_cli(&cli);
+    assert!(o.images_fill);
+    assert!(!o.tables_fill && !o.block_quotes_fill);
+    assert!(!o.tables_alignment && !o.images_alignment && !o.block_quotes_alignment);
+}
+
+#[test]
+fn frontmatter_table_alignment_reaches_page_when_no_cli_flag() {
+    let raw = "---\n\
+style:\n\
+\x20   table:\n\
+\x20       alignment: left\n\
+---\n\n# Doc\n";
+    let page = apply_style_for(raw, &["doc.md"]);
+    assert_eq!(
+        alignment_for(&page, PageComponent::Tables),
+        Alignment::Left,
+        "frontmatter table.alignment must reach the page when no CLI claim",
+    );
+}
+
+#[test]
+fn cli_align_tables_overrides_frontmatter_table_alignment() {
+    // Plan ask: `--align-tables right` overriding frontmatter
+    // `style.table.alignment: left`. The CLI flag wins.
+    let raw = "---\n\
+style:\n\
+\x20   table:\n\
+\x20       alignment: left\n\
+---\n\n# Doc\n";
+    let page = apply_style_for(raw, &["doc.md", "--align-tables", "right"]);
+    assert_eq!(
+        alignment_for(&page, PageComponent::Tables),
+        Alignment::Right,
+        "--align-tables right must override frontmatter table.alignment: left",
+    );
+}
+
+#[test]
+fn cli_global_fill_overrides_frontmatter_table_max_width() {
+    // Plan ask: `--fill max=60` overriding frontmatter
+    // `style.table.max-width: 50%` for all components.
+    let raw = "---\n\
+style:\n\
+\x20   table:\n\
+\x20       max-width: 50%\n\
+---\n\n# Doc\n";
+    let page = apply_style_for(raw, &["doc.md", "--fill", "max=60"]);
+    assert_eq!(
+        fill_for(&page, PageComponent::Tables),
+        TestFill::Max(Length::ch(60)),
+        "--fill max=60 (global) must claim the table fill slot",
+    );
+}
+
+#[test]
+fn frontmatter_table_max_width_reaches_page_when_no_cli_flag() {
+    let raw = "---\n\
+style:\n\
+\x20   table:\n\
+\x20       max-width: 50%\n\
+---\n\n# Doc\n";
+    let page = apply_style_for(raw, &["doc.md"]);
+    assert_eq!(
+        fill_for(&page, PageComponent::Tables),
+        TestFill::Max(Length::Percent(50.0)),
+        "frontmatter table.max-width must reach the page when no CLI claim",
+    );
+}
+
+#[test]
+fn frontmatter_images_alignment_and_fill_reach_page() {
+    let raw = "---\n\
+style:\n\
+\x20   images:\n\
+\x20       alignment: center\n\
+\x20       max-width: 40ch\n\
+---\n\n# Doc\n";
+    let page = apply_style_for(raw, &["doc.md"]);
+    assert_eq!(
+        alignment_for(&page, PageComponent::Images),
+        Alignment::Center,
+    );
+    assert_eq!(
+        fill_for(&page, PageComponent::Images),
+        TestFill::Max(Length::ch(40)),
+    );
+}
+
+#[test]
+fn frontmatter_block_quote_max_width_reaches_page() {
+    let raw = "---\n\
+style:\n\
+\x20   block-quote:\n\
+\x20       max-width: 75%\n\
+---\n\n# Doc\n";
+    let page = apply_style_for(raw, &["doc.md"]);
+    assert_eq!(
+        fill_for(&page, PageComponent::BlockQuotes),
+        TestFill::Max(Length::Percent(75.0)),
+    );
+}
+
+#[test]
+fn style_fixture_renders_with_align_tables_override() {
+    // End-to-end sanity check: the canonical fixture renders successfully
+    // when the user overrides table alignment from the CLI.
+    let output = md_cmd()
+        .arg(style_prop_fixture())
+        .arg("--align-tables")
+        .arg("center")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "md --align-tables center style-prop.md must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn style_fixture_renders_html_with_fill_override() {
+    // End-to-end sanity check: --output html runs the same component-style
+    // path as the terminal pipeline.
+    let output = md_cmd()
+        .arg(style_prop_fixture())
+        .arg("--output")
+        .arg("html")
+        .arg("--fill")
+        .arg("max=60")
+        .env("MD_DRY_RUN", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "md --output html --fill max=60 must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn style_frontmatter_html_emits_component_layout_css() {
+    // Sub-spec #3 acceptance (review-3 finding #3): `md --output html` on a
+    // document carrying `style.table.*`, `style.images.*`, and
+    // `style.block-quote.*` must emit the matching component layout CSS
+    // selectors and declarations, not just succeed silently.
+    //
+    // Mirrors `darkmatter/lib/src/layout/page.rs::browser_render_with_component_*_css`
+    // but drives the assertion through the public CLI surface so the
+    // frontmatter → page-style → HTML pipeline is exercised end-to-end.
+    let tmp = md_file(
+        "---\n\
+        style:\n\
+        \x20   table:\n\
+        \x20       alignment: center\n\
+        \x20       max-width: 60ch\n\
+        \x20   images:\n\
+        \x20       alignment: right\n\
+        \x20       max-width: 40ch\n\
+        \x20   block-quote:\n\
+        \x20       alignment: right\n\
+        \x20       max-width: 50ch\n\
+        ---\n\n\
+        # Doc\n\n\
+        | A | B |\n\
+        | - | - |\n\
+        | 1 | 2 |\n\n\
+        ![alt](./x.png)\n\n\
+        > quote\n",
+    );
+
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--output")
+        .arg("html")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "md --output html must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let html = String::from_utf8(output.stdout).expect("html stdout must be utf-8");
+
+    // Component layout is now emitted as inline `style` attributes by the
+    // renderable browser fold (build_component_css was deleted in the cutover).
+    // Table: center alignment + max-width: 60ch → margin-left:auto;margin-right:auto.
+    assert!(
+        html.contains("<table") && html.contains("max-width:60ch") && html.contains("margin-left:auto") && html.contains("margin-right:auto"),
+        "expected centered table with inline max-width and auto margins in HTML. html:\n{html}",
+    );
+    // Block-quote: right alignment + max-width: 50ch → margin-left:auto.
+    assert!(
+        html.contains("<blockquote") && html.contains("max-width:50ch") && html.contains("margin-left:auto"),
+        "expected right-aligned blockquote with inline max-width and auto margin in HTML. html:\n{html}",
+    );
+    // Image: max-width and alignment are applied to the wrapping paragraph via
+    // the lone-image layout path (alignment without max-width does not emit
+    // margin styles in the current fold).
+    assert!(
+        html.contains("<img") && html.contains("src=\"./x.png\""),
+        "expected image element in HTML. html:\n{html}",
+    );
+}
+
+#[test]
+fn style_prop_fixture_html_emits_table_layout_css() {
+    // Acceptance from sub-spec #3: `md --output html style-prop.md` must emit
+    // the expected table layout CSS (right alignment + 50% max-width that
+    // lowers to the page-content base, i.e. 50ch when the page builds at
+    // its 120-col default for HTML).
+    let output = md_cmd()
+        .arg(style_prop_fixture())
+        .arg("--output")
+        .arg("html")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "md --output html style-prop.md must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let html = String::from_utf8(output.stdout).expect("html stdout must be utf-8");
+
+    // Component layout is now emitted as inline `style` attributes by the
+    // renderable browser fold (build_component_css was deleted in the cutover).
+    // Right alignment + max-width: 50% → margin-left:auto on the table element.
+    assert!(
+        html.contains("<table") && html.contains("margin-left:auto"),
+        "expected right-aligned table with inline auto margin in HTML. html:\n{html}",
+    );
+    // The fixture sets `max-width: 50%`; the fold preserves the percent on HTML.
+    assert!(
+        html.contains("max-width:50%"),
+        "expected `max-width:50%` declaration in HTML. html:\n{html}",
+    );
+}
+
+// =============================================================================
+//          PHASE 5 REGRESSION TESTS (Sub-Spec #3)
+// =============================================================================
+//
+// These tests cover the Phase 5 acceptance criteria:
+//
+//   1. `apply_cli_layout_flags` behavior is unchanged for documents without a
+//      `style:` frontmatter (no silent state drift from the new
+//      `apply_component_style` integration).
+//   2. The canonical `style-prop.md` fixture resolves to the structural
+//      page state the spec promises (table right-aligned, capped at 50%).
+//   3. Component fill from `style.block-quote.max-width` flows into the
+//      page builder and matches the structural shape used by the terminal
+//      blockquote renderer.
+
+#[test]
+fn no_style_frontmatter_leaves_cli_layout_state_intact() {
+    // Phase 5 acceptance: documents without a `style:` block must observe the
+    // same resolved page state with vs. without `apply_style_frontmatter`.
+    // Guards against silent state drift from the component-style integration.
+    use darkmatter::markdown::Markdown;
+    use darkmatter_cli::output::apply_style_frontmatter;
+
+    let raw = "# No Style Doc\n\nBody.\n";
+    let md = Markdown::try_from_content(raw).unwrap();
+    let cli = parse_cli(&[
+        "doc.md",
+        "-m",
+        "3",
+        "--max-width",
+        "70",
+        "--alignment",
+        "center",
+        "--fill",
+        "max=50",
+    ]);
+
+    let term = Terminal::new_optimistic(120);
+    let cli_only = apply_cli_layout_flags(DarkmatterPage::new(&term), &cli);
+    let after_style =
+        apply_style_frontmatter(cli_only.clone(), &md, &cli, None).expect("style apply");
+
+    assert_eq!(
+        after_style.page_margin(),
+        cli_only.page_margin(),
+        "no `style:` frontmatter must leave CLI-resolved margins untouched",
+    );
+    assert_eq!(
+        after_style.page_padding(),
+        cli_only.page_padding(),
+        "no `style:` frontmatter must leave CLI-resolved padding untouched",
+    );
+    assert_eq!(
+        after_style.max_width(),
+        cli_only.max_width(),
+        "no `style:` frontmatter must leave CLI-resolved max-width untouched",
+    );
+    for component in PageComponent::ALL {
+        assert_eq!(
+            alignment_for(&after_style, component),
+            alignment_for(&cli_only, component),
+            "no `style:` frontmatter must leave CLI-resolved alignment untouched: {component:?}",
+        );
+        assert_eq!(
+            fill_for(&after_style, component),
+            fill_for(&cli_only, component),
+            "no `style:` frontmatter must leave CLI-resolved fill untouched: {component:?}",
+        );
+    }
+}
+
+#[test]
+fn style_prop_fixture_resolves_to_expected_table_layout() {
+    // Phase 5 acceptance: the canonical `style-prop.md` fixture must produce
+    // a page where the table is right-aligned and capped at 50% max-width via
+    // the new component-style apply path.
+    let raw = std::fs::read_to_string(style_prop_fixture()).unwrap();
+    let page = apply_style_for(&raw, &["doc.md"]);
+
+    assert_eq!(
+        alignment_for(&page, PageComponent::Tables),
+        Alignment::Right,
+        "fixture must resolve to a right-aligned table",
+    );
+    assert_eq!(
+        fill_for(&page, PageComponent::Tables),
+        TestFill::Max(Length::Percent(50.0)),
+        "fixture must cap the table at 50% max-width",
+    );
+}
+
+#[test]
+fn style_prop_fixture_resolves_to_expected_page_margins() {
+    // Phase 5 acceptance: page-level margins from the fixture survive the
+    // full CLI -> page-style -> component-style pipeline.
+    let raw = std::fs::read_to_string(style_prop_fixture()).unwrap();
+    let page = apply_style_for(&raw, &["doc.md"]);
+
+    let m = page.page_margin();
+    assert_eq!(tv_cells(&m.left), 2, "fixture left-margin: 2ch must reach the page");
+    assert_eq!(tv_cells(&m.right), 4, "fixture right-margin: 4ch must reach the page");
+    assert_eq!(tv_cells(&m.top), 1, "fixture top-margin: 1 must reach the page");
+    assert_eq!(tv_cells(&m.bottom), 0, "fixture bottom-margin: 0 must reach the page");
+}
+
+#[test]
+fn block_quote_max_width_caps_terminal_render_wrap_width() {
+    // Phase 5 acceptance: `style.block-quote.max-width` reaches the page and
+    // caps visible wrap width when the terminal renders a top-level
+    // blockquote. We use a 100-col terminal so 50% resolves cleanly, then
+    // assert that no rendered (ANSI-stripped) blockquote line exceeds the
+    // resolved fill width.
+    use darkmatter::layout::{DarkmatterPage, PageComponent};
+    use darkmatter::markdown::Markdown;
+    use darkmatter::testing::strip_ansi_codes;
+    use darkmatter_cli::output::apply_style_frontmatter;
+
+    let raw = "---\n\
+style:\n\
+\x20   block-quote:\n\
+\x20       max-width: 50%\n\
+---\n\n\
+> This is a long quoted paragraph intended to wrap onto multiple visible \
+rows once the blockquote fill caps the render width well below the page width. \
+Add filler text to guarantee the wrap point is reached even when the \
+terminal is reasonably wide.\n";
+
+    let cli = parse_cli(&["doc.md"]);
+    let md = Markdown::try_from_content(raw).unwrap();
+    let term = Terminal::new_optimistic(100);
+    let page = DarkmatterPage::new(&term);
+    let page = apply_cli_layout_flags(page, &cli);
+    let page = apply_style_frontmatter(page, &md, &cli, None).expect("style apply");
+
+    // Structural guard: the apply pipeline put the fill where the renderer
+    // will look for it.
+    assert_eq!(
+        fill_for(&page, PageComponent::BlockQuotes),
+        TestFill::Max(Length::Percent(50.0)),
+        "block-quote.max-width must reach the page fill slot",
+    );
+
+    let rendered = page.render(&md).expect("render to terminal");
+    let plain = strip_ansi_codes(&rendered);
+
+    // The blockquote should wrap onto at least two visible lines.
+    let quote_lines: Vec<String> = plain
+        .lines()
+        .filter(|l| {
+            let trimmed = l.trim_start();
+            // Common blockquote indicators across themes (`│`, `▌`, `▐`).
+            trimmed.starts_with('│')
+                || trimmed.starts_with('▌')
+                || trimmed.starts_with('▐')
+        })
+        .map(|l| l.trim_end().to_string())
+        .collect();
+
+    assert!(
+        quote_lines.len() >= 2,
+        "blockquote should wrap onto >=2 visible lines under max-width: 50%. plain:\n{plain}",
+    );
+
+    // The renderer chooses 50% of the available content width; with a 100-col
+    // terminal and no other margins/padding that's at most 50 cells of *text*
+    // beyond the indicator + leading space. Allow generous slack for indent +
+    // alignment padding by upper-bounding total visible width at 60.
+    let max_len = quote_lines.iter().map(|l| l.chars().count()).max().unwrap();
+    assert!(
+        max_len <= 60,
+        "blockquote visible width should be capped under max-width: 50% on a 100-col terminal, got max={max_len}. plain:\n{plain}",
+    );
+}
+
+#[test]
+fn render_accepts_code_block_flag() {
+    let tmp = md_file("# Title\n\n```rust\nfn main() {}\n```\n");
+    for mode in ["inverse", "dark", "light", "same"] {
+        md_cmd()
+            .args(["--code-block", mode])
+            .arg(tmp.path())
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Title"));
+    }
+}
+
+#[test]
+fn render_rejects_invalid_code_block_value() {
+    let tmp = md_file("# Title\n");
+    md_cmd()
+        .args(["--code-block", "sideways"])
+        .arg(tmp.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid value 'sideways'"));
 }

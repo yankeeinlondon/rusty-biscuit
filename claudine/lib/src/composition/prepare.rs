@@ -25,8 +25,29 @@ fn map_compose_error(source_path: &std::path::Path, err: MarkdownError) -> Compo
     }
 }
 
+/// Bind the agent's workspace onto compose options: the source file (for
+/// `::file` transclusion and diagnostic spans) and, when known, the directory
+/// the dispatched agent will run in.
+///
+/// Without `shell_cwd`, Darkmatter defaults `::shell` execution to the source
+/// file's parent directory — wrong for `@`-resolved prompts that physically
+/// live under `~/.claudine/prompts/` but reason about the repo the agent runs
+/// in. Pinning the working directory keeps compose-time shell and the agent on
+/// the same root.
+pub fn bind_agent_workspace(
+    opts: ComposeOptions,
+    source_path: &Path,
+    shell_cwd: Option<&Path>,
+) -> ComposeOptions {
+    let opts = opts.with_source_file(source_path);
+    match shell_cwd {
+        Some(cwd) => opts.with_shell_working_directory(cwd),
+        None => opts,
+    }
+}
+
 /// Options for composition preparation.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct PrepareOptions {
     /// Frontmatter `--set` overrides (JSON object).
     pub set_overrides: Option<serde_json::Value>,
@@ -36,6 +57,25 @@ pub struct PrepareOptions {
     pub env_overrides: BTreeMap<String, String>,
     /// Enable Darkmatter composition performance collection.
     pub perf_enabled: bool,
+    /// Pre-computed source repo root.
+    ///
+    /// When `Some`, [`prepare_direct`] and [`prepare_inline`] use this value
+    /// instead of walking up from the source path. CLI callers populate this
+    /// from a shared `CompositionPrepContext` so the same repo-root value is
+    /// reused across eager target resolution, shell preflight, and
+    /// composition preparation. When `None`, the fallback walk
+    /// (`find_git_root_from_path`) preserves the original behavior for
+    /// library-only callers and tests.
+    pub source_repo_root: Option<PathBuf>,
+    /// Directory the dispatched agent will run in.
+    ///
+    /// When `Some`, `::shell` directives execute here instead of the prompt
+    /// file's parent, keeping compose-time shell expansion and the agent on
+    /// one working directory. CLI callers populate this from
+    /// `CompositionPrepContext::launch_workspace.child_cwd`. `None` (the
+    /// default) preserves Darkmatter's source-relative fallback for
+    /// library-only callers and tests.
+    pub shell_working_directory: Option<PathBuf>,
 }
 
 /// Walk up from a file path to find the nearest `.git` directory.
@@ -67,13 +107,17 @@ pub fn prepare_direct(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
 ) -> Result<PreparedComposition, CompositionError> {
+    let override_keys = top_level_override_keys(options.set_overrides.as_ref());
     let mut ctx = ComposeContext::capture();
     for (key, value) in &options.env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
     }
-    let mut compose_opts = ComposeOptions::new_with_context(ctx)
-        .with_source_file(&source.resolved_path)
-        .with_perf(options.perf_enabled);
+    let mut compose_opts = bind_agent_workspace(
+        ComposeOptions::new_with_context(ctx),
+        &source.resolved_path,
+        options.shell_working_directory.as_deref(),
+    )
+    .with_perf(options.perf_enabled);
     if let Some(overrides) = options.set_overrides {
         compose_opts = compose_opts.with_set_overrides(overrides);
     }
@@ -85,35 +129,56 @@ pub fn prepare_direct(
         .compose_with(compose_opts)
         .map_err(|e| map_compose_error(&source.resolved_path, e))?;
 
+    let prompt = composed.content().to_string();
+    if prompt.trim().is_empty() {
+        return Err(CompositionError::ComposedBodyEmpty {
+            source_path: source.resolved_path.clone(),
+            mode: CompositionMode::ChainedDocument,
+            provided_overrides: override_keys,
+        });
+    }
+
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
-    let agent_hint = composed
+    let agent_full = composed
         .frontmatter()
         .as_map()
         .get("agent")
-        .map_or(Ok(None), parse_agent_hint)?;
+        .map_or(Ok(ParsedAgentHint::default()), parse_agent_hint_full)?;
+    let agent_hint = agent_full.to_agent_hint();
     let model_hint = composed
         .frontmatter()
         .as_map()
         .get("model")
         .map_or(Ok(None), parse_model_hint)?;
+    let interactive_hint = composed
+        .frontmatter()
+        .as_map()
+        .get("interactive")
+        .map_or(Ok(None), parse_interactive_hint)?;
     let selection_hints = EffectiveSelectionHints {
         agent: agent_hint,
         model: model_hint,
+        interactive: interactive_hint,
+        agent_invalid: agent_full.invalid,
+        agent_was_list: agent_full.is_list,
     };
     let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
 
-    let source_repo_root = find_git_root_from_path(&source.resolved_path);
+    let source_repo_root = options
+        .source_repo_root
+        .or_else(|| find_git_root_from_path(&source.resolved_path));
 
     Ok(PreparedComposition {
         mode: CompositionMode::ChainedDocument,
         resolved_path: source.resolved_path.clone(),
         source_repo_root,
-        prompt: composed.content().to_string(),
+        prompt,
         effective_frontmatter,
         selection_hints,
         closure: CompositionClosurePlan::Direct,
         lifecycle,
         compose_perf: report.perf,
+        dropped_optionals: Vec::new(),
     })
 }
 
@@ -126,6 +191,7 @@ pub fn prepare_inline(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
 ) -> Result<PreparedComposition, CompositionError> {
+    let override_keys = top_level_override_keys(options.set_overrides.as_ref());
     let fm = source.markdown.frontmatter();
 
     let prompt_value = fm
@@ -148,9 +214,12 @@ pub fn prepare_inline(
     for (key, value) in &options.env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
     }
-    let mut compose_opts = ComposeOptions::new_with_context(ctx)
-        .with_source_file(&source.resolved_path)
-        .with_perf(options.perf_enabled);
+    let mut compose_opts = bind_agent_workspace(
+        ComposeOptions::new_with_context(ctx),
+        &source.resolved_path,
+        options.shell_working_directory.as_deref(),
+    )
+    .with_perf(options.perf_enabled);
     if let Some(overrides) = options.set_overrides {
         compose_opts = compose_opts.with_set_overrides(overrides);
     }
@@ -162,25 +231,43 @@ pub fn prepare_inline(
         .map_err(|e| map_compose_error(&source.resolved_path, e))?;
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
-    let agent_hint = composed
+    let agent_full = composed
         .frontmatter()
         .as_map()
         .get("agent")
-        .map_or(Ok(None), parse_agent_hint)?;
+        .map_or(Ok(ParsedAgentHint::default()), parse_agent_hint_full)?;
+    let agent_hint = agent_full.to_agent_hint();
     let model_hint = composed
         .frontmatter()
         .as_map()
         .get("model")
         .map_or(Ok(None), parse_model_hint)?;
+    let interactive_hint = composed
+        .frontmatter()
+        .as_map()
+        .get("interactive")
+        .map_or(Ok(None), parse_interactive_hint)?;
     let selection_hints = EffectiveSelectionHints {
         agent: agent_hint,
         model: model_hint,
+        interactive: interactive_hint,
+        agent_invalid: agent_full.invalid,
+        agent_was_list: agent_full.is_list,
     };
     let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
 
     let mut prompt = composed.content().to_string();
+    if prompt.trim().is_empty() {
+        return Err(CompositionError::ComposedBodyEmpty {
+            source_path: source.resolved_path.clone(),
+            mode: CompositionMode::InlineFrontmatterPrompt,
+            provided_overrides: override_keys,
+        });
+    }
 
-    let source_repo_root = find_git_root_from_path(&source.resolved_path);
+    let source_repo_root = options
+        .source_repo_root
+        .or_else(|| find_git_root_from_path(&source.resolved_path));
 
     // Append guardrails with the new inline contract
     let guardrails = load_or_create_guardrails(source_repo_root.as_deref());
@@ -203,6 +290,7 @@ pub fn prepare_inline(
         }),
         lifecycle,
         compose_perf: report.perf,
+        dropped_optionals: Vec::new(),
     })
 }
 
@@ -219,14 +307,11 @@ fn frontmatter_to_value(fm: &darkmatter::markdown::Frontmatter) -> serde_json::V
 /// Parse selection hints (`agent`, `model`) from a raw Markdown frontmatter
 /// without composing the document.
 ///
-/// The CLI uses this for *eager* target resolution: it lets the wrapper
-/// know which provider will run before composition templates are rendered,
-/// so `{{env.AGENT}}` and similar references resolve correctly during
-/// body and inline-prompt rendering.
-///
-/// Untemplated, literal `agent`/`model` values are recognized; values that
-/// require composition to materialize (e.g. `agent: "{{env.SOMETHING}}"`)
-/// are not resolved here and fall through to post-compose resolution.
+/// The CLI calls this for *eager* target resolution — knowing which
+/// provider will run before composition templates render, so `{{env.AGENT}}`
+/// and similar references resolve correctly during body/inline rendering.
+/// Only untemplated literal values are recognized here; templated values
+/// fall through to post-compose resolution.
 ///
 /// ## Errors
 ///
@@ -236,32 +321,75 @@ pub fn parse_selection_hints_from_frontmatter(
     fm: &darkmatter::markdown::Frontmatter,
 ) -> Result<EffectiveSelectionHints, CompositionError> {
     let map = fm.as_map();
-    let agent = map.get("agent").map_or(Ok(None), parse_agent_hint)?;
+    let agent_full = map
+        .get("agent")
+        .map_or(Ok(ParsedAgentHint::default()), parse_agent_hint_full)?;
+    let agent = agent_full.to_agent_hint();
     let model = map.get("model").map_or(Ok(None), parse_model_hint)?;
-    Ok(EffectiveSelectionHints { agent, model })
+    let interactive = map
+        .get("interactive")
+        .map_or(Ok(None), parse_interactive_hint)?;
+    Ok(EffectiveSelectionHints {
+        agent,
+        model,
+        interactive,
+        agent_invalid: agent_full.invalid,
+        agent_was_list: agent_full.is_list,
+    })
 }
 
-/// Parse the `agent` frontmatter value into a typed `AgentHint`.
+/// Raw parse result for an `agent` frontmatter value.
 ///
-/// Accepts a single string or an array of strings. Each string is
-/// fuzzy-matched against known providers. Unknown provider names fail
-/// early so composition preparation surfaces the error instead of
-/// deferring it to launch-time resolver failures.
-fn parse_agent_hint(value: &serde_json::Value) -> Result<Option<AgentHint>, CompositionError> {
+/// Preserves fuzzy-matched providers alongside unknown strings so invalid
+/// entries can be surfaced as non-fatal state rather than aborting
+/// composition. The `is_list` flag distinguishes a single value from an
+/// array so a one-element list is still rendered as a list suggestion.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct ParsedAgentHint {
+    valid: Vec<Provider>,
+    invalid: Vec<String>,
+    is_list: bool,
+}
+
+impl ParsedAgentHint {
+    fn to_agent_hint(&self) -> Option<AgentHint> {
+        if self.valid.is_empty() {
+            return None;
+        }
+        if self.is_list {
+            Some(AgentHint::List(self.valid.clone()))
+        } else {
+            Some(AgentHint::Single(self.valid[0]))
+        }
+    }
+}
+
+/// Parse the `agent` frontmatter value while preserving invalid entries.
+///
+/// Strings that do not match a known provider are collected in
+/// [`ParsedAgentHint::invalid`] rather than raising an error. Type errors
+/// (non-string array entries, booleans, numbers, objects) are still fatal
+/// because they cannot be meaningfully classified.
+fn parse_agent_hint_full(value: &serde_json::Value) -> Result<ParsedAgentHint, CompositionError> {
+    let mut result = ParsedAgentHint::default();
     match value {
         serde_json::Value::String(s) => {
-            let provider = Provider::fuzzy_match_cli_name(s)
-                .ok_or_else(|| CompositionError::AgentHintInvalid(s.clone()))?;
-            Ok(Some(AgentHint::Single(provider)))
+            if let Some(provider) = Provider::fuzzy_match_cli_name(s) {
+                result.valid.push(provider);
+            } else {
+                result.invalid.push(s.clone());
+            }
         }
         serde_json::Value::Array(arr) => {
-            let mut providers = Vec::with_capacity(arr.len());
+            result.is_list = true;
             for item in arr {
                 match item {
                     serde_json::Value::String(s) => {
-                        let provider = Provider::fuzzy_match_cli_name(s)
-                            .ok_or_else(|| CompositionError::AgentHintInvalid(s.clone()))?;
-                        providers.push(provider);
+                        if let Some(provider) = Provider::fuzzy_match_cli_name(s) {
+                            result.valid.push(provider);
+                        } else {
+                            result.invalid.push(s.clone());
+                        }
                     }
                     other => {
                         return Err(CompositionError::AgentHintWrongType(
@@ -270,17 +398,15 @@ fn parse_agent_hint(value: &serde_json::Value) -> Result<Option<AgentHint>, Comp
                     }
                 }
             }
-            if providers.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(AgentHint::List(providers)))
-            }
         }
-        serde_json::Value::Null => Ok(None),
-        other => Err(CompositionError::AgentHintWrongType(
-            json_type_name(other).to_string(),
-        )),
+        serde_json::Value::Null => {}
+        other => {
+            return Err(CompositionError::AgentHintWrongType(
+                json_type_name(other).to_string(),
+            ));
+        }
     }
+    Ok(result)
 }
 
 /// Parse the `model` frontmatter value into a typed `ModelHint`.
@@ -316,6 +442,22 @@ fn parse_model_hint(value: &serde_json::Value) -> Result<Option<ModelHint>, Comp
     }
 }
 
+/// Parse the `interactive` frontmatter value into an optional boolean.
+///
+/// Accepts `true`, `false`, or `null` (treated as absent). Anything else
+/// is a typed error naming the offending JSON type.
+pub fn parse_interactive_hint(
+    value: &serde_json::Value,
+) -> Result<Option<bool>, CompositionError> {
+    match value {
+        serde_json::Value::Bool(b) => Ok(Some(*b)),
+        serde_json::Value::Null => Ok(None),
+        other => Err(CompositionError::InteractiveHintWrongType(
+            json_type_name(other).to_string(),
+        )),
+    }
+}
+
 fn json_type_name(value: &serde_json::Value) -> &'static str {
     match value {
         serde_json::Value::Null => "null",
@@ -324,6 +466,19 @@ fn json_type_name(value: &serde_json::Value) -> &'static str {
         serde_json::Value::String(_) => "string",
         serde_json::Value::Array(_) => "array",
         serde_json::Value::Object(_) => "object",
+    }
+}
+
+/// Extract the top-level keys from a `set_overrides` JSON object, in the
+/// underlying `serde_json::Map` iteration order (alphabetical without the
+/// `preserve_order` feature). Returns an empty `Vec` when overrides are
+/// absent or the value is not an object. Used to surface "what the user
+/// provided" in the `ComposedBodyEmpty` error so the diagnostic can name
+/// the variables that were visible to `::block when=…` conditions.
+fn top_level_override_keys(overrides: Option<&serde_json::Value>) -> Vec<String> {
+    match overrides {
+        Some(serde_json::Value::Object(map)) => map.keys().cloned().collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -608,12 +763,81 @@ mod tests {
     }
 
     #[test]
-    fn direct_composition_agent_unknown_provider_errors() {
+    fn direct_composition_agent_unknown_provider_is_non_fatal() {
         let dir = TempDir::new().unwrap();
         let source = make_source(&dir, &[("agent", json!("unknown-provider"))], "Content");
 
-        let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
-        assert!(matches!(err, CompositionError::AgentHintInvalid(_)));
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert_eq!(prepared.selection_hints.agent, None);
+        assert_eq!(
+            prepared.selection_hints.agent_invalid,
+            vec!["unknown-provider".to_string()]
+        );
+    }
+
+    #[test]
+    fn direct_composition_agent_list_skips_invalid_entries() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[("agent", json!(["claude", "not-real", "codex"]))],
+            "Content",
+        );
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert_eq!(
+            prepared.selection_hints.agent,
+            Some(AgentHint::List(vec![Provider::Claude, Provider::Codex]))
+        );
+        assert_eq!(
+            prepared.selection_hints.agent_invalid,
+            vec!["not-real".to_string()]
+        );
+    }
+
+    #[test]
+    fn direct_composition_agent_list_all_invalid_is_empty_hint() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("agent", json!(["bad", "worse"]))], "Content");
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert_eq!(prepared.selection_hints.agent, None);
+        assert_eq!(
+            prepared.selection_hints.agent_invalid,
+            vec!["bad".to_string(), "worse".to_string()]
+        );
+        // Even with no valid providers, the list-ness must survive so a
+        // zero-valid list is not mistaken for a scalar value downstream.
+        assert!(prepared.selection_hints.agent_was_list);
+    }
+
+    #[test]
+    fn direct_composition_single_entry_all_invalid_list_preserves_list_flag() {
+        // A one-element invalid list (`agent: ["not-real"]`) must record
+        // `agent_was_list = true` so classification routes it to the
+        // zero-installed-list state, not the single-invalid scalar state.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("agent", json!(["not-real"]))], "Content");
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert_eq!(prepared.selection_hints.agent, None);
+        assert_eq!(
+            prepared.selection_hints.agent_invalid,
+            vec!["not-real".to_string()]
+        );
+        assert!(prepared.selection_hints.agent_was_list);
+    }
+
+    #[test]
+    fn direct_composition_single_scalar_invalid_is_not_list() {
+        // A scalar invalid value (`agent: not-real`) must record
+        // `agent_was_list = false`.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("agent", json!("not-real"))], "Content");
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert_eq!(prepared.selection_hints.agent, None);
+        assert!(!prepared.selection_hints.agent_was_list);
     }
 
     #[test]
@@ -660,5 +884,177 @@ mod tests {
         let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
         assert_eq!(prepared.selection_hints.agent, None);
         assert_eq!(prepared.selection_hints.model, None);
+    }
+
+    #[test]
+    fn direct_composition_empty_body_returns_composed_body_empty() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("title", json!("Test"))], "   \n\n  \t\n");
+
+        let options = PrepareOptions {
+            set_overrides: Some(json!({"spec": "plan.md", "phase": 1})),
+            ..Default::default()
+        };
+
+        let err = prepare_direct(&source, options).unwrap_err();
+        match err {
+            CompositionError::ComposedBodyEmpty {
+                source_path,
+                mode,
+                provided_overrides,
+            } => {
+                assert_eq!(source_path, source.resolved_path);
+                assert_eq!(mode, CompositionMode::ChainedDocument);
+                let keys: std::collections::HashSet<String> =
+                    provided_overrides.into_iter().collect();
+                assert_eq!(
+                    keys,
+                    ["spec", "phase"].iter().map(|s| s.to_string()).collect()
+                );
+            }
+            other => panic!("expected ComposedBodyEmpty, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn direct_composition_block_strips_everything_returns_composed_body_empty() {
+        let dir = TempDir::new().unwrap();
+        // Body consists entirely of a `::block when="review"` whose guard is
+        // not satisfied (no `review` override provided). After composition
+        // the body should be empty and detection must fire — this mirrors
+        // the real-world prompt that triggered the user-facing bug report.
+        let body = "::block when=\"review\"\n## Context\n\nThis is review-only content.\n::end-block\n";
+        let source = make_source(&dir, &[("title", json!("Test"))], body);
+
+        let options = PrepareOptions {
+            set_overrides: Some(json!({"spec": "plan.md"})),
+            ..Default::default()
+        };
+
+        let err = prepare_direct(&source, options).unwrap_err();
+        let CompositionError::ComposedBodyEmpty {
+            mode,
+            provided_overrides,
+            ..
+        } = err
+        else {
+            panic!("expected ComposedBodyEmpty, got a different error");
+        };
+        assert_eq!(mode, CompositionMode::ChainedDocument);
+        assert_eq!(provided_overrides, vec!["spec".to_string()]);
+    }
+
+    /// Regression: a `@`-resolved prompt physically lives outside the repo
+    /// it reasons about (e.g. `~/.claudine/prompts/commit.md`). With
+    /// `shell_working_directory` set, `::shell` directives must run there,
+    /// not next to the template file — otherwise `sniff repo packages` and
+    /// friends execute in the wrong repo.
+    #[test]
+    fn direct_composition_runs_shell_in_configured_working_directory() {
+        let source_dir = TempDir::new().unwrap();
+        let work_dir = TempDir::new().unwrap();
+        let source = make_source(&source_dir, &[("title", json!("T"))], "::shell pwd\n");
+
+        let mut approved = std::collections::HashSet::new();
+        approved.insert("pwd".to_string());
+        let options = PrepareOptions {
+            pre_approved_commands: Some(approved),
+            shell_working_directory: Some(work_dir.path().to_path_buf()),
+            ..Default::default()
+        };
+
+        let prepared = prepare_direct(&source, options).unwrap();
+        // `pwd` reports the physical path, so compare against canonicalized
+        // temp dirs (macOS routes `/var` through a `/private` symlink).
+        let work_canon = std::fs::canonicalize(work_dir.path()).unwrap();
+        let source_canon = std::fs::canonicalize(source_dir.path()).unwrap();
+        assert!(
+            prepared.prompt.contains(work_canon.to_str().unwrap()),
+            "expected shell to run in work_dir; got: {}",
+            prepared.prompt
+        );
+        assert!(
+            !prepared.prompt.contains(source_canon.to_str().unwrap()),
+            "shell must not run in the prompt's parent dir; got: {}",
+            prepared.prompt
+        );
+    }
+
+    /// Documents the library default: with no `shell_working_directory`,
+    /// Darkmatter's source-relative fallback runs `::shell` in the prompt
+    /// file's parent directory.
+    #[test]
+    fn parse_interactive_hint_accepts_true_false_and_null() {
+        assert_eq!(parse_interactive_hint(&json!(true)).unwrap(), Some(true));
+        assert_eq!(parse_interactive_hint(&json!(false)).unwrap(), Some(false));
+        assert_eq!(parse_interactive_hint(&json!(null)).unwrap(), None);
+    }
+
+    #[test]
+    fn parse_interactive_hint_rejects_non_booleans() {
+        for value in [
+            json!("true"),
+            json!(42),
+            json!([true]),
+            json!({"interactive": true}),
+        ] {
+            let err = parse_interactive_hint(&value).unwrap_err();
+            match err {
+                CompositionError::InteractiveHintWrongType(found) => {
+                    assert_eq!(found, json_type_name(&value));
+                }
+                other => panic!("expected InteractiveHintWrongType for {value}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn direct_composition_parses_interactive_hint() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("interactive", json!(true))], "Content");
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert_eq!(prepared.selection_hints.interactive, Some(true));
+    }
+
+    #[test]
+    fn direct_composition_interactive_null_is_absent() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("interactive", json!(null))], "Content");
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert_eq!(prepared.selection_hints.interactive, None);
+    }
+
+    #[test]
+    fn direct_composition_interactive_wrong_type_errors() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("interactive", json!("yes"))], "Content");
+
+        let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+        assert!(matches!(err, CompositionError::InteractiveHintWrongType(_)));
+    }
+
+    #[test]
+    fn inline_composition_parses_interactive_hint() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[("prompt", json!("Write something")), ("interactive", json!(false))],
+            "Old content",
+        );
+
+        let prepared = prepare_inline(&source, PrepareOptions::default()).unwrap();
+        assert_eq!(prepared.selection_hints.interactive, Some(false));
+    }
+
+    #[test]
+    fn parse_selection_hints_from_frontmatter_reads_interactive() {
+        let mut fm = Frontmatter::new();
+        fm.insert("interactive", json!(true)).unwrap();
+        let md = Markdown::with_frontmatter(fm, "Content");
+
+        let hints = parse_selection_hints_from_frontmatter(md.frontmatter()).unwrap();
+        assert_eq!(hints.interactive, Some(true));
     }
 }

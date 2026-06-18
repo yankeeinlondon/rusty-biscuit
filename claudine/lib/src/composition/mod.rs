@@ -5,24 +5,39 @@
 //! - Prompt preparation (inline frontmatter prompt and chained document)
 //! - Agent/provider selection with precedence rules
 //! - Composition-specific error types
+//!
+//! See [`claudine/docs/topics/composition.md`](../../../docs/topics/composition.md)
+//! for the authoritative design — frontmatter precedence, harness
+//! validations, handlers, and provider selection across `compose`,
+//! `inline-compose`, and `sequence`.
 
+pub mod agent_message;
 pub mod closure;
 mod error;
 mod guardrails;
+pub mod launch_workspace;
 pub mod lifecycle;
 pub mod loop_actions;
 pub mod loop_config;
 pub mod loop_engine;
 pub mod loop_expression;
+pub mod mismatch;
 pub mod preflight;
 mod prepare;
 mod resolve;
+pub mod schema_validation;
 mod select;
 pub mod sequence;
 mod types;
 
+pub use agent_message::{agent_state_breakdown, invalid_agent_message};
 pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
-pub use error::{CompositionError, SequenceSelectionFailure};
+pub use error::{
+    CompositionError, DroppedOptional, DroppedOptionalSource, DroppedOptionalStage,
+    InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE, MissingProperty,
+    SequenceMissingPropertiesStep, SequenceSelectionFailure, TextFormat,
+};
+pub use launch_workspace::{LaunchWorkspaceContext, PackageContext};
 #[allow(deprecated)]
 pub use lifecycle::{
     DefaultLifecycleEmitter, LifecycleConfig, LifecycleEmitter, LifecycleNotification,
@@ -31,30 +46,40 @@ pub use lifecycle::{
 };
 pub use loop_config::{
     resolve_fail_fast_from_env, resolve_loop_config, resolve_max_iterations_from_env,
+    resolve_pause_reset_margin_from_env,
 };
 pub use loop_engine::{
     DEFAULT_MAX_ITERATIONS, LoopExecutionOptions, LoopExecutionResult, LoopIterationContext,
     LoopIterationOutput, execute_loop, execute_loop_with_config,
 };
 pub use loop_expression::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
+pub use mismatch::{capture_frontmatter_yaml, is_inline_sequence_mismatch};
 pub use preflight::{PreFlightResult, resolve_shell_approvals};
 pub use prepare::{
-    PrepareOptions, parse_selection_hints_from_frontmatter, prepare_direct, prepare_inline,
+    PrepareOptions, bind_agent_workspace, parse_interactive_hint,
+    parse_selection_hints_from_frontmatter, prepare_direct, prepare_inline,
 };
 pub use resolve::{resolve_composition_source, validate_file_permissions};
+pub use schema_validation::{
+    InteractiveSchemaOptions, PreValidatedSchema, PropertyState, PropertyStatus,
+    SchemaStatusReport, build_schema_status_report, drop_invalid_optionals,
+    pre_validate_schema, prepare_direct_with_schema, prepare_inline_with_schema,
+};
 pub use select::{
     build_candidate_set, build_installed_snapshot, build_picker_plan, build_picker_plan_with_hints,
-    resolve_model, resolve_model_with_catalog, resolve_model_with_hints, resolve_target_non_tty,
-    resolve_target_non_tty_with_catalog, resolve_target_non_tty_with_hints, select_provider,
+    classify_agent_resolution, resolve_model, resolve_model_with_catalog, resolve_model_with_hints,
+    resolve_target_non_tty, resolve_target_non_tty_with_catalog, resolve_target_non_tty_with_hints,
+    select_provider,
 };
 pub use sequence::{build_step_overlay, resolve_sequence_plan};
 pub use types::{
-    AgentHint, AmbientVariable, CompositionClosurePlan, CompositionExecutionRequest,
-    CompositionMode, EffectiveSelectionHints, InlineClosurePlan, InstalledProviderSnapshot,
-    LoopAction, LoopCondition, LoopConfig, ModelHint, ModelResolutionReason, OutputFormat,
-    PickerInfluence, PreparedComposition, ProviderPickerOption, ProviderPickerPlan,
-    ProviderResolutionReason, ResolutionMode, ResolvedCompositionSource, ResolvedExecutionTarget,
-    SelectedProvider, SelectionReason, SequenceExecutionOptions, SequencePlan, SequenceRunSummary,
-    SequenceSource, SequenceStep, SequenceStepDraft, SequenceStepOverlay, SequenceStepResult,
-    SharedApprovalCache,
+    AgentHint, AgentResolutionState, AmbientVariable, CompositionClosurePlan,
+    CompositionExecutionRequest, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
+    InstalledProviderSnapshot, LoopAction, LoopCondition, LoopConfig, ModelHint,
+    ModelResolutionReason, OnRateLimit, OutputFormat, PickerInfluence, PreparedComposition,
+    ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason, ResolutionMode,
+    ResolvedCompositionSource, ResolvedExecutionTarget, ResolvedSessionInteractivity,
+    SelectedProvider, SelectionReason, SessionInteractivitySource, SequenceExecutionOptions,
+    SequencePlan, SequenceRunSummary, SequenceSource, SequenceStep, SequenceStepDraft,
+    SequenceStepOverlay, SequenceStepResult, SharedApprovalCache,
 };

@@ -200,4 +200,4 @@ mod tests {
 
 - [Unit Tests](./unit-tests.md) - Specific example-based tests
 - [Fuzzing](./fuzzing.md) - Finding crashes with random input
-- [Benchmarking](./benchmarking.md) - Performance testing
+- [Benchmarking](./criterion.md) - Performance testing

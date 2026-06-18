@@ -1,6 +1,6 @@
 ---
 name: serial_test
-description: Test isolation for Rust tests that share global state (environment variables, files, singletons)
+description: Expert knowledge for the Rust serial_test crate — isolating tests that share global state such as environment variables, files, and singletons. Use when parallel tests interfere via shared state, tests pass alone but fail together, or you need #[serial]/#[parallel] to force serialized execution.
 ---
 
 # serial_test

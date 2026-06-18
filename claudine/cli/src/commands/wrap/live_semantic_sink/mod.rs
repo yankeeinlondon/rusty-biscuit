@@ -112,6 +112,13 @@ pub(crate) struct LiveSemanticSink {
     env: EnvironmentContext,
     cwd: PathBuf,
     home: Option<PathBuf>,
+    /// Immediate child PID captured after a successful provider spawn.
+    ///
+    /// `None` until the wrapper spawns the provider; the parser-builder
+    /// closure sets it once spawn returns so every live dispatched/logged
+    /// record carries `EventMeta.agent_pid`. `claudine_pid` rides along in
+    /// `env` and needs no separate slot here.
+    agent_pid: Option<u32>,
     verbosity: Verbosity,
     pending_task_progress: Option<String>,
     session_id: Option<String>,
@@ -181,6 +188,7 @@ impl LiveSemanticSink {
             env,
             cwd: cwd.to_path_buf(),
             home: dirs::home_dir(),
+            agent_pid: None,
             verbosity,
             pending_task_progress: None,
             session_id: None,
@@ -261,6 +269,7 @@ impl LiveSemanticSink {
             env,
             cwd: cwd.to_path_buf(),
             home: dirs::home_dir(),
+            agent_pid: None,
             verbosity,
             pending_task_progress: None,
             session_id: None,
@@ -320,6 +329,14 @@ impl LiveSemanticSink {
     /// thread while the sink itself is shared with the stderr log bridge.
     pub(crate) fn set_output_text_sink(&mut self, emit: OutputTextFn) {
         self.emit_output_text = Some(emit);
+    }
+
+    /// Record the spawned provider's immediate child PID.
+    ///
+    /// Called by the parser-builder closure after a successful spawn so that
+    /// the live dispatched and logged records carry `EventMeta.agent_pid`.
+    pub(crate) fn set_agent_pid(&mut self, agent_pid: Option<u32>) {
+        self.agent_pid = agent_pid;
     }
 
     /// Wire a JSONL logger invoked for every [`SemanticEvent`] the sink
@@ -617,10 +634,13 @@ impl LiveSemanticSink {
             },
         );
         // Override fields that belong to the live sink but wouldn't be
-        // populated by `semantic_event_to_event_meta` alone.
+        // populated by `semantic_event_to_event_meta` alone. `agent_pid` is
+        // known only after spawn, so the sink stamps it here rather than the
+        // shared helper (which always emits `None`).
         DispatchEventMeta {
             event: agentic,
             cwd: Some(self.cwd.display().to_string()),
+            agent_pid: self.agent_pid,
             ..meta
         }
     }
@@ -658,11 +678,27 @@ impl SemanticEventSink for LiveSemanticSink {
                 .map(String::from);
         }
 
-        // 3. Update structured summary's tool-name rollup.
-        if let SemanticEvent::ToolCall { name: Some(n), .. } = &event
-            && let Ok(mut details) = self.summary_details.lock()
-        {
-            details.record_tool_name(n);
+        // 3. Update structured summary's tool-name rollup and the
+        //    final-response accumulator. The accumulator captures only the
+        //    output text emitted after the last tool call: a `ToolCall`
+        //    resets it (dropping any narration that preceded the tool), and
+        //    `OutputText` appends to it. `inline-compose` writes this final
+        //    turn — never the full accumulated narration — into the body.
+        match &event {
+            SemanticEvent::ToolCall { name, .. } => {
+                if let Ok(mut details) = self.summary_details.lock() {
+                    if let Some(n) = name {
+                        details.record_tool_name(n);
+                    }
+                    details.reset_final_response();
+                }
+            }
+            SemanticEvent::OutputText { text, .. } => {
+                if let Ok(mut details) = self.summary_details.lock() {
+                    details.push_final_response(text);
+                }
+            }
+            _ => {}
         }
 
         // 4. Update shared watchdog state for subagent tracking.
@@ -675,9 +711,31 @@ impl SemanticEventSink for LiveSemanticSink {
                     SemanticEvent::SubagentStart { id, name, .. } => {
                         state.subagent_started(id.clone().unwrap_or_default(), name.clone(), now);
                     }
-                    SemanticEvent::SubagentStop { id, .. } => {
+                    SemanticEvent::SubagentStop {
+                        id,
+                        name,
+                        status,
+                        extra,
+                        ..
+                    } => {
                         if let Some(id) = id {
-                            state.subagent_stopped(id, now);
+                            let description = extra
+                                .get("description")
+                                .and_then(|v| v.as_str())
+                                .map(String::from)
+                                .or_else(|| {
+                                    extra
+                                        .get("subagent_type")
+                                        .and_then(|v| v.as_str())
+                                        .map(String::from)
+                                });
+                            state.subagent_stopped(
+                                id,
+                                name.clone(),
+                                description,
+                                status.clone(),
+                                now,
+                            );
                         }
                     }
                     _ => {
@@ -1027,6 +1085,7 @@ fn escape_prose(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biscuit_terminal::discovery::detection::ColorDepth;
     use serde_json::json;
     use std::sync::Mutex as StdMutex;
 
@@ -1063,7 +1122,7 @@ mod tests {
                 lines.lock().unwrap().push(line.to_string());
             })
         };
-        LiveSemanticSink::new(
+        let mut sink = LiveSemanticSink::new(
             provider,
             EnvironmentContext::default(),
             Path::new("/tmp"),
@@ -1071,7 +1130,13 @@ mod tests {
             Arc::new(Mutex::new(StructuredSummaryDetails::default())),
             dispatch,
             emit,
-        )
+        );
+        sink.terminal = Terminal::builder()
+            .is_tty(true)
+            .color_depth(ColorDepth::TrueColor)
+            .osc_link_support(true)
+            .build();
+        sink
     }
 
     #[test]
@@ -1553,6 +1618,55 @@ mod tests {
         });
         let names = details.lock().unwrap().tool_names.clone();
         assert_eq!(names, vec!["bash".to_string()]);
+    }
+
+    #[test]
+    fn final_response_keeps_only_text_after_last_tool_call() {
+        // The final-response accumulator must drop interstitial narration
+        // emitted between tool calls and retain only the output text that
+        // follows the LAST tool call — the agent's closing answer that
+        // `inline-compose` writes into the document body.
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
+        let sink_details = details.clone();
+        let dispatch = Box::new(|_event: AgenticEvent, _meta: DispatchEventMeta| {});
+        let emit = {
+            let lines = lines.clone();
+            Box::new(move |line: &str| lines.lock().unwrap().push(line.to_string()))
+        };
+        let mut sink = LiveSemanticSink::new(
+            Provider::Claude,
+            EnvironmentContext::default(),
+            Path::new("/tmp"),
+            Verbosity::Normal,
+            sink_details,
+            dispatch,
+            emit,
+        );
+
+        let tool_call = |name: &str| SemanticEvent::ToolCall {
+            name: Some(name.to_string()),
+            id: None,
+            input: None,
+            extra: json!({}),
+        };
+        let output = |text: &str| SemanticEvent::OutputText {
+            text: text.to_string(),
+            extra: json!({}),
+        };
+
+        sink.on_semantic_event(output("Let me read the research documents. "));
+        sink.on_semantic_event(tool_call("read_file"));
+        sink.on_semantic_event(output("Now let me write the draft. "));
+        sink.on_semantic_event(tool_call("write_file"));
+        sink.on_semantic_event(output("# Final Body\n"));
+        sink.on_semantic_event(output("This is the closing answer."));
+
+        let final_response = details.lock().unwrap().final_response.clone();
+        assert_eq!(
+            final_response, "# Final Body\nThis is the closing answer.",
+            "only the output text after the last tool call should remain"
+        );
     }
 
     #[test]
@@ -2078,6 +2192,58 @@ mod tests {
                 Some(&Value::String("stream_semantic_event".into()))
             );
         }
+    }
+
+    /// Review-1 Finding 1 — live dispatched/logged records must carry
+    /// `agent_pid` once the wrapper has stamped the spawned child PID.
+    ///
+    /// The same `DispatchEventMeta` is handed to both the JSONL logger and
+    /// the hook dispatcher (step 7 of `on_semantic_event`), so asserting the
+    /// logged copy proves the dispatched hook/action context too. Before
+    /// `set_agent_pid`, records stay `None`; after, they carry the PID.
+    #[test]
+    fn live_records_carry_agent_pid_after_set() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let logged: Arc<StdMutex<Vec<DispatchEventMeta>>> = Arc::new(StdMutex::new(Vec::new()));
+
+        let logger = {
+            let captured = logged.clone();
+            Box::new(move |_event: &SemanticEvent, meta: &DispatchEventMeta| {
+                captured.lock().unwrap().push(meta.clone());
+            })
+        };
+
+        let mut sink = make_sink(lines, dispatched).with_event_logger(logger);
+
+        // Before spawn the wrapper has no child PID to report.
+        sink.on_semantic_event(SemanticEvent::ToolCall {
+            name: Some("bash".into()),
+            id: Some("t1".into()),
+            input: None,
+            extra: json!({}),
+        });
+
+        sink.set_agent_pid(Some(98_765));
+
+        sink.on_semantic_event(SemanticEvent::ToolCall {
+            name: Some("bash".into()),
+            id: Some("t2".into()),
+            input: None,
+            extra: json!({}),
+        });
+
+        let collected = logged.lock().unwrap().clone();
+        assert_eq!(collected.len(), 2);
+        assert_eq!(
+            collected[0].agent_pid, None,
+            "records before set_agent_pid must omit agent_pid"
+        );
+        assert_eq!(
+            collected[1].agent_pid,
+            Some(98_765),
+            "records after set_agent_pid must carry the spawned child PID"
+        );
     }
 
     #[test]
@@ -2735,7 +2901,7 @@ mod tests {
                 lines.lock().unwrap().push(line.to_string());
             })
         };
-        LiveSemanticSink::new(
+        let mut sink = LiveSemanticSink::new(
             Provider::Claude,
             EnvironmentContext::default(),
             cwd,
@@ -2743,7 +2909,13 @@ mod tests {
             Arc::new(Mutex::new(StructuredSummaryDetails::default())),
             dispatch,
             emit,
-        )
+        );
+        sink.terminal = Terminal::builder()
+            .is_tty(true)
+            .color_depth(ColorDepth::TrueColor)
+            .osc_link_support(true)
+            .build();
+        sink
     }
 
     #[test]

@@ -9,6 +9,10 @@
 - when working with the sniff CLI use the 'cli' agent skill
     - ensure that business logic lives in the library 
     - the CLI should report on information provided by the library
+- stdout versus stderr
+    - When reporting output on the Sniff CLI you should use **stdout** for anything that is the "main information content"
+    - in contrast, use **stderr** for content that is not about the host but more about the CLI, a classic example would be a INFO log line expressing that a user should use `--verbose` or `--with-network` to get additional information
+    - when the `--json` is used, we must be extra careful that **stdout** has the full JSON data structure; typically nothing will be sent to **stderr** in these cases but there might be an occasional exception and we just need to ensure that **stdout** is always valid JSON
 - when rendering to the terminal, remember to use the **Renderable** components from `biscuit-terminal`
     - this ensures word wrapping, escape codes (with fallback), hyperlinks (with fallback) and more
     - always consider the `Prose` struct for output

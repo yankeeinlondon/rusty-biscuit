@@ -13,6 +13,12 @@ description: Building terminal UIs in Rust
 - Working with Ratatui/Crossterm
 - Building production Rust CLIs
 
+> The manual `enable_raw_mode` / `EnterAlternateScreen` setup below is the minimal
+> pattern (and what you need on Ratatui ≤ 0.29). For new fullscreen apps on
+> Ratatui 0.30+, prefer `ratatui::run`, which restores the terminal on exit and
+> panic. For structuring a real app — state, update, lifecycle, resize, and a
+> readiness checklist — see [Ratatui Best Practices](./ratatui-best-practices.md).
+
 ## Basic Application
 
 ```rust
@@ -65,7 +71,7 @@ fn main() -> Result<(), io::Error> {
             let paragraph = Paragraph::new(format!("Count: {}", app.counter))
                 .block(block);
 
-            f.render_widget(paragraph, f.size());
+            f.render_widget(paragraph, f.area());
         })?;
 
         if let Event::Key(key) = event::read()? {

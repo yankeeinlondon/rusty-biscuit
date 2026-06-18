@@ -80,8 +80,9 @@ pub enum Mapper {
 
     /// Interpret the exit code as the decision.
     ///
-    /// `0` maps to [`HookDecision::Allow`], `2` maps to
-    /// [`HookDecision::Deny`], and any other status (including crashes,
+    /// `0` maps to [`HookDecision::Allow`](crate::actions::HookDecision::Allow),
+    /// `2` maps to [`HookDecision::Deny`](crate::actions::HookDecision::Deny),
+    /// and any other status (including crashes,
     /// `command-not-found` at `127`, or user-defined anomalous codes)
     /// emits **no** decision. The dispatcher logs a `warn!` on
     /// unexpected statuses and falls through to the next action rather
@@ -127,9 +128,9 @@ pub enum HookAction {
         speed: f32,
 
         /// Optional Darkmatter boolean condition controlling whether this
-        /// action runs. Evaluated against the active [`EventMeta`] before
-        /// the action executes; a falsy or invalid expression skips the
-        /// action.
+        /// action runs. Evaluated against the active
+        /// [`EventMeta`](crate::events::EventMeta) before the action
+        /// executes; a falsy or invalid expression skips the action.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         when: Option<String>,
     },
@@ -185,7 +186,7 @@ pub enum HookAction {
 
         /// Optional Darkmatter boolean condition gating execution. A
         /// skipped `Call` action cannot replace a previously selected
-        /// blocking [`HookResponse`].
+        /// blocking [`HookResponse`](crate::actions::HookResponse).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         when: Option<String>,
     },
@@ -242,9 +243,10 @@ impl HookAction {
     /// action's execution.
     ///
     /// When `Some`, the runner evaluates the expression against the
-    /// active [`EventMeta`] before running the action. A falsy result or
-    /// a parse/evaluation error causes the action to be skipped without
-    /// short-circuiting the rest of the binding.
+    /// active [`EventMeta`](crate::events::EventMeta) before running the
+    /// action. A falsy result or a parse/evaluation error causes the
+    /// action to be skipped without short-circuiting the rest of the
+    /// binding.
     pub fn when(&self) -> Option<&str> {
         match self {
             HookAction::SoundEffect { when, .. }

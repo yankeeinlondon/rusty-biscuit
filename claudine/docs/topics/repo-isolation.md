@@ -25,7 +25,7 @@ When `--repo` is enabled on a wrapper command, Claudine currently does all of th
 4. It excludes a provider-specific set of resource directories from that shadow home so the wrapped agent cannot see those user-scoped resources through its normal config path.
 5. It sets `HOME=~/.claudine` so the wrapped provider resolves its config from the shadow tree instead of the real user home.
 6. It resolves the git root when possible and runs the child from that repo root rather than from an arbitrary nested directory.
-7. It injects wrapper metadata such as `AGENT`, `YOLO`, `INTERACTIVE`, `AGENT_PARAMS`, and, when monorepo detection succeeds, `PACKAGE_AREA` and `PACKAGE`.
+7. It injects wrapper metadata such as `AGENT`, `YOLO`, `INTERACTIVE`, `AGENT_PARAMS`, `CLAUDINE_SESSION_ID`, `CLAUDINE_PID`, and, when monorepo detection succeeds, `PACKAGE_AREA` and `PACKAGE`.
 
 If shadow-home creation fails, Claudine currently falls back to `HOME=/dev/null`. That keeps the session launch moving, but it is a degraded path and can break authentication or provider startup.
 

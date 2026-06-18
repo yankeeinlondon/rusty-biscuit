@@ -188,6 +188,8 @@ fn render_top_level_error(report: &Report) {
 }
 
 fn run() -> Result<()> {
+    let process_start = std::time::Instant::now();
+
     // When invoked as a completion subprocess (COMPLETE=<shell> claudine …),
     // `maybe_complete` writes either a registration snippet or candidate
     // list to stdout and exits before returning. In normal runs it is a
@@ -219,13 +221,19 @@ fn run() -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(async_main(argv, perf_bootstrap, arg_parse_start))
+    runtime.block_on(async_main(
+        argv,
+        perf_bootstrap,
+        arg_parse_start,
+        process_start,
+    ))
 }
 
 async fn async_main(
     argv: Vec<OsString>,
     perf_bootstrap: perf::PerfBootstrap,
     arg_parse_start: std::time::Instant,
+    process_start: std::time::Instant,
 ) -> Result<()> {
     let cli = parse_cli_from(&argv);
     let perf_arg_parsing = arg_parse_start.elapsed();
@@ -243,6 +251,8 @@ async fn async_main(
 
     let perf_enabled = perf_bootstrap.enabled;
 
+    let pre_dispatch = process_start.elapsed();
+
     let command = match wrapper_command(cli.command.unwrap()) {
         Ok((provider, args)) => {
             // Wrapper commands also need config — check before launching
@@ -255,6 +265,10 @@ async fn async_main(
                     arg_parsing: perf_arg_parsing,
                     tracing_init: perf_tracing_init,
                     config_loading: perf_config_loading,
+                    pre_dispatch,
+                    prep_phase: std::time::Duration::ZERO,
+                    process_start,
+                    prep_substages: Vec::new(),
                 })
             } else {
                 None
@@ -291,6 +305,10 @@ async fn async_main(
             arg_parsing: perf_arg_parsing,
             tracing_init: perf_tracing_init,
             config_loading: perf_config_loading,
+            pre_dispatch,
+            prep_phase: std::time::Duration::ZERO,
+            process_start,
+            prep_substages: Vec::new(),
         })
     } else {
         None
@@ -327,5 +345,6 @@ async fn async_main(
         Commands::Sequence(args) => {
             commands::sequence::run_sequence(args, cli.verbose, startup_timings)
         }
+        Commands::Context(args) => commands::context::run(args),
     }
 }

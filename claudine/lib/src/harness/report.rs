@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
-use biscuit_terminal::prelude::Renderable;
+use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::WordWrap;
 use darkmatter::markdown::highlighting::highlight_yaml_lines;

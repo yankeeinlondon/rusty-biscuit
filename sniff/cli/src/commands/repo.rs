@@ -13,6 +13,8 @@ pub(super) struct RepoPackagesArgs<'a> {
     pub(super) package: Option<&'a str>,
     pub(super) package_area: Option<&'a str>,
     pub(super) format: PackagesFormat,
+    pub(super) no_error: bool,
+    pub(super) on_error: Option<String>,
 }
 
 /// Fast-path handler for `sniff repo packages`.
@@ -33,16 +35,15 @@ pub(super) fn handle_repo_packages(
         package,
         package_area,
         format,
+        no_error,
+        on_error,
     } = args;
     let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
     let explicit = base_dir.unwrap_or(&cwd);
     let root = if base_dir.is_some() {
         explicit.to_path_buf()
     } else {
-        git2::Repository::discover(explicit)
-            .ok()
-            .and_then(|repo| repo.workdir().map(std::path::PathBuf::from))
-            .unwrap_or_else(|| explicit.to_path_buf())
+        sniff::filesystem::repo_root(explicit)?.unwrap_or_else(|| explicit.to_path_buf())
     };
 
     let info = match detect_repo_structure(&root)? {
@@ -57,9 +58,18 @@ pub(super) fn handle_repo_packages(
     // this call surfaces the intersection error before render time.
     super::resolve_package_and_area(info.packages.as_deref(), package, package_area)?;
 
+    let names = output::collect_repo_package_names(&info, filter, package, package_area);
+    let is_empty = info.is_monorepo && names.is_empty();
+
+    if is_empty {
+        if json {
+            println!("{}", serde_json::to_string(&names)?);
+            perf.emit_stderr(None);
+        }
+        return handle_no_results(no_error, &on_error, plain, perf);
+    }
+
     if json {
-        let names: Vec<&str> =
-            output::collect_repo_package_names(&info, filter, package, package_area);
         println!("{}", serde_json::to_string(&names)?);
         perf.emit_stderr(None);
         return Ok(());
@@ -89,6 +99,8 @@ pub(super) struct RepoPackageAreasArgs<'a> {
     pub(super) package: Option<&'a str>,
     pub(super) package_area: Option<&'a str>,
     pub(super) format: PackagesFormat,
+    pub(super) no_error: bool,
+    pub(super) on_error: Option<String>,
 }
 
 /// Fast-path handler for `sniff repo package-areas`.
@@ -108,16 +120,15 @@ pub(super) fn handle_repo_package_areas(
         package,
         package_area,
         format,
+        no_error,
+        on_error,
     } = args;
     let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
     let explicit = base_dir.unwrap_or(&cwd);
     let root = if base_dir.is_some() {
         explicit.to_path_buf()
     } else {
-        git2::Repository::discover(explicit)
-            .ok()
-            .and_then(|repo| repo.workdir().map(std::path::PathBuf::from))
-            .unwrap_or_else(|| explicit.to_path_buf())
+        sniff::filesystem::repo_root(explicit)?.unwrap_or_else(|| explicit.to_path_buf())
     };
 
     let info = match detect_repo_structure(&root)? {
@@ -132,9 +143,18 @@ pub(super) fn handle_repo_package_areas(
     // this call surfaces the intersection error before render time.
     super::resolve_package_and_area(info.packages.as_deref(), package, package_area)?;
 
+    let names = output::collect_repo_package_area_names(&info, filter, package, package_area);
+    let is_empty = info.is_monorepo && names.is_empty();
+
+    if is_empty {
+        if json {
+            println!("{}", serde_json::to_string(&names)?);
+            perf.emit_stderr(None);
+        }
+        return handle_no_results(no_error, &on_error, plain, perf);
+    }
+
     if json {
-        let names: Vec<&str> =
-            output::collect_repo_package_area_names(&info, filter, package, package_area);
         println!("{}", serde_json::to_string(&names)?);
         perf.emit_stderr(None);
         return Ok(());

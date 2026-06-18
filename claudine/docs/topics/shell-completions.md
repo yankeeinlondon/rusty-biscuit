@@ -531,6 +531,79 @@ short identifiers) that completion cannot meaningfully suggest. Leaving
 that slot to the shell's default lets the user type freely without
 spurious popups.
 
+## Schema-aware setter completion
+
+When the cursor sits on a setter slot of `claudine compose`,
+`claudine inline-compose`, or `claudine sequence` AND a positional
+prompt-file argument is already committed, the completer consults the
+prompt's `$schema` declaration via Darkmatter before falling back to the
+shell default. Implementation lives in
+[`completion/schema_completion.rs`](../../cli/src/completion/schema_completion.rs).
+
+### Property names (before `=`)
+
+Required properties are emitted first in declaration order, then
+optional properties in declaration order. Names already present in the
+current command line are filtered out so the user is never offered to
+re-set the same key. Each candidate carries a trailing `=` so accepting
+it leaves the cursor positioned to start typing the value.
+
+```text
+claudine compose @plan.md <TAB>
+→ topic=         # required (declared first)
+→ tier=          # required
+→ draft=         # optional
+→ cover=         # optional
+```
+
+A partial before `=` is matched with the same case-insensitive fuzzy
+subsequence rule the rest of the engine uses, so `des<TAB>` completes
+to `description=`.
+
+### Property values (after `=`)
+
+`property=<TAB>` consults Darkmatter's completion metadata for the
+property and dispatches by `CompletionKind`:
+
+- **`enum` → enum members** as `property='value'`. Prefix-insensitive
+  match when a value partial is typed; all members surface when the
+  partial is empty.
+- **`file(match='*.png', …)` → filesystem paths** rooted at the
+  effective repo root (or cwd when no repo), filtered by the
+  property's glob patterns. The walker honors `.gitignore`. An empty
+  `match(...)` list emits zero candidates so the existing `@`-gated
+  path or shell-native completion still handles the slot.
+- **`url`, `email`, `date`, `datetime`, `time` (hint-only)** emit no
+  candidates. The `__complete` stdout protocol does not carry a
+  description channel today, so the hint string from
+  `property_value_hint` is reserved for future protocols that support
+  descriptions.
+
+```text
+claudine compose @plan.md tier=<TAB>
+→ tier='small'
+→ tier='medium'
+→ tier='large'
+
+claudine compose @plan.md cover=<TAB>          # schema: file(match('*.png'))
+→ cover='assets/cover.png'
+→ cover='assets/dark/cover.png'
+```
+
+### When the schema is unavailable
+
+If `$schema` cannot be loaded (missing file, unparseable schema, raw
+JSON Schema without typed metadata, root-level union) the schema
+completer returns no candidates and the slot falls through to the
+existing `@`-gated setter completer described above. Completion is
+strictly side-effect free: no shell directives are executed, no
+provider sessions are launched, no on-disk caches are written.
+
+**Why best-effort.** Completion has a sub-100 ms wall-clock budget; a
+malformed schema or a transient filesystem failure must not break
+`<TAB>` for the entire command. Returning nothing keeps the shell's
+own completion alive in those edge cases.
+
 ## Other commands
 
 Every non-composition subcommand — `skills`, `commands`, `hooks`,
@@ -823,3 +896,4 @@ flowchart TD
 | [`fuzzy.rs`](../../cli/src/completion/fuzzy.rs) | Subsequence matching with prefix-length progression. |
 | [`bootstrap.rs`](../../cli/src/completion/bootstrap.rs) | Shell scripts (bash/zsh/fish) + legacy PowerShell/Elvish. |
 | [`commands/completions.rs`](../../cli/src/commands/completions.rs) | `claudine completions` and the hidden `__complete`. |
+| [`schema_completion.rs`](../../cli/src/completion/schema_completion.rs) | Schema-aware property-name and property-value completion for setter slots. |

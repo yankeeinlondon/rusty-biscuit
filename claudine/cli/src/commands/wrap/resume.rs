@@ -151,7 +151,7 @@ pub(crate) fn build_next_attempt_plan(
     term: &biscuit_terminal::terminal::Terminal,
 ) -> Result<Option<NextAttemptPlan>> {
     use biscuit_terminal::components::prose::Prose;
-    use biscuit_terminal::prelude::Renderable;
+    use biscuit_terminal::prelude::TerminalRenderable;
     let _decision_span = info_span!(
         "harness_handler_decision",
         current_attempt,

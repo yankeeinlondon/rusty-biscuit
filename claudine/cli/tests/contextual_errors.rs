@@ -10,7 +10,7 @@ use std::fs;
 use tempfile::tempdir;
 
 mod common;
-use common::{strip_ansi, write_executable};
+use common::{augmented_path, strip_ansi, write_executable};
 
 /// Shell-expansion failure during `claudine compose`.
 ///
@@ -22,6 +22,8 @@ use common::{strip_ansi, write_executable};
 #[test]
 fn compose_shell_expansion_failure_renders_rich_block() {
     let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
     let md_file = workspace.path().join("compose.md");
     fs::write(
         &md_file,
@@ -29,9 +31,14 @@ fn compose_shell_expansion_failure_renders_rich_block() {
     )
     .unwrap();
 
+    // Fake claude binary so the wrapper pipeline picks a provider and
+    // reaches shell-expansion resolution.
+    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
+
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
-        .args(["compose", md_file.to_str().unwrap()])
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--claude", md_file.to_str().unwrap()])
         .assert()
         .failure();
 
@@ -114,14 +121,21 @@ fn compose_system_prompt_shell_failure_renders_rich_block() {
 #[test]
 fn compose_transclusion_cycle_renders_file_chain() {
     let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
     let a = workspace.path().join("a.md");
     let b = workspace.path().join("b.md");
     fs::write(&a, "Start a.\n\n::file ./b.md\n\nEnd a.\n").unwrap();
     fs::write(&b, "Start b.\n\n::file ./a.md\n\nEnd b.\n").unwrap();
 
+    // Fake claude binary so the wrapper pipeline picks a provider and
+    // reaches transclusion resolution.
+    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
+
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
-        .args(["compose", a.to_str().unwrap()])
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--claude", a.to_str().unwrap()])
         .assert()
         .failure();
 

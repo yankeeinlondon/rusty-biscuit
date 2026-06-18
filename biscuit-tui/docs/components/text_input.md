@@ -4,7 +4,7 @@ The `TextInput` is a single-line text input component for terminal user interfac
 
 ## Description
 
-`TextInput` is designed for capturing a single line of text. It wraps `tui_input` to provide a robust editing engine while exposing a clean API that integrates with the `tui-chrome` theme and label systems. It supports character length capping, validation error display, and customizable key bindings.
+`TextInput` is designed for capturing a single line of text. It wraps `tui_input` to provide a robust editing engine while exposing a clean API that integrates with the `biscuit-tui` theme and label systems. It supports character length capping, validation error display, and customizable key bindings.
 
 The component follows the standard `ratatui` stateful widget pattern, separating the rendering logic (`TextInput` widget) from the mutable buffer and configuration (`TextInputState`).
 
@@ -24,7 +24,7 @@ When using the library, you configure the component via `TextInputState`.
 
 ### Basic Text Input
 ```rust
-use tui_chrome::prelude::*;
+use biscuit_tui::prelude::*;
 
 let state = TextInputState::new()
     .with_value("Initial value");
@@ -35,7 +35,7 @@ let value: String = state.value();
 
 ### Input with Label and Length Limit
 ```rust
-use tui_chrome::prelude::*;
+use biscuit_tui::prelude::*;
 
 let state = TextInputState::new()
     .with_label(Label::new("Username", LabelPosition::Left))
@@ -44,7 +44,7 @@ let state = TextInputState::new()
 
 ### Standalone Runner
 ```rust
-use tui_chrome::{run_standalone, TextInput, TextInputState};
+use biscuit_tui::{run_standalone, TextInput, TextInputState};
 
 let state = TextInputState::new().with_max_length(100);
 // Runs the prompt in the terminal (fullscreen or inline)

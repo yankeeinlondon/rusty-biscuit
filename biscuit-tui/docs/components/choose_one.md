@@ -81,9 +81,20 @@ The `choose_one` runner attempts to enable the Kitty keyboard protocol on startu
 
 On terminals that do not emit modifier-only key events, the component falls back to a deadline-based approach: a chord press (e.g., `Ctrl+R`) arms a short timer (~300 ms) during which the badges remain visible, giving the user a brief window to read the shortcuts before they fade.
 
+### Production-Readiness Scope (Bare-Modifier Badges)
+
+The bare-modifier badge UX above is verified as follows:
+
+- **Ctrl and Alt chord presses** (`Ctrl+R`, `Alt+R`) — fully verified end-to-end with Level-3 OS keyboard injection (`cliclick`) inside a real WezTerm pane. Each modifier has its own active Level-3 test (`level3_wezterm_ctrl_r_chord_selects_red`, `level3_wezterm_alt_r_chord_selects_red`); no other modifier/chord combinations are Level-3 verified.
+- **Bare-modifier badge toggles** (e.g. holding `Alt` or `Ctrl` alone, or `Alt+Space` / `Ctrl+Space` sticky toggles) — **not** Level-3 verified on macOS for the same `flagsChanged` reason described below.
+- **The binary's internal handler for the kitty bare-modifier escape `\x1b[57442;1u`** — verified at Level 2 by piping the literal bytes through `wezterm cli send-text` and asserting the badge appears.
+- **End-to-end "user holds bare Ctrl in WezTerm → badge appears"** — **not** production-verified on macOS. The Level-3 test exists but is `#[ignore]` because no userspace path on macOS can synthesise the `flagsChanged` event that AppKit apps (including WezTerm) observe for bare-modifier presses. The chord case works only because the modifier flag rides along with the letter keyDown event as a normal CGEvent. Unignoring the bare-modifier Level-3 test requires a custom `core_graphics`-based injector that posts a `kCGEventFlagsChanged` CGEvent via `kCGHIDEventTap`.
+
+Treat bare-modifier visibility as **best-effort** on macOS: it works in practice on all terminals listed in the table above when their bare-modifier reporting is correctly configured (e.g. `enable_kitty_keyboard = true` in `wezterm.lua`), but the project's automated tests cannot currently prove the OS → terminal → binary handoff. Chord-based shortcuts remain the supported, fully-verified interaction.
+
 ## Helper Functions
 
-The `tui_chrome::helpers::choice_builders` module provides convenience functions for constructing `ChoiceInput<String>` from common sources:
+The `biscuit_tui::helpers::choice_builders` module provides convenience functions for constructing `ChoiceInput<String>` from common sources:
 
 - `choose_one_from_csv(id, prompt, csv)` — builds options from a comma-separated string.
 - `choose_one_from_markdown_list(id, prompt, markdown)` — builds options from a Markdown bullet or numbered list.
@@ -97,8 +108,8 @@ See the [CLI Reference](../cli-reference.md) and [Theming & Configuration](../th
 A simple list of options using the default `String` value type.
 
 ```rust
-use tui_chrome::components::choose::{ChoiceInput, ChoiceOption};
-use tui_chrome::components::choose_one::ChooseOneState;
+use biscuit_tui::components::choose::{ChoiceInput, ChoiceOption};
+use biscuit_tui::components::choose_one::ChooseOneState;
 
 let input = ChoiceInput::new("color", "Pick a color")
     .with_options(vec![

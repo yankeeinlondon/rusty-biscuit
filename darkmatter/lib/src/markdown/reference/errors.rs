@@ -77,7 +77,8 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
 
                 if let Some(col) = caret_col {
                     body.push(Prose::new(format!(
-                        "<dim>Gutter:</dim> Column {col} is near the error in: <dim>{directive_text}</dim>"
+                        "<dim>Gutter:</dim> Column {col} is near the error in: <dim>{}</dim>",
+                        Prose::escape_text(directive_text)
                     )));
                 }
 
@@ -85,7 +86,8 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
                     .error_header(ErrorHeader::new("ReferenceError", "directive parse failed"))
                     .body(body)
                     .hint(format!(
-                        "Error: {message}\nCheck syntax: <cyan>::file path=\"...\"</cyan>"
+                        "Error: {}\nCheck syntax: <cyan>::file path=\"...\"</cyan>",
+                        Prose::escape_text(message)
                     ))
             }
 
@@ -94,7 +96,8 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
                     .error_header(ErrorHeader::new("ReferenceError", "missing source context"))
                     .body(vec![
                         Prose::new(format!(
-                            "Could not resolve <cyan>{reference}</cyan> at line {line}."
+                            "Could not resolve <cyan>{}</cyan> at line {line}.",
+                            Prose::escape_text(reference)
                         )),
                         Prose::new(
                             "<dim>Note:</dim> Relative references require a file-backed source.",
@@ -105,7 +108,7 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
 
             ReferenceError::Validation(message) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ReferenceError", "validation failed"))
-                .body(message.clone())
+                .body(Prose::escape_text(message))
                 .hint("Review the reference graph and fix any reported cycles or dangling edges."),
 
             ReferenceError::Compose(inner) => inner.status_block(term),

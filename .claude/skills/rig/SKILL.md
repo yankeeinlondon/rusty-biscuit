@@ -1,6 +1,6 @@
 ---
 name: rig
-description: Expert knowledge for building LLM-powered applications with Rig, a Rust library that provides type-safe agents, tool calling, RAG patterns, vector store integration, and unified interfaces for 20+ model providers including OpenAI, Anthropic, Cohere, and Gemini
+description: Expert knowledge for building LLM-powered Rust applications with Rig — type-safe agents, tool calling, RAG patterns, vector-store integration, and a unified interface across 20+ providers (OpenAI, Anthropic, Cohere, Gemini). Use when implementing completions or embeddings, building agents or tools, integrating vector DBs, or switching model providers.
 last_updated: 2025-12-19T00:00:00Z
 hash: d6bb0fc1848ff7a5
 ---

@@ -15,8 +15,9 @@
 //! the deltas and JSON-decodes the final blob before emitting
 //! [`SemanticEvent::ToolCall`]. The canonical end-of-turn signal is the
 //! `prompt` request response, which carries one of `finished`, `cancelled`,
-//! `max_steps_reached`, or `steered`. Context-window pressure crossing
-//! [`CONTEXT_PRESSURE_WARN_PERCENT`] emits a [`SemanticEvent::Warning`].
+//! `max_steps_reached`, or `steered`. Context-window pressure crossing the
+//! module-private `CONTEXT_PRESSURE_WARN_PERCENT` threshold emits a
+//! [`SemanticEvent::Warning`].
 
 use std::collections::HashMap;
 

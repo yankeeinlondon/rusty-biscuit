@@ -23,7 +23,10 @@ pub enum MessageBody {
     /// surface (Discord) place `summary` in the notification field and render
     /// `markdown` in the rich field. Providers without that split fall back
     /// to whichever half is appropriate for their feature set.
-    Summarized { summary: String, markdown: String },
+    Summarized {
+        summary: String,
+        markdown: String,
+    },
 }
 
 /// A geographic location.
@@ -78,10 +81,7 @@ impl Message {
     }
 
     /// Create a message with a plain notification summary and a rich Markdown body.
-    pub fn summarized(
-        summary: impl Into<String>,
-        markdown: impl Into<String>,
-    ) -> Self {
+    pub fn summarized(summary: impl Into<String>, markdown: impl Into<String>) -> Self {
         Self {
             title: None,
             body: Some(MessageBody::Summarized {

@@ -121,11 +121,10 @@ pub(crate) fn wait_with_timeout(
 /// trip a kill), when silence is still under budget, or when in-flight tools
 /// or subagents are still active.
 ///
-/// Like [`detect_opencode_hang_termination`], this helper gates on `in_flight`
-/// and `in_flight_subagents`: a long-running Task/subagent call produces
-/// parent-stream silence by design while the child works. The wall-clock
-/// `timeout` rule serves as the backstop for truly stuck tool calls. The
-/// caller is responsible for SIGTERM escalation.
+/// This helper gates on `in_flight` and `in_flight_subagents`: a long-running
+/// Task/subagent call produces parent-stream silence by design while the
+/// child works. The wall-clock `timeout` rule serves as the backstop for
+/// truly stuck tool calls. The caller is responsible for SIGTERM escalation.
 #[allow(dead_code)]
 pub(crate) fn detect_step_timeout(
     metrics: &LiveMetrics,
@@ -189,49 +188,6 @@ pub(crate) fn detect_step_timeout(
     }
 }
 
-pub(crate) fn detect_opencode_hang_termination(
-    metrics: &LiveMetrics,
-    now: Instant,
-    stop_threshold: Duration,
-) -> Option<EarlyTermination> {
-    let state = metrics.lock().ok()?;
-    let last_event_at = state.last_event_at?;
-    let silence = now.saturating_duration_since(last_event_at);
-
-    if !state.in_flight.is_empty() || !state.in_flight_subagents.is_empty() {
-        return None;
-    }
-
-    if silence < stop_threshold {
-        return None;
-    }
-
-    // Hang recovery requires that we've observed at least one `step_finish`
-    // boundary (`provider_status` becomes `Some(_)` only after the parser
-    // routes a `step_finish` Info event). Until then, startup latency or a
-    // very slow first model response can plausibly explain the silence.
-    let provider_status = state.provider_status.as_deref()?;
-
-    let silence_text = format_internal_duration(silence.as_secs());
-    let message = match provider_status {
-        "stop" => format!(
-            "OpenCode reported stop but stayed alive for {silence_text}; terminating hung process"
-        ),
-        // Common after parallel `task` tool dispatch: the last observed
-        // `step_finish.reason` is `"tool-calls"`, every dispatched tool has
-        // returned (`in_flight` is empty), and OpenCode never emits a final
-        // synthesis step. Treat this as a hang once the silence threshold
-        // is met. Note that OpenCode's `task` tool is dispatched as an
-        // ordinary tool — its `task_started`/`task_completed` events are
-        // not emitted, so `in_flight_subagents` stays empty for these runs.
-        other => format!(
-            "OpenCode went silent after step_finish reason={other:?} for {silence_text} with no tools or subagents in flight; terminating hung process"
-        ),
-    };
-
-    Some(EarlyTermination::CompletedButHung { message })
-}
-
 /// Format a duration in seconds for internal early-termination messages.
 ///
 /// Used by the step-silence and OpenCode-hang detectors to compose their
@@ -279,6 +235,13 @@ pub(crate) struct TimeoutConfig {
     pub(crate) kill_grace: Duration,
     /// Watchdog ticker cadence.
     pub(crate) interval: Duration,
+    /// Wrapped provider, when known. Threaded through so the silence-rule
+    /// evaluator can apply provider-specific guards (notably the OpenCode
+    /// `provider_status` grace that suppresses `step_timeout` until at
+    /// least one `step_finish` boundary has been observed). `None`
+    /// disables all provider-specific guards; the wall-clock `timeout`
+    /// rule is unaffected.
+    pub(crate) provider: Option<claudine::provider::Provider>,
 }
 
 impl Default for TimeoutConfig {
@@ -288,6 +251,7 @@ impl Default for TimeoutConfig {
             step_timeout: None,
             kill_grace: Duration::from_secs(10),
             interval: Duration::from_secs(5),
+            provider: None,
         }
     }
 }
@@ -317,20 +281,26 @@ impl TimeoutConfig {
             step_timeout,
             kill_grace,
             interval,
+            provider: None,
         }
     }
 
-    /// Returns `true` when the wall-clock rule is enabled.
+    /// Set the wrapped provider so the silence-rule evaluator can apply
+    /// provider-specific guards (notably the OpenCode `provider_status`
+    /// grace).
+    pub(crate) fn with_provider(mut self, provider: claudine::provider::Provider) -> Self {
+        self.provider = Some(provider);
+        self
+    }
+
     pub(crate) fn timeout_enabled(&self) -> bool {
         self.timeout.is_some()
     }
 
-    /// Returns `true` when the stream-silence rule is enabled.
     pub(crate) fn step_timeout_enabled(&self) -> bool {
         self.step_timeout.is_some()
     }
 
-    /// Returns `true` when any rule is enabled.
     pub(crate) fn any_enabled(&self) -> bool {
         self.timeout_enabled() || self.step_timeout_enabled()
     }
@@ -351,106 +321,12 @@ fn parse_env_duration(name: &str) -> Option<Duration> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn detect_opencode_hang_termination_recovers_after_stop_reason() {
-        let metrics = claudine::stream::progress::new_live_metrics();
-        let now = Instant::now();
-        {
-            let mut state = metrics.lock().unwrap();
-            state.last_event_at = Some(now - Duration::from_secs(180));
-            state.provider_status = Some("stop".into());
-        }
-
-        let detected = detect_opencode_hang_termination(&metrics, now, Duration::from_secs(120));
-
-        let message = match detected {
-            Some(EarlyTermination::CompletedButHung { message }) => message,
-            other => panic!("expected CompletedButHung, got {other:?}"),
-        };
-        assert!(message.contains("reported stop"), "got: {message}");
-    }
-
-    #[test]
-    fn detect_opencode_hang_termination_recovers_after_tool_calls_reason() {
-        // Parallel-Task hang: the last observed `step_finish.reason` is
-        // `"tool-calls"` (the parent dispatched parallel tools), every
-        // dispatched tool has returned (`in_flight` is empty), and OpenCode
-        // never emits a final synthesis step. The wrapper must recover.
-        let metrics = claudine::stream::progress::new_live_metrics();
-        let now = Instant::now();
-        {
-            let mut state = metrics.lock().unwrap();
-            state.last_event_at = Some(now - Duration::from_secs(180));
-            state.provider_status = Some("tool-calls".into());
-        }
-
-        let detected = detect_opencode_hang_termination(&metrics, now, Duration::from_secs(120));
-
-        let message = match detected {
-            Some(EarlyTermination::CompletedButHung { message }) => message,
-            other => panic!("expected CompletedButHung, got {other:?}"),
-        };
-        assert!(message.contains("tool-calls"), "got: {message}");
-    }
-
-    #[test]
-    fn detect_opencode_hang_termination_skips_when_no_step_finish_seen() {
-        // First-step grace: until at least one `step_finish` Info event has
-        // been observed, `provider_status` stays `None`. Slow startup or a
-        // long first model response must not be killed.
-        let metrics = claudine::stream::progress::new_live_metrics();
-        let now = Instant::now();
-        {
-            let mut state = metrics.lock().unwrap();
-            state.last_event_at = Some(now - Duration::from_secs(180));
-        }
-
-        let detected = detect_opencode_hang_termination(&metrics, now, Duration::from_secs(120));
-
-        assert!(
-            detected.is_none(),
-            "must not fire before any step_finish has been observed"
-        );
-    }
-
-    #[test]
-    fn detect_opencode_hang_termination_skips_when_silence_below_threshold() {
-        let metrics = claudine::stream::progress::new_live_metrics();
-        let now = Instant::now();
-        {
-            let mut state = metrics.lock().unwrap();
-            state.last_event_at = Some(now - Duration::from_secs(60));
-            state.provider_status = Some("tool-calls".into());
-        }
-
-        let detected = detect_opencode_hang_termination(&metrics, now, Duration::from_secs(120));
-
-        assert!(detected.is_none());
-    }
-
-    #[test]
-    fn detect_opencode_hang_termination_skips_when_in_flight_tool() {
-        let metrics = claudine::stream::progress::new_live_metrics();
-        let now = Instant::now();
-        {
-            let mut state = metrics.lock().unwrap();
-            state.last_event_at = Some(now - Duration::from_secs(180));
-            state.provider_status = Some("tool-calls".into());
-            state.in_flight.insert(
-                "task-1".into(),
-                claudine::stream::progress::InFlightTool {
-                    name: Some("task".into()),
-                    started_at: now - Duration::from_secs(180),
-                    last_progress_at: now - Duration::from_secs(180),
-                },
-            );
-        }
-
-        let detected = detect_opencode_hang_termination(&metrics, now, Duration::from_secs(120));
-
-        assert!(detected.is_none());
-    }
+    // test-toolkit provides EnvGuard for safe RAII environment-variable
+    // management in tests. All env-mutating tests in this module are
+    // annotated with `#[serial_test::serial]` to prevent cross-test
+    // interference because the process environment is global state.
+    use rstest::rstest;
+    use test_toolkit::EnvGuard;
 
     #[test]
     fn detect_step_timeout_fires_after_silence_exceeds_budget() {
@@ -662,12 +538,13 @@ mod tests {
         assert!(only_silence.any_enabled());
     }
 
-    #[test]
+    #[rstest]
     #[serial_test::serial]
     fn timeout_config_resolve_honours_pre_resolved_inputs() {
         // Ensure env knobs are absent so we observe the inputs cleanly.
-        let _g1 = TestEnvGuard::clear("CLAUDINE_KILL_GRACE");
-        let _g2 = TestEnvGuard::clear("CLAUDINE_WATCHDOG_INTERVAL");
+        // SAFETY: serial_test::serial prevents concurrent env access.
+        let _g1 = unsafe { EnvGuard::remove("CLAUDINE_KILL_GRACE") };
+        let _g2 = unsafe { EnvGuard::remove("CLAUDINE_WATCHDOG_INTERVAL") };
 
         let config = TimeoutConfig::resolve(
             Some(Duration::from_secs(7200)),
@@ -680,15 +557,16 @@ mod tests {
         assert_eq!(config.interval, Duration::from_secs(5));
     }
 
-    #[test]
+    #[rstest]
     #[serial_test::serial]
     fn timeout_config_resolve_does_not_consult_timeout_env_vars() {
         // Composition layer owns timeout/step_timeout precedence; resolve
         // must NOT read these env vars itself.
-        let _g1 = TestEnvGuard::set("CLAUDINE_TIMEOUT", "1h");
-        let _g2 = TestEnvGuard::set("CLAUDINE_STEP_TIMEOUT", "5m");
-        let _g3 = TestEnvGuard::clear("CLAUDINE_KILL_GRACE");
-        let _g4 = TestEnvGuard::clear("CLAUDINE_WATCHDOG_INTERVAL");
+        // SAFETY: serial_test::serial prevents concurrent env access.
+        let _g1 = unsafe { EnvGuard::set("CLAUDINE_TIMEOUT", "1h") };
+        let _g2 = unsafe { EnvGuard::set("CLAUDINE_STEP_TIMEOUT", "5m") };
+        let _g3 = unsafe { EnvGuard::remove("CLAUDINE_KILL_GRACE") };
+        let _g4 = unsafe { EnvGuard::remove("CLAUDINE_WATCHDOG_INTERVAL") };
 
         let config = TimeoutConfig::resolve(None, None);
         assert_eq!(
@@ -701,46 +579,50 @@ mod tests {
         );
     }
 
-    #[test]
+    #[rstest]
     #[serial_test::serial]
     fn timeout_config_resolve_parses_kill_grace_and_interval_env_vars() {
-        let _g1 = TestEnvGuard::set("CLAUDINE_KILL_GRACE", "30s");
-        let _g2 = TestEnvGuard::set("CLAUDINE_WATCHDOG_INTERVAL", "2s");
+        // SAFETY: serial_test::serial prevents concurrent env access.
+        let _g1 = unsafe { EnvGuard::set("CLAUDINE_KILL_GRACE", "30s") };
+        let _g2 = unsafe { EnvGuard::set("CLAUDINE_WATCHDOG_INTERVAL", "2s") };
 
         let config = TimeoutConfig::resolve(None, None);
         assert_eq!(config.kill_grace, Duration::from_secs(30));
         assert_eq!(config.interval, Duration::from_secs(2));
     }
 
-    #[test]
+    #[rstest]
     #[serial_test::serial]
     fn timeout_config_resolve_falls_back_when_env_invalid() {
-        let _g1 = TestEnvGuard::set("CLAUDINE_KILL_GRACE", "garbage");
-        let _g2 = TestEnvGuard::set("CLAUDINE_WATCHDOG_INTERVAL", "");
+        // SAFETY: serial_test::serial prevents concurrent env access.
+        let _g1 = unsafe { EnvGuard::set("CLAUDINE_KILL_GRACE", "garbage") };
+        let _g2 = unsafe { EnvGuard::set("CLAUDINE_WATCHDOG_INTERVAL", "") };
 
         let config = TimeoutConfig::resolve(None, None);
         assert_eq!(config.kill_grace, Duration::from_secs(10));
         assert_eq!(config.interval, Duration::from_secs(5));
     }
 
-    #[test]
+    #[rstest]
     #[serial_test::serial]
     fn timeout_config_resolve_accepts_minute_and_hour_units() {
-        let _g1 = TestEnvGuard::set("CLAUDINE_KILL_GRACE", "1m");
-        let _g2 = TestEnvGuard::set("CLAUDINE_WATCHDOG_INTERVAL", "1h");
+        // SAFETY: serial_test::serial prevents concurrent env access.
+        let _g1 = unsafe { EnvGuard::set("CLAUDINE_KILL_GRACE", "1m") };
+        let _g2 = unsafe { EnvGuard::set("CLAUDINE_WATCHDOG_INTERVAL", "1h") };
 
         let config = TimeoutConfig::resolve(None, None);
         assert_eq!(config.kill_grace, Duration::from_secs(60));
         assert_eq!(config.interval, Duration::from_secs(3600));
     }
 
-    #[test]
+    #[rstest]
     #[serial_test::serial]
     fn timeout_config_resolve_cli_wins_over_frontmatter_env_and_default() {
-        let _g1 = TestEnvGuard::clear("CLAUDINE_TIMEOUT");
-        let _g2 = TestEnvGuard::clear("CLAUDINE_STEP_TIMEOUT");
-        let _g3 = TestEnvGuard::clear("CLAUDINE_KILL_GRACE");
-        let _g4 = TestEnvGuard::clear("CLAUDINE_WATCHDOG_INTERVAL");
+        // SAFETY: serial_test::serial prevents concurrent env access.
+        let _g1 = unsafe { EnvGuard::remove("CLAUDINE_TIMEOUT") };
+        let _g2 = unsafe { EnvGuard::remove("CLAUDINE_STEP_TIMEOUT") };
+        let _g3 = unsafe { EnvGuard::remove("CLAUDINE_KILL_GRACE") };
+        let _g4 = unsafe { EnvGuard::remove("CLAUDINE_WATCHDOG_INTERVAL") };
 
         // Simulating the composition layer resolving CLI > frontmatter > env
         let resolved_timeout = Some(Duration::from_secs(7200)); // from CLI
@@ -748,38 +630,5 @@ mod tests {
         let config = TimeoutConfig::resolve(resolved_timeout, resolved_step_timeout);
         assert_eq!(config.timeout, Some(Duration::from_secs(7200)));
         assert_eq!(config.step_timeout, Some(Duration::from_secs(1800)));
-    }
-
-    /// RAII wrapper that restores the prior env var value on drop.
-    struct TestEnvGuard {
-        key: &'static str,
-        prior: Option<String>,
-    }
-    impl TestEnvGuard {
-        fn set(key: &'static str, value: &str) -> Self {
-            let prior = std::env::var(key).ok();
-            unsafe {
-                std::env::set_var(key, value);
-            }
-            Self { key, prior }
-        }
-
-        fn clear(key: &'static str) -> Self {
-            let prior = std::env::var(key).ok();
-            unsafe {
-                std::env::remove_var(key);
-            }
-            Self { key, prior }
-        }
-    }
-    impl Drop for TestEnvGuard {
-        fn drop(&mut self) {
-            unsafe {
-                match &self.prior {
-                    Some(v) => std::env::set_var(self.key, v),
-                    None => std::env::remove_var(self.key),
-                }
-            }
-        }
     }
 }

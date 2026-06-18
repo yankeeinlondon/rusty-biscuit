@@ -47,11 +47,13 @@ pub(crate) enum ContextGroup {
     Hardware,
     /// GPU detection (separate — requires subprocess on macOS).
     Gpu,
+    /// Agentic CLI context: agent, model.
+    Agent,
 }
 
 impl ContextGroup {
     /// All available groups.
-    pub(crate) fn all() -> [ContextGroup; 8] {
+    pub(crate) fn all() -> [ContextGroup; 9] {
         [
             Self::DateTime,
             Self::Repo,
@@ -61,6 +63,7 @@ impl ContextGroup {
             Self::Os,
             Self::Hardware,
             Self::Gpu,
+            Self::Agent,
         ]
     }
 
@@ -89,6 +92,8 @@ impl ContextGroup {
             | "day_of_month_suffixed"
             | "time"
             | "time_military"
+            | "time_utc"
+            | "time_military_utc"
             | "timezone"
             | "timezone_offset"
             | "timezone_iana"
@@ -115,7 +120,13 @@ impl ContextGroup {
             | "package_areas"
             | "package_areas_list"
             | "current_package"
-            | "current_package_area" => Some(Self::Repo),
+            | "current_package_area"
+            | "area"
+            | "area_description"
+            | "area_root"
+            | "current_packages"
+            | "depends_on"
+            | "used_by" => Some(Self::Repo),
 
             // FileChanges
             "dirty_files"
@@ -159,6 +170,9 @@ impl ContextGroup {
 
             // GPU (requires ioreg subprocess on macOS)
             "gpu" => Some(Self::Gpu),
+
+            // Agent
+            "agent" | "model" => Some(Self::Agent),
 
             _ => None,
         }
@@ -216,6 +230,8 @@ pub(crate) fn scan_needed_groups(content: &str) -> HashSet<ContextGroup> {
 /// Uses `GitRepo` for atomic queries instead of the monolithic `detect_git`,
 /// so only the fields actually needed are computed.
 struct ContextCapture {
+    /// Directory the capture was built for (the compose working directory).
+    base_dir: PathBuf,
     /// Repository root path (cheap: from `GitRepo::discover`).
     repo_root: Option<PathBuf>,
     /// Repo name parsed from preferred remote URL (cheap: reads git config).
@@ -526,6 +542,7 @@ impl ContextCapture {
             .collect();
 
         Self {
+            base_dir: base_dir.to_path_buf(),
             repo_root,
             repo_name,
             has_git,
@@ -599,6 +616,10 @@ pub(crate) fn capture_runtime_context_for_groups(
 
     if groups.contains(&ContextGroup::Hardware) {
         populate_hardware(&cap, &mut values);
+    }
+
+    if groups.contains(&ContextGroup::Agent) {
+        populate_agent(&mut values);
     }
 
     (values, cap.diagnostics, cap.timings)
@@ -702,6 +723,14 @@ pub(crate) fn populate_datetime(values: &mut Map<String, Value>) {
         "time_military".into(),
         Value::String(now_local.format("%H:%M").to_string()),
     );
+    values.insert(
+        "time_utc".into(),
+        Value::String(format!("{} (UTC)", now_utc.format("%I:%M %p"))),
+    );
+    values.insert(
+        "time_military_utc".into(),
+        Value::String(format!("{} (UTC)", now_utc.format("%H:%M"))),
+    );
 
     // Timezone: sniff owns abbreviation derivation (handles chrono's
     // %Z offset fallback on macOS via IANA-to-abbreviation mapping).
@@ -785,9 +814,40 @@ pub(crate) fn populate_datetime(values: &mut Map<String, Value>) {
         "timestamp_ms".into(),
         Value::Number(now_utc.timestamp_millis().into()),
     );
+
+    // Backward-compatible aliases (documented in `context-variables.md`).
+    // Keep these in sync with the docs: any documented alias must resolve to
+    // the same value as its canonical key so interpolation and the
+    // `claudine context --values` report agree.
+    populate_datetime_aliases(values);
+}
+
+/// Insert documented backward-compatible aliases for date/time keys.
+///
+/// Each alias mirrors the value of an existing canonical key. Aliases are
+/// inserted only when the canonical key is present so a missing canonical
+/// value cannot leak as a populated alias.
+fn populate_datetime_aliases(values: &mut Map<String, Value>) {
+    const ALIASES: &[(&str, &str)] = &[
+        ("utc", "now_utc"),
+        ("dow", "day"),
+        ("dow_abbr", "day_abbr"),
+    ];
+    for (alias, canonical) in ALIASES {
+        if let Some(value) = values.get(*canonical).cloned() {
+            values.insert((*alias).to_string(), value);
+        }
+    }
 }
 
 // ── Repo context ──────────────────────────────────────────────────
+
+/// Removes a single trailing path separator so `repo_root` is join-safe and
+/// matches `sniff repo root` (which also omits the trailing `/`).
+fn strip_trailing_sep(s: &str) -> String {
+    let trimmed = s.strip_suffix('/').or_else(|| s.strip_suffix('\\'));
+    trimmed.unwrap_or(s).to_string()
+}
 
 fn populate_repo(cap: &ContextCapture, values: &mut Map<String, Value>) {
     let repo = cap.repo_info.as_ref();
@@ -802,7 +862,7 @@ fn populate_repo(cap: &ContextCapture, values: &mut Map<String, Value>) {
     values.insert(
         "repo_root".into(),
         cap.repo_root.as_ref().map_or(Value::Null, |r| {
-            Value::String(r.to_string_lossy().to_string())
+            Value::String(strip_trailing_sep(&r.to_string_lossy()))
         }),
     );
 
@@ -885,6 +945,129 @@ fn populate_repo(cap: &ContextCapture, values: &mut Map<String, Value>) {
         values.insert("current_package".into(), Value::Null);
         values.insert("current_package_area".into(), Value::Null);
     }
+
+    populate_monorepo_area(cap, values);
+}
+
+/// Populate the monorepo-scoped `area*`, `current_packages`, `depends_on`, and
+/// `used_by` variables.
+///
+/// These are documented as monorepo-only. Outside a monorepo the `area*`
+/// variables fall back per spec (empty strings; `area_root` is the repo root)
+/// and the list-shaped variables render as empty strings.
+fn populate_monorepo_area(cap: &ContextCapture, values: &mut Map<String, Value>) {
+    let repo = cap.repo_info.as_ref();
+    let is_monorepo = repo.is_some_and(|r| r.is_monorepo);
+
+    let repo_root_str = || {
+        cap.repo_root
+            .as_ref()
+            .map(|r| strip_trailing_sep(&r.to_string_lossy()))
+            .unwrap_or_default()
+    };
+
+    let (area, area_description, area_root) = if !is_monorepo {
+        (String::new(), String::new(), repo_root_str())
+    } else if let Some(pkg) = cap.current_package.as_ref() {
+        // Inside a package folder: the area is the package itself.
+        (
+            pkg.name.clone(),
+            format!("{} package", pkg.name),
+            strip_trailing_sep(&pkg.path.to_string_lossy()),
+        )
+    } else if let Some(area_name) = cap
+        .current_package_area
+        .as_deref()
+        .filter(|a| *a != "root")
+    {
+        // Inside a package area but not a package folder.
+        let area_path = cap
+            .repo_root
+            .as_ref()
+            .map(|r| r.join(area_name))
+            .map(|p| strip_trailing_sep(&p.to_string_lossy()))
+            .unwrap_or_default();
+        (
+            area_name.to_string(),
+            format!("{area_name} package area"),
+            area_path,
+        )
+    } else {
+        // Monorepo root.
+        (String::new(), String::new(), repo_root_str())
+    };
+
+    values.insert("area".into(), Value::String(area.clone()));
+    values.insert("area_description".into(), Value::String(area_description));
+    values.insert("area_root".into(), Value::String(area_root));
+
+    // current_packages: Markdown bullet list of packages under the cwd.
+    let current_packages = repo
+        .and_then(|r| r.packages.as_ref())
+        .map(|pkgs| {
+            pkgs.iter()
+                .filter(|p| p.path.starts_with(&cap.base_dir))
+                .map(|p| format!("- {} ({})", p.name, p.relative))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default();
+    values.insert("current_packages".into(), Value::String(current_packages));
+
+    // depends_on / used_by are scoped to the current `area`: the current
+    // package when in one, all packages in the area when in an area, else all.
+    let scope: Vec<&Package> = if let Some(pkg) = cap.current_package.as_ref() {
+        vec![pkg]
+    } else if !area.is_empty() {
+        repo.and_then(|r| r.packages.as_ref())
+            .map(|pkgs| pkgs.iter().filter(|p| p.package_area == area).collect())
+            .unwrap_or_default()
+    } else {
+        repo.and_then(|r| r.packages.as_ref())
+            .map(|pkgs| pkgs.iter().collect())
+            .unwrap_or_default()
+    };
+
+    let depends_on = render_dependency_list(
+        &scope,
+        |p| p.depends_on.as_slice(),
+        "depends on",
+        |name| format!("- '{name}' has no dependencies on other packages in this monorepo"),
+    );
+    values.insert("depends_on".into(), Value::String(depends_on));
+
+    let used_by = render_dependency_list(
+        &scope,
+        |p| p.used_by.as_slice(),
+        "is used by",
+        |name| format!("- '{name}' is not used by other packages in this monorepo"),
+    );
+    values.insert("used_by".into(), Value::String(used_by));
+}
+
+/// Render a nested Markdown dependency listing for the scoped packages.
+///
+/// `edges` yields the related package names; `verb` and `empty_line` supply the
+/// wording (e.g. "depends on" / "has no dependencies …").
+fn render_dependency_list(
+    scope: &[&Package],
+    edges: impl Fn(&Package) -> &[String],
+    verb: &str,
+    empty_line: impl Fn(&str) -> String,
+) -> String {
+    let mut out = Vec::new();
+    for &pkg in scope {
+        let deps = edges(pkg);
+        if deps.is_empty() {
+            out.push(empty_line(&pkg.name));
+        } else {
+            out.push(format!("- '{}' {verb}:", pkg.name));
+            for d in deps {
+                out.push(format!("    - {d}"));
+            }
+        }
+    }
+    out.join("\n")
 }
 
 // ── File changes context ──────────────────────────────────────────
@@ -1482,6 +1665,113 @@ fn populate_hardware(cap: &ContextCapture, values: &mut Map<String, Value>) {
     );
 }
 
+// ── Agent context ─────────────────────────────────────────────────
+
+/// Populate agentic CLI context from environment variables.
+///
+/// Reads `AGENT` and `MODEL` from `std::env`, trimming ASCII whitespace.
+/// Missing or empty values fall back to `"unknown"` and `"default"`
+/// respectively. There is no model allowlist; any non-empty trimmed value
+/// is accepted.
+pub(crate) fn populate_agent(values: &mut Map<String, Value>) {
+    let agent = std::env::var("AGENT")
+        .ok()
+        .map(|s| s.trim_ascii().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let model = std::env::var("MODEL")
+        .ok()
+        .map(|s| s.trim_ascii().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "default".to_string());
+
+    values.insert("agent".into(), Value::String(agent));
+    values.insert("model".into(), Value::String(model));
+}
+
+#[cfg(test)]
+impl ContextCapture {
+    /// Minimal capture with a fixed repo root and the supplied repo info.
+    fn for_test_base(repo_root: PathBuf, repo_info: Option<RepoInfo>) -> Self {
+        Self {
+            base_dir: repo_root.clone(),
+            repo_root: Some(repo_root),
+            repo_name: None,
+            has_git: true,
+            repo_info,
+            docs: None,
+            os_info: None,
+            hardware_info: None,
+            gpu_names: None,
+            current_package: None,
+            current_package_area: None,
+            dirty_paths: Vec::new(),
+            staged_paths: Vec::new(),
+            untracked_paths: Vec::new(),
+            diagnostics: Vec::new(),
+            timings: Vec::new(),
+        }
+    }
+
+    fn for_test_non_monorepo() -> Self {
+        let root = PathBuf::from("/tmp/not-a-monorepo");
+        let ri = test_repo_info(root.clone(), false, None);
+        Self::for_test_base(root, Some(ri))
+    }
+
+    fn for_test_monorepo_with_packages(pkgs: &[(&str, &str)]) -> Self {
+        let root = PathBuf::from("/tmp/mono");
+        let packages = pkgs
+            .iter()
+            .map(|(name, relative)| Package {
+                name: (*name).to_string(),
+                relative: (*relative).to_string(),
+                path: root.join(relative),
+                ..Default::default()
+            })
+            .collect();
+        let ri = test_repo_info(root.clone(), true, Some(packages));
+        Self::for_test_base(root, Some(ri))
+    }
+
+    fn for_test_monorepo_in_package(
+        name: &str,
+        depends_on: &[&str],
+        used_by: &[&str],
+    ) -> Self {
+        let root = PathBuf::from("/tmp/mono");
+        let pkg = Package {
+            name: name.to_string(),
+            relative: format!("{name}/lib"),
+            package_area: name.to_string(),
+            path: root.join(name).join("lib"),
+            depends_on: depends_on.iter().map(|s| (*s).to_string()).collect(),
+            used_by: used_by.iter().map(|s| (*s).to_string()).collect(),
+            ..Default::default()
+        };
+        let ri = test_repo_info(root.clone(), true, Some(vec![pkg.clone()]));
+        let mut cap = Self::for_test_base(root, Some(ri));
+        cap.current_package = Some(pkg);
+        cap
+    }
+}
+
+#[cfg(test)]
+fn test_repo_info(root: PathBuf, is_monorepo: bool, packages: Option<Vec<Package>>) -> RepoInfo {
+    RepoInfo {
+        is_monorepo,
+        monorepo_tool: None,
+        workspace_tools: Vec::new(),
+        root,
+        dependencies: None,
+        dev_dependencies: None,
+        peer_dependencies: None,
+        optional_dependencies: None,
+        packages,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1526,6 +1816,37 @@ mod tests {
         assert!(values.contains_key("timestamp_ms"));
     }
 
+    /// Regression: documented backward-compatible aliases (`utc`, `dow`,
+    /// `dow_abbr`) must be populated by `populate_datetime` so they
+    /// resolve in interpolation and in `claudine context --values` reports
+    /// instead of rendering as `null`.
+    #[test]
+    fn populate_datetime_populates_documented_aliases() {
+        let mut values = Map::new();
+        populate_datetime(&mut values);
+
+        for (alias, canonical) in [
+            ("utc", "now_utc"),
+            ("dow", "day"),
+            ("dow_abbr", "day_abbr"),
+        ] {
+            let alias_value = values
+                .get(alias)
+                .unwrap_or_else(|| panic!("alias `{alias}` must be present"));
+            let canonical_value = values
+                .get(canonical)
+                .unwrap_or_else(|| panic!("canonical `{canonical}` must be present"));
+            assert!(
+                !alias_value.is_null(),
+                "alias `{alias}` must not be null",
+            );
+            assert_eq!(
+                alias_value, canonical_value,
+                "alias `{alias}` must mirror canonical `{canonical}`",
+            );
+        }
+    }
+
     #[test]
     fn day_of_month_suffixed_formats_correctly() {
         use super::format::ordinal_suffix;
@@ -1543,6 +1864,101 @@ mod tests {
     }
 
     #[test]
+    fn strip_trailing_sep_removes_single_separator() {
+        assert_eq!(strip_trailing_sep("/repo/"), "/repo");
+        assert_eq!(strip_trailing_sep("/repo"), "/repo");
+        assert_eq!(strip_trailing_sep("C:\\repo\\"), "C:\\repo");
+        assert_eq!(strip_trailing_sep(""), "");
+    }
+
+    #[test]
+    fn repo_root_has_no_trailing_slash() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let (values, _, _) = capture_runtime_context_for_groups(root, &[ContextGroup::Repo]);
+        if let Some(Value::String(rr)) = values.get("repo_root") {
+            assert!(
+                !rr.ends_with('/'),
+                "repo_root must not end with '/': got {rr:?}"
+            );
+            assert!(!rr.is_empty(), "repo_root should be non-empty in a repo");
+        }
+    }
+
+    #[test]
+    fn populate_datetime_includes_utc_time_variants() {
+        let mut values = Map::new();
+        populate_datetime(&mut values);
+        let tu = values.get("time_utc").and_then(Value::as_str).unwrap_or("");
+        let tmu = values
+            .get("time_military_utc")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        assert!(
+            tu.ends_with(" (UTC)"),
+            "time_utc must end with ' (UTC)': {tu:?}"
+        );
+        assert!(
+            tmu.ends_with(" (UTC)"),
+            "time_military_utc must end with ' (UTC)': {tmu:?}"
+        );
+    }
+
+    #[test]
+    fn area_vars_empty_when_not_monorepo() {
+        let cap = ContextCapture::for_test_non_monorepo();
+        let mut values = Map::new();
+        populate_repo(&cap, &mut values);
+        assert_eq!(values.get("area"), Some(&Value::String(String::new())));
+        assert_eq!(
+            values.get("area_description"),
+            Some(&Value::String(String::new()))
+        );
+        // area_root falls back to repo root (no trailing slash) when not a monorepo.
+        if let Some(Value::String(ar)) = values.get("area_root") {
+            assert!(!ar.ends_with('/'), "area_root must not end with '/': {ar:?}");
+        }
+    }
+
+    #[test]
+    fn current_packages_lists_packages_under_cwd_as_markdown() {
+        let cap = ContextCapture::for_test_monorepo_with_packages(&[
+            ("alpha", "alpha/lib"),
+            ("alpha-cli", "alpha/cli"),
+        ]);
+        let mut values = Map::new();
+        populate_repo(&cap, &mut values);
+        let listing = values
+            .get("current_packages")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        assert!(listing.contains("- alpha (alpha/lib)"), "got: {listing}");
+        assert!(listing.contains("- alpha-cli (alpha/cli)"), "got: {listing}");
+    }
+
+    #[test]
+    fn depends_on_renders_nested_list_scoped_to_area() {
+        let cap = ContextCapture::for_test_monorepo_in_package("alpha", &["beta", "gamma"], &[]);
+        let mut values = Map::new();
+        populate_repo(&cap, &mut values);
+        let s = values.get("depends_on").and_then(Value::as_str).unwrap_or("");
+        assert!(s.contains("'alpha' depends on:"), "got: {s}");
+        assert!(s.contains("    - beta"), "got: {s}");
+        assert!(s.contains("    - gamma"), "got: {s}");
+    }
+
+    #[test]
+    fn used_by_renders_empty_message_when_no_dependents() {
+        let cap = ContextCapture::for_test_monorepo_in_package("alpha", &[], &[]);
+        let mut values = Map::new();
+        populate_repo(&cap, &mut values);
+        let s = values.get("used_by").and_then(Value::as_str).unwrap_or("");
+        assert!(
+            s.contains("'alpha' is not used by other packages in this monorepo"),
+            "got: {s}"
+        );
+    }
+
+    #[test]
     fn season_determination() {
         use super::format::determine_season;
         // Meteorological seasons
@@ -1551,5 +1967,89 @@ mod tests {
         assert_eq!(determine_season(6, 1), "Summer");
         assert_eq!(determine_season(9, 1), "Fall");
         assert_eq!(determine_season(12, 15), "Winter");
+    }
+
+    /// Helper: run a closure with the given env var set, restoring the
+    /// previous value (or unset state) afterwards. Tests using this are
+    /// marked `#[serial]` to avoid racing with other env-mutating tests.
+    fn with_env_var<F, R>(key: &str, value: Option<&str>, f: F) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        let previous = std::env::var(key).ok();
+        // `set_var`/`remove_var` are unsafe in Rust 2024. Serial_test isolates
+        // these tests from each other, and the helper restores the prior value
+        // so the mutation does not leak past the closure.
+        unsafe {
+            match value {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+        let result = f();
+        unsafe {
+            match previous {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+        result
+    }
+
+    #[test]
+    #[serial_test::serial(env_agent_model)]
+    fn populate_agent_uses_env_values_with_trim() {
+        with_env_var("AGENT", Some("  claude  "), || {
+            with_env_var("MODEL", Some("  sonnet-4  "), || {
+                let mut values = Map::new();
+                populate_agent(&mut values);
+                assert_eq!(
+                    values.get("agent"),
+                    Some(&Value::String("claude".to_string()))
+                );
+                assert_eq!(
+                    values.get("model"),
+                    Some(&Value::String("sonnet-4".to_string()))
+                );
+            })
+        });
+    }
+
+    #[test]
+    #[serial_test::serial(env_agent_model)]
+    fn populate_agent_defaults_when_missing_or_empty() {
+        with_env_var("AGENT", None, || {
+            with_env_var("MODEL", Some("   "), || {
+                let mut values = Map::new();
+                populate_agent(&mut values);
+                assert_eq!(
+                    values.get("agent"),
+                    Some(&Value::String("unknown".to_string()))
+                );
+                assert_eq!(
+                    values.get("model"),
+                    Some(&Value::String("default".to_string()))
+                );
+            })
+        });
+    }
+
+    #[test]
+    #[serial_test::serial(env_agent_model)]
+    fn capture_runtime_context_includes_agent_group() {
+        with_env_var("AGENT", Some("opencode"), || {
+            with_env_var("MODEL", Some("glm-5.2"), || {
+                let (values, _, _) =
+                    capture_runtime_context_for_groups(Path::new("."), &[ContextGroup::Agent]);
+                assert_eq!(
+                    values.get("agent"),
+                    Some(&Value::String("opencode".to_string()))
+                );
+                assert_eq!(
+                    values.get("model"),
+                    Some(&Value::String("glm-5.2".to_string()))
+                );
+            })
+        });
     }
 }

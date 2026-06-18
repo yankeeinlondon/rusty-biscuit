@@ -206,6 +206,42 @@ pub enum GraphInputSyntax {
 
 Auto-detection logic: if the input starts with `digraph`, `graph`, or `strict`, it's treated as DOT. Otherwise, expression syntax.
 
+## Resolution tuning for terminal display
+
+`biscuit-terminal::GraphExpression` is *terminal-display aware*. Before rendering, it computes the exact pixel width of the display target — `cells × cell_pixel_width` — and passes that to the rasterizer via `RenderRequest::target_width`. The PNG comes out at exactly the display resolution, with text glyphs rasterised fresh at that size by `resvg`. No oversampling, no downstream downscaling.
+
+This works because `RenderRequest` carries two complementary sizing knobs:
+
+| Field | Effect |
+|-------|--------|
+| `target_width: Some(px)` | Render the SVG at exactly `px` pixels wide; aspect ratio preserved. Used by `GraphExpression` / `MermaidDiagram` when laying out for a known display. |
+| `scale: N` (with `target_width = None`) | Legacy HiDPI multiplier: PNG is `svg_native × N`. Use for fixed-DPI exports without a known display. |
+
+When `target_width` is `Some`, `scale` is ignored.
+
+### Quick reference
+
+```rust
+use biscuit_visualized::artifact::RenderRequest;
+use biscuit_visualized::graph::GraphDiagram;
+
+let graph = GraphDiagram::from_dot("digraph { A -> B; B -> C }")?;
+
+// Render at 1600 px wide (e.g. terminal cell area).
+let inline = graph.render(&RenderRequest::default().with_target_width(1600))?;
+
+// Render at 2× native (e.g. retina screenshot export).
+let retina = graph.render(&RenderRequest { scale: 2, ..RenderRequest::default() })?;
+```
+
+### Why we don't need DOT-side tricks anymore
+
+Earlier iterations of `sniff repo deps --ui` worked around terminal blur by injecting `node [fontsize=48]` into the generated DOT source. The bigger fontsize grew layout-rs's SVG canvas so that the fixed `scale=2` rasterization happened to produce a PNG big enough to survive terminal downscaling.
+
+With `target_width`-driven rendering that hack is unnecessary — the rasterizer renders at terminal pixel dimensions directly. `build_deps_dot` in `sniff/cli/src/output/filesystem/deps.rs` now emits DOT at `layout-rs`'s default `fontsize=14`, and sharpness is delivered by the rasterizer instead of by inflating the source SVG.
+
+If you find yourself wanting to grow an SVG to "make the terminal render look sharper", reach for `RenderRequest::with_target_width` instead.
+
 ## SVG Post-Processing
 
 After `layout-rs` generates the raw SVG:

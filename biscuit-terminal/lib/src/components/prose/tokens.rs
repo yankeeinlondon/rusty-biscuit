@@ -1,15 +1,22 @@
-//! Token grammar parser for atomic (`{{token}}`) and block (`<tag>…</tag>`) prose styling.
+//! Bracketed-tag parser that builds shared [`RenderNode`] values directly.
 //!
-//! Drives recursion over the input content and consults [`super::styles`]
-//! for SGR escape resolution and per-layer state tracking.
+//! The atomic-token grammar (`{{token}}`) has been removed — `{{…}}` is now
+//! ordinary literal text. Only bracketed tags (`<tag>…</tag>`) and the
+//! Markdown subset (pre-processed into bracketed tags) are recognized.
+//!
+//! Parsing is target-neutral: no terminal capability decisions are made
+//! here. The parser resolves tag names to [`ProseStyle`] intent only;
+//! degradation happens in each target renderer.
 
-use crate::terminal::Terminal;
+use std::iter::Peekable;
+use std::str::Chars;
 
-use super::styles::BlockTagAction;
-use super::styles::{
-    StyleState, atomic_token_layer, atomic_token_to_escape, atomic_token_to_escape_with_term,
-    block_tag_layer, block_tag_to_escape,
-};
+use renderable::color::{BasicColor, Color, RgbColor};
+use renderable::style::UnderlineStyle;
+use renderable::tree::RenderNode;
+
+use super::markdown::{CODE_BLOCK_PLACEHOLDER_MARK, FencedCode};
+use super::styles::{ProseStyle, parse_rgb, tailwind_by_name, web_color_by_name};
 
 /// Parse an opening tag into its name and attributes.
 pub(super) fn parse_opening_tag(tag_content: &str) -> Option<(String, Vec<(String, String)>)> {
@@ -23,25 +30,35 @@ pub(super) fn parse_opening_tag(tag_content: &str) -> Option<(String, Vec<(Strin
 
     let mut attrs = Vec::new();
     if parts.len() > 1 {
-        // Parse attributes
         let attr_str = parts[1];
 
-        // Check if there's any '=' in the attribute string
-        // If not, treat the entire remainder as a positional value (empty key)
+        // No '=' in the attribute string: treat the whole remainder as a
+        // positional value (empty key) — used by `<rgb 1,2,3>`.
         if !attr_str.contains('=') {
             let value = attr_str.trim();
             if !value.is_empty() {
                 attrs.push((value.to_string(), String::new()));
             }
         } else {
-            // Original parsing for key=value attributes
             let mut current_attr = String::new();
             let mut current_value = String::new();
             let mut in_value = false;
             let mut quote_char: Option<char> = None;
 
-            for c in attr_str.chars() {
+            let mut chars = attr_str.chars().peekable();
+            while let Some(c) = chars.next() {
                 if in_value {
+                    // Resolve the `\<`, `\>`, `\\`, `\"`, `\'` escapes that
+                    // `Prose::quoted_attr` applies so the value boundary
+                    // survives parsing; the backslash itself is dropped.
+                    if c == '\\'
+                        && chars
+                            .peek()
+                            .is_some_and(|&n| matches!(n, '<' | '>' | '\\' | '"' | '\''))
+                    {
+                        current_value.push(chars.next().unwrap());
+                        continue;
+                    }
                     if let Some(qc) = quote_char {
                         if c == qc {
                             attrs.push((current_attr.clone(), current_value.clone()));
@@ -71,7 +88,6 @@ pub(super) fn parse_opening_tag(tag_content: &str) -> Option<(String, Vec<(Strin
                 }
             }
 
-            // Handle last attribute without closing quote
             if !current_attr.is_empty() || !current_value.is_empty() {
                 attrs.push((current_attr, current_value));
             }
@@ -81,236 +97,352 @@ pub(super) fn parse_opening_tag(tag_content: &str) -> Option<(String, Vec<(Strin
     Some((tag_name, attrs))
 }
 
-/// Inner token parser that shares a [`StyleState`] across recursion levels.
+/// How a recognized opening tag maps to the IR.
+enum TagResolution {
+    /// A styled span.
+    Styled(ProseStyle),
+    /// A hyperlink carrying the raw href.
+    Link(String),
+    /// A fenced code block with an optional language hint.
+    Code(Option<String>),
+    /// A tag whose styling is handled outside the rendering pipeline
+    /// (`<clipboard>`); only its inner content survives.
+    Transparent,
+    /// Not a recognized tag — the declaration becomes literal text.
+    Unknown,
+}
+
+/// Build a foreground-color resolution from `<rgb …>` / `<bg-rgb …>` attrs.
+fn rgb_color(attrs: &[(String, String)]) -> Option<Color> {
+    let rgb_str = attrs
+        .iter()
+        .find(|(_, v)| v.is_empty())
+        .map(|(k, _)| k.as_str())
+        .unwrap_or("");
+    parse_rgb(rgb_str).map(|(r, g, b)| Color::Rgb(RgbColor::new(r, g, b, BasicColor::White)))
+}
+
+/// Resolve a bracketed-tag name + attributes to a [`TagResolution`].
 ///
-/// Block tags with a style layer push/pop via [`StyleState::set`] and
-/// [`StyleState::restore`] so that closing a tag emits the *parent's*
-/// escape code (or the layer's default reset) instead of `\x1b[0m`.
-pub(super) fn parse_tokens_inner(
-    content: &str,
-    term: Option<&Terminal>,
-    state: &mut StyleState,
-) -> String {
-    let mut result = String::new();
+/// Target-neutral: no terminal context, no capability decisions.
+fn resolve_tag(tag_name: &str, attrs: &[(String, String)]) -> TagResolution {
+    use TagResolution::{Code, Link, Styled, Transparent, Unknown};
+
+    match tag_name {
+        "bold" | "b" => Styled(ProseStyle::bold()),
+        "dim" => Styled(ProseStyle::dim()),
+        "italic" | "i" => Styled(ProseStyle::italic()),
+        "underline" | "u" => Styled(ProseStyle::underline(UnderlineStyle::Straight)),
+        "double-underline" | "uu" => Styled(ProseStyle::underline(UnderlineStyle::Double)),
+        "curly-underline" => Styled(ProseStyle::underline(UnderlineStyle::Curly)),
+        "dotted-underline" => Styled(ProseStyle::underline(UnderlineStyle::Dotted)),
+        "dashed-underline" => Styled(ProseStyle::underline(UnderlineStyle::Dashed)),
+        "blink" => Styled(ProseStyle::blink()),
+        "inverse" | "reverse" => Styled(ProseStyle::inverse()),
+        "strikethrough" | "~" => Styled(ProseStyle::strikethrough()),
+
+        "a" => {
+            let href = attrs
+                .iter()
+                .find(|(k, _)| k == "href")
+                .map(|(_, v)| v.clone())
+                .unwrap_or_default();
+            Link(href)
+        }
+        "clipboard" => Transparent,
+        "code-block" => {
+            let lang = attrs
+                .iter()
+                .find(|(k, _)| k == "lang")
+                .map(|(_, v)| v.clone())
+                .filter(|s| !s.is_empty());
+            Code(lang)
+        }
+
+        "rgb" => rgb_color(attrs)
+            .map(|c| Styled(ProseStyle::fg(c)))
+            .unwrap_or(Unknown),
+        "bg-rgb" => rgb_color(attrs)
+            .map(|c| Styled(ProseStyle::bg(c)))
+            .unwrap_or(Unknown),
+
+        "black" => Styled(ProseStyle::fg(Color::BasicColor(BasicColor::Black))),
+        "red" => Styled(ProseStyle::fg(Color::BasicColor(BasicColor::Red))),
+        "green" => Styled(ProseStyle::fg(Color::BasicColor(BasicColor::Green))),
+        "yellow" => Styled(ProseStyle::fg(Color::BasicColor(BasicColor::Yellow))),
+        "blue" => Styled(ProseStyle::fg(Color::BasicColor(BasicColor::Blue))),
+        "magenta" => Styled(ProseStyle::fg(Color::BasicColor(BasicColor::Magenta))),
+        "cyan" => Styled(ProseStyle::fg(Color::BasicColor(BasicColor::Cyan))),
+        "white" => Styled(ProseStyle::fg(Color::BasicColor(BasicColor::White))),
+        "bright-black" => Styled(ProseStyle::fg(Color::BasicColor(BasicColor::BrightBlack))),
+        "bright-red" => Styled(ProseStyle::fg(Color::BasicColor(BasicColor::BrightRed))),
+        "bright-green" => Styled(ProseStyle::fg(Color::BasicColor(BasicColor::BrightGreen))),
+        "bright-yellow" => Styled(ProseStyle::fg(Color::BasicColor(BasicColor::BrightYellow))),
+        "bright-blue" => Styled(ProseStyle::fg(Color::BasicColor(BasicColor::BrightBlue))),
+        "bright-magenta" => Styled(ProseStyle::fg(Color::BasicColor(BasicColor::BrightMagenta))),
+        "bright-cyan" => Styled(ProseStyle::fg(Color::BasicColor(BasicColor::BrightCyan))),
+        "bright-white" => Styled(ProseStyle::fg(Color::BasicColor(BasicColor::BrightWhite))),
+
+        _ => {
+            if let Some(rest) = tag_name.strip_prefix("bg-") {
+                if let Some(wc) = web_color_by_name(rest) {
+                    return Styled(ProseStyle::bg(Color::Web(wc)));
+                }
+                if let Some(tw) = tailwind_by_name(rest) {
+                    return Styled(ProseStyle::bg(Color::Tailwind(tw)));
+                }
+            }
+            if let Some(wc) = web_color_by_name(tag_name) {
+                return Styled(ProseStyle::fg(Color::Web(wc)));
+            }
+            if let Some(tw) = tailwind_by_name(tag_name) {
+                return Styled(ProseStyle::fg(Color::Tailwind(tw)));
+            }
+            Unknown
+        }
+    }
+}
+
+/// Consume characters from `chars` up to the matching `</tag_name>` at depth
+/// zero, returning the inner content (without the closing tag).
+///
+/// Tracks nesting depth so `<b>x <b>y</b> z</b>` resolves correctly.
+fn scan_inner(chars: &mut Peekable<Chars<'_>>, tag_name: &str) -> String {
+    let closing_tag = format!("</{}>", tag_name);
+    let opening_tag_full = format!("<{}>", tag_name);
+    let opening_tag_with_space = format!("<{} ", tag_name);
+
+    let mut inner = String::new();
+    let mut depth = 1;
+
+    while depth > 0 {
+        let Some(c) = chars.next() else { break };
+        inner.push(c);
+        let len = inner.len();
+
+        if c == '>' {
+            if len >= opening_tag_full.len() {
+                let start = len - opening_tag_full.len();
+                if inner
+                    .get(start..)
+                    .is_some_and(|slice| slice.eq_ignore_ascii_case(&opening_tag_full))
+                {
+                    depth += 1;
+                }
+            }
+            if len >= closing_tag.len() {
+                let start = len - closing_tag.len();
+                if inner
+                    .get(start..)
+                    .is_some_and(|slice| slice.eq_ignore_ascii_case(&closing_tag))
+                {
+                    depth -= 1;
+                    if depth == 0 {
+                        inner.truncate(start);
+                    }
+                }
+            }
+        } else if c == ' ' && len >= opening_tag_with_space.len() {
+            let start = len - opening_tag_with_space.len();
+            if inner
+                .get(start..)
+                .is_some_and(|slice| slice.eq_ignore_ascii_case(&opening_tag_with_space))
+            {
+                depth += 1;
+            }
+        }
+    }
+
+    inner
+}
+
+/// Consume a `CODE<n>\u{0002}` placeholder body from `chars`, assuming the
+/// opening `\u{0002}` sentinel has already been taken.
+///
+/// Returns the parsed block index, or `None` when the following
+/// characters are not a well-formed placeholder (in which case the caller
+/// treats the sentinel as literal text).
+fn take_code_placeholder(chars: &mut Peekable<Chars<'_>>) -> Option<usize> {
+    for expected in ['C', 'O', 'D', 'E'] {
+        chars.next_if_eq(&expected)?;
+    }
+
+    let mut digits = String::new();
+    while let Some(&d) = chars.peek() {
+        if d.is_ascii_digit() {
+            digits.push(d);
+            chars.next();
+        } else {
+            break;
+        }
+    }
+    if digits.is_empty() {
+        return None;
+    }
+
+    chars.next_if_eq(&CODE_BLOCK_PLACEHOLDER_MARK)?;
+    digits.parse().ok()
+}
+
+/// Scan a bracketed-tag declaration, assuming the opening `<` was already
+/// consumed.
+///
+/// The scan is quote-aware (a `>` inside a quoted attribute value is not the
+/// terminator) and escape-aware (the `\<`, `\>`, `\\`, `\"`, `\'` sequences
+/// produced by [`Prose::quoted_attr`](super::Prose::quoted_attr) are preserved
+/// verbatim, so an escaped delimiter never ends the tag). The returned content
+/// is raw — [`parse_opening_tag`] resolves the escapes inside attribute values,
+/// and keeping it raw lets an unrecognized declaration fall back to literal
+/// text intact.
+///
+/// ## Returns
+///
+/// The raw tag content (without the surrounding `<` / `>`) and whether a
+/// closing `>` was found before input ran out.
+fn scan_tag_declaration(chars: &mut Peekable<Chars<'_>>) -> (String, bool) {
+    let mut tag_content = String::new();
+    let mut found_close = false;
+    let mut quote: Option<char> = None;
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => {
+                tag_content.push('\\');
+                if let Some(&next) = chars.peek()
+                    && matches!(next, '<' | '>' | '\\' | '"' | '\'')
+                {
+                    tag_content.push(next);
+                    chars.next();
+                }
+            }
+            '"' | '\'' => {
+                match quote {
+                    Some(q) if q == c => quote = None,
+                    None => quote = Some(c),
+                    Some(_) => {}
+                }
+                tag_content.push(c);
+            }
+            '>' if quote.is_none() => {
+                found_close = true;
+                break;
+            }
+            _ => tag_content.push(c),
+        }
+    }
+    (tag_content, found_close)
+}
+
+/// Push the accumulated literal text (if any) as a [`NodeKind::Text`] node.
+///
+/// [`NodeKind::Text`]: renderable::tree::NodeKind::Text
+fn flush_render_text(text: &mut String, nodes: &mut Vec<RenderNode>) {
+    if !text.is_empty() {
+        nodes.push(RenderNode::text(std::mem::take(text)));
+    }
+}
+
+/// Parse pre-processed Prose `content` directly into shared
+/// [`RenderNode`](renderable::tree::RenderNode) values.
+///
+/// This is the render-tree counterpart of [`parse_nodes`]: it shares the same
+/// scanner ([`scan_tag_declaration`], [`scan_inner`], [`resolve_tag`],
+/// [`take_code_placeholder`]) but builds canonical tree nodes without an
+/// intervening component-local IR. Styled spans lower through
+/// [`project_span`](super::tree::project_span) to semantic
+/// `Strong`/`Emphasis`/`Delete` wrappers or a styled `Span`; links, code
+/// blocks, and literal text map to `Link`, `Code`, and `Text`.
+///
+/// Two Prose-only tag policies:
+///
+/// - `<inverse>` / `<reverse>` carry `TextEmphasis::inverse` through the
+///   styled `Span`, lowered per target by the shared renderers.
+/// - `<hidden>` is not recognized — it renders as inert literal text like any
+///   unknown tag.
+pub(super) fn parse_render_nodes(content: &str, code_blocks: &[FencedCode]) -> Vec<RenderNode> {
+    let mut nodes: Vec<RenderNode> = Vec::new();
+    let mut text = String::new();
     let mut chars = content.chars().peekable();
 
     while let Some(ch) = chars.next() {
+        // ── Fenced-code placeholders: \u{0002}CODE<n>\u{0002} ────────────
+        if ch == CODE_BLOCK_PLACEHOLDER_MARK {
+            if let Some(block) =
+                take_code_placeholder(&mut chars).and_then(|index| code_blocks.get(index))
+            {
+                flush_render_text(&mut text, &mut nodes);
+                nodes.push(RenderNode::code(
+                    Some(block.lang.clone()).filter(|s| !s.is_empty()),
+                    None,
+                    block.body.clone(),
+                ));
+            }
+            continue;
+        }
+
         // ── Backslash escapes: \< \> \{ \\ \* \_ \[ \] \( \) ─────────────
         if ch == '\\' {
             match chars.peek() {
                 Some(&'<') | Some(&'>') | Some(&'{') | Some(&'\\') | Some(&'*') | Some(&'_')
                 | Some(&'[') | Some(&']') | Some(&'(') | Some(&')') => {
-                    result.push(chars.next().unwrap());
+                    text.push(chars.next().unwrap());
                 }
-                _ => result.push(ch),
+                _ => text.push(ch),
             }
             continue;
         }
 
-        // ── Atomic tokens: {{token}} ──────────────────────────────────
-        if ch == '{' && chars.peek() == Some(&'{') {
-            chars.next(); // consume second '{'
-            let mut token = String::new();
-            let mut found_close = false;
-
-            while let Some(c) = chars.next() {
-                if c == '}' && chars.peek() == Some(&'}') {
-                    chars.next(); // consume second '}'
-                    found_close = true;
-                    break;
-                }
-                token.push(c);
-            }
-
-            if found_close {
-                let token_lower = token.to_ascii_lowercase();
-
-                // Capability-aware lookup: only `double-underline`
-                // consults `term`; other tokens fall through to the
-                // static table.
-                if let Some(escape) = atomic_token_to_escape_with_term(&token, term) {
-                    result.push_str(escape.as_ref());
-                    state.used_styles = true;
-
-                    // Update layer tracking. We always pass the *raw*
-                    // table escape into `state.set` so layer restoration
-                    // works regardless of terminal-specific degradation
-                    // (e.g. `\x1b[4m` vs `\x1b[4:2m`).
-                    if token_lower == "reset" {
-                        state.clear_all();
-                    } else if token_lower == "reset-style" {
-                        state.clear_all_except_background();
-                    } else if let Some((layer, is_set)) = atomic_token_layer(&token_lower) {
-                        if is_set {
-                            state.set(layer, escape.as_ref());
-                        } else {
-                            state.restore(layer, None);
-                        }
-                    }
-                } else if atomic_token_to_escape(&token).is_some() {
-                    // Token exists in the static table but the
-                    // capability-aware helper returned `None`
-                    // (currently only `double-underline` on a terminal
-                    // that supports neither double nor straight
-                    // underline). Emit nothing — the parser drops the
-                    // styling sequence entirely. The matching close
-                    // sequence is also a no-op so layer tracking stays
-                    // balanced.
-                } else {
-                    // Unknown token, output as-is
-                    result.push_str("{{");
-                    result.push_str(&token);
-                    result.push_str("}}");
-                }
-            } else {
-                // Unclosed token, output as-is
-                result.push_str("{{");
-                result.push_str(&token);
-            }
-            continue;
-        }
-
-        // ── Block tokens: <tag>content</tag> ──────────────────────────
+        // ── Block tags: <tag>content</tag> ────────────────────────────────
         if ch == '<' {
-            let mut tag_content = String::new();
-            let mut found_close = false;
+            let (tag_content, found_close) = scan_tag_declaration(&mut chars);
 
-            // Collect until '>'
-            for c in chars.by_ref() {
-                if c == '>' {
-                    found_close = true;
-                    break;
-                }
-                tag_content.push(c);
-            }
-
-            if found_close && !tag_content.starts_with('/') {
-                // Parse the opening tag
-                if let Some((tag_name, attrs)) = parse_opening_tag(&tag_content) {
-                    // Pre-compute tag patterns once
-                    let closing_tag = format!("</{}>", tag_name);
-                    let opening_tag_full = format!("<{}>", tag_name);
-                    let opening_tag_with_space = format!("<{} ", tag_name);
-
-                    let mut inner_content = String::new();
-                    let mut depth = 1;
-
-                    while depth > 0 {
-                        if let Some(c) = chars.next() {
-                            inner_content.push(c);
-                            let len = inner_content.len();
-
-                            if c == '>' {
-                                if len >= opening_tag_full.len() {
-                                    let start = len - opening_tag_full.len();
-                                    if inner_content.get(start..).is_some_and(|slice| {
-                                        slice.eq_ignore_ascii_case(&opening_tag_full)
-                                    }) {
-                                        depth += 1;
-                                    }
-                                }
-                                if len >= closing_tag.len() {
-                                    let start = len - closing_tag.len();
-                                    if inner_content.get(start..).is_some_and(|slice| {
-                                        slice.eq_ignore_ascii_case(&closing_tag)
-                                    }) {
-                                        depth -= 1;
-                                        if depth == 0 {
-                                            inner_content.truncate(start);
-                                        }
-                                    }
-                                }
-                            } else if c == ' ' && len >= opening_tag_with_space.len() {
-                                let start = len - opening_tag_with_space.len();
-                                if inner_content.get(start..).is_some_and(|slice| {
-                                    slice.eq_ignore_ascii_case(&opening_tag_with_space)
-                                }) {
-                                    depth += 1;
-                                }
-                            }
-                        } else {
-                            break;
+            if found_close
+                && !tag_content.starts_with('/')
+                && let Some((tag_name, attrs)) = parse_opening_tag(&tag_content)
+            {
+                let resolution = resolve_tag(&tag_name, &attrs);
+                if !matches!(resolution, TagResolution::Unknown) {
+                    let inner = scan_inner(&mut chars, &tag_name);
+                    match resolution {
+                        TagResolution::Styled(style) => {
+                            flush_render_text(&mut text, &mut nodes);
+                            let children = parse_render_nodes(&inner, code_blocks);
+                            // A styled span may wrap a fenced code block; split
+                            // it around the block child so the block-in-phrasing
+                            // shape never reaches (and trips) tree validation.
+                            super::tree::project_styled_span(&style, children, &mut nodes);
                         }
-                    }
-
-                    // Apply the block style
-                    if let Some(action) = block_tag_to_escape(&tag_name, &attrs, term) {
-                        let layer = block_tag_layer(&tag_name);
-
-                        match action {
-                            BlockTagAction::Suppress => {
-                                // Suppressed tag (e.g., `<double-underline>` on a
-                                // terminal that supports neither double nor
-                                // straight underlines, `<a href="">link</a>`,
-                                // or `<clipboard>`): emit only the inner
-                                // content with no escapes.
-                                result.push_str(&parse_tokens_inner(&inner_content, term, state));
-                                continue;
-                            }
-                            BlockTagAction::CodeBlock => {
-                                // Fenced code block: dim + 2-space indent,
-                                // no Prose markup parsing inside.
-                                state.used_styles = true;
-                                for (idx, line) in inner_content.lines().enumerate() {
-                                    if idx > 0 {
-                                        result.push('\n');
-                                    }
-                                    result.push_str("\x1b[2m  ");
-                                    result.push_str(line);
-                                    result.push_str("\x1b[0m");
-                                }
-                                continue;
-                            }
-                            BlockTagAction::Wrap { open, close } => {
-                                state.used_styles = true;
-                                if let Some(layer) = layer {
-                                    // Styled tag: layer-aware push/pop
-                                    let prev = state.set(layer, open.as_ref());
-                                    result.push_str(open.as_ref());
-                                    result.push_str(&parse_tokens_inner(&inner_content, term, state));
-                                    state.restore(layer, prev);
-                                    result.push_str(state.close_code(layer));
-                                } else {
-                                    // Structural tag (e.g. `<a href>` with OSC8
-                                    // or markdown fallback): emit open/close as-is.
-                                    let rendered_inner = parse_tokens_inner(&inner_content, term, state);
-                                    let is_markdown_link_fallback = open.as_ref() == "["
-                                        && close.as_ref().starts_with("](")
-                                        && close.as_ref().ends_with(')');
-                                    result.push_str(open.as_ref());
-                                    if is_markdown_link_fallback {
-                                        result.push_str(&rendered_inner.replace(']', "\\]"));
-                                    } else {
-                                        result.push_str(&rendered_inner);
-                                    }
-                                    result.push_str(close.as_ref());
-                                }
-                                continue;
-                            }
+                        TagResolution::Link(href) => {
+                            flush_render_text(&mut text, &mut nodes);
+                            let children = parse_render_nodes(&inner, code_blocks);
+                            let resolved = super::styles::resolve_href(&href);
+                            nodes.push(RenderNode::link(resolved, None, children));
                         }
-                    } else {
-                        // Unknown tag, output as-is
-                        result.push('<');
-                        result.push_str(&tag_content);
-                        result.push('>');
-                        result.push_str(&parse_tokens_inner(&inner_content, term, state));
-                        result.push_str(&closing_tag);
+                        TagResolution::Transparent => {
+                            flush_render_text(&mut text, &mut nodes);
+                            nodes.extend(parse_render_nodes(&inner, code_blocks));
+                        }
+                        TagResolution::Code(lang) => {
+                            flush_render_text(&mut text, &mut nodes);
+                            nodes.push(RenderNode::code(lang, None, inner));
+                        }
+                        TagResolution::Unknown => unreachable!("guarded above"),
                     }
                     continue;
                 }
             }
 
-            // Not a valid block tag, output as-is
-            result.push('<');
-            result.push_str(&tag_content);
+            // Not a recognized tree-path tag — emit as literal text.
+            text.push('<');
+            text.push_str(&tag_content);
             if found_close {
-                result.push('>');
+                text.push('>');
             }
             continue;
         }
 
-        result.push(ch);
+        text.push(ch);
     }
 
-    result
+    flush_render_text(&mut text, &mut nodes);
+    nodes
 }

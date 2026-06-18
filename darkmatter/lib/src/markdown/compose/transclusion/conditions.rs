@@ -4,14 +4,14 @@
 //! `compose::conditions` and converts errors to `TransclusionError`.
 
 use super::types::TransclusionError;
-use crate::markdown::compose::EffectiveState;
 use crate::markdown::compose::conditions::{self, ConditionError};
+use crate::markdown::compose::expression::EvaluationLookup;
 use biscuit_terminal::errors::SourceContext;
 
 /// Evaluates a `when` condition expression.
-pub fn evaluate_condition(
+pub fn evaluate_condition<L: EvaluationLookup>(
     expr: &str,
-    state: &EffectiveState,
+    state: &L,
     line: usize,
     ctx: SourceContext,
 ) -> Result<bool, TransclusionError> {

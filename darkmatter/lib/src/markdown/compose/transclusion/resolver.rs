@@ -2,8 +2,8 @@
 
 use super::types::{DirectiveKind, ResolvedTarget, TransclusionError};
 use crate::markdown::compose::{ComposeSource, TransclusionOptions};
-use biscuit_terminal::errors::SourceContext;
 use biscuit_file::FileReference;
+use biscuit_terminal::errors::SourceContext;
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument, trace};
 
@@ -20,6 +20,12 @@ pub(crate) fn resolve_target(
     debug!("transclusion: resolving target");
     match kind {
         DirectiveKind::Url => resolve_url_target(raw_target, options),
+        // `::file`/`::code` accept HTTP(S) targets too; route those to the URL
+        // resolver so remote transclusion works through the same directives as
+        // local paths.
+        DirectiveKind::File | DirectiveKind::Code if is_url_like(raw_target) => {
+            resolve_url_target(raw_target, options)
+        }
         DirectiveKind::File | DirectiveKind::Code => {
             let path = resolve_path(raw_target, kind, options, source, line, ctx)?;
             validate_local_target(kind, &path, options)?;
@@ -300,11 +306,7 @@ mod tests {
     }
 
     fn dummy_ctx(content: &str) -> SourceContext {
-        SourceContext::new(
-            PathBuf::from("/test.md"),
-            PathBuf::from("test.md"),
-            content,
-        )
+        SourceContext::new(PathBuf::from("/test.md"), PathBuf::from("test.md"), content)
     }
 
     #[test]
@@ -354,8 +356,8 @@ mod tests {
         // Canonicalize the tempdir root to resolve macOS /var -> /private/var symlink
         let root = std::fs::canonicalize(dir.path()).unwrap();
 
-        // Initialize a real git repo so git2::Repository::discover() works
-        git2::Repository::init(&root).unwrap();
+        // Initialize a real git repo so repo-root discovery works
+        gix::init(&root).unwrap();
 
         let nested = root.join("docs");
         std::fs::create_dir_all(&nested).unwrap();
@@ -447,7 +449,7 @@ mod tests {
         std::fs::write(&source_path, "# root").unwrap();
 
         // Initialize a git repo so FileReference works
-        git2::Repository::init(&root).unwrap();
+        gix::init(&root).unwrap();
 
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(&root).unwrap();

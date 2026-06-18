@@ -31,14 +31,15 @@ Variables are organized into capture groups. The expensive I/O for each group ru
 
 | Group | Expensive I/O | Properties |
 |-------|--------------|------------|
-| **DateTime** | `Local::now()` / `Utc::now()` syscalls (near-zero) | `now`, `now_utc`, `today`, `yesterday`, `tomorrow`, all `_utc` date variants, `day`, `day_abbr`, `day_utc`, `day_abbr_utc`, `year`, `year_utc`, `month`, `month_name`, `month_name_abbr`, `day_of_month`, `day_of_month_suffixed`, `time`, `time_military`, `timezone`, `timezone_offset`, `timezone_iana`, week boundaries, `season`, `timestamp`, `timestamp_ms` |
-| **Repo** | `GitRepo::discover` + `detect_repo_structure` | `repo`, `repo_root`, `is_monorepo`, `package_root`, `package_area_root`, `packages`, `packages_list`, `package_areas`, `package_areas_list`, `current_package`, `current_package_area` |
+| **DateTime** | `Local::now()` / `Utc::now()` syscalls (near-zero) | `now`, `now_utc`, `today`, `yesterday`, `tomorrow`, all `_utc` date variants, `day`, `day_abbr`, `day_utc`, `day_abbr_utc`, `year`, `year_utc`, `month`, `month_name`, `month_name_abbr`, `day_of_month`, `day_of_month_suffixed`, `time`, `time_military`, `time_utc`, `time_military_utc`, `timezone`, `timezone_offset`, `timezone_iana`, week boundaries, `season`, `timestamp`, `timestamp_ms` |
+| **Repo** | `GitRepo::discover` + `detect_repo_structure` | `repo`, `repo_root`, `is_monorepo`, `package_root`, `package_area_root`, `packages`, `packages_list`, `package_areas`, `package_areas_list`, `current_package`, `current_package_area`, `area`, `area_description`, `area_root`, `current_packages`, `depends_on`, `used_by` |
 | **FileChanges** | `GitRepo::file_changes()` | `dirty_files`, `dirty_files_list`, `dirty_source_code_files`, `dirty_source_code_files_list`, `staged_files`, `staged_files_list`, `untracked_files`, `untracked_files_list`, `dirty_packages`, `dirty_packages_list`, `dirty_package_areas`, `dirty_package_areas_list`, `staged_packages`, `staged_packages_list`, `staged_package_areas`, `staged_package_areas_list`, `current_package_has_*`, `current_package_area_has_*` |
 | **Languages** | Reads from already-captured repo info (no additional I/O) | `programming_languages_in_repo`, `programming_language`, `package_manager` |
 | **Documents** | `detect_docs_with_packages` | `docs_readme`, `docs_blast_radius`, `docs_drift`, `docs_skill` |
 | **OS** | `detect_os_with_request` | `os`, `os_distro`, `os_package_manager`, `os_version` |
 | **Hardware** | `detect_hardware_summary` | `memory_total`, `memory_used`, `memory_avail`, `cpu_cores`, `cpu_arch` |
 | **GPU** | `detect_gpus` (subprocess on macOS) | `gpu` |
+| **Agent** | Reads `AGENT` and `MODEL` env vars | `agent`, `model` |
 
 
 ## Information Provided
@@ -47,7 +48,9 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 
 > **Note:** all date and time related information is reported using _local_ time but there will be a `_utc` variant that provides the same utility only using UTC time to resolve.
 
-### Date
+### Date and Time Information
+
+#### Date Only
 
 | Variable                | Type     | Description                                 |
 |-------------------------|----------|---------------------------------------------|
@@ -66,7 +69,7 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 | `end_of_week_mon`       | `String` | End of week (Sunday), `YYYY-MM-DD`          |
 | `end_of_week_mon_utc`   | `String` | End of week (Sunday), UTC                   |
 
-### Date and Time
+#### Date and Time
 
 | Variable  | Type     | Description                                                |
 |-----------|----------|------------------------------------------------------------|
@@ -74,17 +77,19 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 | `now_utc` | `String` | ISO Datetime string for UTC (`YYYY-MM-DDThh:mm:ssZ`)       |
 | `utc`     | `String` | **Alias** for `now_utc` (backward compatibility)           |
 
-### Time
+#### Time Only
 
-| Variable          | Type     | Description                                     |
-|-------------------|----------|-------------------------------------------------|
-| `time`            | `String` | Time in `hh:mm AM/PM` format (e.g., `12:43 PM`) |
-| `time_military`   | `String` | Time in 24-hour format (e.g., `22:30`)          |
-| `timezone`        | `String` | Timezone abbreviation (e.g., `PDT`, `UTC`)      |
+| Variable             | Type     | Description                                          |
+|----------------------|----------|------------------------------------------------------|
+| `time`               | `String` | Time in `hh:mm AM/PM` format (e.g., `12:43 PM`)       |
+| `time_military`      | `String` | Time in 24-hour format (e.g., `22:30`)               |
+| `time_utc`           | `String` | UTC time in `hh:mm AM/PM` format (e.g., `7:43 PM (UTC)`) |
+| `time_military_utc`  | `String` | UTC time in 24-hour format (e.g., `19:43 (UTC)`)     |
+| `timezone`           | `String` | Timezone abbreviation (e.g., `PDT`, `UTC`)           |
 | `timezone_offset` | `String` | UTC offset (e.g., `-0700`)                      |
 | `timezone_iana`   | `String` | UTC offset (e.g., `America/Los_Angeles`)                      |
 
-### Calendar
+#### Calendar
 
 | Variable                | Type     | Description                                         |
 |-------------------------|----------|-----------------------------------------------------|
@@ -103,7 +108,7 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 | `month_name_abbr`       | `String` | Abbreviated month name (e.g., Jan)                  |
 | `season`                | `String` | Meteorological season: Spring, Summer, Fall, Winter |
 
-### Timestamps
+#### Timestamps
 
 | Variable       | Type     | Description                     |
 |----------------|----------|---------------------------------|
@@ -119,7 +124,7 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 | Variable               | Type              | Description                                                                        |
 |------------------------|-------------------|------------------------------------------------------------------------------------|
 | `repo`                 | `String \| null`   | Repository name; null if not in a git repo                                         |
-| `repo_root`            | `String \| null`   | Absolute path to repo root; null if not in a git repo                              |
+| `repo_root`            | `String \| null`   | Absolute path to repo root (no trailing separator); null if not in a git repo      |
 | `is_monorepo`          | `bool`            | Whether the repo is a monorepo; false if not in a repo                             |
 | `package_root`         | `String \| null`   | Absolute path to current package root; null if not monorepo or not in a package    |
 | `package_area_root`    | `String \| null`   | Absolute path to current package area root; null if not monorepo or not in an area |
@@ -127,6 +132,12 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 | `package_areas`        | `[String] \| null` | List of unique package areas; null if not a monorepo                               |
 | `current_package`      | `String \| null`   | Current package name; null if not in a monorepo package                            |
 | `current_package_area` | `String \| null`   | Current package area; null if not in a monorepo area                               |
+| `area`                 | `String`          | Scope name: package name in a package, area name in an area; empty string at root or when not a monorepo |
+| `area_description`     | `String`          | `"{package} package"` in a package, `"{area} package area"` in an area; empty string at root or when not a monorepo |
+| `area_root`            | `String`          | Absolute path to the `area` root (no trailing separator); repo root when not a monorepo |
+| `current_packages`     | `String`          | Markdown bullet list (`- {name} ({relative})`) of packages under the current directory; empty string outside a monorepo |
+| `depends_on`           | `String`          | Nested Markdown list of workspace-internal packages the scoped `area` depends on; empty string outside a monorepo |
+| `used_by`              | `String`          | Nested Markdown list of workspace-internal packages that depend on the scoped `area`; empty string outside a monorepo |
 
 #### Changed Files
 
@@ -218,3 +229,20 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 | `cpu_cores`    | `Number`        | Number of logical CPU cores                                |
 | `cpu_arch`     | `String`        | CPU architecture (e.g., `aarch64`, `x86_64`)               |
 | `gpu`          | `String \| null` | GPU device name(s), comma-separated; null if none detected |
+
+### Agent
+
+The **Agent** group is captured when `ctx.agent` or `ctx.model` is referenced.
+It performs no host probes: it reads the `AGENT` and `MODEL` environment
+variables, trims ASCII whitespace, and applies simple defaults.
+
+| Variable | Type     | Description                                                |
+|----------|----------|------------------------------------------------------------|
+| `agent`  | `String` | Executing agentic CLI name (from `AGENT` env var); defaults to `"unknown"` |
+| `model`  | `String` | Active model identifier (from `MODEL` env var); defaults to `"default"` |
+
+- Missing or empty values receive the defaults above.
+- Values are trimmed before use.
+- There is no model allowlist; any value is accepted as-is.
+- The recognized agent names and aliases are: `claude` / `claude_code` /
+  `claude-code`, `opencode` / `open_code` / `open-code`, and `codex`.

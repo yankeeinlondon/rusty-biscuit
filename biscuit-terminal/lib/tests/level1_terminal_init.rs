@@ -11,19 +11,39 @@ use common::pty::spawn_with_env;
 
 #[test]
 fn terminal_new_cascade_produces_consistent_fields_in_pty() {
-    let mut session = spawn_with_env(&[("PROBE", "terminal"), ("PROBE_TERM_PROGRAM", "ghostty")]);
+    let mut session = spawn_with_env(&[
+        ("PROBE", "terminal"),
+        ("PROBE_TERM_PROGRAM", "ghostty"),
+        ("PROBE_TERM", "xterm-256color"),
+    ]);
 
-    std::thread::sleep(Duration::from_millis(150));
-
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
     let mut output = String::new();
     let mut scratch = [0u8; 4096];
     loop {
         match session.try_read(&mut scratch) {
-            Ok(0) => break,
-            Ok(n) => output.push_str(&String::from_utf8_lossy(&scratch[..n])),
+            Ok(0) => {
+                if output.contains("is_ci=") || std::time::Instant::now() > deadline {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            Ok(n) => {
+                output.push_str(&String::from_utf8_lossy(&scratch[..n]));
+                if output.contains("is_ci=") {
+                    break;
+                }
+            }
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => break,
+            Err(e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                if output.contains("is_ci=") || std::time::Instant::now() > deadline {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
             Err(_) => break,
         }
     }

@@ -31,12 +31,15 @@
 //! unreliable for completion purposes. A purely syntactic scan is cheaper
 //! and more correct.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::completion::composition;
 use crate::completion::root_menu;
+use crate::completion::schema_completion;
 use crate::completion::scopes::{ComposeMode, ScopeContext};
 use crate::completion::setter_value;
+use std::ffi::OsString;
 
 /// Top-level classification of the cursor position in argv.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,7 +57,21 @@ pub(crate) enum CompletionTarget {
     /// against a curated set of documentation-style subdirectories.
     /// The full `name=...` token is carried so the completer can split
     /// name from value and emit a whole-token replacement.
-    SetterValue { token: String },
+    ///
+    /// `file_arg` carries the committed prompt-file positional (when
+    /// present), so the schema-aware completer can resolve `$schema` and
+    /// surface enum / file candidates per the
+    /// [`2026-05-15-schemas`][plan] Phase 4 contract.
+    ///
+    /// [plan]: ../../../../features/2026-05-15-schemas/plan.md
+    SetterValue {
+        token: String,
+        file_arg: Option<String>,
+    },
+    /// Cursor is on a partial setter NAME (no `=` typed yet) AFTER the
+    /// prompt-file positional slot has been committed. Routes to the
+    /// schema-aware property-name completer.
+    SetterName { partial: String, file_arg: String },
     /// Cursor is anywhere else — a wrapper flag value, an administrative
     /// subcommand, etc. The engine emits zero candidates so the shell
     /// falls back to its native file / flag completion.
@@ -158,20 +175,163 @@ pub(crate) fn run_with_context(
             let scope_ctx = ScopeContext::discover();
             composition::run(mode, &scope_ctx, &partial)
         }
-        CompletionTarget::SetterValue { token } => {
+        CompletionTarget::SetterValue { token, file_arg } => {
             let _span = tracing::trace_span!(
                 target: "claudine::completion",
                 "completion::setter_value",
             )
             .entered();
             let scope_ctx = ScopeContext::discover();
-            setter_value::run(&token, &scope_ctx)
+            run_setter_value(&token, file_arg.as_deref(), &scope_ctx)
+        }
+        CompletionTarget::SetterName { partial, file_arg } => {
+            let _span = tracing::trace_span!(
+                target: "claudine::completion",
+                "completion::setter_name",
+            )
+            .entered();
+            let scope_ctx = ScopeContext::discover();
+            run_setter_name(&partial, &file_arg, argv, current_index, &scope_ctx)
         }
         CompletionTarget::Other => {
-            // Unrecognized slot — emit zero candidates so the shell
-            // falls back to its native file / flag completion.
-            Vec::new()
+            // Unrecognized slot — try clap's dynamic completion for
+            // administrative subcommand flags and other static-command-tree
+            // positions before giving up.
+            clap_dynamic_fallback(argv, current_index)
         }
+    }
+}
+
+/// Dispatch the setter-value slot.
+///
+/// When `file_arg` is known, first try schema-aware completion: enum members
+/// for `enum` properties, filesystem paths for `file(match(...))` properties.
+/// If the schema does not contribute candidates (string / number / unknown
+/// property / no `$schema`), fall back to the existing `@`-gated path so the
+/// historical `spec=@docs/...` behavior remains intact.
+fn run_setter_value(token: &str, file_arg: Option<&str>, ctx: &ScopeContext) -> Vec<String> {
+    if let Some(file_arg) = file_arg
+        && let Some(effective) = schema_completion::load_effective_schema(file_arg, ctx)
+        && let Some((name, value)) = split_setter(token)
+    {
+        let schema_candidates = schema_completion::property_value(&effective, name, value, ctx);
+        if !schema_candidates.is_empty() {
+            return schema_candidates;
+        }
+    }
+    setter_value::run(token, ctx)
+}
+
+/// Dispatch the setter-name slot.
+///
+/// Loads the schema for `file_arg`, collects names already supplied in
+/// argv, and asks the schema-aware completer for ordered candidates
+/// (required first, then optional, both in declaration order).
+fn run_setter_name(
+    partial: &str,
+    file_arg: &str,
+    argv: &[String],
+    current_index: usize,
+    ctx: &ScopeContext,
+) -> Vec<String> {
+    let Some(effective) = schema_completion::load_effective_schema(file_arg, ctx) else {
+        return Vec::new();
+    };
+    let supplied = collect_supplied_setter_names(argv, current_index);
+    let declared_order = schema_completion::declared_property_order(file_arg, ctx);
+    schema_completion::property_names(&effective, partial, &supplied, &declared_order)
+}
+
+/// Walk argv (excluding the cursor token itself) and collect setter names
+/// already supplied. Used by the setter-name completer to suppress
+/// re-suggesting keys the user has already passed.
+fn collect_supplied_setter_names(argv: &[String], current_index: usize) -> HashSet<String> {
+    let mut out: HashSet<String> = HashSet::new();
+    for (idx, tok) in argv.iter().enumerate() {
+        if idx == current_index {
+            continue;
+        }
+        if let Some((name, _)) = split_setter(tok) {
+            out.insert(name.to_string());
+        }
+    }
+    out
+}
+
+/// Split a `name=value` token into its parts. Returns `None` when the token
+/// shape does not match `^[A-Za-z_][A-Za-z0-9_-]*=`.
+fn split_setter(token: &str) -> Option<(&str, &str)> {
+    let eq_pos = token.find('=')?;
+    if eq_pos == 0 {
+        return None;
+    }
+    let bytes = token.as_bytes();
+    if !(bytes[0].is_ascii_alphabetic() || bytes[0] == b'_') {
+        return None;
+    }
+    if !bytes[1..eq_pos]
+        .iter()
+        .all(|&c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+    {
+        return None;
+    }
+    Some((&token[..eq_pos], &token[eq_pos + 1..]))
+}
+
+/// `^[A-Za-z_][A-Za-z0-9_-]*$` — the partial-name shape recognized as a
+/// setter-name candidate (e.g. `tit`, `prompt_for`, `count-down`). Differs
+/// from [`is_setter_shaped`] in that there is no `=` separator: the user
+/// has not yet typed past the name.
+fn is_setter_name_partial(token: &str) -> bool {
+    if token.is_empty() {
+        return false;
+    }
+    let bytes = token.as_bytes();
+    if !(bytes[0].is_ascii_alphabetic() || bytes[0] == b'_') {
+        return false;
+    }
+    bytes[1..]
+        .iter()
+        .all(|&c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+}
+
+/// Fall back to clap's dynamic completion for slots the custom engine does
+/// not own (administrative subcommand flags, wrapper flags, etc.).
+///
+/// Activates when:
+/// - the cursor partial is flag-shaped (`-` or `--`), or
+/// - the previous token is flag-shaped (indicating the cursor is on a flag
+///   value).
+///
+/// Empty or non-flag partials at vanilla positional slots still defer to the
+/// shell's native file completion, preserving the contract tested by
+/// `non_targeted_subcommand_emits_no_candidates`.
+///
+/// Uses the same `ignore_errors(true)` command tree that powers the legacy
+/// `CompleteEnv` path so wrapper subcommands do not short-circuit on unknown
+/// passthrough tokens.
+fn clap_dynamic_fallback(argv: &[String], current_index: usize) -> Vec<String> {
+    let partial = argv.get(current_index).map(String::as_str).unwrap_or("");
+    let prev_flag = current_index
+        .checked_sub(1)
+        .and_then(|i| argv.get(i))
+        .is_some_and(|p| p.starts_with('-'));
+    if !partial.starts_with('-') && !prev_flag {
+        return Vec::new();
+    }
+    let mut cmd = super::completion_command();
+    let args: Vec<OsString> = argv.iter().map(|s| s.into()).collect();
+    match clap_complete::engine::complete(
+        &mut cmd,
+        args,
+        current_index,
+        std::env::current_dir().ok().as_deref(),
+    ) {
+        Ok(candidates) => candidates
+            .into_iter()
+            .map(|c| c.get_value().to_string_lossy().into_owned())
+            .collect(),
+        Err(_) => Vec::new(),
     }
 }
 
@@ -264,42 +424,38 @@ fn classify_post_subcommand(
     };
 
     let current = argv.get(current_index).map(String::as_str).unwrap_or("");
+
+    // Walk tokens between the subcommand and the cursor to find the first
+    // committed prompt-file positional (skipping flags, flag values, and
+    // `key=value` setters). The file_arg, when present, unlocks the
+    // schema-aware completers downstream.
+    let (file_arg, has_seen_positional_before_cursor) =
+        scan_committed_positional(argv, sub_idx + 1, current_index);
+
     // A setter-shaped cursor routes to the setter-value completer
     // regardless of the positional state — the `name=` prefix
     // disambiguates against the file slot.
     if is_setter_shaped(current) {
         return CompletionTarget::SetterValue {
             token: current.to_string(),
+            file_arg,
         };
     }
 
-    // Walk tokens between the subcommand and the cursor. If we have not
-    // yet seen a positional (ignoring flags, flag values, and
-    // key=value setters), the cursor slot IS the first positional.
-    let mut cursor = sub_idx + 1;
-    let mut seen_positional = false;
-    while cursor < current_index {
-        let token = argv[cursor].as_str();
-        if token == "--" {
-            cursor += 1;
-            continue;
-        }
-        if is_flag_token(token) {
-            if is_value_bearing_flag(token) && !token.contains('=') {
-                cursor += 2;
-            } else {
-                cursor += 1;
-            }
-            continue;
-        }
-        if is_setter_shaped(token) {
-            cursor += 1;
-            continue;
-        }
-        seen_positional = true;
-        cursor += 1;
+    // If the file slot has been committed AND the cursor token is a valid
+    // setter-name partial (no `=`, plain identifier shape), route to the
+    // schema-aware setter-name completer. This is the new Phase 4 path —
+    // historically these tokens fell through to `Other`.
+    if let Some(file) = file_arg.as_ref()
+        && is_setter_name_partial(current)
+    {
+        return CompletionTarget::SetterName {
+            partial: current.to_string(),
+            file_arg: file.clone(),
+        };
     }
-    if seen_positional {
+
+    if has_seen_positional_before_cursor {
         return CompletionTarget::Other;
     }
 
@@ -307,6 +463,46 @@ fn classify_post_subcommand(
         mode,
         partial: current.to_string(),
     }
+}
+
+/// Walk argv between `start` and `cursor` and return:
+///
+/// - The first committed positional file argument (non-flag, non-setter)
+///   when one exists.
+/// - `true` when at least one positional was committed before the cursor.
+fn scan_committed_positional(
+    argv: &[String],
+    start: usize,
+    cursor: usize,
+) -> (Option<String>, bool) {
+    let mut idx = start;
+    let mut file_arg: Option<String> = None;
+    let mut seen = false;
+    while idx < cursor {
+        let token = argv[idx].as_str();
+        if token == "--" {
+            idx += 1;
+            continue;
+        }
+        if is_flag_token(token) {
+            if is_value_bearing_flag(token) && !token.contains('=') {
+                idx += 2;
+            } else {
+                idx += 1;
+            }
+            continue;
+        }
+        if is_setter_shaped(token) {
+            idx += 1;
+            continue;
+        }
+        seen = true;
+        if file_arg.is_none() {
+            file_arg = Some(token.to_string());
+        }
+        idx += 1;
+    }
+    (file_arg, seen)
 }
 
 fn is_flag_token(token: &str) -> bool {
@@ -382,9 +578,6 @@ fn is_global_bool_flag(token: &str) -> bool {
 /// (`.claudine/config.json5`) are accepted — JSON5 is a common hand-edited
 /// form in the wild even though `user_config_path()` in the library only
 /// probes `.json`.
-// ------------------------------------------------------------------
-// Filesystem probes — shared with [`RootContext::discover`].
-// ------------------------------------------------------------------
 fn user_config_exists(home: Option<&Path>) -> bool {
     let Some(home) = home else {
         return false;
@@ -529,8 +722,27 @@ mod tests {
     }
 
     #[test]
-    fn classifier_other_after_first_positional_is_committed() {
+    fn classifier_setter_name_after_first_positional_is_committed() {
+        // Schemas Phase 4: once the file slot is committed, a plain
+        // identifier-shaped token at the cursor is treated as a setter-
+        // name partial. The schema-aware completer downstream decides
+        // whether the name maps to a schema property; the classifier is
+        // happy as long as the shape and file_arg are right.
         let a = argv(&["claudine", "compose", "plan.md", "more"]);
+        assert_eq!(
+            classify_completion_target(&a, 3),
+            CompletionTarget::SetterName {
+                partial: "more".to_string(),
+                file_arg: "plan.md".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn classifier_other_when_second_positional_has_non_identifier_chars() {
+        // Tokens that look like paths or contain unsupported characters
+        // are not setter-name partials and still route to `Other`.
+        let a = argv(&["claudine", "compose", "plan.md", "more/stuff"]);
         assert_eq!(classify_completion_target(&a, 3), CompletionTarget::Other);
     }
 
@@ -541,20 +753,25 @@ mod tests {
             classify_completion_target(&a, 2),
             CompletionTarget::SetterValue {
                 token: "key=val".to_string(),
+                file_arg: None,
             },
         );
     }
 
     #[test]
     fn classifier_setter_value_after_committed_positional() {
-        // Phase 4 contract: a setter-shaped cursor wins even when the
-        // file slot has already been filled. The classifier must not
-        // return `Other` just because a positional was observed earlier.
+        // Phase 4 (improved-shell-completions) contract: a setter-shaped
+        // cursor wins even when the file slot has already been filled.
+        // The classifier must not return `Other` just because a positional
+        // was observed earlier — and the schemas-Phase-4 work now also
+        // surfaces the committed file as `file_arg` so the schema-aware
+        // value completer can use it.
         let a = argv(&["claudine", "compose", "foo.md", "spec=@s"]);
         assert_eq!(
             classify_completion_target(&a, 3),
             CompletionTarget::SetterValue {
                 token: "spec=@s".to_string(),
+                file_arg: Some("foo.md".to_string()),
             },
         );
     }
@@ -566,6 +783,7 @@ mod tests {
             classify_completion_target(&a, 3),
             CompletionTarget::SetterValue {
                 token: "ref=@d".to_string(),
+                file_arg: Some("foo.md".to_string()),
             },
         );
     }
@@ -577,6 +795,7 @@ mod tests {
             classify_completion_target(&a, 3),
             CompletionTarget::SetterValue {
                 token: "plan=@p".to_string(),
+                file_arg: Some("foo.md".to_string()),
             },
         );
     }
@@ -768,5 +987,143 @@ mod tests {
         let got = run_with_context(&a, 2, &test_ctx(true, true, true));
         assert!(got.iter().any(|c| c == "compose"));
         assert!(got.iter().any(|c| c == "commands"));
+    }
+
+    #[test]
+    fn clap_fallback_completes_providers_flags() {
+        let a = argv(&["claudine", "providers", "--des"]);
+        let got = run_with_context(&a, 2, &test_ctx(true, true, true));
+        assert!(
+            got.iter().any(|c| c == "--describe"),
+            "expected --describe in candidates, got {got:?}"
+        );
+    }
+
+    #[test]
+    fn clap_fallback_completes_providers_format_flag() {
+        let a = argv(&["claudine", "providers", "--format"]);
+        let got = run_with_context(&a, 2, &test_ctx(true, true, true));
+        assert!(
+            got.iter().any(|c| c == "--format"),
+            "expected --format in candidates, got {got:?}"
+        );
+    }
+
+    // -- SetterName classification (schemas Phase 4) -----------------------
+
+    #[test]
+    fn classifier_setter_name_on_inline_compose() {
+        let a = argv(&["claudine", "inline-compose", "plan.md", "tit"]);
+        assert_eq!(
+            classify_completion_target(&a, 3),
+            CompletionTarget::SetterName {
+                partial: "tit".to_string(),
+                file_arg: "plan.md".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn classifier_setter_name_on_sequence() {
+        let a = argv(&["claudine", "sequence", "plan.md", "stat"]);
+        assert_eq!(
+            classify_completion_target(&a, 3),
+            CompletionTarget::SetterName {
+                partial: "stat".to_string(),
+                file_arg: "plan.md".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn classifier_setter_name_with_empty_cursor_after_committed_file() {
+        // Empty cursor token after `plan.md spec=foo <TAB>` is treated as
+        // an unfiltered setter-name lookup — show every (unsupplied)
+        // property.
+        let a = argv(&["claudine", "compose", "plan.md", "spec=foo", ""]);
+        // Empty token has no shape, so `is_setter_name_partial` returns
+        // false: classifier returns Other (the value slot is fully filled).
+        assert_eq!(classify_completion_target(&a, 4), CompletionTarget::Other);
+    }
+
+    #[test]
+    fn classifier_setter_name_only_when_file_arg_present() {
+        // Without a committed file_arg, an identifier-shaped cursor stays
+        // at the composition positional slot — there's no schema to load
+        // yet.
+        let a = argv(&["claudine", "compose", "tit"]);
+        assert_eq!(
+            classify_completion_target(&a, 2),
+            CompletionTarget::CompositionPositional {
+                mode: ComposeMode::Compose,
+                partial: "tit".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn is_setter_name_partial_accepts_identifiers() {
+        assert!(is_setter_name_partial("foo"));
+        assert!(is_setter_name_partial("_bar"));
+        assert!(is_setter_name_partial("a1-b2"));
+        assert!(is_setter_name_partial("snake_case"));
+    }
+
+    #[test]
+    fn is_setter_name_partial_rejects_non_identifier_shapes() {
+        assert!(!is_setter_name_partial(""));
+        assert!(!is_setter_name_partial("1abc"));
+        assert!(!is_setter_name_partial("foo/bar"));
+        assert!(!is_setter_name_partial("foo=bar"));
+        assert!(!is_setter_name_partial("foo.bar"));
+    }
+
+    #[test]
+    fn scan_committed_positional_finds_file_arg_among_setters_and_flags() {
+        let a = argv(&[
+            "claudine", "compose", "--model", "gpt-4", "spec=val", "plan.md", "",
+        ]);
+        let (file, seen) = scan_committed_positional(&a, 2, 6);
+        assert_eq!(file.as_deref(), Some("plan.md"));
+        assert!(seen);
+    }
+
+    #[test]
+    fn scan_committed_positional_returns_none_when_no_positional() {
+        let a = argv(&["claudine", "compose", "spec=val", "--model", "gpt", ""]);
+        let (file, seen) = scan_committed_positional(&a, 2, 5);
+        assert!(file.is_none());
+        assert!(!seen);
+    }
+
+    #[test]
+    fn collect_supplied_setter_names_skips_cursor_token() {
+        let a = argv(&["claudine", "compose", "plan.md", "title=hi", "des"]);
+        let got = collect_supplied_setter_names(&a, 4);
+        assert!(got.contains("title"));
+        assert!(!got.contains("des"));
+    }
+
+    #[test]
+    fn split_setter_handles_typical_cases() {
+        assert_eq!(split_setter("title=hi"), Some(("title", "hi")));
+        assert_eq!(split_setter("a_b-c=v=w"), Some(("a_b-c", "v=w")));
+        assert!(split_setter("=missing-name").is_none());
+        assert!(split_setter("no-equals").is_none());
+        assert!(split_setter("9bad=v").is_none());
+    }
+
+    #[test]
+    fn clap_fallback_completes_providers_format_values() {
+        let a = argv(&["claudine", "providers", "--format", ""]);
+        let got = run_with_context(&a, 3, &test_ctx(true, true, true));
+        assert!(
+            got.iter().any(|c| c == "text"),
+            "expected 'text' format value, got {got:?}"
+        );
+        assert!(
+            got.iter().any(|c| c == "json"),
+            "expected 'json' format value, got {got:?}"
+        );
     }
 }

@@ -611,6 +611,7 @@ name = "test"
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_as_json_negative_numbers() {
         let toml = Toml::from_str(
             r#"
@@ -1070,6 +1071,7 @@ name = "test"
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_underscore_in_numbers() {
         let toml = Toml::from_str(
             r#"

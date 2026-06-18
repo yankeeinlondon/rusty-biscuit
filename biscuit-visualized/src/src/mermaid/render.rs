@@ -1,7 +1,7 @@
 use crate::artifact::{OutputFormat, RenderRequest, RenderedArtifact};
 use crate::cache::file_cache::MERMAID_BACKEND;
 use crate::cache::{FileCache, VisualizationKind};
-use crate::raster::rasterize_svg_to_png_bytes;
+use crate::raster::{rasterize_svg_to_png, rasterize_svg_to_png_bytes};
 
 use super::config::{MermaidConfig, MermaidTheme};
 use super::error::MermaidError;
@@ -170,7 +170,10 @@ impl MermaidDiagram {
                 svg.as_bytes(),
             )?,
             OutputFormat::Png => {
-                let png_data = rasterize_svg_to_png_bytes(&svg, request.scale)?;
+                let png_data = match request.target_width {
+                    Some(width) => rasterize_svg_to_png(&svg, width)?,
+                    None => rasterize_svg_to_png_bytes(&svg, request.scale)?,
+                };
                 cache.store(
                     VisualizationKind::Mermaid,
                     &cache_key,
@@ -200,6 +203,7 @@ impl MermaidDiagram {
             "title": self.title,
             "config": config_value,
             "scale": request.scale.max(1),
+            "target_width": request.target_width,
             "transparent_background": request.transparent_background,
         }))
         .unwrap_or_else(|_| "{}".to_string())

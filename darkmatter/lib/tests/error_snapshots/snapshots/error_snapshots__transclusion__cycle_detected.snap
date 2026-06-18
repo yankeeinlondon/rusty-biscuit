@@ -2,7 +2,8 @@
 source: darkmatter/lib/tests/error_snapshots/transclusion.rs
 expression: out
 ---
-⨫ TransclusionError: cycle detected
+⤫ TransclusionError: cycle detected
+┃ 
 ┃ Chain:
 ┃ 
 ┃   a.md :line 3
@@ -10,4 +11,5 @@ expression: out
 ┃   b.md :line 7
 ┃ 
 ┃   a.md :line 3
-Break the cycle by removing one transclusion edge.
+┃ 
+┃ Break the cycle by removing one transclusion edge.

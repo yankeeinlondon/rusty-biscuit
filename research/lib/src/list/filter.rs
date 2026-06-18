@@ -3,7 +3,7 @@
 //! This module provides filtering functionality for discovered research topics,
 //! supporting glob pattern matching and type filtering.
 
-use crate::list::types::TopicInfo;
+use crate::list::types::{TopicInfo, TopicType};
 use globset::{Glob, GlobSetBuilder};
 use thiserror::Error;
 
@@ -61,6 +61,14 @@ pub fn apply_filters(
         return Ok(topics);
     }
 
+    // If only invalid types are provided, return empty immediately
+    if patterns.is_empty() && !types.is_empty() {
+        let any_valid = types.iter().any(|t| t.parse::<TopicType>().is_ok());
+        if !any_valid {
+            return Ok(Vec::new());
+        }
+    }
+
     // Build glob matcher for patterns (case-insensitive)
     let pattern_matcher = if !patterns.is_empty() {
         Some(build_glob_matcher(patterns)?)
@@ -68,13 +76,25 @@ pub fn apply_filters(
         None
     };
 
-    // Convert types to lowercase for case-insensitive matching
-    let normalized_types: Vec<String> = types.iter().map(|t| t.to_lowercase()).collect();
+    // Parse type strings into TopicType variants (case-insensitive).
+    // Unknown type strings produce no valid variants, causing them to match nothing.
+    let type_filters: Vec<TopicType> = types
+        .iter()
+        .filter_map(|t| t.parse::<TopicType>().ok())
+        .collect();
+
+    // If types were specified but none parsed successfully, there can be no matches.
+    let has_unparseable_types = !types.is_empty() && type_filters.is_empty();
 
     // Filter topics
     let filtered = topics
         .into_iter()
         .filter(|topic| {
+            // If type filters were requested but none were valid, nothing matches.
+            if has_unparseable_types {
+                return false;
+            }
+
             // Check pattern match (OR logic: match any pattern)
             let pattern_match = if let Some(ref matcher) = pattern_matcher {
                 matcher.is_match(&topic.name)
@@ -83,8 +103,8 @@ pub fn apply_filters(
             };
 
             // Check type match (OR logic: match any type)
-            let type_match = if !normalized_types.is_empty() {
-                normalized_types.contains(&topic.topic_type.to_lowercase())
+            let type_match = if !type_filters.is_empty() {
+                type_filters.contains(&topic.topic_type)
             } else {
                 true // No type filter, so pass
             };
@@ -163,7 +183,7 @@ mod tests {
         vec![
             TopicInfo {
                 name: "foo-library".to_string(),
-                topic_type: "library".to_string(),
+                topic_type: TopicType::Library,
                 description: Some("A foo library".to_string()),
                 language: None,
                 additional_files: vec![],
@@ -174,7 +194,7 @@ mod tests {
             },
             TopicInfo {
                 name: "bar-framework".to_string(),
-                topic_type: "framework".to_string(),
+                topic_type: TopicType::Framework,
                 description: Some("A bar framework".to_string()),
                 language: None,
                 additional_files: vec![],
@@ -185,7 +205,7 @@ mod tests {
             },
             TopicInfo {
                 name: "baz-software".to_string(),
-                topic_type: "software".to_string(),
+                topic_type: TopicType::Software,
                 description: Some("Baz software".to_string()),
                 language: None,
                 additional_files: vec![],
@@ -196,7 +216,7 @@ mod tests {
             },
             TopicInfo {
                 name: "foobar-lib".to_string(),
-                topic_type: "library".to_string(),
+                topic_type: TopicType::Library,
                 description: Some("Foobar library".to_string()),
                 language: None,
                 additional_files: vec![],
@@ -207,7 +227,7 @@ mod tests {
             },
             TopicInfo {
                 name: "rust-library".to_string(),
-                topic_type: "library".to_string(),
+                topic_type: TopicType::Library,
                 description: Some("Rust library".to_string()),
                 language: None,
                 additional_files: vec![],
@@ -281,7 +301,7 @@ mod tests {
         let topics = create_test_topics();
         let filtered = apply_filters(topics, &[], &["library".to_string()]).unwrap();
         assert_eq!(filtered.len(), 3); // foo-library, foobar-lib, rust-library
-        assert!(filtered.iter().all(|t| t.topic_type == "library"));
+        assert!(filtered.iter().all(|t| t.topic_type == TopicType::Library));
     }
 
     #[test]
@@ -297,7 +317,7 @@ mod tests {
         assert!(
             filtered
                 .iter()
-                .all(|t| t.topic_type == "library" || t.topic_type == "framework")
+                .all(|t| t.topic_type == TopicType::Library || t.topic_type == TopicType::Framework)
         );
     }
 
@@ -330,7 +350,7 @@ mod tests {
         let topics = create_test_topics();
         let filtered = apply_filters(topics, &[], &["LIBRARY".to_string()]).unwrap();
         assert_eq!(filtered.len(), 3); // Should match despite case difference
-        assert!(filtered.iter().all(|t| t.topic_type == "library"));
+        assert!(filtered.iter().all(|t| t.topic_type == TopicType::Library));
     }
 
     #[test]

@@ -3,6 +3,7 @@
 //! Splits a shell block body into logical commands, handling line continuations.
 
 use super::types::{ShellBlockCommand, ShellBlockError, SourceExcerpt};
+use crate::markdown::compose::parse_utils::strip_blockquote_prefix;
 
 /// Split a shell block body into logical commands.
 ///
@@ -25,8 +26,16 @@ pub(crate) fn split_logical_commands(
     let mut current_start_byte: Option<usize> = None;
     let mut in_continuation = false;
 
-    for (i, (line, line_start)) in physical_lines(body).into_iter().enumerate() {
+    for (i, (raw_line, raw_line_start)) in physical_lines(body).into_iter().enumerate() {
         let line_number = body_start_line + i;
+
+        // Strip any block-quote markers so a block-quoted shell block exposes the
+        // bare command; lines without `>` markers (and their significant leading
+        // whitespace) are returned untouched. The byte offset is advanced past
+        // the stripped markers so spans still index into `body`.
+        let line = strip_blockquote_prefix(raw_line);
+        let line_start = raw_line_start + (raw_line.len() - line.len());
+
         let trimmed = line.trim();
 
         if trimmed.is_empty() {
@@ -157,6 +166,19 @@ mod tests {
         assert_eq!(cmds.len(), 2);
         assert_eq!(cmds[0].raw_command, "echo hello");
         assert_eq!(cmds[1].raw_command, "echo world");
+    }
+
+    #[test]
+    fn strips_blockquote_markers_from_commands() {
+        // Block-quoted body lines expose the bare command, and the physical span
+        // points past the stripped `> ` markers into the real command bytes.
+        let body = "> echo hello\n> echo world\n";
+        let cmds = split_logical_commands(body, 1).unwrap();
+        assert_eq!(cmds.len(), 2);
+        assert_eq!(cmds[0].raw_command, "echo hello");
+        assert_eq!(cmds[1].raw_command, "echo world");
+        assert_eq!(&body[cmds[0].physical_span.clone()], "echo hello");
+        assert_eq!(&body[cmds[1].physical_span.clone()], "echo world");
     }
 
     #[test]

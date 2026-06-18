@@ -23,8 +23,8 @@ use std::path::PathBuf;
 use schematic_define::openapi::ExportOptions;
 use schematic_definitions::apis_by_module;
 use schematic_definitions::registry::get_registries_for_module;
-use schematic_gen::openapi_output::write_openapi_grouped;
-use schematic_gen::postman_output::{write_postman, write_postman_grouped};
+use schematic_gen::export::openapi::write_openapi_grouped;
+use schematic_gen::export::postman::{write_postman, write_postman_grouped};
 
 /// Returns the absolute path to the `schematic/` package area, anchored on
 /// the gen crate's `CARGO_MANIFEST_DIR` so the tests work regardless of the
@@ -216,11 +216,13 @@ fn generated_openapi_no_legacy_per_api_files() {
 fn artificial_analysis_attribution_present_in_all_artifacts() {
     const ATTRIBUTION_URL: &str = "https://artificialanalysis.ai/";
     let root = schematic_root();
+    let schema_path = {
+        let single = root.join("schema/src/artificial_analysis.rs");
+        let split = root.join("schema/src/artificial_analysis/mod.rs");
+        if single.exists() { single } else { split }
+    };
     let artifacts: [(&str, PathBuf); 3] = [
-        (
-            "schema rustdoc",
-            root.join("schema/src/artificial_analysis.rs"),
-        ),
+        ("schema rustdoc", schema_path),
         (
             "OpenAPI grouped doc",
             root.join("openapi/artificial_analysis.json"),
@@ -232,9 +234,8 @@ fn artificial_analysis_attribution_present_in_all_artifacts() {
     ];
 
     for (label, path) in artifacts {
-        let contents = fs::read_to_string(&path).unwrap_or_else(|e| {
-            panic!("read {label} at {} failed: {e}", path.display())
-        });
+        let contents = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {label} at {} failed: {e}", path.display()));
         assert!(
             contents.contains(ATTRIBUTION_URL),
             "{label} ({}) is missing the required Artificial Analysis \

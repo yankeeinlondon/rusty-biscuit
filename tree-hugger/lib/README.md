@@ -190,29 +190,38 @@ for d in diagnostics {
 
 These rules analyze symbol definitions, imports, and references:
 
-| Rule | Severity | Description |
-|------|----------|-------------|
-| `undefined-symbol` | Error | Reference to a symbol not defined, imported, or builtin |
-| `undefined-module` | Warning | Reference to undefined module or namespace |
-| `unused-symbol` | Warning | Symbol defined but never referenced or exported |
-| `unused-import` | Warning | Imported symbol never used in the file |
-| `dead-code` | Warning | Code after unconditional return/throw/panic |
+| Rule | Severity | Description | Default |
+|------|----------|-------------|---------|
+| `undefined-symbol` | Error | Reference to a symbol not defined, imported, or builtin | experimental |
+| `undefined-module` | Warning | Reference to undefined module or namespace | experimental |
+| `unused-symbol` | Warning | Symbol defined but never referenced or exported | experimental |
+| `unused-import` | Warning | Imported symbol never used in the file | off (low confidence) |
+| `dead-code` | Warning | Code after unconditional return/throw/panic | on |
+
+`unused-import` is off by default: without trait/type resolution a syntactic scan
+cannot see imports used only through trait methods (`Write` for `.write_all()`) or
+macros, so it has an irreducible false-positive rate. Enable with `--warn unused-import`.
+The `experimental` rules require `--experimental-semantics`.
 
 ### Pattern Rules
 
 Language-specific pattern matching rules:
 
-| Language | Rule | Description |
-|----------|------|-------------|
-| **Rust** | `unwrap-call` | Explicit `.unwrap()` call |
-| **Rust** | `expect-call` | Explicit `.expect()` call |
-| **Rust** | `dbg-macro` | Debug macro `dbg!()` usage |
-| **JavaScript/TypeScript** | `debugger-statement` | `debugger;` statement |
-| **JavaScript/TypeScript** | `eval-call` | Usage of `eval()` |
-| **Python** | `eval-call` | Usage of `eval()` |
-| **Python** | `exec-call` | Usage of `exec()` |
-| **Python** | `breakpoint-call` | Usage of `breakpoint()` |
-| **PHP** | `eval-call` | Usage of `eval()` |
+| Language | Rule | Description | Default |
+|----------|------|-------------|---------|
+| **Rust** | `unwrap-call` | Explicit `.unwrap()` call | off (`restriction`) |
+| **Rust** | `expect-call` | Explicit `.expect()` call | off (`restriction`) |
+| **Rust** | `dbg-macro` | Debug macro `dbg!()` usage | on |
+| **JavaScript/TypeScript** | `debugger-statement` | `debugger;` statement | on |
+| **JavaScript/TypeScript** | `eval-call` | Usage of `eval()` | on |
+| **Python** | `eval-call` | Usage of `eval()` | on |
+| **Python** | `exec-call` | Usage of `exec()` | on |
+| **Python** | `breakpoint-call` | Usage of `breakpoint()` | on |
+| **PHP** | `eval-call` | Usage of `eval()` | on |
+
+`unwrap-call` and `expect-call` are `restriction`-category rules: the construct is
+valid and deliberate, so they are silent by default. Enable them with `--warn <rule>`,
+`--deny <rule>`, or `--deny category:restriction`.
 
 ### Ignore Directives
 

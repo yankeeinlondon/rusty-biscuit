@@ -102,9 +102,9 @@ impl Drop for TerminalGuard {
 }
 
 /// Redirects fd 1 (`stdout`) to `/dev/tty` for the duration of a
-/// standalone prompt when the process's real stdout is not a TTY
-/// (e.g. when running under `FOO=$(question ...)` command
-/// substitution).
+/// standalone prompt when the process's real stdout is not a TTY but
+/// stderr still is — the shell command-substitution shape
+/// (`FOO=$(question ...)`).
 ///
 /// This is required because `crossterm::cursor::position` — which
 /// `ratatui` calls implicitly when constructing an inline-viewport
@@ -112,6 +112,12 @@ impl Drop for TerminalGuard {
 /// `io::stdout()` directly. If stdout is a pipe, the query never
 /// reaches the terminal and crossterm times out with "The cursor
 /// position could not be read within a normal duration".
+///
+/// When *both* stdout and stderr are piped (the test-harness shape:
+/// `assert_cmd` / `cargo nextest`) the redirect stays inactive so the
+/// subprocess does not leak ANSI escape sequences onto `/dev/tty`,
+/// which would otherwise interleave with the parent runner's own
+/// terminal output and corrupt its progress display.
 ///
 /// On `Drop` the original stdout file descriptor is restored, so the
 /// caller's result-emitting `println!` / `writeln!` calls reach the
@@ -129,13 +135,24 @@ impl StdoutTtyRedirect {
     /// Activates the redirect when stdout is not a TTY.
     ///
     /// Returns an inactive guard (no-op on drop) when stdout is
-    /// already a TTY, when `/dev/tty` cannot be opened, or when any
-    /// of the `dup`/`dup2` calls fail. In those failure modes the
-    /// caller still proceeds — they will see the underlying error
-    /// (e.g. crossterm's cursor-position timeout) rather than a
-    /// confusing redirect-related failure.
+    /// already a TTY, when stderr is *also* not a TTY (the test-harness
+    /// shape: both stdio streams captured by a parent — leaking ANSI
+    /// to `/dev/tty` would corrupt the parent's own progress display),
+    /// when `/dev/tty` cannot be opened, or when any of the
+    /// `dup`/`dup2` calls fail. In those failure modes the caller
+    /// still proceeds — they will see the underlying error (e.g.
+    /// crossterm's cursor-position timeout) rather than a confusing
+    /// redirect-related failure.
+    ///
+    /// The stderr check distinguishes the two piped-stdout scenarios:
+    /// shell command substitution (`FOO=$(question ...)`) inherits
+    /// stderr from the terminal, so the redirect activates and the
+    /// user still sees the prompt; under `assert_cmd` / `cargo nextest`
+    /// stderr is also piped, so the redirect stays disabled and the
+    /// subprocess does not interleave ANSI with the parent runner's
+    /// own terminal output.
     pub(super) fn activate_if_piped() -> Self {
-        if io::stdout().is_terminal() {
+        if io::stdout().is_terminal() || !io::stderr().is_terminal() {
             return Self {
                 saved_fd: None,
                 tty_fd: None,

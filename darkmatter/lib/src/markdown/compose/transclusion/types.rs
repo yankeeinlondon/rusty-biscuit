@@ -1,7 +1,7 @@
 //! Type definitions for the transclusion phase.
 
-use biscuit_terminal::errors::SourceContext;
 use crate::markdown::compose::ComposeSource;
+use biscuit_terminal::errors::SourceContext;
 use std::ops::Range;
 use std::path::PathBuf;
 use thiserror::Error;
@@ -377,6 +377,9 @@ pub enum TransclusionError {
     #[error("Remote URL transclusion is disabled: {url}")]
     UrlExecutionDisabled { url: String },
 
+    #[error("Remote fetch failed for {url}: {reason}")]
+    RemoteFetchFailed { url: String, reason: String },
+
     #[error(
         "Invalid frontmatter assignment on '::file' directive at line {line}: {reason} (value: {raw})"
     )]
@@ -455,7 +458,7 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                     Prose::new(format!(
                         "Invalid {} reference <red><b>{}</b></red> found in:",
                         directive_kind.as_str(),
-                        reference
+                        Prose::escape_text(reference)
                     )),
                     ctx.excerpt_prose(*line, 2, "md"),
                 ];
@@ -480,7 +483,8 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                     ))
                     .body(vec![
                         Prose::new(format!(
-                            "Could not resolve <cyan>{reference}</cyan> at line {line}."
+                            "Could not resolve <cyan>{}</cyan> at line {line}.",
+                            Prose::escape_text(reference)
                         )),
                         Prose::new(
                             "<dim>Note:</dim> Relative transclusions require a file-backed source.",
@@ -495,7 +499,10 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                         "TransclusionError",
                         "unsupported reference type",
                     ))
-                    .body(format!("The reference <cyan>{reference}</cyan> uses an unsupported scheme or syntax."))
+                    .body(format!(
+                        "The reference <cyan>{}</cyan> uses an unsupported scheme or syntax.",
+                        Prose::escape_text(reference)
+                    ))
                     .hint("Supported: <dim>./relative, @/repo, !package, vault:, %, {{ENV}}</dim>")
             }
 
@@ -545,7 +552,7 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                 let body = vec![
                     Prose::new(format!(
                         "Failed to evaluate <cyan>when=\"{}\"</cyan>:",
-                        expr
+                        Prose::escape_text(expr)
                     )),
                     ctx.excerpt_prose(*line, 1, "md"),
                 ];
@@ -556,7 +563,7 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                         "condition evaluation failed",
                     ))
                     .body(body)
-                    .hint(format!("Error: {message}"))
+                    .hint(format!("Error: {}", Prose::escape_text(message)))
             }
 
             TransclusionError::ConditionParse {
@@ -566,19 +573,22 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                 message,
             } => {
                 let body = vec![
-                    Prose::new(format!("Failed to parse <cyan>when=\"{}\"</cyan>:", expr)),
+                    Prose::new(format!(
+                        "Failed to parse <cyan>when=\"{}\"</cyan>:",
+                        Prose::escape_text(expr)
+                    )),
                     ctx.excerpt_prose(*line, 1, "md"),
                 ];
 
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("TransclusionError", "condition parse failed"))
                     .body(body)
-                    .hint(format!("Error: {message}"))
+                    .hint(format!("Error: {}", Prose::escape_text(message)))
             }
 
             TransclusionError::Relevel(message) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("TransclusionError", "re-leveling failed"))
-                .body(message.clone())
+                .body(Prose::escape_text(message))
                 .hint("Check that transcluded headings do not push past H6."),
 
             TransclusionError::UrlExecutionDisabled { url } => StatusBlock::new(StatusState::Error)
@@ -586,8 +596,20 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                     "TransclusionError",
                     "remote transclusion disabled",
                 ))
-                .body(format!("The URL <cyan>{url}</cyan> was blocked by policy."))
+                .body(format!(
+                    "The URL <cyan>{}</cyan> was blocked by policy.",
+                    Prose::escape_text(url)
+                ))
                 .hint("Enable <dim>allow_remote: true</dim> in frontmatter or CLI options."),
+
+            TransclusionError::RemoteFetchFailed { url, reason } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("TransclusionError", "remote fetch failed"))
+                .body(format!(
+                    "Fetching <cyan>{}</cyan> failed: {}",
+                    Prose::escape_text(url),
+                    Prose::escape_text(reason)
+                ))
+                .hint("Check the URL, the allowed-hosts policy, and network availability."),
 
             TransclusionError::InvalidFrontmatterAssignment {
                 ctx,
@@ -598,7 +620,10 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                 let body = vec![
                     Prose::new("Invalid frontmatter override in directive:"),
                     ctx.excerpt_prose(*line, 1, "md"),
-                    Prose::new(format!("<dim>Value:</dim> <red>{}</red>", raw)),
+                    Prose::new(format!(
+                        "<dim>Value:</dim> <red>{}</red>",
+                        Prose::escape_text(raw)
+                    )),
                 ];
 
                 StatusBlock::new(StatusState::Error)
@@ -607,14 +632,14 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                         "invalid frontmatter assignment",
                     ))
                     .body(body)
-                    .hint(format!("Error: {reason}"))
+                    .hint(format!("Error: {}", Prose::escape_text(reason)))
             }
 
             TransclusionError::InvalidReassignedFrontmatterProperty { ctx, line, name } => {
                 let body = vec![
                     Prose::new(format!(
                         "Duplicate assignment to property <red><b>{}</b></red> found in:",
-                        name
+                        Prose::escape_text(name)
                     )),
                     ctx.excerpt_prose(*line, 1, "md"),
                 ];

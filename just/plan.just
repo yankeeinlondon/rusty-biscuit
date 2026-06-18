@@ -15,6 +15,133 @@ cyan := '\033[36m'
 
 ImplementPhasePrompt := "../prompts/implement-phase.md"
 
+plan-implement-review:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo -e "Kicking off a {{ bold }}Plan -> Implement -> Review{{ reset }} cycle"
+    spec="$(just _choose_spec)"
+    spec_file="$(basename "${spec}")"
+    area="$(sniff repo package-area)"
+    root="$(sniff repo root)"
+    dir="$(dirname "${spec}")"
+    fq_path="${root}${area}/${dir}"
+    plan="$(just _derive_plan_name "${spec_file}")"
+    planning_agent="$(just _choose_agent 'Choose the planning Agent')"
+    planning_model=""
+    planning_model_param=""
+    if [[ "${planning_agent}" == "opencode" ]]; then
+        planning_model="$(just _choose_model 'Choose the planning Model for opencode')"
+        planning_model_param="--model ${planning_model}"
+    fi
+    implementing_agent="$(just _choose_agent 'Choose the Implementing Agent')"
+    implementing_model=""
+    implementing_model_param=""
+    if [[ "${implementing_agent}" == "opencode" ]]; then
+        implementing_model="$(just _choose_model 'Choose the implementing Model for opencode')"
+        implementing_model_param="--model ${implementing_model}"
+    fi
+    reviewing_agent="$(just _choose_agent 'Choose the reviewing Agent')"
+    reviewing_model=""
+    reviewing_model_param=""
+    if [[ "${reviewing_agent}" == "opencode" ]]; then
+        reviewing_model="$(just _choose_model 'Choose the reviewing Model for opencode')"
+        reviewing_model_param="--model ${reviewing_model}"
+    fi
+    echo
+    echo -e "{{ bold }}Strategy:{{ reset }}"
+    echo
+    echo -e "1. we will plan the {{ blue }}${spec}{{ reset }} file (with {{ yellow }}${planning_agent}{{ reset }}); save to {{ blue }}${dir}/${plan}{{ reset }}"
+    echo -e "2. we will then {{ italic }}implement{{ reset }} the plan using the {{ yellow }}${implementing_agent}{{ reset }} agent"
+    echo -e "3. and finally we will review the implementation with {{ yellow }}${reviewing_agent}{{ reset }} agent"
+    echo -e "path: ${fq_path}"
+    echo
+    if [[ "$(just _confirm "Ready to start?")" == "n" ]]; then
+        echo
+        echo -e "Ok bye"
+        exit 0
+    fi
+    claudine compose @prompts/plan.md -y spec="${spec}" plan="${plan}" --${planning_agent} ${planning_model_param}
+    plan_path="${fq_path}/${plan}"
+    total_phases="$(md get "${plan_path}" phases)"
+    if [[ -z "${total_phases}" ]] || ! [[ "${total_phases}" =~ ^[0-9]+$ ]]; then
+        echo -e "{{ red }}{{ bold }}ERROR:{{ reset }} Expected a numeric 'phases' frontmatter field in {{ blue }}${plan_path}{{ reset }} but got: '{{ dim }}${total_phases}{{ reset }}'" >&2
+        exit 1
+    fi
+    echo
+    echo -e "Detected {{ yellow }}${total_phases}{{ reset }} phases in the plan"
+    echo
+    current=1
+    while (( current <= total_phases )); do
+        claudine compose @prompts/implement-phase.md -y plan="${dir}/${plan}" --${implementing_agent} ${implementing_model_param} phase="${current}" total_phases="${total_phases}"
+        ((current++))
+    done
+    claudine compose @prompts/review-feature.md -y spec="${spec}" iteration=1 --${reviewing_agent} ${reviewing_model_param}
+    echo
+    echo -e "The specification file {{ blue }}${spec}{{ reset }} drove a plan, implementation, and review."
+    echo
+    echo -e "  - {{ bold }}Review:{{ reset }} $(just _link "${dir}/review-1.md" "$(sniff repo root)/${dir}/review-1.md")"
+    echo
+
+implement-review:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    plan="$(just _choose_plan)"
+    dir="$(dirname "${plan}")"
+    spec="$(just _get_spec_doc "${dir}")"
+
+    implementing_agent="$(just _choose_agent 'Choose the Implementing Agent')"
+    implementing_model=""
+    implementing_model_param=""
+    if [[ "${implementing_agent}" == "opencode" ]]; then
+        implementing_model="$(just _choose_model 'Choose the implementing Model for opencode')"
+        implementing_model_param="--model ${implementing_model}"
+    fi
+    reviewing_agent="$(just _choose_agent 'Choose the reviewing Agent')"
+    reviewing_model=""
+    reviewing_model_param=""
+    if [[ "${reviewing_agent}" == "opencode" ]]; then
+        reviewing_model="$(just _choose_model 'Choose the reviewing Model for opencode')"
+        reviewing_model_param="--model ${reviewing_model}"
+    fi
+    echo
+    echo -e "{{ bold }}Strategy:{{ reset }}"
+    echo
+    echo -e "1. we will {{ italic }}implement{{ reset }} the plan {{ blue }}${plan}{{ reset }} using the {{ yellow }}${implementing_agent}{{ reset }} agent"
+    echo -e "2. and then we will review the implementation with {{ yellow }}${reviewing_agent}{{ reset }} agent"
+    echo
+    echo -e "Based on the {{ blue }}${spec}{{ reset }} specification"
+    echo
+    if [[ "$(just _confirm "Ready to start?")" == "n" ]]; then
+        echo
+        echo -e "Ok bye"
+        exit 0
+    fi
+    total_phases="$(md get "${plan}" phases)"
+    if [[ -z "${total_phases}" ]] || ! [[ "${total_phases}" =~ ^[0-9]+$ ]]; then
+        echo -e "{{ red }}{{ bold }}ERROR:{{ reset }} Expected a numeric 'phases' frontmatter field in {{ blue }}${plan}{{ reset }} but got: '{{ dim }}${total_phases}{{ reset }}'" >&2
+        exit 1
+    fi
+    memory="$(md get "${plan}" memory)"
+    start_phase="$(md get "${plan}" start_phase)"
+    [[ -z "${start_phase}" ]] && start_phase=1
+    if (( start_phase > total_phases )); then
+        echo -e "{{ red }}start_phase (${start_phase}) exceeds total phases (${total_phases}) — aborting.{{ reset }}"
+        exit 1
+    fi
+    echo -e "Starting at {{ yellow }}phase ${start_phase}{{ reset }} of {{ yellow }}${total_phases}{{ reset }}"
+    current="${start_phase}"
+    while (( current <= total_phases )); do
+        claudine compose @prompts/implement-phase.md -y plan="${plan}" --${implementing_agent} ${implementing_model_param} phase="${current}" total_phases="${total_phases}" memory="${memory}"
+        ((current++))
+    done
+    claudine compose @prompts/review-feature.md -y spec="${spec}" iteration=1 --${reviewing_agent} ${reviewing_model_param}
+    echo
+    echo -e "The specification file {{ blue }}${spec}{{ reset }} drove implementation and review."
+    echo
+    echo -e "  - {{ bold }}Review:{{ reset }} $(just _link "${dir}/review-1.md" "$(sniff repo root)/${dir}/review-1.md")"
+    echo
+
 implement-spec filter="" agent="" model="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -46,7 +173,12 @@ implement-plan filter="":
     #!/usr/bin/env bash
     set -euo pipefail
 
-    plan="$(just _choose_plan "{{ filter }}")"
+    # If the argument is an existing file path, use it directly
+    if [[ -f "{{ filter }}" ]]; then
+        plan="{{ filter }}"
+    else
+        plan="$(just _choose_plan "{{ filter }}")"
+    fi
     if [[ -z "${plan}" ]]; then
         echo -e "{{ red }}No plan file selected — aborting.{{ reset }}" >&2
         exit 1
@@ -133,7 +265,7 @@ plan spec="" design="" review="":
         # Step 2: Choose target document and delegate to appropriate planner
         case "${area}" in
             Feature)
-                doc="$(fd -g '*{spec,design}.md' features/ --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a spec or design file')"
+                doc="$(fd -g '*{spec,design}*.md' features/ --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a spec or design file')"
                 if [[ -z "${doc}" ]]; then
                     echo -e "{{ red }}No document selected — aborting.{{ reset }}" >&2
                     exit 1
@@ -149,7 +281,7 @@ plan spec="" design="" review="":
                 just plan-feature "${spec_file}" "${design_file}"
                 ;;
             Fix)
-                doc="$(fd -g '*{spec,design}.md' fixes/ --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a spec or design file')"
+                doc="$(fd -g '*{spec,design}*.md' fixes/ --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a spec or design file')"
                 if [[ -z "${doc}" ]]; then
                     echo -e "{{ red }}No document selected — aborting.{{ reset }}" >&2
                     exit 1
@@ -168,7 +300,7 @@ plan spec="" design="" review="":
                 just plan-review
                 ;;
             'Feature (unscheduled)')
-                doc="$(fd -g '*{spec,design}.md' features/_unscheduled/ --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a spec or design file')"
+                doc="$(fd -g '*{spec,design}*.md' features/_unscheduled/ --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a spec or design file')"
                 if [[ -z "${doc}" ]]; then
                     echo -e "{{ red }}No document selected — aborting.{{ reset }}" >&2
                     exit 1
@@ -184,7 +316,7 @@ plan spec="" design="" review="":
                 just plan-feature "${spec_file}" "${design_file}"
                 ;;
             'Fix (unscheduled)')
-                doc="$(fd -g '*{spec,design}.md' fixes/_unscheduled/ --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a spec or design file')"
+                doc="$(fd -g '*{spec,design}*.md' fixes/_unscheduled/ --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a spec or design file')"
                 if [[ -z "${doc}" ]]; then
                     echo -e "{{ red }}No document selected — aborting.{{ reset }}" >&2
                     exit 1
@@ -339,7 +471,8 @@ plan-feature spec="" design="":
         exit 0
     fi
     echo
-    claudine compose @prompts/plan.md -y --${agent} spec="${spec_file}" design="${design_file}" ${model} || (
+    plan="$(just _derive_plan_name "${spec_file}")"
+    claudine compose @prompts/plan.md -y --${agent} spec="${spec_file}" design="${design_file}" plan="${plan}" ${model} || (
         echo
         echo "Planning failed for {{ bold }}${dir}{{ reset }}"
         echo
@@ -348,6 +481,21 @@ plan-feature spec="" design="":
     )
     echo
     echo -e "🎉 planning is complete!"
+
+    # Offer to implement the newly created plan
+    plan_path="${dir}/${plan}"
+    if [[ -f "${plan_path}" ]]; then
+        echo
+        echo -e "A plan file was created at {{ blue }}$(just _link "${plan_path}" "$(just _abs_path "${plan_path}")"){{ reset }}"
+        if [[ "$(just _confirm "Do you want to implement this plan phase by phase now?")" == "y" ]]; then
+            echo
+            just implement-plan "${plan_path}"
+        else
+            echo
+            echo -e "Ok. You can implement it later with: {{ yellow }}just implement-plan ${plan_path}{{ reset }}"
+        fi
+    fi
+    echo
 
 # create a plan from a review
 plan-review review="":

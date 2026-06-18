@@ -39,7 +39,7 @@ pub struct FileListArgs {
     pub no_error: bool,
 
     /// Message to display when no results found
-    #[arg(long, value_name = "MESSAGE")]
+    #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
     pub on_error: Option<String>,
 
     /// Filter paths by substring match (OR logic)
@@ -299,12 +299,6 @@ pub enum Commands {
 
     /// Show only repository/monorepo structure
     Repo {
-        /// Query package registries for latest dependency versions and report available updates
-        #[arg(long)]
-        latest_versions: bool,
-        /// Filter packages by name (or @area); prefix with ! to exclude
-        filter: Vec<String>,
-
         #[command(subcommand)]
         repo_subcommand: Option<RepoSubcommand>,
     },
@@ -337,6 +331,18 @@ pub enum Commands {
         /// Show only documents that have a blast_radius frontmatter key
         #[arg(long)]
         blast_radius: bool,
+
+        /// Output only relative file paths (no metadata, fastest mode)
+        #[arg(long)]
+        paths_only: bool,
+
+        /// Filter to documents in a specific package area (repeatable, OR logic)
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Vec<String>,
+
+        /// Filter to documents in a specific package (repeatable, OR logic)
+        #[arg(long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
+        package: Vec<String>,
 
         /// Filter documents by substring match on filepath/filename
         filter: Vec<String>,
@@ -437,7 +443,7 @@ pub enum Commands {
         no_error: bool,
 
         /// Message to display when no results found
-        #[arg(long, value_name = "MESSAGE")]
+        #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
         on_error: Option<String>,
     },
 
@@ -632,9 +638,6 @@ impl Commands {
             Commands::Filesystem {
                 latest_versions: true,
                 ..
-            } | Commands::Repo {
-                latest_versions: true,
-                ..
             }
         )
     }
@@ -648,13 +651,18 @@ impl Commands {
                 src,
                 has_prompt,
                 blast_radius,
+                package_area,
+                package,
                 filter,
+                ..
             } => DocsFilter {
                 readme: *readme,
                 plan: *plan,
                 src: *src,
                 has_prompt: *has_prompt,
                 blast_radius: *blast_radius,
+                package_area: package_area.clone(),
+                package: package.clone(),
                 filter: filter.clone(),
             },
             _ => DocsFilter::default(),
@@ -674,27 +682,15 @@ impl Commands {
     /// Normalize a Repo command into a RepoAction for dispatch.
     pub fn to_repo_action(&self) -> Option<RepoAction> {
         match self {
-            Commands::Repo {
-                latest_versions,
-                filter,
-                repo_subcommand,
-            } => Some(match repo_subcommand {
-                None => RepoAction::Structure {
-                    filter: filter.clone(),
-                    latest_versions: *latest_versions,
-                    package: None,
-                    package_area: None,
-                },
+            Commands::Repo { repo_subcommand } => Some(match repo_subcommand {
+                None => RepoAction::Name,
                 Some(RepoSubcommand::Structure {
-                    filter: sub_filter,
+                    filter,
+                    latest_versions,
                     package,
                     package_area,
                 }) => RepoAction::Structure {
-                    filter: if sub_filter.is_empty() {
-                        filter.clone()
-                    } else {
-                        sub_filter.clone()
-                    },
+                    filter: filter.clone(),
                     latest_versions: *latest_versions,
                     package: package.clone(),
                     package_area: package_area.clone(),
@@ -705,12 +701,16 @@ impl Commands {
                     compact,
                     package,
                     package_area,
+                    branch,
+                    worktree,
                 }) => RepoAction::GitStatus {
                     history: *history,
                     refresh_remotes: *refresh_remotes,
                     compact: *compact,
                     package: package.clone(),
                     package_area: package_area.clone(),
+                    branch: branch.clone(),
+                    worktree: worktree.clone(),
                 },
                 Some(RepoSubcommand::Hash { sha }) => RepoAction::Hash { sha: sha.clone() },
                 Some(RepoSubcommand::StagedFiles(args)) => RepoAction::StagedFiles(args.clone()),
@@ -733,18 +733,20 @@ impl Commands {
                 },
                 Some(RepoSubcommand::Deps {
                     ui,
+                    svg,
                     filter: sub_filter,
                     package,
                     package_area,
+                    width,
+                    orientation,
                 }) => RepoAction::Deps {
-                    filter: if sub_filter.is_empty() {
-                        filter.clone()
-                    } else {
-                        sub_filter.clone()
-                    },
+                    filter: sub_filter.clone(),
                     ui: *ui,
+                    svg: *svg,
                     package: package.clone(),
                     package_area: package_area.clone(),
+                    width: width.clone(),
+                    orientation: orientation.map(|o| o.as_str().to_string()),
                 },
                 Some(RepoSubcommand::Packages {
                     filter: sub_filter,
@@ -752,12 +754,10 @@ impl Commands {
                     package_area,
                     md,
                     list,
+                    no_error,
+                    on_error,
                 }) => RepoAction::Packages {
-                    filter: if sub_filter.is_empty() {
-                        filter.clone()
-                    } else {
-                        sub_filter.clone()
-                    },
+                    filter: sub_filter.clone(),
                     package: package.clone(),
                     package_area: package_area.clone(),
                     format: if *md {
@@ -767,6 +767,8 @@ impl Commands {
                     } else {
                         PackagesFormat::Csv
                     },
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
                 },
                 Some(RepoSubcommand::PackageAreas {
                     filter: sub_filter,
@@ -774,12 +776,10 @@ impl Commands {
                     package_area,
                     md,
                     list,
+                    no_error,
+                    on_error,
                 }) => RepoAction::PackageAreas {
-                    filter: if sub_filter.is_empty() {
-                        filter.clone()
-                    } else {
-                        sub_filter.clone()
-                    },
+                    filter: sub_filter.clone(),
                     package: package.clone(),
                     package_area: package_area.clone(),
                     format: if *md {
@@ -789,6 +789,8 @@ impl Commands {
                     } else {
                         PackagesFormat::Csv
                     },
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
                 },
                 Some(RepoSubcommand::Package { no_error, on_error }) => RepoAction::Package {
                     no_error: *no_error,
@@ -800,16 +802,16 @@ impl Commands {
                         on_error: on_error.clone(),
                     }
                 }
+                Some(RepoSubcommand::Area { no_error, on_error }) => RepoAction::Area {
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
+                },
                 Some(RepoSubcommand::DirtyPackages {
                     filter: sub_filter,
                     package,
                     package_area,
                 }) => RepoAction::DirtyPackages {
-                    filter: if sub_filter.is_empty() {
-                        filter.clone()
-                    } else {
-                        sub_filter.clone()
-                    },
+                    filter: sub_filter.clone(),
                     package: package.clone(),
                     package_area: package_area.clone(),
                 },
@@ -818,11 +820,7 @@ impl Commands {
                     package,
                     package_area,
                 }) => RepoAction::DirtyPackageAreas {
-                    filter: if sub_filter.is_empty() {
-                        filter.clone()
-                    } else {
-                        sub_filter.clone()
-                    },
+                    filter: sub_filter.clone(),
                     package: package.clone(),
                     package_area: package_area.clone(),
                 },
@@ -831,11 +829,7 @@ impl Commands {
                     package,
                     package_area,
                 }) => RepoAction::StagedPackages {
-                    filter: if sub_filter.is_empty() {
-                        filter.clone()
-                    } else {
-                        sub_filter.clone()
-                    },
+                    filter: sub_filter.clone(),
                     package: package.clone(),
                     package_area: package_area.clone(),
                 },
@@ -844,11 +838,7 @@ impl Commands {
                     package,
                     package_area,
                 }) => RepoAction::StagedPackageAreas {
-                    filter: if sub_filter.is_empty() {
-                        filter.clone()
-                    } else {
-                        sub_filter.clone()
-                    },
+                    filter: sub_filter.clone(),
                     package: package.clone(),
                     package_area: package_area.clone(),
                 },
@@ -857,11 +847,7 @@ impl Commands {
                     package,
                     package_area,
                 }) => RepoAction::UnstagedPackages {
-                    filter: if sub_filter.is_empty() {
-                        filter.clone()
-                    } else {
-                        sub_filter.clone()
-                    },
+                    filter: sub_filter.clone(),
                     package: package.clone(),
                     package_area: package_area.clone(),
                 },
@@ -870,11 +856,7 @@ impl Commands {
                     package,
                     package_area,
                 }) => RepoAction::UnstagedPackageAreas {
-                    filter: if sub_filter.is_empty() {
-                        filter.clone()
-                    } else {
-                        sub_filter.clone()
-                    },
+                    filter: sub_filter.clone(),
                     package: package.clone(),
                     package_area: package_area.clone(),
                 },
@@ -954,6 +936,13 @@ impl Commands {
                     no_error: *no_error,
                     on_error: on_error.clone(),
                 },
+                Some(RepoSubcommand::Worktrees { md, list, csv }) => RepoAction::Worktrees {
+                    md: *md,
+                    list: *list,
+                    csv: *csv,
+                    verbose: false,
+                },
+                Some(RepoSubcommand::Name) => RepoAction::Name,
             }),
             _ => None,
         }
@@ -973,6 +962,10 @@ pub struct DocsFilter {
     pub has_prompt: bool,
     /// Show only documents that have a blast_radius frontmatter key.
     pub blast_radius: bool,
+    /// Package areas to include (OR logic); empty means no filter.
+    pub package_area: Vec<String>,
+    /// Package names to include (OR logic); empty means no filter.
+    pub package: Vec<String>,
     /// Substring filter on filepath/filename (case-insensitive).
     pub filter: Vec<String>,
 }
@@ -1110,9 +1103,14 @@ Output modes:
 ";
 
 pub const REPO_AFTER_HELP: &str = "\
+Identity:
+  sniff repo name                     Repository name (plain text)
+  sniff repo name -v                  Name + version + language or package count
+
 Structure:
-  sniff repo                          Show repository/monorepo structure
-  sniff repo biscuit darkmatter       Filter to packages matching \"biscuit\" or \"darkmatter\"
+  sniff repo structure                Show repository/monorepo structure
+  sniff repo structure biscuit darkmatter
+                                      Filter to packages matching \"biscuit\" or \"darkmatter\"
   sniff repo structure @sniff         Filter to packages in \"sniff\" area
 
 Git:
@@ -1150,7 +1148,8 @@ Languages:
 Dependencies:
   sniff repo deps                     Text dependency list
   sniff repo deps --ui                Mermaid dependency diagram
-  sniff repo --latest-versions        Check registries for updates
+  sniff repo structure --latest-versions
+                                      Check registries for updates
 ";
 
 pub const COMPLETIONS_HELP: &str = "\
@@ -1264,6 +1263,34 @@ mod tests {
         }
 
         #[test]
+        fn docs_package_area_and_package_flags_parse() {
+            let cli = parse_args(&[
+                "docs",
+                "--package-area",
+                "sniff",
+                "--package-area",
+                "claudine",
+                "--package",
+                "sniff-lib",
+            ])
+            .unwrap();
+            if let Some(Commands::Docs {
+                package_area,
+                package,
+                ..
+            }) = cli.command
+            {
+                assert_eq!(
+                    package_area,
+                    vec!["sniff".to_string(), "claudine".to_string()]
+                );
+                assert_eq!(package, vec!["sniff-lib".to_string()]);
+            } else {
+                panic!("Expected Docs command");
+            }
+        }
+
+        #[test]
         fn files_association_filter_parse() {
             let cli = parse_args(&["files", "--association", "documentation"]).unwrap();
             if let Some(Commands::Files {
@@ -1276,19 +1303,37 @@ mod tests {
         }
 
         #[test]
-        fn repo_flags_and_filter_parse() {
-            let cli = parse_args(&["repo", "--latest-versions", "@sniff"]).unwrap();
+        fn repo_structure_flags_and_filter_parse() {
+            let cli = parse_args(&["repo", "structure", "--latest-versions", "@sniff"]).unwrap();
             if let Some(Commands::Repo {
-                filter,
-                latest_versions,
-                ..
+                repo_subcommand:
+                    Some(RepoSubcommand::Structure {
+                        filter,
+                        latest_versions,
+                        ..
+                    }),
             }) = cli.command
             {
                 assert!(latest_versions);
                 assert_eq!(filter, vec!["@sniff".to_string()]);
             } else {
-                panic!("Expected Repo command");
+                panic!("Expected Repo structure command");
             }
+        }
+
+        #[test]
+        fn repo_unknown_positional_errors() {
+            let result = parse_args(&["repo", "dfd"]);
+            assert!(result.is_err(), "Expected error for unknown subcommand");
+        }
+
+        #[test]
+        fn repo_no_subcommand_is_name() {
+            let cli = parse_args(&["repo"]).unwrap();
+            let Some(cmd) = &cli.command else {
+                panic!("Expected Repo command")
+            };
+            assert!(matches!(cmd.to_repo_action(), Some(RepoAction::Name)));
         }
 
         #[test]
@@ -1618,8 +1663,6 @@ mod tests {
             );
             assert_eq!(
                 Commands::Repo {
-                    latest_versions: false,
-                    filter: vec![],
                     repo_subcommand: None,
                 }
                 .to_output_filter(),
@@ -1703,14 +1746,15 @@ mod tests {
 
         #[test]
         fn repo_accessors_work() {
+            // Structure with filter and latest_versions
             let cmd = Commands::Repo {
-                latest_versions: true,
-                filter: vec!["biscuit".to_string()],
-                repo_subcommand: None,
+                repo_subcommand: Some(RepoSubcommand::Structure {
+                    filter: vec!["biscuit".to_string()],
+                    latest_versions: true,
+                    package: None,
+                    package_area: None,
+                }),
             };
-
-            assert!(cmd.latest_versions());
-            // Normalization captures filter
             if let Some(RepoAction::Structure {
                 filter,
                 latest_versions,
@@ -1723,15 +1767,16 @@ mod tests {
                 panic!("Expected Structure action");
             }
 
-            // Subcommand filter takes precedence
+            // Deps subcommand carries its own filter
             let cmd = Commands::Repo {
-                latest_versions: false,
-                filter: vec!["top-level".to_string()],
                 repo_subcommand: Some(RepoSubcommand::Deps {
                     ui: true,
+                    svg: false,
                     filter: vec!["sub-level".to_string()],
                     package: None,
                     package_area: None,
+                    width: None,
+                    orientation: None,
                 }),
             };
             if let Some(RepoAction::Deps { filter, ui, .. }) = cmd.to_repo_action() {
@@ -1741,26 +1786,7 @@ mod tests {
                 panic!("Expected Deps action");
             }
 
-            // Falls back to top-level filter when subcommand has none
             let cmd = Commands::Repo {
-                latest_versions: false,
-                filter: vec!["top-level".to_string()],
-                repo_subcommand: Some(RepoSubcommand::Deps {
-                    ui: false,
-                    filter: vec![],
-                    package: None,
-                    package_area: None,
-                }),
-            };
-            if let Some(RepoAction::Deps { filter, .. }) = cmd.to_repo_action() {
-                assert_eq!(filter, vec!["top-level".to_string()]);
-            } else {
-                panic!("Expected Deps action");
-            }
-
-            let cmd = Commands::Repo {
-                latest_versions: false,
-                filter: vec![],
                 repo_subcommand: Some(RepoSubcommand::RecentCommits {
                     period: Some("1w".to_string()),
                     actions: vec![RecentCommitActionArg::Feat, RecentCommitActionArg::Fix],
@@ -1792,12 +1818,17 @@ mod tests {
                 src: true,
                 has_prompt: false,
                 blast_radius: false,
+                paths_only: false,
+                package_area: vec!["sniff".to_string()],
+                package: vec!["sniff-lib".to_string()],
                 filter: vec!["homelab".to_string()],
             };
             let filter = docs.docs_filter();
             assert!(filter.readme);
             assert!(filter.src);
             assert!(!filter.blast_radius);
+            assert_eq!(filter.package_area, vec!["sniff".to_string()]);
+            assert_eq!(filter.package, vec!["sniff-lib".to_string()]);
             assert_eq!(filter.filter, vec!["homelab".to_string()]);
         }
 
@@ -1857,8 +1888,16 @@ mod tests {
             let git = parse_args(&["repo", "git-status", "--refresh-remotes"]).unwrap();
             assert!(git.command.as_ref().is_some_and(Commands::refresh_remotes));
 
-            let repo = parse_args(&["repo", "--latest-versions"]).unwrap();
-            assert!(repo.command.as_ref().is_some_and(Commands::latest_versions));
+            let repo = parse_args(&["repo", "structure", "--latest-versions"]).unwrap();
+            assert!(matches!(
+                repo.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::Structure {
+                        latest_versions: true,
+                        ..
+                    }),
+                })
+            ));
         }
     }
 
@@ -2023,7 +2062,7 @@ mod tests {
                 ..
             }) = cli.command
             {
-                assert_eq!(remote, "origin");
+                assert_eq!(remote, Some("origin".to_string()));
             } else {
                 panic!("Expected repo remote");
             }
@@ -2073,17 +2112,97 @@ mod tests {
                 panic!("Expected repo worktree --on-error");
             }
         }
+
+        #[test]
+        fn repo_worktrees_parses() {
+            let cli = parse_args(&["repo", "worktrees"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Worktrees { md, list, csv }),
+                ..
+            }) = cli.command
+            {
+                assert!(!md);
+                assert!(!list);
+                assert!(!csv);
+            } else {
+                panic!("Expected repo worktrees");
+            }
+        }
+
+        #[test]
+        fn repo_worktrees_md_parses() {
+            let cli = parse_args(&["repo", "worktrees", "--md"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Worktrees { md, list, csv }),
+                ..
+            }) = cli.command
+            {
+                assert!(md);
+                assert!(!list);
+                assert!(!csv);
+            } else {
+                panic!("Expected repo worktrees --md");
+            }
+        }
+
+        #[test]
+        fn repo_worktrees_list_parses() {
+            let cli = parse_args(&["repo", "worktrees", "--list"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Worktrees { md, list, csv }),
+                ..
+            }) = cli.command
+            {
+                assert!(!md);
+                assert!(list);
+                assert!(!csv);
+            } else {
+                panic!("Expected repo worktrees --list");
+            }
+        }
+
+        #[test]
+        fn repo_worktrees_csv_parses() {
+            let cli = parse_args(&["repo", "worktrees", "--csv"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Worktrees { md, list, csv }),
+                ..
+            }) = cli.command
+            {
+                assert!(!md);
+                assert!(!list);
+                assert!(csv);
+            } else {
+                panic!("Expected repo worktrees --csv");
+            }
+        }
+
+        #[test]
+        fn repo_worktrees_verbose_global_flag() {
+            let cli = parse_args(&["repo", "worktrees", "-v"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::Worktrees { .. }),
+                    ..
+                })
+            ));
+            assert_eq!(cli.verbose, 1);
+        }
     }
 
     mod repo_action_normalization {
         use super::*;
 
         #[test]
-        fn to_repo_action_structure_default() {
+        fn to_repo_action_structure() {
             let cmd = Commands::Repo {
-                latest_versions: true,
-                filter: vec!["biscuit".to_string()],
-                repo_subcommand: None,
+                repo_subcommand: Some(RepoSubcommand::Structure {
+                    filter: vec!["biscuit".to_string()],
+                    latest_versions: true,
+                    package: None,
+                    package_area: None,
+                }),
             };
             match cmd.to_repo_action() {
                 Some(RepoAction::Structure {
@@ -2099,16 +2218,24 @@ mod tests {
         }
 
         #[test]
+        fn to_repo_action_none_is_name() {
+            let cmd = Commands::Repo {
+                repo_subcommand: None,
+            };
+            assert!(matches!(cmd.to_repo_action(), Some(RepoAction::Name)));
+        }
+
+        #[test]
         fn to_repo_action_git_status() {
             let cmd = Commands::Repo {
-                latest_versions: false,
-                filter: vec![],
                 repo_subcommand: Some(RepoSubcommand::GitStatus {
                     history: 25,
                     refresh_remotes: true,
                     compact: true,
                     package: Some("homelab".to_string()),
                     package_area: None,
+                    branch: None,
+                    worktree: None,
                 }),
             };
             match cmd.to_repo_action() {
@@ -2131,8 +2258,6 @@ mod tests {
         #[test]
         fn to_repo_action_pr() {
             let cmd = Commands::Repo {
-                latest_versions: false,
-                filter: vec![],
                 repo_subcommand: Some(RepoSubcommand::Pr {
                     status: sniff::remote::PullRequestState::Merged,
                 }),
@@ -2149,8 +2274,6 @@ mod tests {
         #[test]
         fn to_repo_action_worktree() {
             let cmd = Commands::Repo {
-                latest_versions: false,
-                filter: vec![],
                 repo_subcommand: Some(RepoSubcommand::Worktree {
                     no_error: true,
                     on_error: Some("msg".to_string()),
@@ -2162,6 +2285,31 @@ mod tests {
                     assert_eq!(on_error, Some("msg".to_string()));
                 }
                 _ => panic!("Expected Worktree action"),
+            }
+        }
+
+        #[test]
+        fn to_repo_action_worktrees() {
+            let cmd = Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Worktrees {
+                    md: false,
+                    list: true,
+                    csv: false,
+                }),
+            };
+            match cmd.to_repo_action() {
+                Some(RepoAction::Worktrees {
+                    md,
+                    list,
+                    csv,
+                    verbose,
+                }) => {
+                    assert!(!md);
+                    assert!(list);
+                    assert!(!csv);
+                    assert!(!verbose);
+                }
+                _ => panic!("Expected Worktrees action"),
             }
         }
     }
@@ -2213,6 +2361,24 @@ mod tests {
         fn blast_radius_list_csv_conflict() {
             let result = parse_args(&["blast-radius", "--list", "--csv"]);
             assert!(result.is_err(), "--list and --csv should conflict");
+        }
+
+        #[test]
+        fn repo_worktrees_list_csv_conflict() {
+            let result = parse_args(&["repo", "worktrees", "--list", "--csv"]);
+            assert!(result.is_err(), "--list and --csv should conflict");
+        }
+
+        #[test]
+        fn repo_worktrees_md_format_conflicts() {
+            assert!(
+                parse_args(&["repo", "worktrees", "--md", "--list"]).is_err(),
+                "--md and --list should conflict"
+            );
+            assert!(
+                parse_args(&["repo", "worktrees", "--md", "--csv"]).is_err(),
+                "--md and --csv should conflict"
+            );
         }
 
         #[test]

@@ -1,0 +1,37 @@
+[package]
+name = "claudine-contract"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+description = "InferenceAdapter backed by Claudine non-interactive, tool-free agentic-CLI sessions"
+
+[lib]
+name = "claudine_contract"
+path = "src/lib.rs"
+
+[dependencies]
+# Internal
+biscuit-contract = { path = "../../biscuit-contract/lib" }
+claudine = { path = "../lib" }
+
+# Trait object-safety (matches biscuit-contract's #[async_trait] Send bound)
+async-trait = "0.1"
+
+# Process spawning + async I/O for non-interactive sessions
+tokio = { version = "1", features = ["process", "io-util", "rt", "macros", "time", "sync"] }
+
+# Structured-output schema + payload values, and adapter-owned JSON Schema validation
+serde_json = "1.0"
+jsonschema = { version = "0.42", default-features = false }
+
+# Filesystem isolation for the session working directory
+tempfile = "3"
+
+# Adapter-internal error type, mapped to InferenceError at the trait boundary
+thiserror = "2.0"
+
+# Redacted diagnostics (secrets never leave tracing)
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "process", "io-util", "time", "sync"] }

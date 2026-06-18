@@ -63,7 +63,7 @@ Recommendation: make the CLI duplicate check operate on effective hotkeys, not j
 Passed:
 
 ```text
-cargo test -p tui-chrome -p tui-chrome-cli
+cargo test -p biscuit-tui -p biscuit-tui-cli
 ```
 
 ## Production Readiness

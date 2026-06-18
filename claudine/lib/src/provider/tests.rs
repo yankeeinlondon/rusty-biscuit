@@ -1028,8 +1028,13 @@ fn provider_field_matches_registry_key() {
 
 /// The OnceLock-backed registry array must have exactly one slot per
 /// [`Provider`] variant.
+///
+/// Nextest runs each test in its own process, so the `OnceLock` starts
+/// uninitialized — we must trigger lazy initialization via
+/// [`provider_info`] before reading `REGISTRY.get()`.
 #[test]
 fn registry_array_length_matches_variant_count() {
+    let _ = provider_info(PROVIDERS_DISPLAY_ORDER[0]);
     let registry = super::registry::REGISTRY
         .get()
         .expect("registry initialized");
@@ -1115,6 +1120,140 @@ fn config_paths_have_primary_user_entry() {
 // ---------------------------------------------------------------------------
 // Review 4 / Phase 1: serializable catalog half (Finding 1)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Phase 2: system-prompt delivery spec invariants
+// ---------------------------------------------------------------------------
+
+/// The affected providers (Gemini, Codex, Qwen) must use the new
+/// spec-driven delivery variants so the wrap layer can dispatch without
+/// HOME redirect.
+#[test]
+fn gemini_system_prompt_uses_env_var_file() {
+    let info = provider_info(Provider::Gemini);
+    assert!(
+        matches!(
+            info.system_prompt.append.interactive,
+            super::SystemPromptDelivery::EnvVarFile {
+                env_var: "GEMINI_SYSTEM_MD"
+            }
+        ),
+        "Gemini append interactive must be EnvVarFile(GEMINI_SYSTEM_MD)"
+    );
+    assert!(
+        matches!(
+            info.system_prompt.append.non_interactive,
+            super::SystemPromptDelivery::EnvVarFile {
+                env_var: "GEMINI_SYSTEM_MD"
+            }
+        ),
+        "Gemini append non-interactive must be EnvVarFile(GEMINI_SYSTEM_MD)"
+    );
+    assert!(
+        matches!(
+            info.system_prompt.replace.interactive,
+            super::SystemPromptDelivery::EnvVarFile {
+                env_var: "GEMINI_SYSTEM_MD"
+            }
+        ),
+        "Gemini replace interactive must be EnvVarFile(GEMINI_SYSTEM_MD)"
+    );
+    assert!(
+        matches!(
+            info.system_prompt.replace.non_interactive,
+            super::SystemPromptDelivery::EnvVarFile {
+                env_var: "GEMINI_SYSTEM_MD"
+            }
+        ),
+        "Gemini replace non-interactive must be EnvVarFile(GEMINI_SYSTEM_MD)"
+    );
+}
+
+#[test]
+fn qwen_system_prompt_uses_inline_flags() {
+    let info = provider_info(Provider::QwenCode);
+    assert!(
+        matches!(
+            info.system_prompt.append.interactive,
+            super::SystemPromptDelivery::InlineFlag {
+                flag: "--append-system-prompt"
+            }
+        ),
+        "Qwen append interactive must be InlineFlag(--append-system-prompt)"
+    );
+    assert!(
+        matches!(
+            info.system_prompt.append.non_interactive,
+            super::SystemPromptDelivery::InlineFlag {
+                flag: "--append-system-prompt"
+            }
+        ),
+        "Qwen append non-interactive must be InlineFlag(--append-system-prompt)"
+    );
+    assert!(
+        matches!(
+            info.system_prompt.replace.interactive,
+            super::SystemPromptDelivery::InlineFlag {
+                flag: "--system-prompt"
+            }
+        ),
+        "Qwen replace interactive must be InlineFlag(--system-prompt)"
+    );
+    assert!(
+        matches!(
+            info.system_prompt.replace.non_interactive,
+            super::SystemPromptDelivery::InlineFlag {
+                flag: "--system-prompt"
+            }
+        ),
+        "Qwen replace non-interactive must be InlineFlag(--system-prompt)"
+    );
+}
+
+#[test]
+fn codex_system_prompt_uses_config_key_variants() {
+    let info = provider_info(Provider::Codex);
+    assert!(
+        matches!(
+            info.system_prompt.append.interactive,
+            super::SystemPromptDelivery::ConfigKeyInline {
+                flag: "-c",
+                key: "developer_instructions"
+            }
+        ),
+        "Codex append interactive must be ConfigKeyInline(-c, developer_instructions)"
+    );
+    assert!(
+        matches!(
+            info.system_prompt.append.non_interactive,
+            super::SystemPromptDelivery::ConfigKeyInline {
+                flag: "-c",
+                key: "developer_instructions"
+            }
+        ),
+        "Codex append non-interactive must be ConfigKeyInline(-c, developer_instructions)"
+    );
+    assert!(
+        matches!(
+            info.system_prompt.replace.interactive,
+            super::SystemPromptDelivery::ConfigKeyFile {
+                flag: "-c",
+                key: "model_instructions_file"
+            }
+        ),
+        "Codex replace interactive must be ConfigKeyFile(-c, model_instructions_file)"
+    );
+    assert!(
+        matches!(
+            info.system_prompt.replace.non_interactive,
+            super::SystemPromptDelivery::ConfigKeyFile {
+                flag: "-c",
+                key: "model_instructions_file"
+            }
+        ),
+        "Codex replace non-interactive must be ConfigKeyFile(-c, model_instructions_file)"
+    );
+}
 
 /// Every provider's JSON describe surface includes typed resource
 /// portability data and excludes the legacy `AgentCapabilities` tree.
