@@ -116,6 +116,24 @@ lint:
     @just _lint {{ LIBRARY }}
     @just _lint {{ CLI }}
 
+# Report CLI source/test files over the ~500-line review soft cap.
+lint-files:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    limit=500
+    roots=(./cli/src ./cli/tests)
+    found=0
+    while IFS= read -r file; do
+        lines=$(wc -l < "$file" | tr -d ' ')
+        if (( lines > limit )); then
+            printf 'darkmatter/%s:%s lines\n' "${file#./}" "$lines"
+            found=1
+        fi
+    done < <(find "${roots[@]}" -type f -name '*.rs' | sort)
+    if (( found == 0 )); then
+        echo "No darkmatter CLI source/test files exceed ${limit} lines."
+    fi
+
 # Per-package LCOV coverage for the library and CLI.
 coverage *args="":
     @just _coverage {{ LIBRARY }} {{ args }}
