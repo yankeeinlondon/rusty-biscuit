@@ -31,28 +31,131 @@ static SENTINEL_COUNTER: AtomicU32 = AtomicU32::new(0);
 /// Cargo at compile time. Using it instead of a bare `md` keeps Level 2 tests
 /// from silently passing against a stale `md` installed on the host `PATH`
 /// (e.g. `~/.cargo/bin/md`) while the code under review still fails.
-const MD_BIN: &str = env!("CARGO_BIN_EXE_md");
+pub const MD_BIN: &str = env!("CARGO_BIN_EXE_md");
 
-/// Absolute path to a `md` symlink (under the system temp dir) that points at
+/// Absolute path to a `md` shim (under the system temp dir) that points at
 /// [`MD_BIN`]. Tests invoke this instead of `MD_BIN` directly because the built
 /// binary lives under `…/rusty-biscuit/…/target/debug/md`, whose path contains
 /// the substring `rust`. Embedding that path in the shell command would put
 /// `rust` into the captured command echo, where `find(|l| l.contains("rust"))`
 /// anchors (the rust code-fence label) would match the echo instead of the
-/// rendered code block. The symlink lives under `/var/folders/…`, so the
+/// rendered code block. The shim lives under `/var/folders/…`, so the
 /// visible command carries no `rust` while still running the freshly built
 /// binary rather than whatever `md` happens to be installed on the host.
+///
+/// Using [`md_shim`] (rather than the bare host `PATH` `md`) is what lets the
+/// Level 2 suite prove behavior of the code under review instead of whatever
+/// stale `md` is installed on the developer's machine (review-2 finding #1).
+///
+/// The shim is created via [`link_or_copy`] so the suite stays robust on
+/// hosts where symlink creation requires elevated privileges or Developer
+/// Mode (notably Windows). See [`link_or_copy`] for the fallback ladder
+/// (review-3 finding).
 pub fn md_shim() -> &'static str {
     static SHIM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     SHIM.get_or_init(|| {
         let dir = std::env::temp_dir().join(format!("dm-md-shim-{}", std::process::id()));
         fs::create_dir_all(&dir).expect("create md shim dir");
+        // On Windows the shim path needs the `.exe` suffix so the pane
+        // resolves it as an executable. On Unix a bare `md` suffices.
+        #[cfg(windows)]
+        let link = dir.join("md.exe");
+        #[cfg(not(windows))]
         let link = dir.join("md");
         // Idempotent across reruns within the same pid: replace any stale link.
         let _ = fs::remove_file(&link);
-        create_md_shim(MD_BIN, &link).expect("symlink md shim");
+        link_or_copy(std::path::Path::new(MD_BIN), &link).expect("create md shim");
+        // Fail fast if the shim does not actually point at the Cargo-built
+        // binary. This catches environment-specific issues (broken link,
+        // stale temp dir, permission problems) before the Level 2 pane
+        // silently runs the wrong binary.
+        assert_shim_resolves_to_built(&link);
         link.to_str().expect("shim path is valid UTF-8").to_string()
     })
+}
+
+/// Verifies that the shim at `link` resolves to [`MD_BIN`] (the
+/// `CARGO_BIN_EXE_md` path baked in at compile time). Called once per
+/// process from [`md_shim`]; failures abort the test binary so the
+/// suite cannot silently pass against a host-installed `md`.
+///
+/// Uses [`is_same_binary`] so the check works regardless of whether the
+/// shim was created as a symlink, a hard link, or a copy (review-3 finding).
+pub fn assert_shim_resolves_to_built(link: &std::path::Path) {
+    let built = std::path::Path::new(MD_BIN);
+    if !is_same_binary(link, built) {
+        panic!(
+            "md shim {} did not resolve to the Cargo-built binary {};\
+             tests would run against the wrong binary",
+            link.display(),
+            built.display(),
+        );
+    }
+}
+
+/// Cross-platform shim creation with a graceful fallback ladder.
+///
+/// Tries each strategy in order so the Level 2 suite stays robust across
+/// host configurations where one method is unavailable (review-3 finding):
+///
+/// 1. **Symlink** — cleanest; preserves identity through `canonicalize`.
+///    On Windows, file symlinks require Developer Mode or elevated
+///    privileges.
+/// 2. **Hard link** — no extra privileges required on Windows for
+///    same-volume files; shares the same inode/file-index as the target
+///    so identity comparison still works.
+/// 3. **Copy** — always-works fallback for cross-volume temp directories
+///    (e.g. Windows temp on `D:` and Cargo target on `C:`); produces a
+///    separate inode so the integrity check uses content comparison.
+pub fn link_or_copy(target: &std::path::Path, link: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    if std::os::unix::fs::symlink(target, link).is_ok() {
+        return Ok(());
+    }
+    #[cfg(windows)]
+    if std::os::windows::fs::symlink_file(target, link).is_ok() {
+        return Ok(());
+    }
+    if std::fs::hard_link(target, link).is_ok() {
+        return Ok(());
+    }
+    std::fs::copy(target, link).map(|_| ())
+}
+
+/// Returns `true` if `candidate` and `built` point at the same file or
+/// at content-equivalent copies.
+///
+/// Fast path: file identity (inode on Unix, volume-serial + file-index
+/// on Windows). Works for symlinks (after `metadata` follows them) and
+/// for hard links.
+///
+/// Slow path: byte-for-byte content comparison. Handles the copy
+/// fallback from [`link_or_copy`] where shim and target are different
+/// inodes but identical content.
+pub fn is_same_binary(candidate: &std::path::Path, built: &std::path::Path) -> bool {
+    #[cfg(unix)]
+    if let (Ok(ma), Ok(mb)) = (fs::metadata(candidate), fs::metadata(built)) {
+        use std::os::unix::fs::MetadataExt;
+        if ma.ino() == mb.ino() && ma.dev() == mb.dev() {
+            return true;
+        }
+    }
+    #[cfg(windows)]
+    if let (Ok(ma), Ok(mb)) = (fs::metadata(candidate), fs::metadata(built)) {
+        use std::os::windows::fs::MetadataExt;
+        let va = ma.volume_serial_number();
+        let ia = ma.file_index();
+        // Identity is conclusive only when both fields are present and
+        // match. `None` means the filesystem did not report the field;
+        // fall through to the content comparison below.
+        if va.is_some() && va == mb.volume_serial_number() && ia == mb.file_index() {
+            return true;
+        }
+    }
+    matches!(
+        (fs::read(candidate), fs::read(built)),
+        (Ok(a), Ok(b)) if a == b
+    )
 }
 
 /// Maximum wall time we'll spend waiting for a single command's completion
@@ -109,16 +212,16 @@ pub fn run_with_sentinel(harness: &mut WezTermHarness, cmd: &str) -> CapturedFra
 
 /// Helper: write a markdown fixture, run `md` with the given flags inside the
 /// shared harness pane, and return the captured frame.
+///
+/// Always invokes the Cargo-built `md` via [`md_shim`]; the bare host `PATH`
+/// `md` is never used because doing so would let a stale installed binary
+/// satisfy the suite while the code under review still fails (review-2
+/// finding #1). The shim is also stored under a path that does not contain
+/// the substring `rust`, so `find(|l| l.contains("rust"))` anchors (the rust
+/// code-fence label) only match the rendered code block, not the command
+/// echo.
 pub fn run_md(file_body: &str, extra_args: &str) -> Option<(CapturedFrame, std::path::PathBuf)> {
     run_md_env(file_body, extra_args, &[])
-}
-
-/// Like [`run_md`] but runs the just-built `md` ([`md_shim`]) instead of the
-/// host `PATH` binary. Used by the disclosure Level 2 tests so they verify the
-/// code under review rather than whatever `md` is installed on the host
-/// (review-4 finding #3).
-pub fn run_md_built(file_body: &str, extra_args: &str) -> Option<(CapturedFrame, std::path::PathBuf)> {
-    run_md_env_bin(md_shim(), file_body, extra_args, &[])
 }
 
 /// Like [`run_md`] but injects inline environment assignments onto the `md`
@@ -129,18 +232,35 @@ pub fn run_md_env(
     extra_args: &str,
     env: &[(&str, &str)],
 ) -> Option<(CapturedFrame, std::path::PathBuf)> {
-    run_md_env_bin("md", file_body, extra_args, env)
+    // `md_shim` is resolved lazily inside `run_md_env_bin` so a host
+    // that would skip the Level 2 tier never pays for shim creation
+    // (review-3 finding).
+    run_md_env_bin(md_shim, file_body, extra_args, env)
 }
 
-/// Core of [`run_md_env`] parameterized over the `md` program to invoke. `bin`
-/// is either the bare `md` (resolved through the pane's `PATH`) or an absolute
-/// path to the just-built binary via [`md_shim`].
-pub fn run_md_env_bin(
-    bin: &str,
+/// Core of [`run_md_env`] parameterized over the `md` program to invoke.
+///
+/// `bin` is a closure that returns the binary path. The closure is called
+/// only after the Level 2 gate has passed, so closure side effects (such
+/// as [`md_shim`]'s filesystem work) are skipped on hosts that would skip
+/// the Level 2 tier entirely. This matters on Windows where shim creation
+/// may require elevated privileges or Developer Mode; gating first keeps
+/// `just test-l2` from failing during setup when the real-terminal tier
+/// would skip anyway (review-3 finding).
+///
+/// Tests should only pass a different `bin` closure when they need to
+/// assert behavior that depends on the wrapper name itself (for example,
+/// `run_md_after_shell_prefix` builds a `prefix md …` command where `md`
+/// must resolve through the pane `PATH`-aware wrapper).
+pub fn run_md_env_bin<F>(
+    bin: F,
     file_body: &str,
     extra_args: &str,
     env: &[(&str, &str)],
-) -> Option<(CapturedFrame, std::path::PathBuf)> {
+) -> Option<(CapturedFrame, std::path::PathBuf)>
+where
+    F: FnOnce() -> &'static str,
+{
     match wezterm_decision() {
         LevelDecision::Run => {}
         LevelDecision::Skip(msg) => {
@@ -149,6 +269,9 @@ pub fn run_md_env_bin(
         }
         LevelDecision::Panic(msg) => panic!("{msg}"),
     }
+
+    // Resolve the binary only after the gate has passed.
+    let bin = bin();
 
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("layout.md");
@@ -202,16 +325,6 @@ pub fn rtrim(s: &str) -> &str {
 }
 
 
-#[cfg(unix)]
-fn create_md_shim(target: &str, link: &std::path::Path) -> std::io::Result<()> {
-    std::os::unix::fs::symlink(target, link)
-}
-
-#[cfg(windows)]
-fn create_md_shim(target: &str, link: &std::path::Path) -> std::io::Result<()> {
-    std::os::windows::fs::symlink_file(target, link)
-}
-
 pub fn run_md_after_shell_prefix(
     file_body: &str,
     prefix: &str,
@@ -236,7 +349,9 @@ pub fn run_md_after_shell_prefix(
 
     run_with_sentinel(harness, "clear");
 
-    let cmd = format!("{prefix} md {} {extra_args}", file_path.display());
+    // Use the Cargo-built `md` via the shim so prefix-wrapped invocations
+    // also verify the code under review (review-2 finding #1).
+    let cmd = format!("{prefix} {} {} {extra_args}", md_shim(), file_path.display());
     let frame = run_with_sentinel(harness, &cmd);
     Some((frame, file_path))
 }

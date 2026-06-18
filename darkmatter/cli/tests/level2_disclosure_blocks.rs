@@ -1,6 +1,6 @@
 mod common;
 
-use common::level2::run_md_built;
+use common::level2::run_md;
 use serial_test::serial;
 
 fn raw_sgr_has_attr(raw: &str, param: u32) -> bool {
@@ -23,7 +23,7 @@ fn raw_sgr_has_attr(raw: &str, param: u32) -> bool {
 #[serial(level2_terminal)]
 fn level2_disclosure_body_renders_as_dim_italic_block_quote() {
     let body = "::disclosure\nLicense_sentinel Agreement\n::details\nKeep_sentinel your hands off.\n::end-disclosure\n";
-    let Some((frame, _)) = run_md_built(body, "--max-width 60") else {
+    let Some((frame, _)) = run_md(body, "--max-width 60") else {
         return;
     };
 
@@ -66,7 +66,7 @@ fn level2_disclosure_honors_inline_opener_color_and_width() {
     // must reach the real terminal: the summary carries the truecolor red and
     // the narrow `max-width` wraps the body into multiple quoted lines.
     let body = "::disclosure color=red-500 max-width=24ch Inline_sentinel Title\n::details\nThis disclosed body is comfortably longer than twenty-four columns wide here.\n::end-disclosure\n";
-    let Some((frame, _)) = run_md_built(body, "--max-width 70") else {
+    let Some((frame, _)) = run_md(body, "--max-width 70") else {
         return;
     };
 
@@ -117,7 +117,7 @@ style:
 This disclosed body stays on one line at sixty wide.
 ::end-disclosure
 "#;
-    let Some((frame, _)) = run_md_built(body, "--max-width 80") else {
+    let Some((frame, _)) = run_md(body, "--max-width 80") else {
         return;
     };
 
@@ -165,7 +165,7 @@ Frontmatter_sentinel Title
 This disclosed body is comfortably longer than twenty-four columns wide here.
 ::end-disclosure
 "#;
-    let Some((frame, _)) = run_md_built(body, "--max-width 70") else {
+    let Some((frame, _)) = run_md(body, "--max-width 70") else {
         return;
     };
 
