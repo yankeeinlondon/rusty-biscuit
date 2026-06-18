@@ -4,6 +4,49 @@ phases: 4
 created: 2026-06-18
 start_phase: 1
 yolo: "true"
+source_files_during_phase_1:
+  - claudine/lib/src/composition/loop_config.rs
+  - claudine/lib/src/composition/loop_engine.rs
+  - claudine/lib/src/composition/mod.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - claudine/cli/src/commands/compose.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/cli/src/commands/context.rs
+  - claudine/lib/src/composition/error.rs
+  - claudine/lib/src/composition/loop_actions.rs
+  - claudine/lib/src/composition/select.rs
+  - darkmatter/lib/src/catalog/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/mod.rs
+  - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - claudine/lib/src/composition/loop_engine.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_code:
+  - claudine/lib/src/composition/loop_config.rs
+  - claudine/lib/src/composition/loop_engine.rs
+  - claudine/lib/src/composition/mod.rs
+  - claudine/cli/src/commands/compose.rs
+  - claudine/lib/src/composition/error.rs
+  - claudine/lib/src/composition/loop_actions.rs
+  - claudine/lib/src/composition/select.rs
+  - darkmatter/lib/src/catalog/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/mod.rs
+  - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+documentation: []
+packages:
+  - claudine
+  - darkmatter
 ---
 
 # Loop State Sequencing — Execution Plan
@@ -122,7 +165,7 @@ caller can produce a correct `initial_frontmatter` for
 
 ### Tasks
 
-- [ ] **1.1 Add `extract_control_variables(config: &LoopConfig) -> Vec<String>`.**
+- [x] **1.1 Add `extract_control_variables(config: &LoopConfig) -> Vec<String>`.**
   Place it in `loop_config.rs` alongside `resolve_loop_config`. It must
   return a deduplicated, deterministic list (use `BTreeSet<String>`
   internally so output is stable for diffs). Sources:
@@ -138,7 +181,7 @@ caller can produce a correct `initial_frontmatter` for
   `true`, `false`, `doc`, `env`, and any identifier starting with `_loop_`
   (ambients are supplied separately and are never seed-resolved).
 
-- [ ] **1.2 Add the recursive `Expr` identifier visitor.**
+- [x] **1.2 Add the recursive `Expr` identifier visitor.**
   A private `collect_identifiers(&Expr, &mut BTreeSet<String>)` helper in
   `loop_config.rs`. Must recurse through every AST node that can carry a
   variable reference: `Variable`, `UnaryNot`, `UnaryMinus`, `Binary`,
@@ -147,7 +190,7 @@ caller can produce a correct `initial_frontmatter` for
   and `FunctionCall` (`args` only — `name` is a function, not a variable).
   Literals (`StringLiteral`, `NumberLiteral`, `BoolLiteral`) terminate.
 
-- [ ] **1.3 Add `build_loop_seed` to the library.**
+- [x] **1.3 Add `build_loop_seed` to the library.**
   New function in `loop_engine.rs` (it needs `prepare_direct`, which lives in
   the same crate). Signature:
 
@@ -173,7 +216,7 @@ caller can produce a correct `initial_frontmatter` for
   variable is absent from `effective_frontmatter`, omit it (the action will
   create it, matching today's `None → 1` increment semantics).
 
-- [ ] **1.4 Wire `execute_loop` through `build_loop_seed`.**
+- [x] **1.4 Wire `execute_loop` through `build_loop_seed`.**
   `execute_loop` (`loop_engine.rs:224`) currently builds `initial_frontmatter`
   from `source.markdown.frontmatter().as_map()`. Change it to accept a
   `prepare_options: PrepareOptions` parameter (add it after `options`) and
@@ -184,14 +227,14 @@ caller can produce a correct `initial_frontmatter` for
   API + any library tests that call `execute_loop` directly (audit with a
   grep — expected: none besides its own doctests).
 
-- [ ] **1.5 Re-export the new helpers from `composition/mod.rs`.**
+- [x] **1.5 Re-export the new helpers from `composition/mod.rs`.**
   Add `build_loop_seed` and `extract_control_variables` to the
   `pub use loop_engine::{...}` / `pub use loop_config::{...}` blocks so the
   CLI can reach them as `claudine::composition::build_loop_seed`.
 
 ### Phase 1 validation checkpoints
 
-- [ ] **VC-1.1 `extract_control_variables` unit tests (in `loop_config.rs`).**
+- [x] **VC-1.1 `extract_control_variables` unit tests (in `loop_config.rs`).**
   Cases that must pass:
   - repro shape: `until: "phase > total_phases"`, `action: "increment(phase)"`
     → returns `["phase", "total_phases"]` (order-stable);
@@ -204,7 +247,7 @@ caller can produce a correct `initial_frontmatter` for
   - dotted condition path: `until: "state.done"` → returns `["state"]`
     (head segment only);
   - empty/identity: no actions, `while: "true"` → returns `[]`.
-- [ ] **VC-1.2 `build_loop_seed` unit tests (in `loop_engine.rs`).**
+- [x] **VC-1.2 `build_loop_seed` unit tests (in `loop_engine.rs`).**
   Build a `ResolvedCompositionSource` from an inline `Markdown` whose
   frontmatter has `phase: "{{ start || 1 }}"`, `total_phases: "{{ 6 }}"`,
   plus a derived `pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"`. Use a
@@ -214,14 +257,19 @@ caller can produce a correct `initial_frontmatter` for
   - returned map contains `total_phases == json!(6)`;
   - returned map **does not** contain `pass_icon` (derived, not lifted);
   - returned map contains `start == json!(1)` (CLI setter carried).
-- [ ] **VC-1.3 Regression: existing `loop_engine` / `loop_actions` /
+  > Note: the test fixture uses `initial_phase` as the CLI setter key instead
+  > of `start` because `start` is a reserved lifecycle frontmatter property;
+  > the assertion semantics are unchanged.
+- [x] **VC-1.3 Regression: existing `loop_engine` / `loop_actions` /
   `loop_expression` tests pass unchanged.** Run the library test suite for
   these three modules; zero modifications expected because
   `execute_loop_with_config` is untouched. This is the proof that the change
   is surgical.
-- [ ] **VC-1.4 `cargo build -p claudine` (library) compiles.** Then
-  `cargo build -p claudine-cli` — expect a compile error at
-  `run_loop_with_overrides` (still building raw seed) which Phase 2 fixes.
+- [x] **VC-1.4 `cargo build -p claudine` (library) compiles.** Then
+  `cargo build -p claudine-cli` — the plan expected a compile error at
+  `run_loop_with_overrides`, but the CLI uses `execute_loop_with_config`
+  directly and therefore still compiles. The raw-seed behavior in
+  `run_loop_with_overrides` remains and will be replaced in Phase 2.
 
 ---
 
@@ -242,7 +290,7 @@ functions in `loop_actions.rs` / `error.rs`).
 
 ### Tasks
 
-- [ ] **2.1 Replace the raw-seed block in `run_loop_with_overrides` with
+- [x] **2.1 Replace the raw-seed block in `run_loop_with_overrides` with
   `build_loop_seed`.**
   Delete the block at `compose.rs:1359–1371` that builds
   `initial_frontmatter` from `source.markdown.frontmatter().as_map()` +
@@ -256,7 +304,7 @@ functions in `loop_actions.rs` / `error.rs`).
   `launch_pwd` capture and the `wrapped_executor` interrupt/CWD-restoration
   logic untouched — that machinery is orthogonal to seeding.
 
-- [ ] **2.2 Confirm per-iteration overrides already carry control state.**
+- [x] **2.2 Confirm per-iteration overrides already carry control state.**
   No code change expected here — verify, don't assume. The executor closure
   at `compose.rs:601–613` builds `set_overrides: Some(ctx.as_set_overrides())`.
   Because `ctx.frontmatter` is now the control-only seed (mutated by actions
@@ -266,7 +314,7 @@ functions in `loop_actions.rs` / `error.rs`).
   `ctx.frontmatter.get("phase") == Some(json!(N))` on iteration N, then
   remove the probe once the integration test (Phase 4) covers it.
 
-- [ ] **2.3 Apply the same wiring to the second `run_loop_with_overrides`
+- [x] **2.3 Apply the same wiring to the second `run_loop_with_overrides`
   call site (inline-compose path, ~1080).**
   Both call sites share the same `run_loop_with_overrides` function, so this
   is automatically covered by 2.1 — but **verify** the `PrepareOptions`
@@ -276,7 +324,7 @@ functions in `loop_actions.rs` / `error.rs`).
 
 ### Phase 2 validation checkpoints
 
-- [ ] **VC-2.1 The repro command compiles and runs to completion.** Execute
+- [x] **VC-2.1 The repro command compiles and runs to completion.** Execute
   the exact repro from the spec against a stub `plan.md` fixture (or the real
   `features/2026-06-09-improved-descriptions/plan.md` if available):
   ```
@@ -287,10 +335,10 @@ functions in `loop_actions.rs` / `error.rs`).
   Expect: no `InvalidIncrementType`; `phase` advances; loop halts. (If a real
   provider run is impractical in CI, Phase 4's library integration test is
   the authoritative substitute; this checkpoint is the manual smoke test.)
-- [ ] **VC-2.2 `cargo test -p claudine-cli` passes.** No new CLI tests
+- [x] **VC-2.2 `cargo test -p claudine-cli` passes.** No new CLI tests
   required in this phase (Phase 4 covers the loop end-to-end), but existing
   CLI tests must not regress.
-- [ ] **VC-2.3 No behavioral drift between library and CLI entrypoints.**
+- [x] **VC-2.3 No behavioral drift between library and CLI entrypoints.**
   Confirm by grep that **neither** `execute_loop` **nor**
   `run_loop_with_overrides` references
   `source.markdown.frontmatter().as_map()` for seeding after the change —
@@ -320,7 +368,7 @@ Phase 2.
 
 ### Tasks
 
-- [ ] **3.1 Extend the two error variants with an offending-value field.**
+- [x] **3.1 Extend the two error variants with an offending-value field.**
   Add `value_excerpt: String` to both `InvalidIncrementType` and
   `InvalidDecrementType` in `error.rs`. Update the `#[error(...)]` format to
   read, e.g.:
@@ -328,7 +376,7 @@ Phase 2.
   Keep the existing fields and their names stable so downstream matchers
   keep working; only **add** the new field.
 
-- [ ] **3.2 Populate the excerpt at the two construction sites.**
+- [x] **3.2 Populate the excerpt at the two construction sites.**
   In `apply_increment_with_context` / `apply_decrement_with_context`
   (`loop_actions.rs`), build the excerpt from the offending `value`:
   - if the value is a `Value::String` that matches the unresolved-template
@@ -342,7 +390,7 @@ Phase 2.
   Add a small private helper (`value_error_excerpt(&Value) -> String`) in
   `loop_actions.rs` to keep the two sites identical.
 
-- [ ] **3.3 Route through the existing composition-error formatting.**
+- [x] **3.3 Route through the existing composition-error formatting.**
   No new renderer code. These variants already flow through the claudine
   composition-error formatting contract (styled, deduplicated, no raw
   chains). Confirm by checking the error renders via the existing
@@ -351,7 +399,7 @@ Phase 2.
 
 ### Phase 3 validation checkpoints
 
-- [ ] **VC-3.1 Unresolved-template error message unit test.** Drive
+- [x] **VC-3.1 Unresolved-template error message unit test.** Drive
   `apply_increment` on a map containing
   `phase: "{{ frontmatter(plan, 'start_phase') || 1 }}"` (the literal repro
   value). Assert the resulting `CompositionError::InvalidIncrementType`
@@ -359,15 +407,15 @@ Phase 2.
   `{{ frontmatter(plan, 'start_phase')` and the phrase
   `unresolved template`. This is the message that would have saved the
   original debugging session.
-- [ ] **VC-3.2 Resolved-non-numeric error message unit test.** Drive
+- [x] **VC-3.2 Resolved-non-numeric error message unit test.** Drive
   `apply_increment` on `area: "claudine-cli"` (a resolved but non-numeric
   string). Assert `found == "string"` and `value_excerpt` contains
   `claudine-cli` (truncated if longer than the cap). This covers the
   genuine-user-error path.
-- [ ] **VC-3.3 Decrement parity test.** Same two cases against
+- [x] **VC-3.3 Decrement parity test.** Same two cases against
   `apply_decrement`, asserting `InvalidDecrementType` with the same excerpt
   semantics.
-- [ ] **VC-3.4 Existing error tests still match.** The tests at
+- [x] **VC-3.4 Existing error tests still match.** The tests at
   `loop_actions.rs:711` (`increment_rejects_non_numeric_strings`),
   `:935` (`increment_rejects_boolean`), `:951` (`decrement_rejects_boolean`),
   `:967` (`decrement_rejects_non_numeric_string`) use structural
@@ -398,7 +446,7 @@ and the honest errors).
 
 ### Tasks
 
-- [ ] **4.1 Author the repro fixture document inline.**
+- [x] **4.1 Author the repro fixture document inline.**
   Build a `ResolvedCompositionSource` from a `Markdown` whose frontmatter
   mirrors `implement-plan.md`:
   ```yaml
@@ -412,14 +460,14 @@ and the honest errors).
   and whose body is `Implement Phase {{ phase }} of {{ total_phases }}`.
   No external file I/O — keep it self-contained in the test.
 
-- [ ] **4.2 Wire the seeded engine with a real-prepare executor.**
+- [x] **4.2 Wire the seeded engine with a real-prepare executor.**
   Call `build_loop_seed` → `execute_loop_with_config` with an executor that
   invokes `prepare_direct(source, PrepareOptions { set_overrides:
   Some(ctx.as_set_overrides()), .. })` and captures both the rendered body
   and the resolved `pass_icon` per iteration into a `RefCell<Vec<...>>`.
   Use a no-op provider (return `LoopIterationOutput::success(body)`).
 
-- [ ] **4.3 Assert the full success-criteria matrix.** The test must
+- [x] **4.3 Assert the full success-criteria matrix.** The test must
   observe, across the run:
   - **Stop count:** exactly 6 iterations execute; the loop halts without
     `InvalidIncrementType` and without `LoopLimitExceeded`.
@@ -434,7 +482,7 @@ and the honest errors).
     1..=5 and `✅` for iteration 6 (the final pass). This proves the
     derived/presentation class was never frozen at its seed value.
 
-- [ ] **4.4 Assert the honest-error path end-to-end (negative fixture).**
+- [x] **4.4 Assert the honest-error path end-to-end (negative fixture).**
   A second fixture where `increment(area)` targets a resolved non-numeric
   string (`area: "claudine"`). Seed resolves it (to the string), the first
   increment fails, and the resulting `InvalidIncrementType` carries the
@@ -443,10 +491,10 @@ and the honest errors).
 
 ### Phase 4 validation checkpoints
 
-- [ ] **VC-4.1 The integration test passes locally on macOS** (the host OS).
-- [ ] **VC-4.2 `just test` (or `cargo test -p claudine`) is green**, including
+- [x] **VC-4.1 The integration test passes locally on macOS** (the host OS).
+- [x] **VC-4.2 `just test` (or `cargo test -p claudine`) is green**, including
   the new test and all pre-existing loop tests.
-- [ ] **VC-4.3 `cargo fmt --check` is clean** for the touched files (read-only
+- [x] **VC-4.3 `cargo fmt --check` is clean** for the touched files (read-only
   diagnostic — do **not** run `cargo fmt` in write mode per the repo's
   formatting policy in `AGENTS.md`; hand-match surrounding style instead).
 
