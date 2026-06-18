@@ -106,7 +106,10 @@ impl Fixture {
         let workspace = TestWorkspace::named("claudine-promptrep-l2");
         let bin_dir = workspace.path().join("bin");
         fs::create_dir_all(&bin_dir).unwrap();
-        write_executable(&bin_dir.join("goose"), "#!/bin/sh\necho 'Agent response'\nexit 0\n");
+        write_executable(
+            &bin_dir.join("goose"),
+            "#!/bin/sh\necho 'Agent response'\nexit 0\n",
+        );
 
         // HOME points here, so change-detection state lives under this dir and
         // every run is a first run (the report always renders by default).

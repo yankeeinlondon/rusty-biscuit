@@ -2672,14 +2672,16 @@ fn compose_interactive_preflight_with_whitelisted_command() {
 
 #[cfg(unix)]
 #[test]
-fn compose_skips_shell_hidden_by_false_block() {
+fn compose_preflight_discovers_shell_inside_false_block() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
     seed_minimal_config(workspace.path());
 
-    // The ::shell is inside a ::block when="false" — Darkmatter's composition
-    // excludes it, so preflight never discovers the un-whitelisted command.
+    // Preflight discovery is condition-blind: a ::shell inside a
+    // ::block when="false" is still discovered and must be whitelisted, even
+    // though composition would exclude it from the output. An un-whitelisted
+    // command therefore fails preflight rather than being silently skipped.
     let md_file = workspace.path().join("template.md");
     fs::write(
         &md_file,
@@ -2691,12 +2693,14 @@ fn compose_skips_shell_hidden_by_false_block() {
     )
     .unwrap();
 
+    // Provider binary (should never be reached — preflight aborts first).
     write_executable(
         &path_dir.join("codex"),
         "#!/bin/sh\necho 'provider-launched' >&2\nexit 0\n",
     );
 
-    // No whitelist for curl — if it were discovered, preflight would fail.
+    // No whitelist for curl and no --interactive approval handler, so the
+    // discovered command fails preflight.
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
@@ -2704,14 +2708,20 @@ fn compose_skips_shell_hidden_by_false_block() {
         .current_dir(workspace.path())
         .args(["compose", "--codex", md_file.to_str().unwrap()])
         .assert()
-        .success();
+        .failure();
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
     let plain = strip_ansi(&stderr);
 
+    // The conditionally-excluded curl is still discovered and named.
     assert!(
-        plain.contains("provider-launched"),
-        "provider should launch — ::shell inside ::block when=\"false\" must be hidden; stderr was:\n{plain}"
+        plain.contains("curl"),
+        "preflight should discover ::shell inside ::block when=\"false\"; stderr was:\n{plain}"
+    );
+    // Provider must not launch when an un-whitelisted command fails preflight.
+    assert!(
+        !plain.contains("provider-launched"),
+        "provider must not launch when preflight fails; stderr was:\n{plain}"
     );
 }
 

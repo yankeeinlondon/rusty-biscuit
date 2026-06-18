@@ -106,7 +106,10 @@ pub(crate) use packages::{
     select_dirty_package_names, select_repo_packages, select_staged_package_names,
     select_unstaged_package_names,
 };
-pub use repo::{render_filesystem_section, render_repo_name, render_repo_section};
+pub(crate) use repo::format_monorepo_label;
+pub use repo::{
+    render_filesystem_section, render_repo_default_verbose, render_repo_name, render_repo_section,
+};
 
 /// Format a commit datetime to a relative date string and 12hr time string.
 ///
@@ -863,7 +866,9 @@ pub fn render_git_section(
             // Verbose: nested list with current branch + other branches
             let mut local_list = UnorderedList::empty();
 
-            let dirty = if git.status.is_dirty {
+            // Identity-only `GitInfo` carries no status; render no dirty marker
+            // rather than asserting cleanliness (or panicking) on absent status.
+            let dirty = if git.status.as_ref().is_some_and(|s| s.is_dirty) {
                 "<red>+</red>"
             } else {
                 ""
@@ -1180,13 +1185,15 @@ pub(crate) fn current_package_area_is_dirty(
 
     let area_prefix = if area == "root" { "" } else { area };
 
-    let has_dirty = git
-        .status
+    // Without computed status (identity-only request) dirtiness is
+    // indeterminate, so return `None` like the other missing-data early exits.
+    let status = git.status.as_ref()?;
+    let has_dirty = status
         .dirty
         .iter()
         .map(|d| d.filepath.to_str().unwrap_or(""))
         .chain(
-            git.status
+            status
                 .untracked
                 .iter()
                 .map(|u| u.filepath.to_str().unwrap_or("")),
@@ -1255,13 +1262,16 @@ pub(crate) fn package_area_source_code_change_count(
 
     let area_prefix = if area == "root" { "" } else { area };
 
-    let count = git
-        .status
+    // Without computed status (identity-only request) the change count is
+    // indeterminate, so return `None` like the other missing-data early exits.
+    let status = git.status.as_ref()?;
+
+    let count = status
         .dirty
         .iter()
         .map(|d| d.filepath.to_str().unwrap_or(""))
         .chain(
-            git.status
+            status
                 .untracked
                 .iter()
                 .map(|u| u.filepath.to_str().unwrap_or("")),
@@ -1348,7 +1358,8 @@ mod tests {
             package_area: area.to_string(),
             name: name.to_string(),
             ecosystem: sniff::filesystem::repo::PackageEcosystem::Unknown,
-            discovery_sources: vec![],
+            standard: sniff::filesystem::repo::MonorepoStandard::Unknown,
+            provenance: sniff::filesystem::repo::PackageProvenance::ManifestScan,
             nested_packages: vec![],
             primary_language: None,
             secondary_languages: vec![],
@@ -1360,6 +1371,7 @@ mod tests {
             editor_config: None,
             command_runner: vec![],
             package_managers: vec![],
+            test_runners: vec![],
             version: None,
             features: vec![],
             depends_on: depends_on.iter().map(|s| s.to_string()).collect(),
@@ -1393,6 +1405,7 @@ mod tests {
             org: None,
             repo: None,
             current_branch: Some("main".to_string()),
+            head_id: None,
             branches: vec![],
             in_worktree: false,
             base_repo_root: None,
@@ -1404,7 +1417,7 @@ mod tests {
                 remotes: None,
                 refs: vec![],
             }],
-            status: RepoStatus {
+            status: Some(RepoStatus {
                 is_dirty: !file_changes.is_empty(),
                 staged_count,
                 unstaged_count,
@@ -1412,7 +1425,7 @@ mod tests {
                 dirty: vec![],
                 untracked: vec![],
                 is_behind: None,
-            },
+            }),
             remotes: vec![],
             worktrees: HashMap::new(),
             config: GitConfig::default(),
@@ -1911,7 +1924,10 @@ mod tests {
             // to a transient label — they must be ignored in favor of `~`.
             let path = PathBuf::from("/Users/ken/.claudine/worktrees/rusty-biscuit/sniff");
             let vars = env(&[
-                ("OLDPWD", "/Users/ken/.claudine/worktrees/rusty-biscuit/sniff"),
+                (
+                    "OLDPWD",
+                    "/Users/ken/.claudine/worktrees/rusty-biscuit/sniff",
+                ),
                 ("PWD", "/Users/ken/.claudine/worktrees/rusty-biscuit/sniff"),
             ]);
             assert_eq!(
@@ -1925,7 +1941,10 @@ mod tests {
             let path = PathBuf::from("/opt/tool/bin");
             // Relative and empty env values must never match.
             let vars = env(&[("REL", "opt/tool"), ("EMPTY", "")]);
-            assert_eq!(alias_path_with(&path, &vars, Some(Path::new("/home/other"))), "/opt/tool/bin");
+            assert_eq!(
+                alias_path_with(&path, &vars, Some(Path::new("/home/other"))),
+                "/opt/tool/bin"
+            );
         }
 
         #[test]
@@ -2327,13 +2346,13 @@ mod tests {
         fn make_repo(packages: Vec<Package>, is_monorepo: bool) -> RepoInfo {
             RepoInfo {
                 is_monorepo,
-                monorepo_tool: None,
-                workspace_tools: Vec::new(),
                 root: PathBuf::from("/repo"),
                 dependencies: None,
                 dev_dependencies: None,
                 peer_dependencies: None,
                 optional_dependencies: None,
+                monorepo_standards: Vec::new(),
+                monorepo_layers: Vec::new(),
                 packages: if packages.is_empty() {
                     None
                 } else {
@@ -2363,7 +2382,7 @@ mod tests {
             let packages = vec![make_package("alpha", "alpha", &[])];
             let repo = make_repo(packages, false);
             let mut git = make_git_info(vec![]);
-            git.status.dirty = vec![make_dirty_file("alpha/src/main.rs")];
+            git.status.as_mut().unwrap().dirty = vec![make_dirty_file("alpha/src/main.rs")];
             let result = build_result(repo, git);
 
             let names = select_dirty_package_names(&result, &[], None, None);
@@ -2386,7 +2405,7 @@ mod tests {
 
             let repo = make_repo(packages, true);
             let mut git = make_git_info(vec![]);
-            git.status.dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
+            git.status.as_mut().unwrap().dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
             let result = build_result(repo, git);
 
             let names = select_dirty_package_names(&result, &[], None, None);
@@ -2404,7 +2423,7 @@ mod tests {
 
             let repo = make_repo(packages, true);
             let mut git = make_git_info(vec![]);
-            git.status.dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
+            git.status.as_mut().unwrap().dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
             let result = build_result(repo, git);
 
             let areas = select_dirty_package_area_names(&result, &[], None, None);
@@ -2422,7 +2441,7 @@ mod tests {
 
             let repo = make_repo(packages, true);
             let mut git = make_git_info(vec![]);
-            git.status.dirty = vec![
+            git.status.as_mut().unwrap().dirty = vec![
                 make_dirty_file("area-a/alpha/src/main.rs"),
                 make_dirty_file("area-b/beta/src/lib.rs"),
             ];
@@ -2515,13 +2534,13 @@ mod tests {
         fn make_repo(packages: Vec<Package>) -> RepoInfo {
             RepoInfo {
                 is_monorepo: true,
-                monorepo_tool: None,
-                workspace_tools: Vec::new(),
                 root: PathBuf::from("/repo"),
                 dependencies: None,
                 dev_dependencies: None,
                 peer_dependencies: None,
                 optional_dependencies: None,
+                monorepo_standards: Vec::new(),
+                monorepo_layers: Vec::new(),
                 packages: if packages.is_empty() {
                     None
                 } else {
@@ -2543,7 +2562,8 @@ mod tests {
         fn build_result(repo: RepoInfo, dirty_paths: &[&str]) -> SniffResult {
             let mut git = make_git_info(vec![]);
             git.repo_root = repo.root.clone();
-            git.status.dirty = dirty_paths.iter().map(|p| dirty_file(p)).collect();
+            git.status.as_mut().unwrap().dirty =
+                dirty_paths.iter().map(|p| dirty_file(p)).collect();
             let filesystem = FilesystemInfo {
                 repo: Some(repo),
                 git: Some(git),
@@ -2556,6 +2576,56 @@ mod tests {
                 filesystem: Some(filesystem),
                 performance: None,
             }
+        }
+
+        /// Build a `SniffResult` whose `GitInfo` is identity-only: `status`
+        /// is `None` (as produced by `GitRequest::identity()`), mirroring a
+        /// valid library state the CLI helpers must tolerate without panicking.
+        fn build_identity_only_result(repo: RepoInfo) -> SniffResult {
+            let mut git = make_git_info(vec![]);
+            git.repo_root = repo.root.clone();
+            git.status = None;
+            git.head_id = Some("1234567890abcdef".to_string());
+            let filesystem = FilesystemInfo {
+                repo: Some(repo),
+                git: Some(git),
+                ..Default::default()
+            };
+            SniffResult {
+                os: None,
+                hardware: None,
+                network: None,
+                filesystem: Some(filesystem),
+                performance: None,
+            }
+        }
+
+        #[test]
+        fn identity_only_git_info_yields_indeterminate_not_panic() {
+            let mut packages = vec![make_package("alpha", "area-a", &[])];
+            packages[0].relative = "area-a/alpha".to_string();
+            let repo = make_repo(packages);
+            let result = build_identity_only_result(repo);
+            let area_dir = PathBuf::from("/repo/area-a/alpha");
+
+            // Selection helpers report "indeterminate" (None / empty) rather
+            // than silently claiming clean — and never panic on absent status.
+            assert_eq!(
+                current_package_area_is_dirty(&result, Some(&area_dir)),
+                None
+            );
+            assert_eq!(
+                package_area_source_code_change_count(&result, Some(&area_dir)),
+                None
+            );
+
+            let fs = result.filesystem.as_ref().unwrap();
+            let git = fs.git.as_ref().unwrap();
+            assert!(super::packages::dirty_package_names(&result).is_empty());
+
+            // Status-oriented renderers must produce output without panicking.
+            let _ = render_git_section(git, 10, 1, false, None, None);
+            let _ = super::repo::render_filesystem_section(fs, 1, Some(&git.repo_root), false);
         }
 
         #[test]
@@ -2659,8 +2729,8 @@ mod tests {
             git.repo_root = repo.root.clone();
             // Force status.dirty / status.untracked empty so the test
             // exclusively exercises the file_changes branch.
-            git.status.dirty = Vec::new();
-            git.status.untracked = Vec::new();
+            git.status.as_mut().unwrap().dirty = Vec::new();
+            git.status.as_mut().unwrap().untracked = Vec::new();
             let filesystem = FilesystemInfo {
                 repo: Some(repo),
                 git: Some(git),
@@ -3004,6 +3074,37 @@ mod tests {
                 !result.contains("n1 -> n2;"),
                 "external-only edge should not be drawn"
             );
+        }
+    }
+
+    mod monorepo_label {
+        use super::*;
+        use sniff::filesystem::repo::MonorepoStandard;
+
+        #[test]
+        fn label_is_authority_alone_with_no_orchestrators() {
+            let label = format_monorepo_label(MonorepoStandard::PnpmWorkspaces, &[]);
+            assert_eq!(label, "pnpm workspaces");
+        }
+
+        #[test]
+        fn label_wraps_single_orchestrator_with_authority() {
+            let label =
+                format_monorepo_label(MonorepoStandard::PnpmWorkspaces, &[MonorepoStandard::Nx]);
+            assert_eq!(label, "Nx (using pnpm workspaces)");
+        }
+
+        #[test]
+        fn label_joins_every_orchestrator_in_layer_order() {
+            // A layer may carry multiple orchestrators (e.g. Nx + Lerna over a
+            // pnpm workspace). Every orchestrator must surface in the text,
+            // joined deterministically in the order the topology layer carries
+            // them (the same order the JSON `orchestrators` array emits).
+            let label = format_monorepo_label(
+                MonorepoStandard::PnpmWorkspaces,
+                &[MonorepoStandard::Nx, MonorepoStandard::Lerna],
+            );
+            assert_eq!(label, "Nx + Lerna (using pnpm workspaces)");
         }
     }
 }

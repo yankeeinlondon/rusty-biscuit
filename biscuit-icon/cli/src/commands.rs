@@ -452,7 +452,7 @@ async fn launch_picker(
     fmt: &Format,
     meta: bool,
 ) -> Result<()> {
-    use tui_chrome::prelude::*;
+    use biscuit_tui::prelude::*;
 
     let options: Vec<ChoiceOption> = ids
         .iter()
@@ -462,7 +462,7 @@ async fn launch_picker(
     let state = ChooseManyState::from_options(options);
     let component = ChooseMany::new();
 
-    match tui_chrome::core::standalone::run_standalone(component, state, None) {
+    match biscuit_tui::core::standalone::run_standalone(component, state, None) {
         Ok(picked) => {
             if picked.is_empty() {
                 return Ok(());

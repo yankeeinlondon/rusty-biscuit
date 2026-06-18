@@ -75,7 +75,7 @@ From highest to lowest:
 3. **Multiplicative** — `*`, `/`, `%`
 4. **Additive** — `+`, `-`
 5. **Comparison** — `==`, `!=`, `>`, `>=`, `<`, `<=`
-6. **Logical AND** — `&&` (condition mode)
+6. **Logical AND** — `&&`
 7. **Logical OR / Fallback** — `||` (mode-dependent)
 8. **Ternary** — `? :`
 
@@ -206,7 +206,8 @@ body interpolation, `when=`, or another post-frontmatter surface.
 
 ## Interpolation vs. Condition Mode
 
-The parser supports two modes. The operator set differs:
+The parser supports two modes. Only `||` differs between them; `&&` is logical
+AND in both:
 
 | Surface | `||` meaning |
 | --- | --- |
@@ -217,7 +218,7 @@ Consequences:
 
 - `when="a || b"` is logical OR and evaluates to a boolean
 - `{{ a || "default" }}` is fallback sugar and expands to the first truthy value
-- `{{ a && b }}` is rejected at parse time
+- `{{ a && b }}` is logical AND (lowered to `and(a, b)`)
 - `when="a && b"` is logical AND
 
 The function-call forms `and(...)` and `or(...)` are valid in both modes.
@@ -472,7 +473,7 @@ one or more digits, where the hyphen is not preceded by another hyphen:
 | `ext(file)` | final extension without the leading dot; `""` when none |
 | `parent_dir(file)` | directory segment immediately above the basename |
 | `file_trailing(file)` | last directory segment plus basename |
-| `dir_leading(file)` | directory path before the last segment |
+| `dir_leading(file)` | directory path above the last directory segment, dropping the basename and its parent (complement of `file_trailing`) |
 | `join(left, right)` | joins two path strings, normalizing separators |
 
 #### Link Helpers
@@ -781,7 +782,6 @@ includes the source line number.
 
 Unsupported or easy-to-misread forms:
 
-- `a && b` inside `{{ ... }}` interpolation — only `when="..."` accepts it
 - a single `&` (always a lexer error)
 - numeric dot access like `foo.0` — use `foo[0]` instead
 

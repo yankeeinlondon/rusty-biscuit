@@ -229,7 +229,7 @@ Goal: each output module accepts the resolved `package` (exact `&str`) and `pack
 
 - `just -d sniff test`.
 - `sniff repo structure --package-area homelab --json` returns only homelab packages.
-- `sniff repo deps -p sniff-cli` produces deps view focused on that package.
+- `sniff repo package-dependencies -p sniff-cli` produces deps view focused on that package.
 - `sniff repo packages -p sniff-lib` returns exactly one package; `--package-area sniff` returns all sniff packages.
 
 ---

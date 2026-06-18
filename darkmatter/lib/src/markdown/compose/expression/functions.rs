@@ -912,8 +912,16 @@ pub fn is_this_year_utc(args: &[Value]) -> Result<Value, String> {
     Ok(Value::Bool(is_this_year_with(&args[0], today_utc(), true)))
 }
 
-/// Resolves a filepath argument to an absolute path using FileReference rules
-/// and the document-relative base dir.
+/// Resolves a filepath argument to an absolute path using FileReference rules.
+///
+/// Resolution is attempted document-relative first (against `ctx.base_dir`, so
+/// references written inside a composed document resolve next to that document),
+/// then falls back to ambient process-CWD resolution. The fallback keeps these
+/// functions in agreement with the `file`-typed `$schema` validator, which uses
+/// `FileReference::resolve()` (process CWD): a caller-supplied path — e.g. a CLI
+/// `-y` variable typed relative to the user's working directory — that the
+/// schema layer accepts must not read as missing here. The two anchors only
+/// differ when the process CWD is not the document's directory.
 ///
 /// ## Returns
 ///
@@ -927,9 +935,15 @@ fn resolve_arg(raw: &str, ctx: &ResolutionContext) -> Result<Option<PathBuf>, St
     for (path, position) in &ctx.magic_paths {
         file_ref = file_ref.add_magic_path(path, *position);
     }
-    file_ref
+    match file_ref
         .resolve_from(&ctx.base_dir)
-        .map_err(|e| format!("invalid file path {raw:?}: {e}"))
+        .map_err(|e| format!("invalid file path {raw:?}: {e}"))?
+    {
+        Some(path) => Ok(Some(path)),
+        None => file_ref
+            .resolve()
+            .map_err(|e| format!("invalid file path {raw:?}: {e}")),
+    }
 }
 
 /// `absolute(file) -> file | Error::InvalidFilePath`
@@ -2302,6 +2316,29 @@ mod tests {
                 file_exists_fn(&[json!("\0bad")], &ctx).unwrap(),
                 json!(false)
             );
+        }
+
+        #[test]
+        #[serial_test::serial]
+        fn file_exists_falls_back_to_process_cwd() {
+            // A path that does not exist relative to base_dir but DOES exist
+            // relative to the process CWD must still resolve — matching the
+            // `file` schema validator, which resolves from the ambient CWD.
+            // This is the case a CLI `-y` variable typed relative to the user's
+            // working directory hits when the document lives elsewhere.
+            let cwd_dir = tempfile::TempDir::new().unwrap();
+            std::fs::write(cwd_dir.path().join("plan.md"), "# Plan\n").unwrap();
+            // base_dir deliberately lacks plan.md, so document-relative
+            // resolution misses and only the CWD fallback can succeed.
+            let base_dir = tempfile::TempDir::new().unwrap();
+            let ctx = ResolutionContext::new(base_dir.path().to_path_buf());
+
+            let original = std::env::current_dir().unwrap();
+            std::env::set_current_dir(cwd_dir.path()).unwrap();
+            let found = file_exists_fn(&[json!("plan.md")], &ctx);
+            std::env::set_current_dir(&original).unwrap();
+
+            assert_eq!(found.unwrap(), json!(true));
         }
 
         #[test]

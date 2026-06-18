@@ -1,4 +1,6 @@
+use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::terminal::Terminal;
 use clap::{CommandFactory, Parser};
 use clap_complete::{CompleteEnv, Shell};
 use sniff::filesystem::blast_radius::{ChangeScope, ChangedPathKind, find_blast_radius_documents};
@@ -12,7 +14,7 @@ use tracing::info_span;
 
 use crate::args::{
     BlastRadiusScopeArg, COMPLETIONS_HELP, Cli, Commands, DEFAULT_COMMIT_COUNT, DocsFilter,
-    FilesFilter, ServiceStateArg,
+    FilesFilter, ServiceStateArg, SoftwareSubcommand,
 };
 use crate::output::{self, OutputFilter, PathListFormat};
 use crate::perf::{CliPerf, handle_no_results};
@@ -23,8 +25,10 @@ mod repo;
 
 use remote::{handle_pr_command, handle_remote_url, handle_shorthand};
 use repo::{
-    RepoPackageAreasArgs, RepoPackagesArgs, handle_file_list_command, handle_repo_package_areas,
-    handle_repo_packages,
+    RepoPackageAreasArgs, RepoPackageManagerArgs, RepoPackagesArgs, RepoTestRunnerArgs,
+    RepoVersionArgs, handle_file_list_command, handle_repo_branches, handle_repo_dependencies,
+    handle_repo_package_areas, handle_repo_package_manager, handle_repo_packages,
+    handle_repo_test_runner, handle_repo_version,
 };
 
 /// Main CLI entrypoint.
@@ -100,7 +104,12 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Handle programs mode separately (doesn't use SniffResult)
     if let Some(ref cmd) = cli.command {
         // Handle notification-helpers before generic programs mode
-        if matches!(cmd, Commands::NotificationHelpers) {
+        if matches!(
+            cmd,
+            Commands::Software {
+                subcommand: Some(SoftwareSubcommand::NotificationHelpers),
+            }
+        ) {
             let programs = sniff::programs::ProgramsInfo::detect();
             if cli.json {
                 output::print_notification_helpers_json(
@@ -113,6 +122,34 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     cli.verbose,
                 );
                 output::emit_text(&rendered, cli.plain);
+                perf.emit_stdout(None);
+            }
+            return Ok(());
+        }
+
+        // Handle test-runners separately because they use a richer
+        // `Availability` discriminator than the bare `installed: bool` shape
+        // the other 8 categories produce.
+        if matches!(
+            cmd,
+            Commands::Software {
+                subcommand: Some(SoftwareSubcommand::TestRunners),
+            }
+        ) {
+            let programs = sniff::programs::ProgramsInfo::detect();
+            if cli.json {
+                let json = output::build_test_runners_json(&programs.test_runners)?;
+                output::print_json_value(json, perf.build_report().as_ref());
+            } else {
+                let rendered =
+                    output::render_test_runners_markdown(&programs.test_runners, cli.verbose);
+                output::emit_text(&rendered, cli.plain);
+                if !cli.plain {
+                    eprintln!(
+                        "{}",
+                        output::test_runners_search_hint(output::HintMode::Stderr)
+                    );
+                }
                 perf.emit_stdout(None);
             }
             return Ok(());
@@ -696,6 +733,187 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 perf.emit_stderr(None);
                 return Ok(());
             }
+            crate::args::RepoAction::Default => {
+                let dir = base_dir
+                    .as_deref()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let identity = sniff::filesystem::repo::detect_repo_identity(dir)?;
+                if !cli.json {
+                    // v0 prints the bare name (a subset of the aggregate, unchanged
+                    // from the legacy default). `-v` prints the rich one-liner
+                    // whose fields all live in the parent aggregate scope.
+                    let rendered = if cli.verbose > 0 {
+                        output::render_repo_default_verbose(&identity)
+                    } else {
+                        output::render_repo_name(&identity, 0)
+                    };
+                    output::emit_text(&rendered, cli.plain);
+                    perf.emit_stderr(None);
+                    return Ok(());
+                }
+            }
+            crate::args::RepoAction::IsMonorepo { no_error } => {
+                let dir = base_dir
+                    .as_deref()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let root = match sniff::filesystem::repo_root(dir)? {
+                    Some(root) => root,
+                    None => {
+                        output::emit_stderr(
+                            &format!("Not a git repository: {}\n", dir.display()),
+                            cli.plain,
+                        );
+                        std::process::exit(1);
+                    }
+                };
+                let info = match sniff::filesystem::repo::detect_repo_structure(&root) {
+                    Ok(info) => info,
+                    Err(e) => {
+                        output::emit_stderr(
+                            &format!(
+                                "Failed to detect repository structure at {}: {e}\n",
+                                root.display()
+                            ),
+                            cli.plain,
+                        );
+                        std::process::exit(1);
+                    }
+                };
+                if cli.json {
+                    let outcome = output::repo_json::is_monorepo_outcome(info.as_ref(), *no_error);
+                    output::print_json_value(outcome.value, perf.build_report().as_ref());
+                    if let Some(code) = outcome.exit_code {
+                        std::process::exit(code);
+                    }
+                    return Ok(());
+                }
+                match info {
+                    Some(ref repo) if repo.is_monorepo => {
+                        let layer = repo
+                            .primary_layer()
+                            .expect("is_monorepo implies a membership layer");
+                        let label =
+                            output::format_monorepo_label(layer.authority, &layer.orchestrators);
+                        let rendered = Prose::new(label).render(&Terminal::default());
+                        output::emit_text(&rendered, cli.plain);
+                        println!();
+                        perf.emit_stderr(None);
+                        return Ok(());
+                    }
+                    _ => {
+                        println!("false");
+                        perf.emit_stderr(None);
+                        if !*no_error {
+                            std::process::exit(1);
+                        }
+                        return Ok(());
+                    }
+                }
+            }
+            crate::args::RepoAction::PackageCount => {
+                let dir = base_dir
+                    .as_deref()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                // Count the canonical catalog so a recognized standalone project
+                // reports `1` rather than `0`. `RepoIdentity::package_count` is
+                // only populated for monorepos, so it cannot serve this path.
+                let root =
+                    sniff::filesystem::repo_root(dir)?.unwrap_or_else(|| dir.to_path_buf());
+                let count = sniff::filesystem::repo::detect_repo_structure_or_root_package(&root)?
+                    .and_then(|info| info.packages)
+                    .map_or(0, |packages| packages.len());
+                if cli.json {
+                    let outcome = output::repo_json::package_count_outcome(count);
+                    output::print_json_value(outcome.value, perf.build_report().as_ref());
+                    return Ok(());
+                }
+                println!("{count}");
+                perf.emit_stderr(None);
+                return Ok(());
+            }
+            crate::args::RepoAction::PackageManager { csv, list, md } => {
+                return handle_repo_package_manager(
+                    base_dir.as_deref(),
+                    RepoPackageManagerArgs {
+                        csv: *csv,
+                        list: *list,
+                        md: *md,
+                    },
+                    cli.json,
+                    cli.plain,
+                    &perf,
+                );
+            }
+            crate::args::RepoAction::Branches { refresh_remotes } => {
+                return handle_repo_branches(
+                    base_dir.as_deref(),
+                    *refresh_remotes,
+                    cli.json,
+                    cli.plain,
+                    &perf,
+                );
+            }
+            crate::args::RepoAction::Dependencies {
+                dependencies,
+                dev_dependencies,
+                peer_dependencies,
+                optional_dependencies,
+            } => {
+                return handle_repo_dependencies(
+                    base_dir.as_deref(),
+                    sniff::filesystem::repo::ExternalDependencyFilter {
+                        dependencies: *dependencies,
+                        dev_dependencies: *dev_dependencies,
+                        peer_dependencies: *peer_dependencies,
+                        optional_dependencies: *optional_dependencies,
+                    },
+                    cli.json,
+                    cli.plain,
+                    &perf,
+                );
+            }
+            crate::args::RepoAction::Version {
+                csv,
+                list,
+                md,
+                all,
+                package,
+                package_area,
+                no_error,
+                on_error,
+            } => {
+                return handle_repo_version(
+                    base_dir.as_deref(),
+                    RepoVersionArgs {
+                        csv: *csv,
+                        list: *list,
+                        md: *md,
+                        all: *all,
+                        package: package.clone(),
+                        package_area: package_area.clone(),
+                    },
+                    cli.json,
+                    cli.plain,
+                    cli.verbose,
+                    *no_error,
+                    on_error.clone(),
+                    &perf,
+                );
+            }
+            crate::args::RepoAction::TestRunner { csv, list, md } => {
+                return handle_repo_test_runner(
+                    base_dir.as_deref(),
+                    RepoTestRunnerArgs {
+                        csv: *csv,
+                        list: *list,
+                        md: *md,
+                    },
+                    cli.json,
+                    cli.plain,
+                    cli.verbose,
+                    &perf,
+                );
+            }
             crate::args::RepoAction::Worktree { no_error, on_error } => {
                 let dir = base_dir
                     .as_deref()
@@ -728,7 +946,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return handle_no_results(*no_error, on_error, cli.plain, &perf);
             }
-            crate::args::RepoAction::Worktrees { md, list: _, csv, .. } => {
+            crate::args::RepoAction::Worktrees {
+                md, list: _, csv, ..
+            } => {
                 let dir = base_dir
                     .as_deref()
                     .unwrap_or_else(|| std::path::Path::new("."));
@@ -785,8 +1005,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             .iter()
                             .map(|(is_current, body)| {
                                 let marker = if *is_current { "* " } else { "" };
-                                let prefix =
-                                    if *md { format!("- {marker}") } else { marker.to_string() };
+                                let prefix = if *md {
+                                    format!("- {marker}")
+                                } else {
+                                    marker.to_string()
+                                };
                                 render(&format!("{prefix}{body}"))
                             })
                             .collect::<Vec<_>>()
@@ -1079,6 +1302,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
         | OutputFilter::NotificationHelpers
+        | OutputFilter::TestRunners
         | OutputFilter::Services
         | OutputFilter::Just
         | OutputFilter::BlastRadius => {
@@ -1130,17 +1354,21 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .retain(|f| f.path.to_string_lossy().starts_with(path_prefix));
 
                 // Filter dirty files
-                git.status
+                let status = git
+                    .status
+                    .as_mut()
+                    .expect("git-status command always computes status");
+                status
                     .dirty
                     .retain(|f| f.filepath.to_string_lossy().starts_with(path_prefix));
 
                 // Filter untracked files
-                git.status
+                status
                     .untracked
                     .retain(|f| f.filepath.to_string_lossy().starts_with(path_prefix));
 
                 // Update counts to match filtered lists
-                git.status.staged_count = git
+                status.staged_count = git
                     .file_changes
                     .iter()
                     .filter(|f| {
@@ -1148,7 +1376,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             || f.status == sniff::filesystem::git::FileStatus::Both
                     })
                     .count();
-                git.status.unstaged_count = git
+                status.unstaged_count = git
                     .file_changes
                     .iter()
                     .filter(|f| {
@@ -1156,14 +1384,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             || f.status == sniff::filesystem::git::FileStatus::Both
                     })
                     .count();
-                git.status.untracked_count = git
+                status.untracked_count = git
                     .file_changes
                     .iter()
                     .filter(|f| f.status == sniff::filesystem::git::FileStatus::Untracked)
                     .count();
-                git.status.is_dirty = git.status.staged_count > 0
-                    || git.status.unstaged_count > 0
-                    || git.status.untracked_count > 0
+                status.is_dirty = status.staged_count > 0
+                    || status.unstaged_count > 0
+                    || status.untracked_count > 0
                     || git
                         .file_changes
                         .iter()
@@ -1201,12 +1429,16 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             // not the one being inspected — clear it so the output doesn't
             // imply those files are dirty on the target branch.
             git.file_changes.clear();
-            git.status.dirty.clear();
-            git.status.untracked.clear();
-            git.status.staged_count = 0;
-            git.status.unstaged_count = 0;
-            git.status.untracked_count = 0;
-            git.status.is_dirty = false;
+            let status = git
+                .status
+                .as_mut()
+                .expect("git-status command always computes status");
+            status.dirty.clear();
+            status.untracked.clear();
+            status.staged_count = 0;
+            status.unstaged_count = 0;
+            status.untracked_count = 0;
+            status.is_dirty = false;
         }
     }
 
@@ -1242,7 +1474,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let file_changes = wt_repo.file_changes().unwrap_or_default();
                     let repo_status = wt_repo.repo_status().unwrap_or_default();
                     git.file_changes = file_changes;
-                    git.status = repo_status;
+                    git.status = Some(repo_status);
                 }
                 // Reflect the worktree's location so absolute file paths in
                 // the rendered output resolve to the worktree, and the queried
@@ -1275,7 +1507,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             package_area,
             ..
         }
-        | crate::args::RepoAction::Deps {
+        | crate::args::RepoAction::PackageDependencies {
             package,
             package_area,
             ..
@@ -1417,6 +1649,21 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     if latest_versions_enabled {
         result = enrich_result_dependencies(result).await;
+    }
+
+    // Bare `sniff repo --json` assembles the scope-complete aggregate of its
+    // participating children. It must run after the full detection pass so
+    // the aggregate can draw from the shared `SniffResult`.
+    if matches!(repo_action, Some(crate::args::RepoAction::Default)) && cli.json {
+        let dir = base_dir
+            .as_deref()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let identity = sniff::filesystem::repo::detect_repo_identity(dir)?;
+        let aggregate =
+            output::repo_json::build_aggregate_value(&result, base_dir.as_deref(), &identity)?;
+        output::print_json_value(aggregate, result.performance.as_ref());
+        perf.emit_for_json(result.performance.as_ref());
+        return Ok(());
     }
 
     let docs_filter = cli
@@ -1877,7 +2124,7 @@ fn is_scriptable_repo_action(action: Option<&crate::args::RepoAction>) -> bool {
         Some(
             RepoAction::Structure { .. }
             | RepoAction::GitStatus { .. }
-            | RepoAction::Deps { .. }
+            | RepoAction::PackageDependencies { .. }
             | RepoAction::Remote { .. }
             | RepoAction::Hash { .. },
         ) => false,

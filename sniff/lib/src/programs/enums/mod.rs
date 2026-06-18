@@ -11,7 +11,7 @@ pub mod metadata;
 pub use crate::programs::contract::CategoryEnum;
 pub use categories::{
     AiCli, Editor, HeadlessAudio, LanguagePackageManager, NotificationHelper, OsPackageManager,
-    TerminalApp, TtsClient, Utility,
+    TerminalApp, TestRunner, TtsClient, Utility,
 };
 
 #[cfg(test)]
@@ -69,6 +69,11 @@ mod tests {
             NotificationHelper::COUNT,
             metadata::NOTIFICATION_HELPER_INFO.len()
         );
+    }
+
+    #[test]
+    fn test_test_runner_count_matches_info() {
+        assert_eq!(TestRunner::COUNT, metadata::TEST_RUNNER_INFO.len());
     }
 
     #[test]

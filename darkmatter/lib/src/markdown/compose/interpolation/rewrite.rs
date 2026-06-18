@@ -9,6 +9,7 @@ use super::{EvalResult, Evaluator, ExpressionFinder, ExpressionLocation, parse};
 use crate::markdown::compose::expression::{EvaluationLookup, UNKNOWN_FUNCTION_PREFIX};
 use crate::markdown::compose::ComposeWarning;
 use crate::markdown::types::MarkdownError;
+use serde_json::Value;
 
 /// Whether an evaluation error is fatal even in non-fail-fast mode.
 ///
@@ -163,6 +164,59 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
         replacements: total_count,
         warnings: all_warnings,
     })
+}
+
+/// Interpolates a single frontmatter value, preserving scalar type when the
+/// whole value is one `{{ expr }}`.
+///
+/// When `input` is exactly one interpolation expression (ignoring surrounding
+/// whitespace) that evaluates to a boolean, number, or null, the typed
+/// `serde_json::Value` is returned so `{{ false }}` stays the boolean `false`
+/// (falsy) rather than the string `"false"` (truthy), and `{{ file_index(x) }}`
+/// stays a number for downstream predicates like `is_number`. Strings, arrays,
+/// objects, mixed text (`"a {{ x }}"`), parse/eval failures, and unresolved
+/// (e.g. shell-pending) templates fall through to [`interpolate_text`], keeping
+/// the established string-rewrite behavior — including leaving an unresolved
+/// `{{ … }}` in place for a later pass.
+///
+/// ## Errors
+///
+/// Propagates the same `MarkdownError` as [`interpolate_text`] when `fail_fast`
+/// is set or a fatal evaluation error occurs on the string path.
+pub(crate) fn interpolate_value<L: EvaluationLookup>(
+    input: &str,
+    evaluator: &Evaluator<L>,
+    fail_fast: bool,
+    warning_stage: &'static str,
+) -> Result<(Value, usize, Vec<ComposeWarning>), MarkdownError> {
+    if let Some(typed) = whole_value_scalar(input, evaluator) {
+        return Ok((typed, 1, Vec::new()));
+    }
+    let result = interpolate_text(input, evaluator, ScanMode::Plain, fail_fast, warning_stage)?;
+    Ok((Value::String(result.output), result.replacements, result.warnings))
+}
+
+/// Returns the typed scalar value when `input` is a single whole-value
+/// `{{ expr }}` that evaluates to a boolean, number, or null.
+///
+/// Returns `None` (string path) when the value is mixed text, holds more than
+/// one expression, evaluates to a string/array/object, or fails to parse or
+/// evaluate. Restricting to `Bool`/`Number`/`Null` keeps the change to the
+/// value kinds literal frontmatter already produces (`yolo: true`, `phase: 1`),
+/// and leaves string/array/object results on the proven string path.
+fn whole_value_scalar<L: EvaluationLookup>(input: &str, evaluator: &Evaluator<L>) -> Option<Value> {
+    let locations = ExpressionFinder::find_all_plain(input);
+    let [loc] = locations.as_slice() else {
+        return None;
+    };
+    if !input[..loc.start].trim().is_empty() || !input[loc.end..].trim().is_empty() {
+        return None;
+    }
+    let expr = parse(&loc.expression).ok()?;
+    match evaluator.eval_json(&expr) {
+        Ok(value @ (Value::Bool(_) | Value::Number(_) | Value::Null)) => Some(value),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

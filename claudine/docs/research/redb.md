@@ -1,6 +1,6 @@
 ---
 prompt: |-
-    The 'redb' crate in Rust provides a modern and highly performant transactional database which we plan to use in the "remote-signal" daemon.
+    The 'redb' crate in Rust provides a modern and highly performant transactional database which we plan to use in the "rendezvous" daemon.
     
     Your task is to do a deep dive on the 'redb' crate and answer the following questions through thorough research:
     

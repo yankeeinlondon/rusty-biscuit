@@ -26,6 +26,15 @@ Root `justfile` exposes `just test|lint|build|install|doctest`, iterating a **cu
 - shared recipes are all located in the `/just` folder
 - each package area has it's own `justfile` but the shared recipes are leveraged as much as possible to keep as much uniformity as possible
 
+## Formatting
+
+`main` is the formatting authority.
+
+- Never run `cargo fmt` / `rustfmt` write-mode unless explicitly asked. Match surrounding style by hand when editing.
+- Reason: `rust-toolchain.toml` pins `channel = "stable"`, not a specific rustfmt version. Ad-hoc fmt reformats to whatever rustfmt floats in locally, which drifts from `main` and poisons branch↔`main` merges — a repo-wide reformat touches nearly every line, so git silently mis-merges reformatted-but-old code with `main`'s real changes.
+- `cargo fmt --check` (read-only) is fine for diagnosis.
+- To resolve a merge poisoned by a stray reformat: reset every file whose only branch-side change was a `style`/reformat commit back to `main` (`git checkout MERGE_HEAD -- <file>`), keeping only genuine semantic work.
+
 ## Rustdoc Convention
 
 - No `# H1` inside `///` blocks — rustdoc already titles the item.

@@ -73,7 +73,7 @@ via Rayon. Each `which` call scans the entire PATH directory by directory.
 
 The `ExecutableIndex` (in `find_program.rs`) already provides a solution: scan
 all PATH directories once, then do O(1) HashMap lookups. The index exists and is
-used by `sniff repo` and `sniff programs`, but `CategoryDetector::new()` still
+used by `sniff repo` and `sniff software`, but `CategoryDetector::new()` still
 uses the per-binary `which` approach.
 
 **Fix:** Refactor `CategoryDetector::new()` to build an `ExecutableIndex` once

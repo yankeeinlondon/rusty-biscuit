@@ -6,14 +6,14 @@ blast_radius:
   - sniff/lib/src/filesystem/repo.rs
 ---
 
-# The `sniff repo deps` Subcommand
+# The `sniff repo package-dependencies` Subcommand
 
 Renders the internal dependency graph of a monorepo workspace — showing which packages depend on which other packages within the same workspace. Only applies to monorepos (Cargo workspaces, pnpm workspaces, Nx, etc.); exits with an error message if no workspace packages are found.
 
 ## Arguments and Flags
 
 ```
-sniff repo deps [--ui] [filter]
+sniff repo package-dependencies [--ui] [filter]
 ```
 
 | Argument | Description |
@@ -21,7 +21,7 @@ sniff repo deps [--ui] [filter]
 | `filter` | Optional positional filter — see [Package Filtering](#package-filtering) below |
 | `--ui`   | Render the dependency graph as a Mermaid flowchart diagram instead of text |
 
-The filter can also be supplied at the `repo` level and is inherited by `deps` when no subcommand-level filter is given. The subcommand-level filter takes precedence when both are set.
+The filter can also be supplied at the `repo` level and is inherited by `package-dependencies` when no subcommand-level filter is given. The subcommand-level filter takes precedence when both are set.
 
 ## Default Text Output
 
@@ -55,7 +55,7 @@ Packages that have neither `depends_on` entries nor `used_by` entries are **omit
 ## Visual Mode (`--ui`)
 
 ```
-sniff repo deps --ui
+sniff repo package-dependencies --ui
 ```
 
 Builds a Mermaid `flowchart TD` diagram from the workspace dependency data and renders it inline in the terminal using `MermaidDiagram` (via biscuit-terminal). Falls back to a fenced code block if the terminal cannot display images or `mmdc` is not available.
@@ -93,8 +93,8 @@ Two flags layer on top of the positional filter:
 | `--package-area <AREA>` | Case-insensitive prefix match on `Package.package_area` |
 
 ```bash
-sniff repo deps -p sniff-cli                # Focus on a single package
-sniff repo deps --package-area homelab      # All homelab/* packages
+sniff repo package-dependencies -p sniff-cli                # Focus on a single package
+sniff repo package-dependencies --package-area homelab      # All homelab/* packages
 ```
 
 Passing both flags requires the resolved package to live inside the resolved area; otherwise the command fails with an error. Unknown values for either flag fail with an error listing the valid names. Edges referencing packages outside the resolved scope are pruned from both text and `--ui` output.
@@ -102,14 +102,14 @@ Passing both flags requires the resolved package to live inside the resolved are
 ## JSON Output
 
 ```
-sniff --json repo deps [filter]
+sniff --json repo package-dependencies [filter]
 ```
 
 Returns a focused `{ packages: [...] }` object — **not** the full
 `RepoInfo` blob. Each entry uses a deliberately narrow allowlist of
 fields so future additions to the `Package` struct (languages,
 documentation, configuration, etc.) cannot silently leak into the
-public `deps --json` contract:
+public `package-dependencies --json` contract:
 
 ```json
 {
@@ -147,7 +147,7 @@ on JSON output.
 ## Plain Output
 
 ```
-sniff --plain repo deps [filter]
+sniff --plain repo package-dependencies [filter]
 ```
 
 Adding `--plain` strips all ANSI escape codes (colors, bold, italic, hyperlinks) from the text output. The `--ui` flag still renders the Mermaid diagram; `--plain` only affects the styled text around it.

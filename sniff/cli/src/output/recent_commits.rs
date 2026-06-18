@@ -1,6 +1,8 @@
 use biscuit_terminal::terminal::Terminal;
-use chrono::Utc;
+use chrono::{Duration, Utc};
+use serde_json::{Value, json};
 
+use sniff::filesystem::git::recent_commits::{CommitDescSet, get_recent_commits_by_duration};
 use sniff::filesystem::git::{PeriodSpecifier, parse_period};
 
 use crate::args::{RecentCommitActionArg, RepoAction};
@@ -83,42 +85,28 @@ pub(crate) fn handle_recent_commits_command(
     }
 
     if json {
-        // `recent-commits` keeps today's behavior — emit the full
-        // CommitDescSet untouched. The two filtered modes apply the same
-        // per-commit / per-file filtering used by styled / plain output and
-        // tag the payload with a top-level `filter` field so JSON consumers
-        // can tell the variants apart.
+        // The two filtered modes still honor the no-results policy at the
+        // command level; the value builder itself always returns a stable
+        // object and is reused by the `repo --json` aggregate.
         match mode {
-            RecentCommitsMode::RecentCommits => {
-                let value = serde_json::to_value(&commit_set)?;
-                crate::output::print_json_value(value, perf.build_report().as_ref());
-                return Ok(());
-            }
             RecentCommitsMode::SourceCodeChanges | RecentCommitsMode::DocumentationChanges => {
-                let (centric_filter, filter_label) = match mode {
-                    RecentCommitsMode::SourceCodeChanges => {
-                        (CommitCentricFilter::SourceCode, "source_code")
-                    }
-                    RecentCommitsMode::DocumentationChanges => {
-                        (CommitCentricFilter::Documentation, "documentation")
-                    }
+                let centric_filter = match mode {
+                    RecentCommitsMode::SourceCodeChanges => CommitCentricFilter::SourceCode,
+                    RecentCommitsMode::DocumentationChanges => CommitCentricFilter::Documentation,
                     RecentCommitsMode::RecentCommits => unreachable!(),
                 };
-                let mut filtered = filter_commit_set(&commit_set, centric_filter);
+                let filtered = filter_commit_set(&commit_set, centric_filter);
                 if filtered.commits.is_empty() {
                     let msg = on_error.clone().unwrap_or_else(|| "none found".to_string());
                     return handle_no_results(no_error, &Some(msg), plain, perf);
                 }
-                // Trim full package metadata for brevity in filtered commit views.
-                filtered.packages = None;
-                let mut value = serde_json::to_value(&filtered)?;
-                if let Some(obj) = value.as_object_mut() {
-                    obj.insert("filter".into(), serde_json::json!(filter_label));
-                }
-                crate::output::print_json_value(value, perf.build_report().as_ref());
-                return Ok(());
             }
+            _ => {}
         }
+
+        let value = commit_family_value(&commit_set, mode);
+        crate::output::print_json_value(value, perf.build_report().as_ref());
+        return Ok(());
     }
 
     if plain {
@@ -161,10 +149,55 @@ pub(crate) fn handle_recent_commits_command(
 }
 
 #[derive(Debug, Clone, Copy)]
-enum RecentCommitsMode {
+pub(crate) enum RecentCommitsMode {
     RecentCommits,
     SourceCodeChanges,
     DocumentationChanges,
+}
+
+/// Build the JSON value for a commit-family subcommand.
+///
+/// Returns the focused shape (`commits`, `period_label`, `repo_root`, plus
+/// `packages`/`filter`) even when `commit_set.commits` is empty, so the
+/// `repo --json` aggregate can include a stable object for
+/// `recent-commits`, `source-code-changes`, and `documentation-changes`
+/// without triggering the leaf command's no-results exit path.
+pub(crate) fn commit_family_value(commit_set: &CommitDescSet, mode: RecentCommitsMode) -> Value {
+    match mode {
+        RecentCommitsMode::RecentCommits => serde_json::to_value(commit_set).unwrap_or(Value::Null),
+        RecentCommitsMode::SourceCodeChanges | RecentCommitsMode::DocumentationChanges => {
+            let (filter, filter_label) = match mode {
+                RecentCommitsMode::SourceCodeChanges => {
+                    (CommitCentricFilter::SourceCode, "source_code")
+                }
+                RecentCommitsMode::DocumentationChanges => {
+                    (CommitCentricFilter::Documentation, "documentation")
+                }
+                RecentCommitsMode::RecentCommits => unreachable!(),
+            };
+            let mut filtered = filter_commit_set(commit_set, filter);
+            // Trim full package metadata for brevity in filtered commit views.
+            filtered.packages = None;
+            let mut value = serde_json::to_value(&filtered).unwrap_or(Value::Null);
+            if let Some(obj) = value.as_object_mut() {
+                obj.insert("filter".into(), json!(filter_label));
+            }
+            value
+        }
+    }
+}
+
+/// Load the default commit set used by the bare `repo --json` aggregate.
+///
+/// The aggregate uses the same default period as `sniff repo recent-commits`
+/// (last 3 days) so the parent scope matches the child's default invocation.
+pub(crate) fn default_commit_family_set(
+    base_dir: &std::path::Path,
+) -> Result<CommitDescSet, Box<dyn std::error::Error>> {
+    let duration = Duration::days(3);
+    Ok(get_recent_commits_by_duration(
+        base_dir, duration, "last 3d",
+    )?)
 }
 
 struct RecentCommitsParams {

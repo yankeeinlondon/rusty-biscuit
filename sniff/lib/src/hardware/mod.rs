@@ -362,8 +362,8 @@ mod tests {
     fn test_storage_info_collected() {
         // Storage only: storage enumeration is fast, so skip the slow GPU/audio
         // probes that full detection would otherwise run.
-        let info =
-            detect_hardware_with_request(&HardwareRequest::summary().include_storage(true)).unwrap();
+        let info = detect_hardware_with_request(&HardwareRequest::summary().include_storage(true))
+            .unwrap();
         // At least one disk should be present
         assert!(!info.storage.is_empty());
     }

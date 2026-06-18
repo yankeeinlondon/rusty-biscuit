@@ -248,7 +248,7 @@ The following paths can be referenced in `when` expressions:
 | `os.*` | Operating system context (`os.name`, `os.type`, `os.version`, `os.hostname`) |
 | `hardware.*` | Hardware context (`hardware.arch`, `hardware.cpu`, `hardware.cores`) |
 | `git.*` | Git context (`git.branch`, `git.is_dirty`, `git.head_sha`, etc.) |
-| `project.*` | Project context (`project.language`, `project.is_monorepo`, `project.monorepo_tool`) |
+| `project.*` | Project context (`project.language`, `project.is_monorepo`, `project.monorepo_standard`, `project.monorepo_orchestrators`, `project.monorepo_tool`) |
 | `ctx.*` | Auto-captured runtime context (`ctx.today`, `ctx.year`, etc.) |
 | Top-level fields | `provider`, `event`, `timestamp`, `session_id`, `cwd`, `tool_name`, `error`, `prompt`, `agent_type`, `notification_type`, `notification_message` |
 
@@ -314,7 +314,9 @@ All string fields in actions (`message`, `template`, `command`, `args`) support 
 | `{{git.repo_org}}` | Organization/owner name |
 | `{{project.language}}` | Primary project language |
 | `{{project.is_monorepo}}` | Monorepo detection (true/false) |
-| `{{project.monorepo_tool}}` | Monorepo tool (cargo_workspace, pnpm, nx) |
+| `{{project.monorepo_standard}}` | Monorepo authority standard (cargo-workspace, pnpm-workspaces, etc.) |
+| `{{project.monorepo_orchestrators}}` | Orchestrators on the primary monorepo layer (nx, turborepo, lerna) |
+| `{{project.monorepo_tool}}` | Deprecated alias for `{{project.monorepo_standard}}` |
 
 ### Environment Variables
 

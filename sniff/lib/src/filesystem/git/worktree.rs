@@ -326,7 +326,7 @@ mod tests {
 
     #[test]
     fn list_worktrees_main_only() {
-        let (dir, _repo) = setup_repo();
+        let (dir, repo) = setup_repo();
 
         let worktrees = list_worktrees(dir.path())
             .unwrap()
@@ -340,8 +340,14 @@ mod tests {
         let main = &worktrees[0];
         // The temp dir basename becomes the main worktree name.
         let expected_name = dir.path().file_name().unwrap().to_str().unwrap();
+        let expected_branch = repo
+            .head()
+            .unwrap()
+            .shorthand()
+            .expect("fixture repo has a named branch")
+            .to_string();
         assert_eq!(main.name, expected_name);
-        assert_eq!(main.branch, Some("main".to_string()));
+        assert_eq!(main.branch, Some(expected_branch));
         assert!(!main.is_detached);
         // is_current depends on where the test process is running from.
         // We only assert the structure is consistent.

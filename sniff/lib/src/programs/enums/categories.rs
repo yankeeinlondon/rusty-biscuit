@@ -373,3 +373,70 @@ pub enum NotificationHelper {
     Dunstify,
     NotifySend,
 }
+
+// ============================================================================
+// Test Runner Enum
+// ============================================================================
+
+/// Test runners and testing frameworks.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    EnumIter,
+    EnumCount,
+    IntoStaticStr,
+)]
+#[strum(serialize_all = "snake_case")]
+pub enum TestRunner {
+    // Rust
+    CargoTest,
+    Nextest,
+    // Go
+    GoTest,
+    Gotestsum,
+    Ginkgo,
+    // JS/TS
+    Vitest,
+    Jest,
+    Mocha,
+    Ava,
+    NodeTest,
+    Jasmine,
+    NodeTap,
+    Uvu,
+    // Python
+    Pytest,
+    Unittest,
+    Nose2,
+    Tox,
+    Nox,
+    // PHP
+    PhpUnit,
+    Pest,
+    Codeception,
+    Behat,
+    Atoum,
+    // Ruby
+    RSpec,
+    Minitest,
+    TestUnit,
+    // JVM
+    JUnit5,
+    JUnit4,
+    TestNg,
+    // .NET
+    XUnit,
+    NUnit,
+    MsTest,
+    // Elixir
+    ExUnit,
+    ESpec,
+}

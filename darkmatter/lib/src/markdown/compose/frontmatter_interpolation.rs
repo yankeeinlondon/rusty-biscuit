@@ -28,7 +28,7 @@
 //! second time to resolve those keys against the shell-expanded values.
 
 use super::expression::{EvaluationLookup, Expr, ExpressionFinder, ResolutionContext, doc_namespace, parse};
-use super::interpolation::{Evaluator, ScanMode, interpolate_text};
+use super::interpolation::{Evaluator, interpolate_value};
 use super::{ComposeContext, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
 use crate::markdown::types::MarkdownError;
@@ -152,18 +152,9 @@ fn rewrite_value<L: EvaluationLookup>(
 ) -> Result<(Value, usize, Vec<ComposeWarning>), MarkdownError> {
     match value {
         Value::String(s) => {
-            let result = interpolate_text(
-                s,
-                evaluator,
-                ScanMode::Plain,
-                fail_fast,
-                "frontmatter-interpolation",
-            )?;
-            Ok((
-                Value::String(result.output),
-                result.replacements,
-                result.warnings,
-            ))
+            // Preserve scalar type when the whole value is one `{{ expr }}`
+            // (e.g. `{{ false }}` stays a boolean), else rewrite as a string.
+            interpolate_value(s, evaluator, fail_fast, "frontmatter-interpolation")
         }
         Value::Array(arr) => {
             let mut new_arr = Vec::with_capacity(arr.len());
@@ -876,6 +867,28 @@ mod tests {
         }
 
         #[test]
+        fn whole_value_interpolation_preserves_scalar_type() {
+            // A frontmatter value that is exactly one `{{ expr }}` keeps its
+            // scalar type (bool/number/null) instead of stringifying. Mixed
+            // text and string results stay strings.
+            let mut fm = fm_from_json(json!({
+                "b": "{{ false }}",
+                "n": "{{ 1 + 1 }}",
+                "nul": "{{ null }}",
+                "s": "{{ 'x' }}",
+                "mixed": "prefix {{ false }}",
+            }));
+            interpolate_frontmatter(&mut fm, &test_context(), false, true, None).unwrap();
+
+            let map = fm.as_map();
+            assert_eq!(map.get("b"), Some(&json!(false)));
+            assert_eq!(map.get("n"), Some(&json!(2)));
+            assert_eq!(map.get("nul"), Some(&Value::Null));
+            assert_eq!(map.get("s"), Some(&json!("x")));
+            assert_eq!(map.get("mixed"), Some(&json!("prefix false")));
+        }
+
+        #[test]
         fn read_side_functions_resolve_with_context_pre_shell_pass() {
             // The pre-shell pass (`defer_shell_pending = true`) carries the
             // resolution context, so read-side functions resolve in frontmatter.
@@ -891,8 +904,8 @@ mod tests {
             }));
             interpolate_frontmatter(&mut fm, &test_context(), false, true, Some(ctx)).unwrap();
 
-            assert_eq!(fm.as_map().get("exists"), Some(&json!("true")));
-            assert_eq!(fm.as_map().get("missing"), Some(&json!("false")));
+            assert_eq!(fm.as_map().get("exists"), Some(&json!(true)));
+            assert_eq!(fm.as_map().get("missing"), Some(&json!(false)));
             assert_eq!(
                 fm.as_map().get("abs"),
                 Some(&json!(
@@ -917,7 +930,7 @@ mod tests {
             }));
             interpolate_frontmatter(&mut fm, &test_context(), false, false, Some(ctx)).unwrap();
 
-            assert_eq!(fm.as_map().get("exists"), Some(&json!("true")));
+            assert_eq!(fm.as_map().get("exists"), Some(&json!(true)));
             assert_eq!(
                 fm.as_map().get("abs"),
                 Some(&json!(

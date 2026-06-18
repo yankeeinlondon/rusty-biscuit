@@ -423,7 +423,7 @@ impl ExecutableIndex {
 
 **Option C:** Lazily build the eager index on first lookup rather than upfront. For `ProgramsInfo::detect()` this doesn't help (all categories are queried), but for single-shot lookups it defers I/O.
 
-**Expected improvement:** 70–90% reduction in benchmark time (from ~25ms to ~2–3ms) by eliminating redundant I/O. Real-world impact is smaller because the index is typically built once per sniff invocation, but repeated CLI calls (e.g. `sniff programs` followed by `sniff repo`) would benefit.
+**Expected improvement:** 70–90% reduction in benchmark time (from ~25ms to ~2–3ms) by eliminating redundant I/O. Real-world impact is smaller because the index is typically built once per sniff invocation, but repeated CLI calls (e.g. `sniff software` followed by `sniff repo`) would benefit.
 
 ---
 

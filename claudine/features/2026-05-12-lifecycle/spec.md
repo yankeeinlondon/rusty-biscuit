@@ -1,21 +1,11 @@
 # Lifecycle Formalization for Claudine Prompts & Late Binding Context
 
-## Late Binding Context
 
-Up to now we have relied on using the `doc` (aka, document frontmatter), `ctx`, and `env` global variables to react to the execution environment for Claudine. However, once we introduce the Lifecycle Model (in next section) we will have an interesting gap:
-
-- TODAY: all interpolation, shell expansion, etc. happens immediately upon the composition process starting
-- FUTURE STATE:
-    - The `initialize` event takes place immediately after pre-flight checks have completed (and BEFORE we route to `start` or `blocked`)
-        - from a timing perspective we're in a good position to "handle" a pre-flight check failing or a document's schema being invalid
-        - however, to do that, we would need to be able to receive both the preflight state and the schema validation state
-        - currently there is no way to get this
-    - The `failure` lifecycle event takes place when the prompt has failed
 
 
 ## The Prompt Lifecycle
 
-![lifecycle](./lifecycle.png)
+![lifecycle](./)
 
 A Claudine prompt document moves through a fixed set of lifecycle events. Today four of them exist as `LifecycleSignal` variants in `composition/lifecycle.rs` (`start`, `success`, `blocked`, `failure`), but they only support a handful of communication properties. This feature formalizes the full event set, introduces a unified per-event configuration model, and folds a pre-existing composition concerns (`loop`) into that model.
 
@@ -40,6 +30,7 @@ A Claudine prompt document moves through a fixed set of lifecycle events. Today 
 - **`success`** — communicate completion, capture metrics, fire webhooks, advance a sequence.
 - **`failure`** — communicate failure, recover with `Retry` / `Resume` / `Requeue` / `Proxy`, or simply exit.
 - **`loop`** — per-iteration boundary inside a looping prompt; layers lifecycle-event behavior on top of the existing iteration controls.
+- **`finalize`** — called after success/failure, if in a loop then the finalize event is only called on the last iteration of the loop
 
 ## Configuration Model
 
@@ -364,6 +355,23 @@ failure:
 ```
 
 Adding `stack:` is purely additive. The top-level properties fire first, then the stack is processed.
+
+
+
+## Late Binding Context
+
+![lifecycle](../../docs/getting-started/lifecycle.excalidraw.svg)
+
+Up to now we have relied on using the `doc` (aka, document frontmatter), `ctx`, and `env` global variables to react to the execution environment for Claudine. However, once we introduce the Lifecycle Model (in next section) we will have an interesting gap:
+
+- TODAY: all interpolation, shell expansion, etc. happens immediately upon the composition process starting
+- FUTURE STATE:
+    - The `initialize` event takes place immediately after pre-flight checks have completed (and BEFORE we route to `start` or `blocked`)
+        - from a timing perspective we're in a good position to "handle" a pre-flight check failing or a document's schema being invalid
+        - however, to do that, we would need to be able to receive both the preflight state and the schema validation state
+        - currently there is no way to get this
+    - The `failure` lifecycle event takes place when the prompt has failed
+
 
 ## Dependencies
 

@@ -171,7 +171,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
     },
     ExpressionFunctionDescriptor {
         signature: "without_date(string)",
-        description: "Removes valid ISO date substrings from a string.",
+        description: "Removes substrings that are real YYYY-MM-DD calendar dates, leaving surrounding text untouched.",
         category: "String Mutations",
         order: 9,
     },
@@ -447,7 +447,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
     },
     ExpressionFunctionDescriptor {
         signature: "dir_leading(file)",
-        description: "Returns the directory path before the last segment.",
+        description: "Returns the directory path above the last directory segment, dropping the basename and its parent (the complement of file_trailing).",
         category: "Filesystem",
         order: 20,
     },

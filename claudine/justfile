@@ -69,9 +69,11 @@ test-cli *args="":
 test-library *args="":
     @just _test claudine {{ args }}
     
-# test just the remote-signal daemon 
-test-remote-signal *args: 
-    @just _test remote-signal {{args}}
+# test the rendezvous core, daemon, and test-client crates
+test-rendezvous *args:
+    @just _test rendezvous-core {{args}}
+    @just _test rendezvous-daemon {{args}}
+    @just _test rendezvous-client {{args}}
     
 # Test the library, contract adapter, and CLI.
 test *args="":

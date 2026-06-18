@@ -35,7 +35,9 @@ fn level2_git_status_headers_and_links_render_styled_in_tmux() {
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
 
-    let bin_path = cargo_bin!("render_git_status_fixture").display().to_string();
+    let bin_path = cargo_bin!("render_git_status_fixture")
+        .display()
+        .to_string();
     harness
         .send_command_with_env(&bin_path, &[("FORCE_COLOR", "1")])
         .expect("send_command_with_env failed");
@@ -65,9 +67,8 @@ fn level2_git_status_headers_and_links_render_styled_in_tmux() {
     // Double-underline headers: `\e[4:2m` (ITU double) on capable terminals, or
     // straight underline (`\e[4m` / `;4m`) after graceful degradation in tmux.
     // Matched precisely so a blue SGR (`[34m`) cannot satisfy it.
-    let has_underline = frame.raw.contains("4:2m")
-        || frame.raw.contains("[4m")
-        || frame.raw.contains(";4m");
+    let has_underline =
+        frame.raw.contains("4:2m") || frame.raw.contains("[4m") || frame.raw.contains(";4m");
     assert!(
         has_underline,
         "expected a double/straight underline SGR (section headers) in raw capture.\nraw:\n{}",

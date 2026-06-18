@@ -220,6 +220,22 @@ impl ExecutableIndex {
         self.path_dir_count
     }
 
+    /// Build an index backed by a synthetic eager PATH map.
+    ///
+    /// Used only in tests so binary-resolution logic can be exercised without
+    /// requiring real monorepo binaries to be installed on the host.
+    #[cfg(test)]
+    pub fn for_test(entries: std::collections::HashMap<std::ffi::OsString, PathBuf>) -> Self {
+        Self {
+            path_dir_count: 1,
+            eager_path: Some(entries),
+            #[cfg(target_os = "macos")]
+            bundle_executables: HashMap::new(),
+            #[cfg(target_os = "windows")]
+            windows_index: crate::programs::windows_apps::WindowsIndex::default(),
+        }
+    }
+
     /// Bulk lookup of multiple programs, choosing the optimal strategy.
     ///
     /// When an eager PATH index is present, lookups are sequential (each
