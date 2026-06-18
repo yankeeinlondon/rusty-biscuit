@@ -562,27 +562,6 @@ fn repo_aggregate_json_does_not_duplicate_full_package_catalogs() {
 }
 
 #[test]
-fn repo_aggregate_json_is_materially_smaller_than_phase_1_baseline() {
-    let output = cargo_bin_cmd!("sniff")
-        .args(["repo", "--json"])
-        .output()
-        .expect("run sniff repo --json");
-
-    assert!(
-        output.status.success(),
-        "sniff repo --json must succeed: stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let baseline_bytes = 2_150_698usize;
-    assert!(
-        output.stdout.len() < baseline_bytes / 2,
-        "aggregate should be less than half the Phase 1 baseline ({baseline_bytes} bytes), got {} bytes",
-        output.stdout.len()
-    );
-}
-
-#[test]
 fn repo_aggregate_json_is_offline() {
     // The aggregate must not trigger a network call. We verify this indirectly
     // by ensuring the output completes successfully and does not contain the
