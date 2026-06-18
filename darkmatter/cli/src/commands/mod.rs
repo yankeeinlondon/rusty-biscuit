@@ -159,8 +159,6 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             updated,
             json,
         } => {
-            use crate::delta::print_delta;
-
             let base_md = load_markdown(Some(&base))
                 .wrap_err_with(|| format!("Failed to read base file: {:?}", base))?;
             let updated_md = load_markdown(Some(&updated))
@@ -170,7 +168,14 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             if json {
                 println!("{}", serde_json::to_string_pretty(&delta)?);
             } else {
-                print_delta(&delta, cli.verbose > 0, &base_md, &updated_md);
+                use darkmatter::markdown::delta::DeltaReport;
+
+                let mut report =
+                    DeltaReport::new(delta).with_documents(base_md.clone(), updated_md.clone());
+                if cli.verbose > 0 {
+                    report = report.verbose();
+                }
+                print!("{}", report.render(&Terminal::new()));
             }
         }
         CliCommand::Get {

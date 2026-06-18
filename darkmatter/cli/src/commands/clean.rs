@@ -1,8 +1,10 @@
 //! `md clean` subcommand implementation.
 
-use crate::delta::print_delta;
 use crate::io::{load_markdown, resolve_file_path};
 use color_eyre::eyre::{Context, Result, eyre};
+use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::terminal::Terminal;
+use darkmatter::markdown::delta::DeltaReport;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::cleanup::ListSpacingMode;
 use std::path::PathBuf;
@@ -52,7 +54,11 @@ pub fn run_clean(
             .wrap_err_with(|| format!("Failed to write cleaned markdown to {:?}", resolved))?;
     }
 
-    print_delta(&delta, verbose, &original, &cleaned);
+    let mut report = DeltaReport::new(delta).with_documents(original, cleaned);
+    if verbose {
+        report = report.verbose();
+    }
+    print!("{}", report.render(&Terminal::new()));
     Ok(())
 }
 
