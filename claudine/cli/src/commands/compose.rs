@@ -616,7 +616,7 @@ fn run_compose_inner(
         ),
     };
     if !shared.dry_run && let Some(loop_result) =
-        run_loop_with_overrides(&source, &loop_prepare_options, loop_options, |ctx| {
+        run_loop_with_overrides(&source, &loop_prepare_options, loop_options, CompositionMode::ChainedDocument, |ctx| {
             let prepared = {
                 let _span = info_span!("compose_prep.prepare_direct").entered();
                 // Schema-aware variant: typed `SchemaLoad` /
@@ -1110,7 +1110,7 @@ fn run_inline_compose_inner(
         ),
     };
     if !shared.dry_run && let Some(loop_result) =
-        run_loop_with_overrides(&source, &loop_prepare_options, loop_options, |ctx| {
+        run_loop_with_overrides(&source, &loop_prepare_options, loop_options, CompositionMode::InlineFrontmatterPrompt, |ctx| {
             let prepared = {
                 let _span = info_span!("compose_prep.prepare_inline").entered();
                 // Schema-aware variant: typed `SchemaLoad` /
@@ -1365,10 +1365,17 @@ fn build_loop_iteration_output(
 /// (with `set_overrides` replaced by the per-iteration control state) are
 /// expected to be used by the executor closure so the seed and iteration 1
 /// resolve from identical inputs.
+///
+/// `mode` selects the seed compose pass and is forwarded to
+/// [`claudine::composition::build_loop_seed`]. It must match the iteration
+/// executor's prepare variant so the seed and iteration 1 resolve from the
+/// same body: `ChainedDocument` for `compose`, `InlineFrontmatterPrompt`
+/// for `inline-compose`.
 fn run_loop_with_overrides<F>(
     source: &claudine::composition::ResolvedCompositionSource,
     base_prepare_options: &claudine::composition::PrepareOptions,
     options: claudine::composition::LoopExecutionOptions,
+    mode: claudine::composition::CompositionMode,
     mut executor: F,
 ) -> std::result::Result<
     Option<claudine::composition::LoopExecutionResult>,
@@ -1386,8 +1393,12 @@ where
         return Ok(None);
     };
 
-    let initial_frontmatter =
-        claudine::composition::build_loop_seed(source, &config, base_prepare_options.clone())?;
+    let initial_frontmatter = claudine::composition::build_loop_seed(
+        source,
+        &config,
+        base_prepare_options.clone(),
+        mode,
+    )?;
 
     let prompt_path = source.resolved_path.clone();
 

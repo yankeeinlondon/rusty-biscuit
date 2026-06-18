@@ -132,9 +132,11 @@ pub fn resolve_loop_config(
 /// - every identifier referenced by the `while`/`until` condition;
 /// - every identifier referenced inside action-value templates.
 ///
-/// Reserved namespaces (`true`, `false`, `doc`, `env`, and any identifier
-/// starting with `_loop_`) are excluded because they are supplied by the
-/// runtime rather than resolved from frontmatter.
+/// Reserved namespaces are excluded because they are supplied by the
+/// runtime rather than resolved from frontmatter: `doc.<head>` references
+/// lift `<head>` as a control variable (the `doc` namespace traverses the
+/// loop's frontmatter state), while bare `doc`, `env`, boolean literals,
+/// and any identifier starting with `_loop_` remain excluded.
 pub fn extract_control_variables(config: &LoopConfig) -> Vec<String> {
     let mut names = BTreeSet::new();
 
@@ -176,8 +178,17 @@ fn collect_value_template_identifiers(raw: &str, names: &mut BTreeSet<String>) {
 fn collect_identifiers(expr: &Expr, names: &mut BTreeSet<String>) {
     match expr {
         Expr::Variable(path) => {
-            let head = path.split('.').next().unwrap_or(path);
-            if !is_reserved_identifier(head) {
+            let mut segments = path.split('.');
+            let head = segments.next().unwrap_or(path);
+            if head == "doc" {
+                // `doc.<path>` traverses the frontmatter object the loop
+                // owns, so lift the first segment after `doc` as a control
+                // variable. Bare `doc` (the whole object) has no single key
+                // to own.
+                if let Some(segment) = segments.next() {
+                    names.insert(segment.to_string());
+                }
+            } else if !is_reserved_identifier(head) {
                 names.insert(head.to_string());
             }
         }
@@ -1059,5 +1070,44 @@ mod tests {
     fn extract_control_variables_empty_identity() {
         let config = control_config("true", vec![]);
         assert!(extract_control_variables(&config).is_empty());
+    }
+
+    #[test]
+    fn extract_control_variables_lifts_doc_namespace_head() {
+        let config = control_config("doc.counter < doc.total", vec![]);
+        assert_eq!(
+            extract_control_variables(&config),
+            vec!["counter".to_string(), "total".to_string()]
+        );
+    }
+
+    #[test]
+    fn extract_control_variables_dotted_doc_path_lifts_head_only() {
+        let config = control_config("doc.config.retries > 0", vec![]);
+        assert_eq!(
+            extract_control_variables(&config),
+            vec!["config".to_string()]
+        );
+    }
+
+    #[test]
+    fn extract_control_variables_bare_doc_lifts_nothing() {
+        let config = control_config("doc && counter < 3", vec![]);
+        assert_eq!(
+            extract_control_variables(&config),
+            vec!["counter".to_string()]
+        );
+    }
+
+    #[test]
+    fn extract_control_variables_doc_and_action_target_merge() {
+        let config = control_config(
+            "doc.counter < doc.total",
+            vec![LoopAction::Increment("counter".into())],
+        );
+        assert_eq!(
+            extract_control_variables(&config),
+            vec!["counter".to_string(), "total".to_string()]
+        );
     }
 }

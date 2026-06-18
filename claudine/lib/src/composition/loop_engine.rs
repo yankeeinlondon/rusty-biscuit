@@ -8,8 +8,8 @@ use super::error::CompositionError;
 use super::loop_actions::ActionStaging;
 use super::loop_config::{extract_control_variables, resolve_loop_config};
 use super::loop_expression::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
-use super::prepare::{PrepareOptions, prepare_direct};
-use super::types::{LoopConfig, OnRateLimit, ResolvedCompositionSource};
+use super::prepare::{PrepareOptions, prepare_direct, prepare_inline};
+use super::types::{CompositionMode, LoopConfig, OnRateLimit, ResolvedCompositionSource};
 use crate::stream::summary::RateLimitInfo;
 
 /// Default safety cap for prompt loops.
@@ -225,6 +225,18 @@ impl LoopExecutionResult {
 /// Derived/presentation frontmatter keys are intentionally omitted so they
 /// re-resolve each iteration against current state and ambients.
 ///
+/// `mode` selects the seed compose pass so seeding matches the iteration
+/// executor:
+/// - [`CompositionMode::ChainedDocument`] composes the document body (as
+///   `compose` does); a doc with an empty body fails seed resolution with
+///   [`CompositionError::ComposedBodyEmpty`].
+/// - [`CompositionMode::InlineFrontmatterPrompt`] composes the frontmatter
+///   `prompt` value as the body (as `inline-compose` does); a doc whose
+///   prompt lives in frontmatter resolves even when the body is empty.
+///   Without this mode split, an inline-compose doc with an empty body
+///   would fail seed resolution before iteration 1 even though the
+///   iteration executor composes the `prompt:` frontmatter value.
+///
 /// ## Errors
 ///
 /// Returns `CompositionError` when the seed compose pass fails.
@@ -232,8 +244,14 @@ pub fn build_loop_seed(
     source: &ResolvedCompositionSource,
     config: &LoopConfig,
     prepare_options: PrepareOptions,
+    mode: CompositionMode,
 ) -> Result<Map<String, Value>, CompositionError> {
-    let prepared = prepare_direct(source, prepare_options.clone())?;
+    let prepared = match mode {
+        CompositionMode::ChainedDocument => prepare_direct(source, prepare_options.clone())?,
+        CompositionMode::InlineFrontmatterPrompt => {
+            prepare_inline(source, prepare_options.clone())?
+        }
+    };
     let effective = &prepared.effective_frontmatter;
     let control_vars = extract_control_variables(config);
 
@@ -263,6 +281,11 @@ pub fn build_loop_seed(
 /// `key=value` setters in `prepare_options.set_overrides` are preserved in
 /// the seed.
 ///
+/// `mode` selects the seed compose pass and is forwarded to
+/// [`build_loop_seed`]. It must match the composition mode of the caller
+/// (`ChainedDocument` for `compose`, `InlineFrontmatterPrompt` for
+/// `inline-compose`) so seeding and iteration 1 resolve from the same body.
+///
 /// ## Errors
 ///
 /// Returns parse/evaluation errors that prevent the engine from determining
@@ -272,12 +295,13 @@ pub fn execute_loop(
     source: &ResolvedCompositionSource,
     options: LoopExecutionOptions,
     prepare_options: PrepareOptions,
+    mode: CompositionMode,
     executor: impl FnMut(LoopIterationContext) -> Result<LoopIterationOutput, CompositionError>,
 ) -> Result<Option<LoopExecutionResult>, CompositionError> {
     let Some(config) = resolve_loop_config(source)? else {
         return Ok(None);
     };
-    let initial_frontmatter = build_loop_seed(source, &config, prepare_options)?;
+    let initial_frontmatter = build_loop_seed(source, &config, prepare_options, mode)?;
     execute_loop_with_config(
         &source.resolved_path,
         &config,
@@ -762,12 +786,56 @@ mod tests {
             ..PrepareOptions::default()
         };
 
-        let seed = build_loop_seed(&source, &config, options).unwrap();
+        let seed =
+            build_loop_seed(&source, &config, options, CompositionMode::ChainedDocument).unwrap();
 
         assert_eq!(seed.get("phase"), Some(&json!(1)));
         assert_eq!(seed.get("total_phases"), Some(&json!(6)));
         assert!(!seed.contains_key("pass_icon"), "derived keys must not be lifted into the seed");
         assert_eq!(seed.get("initial_phase"), Some(&json!(1)));
+    }
+
+    #[test]
+    fn build_loop_seed_inline_mode_resolves_prompt_frontmatter_with_empty_body() {
+        let source = make_source_with_body(
+            &[
+                ("prompt", json!("Build phase {{phase}}")),
+                ("phase", json!("{{ start || 1 }}")),
+                (
+                    "loop",
+                    json!({"while": "phase < 2", "action": "increment(phase)"}),
+                ),
+            ],
+            "",
+        );
+        let config = resolve_loop_config(&source).unwrap().unwrap();
+
+        // Inline mode composes the `prompt:` frontmatter value as the body,
+        // so an empty document body still resolves and the control variable
+        // `phase` lifts into the seed.
+        let seed = build_loop_seed(
+            &source,
+            &config,
+            PrepareOptions::default(),
+            CompositionMode::InlineFrontmatterPrompt,
+        )
+        .expect("inline seed should resolve from prompt frontmatter with empty body");
+        assert_eq!(seed.get("phase"), Some(&json!(1)));
+
+        // Direct mode composes the document body itself, which is empty, so
+        // seeding fails before iteration 1 with `ComposedBodyEmpty`. This
+        // locks in the mode distinction that motivates parameterizing
+        // `build_loop_seed` by `CompositionMode`.
+        let direct = build_loop_seed(
+            &source,
+            &config,
+            PrepareOptions::default(),
+            CompositionMode::ChainedDocument,
+        );
+        assert!(
+            matches!(direct, Err(CompositionError::ComposedBodyEmpty { .. })),
+            "direct mode with empty body should fail seed resolution; got {direct:?}"
+        );
     }
 
     #[test]
@@ -1555,7 +1623,13 @@ mod tests {
             "Implement Phase {{ phase }} of {{ total_phases }}",
         );
         let config = resolve_loop_config(&source).unwrap().unwrap();
-        let seed = build_loop_seed(&source, &config, PrepareOptions::default()).unwrap();
+        let seed = build_loop_seed(
+            &source,
+            &config,
+            PrepareOptions::default(),
+            CompositionMode::ChainedDocument,
+        )
+        .unwrap();
 
         let captured = RefCell::new(Vec::new());
         let result = execute_loop_with_config(
@@ -1621,7 +1695,13 @@ mod tests {
             "work",
         );
         let config = resolve_loop_config(&source).unwrap().unwrap();
-        let seed = build_loop_seed(&source, &config, PrepareOptions::default()).unwrap();
+        let seed = build_loop_seed(
+            &source,
+            &config,
+            PrepareOptions::default(),
+            CompositionMode::ChainedDocument,
+        )
+        .unwrap();
 
         let result = execute_loop_with_config(
             &source.resolved_path,
@@ -1648,6 +1728,68 @@ mod tests {
                 );
             }
             other => panic!("expected InvalidIncrementType, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn seeded_loop_doc_namespace_condition_retains_readonly_control_value() {
+        let source = make_source_with_body(
+            &[
+                ("counter", json!(0)),
+                ("total", json!(2)),
+                (
+                    "loop",
+                    json!({"while": "doc.counter < doc.total", "action": "increment(counter)"}),
+                ),
+            ],
+            "Step {{ counter }} of {{ total }}",
+        );
+        let config = resolve_loop_config(&source).unwrap().unwrap();
+        let seed = build_loop_seed(
+            &source,
+            &config,
+            PrepareOptions::default(),
+            CompositionMode::ChainedDocument,
+        )
+        .unwrap();
+
+        assert_eq!(seed.get("counter"), Some(&json!(0)));
+        assert_eq!(seed.get("total"), Some(&json!(2)));
+
+        let captured = RefCell::new(Vec::new());
+        let result = execute_loop_with_config(
+            &source.resolved_path,
+            &config,
+            seed,
+            LoopExecutionOptions::default(),
+            |ctx| {
+                let prepared = prepare_direct(
+                    &source,
+                    PrepareOptions {
+                        set_overrides: Some(ctx.as_set_overrides()),
+                        ..PrepareOptions::default()
+                    },
+                )?;
+                let body = prepared.prompt.clone();
+                captured.borrow_mut().push((ctx.iteration, body));
+                Ok(LoopIterationOutput::success(prepared.prompt))
+            },
+        )
+        .unwrap();
+
+        assert!(result.error.is_none(), "expected clean run, got {result:?}");
+        assert_eq!(result.iteration_count, 2);
+        assert_eq!(result.final_frontmatter.get("counter"), Some(&json!(2)));
+
+        let seen = captured.into_inner();
+        assert_eq!(seen.len(), 2);
+        for (index, (iteration, body)) in seen.iter().enumerate() {
+            let n = index + 1;
+            assert_eq!(*iteration, n);
+            // Iteration N uses the counter value BEFORE the increment fires
+            // at the end of the iteration (counter 0→1→2), so the rendered
+            // body shows the starting counter for that pass.
+            assert_eq!(body.trim(), format!("Step {} of 2", n - 1));
         }
     }
 }

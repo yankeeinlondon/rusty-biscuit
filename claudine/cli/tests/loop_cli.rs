@@ -116,6 +116,67 @@ exit 0
     assert_eq!(calls.trim(), "2", "inline loop should run 2 iterations");
 }
 
+/// Regression: an `inline-compose` document whose prompt lives in the
+/// `prompt:` frontmatter key and whose body is empty must still seed and run.
+/// Before the seed path was parameterized by composition mode, seeding called
+/// `prepare_direct`, which composes the (empty) body and failed with
+/// `ComposedBodyEmpty` before iteration 1 — even though the iteration
+/// executor composes the `prompt:` frontmatter value.
+#[cfg(unix)]
+#[test]
+fn inline_compose_loop_with_prompt_frontmatter_and_empty_body_runs() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let count_path = workspace.path().join("call-count.txt");
+
+    let md_file = workspace.path().join("loop.md");
+    fs::write(
+        &md_file,
+        r#"---
+prompt: "Generate a number"
+loop:
+  while: "counter < 2"
+  actions:
+    - "increment(counter)"
+---
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        r#"#!/bin/sh
+count=0
+if [ -f "$CLAUDINE_COUNT_FILE" ]; then
+  IFS= read -r count < "$CLAUDINE_COUNT_FILE"
+fi
+count=$((count + 1))
+printf '%s' "$count" > "$CLAUDINE_COUNT_FILE"
+cat > /dev/null
+printf 'Generated body %s' "$count"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("CLAUDINE_COUNT_FILE", &count_path)
+        .current_dir(workspace.path())
+        .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let calls = fs::read_to_string(&count_path).unwrap();
+    assert_eq!(
+        calls.trim(),
+        "2",
+        "inline loop with prompt frontmatter and empty body should run 2 iterations"
+    );
+}
+
 // ============================================================================
 // max-iterations override
 // ============================================================================
