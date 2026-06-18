@@ -97,7 +97,7 @@ pub(super) fn package_json_dependencies_from_value(
 }
 
 /// Extracts the package name from a parsed package.json value.
-pub(super) fn npm_package_name(parsed: &serde_json::Value) -> Option<String> {
+pub(crate) fn npm_package_name(parsed: &serde_json::Value) -> Option<String> {
     parsed
         .get("name")
         .and_then(|n| n.as_str())
@@ -105,7 +105,7 @@ pub(super) fn npm_package_name(parsed: &serde_json::Value) -> Option<String> {
 }
 
 /// Extracts the package version from a parsed package.json value.
-pub(super) fn npm_package_version(parsed: &serde_json::Value) -> Option<String> {
+pub(crate) fn npm_package_version(parsed: &serde_json::Value) -> Option<String> {
     parsed
         .get("version")
         .and_then(|v| v.as_str())

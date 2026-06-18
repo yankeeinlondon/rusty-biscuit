@@ -21,8 +21,10 @@ pub mod types;
 pub mod uv;
 
 pub use aggregate::{
-    AggregateResult, AggregateScope, TestRunnerAttribution, aggregate_package_values,
-    aggregate_test_runners, collect_external_dependencies, resolve_scope,
+    AggregateResult, AggregateScope, TestRunnerAttribution, VersionAttribution,
+    VersionSource, VersionSourceAttribution, aggregate_package_values, aggregate_test_runners,
+    aggregate_versions, bare_aggregate_version, collect_external_dependencies,
+    resolve_directory_version, resolve_scope, resolve_scope_with_overrides,
 };
 pub use area::{AreaError, detect_area};
 pub use identity::{RepoIdentity, detect_repo_identity, detect_repo_identity_with_repo};

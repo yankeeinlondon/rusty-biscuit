@@ -12,7 +12,7 @@ use crate::filesystem::file_types::{
 
 use super::cargo::{
     cargo_dependencies_from_value, cargo_features_from_value, cargo_package_name,
-    cargo_package_version, detect_cargo_workspace,
+    cargo_package_version_with_source, detect_cargo_workspace,
 };
 use super::dotnet::{detect_dotnet_solution, root_has_solution_file};
 use super::go::{
@@ -737,10 +737,15 @@ fn resolve_package_version(
 ) -> Option<String> {
     let cargo_toml = path.join("Cargo.toml");
     if cargo_toml.exists() {
+        // Resolve `version.workspace = true` against the root manifest so the
+        // package catalog reports inherited versions, matching what
+        // `aggregate_versions` reports for `sniff repo version`. The source and
+        // `inherited` flag are unused here; the catalog stores only the string.
         return ctx
             .manifests
             .cargo(&cargo_toml)
-            .and_then(cargo_package_version);
+            .and_then(|parsed| cargo_package_version_with_source(parsed, &cargo_toml, root))
+            .map(|(version, _, _)| version);
     }
 
     let package_json = path.join("package.json");
@@ -1461,6 +1466,7 @@ pub(crate) fn create_package(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::filesystem::repo::cargo::cargo_package_version;
     use crate::package::{DependencyEntry, DependencyKind};
 
     fn make_test_package(name: &str, deps: Vec<DependencyEntry>) -> Package {
@@ -1809,6 +1815,44 @@ mod tests {
             assert_eq!(normal.len(), 1);
             assert_eq!(normal[0].name, "serde");
         }
+    }
+
+    #[test]
+    fn create_package_resolves_cargo_workspace_inherited_version() {
+        use tempfile::tempdir;
+
+        // A member crate that inherits its version from the workspace root must
+        // land in the package catalog with a resolved `version`, not `None` —
+        // the catalog feeds `repo structure --json` and every consumer of
+        // `Package.version`, not just `repo version`.
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"member\"]\n\n[workspace.package]\nversion = \"9.9.9\"\n",
+        )
+        .unwrap();
+        let member = root.join("member");
+        std::fs::create_dir_all(&member).unwrap();
+        std::fs::write(
+            member.join("Cargo.toml"),
+            "[package]\nname = \"member\"\nversion.workspace = true\n",
+        )
+        .unwrap();
+
+        let package = create_package(
+            &member,
+            root,
+            MonorepoStandard::CargoWorkspace,
+            PackageProvenance::Globbed,
+            &None,
+        );
+        assert_eq!(
+            package.version,
+            Some("9.9.9".to_string()),
+            "inherited workspace version must populate the catalog, got {:?}",
+            package.version
+        );
     }
 
     // ============================================================================

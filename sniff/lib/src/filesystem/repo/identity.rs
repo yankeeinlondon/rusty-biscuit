@@ -239,12 +239,16 @@ fn resolve_language(root: &Path) -> Option<String> {
     None
 }
 
-fn read_toml(path: &Path) -> Option<toml_crate::Value> {
+/// Read and parse a TOML manifest at `path`, returning `None` on any I/O or
+/// parse failure. Used by the identity detectors and the version aggregator.
+pub(crate) fn read_toml(path: &Path) -> Option<toml_crate::Value> {
     let content = std::fs::read_to_string(path).ok()?;
     toml_crate::from_str(&content).ok()
 }
 
-fn read_json(path: &Path) -> Option<serde_json::Value> {
+/// Read and parse a JSON manifest at `path`, returning `None` on any I/O or
+/// parse failure. Used by the identity detectors and the version aggregator.
+pub(crate) fn read_json(path: &Path) -> Option<serde_json::Value> {
     let content = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&content).ok()
 }
