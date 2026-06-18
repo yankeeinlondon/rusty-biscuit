@@ -10,6 +10,14 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - darkmatter/lib/src/catalog/mod.rs
+  - darkmatter/lib/src/markdown/compose/context/catalog.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog.rs
+  - darkmatter/lib/src/effects/catalog.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 packages:
   - darkmatter
 ---
@@ -46,38 +54,38 @@ Add `example` fields and `impl Described` to the existing context, expression, a
 
 ### Context variables
 
-- [ ] Add `example: Option<Example>` to `ContextVariableDescriptor` in `darkmatter/lib/src/markdown/compose/context/catalog.rs`.
-- [ ] Implement `Described` for `ContextVariableDescriptor`.
-- [ ] Add one illustrative `Example` per descriptor where the `result` string is type-consistent with `display_type`.
-- [ ] Write `cfg(test)` `capture_value_shape_matches_display_type` that captures one `ComposeContext` and asserts every descriptor's JSON value shape matches `display_type` (including `Nullable(T)` semantics).
-- [ ] Write `cfg(test)` `context_example_results_are_type_consistent` that asserts each `Example.result` string matches the `display_type` shape rules.
-- [ ] Run `cargo test` for context catalog tests and confirm green.
+- [x] Add `example: Option<Example>` to `ContextVariableDescriptor` in `darkmatter/lib/src/markdown/compose/context/catalog.rs`.
+- [x] Implement `Described` for `ContextVariableDescriptor`.
+- [x] Add one illustrative `Example` per descriptor where the `result` string is type-consistent with `display_type`.
+- [x] Write `cfg(test)` `capture_value_shape_matches_display_type` that captures one `ComposeContext` and asserts every descriptor's JSON value shape matches `display_type` (including `Nullable(T)` semantics).
+- [x] Write `cfg(test)` `context_example_results_are_type_consistent` that asserts each `Example.result` string matches the `display_type` shape rules.
+- [x] Run `cargo test` for context catalog tests and confirm green.
 
 ### Expression functions
 
-- [ ] Add `example: Option<Example>` to `ExpressionFunctionDescriptor` in `darkmatter/lib/src/markdown/compose/expression/catalog.rs`.
-- [ ] Implement `Described` for `ExpressionFunctionDescriptor`.
-- [ ] Add executable `Example` entries for every pure function.
-- [ ] Mark filesystem functions as display-only if their examples cannot be pinned to a tempdir fixture; document the reason beside each such descriptor.
-- [ ] Prepare a `cfg(test)` tempdir fixture with a known `.md` file and a known plain file for fs-function examples.
-- [ ] Add executable `Example` entries for fs functions referencing the tempdir fixture.
-- [ ] Mark date-relative functions as display-only when their only useful example depends on wall-clock time; document the reason.
-- [ ] Write `cfg(test)` `every_example_evaluates_to_its_declared_result` that parses each `example.invocation`, runs it through `evaluate`, and asserts rendered output equals `example.result`.
-- [ ] Run `cargo test` for expression catalog tests and confirm green.
+- [x] Add `example: Option<Example>` to `ExpressionFunctionDescriptor` in `darkmatter/lib/src/markdown/compose/expression/catalog.rs`.
+- [x] Implement `Described` for `ExpressionFunctionDescriptor`.
+- [x] Add executable `Example` entries for every pure function.
+- [x] Mark filesystem functions as display-only if their examples cannot be pinned to a tempdir fixture; document the reason beside each such descriptor.
+- [x] Prepare a `cfg(test)` tempdir fixture with a known `.md` file and a known plain file for fs-function examples.
+- [x] Add executable `Example` entries for fs functions referencing the tempdir fixture.
+- [x] Mark date-relative functions as display-only when their only useful example depends on wall-clock time; document the reason.
+- [x] Write `cfg(test)` `every_example_evaluates_to_its_declared_result` that parses each `example.invocation`, runs it through `evaluate`, and asserts rendered output equals `example.result`.
+- [x] Run `cargo test` for expression catalog tests and confirm green.
 
 ### Side effects
 
-- [ ] Add `example: Option<Example>` to `EffectDescriptor` in `darkmatter/lib/src/effects/catalog.rs`.
-- [ ] Implement `Described` for `EffectDescriptor`.
-- [ ] Add one display `Example` per effect descriptor.
-- [ ] Reconcile with the existing in-code contract: `effects/mod.rs` + `effects/catalog.rs` already document the descriptor catalog as the authoritative capability surface (a method without a descriptor is intentionally outside the surface). Either reference that contract or, if a discoverable list still earns its keep, define `const INTENTIONALLY_UNCATALOGUED: &[&str]` naming `EffectEngine` methods deliberately outside the capability surface.
-- [ ] Note: `EffectVerb`/`EFFECT_VERBS` is now `cfg(test)` and the no-probe counters live behind the off-by-default `effects-instrumentation` cargo feature — enable that feature for any test asserting "no `EffectEngine` constructed".
-- [ ] Update existing `verb_signature_set_equals_descriptor_signature_set` to additionally assert every descriptor carries an example.
-- [ ] Run `cargo test` for effects catalog tests and confirm green.
+- [x] Add `example: Option<Example>` to `EffectDescriptor` in `darkmatter/lib/src/effects/catalog.rs`.
+- [x] Implement `Described` for `EffectDescriptor`.
+- [x] Add one display `Example` per effect descriptor.
+- [x] Reconcile with the existing in-code contract: `effects/mod.rs` + `effects/catalog.rs` already document the descriptor catalog as the authoritative capability surface (a method without a descriptor is intentionally outside the surface). Either reference that contract or, if a discoverable list still earns its keep, define `const INTENTIONALLY_UNCATALOGUED: &[&str]` naming `EffectEngine` methods deliberately outside the capability surface.
+- [x] Note: `EffectVerb`/`EFFECT_VERBS` is now `cfg(test)` and the no-probe counters live behind the off-by-default `effects-instrumentation` cargo feature — enable that feature for any test asserting "no `EffectEngine` constructed".
+- [x] Update existing `verb_signature_set_equals_descriptor_signature_set` to additionally assert every descriptor carries an example.
+- [x] Run `cargo test` for effects catalog tests and confirm green.
 
 ### Closure
 
-- [ ] Run full `cargo test -p darkmatter-lib` and confirm no regressions.
+- [x] Run full `cargo test -p darkmatter-lib` and confirm no regressions.
 
 **Validation checkpoint:** All three catalogs implement `Described`; every catalog has examples; all three executable-anchor tests pass.
 
