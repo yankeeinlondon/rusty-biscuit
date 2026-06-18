@@ -4,6 +4,8 @@
 //! [`EffectEngine`]. The catalog is a static, compile-time constant —
 //! constructing or reading it performs no host probes, no I/O, and no runtime
 //! context capture.
+use crate::catalog::{Described, Example};
+
 
 /// Safety classification for a side-effect capability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -19,6 +21,7 @@ pub enum EffectSafety {
 /// Descriptor for a single side-effect capability.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EffectDescriptor {
+
     /// Canonical signature including arity (e.g., `ensure_file(file)` or
     /// `ensure_file(file, content)`).
     pub signature: &'static str,
@@ -30,7 +33,27 @@ pub struct EffectDescriptor {
     pub category: &'static str,
     /// Stable display order within the category.
     pub order: usize,
+    /// Optional verified example.
+    pub example: Option<Example>,
 }
+impl Described for EffectDescriptor {
+    fn key(&self) -> &'static str {
+        self.signature
+    }
+    fn description(&self) -> &'static str {
+        self.description
+    }
+    fn category(&self) -> &'static str {
+        self.category
+    }
+    fn order(&self) -> usize {
+        self.order
+    }
+    fn example(&self) -> Option<&Example> {
+        self.example.as_ref()
+    }
+}
+
 
 /// All side-effect capability descriptors, in display order.
 pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
@@ -41,94 +64,154 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         safety: EffectSafety::MarkdownMutation,
         category: "Frontmatter Mutations",
         order: 1,
-    },
+
+        example: Some(Example { invocation: "set_frontmatter(\"d.md\", \"status\", \"x\")", result: "null" }),
+ },
     EffectDescriptor {
+
         signature: "merge_frontmatter(file, obj)",
         description: "Shallow-merges an object into the document's frontmatter. Returns the merged object.",
         safety: EffectSafety::MarkdownMutation,
         category: "Frontmatter Mutations",
         order: 2,
+
+        example: Some(Example { invocation: "merge_frontmatter(\"d.md\", {\"owner\": \"ken\"})", result: "{\"owner\":\"ken\"}" }),
+
     },
     EffectDescriptor {
+
         signature: "delete_frontmatter(file, prop)",
         description: "Removes a frontmatter property. Returns the removed value (or null).",
         safety: EffectSafety::MarkdownMutation,
         category: "Frontmatter Mutations",
         order: 3,
+
+        example: Some(Example { invocation: "delete_frontmatter(\"d.md\", \"owner\")", result: "ken" }),
+
     },
     EffectDescriptor {
+
         signature: "increment_frontmatter(file, prop)",
         description: "Increments a numeric frontmatter property. Missing becomes 1. Returns the new number.",
         safety: EffectSafety::MarkdownMutation,
         category: "Frontmatter Mutations",
         order: 4,
+
+        example: Some(Example { invocation: "increment_frontmatter(\"d.md\", \"phase\")", result: "2" }),
+
     },
     EffectDescriptor {
+
         signature: "decrement_frontmatter(file, prop)",
         description: "Decrements a numeric frontmatter property. Missing becomes -1. Returns the new number.",
         safety: EffectSafety::MarkdownMutation,
         category: "Frontmatter Mutations",
         order: 5,
+
+        example: Some(Example { invocation: "decrement_frontmatter(\"d.md\", \"phase\")", result: "0" }),
+
     },
     EffectDescriptor {
+
         signature: "append_frontmatter(file, prop, value)",
         description: "Appends a value to a frontmatter array property. Returns the new array.",
         safety: EffectSafety::MarkdownMutation,
         category: "Frontmatter Mutations",
         order: 6,
+
+        example: Some(Example { invocation: "append_frontmatter(\"d.md\", \"tags\", \"b\")", result: "[\"a\",\"b\"]" }),
+
     },
     EffectDescriptor {
+
         signature: "prepend_frontmatter(file, prop, value)",
         description: "Prepends a value to a frontmatter array property. Returns the new array.",
         safety: EffectSafety::MarkdownMutation,
         category: "Frontmatter Mutations",
         order: 7,
+
+        example: Some(Example { invocation: "prepend_frontmatter(\"d.md\", \"tags\", \"z\")", result: "[\"z\",\"a\",\"b\"]" }),
+
     },
     // ── File & Directory ────────────────────────────────────────────
     EffectDescriptor {
+
         signature: "ensure_file(file)",
         description: "Creates an empty file if missing. Returns the absolute path.",
         safety: EffectSafety::FilesystemWrite,
         category: "File & Directory",
         order: 1,
+
+        example: Some(Example { invocation: "ensure_file(\"new.txt\")", result: "/path/to/new.txt" }),
+
     },
     EffectDescriptor {
+
         signature: "ensure_file(file, content)",
         description: "Creates a file with content if missing. Existing files are unchanged. Returns the absolute path.",
         safety: EffectSafety::FilesystemWrite,
         category: "File & Directory",
         order: 2,
+
+        example: Some(Example { invocation: "ensure_file(\"new.txt\", \"hello\")", result: "/path/to/new.txt" }),
+
     },
     EffectDescriptor {
+
         signature: "ensure_dir(dir)",
         description: "Creates a directory and all parents if missing. Returns the absolute path.",
         safety: EffectSafety::FilesystemWrite,
         category: "File & Directory",
         order: 3,
+
+        example: Some(Example { invocation: "ensure_dir(\"sub\")", result: "/path/to/sub" }),
+
     },
     EffectDescriptor {
+
         signature: "append_line(file, text)",
         description: "Appends text and a newline to a file. Returns the absolute path.",
         safety: EffectSafety::FilesystemWrite,
         category: "File & Directory",
         order: 4,
+
+        example: Some(Example { invocation: "append_line(\"log.txt\", \"entry\")", result: "/path/to/log.txt" }),
+
     },
     EffectDescriptor {
+
         signature: "append_jsonl(file, obj)",
         description: "Serializes an object as JSON and appends it as a line. Returns the absolute path.",
         safety: EffectSafety::FilesystemWrite,
         category: "File & Directory",
         order: 5,
+
+        example: Some(Example { invocation: "append_jsonl(\"log.jsonl\", {\"k\": 1})", result: "/path/to/log.jsonl" }),
+
     },
     // ── Network ─────────────────────────────────────────────────────
     EffectDescriptor {
+
         signature: "http_post(url, body)",
         description: "Sends an HTTP POST request. Returns an object with status and body.",
         safety: EffectSafety::Network,
         category: "Network",
         order: 1,
+
+        example: Some(Example { invocation: "http_post(\"https://example.com/hook\", \"{}\")", result: "{\"status\":403,\"body\":\"\"}" }),
+
     },
 ];
+
+/// Public [`EffectEngine`] methods that are intentionally outside the
+/// capability surface described by [`EFFECT_DESCRIPTORS`].
+///
+/// The descriptor catalog is the authoritative capability surface: a method
+/// without a descriptor is not a catalogued capability. This list is empty
+/// because every public mutating method on [`EffectEngine`] currently has a
+/// matching descriptor.
+pub const INTENTIONALLY_UNCATALOGUED: &[&str] = &[];
+
 
 /// Returns all side-effect capability descriptors in display order.
 pub fn effect_descriptors() -> &'static [EffectDescriptor] {
@@ -269,6 +352,14 @@ mod tests {
             descriptors_without_verbs.is_empty(),
             "descriptors without verbs: {descriptors_without_verbs:?}"
         );
+
+        for d in EFFECT_DESCRIPTORS {
+            assert!(
+                d.example().is_some(),
+                "descriptor `{}` must carry an example",
+                d.signature
+            );
+        }
     }
 
     /// Every registered verb must invoke a real, reachable `EffectEngine`
