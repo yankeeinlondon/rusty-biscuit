@@ -23,6 +23,8 @@ pub(crate) mod overlay;
 pub(crate) mod policy;
 pub(crate) mod prompt_source;
 pub(crate) mod resume;
+pub(crate) mod wrapper_exec;
+pub(crate) mod wrapper_mcp;
 
 // Re-exports from split modules
 pub use flags::WrapperArgs;
@@ -733,165 +735,16 @@ fn run_provider_wrapper_inner(
         ));
     }
 
-    let mut mcp_runtime = None;
-    let mut mcp_cleanup: Option<(
-        Box<dyn claudine::mcp::inject::McpInjector>,
-        claudine::mcp::inject::InjectionResult,
-    )> = None;
-
-    // MCP session composition
-    if args.mcp || !args.mcp_use.is_empty() {
-        use claudine::mcp::catalog::McpCatalogStore;
-        use claudine::mcp::inject::injector_for_provider;
-        use claudine::mcp::session::{compute_session_set, lex_tags};
-
-        let repo_root_ref = env_plan.repo_root.as_deref();
-        if bootstrap_mcp_state(repo_root_ref)? {
-            deferred_messages.push(
-                "MCP bootstrap: created Claudine MCP state from discoverable provider configs."
-                    .to_string(),
-            );
-        }
-        let catalog =
-            McpCatalogStore::load().map_err(|e| eyre!("failed to load MCP catalog: {e}"))?;
-        let (cleaned_prompt, prompt_tags) =
-            inline::extract_tags_from_prompt(prompt_source.as_inline(), lex_tags);
-        if let Some(ref cleaned) = cleaned_prompt {
-            prompt_source = profile::PromptSource::Inline(cleaned.clone());
-        }
-        let prompt_is_interactive =
-            std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
-        let mut session = compute_session_set(
-            &catalog,
-            repo_root_ref,
-            &args.mcp_use,
-            &prompt_tags,
-            |tag, _tier, candidates| {
-                if args.strict || non_interactive_requested || !prompt_is_interactive {
-                    return None;
-                }
-                inquire::Select::new(
-                    &format!("`#{tag}` matched multiple MCP servers. Choose one:"),
-                    candidates.to_vec(),
-                )
-                .prompt()
-                .ok()
-            },
-        )
-        .map_err(|e| eyre!("MCP session error: {e}"))?;
-        session.cleaned_prompt = cleaned_prompt.clone();
-
-        for warning in &session.warnings {
-            deferred_warnings.push(warning.clone());
-        }
-        if !session.missing_tags.is_empty() {
-            if args.strict {
-                return Err(eyre!(
-                    "unresolved MCP tag(s): {}",
-                    session
-                        .missing_tags
-                        .iter()
-                        .map(|tag| format!("#{tag}"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
-            }
-            for tag in &session.missing_tags {
-                deferred_warnings.push(format!("tag `#{tag}` was not found in the MCP catalog"));
-            }
-        }
-        if !session.ambiguous_tags.is_empty() {
-            if args.strict || non_interactive_requested {
-                let message = session
-                    .ambiguous_tags
-                    .iter()
-                    .map(|tag| format!("#{} -> {}", tag.tag, tag.candidates.join(", ")))
-                    .collect::<Vec<_>>()
-                    .join("; ");
-                return Err(eyre!("ambiguous MCP tag(s): {message}"));
-            }
-            // Interactive non-strict: warn and drop ambiguous tags
-            for tag in &session.ambiguous_tags {
-                deferred_warnings.push(format!(
-                    "tag `#{0}` is ambiguous ({1}); dropped from session",
-                    tag.tag,
-                    tag.candidates.join(", ")
-                ));
-            }
-            session.ambiguous_tags.clear();
-        }
-
-        let mut runtime = McpRuntimeInfo {
-            servers: session
-                .servers
-                .iter()
-                .map(|server| server.id.clone())
-                .collect(),
-            default_servers: session.default_servers.clone(),
-            explicit_servers: session.explicit_servers.clone(),
-            tag_servers: session.tag_servers.clone(),
-            resolved_tags: session
-                .resolved_tags
-                .iter()
-                .map(|tag| format!("#{} -> {} ({:?})", tag.tag, tag.resolved_to, tag.match_tier))
-                .collect(),
-            missing_tags: session
-                .missing_tags
-                .iter()
-                .map(|tag| format!("#{tag}"))
-                .collect(),
-            ambiguous_tags: session
-                .ambiguous_tags
-                .iter()
-                .map(|tag| format!("#{} -> {}", tag.tag, tag.candidates.join(", ")))
-                .collect(),
-            cleaned_prompt: session.cleaned_prompt.clone(),
-            ..McpRuntimeInfo::default()
-        };
-
-        if let Some(injector) = injector_for_provider(provider) {
-            if !session.servers.is_empty() {
-                let shadow = env_plan.shadow_home_path.as_deref();
-                // Injector works with String env; bridge to OsString env plan
-                let mut string_env = std::collections::HashMap::new();
-                let result = injector
-                    .inject(&session.servers, &mut string_env, shadow)
-                    .map_err(|e| eyre!("MCP injection failed: {e}"))?;
-
-                // Merge injected env vars into the OsString env plan
-                for (k, v) in string_env {
-                    env_plan.env.insert(k.into(), v.into());
-                }
-
-                for arg in &result.extra_args {
-                    child_args.push(arg.clone());
-                }
-
-                runtime.env_vars_set = result.env_vars_set.clone();
-                runtime.temp_files = result.temp_files.clone();
-                runtime.extra_args = result.extra_args.clone();
-
-                mcp_cleanup = Some((injector, result));
-            }
-        } else {
-            return Err(eyre!(
-                "provider {} does not support runtime MCP injection.\n\
-                 Use `claudine mcp export {} --apply` to write servers to its native config instead.",
-                provider,
-                provider.as_slug()
-            ));
-        }
-
-        deferred_messages.push(if runtime.servers.is_empty() {
-            "MCP: no active servers".to_string()
-        } else {
-            format!("MCP: {}", runtime.servers.join(", "))
-        });
-        if !runtime.resolved_tags.is_empty() {
-            deferred_messages.push(format!("MCP tags: {}", runtime.resolved_tags.join(", ")));
-        }
-        mcp_runtime = Some(runtime);
-    }
+    let (mcp_runtime, mcp_cleanup) = wrapper_mcp::compose_mcp_session(
+        &args,
+        provider,
+        non_interactive_requested,
+        &mut env_plan,
+        &mut child_args,
+        &mut prompt_source,
+        &mut deferred_warnings,
+        &mut deferred_messages,
+    )?;
 
     let child_cwd = env_plan.child_cwd.as_path();
 
@@ -1192,140 +1045,27 @@ fn run_provider_wrapper_inner(
         }
         (harness_code, None)
     } else if use_structured {
-        let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
-        let parser_config = claudine::stream::ParserConfig {
-            model: args.model.clone(),
-        };
-        let sink = live_semantic_sink::LiveSemanticSink::with_default_wiring(
+        wrapper_exec::run_structured_stream_session(
+            &args,
             provider,
-            env_context.clone(),
-            child_cwd,
-            stream_verbosity,
-            summary_details.clone(),
-        )
-        .with_context_extra(dispatch_context.clone());
-        let live_metrics = sink.live_metrics();
-        let stream_output = sink.stream_output();
-        let watchdog_state = Some(sink.watchdog_state());
-        // Snapshot the sink's section-stream handle before the sink is
-        // moved into the parser closure. Post-stream trailer and
-        // Codex-final-stdout emission uses this handle so every section
-        // transition shares the same tracker state.
-        let section_stream = sink.section_stream();
-        let (build_parser, stderr_bridge) =
-            policy::build_structured_plumbing(provider, sink, parser_config);
-        let mut _spawned = false;
-        let stream_result = if let Some(wire_prompt) = wire_prompt.clone() {
-            let runtime_context =
-                match claudine::dispatch::DispatchRuntimeContext::load_for_env(&env_context) {
-                    Ok(runtime) => runtime,
-                    Err(error) => {
-                        tracing::warn!(%provider, "failed to preload wire runtime config: {error}");
-                        claudine::dispatch::DispatchRuntimeContext::default()
-                    }
-                };
-            let _ = stderr_bridge;
-            wire_io::run_kimi_wire_session(
-                wire_io::WireSessionConfig {
-                    binary: binary_path.as_path(),
-                    args: &child_args,
-                    env: &env_plan.env,
-                    cwd: child_cwd,
-                    prompt: wire_prompt,
-                    timeout: args.timeout.as_ref().and_then(|raw| {
-                        claudine::harness::parse_timeout(raw, std::path::Path::new("<cli>")).ok()
-                    }),
-                    client_name: env!("CARGO_PKG_NAME"),
-                    client_version: env!("CARGO_PKG_VERSION"),
-                    capabilities: wire_io::WireClientCapabilities::default_for_claudine(),
-                    env_context: env_context.clone(),
-                },
-                wire_io::WireSessionWiring {
-                    build_parser,
-                    stream_output,
-                    live_metrics,
-                    runtime_context,
-                },
-                &mut _spawned,
-            )?
-        } else {
-            let timeout_config = composition::resolve_timeouts(
-                args.timeout.clone(),
-                None,
-                cli_step_timeout.clone(),
-                None,
-            )
-            .with_provider(provider);
-            exec::run_child_stream_semantic(
-                binary_path.as_path(),
-                &child_args,
-                &env_plan.env,
-                child_cwd,
-                timeout_config,
-                stderr_noise,
-                profile.suppress_structured_stderr_on_success(),
-                stream_verbosity != Verbosity::Silent,
-                stdin_seed.as_deref(),
-                build_parser,
-                &mut _spawned,
-                live_metrics,
-                stream_output,
-                stderr_bridge,
-                None,
-                watchdog_state,
-                Some(section_stream.tracker()),
-            )?
-        };
-        let mut summary = stream_result.data;
-        let api_duration_ms = summary.duration_ms;
-        if let Some(collector) = perf_collector.as_mut() {
-            collector.set_agent_perf(stream_result.telemetry.into_agent_perf(api_duration_ms));
-        }
-        if let Some(ref sid) = summary.session_id {
-            wrapper_span.record("session_id", tracing::field::display(sid));
-        }
-        if let Some(codex_output) = structured_codex_output.as_ref() {
-            codex_output.apply_to_summary(&mut summary);
-        }
-        // Codex delivers its final assistant message via the
-        // `--output-last-message` file; this block renders that file's
-        // contents to stdout. Suppress on user interrupt because the
-        // overlapping `agent_message` prose already rendered live as
-        // `▌ ` thinking blocks above.
-        if provider == Provider::Codex
-            && !summary.assistant_text.is_empty()
-            && !crate::output::user_interrupt_observed()
-        {
-            section_stream.enter_final_stdout();
-            let text = &summary.assistant_text;
-            if std::io::stdout().is_terminal() {
-                let rendered = crate::output::render_assistant_markdown(text, &term);
-                std::io::stdout().write_all(rendered.as_bytes())?;
-                if !rendered.ends_with('\n') {
-                    std::io::stdout().write_all(b"\n")?;
-                }
-            } else {
-                std::io::stdout().write_all(text.as_bytes())?;
-                if !text.ends_with('\n') {
-                    std::io::stdout().write_all(b"\n")?;
-                }
-            }
-            std::io::stdout().flush()?;
-        }
-
-        policy::emit_stream_summary(
-            &summary,
             profile,
+            binary_path.as_path(),
+            &child_args,
+            &env_plan,
+            child_cwd,
             &env_context,
+            &dispatch_context,
             stream_verbosity,
             detail_requested,
-            &summary_details.lock().unwrap().clone(),
-            Some(&section_stream),
-            stream_result.agent_pid,
-        );
-
-        let stderr_text = summary.stderr_text.clone();
-        (summary.exit_code, stderr_text)
+            structured_codex_output.as_ref(),
+            wire_prompt.clone(),
+            stdin_seed.as_deref(),
+            cli_step_timeout.clone(),
+            stderr_noise,
+            &term,
+            &wrapper_span,
+            perf_collector.as_deref_mut(),
+        )?
     } else {
         // Legacy path: forward I/O to terminal
         let mut _spawned = false;
@@ -1359,182 +1099,4 @@ fn run_provider_wrapper_inner(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::HashMap;
-
-    /// Regression: `switch_process_cwd` must update both the OS cwd
-    /// (`chdir(2)`) AND the `PWD` env var. Rust's `set_current_dir`
-    /// only does the former; the latter is the shell convention that
-    /// downstream tools (OpenCode, bash, fish, etc.) trust over the
-    /// real cwd. Leaving them out of sync produces spec-vs-reality
-    /// drift in child processes that resolve project / git roots from
-    /// `process.env.PWD`.
-    #[test]
-    fn switch_process_cwd_syncs_pwd_env_var() {
-        // Test mutates process cwd and PWD; serialize it informally
-        // by running synchronously and restoring before assert prints.
-        let target = tempfile::tempdir().unwrap();
-        // Canonicalize: macOS prefixes /private/ on /var paths and
-        // `current_dir()` returns the canonical form.
-        let target_canon = std::fs::canonicalize(target.path()).unwrap();
-
-        let prior_cwd = std::env::current_dir().unwrap();
-        let prior_pwd = std::env::var_os("PWD");
-        // SAFETY: scoped mutation; we restore before returning.
-        unsafe {
-            std::env::set_var("PWD", "/definitely/not/the/target");
-        }
-
-        switch_process_cwd(&target_canon).unwrap();
-        let observed_cwd = std::env::current_dir().unwrap();
-        let observed_pwd = std::env::var_os("PWD");
-
-        // Restore.
-        let _ = std::env::set_current_dir(&prior_cwd);
-        unsafe {
-            match prior_pwd {
-                Some(value) => std::env::set_var("PWD", value),
-                None => std::env::remove_var("PWD"),
-            }
-        }
-
-        assert_eq!(observed_cwd, target_canon, "chdir must take effect",);
-        assert_eq!(
-            observed_pwd.as_deref(),
-            Some(target_canon.as_os_str()),
-            "PWD env var must track child_cwd after switch_process_cwd \
-             (the bug: chdir without PWD-sync lets child processes resolve \
-             paths against stale shell PWD)",
-        );
-    }
-
-    #[test]
-    fn missing_binary_preflight_has_actionable_message() {
-        let clients = InstalledAiClients::default();
-        let profile = profile::profile_for_provider(Provider::Codex).unwrap();
-
-        let error = resolve_binary_path(profile, &clients).unwrap_err();
-        let message = error.to_string();
-
-        assert!(message.contains("cannot run wrapped Codex session"));
-        assert!(message.contains("docs:"));
-    }
-
-    /// W2 regression: when the prep snapshot already knows where the
-    /// provider binary lives, `resolve_binary_path_direct` must return
-    /// that path without touching `which::which`. We verify this by
-    /// seeding the snapshot with a synthetic path that does **not** exist
-    /// on `PATH`; if the function fell through to `which::which`, the
-    /// call would error with `binary_missing_error`.
-    #[test]
-    fn resolve_binary_path_direct_uses_snapshot_without_which_lookup() {
-        use std::collections::{BTreeMap, BTreeSet};
-
-        let synthetic = PathBuf::from("/nonexistent/cache/codex-bin-stub");
-        let mut binary_paths = BTreeMap::new();
-        binary_paths.insert(Provider::Codex, synthetic.clone());
-        let snapshot = InstalledProviderSnapshot {
-            runnable: vec![Provider::Codex],
-            excluded: BTreeSet::new(),
-            all_installed: vec![Provider::Codex],
-            binary_paths,
-        };
-
-        let profile = profile::profile_for_provider(Provider::Codex).unwrap();
-        let resolved =
-            resolve_binary_path_direct(profile, Some(&snapshot)).expect("snapshot path wins");
-
-        assert_eq!(
-            resolved, synthetic,
-            "snapshot path must be returned verbatim, not re-resolved via `which`"
-        );
-    }
-
-    /// Companion: when the snapshot has no entry for the requested
-    /// provider, the legacy `which::which` fallback path is taken.
-    /// In an unhydrated environment (no real `codex` binary on PATH),
-    /// that path must still surface the actionable missing-binary error
-    /// rather than panic.
-    #[test]
-    fn resolve_binary_path_direct_falls_back_when_snapshot_lacks_provider() {
-        use std::collections::{BTreeMap, BTreeSet};
-
-        let snapshot = InstalledProviderSnapshot {
-            runnable: vec![],
-            excluded: BTreeSet::new(),
-            all_installed: vec![],
-            binary_paths: BTreeMap::new(),
-        };
-        let profile = profile::profile_for_provider(Provider::Codex).unwrap();
-
-        // Force PATH to a directory we know contains no binaries so the
-        // `which::which` fallback deterministically misses.
-        let empty = tempfile::tempdir().unwrap();
-        let prev_path = std::env::var_os("PATH");
-        // SAFETY: tests in this binary are not parallelised across this
-        // env var; the variable is restored before returning.
-        unsafe {
-            std::env::set_var("PATH", empty.path());
-        }
-        let result = resolve_binary_path_direct(profile, Some(&snapshot));
-        unsafe {
-            match prev_path {
-                Some(p) => std::env::set_var("PATH", p),
-                None => std::env::remove_var("PATH"),
-            }
-        }
-
-        let error = result.expect_err("missing-binary fallback should error");
-        assert!(
-            error.to_string().contains("cannot run wrapped Codex"),
-            "expected actionable error; got {error}"
-        );
-    }
-
-    #[test]
-    fn package_name_display_shows_resolved_package_and_area() {
-        let env_plan = env::EnvPlan {
-            env: HashMap::new(),
-            removed: Vec::new(),
-            included: Vec::new(),
-            added: Vec::new(),
-            repo_root: None,
-            child_cwd: PathBuf::from("/tmp"),
-            package_context: Some(claudine::composition::PackageContext {
-                package_area: "claudine".to_string(),
-                package: Some("claudine-cli".to_string()),
-                candidates: vec!["claudine-cli".to_string()],
-            }),
-            warnings: Vec::new(),
-            shadow_home_path: None,
-            perf_substages: Vec::new(),
-        };
-
-        let rendered = crate::output::package_name_display(&env_plan).unwrap();
-        assert!(rendered.contains("claudine-cli"));
-        assert!(rendered.contains("area: claudine"));
-    }
-
-    #[test]
-    fn package_name_display_is_hidden_when_package_is_ambiguous() {
-        let env_plan = env::EnvPlan {
-            env: HashMap::new(),
-            removed: Vec::new(),
-            included: Vec::new(),
-            added: Vec::new(),
-            repo_root: None,
-            child_cwd: PathBuf::from("/tmp"),
-            package_context: Some(claudine::composition::PackageContext {
-                package_area: "claudine".to_string(),
-                package: None,
-                candidates: vec!["claudine".to_string(), "claudine-cli".to_string()],
-            }),
-            warnings: Vec::new(),
-            shadow_home_path: None,
-            perf_substages: Vec::new(),
-        };
-
-        assert!(crate::output::package_name_display(&env_plan).is_none());
-    }
-}
+mod tests;
