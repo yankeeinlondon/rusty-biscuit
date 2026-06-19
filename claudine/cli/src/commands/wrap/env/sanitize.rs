@@ -92,22 +92,34 @@ pub(crate) fn is_sensitive_key(key: &str) -> bool {
         || uppercase.contains("CREDENTIAL")
         || uppercase.contains("ACCESS_KEY")
         || uppercase.contains("PASSPHRASE")
+        || (uppercase.ends_with("_KEY") && !uppercase.contains("PUBLIC_KEY"))
+        || uppercase.ends_with("_AUTH")
+        || uppercase.ends_with("_PAT")
+        || uppercase.ends_with("_PWD")
+        || uppercase.ends_with("_PEM")
 }
 
 /// Redact values in CLI args that look like they contain secrets.
 ///
 /// Scans for patterns like `--api-key=sk-...` or `--token sk-...` and
-/// replaces the value portion with `****`.
+/// replaces the value portion with `****`. Matching is case-insensitive for
+/// flag names, and a few common short aliases (`-k`) and token-value shapes
+/// (`sk-`, `ghp_`, `xox[bp]-`, `AKIA`) are also redacted.
 pub(crate) fn redact_sensitive_args(args: &[String]) -> Vec<String> {
     let sensitive_prefixes: &[&str] = &[
         "--api-key",
+        "--apikey",
         "--token",
         "--secret",
         "--password",
         "--credential",
         "--access-key",
+        "--accesskey",
         "--private-key",
+        "--privatekey",
         "--passphrase",
+        "--bearer",
+        "-k",
     ];
 
     let mut result = Vec::with_capacity(args.len());
@@ -120,29 +132,55 @@ pub(crate) fn redact_sensitive_args(args: &[String]) -> Vec<String> {
             continue;
         }
 
-        // Check for --flag=value format
+        // Check for --flag=value format first, preserving the authored casing
+        // of the flag while redacting the value.
         let mut matched = false;
-        for prefix in sensitive_prefixes {
-            if let Some(rest) = arg.strip_prefix(prefix) {
-                if rest.starts_with('=') {
-                    result.push(format!("{prefix}=****"));
-                    matched = true;
-                    break;
-                }
-                if rest.is_empty() {
-                    // Next arg is the value
-                    result.push(arg.clone());
-                    redact_next = true;
+        if let Some(eq_pos) = arg.find('=') {
+            let (flag, _rest) = arg.split_at(eq_pos);
+            let flag_lower = flag.to_ascii_lowercase();
+            for prefix in sensitive_prefixes {
+                if flag_lower == *prefix {
+                    result.push(format!("{flag}=****"));
                     matched = true;
                     break;
                 }
             }
         }
-
-        if !matched {
-            result.push(arg.clone());
+        if matched {
+            continue;
         }
+
+        // Check for --flag value format.
+        let arg_lower = arg.to_ascii_lowercase();
+        for prefix in sensitive_prefixes {
+            if arg_lower == *prefix {
+                result.push(arg.clone());
+                redact_next = true;
+                matched = true;
+                break;
+            }
+        }
+        if matched {
+            continue;
+        }
+
+        // Value-shape redaction: bare secret-looking tokens.
+        if looks_like_secret_token(arg) {
+            result.push("****".to_string());
+            continue;
+        }
+
+        result.push(arg.clone());
     }
 
     result
+}
+
+/// Returns `true` when a bare argument value starts with a known secret prefix.
+fn looks_like_secret_token(value: &str) -> bool {
+    value.starts_with("sk-")
+        || value.starts_with("ghp_")
+        || value.starts_with("xoxb-")
+        || value.starts_with("xoxp-")
+        || value.starts_with("AKIA")
 }

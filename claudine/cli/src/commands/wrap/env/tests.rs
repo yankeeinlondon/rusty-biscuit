@@ -90,6 +90,53 @@ fn redact_sensitive_args_hides_secret_values() {
 }
 
 #[test]
+fn is_sensitive_key_catches_bare_key_suffix_and_other_secret_patterns() {
+    assert!(is_sensitive_key("STRIPE_KEY"));
+    assert!(is_sensitive_key("SENDGRID_KEY"));
+    assert!(is_sensitive_key("NPM_AUTH"));
+    assert!(is_sensitive_key("GITHUB_PAT"));
+    assert!(is_sensitive_key("DB_PWD"));
+    assert!(is_sensitive_key("SSL_PEM"));
+}
+
+#[test]
+fn is_sensitive_key_preserves_public_key_and_ssh_auth_sock() {
+    assert!(!is_sensitive_key("PUBLIC_KEY"));
+    assert!(!is_sensitive_key("SSH_AUTH_SOCK"));
+    assert!(!is_sensitive_key("OLDPWD"));
+    assert!(!is_sensitive_key("CWD"));
+}
+
+#[test]
+fn redact_sensitive_args_is_case_insensitive_and_alias_aware() {
+    let args = vec![
+        "--ApiKey=sk-secret".to_string(),
+        "--API_KEY".to_string(),
+        "sk-other".to_string(),
+        "-k".to_string(),
+        "ghp_12345".to_string(),
+        "--bearer".to_string(),
+        "xoxb-token".to_string(),
+        "AKIAIOSFODNN7EXAMPLE".to_string(),
+    ];
+
+    let redacted = redact_sensitive_args(&args);
+    assert_eq!(
+        redacted,
+        vec![
+            "--ApiKey=****",
+            "--API_KEY",
+            "****",
+            "-k",
+            "****",
+            "--bearer",
+            "****",
+            "****",
+        ]
+    );
+}
+
+#[test]
 fn redact_sensitive_args_preserves_non_secret_args() {
     let args = vec![
         "--json".to_string(),
