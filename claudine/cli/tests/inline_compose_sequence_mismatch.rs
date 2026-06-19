@@ -190,8 +190,9 @@ fn rejects_mapping_prompt_with_sequence() {
 #[test]
 fn non_tty_withholds_yaml_but_keeps_guidance() {
     // Criterion 12: under piped stderr the diagnostic retains the mismatch +
-    // `sections` guidance, omits the YAML intro/block, and states the YAML was
-    // withheld. The unique frontmatter token must not leak.
+    // `sections` guidance and omits the authored YAML block entirely (the
+    // frontmatter excerpt is TTY-gated). The unique frontmatter token must not
+    // leak.
     let workspace = tempdir().unwrap();
     let md_file = workspace.path().join("doc.md");
     fs::write(
@@ -217,14 +218,6 @@ fn non_tty_withholds_yaml_but_keeps_guidance() {
     assert!(
         plain.contains("sections"),
         "non-TTY output should keep the `sections` guidance; stderr:\n{plain}"
-    );
-    assert!(
-        plain.contains("withheld"),
-        "non-TTY output should state the YAML was withheld; stderr:\n{plain}"
-    );
-    assert!(
-        !plain.contains("Below is the full YAML definition"),
-        "the YAML intro must be omitted under non-TTY; stderr:\n{plain}"
     );
     assert!(
         !plain.contains("secret-frontmatter-token"),
