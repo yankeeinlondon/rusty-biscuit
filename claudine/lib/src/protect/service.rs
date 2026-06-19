@@ -15,7 +15,7 @@ use super::path::{
 /// Evaluation request for the protect service.
 #[derive(Debug)]
 pub enum ProtectRequest<'a> {
-    BashCommand { command: &'a str },
+    BashCommand { command: Cow<'a, str> },
     WritePath { path: &'a str, cwd: Option<&'a str> },
     McpResponse { payloads: Vec<Cow<'a, str>> },
 }
@@ -59,7 +59,7 @@ impl ProtectService {
         }
 
         let decision = match request {
-            ProtectRequest::BashCommand { command } => self.evaluate_bash_command(command),
+            ProtectRequest::BashCommand { command } => self.evaluate_bash_command(command.as_ref()),
             ProtectRequest::WritePath { path, cwd } => self.evaluate_write_path(path, *cwd),
             ProtectRequest::McpResponse { payloads } => self.evaluate_mcp_response(payloads),
         };
@@ -74,11 +74,11 @@ impl ProtectService {
     }
 
     fn evaluate_bash_command(&self, command: &str) -> ProtectDecision {
-        let _span = info_span!(
-            "protect_bash",
-            command_truncated = &command[..command.len().min(80)]
-        )
-        .entered();
+        let command_truncated = command
+            .char_indices()
+            .nth(80)
+            .map_or(command, |(i, _)| &command[..i]);
+        let _span = info_span!("protect_bash", command_truncated).entered();
         for group in &self.catalog.command_groups {
             if let Some((m, rule_supports_allow_paths)) = group.find_match(command) {
                 if rule_supports_allow_paths
@@ -104,7 +104,7 @@ impl ProtectService {
             }
         }
 
-        if let Some(custom) = &self.catalog.custom_group
+        if let Some(custom) = &self.catalog.custom_command_group
             && let Some((m, _)) = custom.find_match(command)
         {
             debug!(
@@ -140,18 +140,7 @@ impl ProtectService {
         if self.path_checker.is_sensitive(&resolved_str) {
             // Check allow_paths suppression
             if let Some(allow_paths) = self.config.get_allow_paths(RuleGroup::SensitivePaths)
-                && allow_paths.iter().any(|allowed| {
-                    if allowed.starts_with('/') {
-                        let allowed_normalized = normalize_path(allowed);
-                        let allowed_canonical =
-                            super::path::canonicalize_existing_ancestor(&allowed_normalized);
-                        let allowed_str = allowed_canonical.to_string_lossy();
-                        resolved_str == allowed_str
-                            || resolved_str.starts_with(&format!("{allowed_str}/"))
-                    } else {
-                        resolved_str.split('/').any(|part| part == allowed.as_str())
-                    }
-                })
+                && super::path::is_path_allowed(&resolved_str, allow_paths)
             {
                 debug!(path = %resolved_str, "sensitive path suppressed by allow_paths");
                 return ProtectDecision::allow();
@@ -202,7 +191,7 @@ mod tests {
     fn bash_rm_rf_root_is_blocked() {
         let service = default_service();
         let decision = service.evaluate(&ProtectRequest::BashCommand {
-            command: "rm -rf /",
+            command: Cow::Borrowed("rm -rf /"),
         });
         assert!(decision.is_blocked());
         assert_eq!(
@@ -227,7 +216,7 @@ mod tests {
             }));
         let service = ProtectService::new(config, ProtectPlatform::current()).unwrap();
         let decision = service.evaluate(&ProtectRequest::BashCommand {
-            command: "rm -rf node_modules",
+            command: Cow::Borrowed("rm -rf node_modules"),
         });
         assert!(!decision.is_blocked());
     }
@@ -236,7 +225,7 @@ mod tests {
     fn bash_safe_command_is_allowed() {
         let service = default_service();
         let decision = service.evaluate(&ProtectRequest::BashCommand {
-            command: "cargo test -p claudine",
+            command: Cow::Borrowed("cargo test -p claudine"),
         });
         assert!(!decision.is_blocked());
     }
@@ -320,12 +309,13 @@ mod tests {
             custom_patterns: vec![CustomPattern {
                 name: "no_terraform_destroy".to_string(),
                 pattern: r"terraform\s+destroy".to_string(),
+                surface: ScanSurface::BashCommand,
             }],
             ..Default::default()
         };
         let service = ProtectService::new(config, ProtectPlatform::current()).unwrap();
         let decision = service.evaluate(&ProtectRequest::BashCommand {
-            command: "terraform destroy -auto-approve",
+            command: Cow::Borrowed("terraform destroy -auto-approve"),
         });
         assert!(decision.is_blocked());
         assert_eq!(decision.blocked.unwrap().rule_id, "no_terraform_destroy");
@@ -339,7 +329,7 @@ mod tests {
         };
         let service = ProtectService::new(config, ProtectPlatform::current()).unwrap();
         let decision = service.evaluate(&ProtectRequest::BashCommand {
-            command: "rm -rf /",
+            command: Cow::Borrowed("rm -rf /"),
         });
         assert!(!decision.is_blocked());
     }
@@ -354,7 +344,7 @@ mod tests {
             }));
         let service = ProtectService::new(config, ProtectPlatform::current()).unwrap();
         let decision = service.evaluate(&ProtectRequest::BashCommand {
-            command: "sudo rm -rf /boot",
+            command: Cow::Borrowed("sudo rm -rf /boot"),
         });
         assert!(
             decision.is_blocked(),
@@ -424,6 +414,24 @@ mod tests {
         assert!(
             result.is_err(),
             "ProtectService::new should reject invalid config"
+        );
+    }
+
+    #[test]
+    fn long_command_truncation_respects_char_boundaries() {
+        test_toolkit::init_test_tracing();
+        let service = default_service();
+        // 78 ASCII bytes, then a 4-byte emoji, then more ASCII. Byte 80 is
+        // inside the emoji, so a byte-index slice at 80 would panic.
+        let prefix = "x".repeat(78);
+        let command = format!("{prefix}😀echo hello");
+        assert!(command.len() > 80);
+        let decision = service.evaluate(&ProtectRequest::BashCommand {
+            command: Cow::Borrowed(command.as_str()),
+        });
+        assert!(
+            !decision.is_blocked(),
+            "safe long command should be allowed without panicking"
         );
     }
 
