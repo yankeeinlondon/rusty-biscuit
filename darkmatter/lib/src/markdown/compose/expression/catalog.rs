@@ -704,12 +704,12 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
     },
     ExpressionFunctionDescriptor {
 
-        signature: "dir(file)",
+        signature: "dirname(file)",
         description: "Returns the directory portion of the display path.",
         category: "Filesystem",
         order: 16,
 
-        example: Some(Example { invocation: "dir(\"sub/note.md\")", result: "sub", verification: ExampleVerification::Executable }),
+        example: Some(Example { invocation: "dirname(\"sub/note.md\")", result: "sub", verification: ExampleVerification::Executable }),
 
     },
     ExpressionFunctionDescriptor {
@@ -1119,7 +1119,7 @@ mod tests {
             "decrement_file_index(file)",
             "basename(file)",
             "basename_without_index(file)",
-            "dir(file)",
+            "dirname(file)",
             "ext(file)",
             "parent_dir(file)",
             "file_trailing(file)",

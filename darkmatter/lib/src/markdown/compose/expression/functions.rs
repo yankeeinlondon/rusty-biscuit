@@ -1251,13 +1251,13 @@ pub fn basename_without_index_fn(args: &[Value], ctx: &ResolutionContext) -> Res
     Ok(Value::String(out))
 }
 
-/// `dir(file) -> string` — the directory portion of the display path.
-pub fn dir_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
-    require_args("dir", args, 1)?;
+/// `dirname(file) -> string` — the directory portion of the display path.
+pub fn dirname_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    require_args("dirname", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
-    let path = resolve_path_arg("dir", &args[0], ctx)?;
+    let path = resolve_path_arg("dirname", &args[0], ctx)?;
     let (dirs, _) = path_display_components(&path, &ctx.base_dir);
     Ok(Value::String(if dirs.is_empty() {
         String::new()
@@ -1808,7 +1808,7 @@ pub const FS_FUNCTIONS: &[FsFunction] = &[
     FsFunction { canonical: "decrement_file_index", aliases: &["decrementfileindex"], signatures: &["decrement_file_index(file)"], handler: decrement_file_index_fn },
     FsFunction { canonical: "basename", aliases: &[], signatures: &["basename(file)"], handler: basename_fn },
     FsFunction { canonical: "basename_without_index", aliases: &["basenamewithoutindex"], signatures: &["basename_without_index(file)"], handler: basename_without_index_fn },
-    FsFunction { canonical: "dir", aliases: &[], signatures: &["dir(file)"], handler: dir_fn },
+    FsFunction { canonical: "dirname", aliases: &[], signatures: &["dirname(file)"], handler: dirname_fn },
     FsFunction { canonical: "ext", aliases: &[], signatures: &["ext(file)"], handler: ext_fn },
     FsFunction { canonical: "parent_dir", aliases: &["parentdir"], signatures: &["parent_dir(file)"], handler: parent_dir_fn },
     FsFunction { canonical: "file_trailing", aliases: &["filetrailing"], signatures: &["file_trailing(file)"], handler: file_trailing_fn },
@@ -2292,6 +2292,18 @@ mod tests {
         fn dispatch_fs_returns_none_for_non_fs_names() {
             let ctx = ResolutionContext::new(std::path::PathBuf::from("."));
             assert!(dispatch_fs("lower", &[json!("x")], &ctx).is_none());
+        }
+
+        #[test]
+        fn dirname_renamed_without_dir_alias() {
+            let ctx = ResolutionContext::new(std::path::PathBuf::from("."));
+            assert_eq!(
+                dispatch_fs("dirname", &[json!("sub/note.md")], &ctx)
+                    .unwrap()
+                    .unwrap(),
+                json!("sub")
+            );
+            assert!(dispatch_fs("dir", &[json!("sub/note.md")], &ctx).is_none());
         }
 
         #[test]
@@ -2897,7 +2909,7 @@ mod tests {
                 basename_without_index_fn(&[json!("foo/review-1.md")], &ctx).unwrap(),
                 json!("review.md")
             );
-            assert_eq!(dir_fn(&[json!("foo/bar/baz/test.md")], &ctx).unwrap(), json!("foo/bar/baz"));
+            assert_eq!(dirname_fn(&[json!("foo/bar/baz/test.md")], &ctx).unwrap(), json!("foo/bar/baz"));
             assert_eq!(ext_fn(&[json!("foo/bar/baz/test.md")], &ctx).unwrap(), json!("md"));
             assert_eq!(ext_fn(&[json!("no-ext")], &ctx).unwrap(), json!(""));
             assert_eq!(
@@ -2920,7 +2932,7 @@ mod tests {
             std::fs::write(dir.path().join("test.md"), "x").unwrap();
 
             assert_eq!(basename_fn(&[json!("test.md")], &ctx).unwrap(), json!("test.md"));
-            assert_eq!(dir_fn(&[json!("test.md")], &ctx).unwrap(), json!(""));
+            assert_eq!(dirname_fn(&[json!("test.md")], &ctx).unwrap(), json!(""));
             assert_eq!(parent_dir_fn(&[json!("test.md")], &ctx).unwrap(), json!(""));
             assert_eq!(file_trailing_fn(&[json!("test.md")], &ctx).unwrap(), json!("test.md"));
             assert_eq!(dir_leading_fn(&[json!("test.md")], &ctx).unwrap(), json!(""));
@@ -2971,7 +2983,7 @@ mod tests {
             let ctx = ResolutionContext::new(std::env::temp_dir());
 
             assert_eq!(basename_fn(&[json!("foo/bar/missing.md")], &ctx).unwrap(), json!("missing.md"));
-            assert_eq!(dir_fn(&[json!("foo/bar/missing.md")], &ctx).unwrap(), json!("foo/bar"));
+            assert_eq!(dirname_fn(&[json!("foo/bar/missing.md")], &ctx).unwrap(), json!("foo/bar"));
             assert_eq!(
                 increment_file_index_fn(&[json!("foo/bar/missing.md")], &ctx).unwrap(),
                 json!("foo/bar/missing-2.md")
@@ -2994,6 +3006,10 @@ mod tests {
             assert_eq!(
                 dispatch_fs("basename", &[json!("foo/bar.md")], &ctx).unwrap().unwrap(),
                 json!("bar.md")
+            );
+            assert_eq!(
+                dispatch_fs("dirname", &[json!("foo/bar.md")], &ctx).unwrap().unwrap(),
+                json!("foo")
             );
             assert_eq!(
                 dispatch_fs("join", &[json!("foo"), json!("bar.md")], &ctx)
