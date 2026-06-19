@@ -13,6 +13,7 @@ use biscuit_speaks::{SpeedLevel, TtsConfig, TtsFailoverStrategy};
 use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
 use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
+use darkmatter::markdown::compose::expression::ExpressionFinder;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
@@ -593,6 +594,96 @@ pub fn parse_lifecycle_config(
     }
 
     Ok(config)
+}
+
+/// Validates that no rendered lifecycle string contains a surviving
+/// `{{ … }}` interpolation span.
+///
+/// Iterates every configured signal in deterministic order
+/// (`Start`, `Success`, `Blocked`, `Failure`) and every string field on the
+/// notification in deterministic order (`say`, `say_first`, `message`,
+/// `stderr`, `notify`). The first field with a non-empty span list aborts
+/// with [`CompositionError::LifecycleInterpolationLeak`].
+///
+/// This runs **after** composition, when expressions should have resolved.
+/// It intentionally does *not* run inside [`parse_lifecycle_config`], which
+/// is also used for raw frontmatter inspection where unresolved templates
+/// are legitimate.
+///
+/// ## Arguments
+///
+/// * `config` — parsed lifecycle configuration.
+/// * `source_path` — composed prompt file, used for the diagnostic.
+/// * `warnings` — compose report warnings, used best-effort to enrich the
+///   leak reason.
+pub fn validate_no_interpolation_leaks(
+    config: &LifecycleConfig,
+    source_path: &Path,
+    warnings: &[darkmatter::markdown::compose::ComposeWarning],
+) -> Result<(), CompositionError> {
+    let signals = [
+        LifecycleSignal::Start,
+        LifecycleSignal::Success,
+        LifecycleSignal::Blocked,
+        LifecycleSignal::Failure,
+    ];
+
+    for signal in signals {
+        let Some(notification) = config.get(signal) else {
+            continue;
+        };
+
+        let fields: [(&str, Option<&String>); 5] = [
+            ("say", notification.say.as_ref()),
+            ("say_first", notification.say_first.as_ref()),
+            ("message", notification.message.as_ref()),
+            ("stderr", notification.stderr.as_ref()),
+            ("notify", notification.notify.as_ref()),
+        ];
+
+        for (field_name, value) in fields {
+            let Some(text) = value else {
+                continue;
+            };
+            if text.is_empty() {
+                continue;
+            }
+
+            let spans = ExpressionFinder::find_all_plain(text);
+            if let Some(first) = spans.first() {
+                let property = format!("{}.{}", signal.property_name(), field_name);
+                let expression = first.expression.clone();
+                let reason = find_matching_warning_reason(&expression, warnings);
+                return Err(CompositionError::LifecycleInterpolationLeak {
+                    source_path: source_path.to_path_buf(),
+                    property,
+                    expression,
+                    reason,
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Best-effort extraction of a warning reason mentioning the leaked expression.
+fn find_matching_warning_reason(
+    expression: &str,
+    warnings: &[darkmatter::markdown::compose::ComposeWarning],
+) -> String {
+    let inner = expression
+        .trim_start_matches("{{")
+        .trim_end_matches("}}")
+        .trim();
+
+    for warning in warnings {
+        if warning.message.contains(expression) || warning.message.contains(inner) {
+            return warning.message.clone();
+        }
+    }
+
+    String::new()
 }
 
 /// Normalizes empty or whitespace-only strings to `None`.
@@ -1431,6 +1522,38 @@ mod tests {
         assert!(guard.provider_launched());
 
         guard.defuse();
+    }
+
+    #[test]
+    fn guard_prevents_message_dispatch_on_leak() {
+        let config = parse_lifecycle_config(
+            &json!({
+                "start": {
+                    "message": "{{ broken( }}",
+                }
+            }),
+            dummy_path(),
+        )
+        .unwrap();
+        let emitter = RecordingEmitter::new();
+
+        let err = validate_no_interpolation_leaks(&config, dummy_path(), &[]).unwrap_err();
+        match err {
+            CompositionError::LifecycleInterpolationLeak {
+                property,
+                expression,
+                ..
+            } => {
+                assert_eq!(property, "start.message");
+                assert!(expression.contains("broken("));
+            }
+            other => panic!("expected LifecycleInterpolationLeak, got: {other:?}"),
+        }
+
+        assert!(
+            emitter.actions().is_empty(),
+            "no lifecycle emissions should occur when the interpolation leak guard fires"
+        );
     }
 
     #[test]

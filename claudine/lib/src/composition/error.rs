@@ -253,6 +253,30 @@ pub enum CompositionError {
     #[error("lifecycle property `{0}` references unknown sound effect `{1}`")]
     LifecycleUnknownEffect(String, String),
 
+    /// A rendered lifecycle string still contains a recognized `{{ … }}`
+    /// interpolation span after composition.
+    ///
+    /// This guards against Darkmatter's default lenient behavior
+    /// (`fail_fast = false`), which leaves malformed or unresolvable
+    /// expressions in place instead of failing composition. Catching the
+    /// leak here prevents raw template syntax from reaching user-visible
+    /// side effects (Discord, Slack, TTS, stderr, desktop notifications).
+    #[error(
+        "lifecycle interpolation leaked in `{property}`: {expression} ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleInterpolationLeak {
+        /// The composed prompt file whose lifecycle frontmatter leaked.
+        source_path: PathBuf,
+        /// Dotted lifecycle key path, e.g. `"start.message"`.
+        property: String,
+        /// Raw offending span text, e.g. `"{{ parent_dir(review)) }}"`.
+        expression: String,
+        /// Parse/eval failure reason from the compose report's warnings, when
+        /// available. Empty when the span is unrecognized entirely.
+        reason: String,
+    },
+
     // -- Sequence errors -------------------------------------------------------
     /// The `sequence` frontmatter value is not a valid type (must be a list or a string).
     #[error("invalid sequence definition: {0}")]
@@ -820,6 +844,35 @@ impl BlockError for CompositionError {
                     ))
                     .body(body)
                     .hint("Check the lifecycle frontmatter section in your prompt file.")
+            }
+            CompositionError::LifecycleInterpolationLeak {
+                source_path,
+                property,
+                expression,
+                reason,
+            } => {
+                let file_link = render_file_link(source_path);
+                let mut body = format!(
+                    "Interpolation span leaked in lifecycle property \
+                     <cyan>`{property}`</cyan> in {file_link}.\n\n\
+                     <b>Expression:</b> <cyan>`{}`</cyan>",
+                    escape_prose_path(expression)
+                );
+                if !reason.is_empty() {
+                    body.push_str("\n\n<b>Reason:</b> ");
+                    body.push_str(&escape_prose_path(reason));
+                }
+
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "lifecycle interpolation leaked",
+                    ))
+                    .body(body)
+                    .hint(
+                        "Fix the expression grammar or define the referenced variable in the \
+                         lifecycle frontmatter section of your prompt file.",
+                    )
             }
             CompositionError::LoopIterationFailed {
                 iteration,

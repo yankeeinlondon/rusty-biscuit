@@ -92,7 +92,7 @@ fn find_git_root_from_path(path: &Path) -> Option<PathBuf> {
 
 use super::error::CompositionError;
 use super::guardrails::load_or_create_guardrails;
-use super::lifecycle::parse_lifecycle_config;
+use super::lifecycle::{parse_lifecycle_config, validate_no_interpolation_leaks};
 use super::types::{
     AgentHint, CompositionClosurePlan, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
     ModelHint, PreparedComposition, ResolvedCompositionSource,
@@ -163,6 +163,7 @@ pub fn prepare_direct(
         agent_was_list: agent_full.is_list,
     };
     let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
+    validate_no_interpolation_leaks(&lifecycle, &source.resolved_path, &report.warnings)?;
 
     let source_repo_root = options
         .source_repo_root
@@ -256,6 +257,7 @@ pub fn prepare_inline(
         agent_was_list: agent_full.is_list,
     };
     let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
+    validate_no_interpolation_leaks(&lifecycle, &source.resolved_path, &report.warnings)?;
 
     let mut prompt = composed.content().to_string();
     if prompt.trim().is_empty() {
@@ -650,6 +652,127 @@ mod tests {
 
         let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
         assert!(matches!(err, CompositionError::LifecycleSayConflict(_)));
+    }
+
+    #[test]
+    fn malformed_lifecycle_interpolation_fails_preparation() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("title", json!("Test")),
+                ("start", json!({"message": "{{ parent_dir(review)) }}"})),
+            ],
+            "Content",
+        );
+
+        let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+        match err {
+            CompositionError::LifecycleInterpolationLeak {
+                property,
+                expression,
+                ..
+            } => {
+                assert_eq!(property, "start.message");
+                assert!(expression.contains("parent_dir(review))"));
+            }
+            other => panic!("expected LifecycleInterpolationLeak, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn clean_lifecycle_interpolation_passes_preparation() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("title", json!("Test")),
+                ("start", json!({"message": "{{ ctx.today }}"})),
+            ],
+            "Content",
+        );
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        let start = prepared.lifecycle.start.as_ref().unwrap();
+        let message = start.message.as_ref().unwrap();
+        assert!(!message.contains("{{"));
+        assert!(!message.contains("}}"));
+    }
+
+    #[test]
+    fn lifecycle_leak_reported_for_first_field_in_deterministic_order() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("title", json!("Test")),
+                ("start", json!({"message": "{{ parent_dir(review)) }}"})),
+                ("failure", json!({"say": "{{ broken( }}"})),
+            ],
+            "Content",
+        );
+
+        let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+        match err {
+            CompositionError::LifecycleInterpolationLeak { property, .. } => {
+                assert_eq!(property, "start.message");
+            }
+            other => panic!("expected LifecycleInterpolationLeak, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn implement_suggestions_prompt_composes_without_lifecycle_leak() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let prompt_path = manifest_dir.join("../../prompts/implement-suggestions.md");
+        let original_text = fs::read_to_string(&prompt_path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", prompt_path.display()));
+        let markdown: Markdown = original_text.clone().into();
+        let source = ResolvedCompositionSource {
+            original_ref: prompt_path.to_str().unwrap().to_string(),
+            resolved_path: prompt_path.clone(),
+            original_text,
+            markdown,
+        };
+
+        let dir = TempDir::new().unwrap();
+        let review_file = dir.path().join("review.md");
+        fs::write(&review_file, "# Review\n").unwrap();
+
+        let options = PrepareOptions {
+            set_overrides: Some(json!({ "review": review_file.to_str().unwrap() })),
+            ..Default::default()
+        };
+
+        let prepared = prepare_direct(&source, options).unwrap();
+        let notifications = [
+            prepared.lifecycle.start.as_ref(),
+            prepared.lifecycle.success.as_ref(),
+            prepared.lifecycle.blocked.as_ref(),
+            prepared.lifecycle.failure.as_ref(),
+        ];
+
+        for notification in notifications.into_iter().flatten() {
+            for text in [
+                notification.say.as_deref(),
+                notification.say_first.as_deref(),
+                notification.message.as_deref(),
+                notification.stderr.as_deref(),
+                notification.notify.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                assert!(
+                    !text.contains("{{"),
+                    "lifecycle string contains unresolved '{{': {text}"
+                );
+                assert!(
+                    !text.contains("}}"),
+                    "lifecycle string contains unresolved '}}': {text}"
+                );
+            }
+        }
     }
 
     #[test]
