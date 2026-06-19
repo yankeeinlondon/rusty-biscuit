@@ -1963,4 +1963,62 @@ mod tests {
         assert!(rendered.contains("this command failed"), "got: {rendered}");
         assert!(rendered.contains("::shell"), "got: {rendered}");
     }
+
+    /// Exercise the full Markdown → `map_compose_error` → `report_block_error`
+    /// path with a real failing `::shell` directive.
+    ///
+    /// This complements the hand-built `shell_expansion_failed_err` tests by
+    /// proving that a captured `ExecutionFailed` from an actual subprocess
+    /// survives through `prepare_direct` and renders with file-relative line
+    /// numbers, the command's stderr, a source excerpt, and the composed
+    /// frontmatter block.
+    #[test]
+    fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
+        use std::collections::{BTreeMap, HashSet};
+
+        use biscuit_terminal::terminal::Terminal;
+        use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+        use super::super::prepare::{PrepareOptions, prepare_direct};
+        use super::super::resolve::resolve_composition_source;
+
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.md");
+        let content = "---\ntitle: Shell demo\n---\n\nPre.\n\n::shell rustc --edition=invalid\n\nPost.\n";
+        std::fs::write(&file_path, content).unwrap();
+
+        let source = resolve_composition_source(file_path.to_str().unwrap()).unwrap();
+
+        let mut approved = HashSet::new();
+        approved.insert("rustc --edition=invalid".to_string());
+        let options = PrepareOptions {
+            set_overrides: None,
+            pre_approved_commands: Some(approved),
+            env_overrides: BTreeMap::new(),
+            perf_enabled: false,
+            source_repo_root: None,
+            shell_working_directory: None,
+        };
+
+        let err = prepare_direct(&source, options).unwrap_err();
+        let term = Terminal::new_optimistic(80);
+        let rendered = strip_escape_codes(err.report_block_error(&term));
+
+        assert!(
+            rendered.contains("line 7"),
+            "expected file-relative line in diagnostic: {rendered}"
+        );
+        assert!(
+            rendered.contains("error:"),
+            "expected captured rustc stderr text in diagnostic: {rendered}"
+        );
+        assert!(
+            rendered.contains("::shell"),
+            "expected source excerpt in diagnostic: {rendered}"
+        );
+        assert!(
+            rendered.contains("title:") || rendered.contains("---"),
+            "expected frontmatter block in diagnostic: {rendered}"
+        );
+    }
 }
