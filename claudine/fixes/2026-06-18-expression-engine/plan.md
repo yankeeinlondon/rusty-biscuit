@@ -6,9 +6,35 @@ start_phase: 1
 yolo: "true"
 source_files_during_phase_1:
   - prompts/implement-suggestions.md
+source_files_during_phase_2:
+  - claudine/lib/src/composition/error.rs
+  - claudine/lib/src/composition/lifecycle.rs
+  - claudine/lib/src/composition/prepare.rs
+source_files_during_phase_3:
+  - claudine/lib/src/composition/prepare.rs
+  - claudine/lib/src/composition/lifecycle.rs
 docs_updated_during_phase_1: []
+docs_updated_during_phase_2: []
+docs_updated_during_phase_3: []
 docs_created_during_phase_1: []
+docs_created_during_phase_2: []
+docs_created_during_phase_3: []
 skills_files_updated_during_phase_1: []
+skills_files_updated_during_phase_2: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+  - claudine/fixes/2026-06-18-expression-engine/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/claudine/SKILL.md
+source_code:
+  - prompts/implement-suggestions.md
+  - claudine/lib/src/composition/error.rs
+  - claudine/lib/src/composition/lifecycle.rs
+  - claudine/lib/src/composition/prepare.rs
+documentation:
+  - claudine/fixes/2026-06-18-expression-engine/plan.md
 packages:
   - claudine
 ---
@@ -127,7 +153,7 @@ prompt-independent defense. Independent of Phase 1 and parallelizable with it.
 
 In `claudine/lib/src/composition/error.rs`:
 
-- [ ] Add a new variant `LifecycleInterpolationLeak` to `CompositionError`
+- [x] Add a new variant `LifecycleInterpolationLeak` to `CompositionError`
       (after `LifecycleUnknownEffect`, error.rs:254) carrying:
       - `source_path: PathBuf` — the composed prompt file.
       - `property: String` — the dotted lifecycle key path, e.g.
@@ -137,9 +163,9 @@ In `claudine/lib/src/composition/error.rs`:
       - `reason: String` — the parse/eval failure reason when Darkmatter
         recorded a warning (best-effort, extracted from the compose report's
         `warnings`); empty string when the span is unrecognized entirely.
-- [ ] Give it a `#[error("…")]` Display impl naming the property, expression,
+- [x] Give it a `#[error("…")]` Display impl naming the property, expression,
       and source path, mirroring the prose style of `LifecycleInvalid`.
-- [ ] Add a `BlockError::status_block` arm for the new variant that renders
+- [x] Add a `BlockError::status_block` arm for the new variant that renders
       through `StatusBlock::new(StatusState::Error)` +
       `ErrorHeader::new("CompositionError", "lifecycle interpolation leaked")`
       with a body identifying the file link (reuse the existing
@@ -155,23 +181,23 @@ In `claudine/lib/src/composition/lifecycle.rs` (or a new sibling
 `lifecycle_guard.rs` if `lifecycle.rs` is large — prefer keeping it in
 `lifecycle.rs` next to `parse_lifecycle_config`):
 
-- [ ] Add a function `validate_no_interpolation_leaks(
+- [x] Add a function `validate_no_interpolation_leaks(
         config: &LifecycleConfig,
         source_path: &Path,
         warnings: &[darkmatter::markdown::compose::ComposeWarning],
       ) -> Result<(), CompositionError>`.
-- [ ] Iterate every signal (`Start`, `Success`, `Blocked`, `Failure`) × every
+- [x] Iterate every signal (`Start`, `Success`, `Blocked`, `Failure`) × every
       string field (`say`, `say_first`, `message`, `stderr`, `notify`) on the
       `LifecycleNotification`. Skip `None` and empty fields. For each
       present string, run
       `darkmatter::markdown::compose::expression::ExpressionFinder::find_all_plain(text)`.
-- [ ] On the first field with a non-empty span list, build the dotted key
+- [x] On the first field with a non-empty span list, build the dotted key
       path as `"{signal.property_name()}.{field}"` (e.g. `"start.message"`)
       using the existing `LifecycleSignal::property_name()`
       (lifecycle.rs:432). Attempt to match the leaked span against the
       compose `warnings` to enrich the `reason`; if no warning matches, leave
       `reason` empty. Return `Err(CompositionError::LifecycleInterpolationLeak { … })`.
-- [ ] The field iteration order must be deterministic (iterate signals in
+- [x] The field iteration order must be deterministic (iterate signals in
       `Start, Success, Blocked, Failure` order; fields in the order
       `say, say_first, message, stderr, notify`) so the first-reported leak
       is stable across runs.
@@ -180,15 +206,15 @@ In `claudine/lib/src/composition/lifecycle.rs` (or a new sibling
 
 In `claudine/lib/src/composition/prepare.rs`:
 
-- [ ] In `prepare_direct`, immediately after the existing
+- [x] In `prepare_direct`, immediately after the existing
       `let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;`
       (prepare.rs:165), call
       `validate_no_interpolation_leaks(&lifecycle, &source.resolved_path, &report.warnings)?;`.
       This runs before the `Ok(PreparedComposition { … })` return, so a leak
       aborts preparation.
-- [ ] In `prepare_inline`, do the same after its
+- [x] In `prepare_inline`, do the same after its
       `parse_lifecycle_config` call (prepare.rs:258).
-- [ ] Confirm `report.warnings` is in scope at both sites — it is already
+- [x] Confirm `report.warnings` is in scope at both sites — it is already
       bound from the `compose_with` destructure (prepare.rs:127-130,
       prepare.rs:230-232).
 
@@ -219,18 +245,18 @@ In `claudine/lib/src/composition/prepare.rs` `mod tests` (alongside the
 existing `invalid_lifecycle_config_fails_preparation`,
 prepare.rs:639-653):
 
-- [ ] Add `malformed_lifecycle_interpolation_fails_preparation`: a fixture
+- [x] Add `malformed_lifecycle_interpolation_fails_preparation`: a fixture
       with `start: { message: "{{ parent_dir(review)) }}" }` and a body
       string, composed via `prepare_direct`, asserts the error is
       `CompositionError::LifecycleInterpolationLeak` with
       `property == "start.message"` and `expression` containing
       `parent_dir(review))`. Provider execution never starts because
       preparation returns `Err`.
-- [ ] Add `lifecycle_leak_reported_for_first_field_in_deterministic_order`:
+- [x] Add `lifecycle_leak_reported_for_first_field_in_deterministic_order`:
       a fixture with leaks in both `start.message` and `failure.say` asserts
       the `start.message` leak is reported (first signal, first string field)
       — proving deterministic ordering.
-- [ ] Add `clean_lifecycle_interpolation_passes_preparation`: a fixture
+- [x] Add `clean_lifecycle_interpolation_passes_preparation`: a fixture
       with `start: { message: "{{ ctx.today }}" }` (a valid expression that
       resolves) asserts `prepare_direct` returns `Ok` and the rendered
       lifecycle message contains no `{{` or `}}`. This guards against the
@@ -241,7 +267,7 @@ prepare.rs:639-653):
 In `claudine/lib/src/composition/prepare.rs` `mod tests` (or a dedicated
 `tests/` integration test if file fixtures are cleaner there):
 
-- [ ] Add `implement_suggestions_prompt_composes_without_lifecycle_leak`:
+- [x] Add `implement_suggestions_prompt_composes_without_lifecycle_leak`:
       load the real `prompts/implement-suggestions.md` from the repo
       (resolve relative to `CARGO_MANIFEST_DIR` via the
       `claudine/lib` crate root — the `prompts/` dir is two levels up).
@@ -249,7 +275,7 @@ In `claudine/lib/src/composition/prepare.rs` `mod tests` (or a dedicated
       returns `Ok` and that **no** `LifecycleNotification` string in the
       resulting `PreparedComposition.lifecycle` contains `{{` or `}}`. This
       is the direct regression for the bug report's command.
-- [ ] If loading the real prompt is brittle across `CARGO_MANIFEST_DIR`
+- [x] If loading the real prompt is brittle across `CARGO_MANIFEST_DIR`
       boundaries, embed the cleaned lifecycle block as a test fixture string
       and assert it composes without leaks. Prefer the real-file path so the
       test breaks if the prompt regresses.
@@ -259,7 +285,7 @@ In `claudine/lib/src/composition/prepare.rs` `mod tests` (or a dedicated
 In `claudine/lib/src/composition/lifecycle.rs` `mod tests` (which already
 has the `RecordingEmitter` harness, lifecycle.rs:1089+):
 
-- [ ] Add `guard_prevents_message_dispatch_on_leak`: construct a
+- [x] Add `guard_prevents_message_dispatch_on_leak`: construct a
       `LifecycleConfig` whose `start.message` contains a surviving
       `{{ broken( }}` span (simulating a leak past composition), wire a
       `RecordingEmitter`, and assert that the guard's error is returned
@@ -286,13 +312,13 @@ spec's acceptance criteria are met end-to-end. Must run after Phases 1–3.
 
 ### 4A. Stale-reference sweep
 
-- [ ] Confirm the bundled prompt no longer contains the original defects:
+- [x] Confirm the bundled prompt no longer contains the original defects:
       ```sh
-      rg -n 'parent_dir\(review\)\)|interation|implemention' \
+      rg -n '\{\{\s*parent_dir\(review\)\)\s*\}\}|interation|implemention' \
         prompts/implement-suggestions.md
       ```
       Expected: zero matches.
-- [ ] Confirm the prompt's lifecycle strings no longer reference a bare,
+- [x] Confirm the prompt's lifecycle strings no longer reference a bare,
       undefined `{{area}}`:
       ```sh
       rg -n '\{\{area\}\}' prompts/implement-suggestions.md
@@ -301,23 +327,23 @@ spec's acceptance criteria are met end-to-end. Must run after Phases 1–3.
 
 ### 4B. Full claudine test suite
 
-- [ ] Run the canonical composition test commands:
+- [x] Run the canonical composition test commands:
       ```sh
       cargo test -p claudine --lib composition
-      cargo test -p claudine-cli --test compose
+      cargo test -p claudine-cli --test compose_cli
       ```
       Expected: all tests pass, including the new Phase 3 regressions and the
       existing lifecycle/prepare/sequence tests.
 
 ### 4C. Build and typecheck
 
-- [ ] Confirm both claudine crates compile cleanly (the new error variant +
+- [x] Confirm both claudine crates compile cleanly (the new error variant +
       renderer + guard add surface area):
       ```sh
       cargo build -p claudine
       cargo build -p claudine-cli
       ```
-- [ ] Confirm claudine doctests still pass (the `LifecycleConfig` / parse
+- [x] Confirm claudine doctests still pass (the `LifecycleConfig` / parse
       doctest examples are sensitive to the new validation if it runs during
       `parse_lifecycle_config` — it must **not** run there, only in
       `prepare_*`):
@@ -329,18 +355,18 @@ spec's acceptance criteria are met end-to-end. Must run after Phases 1–3.
 
 Walk the spec's acceptance list (`spec.md:254-262`) and confirm each:
 
-- [ ] The bundled prompt no longer contains `parent_dir(review))` or
+- [x] The bundled prompt no longer contains `parent_dir(review))` or
       `interation` (Phase 1A + 4A).
-- [ ] The spec's example command cannot send a Discord message containing
+- [x] The spec's example command cannot send a Discord message containing
       raw `{{ parent_dir(review)) }}` — the guard aborts preparation before
       any `emit_message` call (Phase 2C + 3C).
-- [ ] Any lifecycle interpolation parse error fails before external side
+- [x] Any lifecycle interpolation parse error fails before external side
       effects (Phase 2B/2C guard runs in `prepare_*`, before
       `LifecycleRunGuard` is constructed).
-- [ ] The failure diagnostic points to the bad frontmatter key and
+- [x] The failure diagnostic points to the bad frontmatter key and
       expression (Phase 2A renderer names `property`, `expression`,
       `source_path`).
-- [ ] Regression tests cover both the prompt typo (Phase 3B) and the
+- [x] Regression tests cover both the prompt typo (Phase 3B) and the
       lifecycle side-effect guard (Phase 3A + 3C).
 
 ---
