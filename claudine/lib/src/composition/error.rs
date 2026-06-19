@@ -253,6 +253,53 @@ pub enum CompositionError {
     #[error("lifecycle property `{0}` references unknown sound effect `{1}`")]
     LifecycleUnknownEffect(String, String),
 
+    /// A rendered lifecycle string still contains a recognized `{{ … }}`
+    /// interpolation span after composition.
+    ///
+    /// This guards against Darkmatter's default lenient behavior
+    /// (`fail_fast = false`), which leaves malformed or unresolvable
+    /// expressions in place instead of failing composition. Catching the
+    /// leak here prevents raw template syntax from reaching user-visible
+    /// side effects (Discord, Slack, TTS, stderr, desktop notifications).
+    #[error(
+        "lifecycle interpolation leaked in `{property}`: {expression} ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleInterpolationLeak {
+        /// The composed prompt file whose lifecycle frontmatter leaked.
+        source_path: PathBuf,
+        /// Dotted lifecycle key path, e.g. `"start.message"`.
+        property: String,
+        /// Raw offending span text, e.g. `"{{ parent_dir(review)) }}"`.
+        expression: String,
+        /// Parse/eval failure reason from the compose report's warnings, when
+        /// available. Empty when the span is unrecognized entirely.
+        reason: String,
+    },
+
+    /// A lifecycle string references a bare `{{ variable }}` that is undefined
+    /// after composition.
+    ///
+    /// Darkmatter resolves an unknown bare variable to an empty string with no
+    /// warning and no error (even in fail-fast mode), so a message like
+    /// `"before {{ missing }} after"` would otherwise dispatch silently as
+    /// `"before  after"`. This guard inspects the **raw** (pre-composition)
+    /// lifecycle strings — where the span is still visible — and aborts
+    /// preparation before any side effect (Discord, Slack, TTS, stderr,
+    /// desktop notification) can dispatch the degraded message.
+    #[error(
+        "lifecycle property `{property}` references undefined variable `{variable}` ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleUndefinedVariable {
+        /// The prompt file whose lifecycle frontmatter referenced the variable.
+        source_path: PathBuf,
+        /// Dotted lifecycle key path, e.g. `"start.message"`.
+        property: String,
+        /// The undefined bare variable name, e.g. `"missing_lifecycle_var"`.
+        variable: String,
+    },
+
     // -- Sequence errors -------------------------------------------------------
     /// The `sequence` frontmatter value is not a valid type (must be a list or a string).
     #[error("invalid sequence definition: {0}")]
@@ -359,7 +406,7 @@ pub enum CompositionError {
 
     /// Increment targeted a property with an unsupported type.
     #[error(
-        "invalid increment at iteration {iteration}, action {action_index} of {total_actions}: property `{property}` has type {found}"
+        "invalid increment at iteration {iteration}, action {action_index} of {total_actions}: property `{property}` has type {found} (value: {value_excerpt})"
     )]
     InvalidIncrementType {
         /// 1-based iteration index.
@@ -372,11 +419,14 @@ pub enum CompositionError {
         property: String,
         /// Actual property type.
         found: String,
+        /// Excerpt of the offending value, including a stage note when it is an
+        /// unresolved template.
+        value_excerpt: String,
     },
 
     /// Decrement targeted a property with an unsupported type.
     #[error(
-        "invalid decrement at iteration {iteration}, action {action_index} of {total_actions}: property `{property}` has type {found}"
+        "invalid decrement at iteration {iteration}, action {action_index} of {total_actions}: property `{property}` has type {found} (value: {value_excerpt})"
     )]
     InvalidDecrementType {
         /// 1-based iteration index.
@@ -389,6 +439,9 @@ pub enum CompositionError {
         property: String,
         /// Actual property type.
         found: String,
+        /// Excerpt of the offending value, including a stage note when it is an
+        /// unresolved template.
+        value_excerpt: String,
     },
 
     /// Loop execution was interrupted by the user (SIGINT / Ctrl+C).
@@ -774,7 +827,7 @@ pub struct SequenceSelectionFailure {
 }
 
 impl BlockError for CompositionError {
-    fn status_block(&self, _term: &Terminal) -> StatusBlock {
+    fn status_block(&self, term: &Terminal) -> StatusBlock {
         match self {
             CompositionError::LifecycleInvalid {
                 property,
@@ -814,6 +867,59 @@ impl BlockError for CompositionError {
                     ))
                     .body(body)
                     .hint("Check the lifecycle frontmatter section in your prompt file.")
+            }
+            CompositionError::LifecycleInterpolationLeak {
+                source_path,
+                property,
+                expression,
+                reason,
+            } => {
+                let file_link = render_file_link(source_path);
+                let mut body = format!(
+                    "Interpolation span leaked in lifecycle property \
+                     <cyan>`{property}`</cyan> in {file_link}.\n\n\
+                     <b>Expression:</b> <cyan>`{}`</cyan>",
+                    escape_prose_path(expression)
+                );
+                if !reason.is_empty() {
+                    body.push_str("\n\n<b>Reason:</b> ");
+                    body.push_str(&escape_prose_path(reason));
+                }
+
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "lifecycle interpolation leaked",
+                    ))
+                    .body(body)
+                    .hint(
+                        "Fix the expression grammar or define the referenced variable in the \
+                         lifecycle frontmatter section of your prompt file.",
+                    )
+            }
+            CompositionError::LifecycleUndefinedVariable {
+                source_path,
+                property,
+                variable,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "Lifecycle property <cyan>`{property}`</cyan> in {file_link} references \
+                     undefined variable <cyan>`{}`</cyan>, which composition resolves to an \
+                     empty string.",
+                    escape_prose_path(variable)
+                );
+
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "undefined lifecycle variable",
+                    ))
+                    .body(body)
+                    .hint(
+                        "Define the variable in frontmatter, prefix a runtime value with \
+                         `ctx.`/`env.`, or supply a fallback (`{{ var || 'default' }}`).",
+                    )
             }
             CompositionError::LoopIterationFailed {
                 iteration,
@@ -989,6 +1095,13 @@ impl BlockError for CompositionError {
                          conditional block.",
                     )
             }
+            CompositionError::ShellExpansionFailed { error, .. } => {
+                // Delegate to the structured shell-expansion block so the
+                // linked source path, source excerpt, composed frontmatter
+                // block, and captured stderr/stdout all survive the claudine
+                // boundary instead of being flattened by the catch-all arm.
+                error.status_block(term)
+            }
             _ => {
                 let msg = self.to_string();
                 StatusBlock::new(StatusState::Error)
@@ -1012,6 +1125,21 @@ impl BlockError for CompositionError {
     /// keep the default `status_block(term).render(term)` behavior.
     fn report_block_error(&self, term: &Terminal) -> String {
         match self {
+            CompositionError::ShellExpansionFailed { .. } => {
+                // The delegated status block contains OSC 8 links, SGR
+                // styling, and source gutters. When the terminal has no color
+                // depth (piped / NO_COLOR / JSON), those escape bytes must be
+                // stripped at the claudine boundary so pipeable output stays
+                // plain text per the error-formatting contract.
+                let mut out = self.status_block(term).render(term);
+                if matches!(
+                    term.color_depth,
+                    biscuit_terminal::discovery::detection::ColorDepth::None
+                ) {
+                    out = biscuit_terminal::utils::escape_codes::strip_escape_codes(&out);
+                }
+                out
+            }
             CompositionError::InlineComposeSequenceMismatch {
                 raw_yaml,
                 stderr_is_tty,
@@ -1844,5 +1972,153 @@ mod tests {
                 "regression: hint must appear inside block quote border, got: {hint_line:?}\nfull output:\n{rendered}"
             );
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 4: shell-expansion failure boundary fidelity
+    // -------------------------------------------------------------------------
+
+    fn shell_expansion_failed_err() -> CompositionError {
+        use darkmatter::markdown::compose::ShellCommandOrigin;
+
+        let content = "---\ntitle: Test\n---\n# Body\n\n::shell \"cmd-that-fails\"\n";
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            PathBuf::from("/repo/prompts/test.md"),
+            PathBuf::from("prompts/test.md"),
+            content,
+        );
+        let shell = ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(ctx),
+            command: "cmd-that-fails".to_string(),
+            code: 2,
+            stdout: "".to_string(),
+            stderr: "this command failed\nunknown flag --whatever".to_string(),
+            origin: ShellCommandOrigin::Body { line: 6 },
+        };
+        CompositionError::ShellExpansionFailed {
+            source_path: PathBuf::from("prompts/test.md"),
+            error: Box::new(shell),
+        }
+    }
+
+    #[test]
+    fn shell_expansion_failed_status_block_delegates_to_shell_error() {
+        use biscuit_terminal::prelude::TerminalRenderable;
+
+        let err = shell_expansion_failed_err();
+        let term = Terminal::new_optimistic(80);
+        let rendered = err.status_block(&term).render(&term);
+        assert!(
+            rendered.contains("ShellExpansionError"),
+            "expected delegated shell-expansion header: {rendered}"
+        );
+        assert!(
+            !rendered.contains("CompositionError"),
+            "must not use the generic composition header: {rendered}"
+        );
+    }
+
+    #[test]
+    fn shell_expansion_failed_preserves_rich_diagnostic() {
+        use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+        let err = shell_expansion_failed_err();
+        let term = Terminal::new_optimistic(80);
+        let rendered = strip_escape_codes(err.report_block_error(&term));
+
+        assert!(
+            rendered.contains("line 6"),
+            "expected file-relative line in diagnostic: {rendered}"
+        );
+        assert!(
+            rendered.contains("this command failed"),
+            "expected stderr text in diagnostic: {rendered}"
+        );
+        assert!(
+            rendered.contains("::shell"),
+            "expected source excerpt in diagnostic: {rendered}"
+        );
+        assert!(
+            rendered.contains("cmd-that-fails"),
+            "expected command name in diagnostic: {rendered}"
+        );
+    }
+
+    #[test]
+    fn shell_expansion_failed_plain_terminal_has_no_escape_bytes() {
+        let mut term = Terminal::builder()
+            .width(80)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+            .build();
+        term.is_nerd_font = Some(false);
+
+        let err = shell_expansion_failed_err();
+        let rendered = err.report_block_error(&term);
+
+        assert!(
+            !rendered.contains('\x1b'),
+            "plain render must contain no escape byte; got: {rendered:?}"
+        );
+        assert!(rendered.contains("line 6"), "got: {rendered}");
+        assert!(rendered.contains("this command failed"), "got: {rendered}");
+        assert!(rendered.contains("::shell"), "got: {rendered}");
+    }
+
+    /// Exercise the full Markdown → `map_compose_error` → `report_block_error`
+    /// path with a real failing `::shell` directive.
+    ///
+    /// This complements the hand-built `shell_expansion_failed_err` tests by
+    /// proving that a captured `ExecutionFailed` from an actual subprocess
+    /// survives through `prepare_direct` and renders with file-relative line
+    /// numbers, the command's stderr, a source excerpt, and the composed
+    /// frontmatter block.
+    #[test]
+    fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
+        use std::collections::{BTreeMap, HashSet};
+
+        use biscuit_terminal::terminal::Terminal;
+        use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+        use super::super::prepare::{PrepareOptions, prepare_direct};
+        use super::super::resolve::resolve_composition_source;
+
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.md");
+        let content = "---\ntitle: Shell demo\n---\n\nPre.\n\n::shell rustc --edition=invalid\n\nPost.\n";
+        std::fs::write(&file_path, content).unwrap();
+
+        let source = resolve_composition_source(file_path.to_str().unwrap()).unwrap();
+
+        let mut approved = HashSet::new();
+        approved.insert("rustc --edition=invalid".to_string());
+        let options = PrepareOptions {
+            set_overrides: None,
+            pre_approved_commands: Some(approved),
+            env_overrides: BTreeMap::new(),
+            perf_enabled: false,
+            source_repo_root: None,
+            shell_working_directory: None,
+        };
+
+        let err = prepare_direct(&source, options).unwrap_err();
+        let term = Terminal::new_optimistic(80);
+        let rendered = strip_escape_codes(err.report_block_error(&term));
+
+        assert!(
+            rendered.contains("line 7"),
+            "expected file-relative line in diagnostic: {rendered}"
+        );
+        assert!(
+            rendered.contains("error:"),
+            "expected captured rustc stderr text in diagnostic: {rendered}"
+        );
+        assert!(
+            rendered.contains("::shell"),
+            "expected source excerpt in diagnostic: {rendered}"
+        );
+        assert!(
+            rendered.contains("title:") || rendered.contains("---"),
+            "expected frontmatter block in diagnostic: {rendered}"
+        );
     }
 }

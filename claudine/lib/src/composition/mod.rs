@@ -45,12 +45,12 @@ pub use lifecycle::{
     emit_lifecycle_signal, parse_lifecycle_config,
 };
 pub use loop_config::{
-    resolve_fail_fast_from_env, resolve_loop_config, resolve_max_iterations_from_env,
-    resolve_pause_reset_margin_from_env,
+    extract_control_variables, resolve_fail_fast_from_env, resolve_loop_config,
+    resolve_max_iterations_from_env, resolve_pause_reset_margin_from_env,
 };
 pub use loop_engine::{
     DEFAULT_MAX_ITERATIONS, LoopExecutionOptions, LoopExecutionResult, LoopIterationContext,
-    LoopIterationOutput, execute_loop, execute_loop_with_config,
+    LoopIterationOutput, build_loop_seed, execute_loop, execute_loop_with_config,
 };
 pub use loop_expression::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
 pub use mismatch::{capture_frontmatter_yaml, is_inline_sequence_mismatch};

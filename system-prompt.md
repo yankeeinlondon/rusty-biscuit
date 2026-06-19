@@ -46,3 +46,13 @@ scope: "{{ctx.current_package_area == 'root' ? 'package' : 'package area' }}"
     - The Markdown file is segmented into a hash for it's frontmatter which is distinct from the body of the page (the `-` character delimits them)
 - if you need to hash for non-markdown content, unless this is related to git or some other domain which has it's own hashing rules, then you should use the **biscuit-hash** library for hashing using xxHash
     - this content doesn't have the same Frontmatter versus Body hashing strategy but it uses the same **xxHash** hashing algorithm
+
+## Testing
+
+- we use **nextest** for unit and integration tests (not `cargo test`)
+- when in a package area:
+    - use `just test` (for unit tests)
+    - use `just test-l2` (for integration tests)
+    - use `just lint` to run linter
+- when in the repo root:
+    - use `just test {pkg}`

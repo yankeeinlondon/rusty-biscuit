@@ -53,13 +53,15 @@ impl Markdown {
                 inline::shell_expansion::run_stage(self, options, runtime, report, perf)
             }
             ComposeOperation::ShellBlocks => {
-                let sb_ctx = self.source_context_for_errors();
+                let sb_ctx = self.full_source_context_for_errors();
+                let line_offset = self.frontmatter_line_count();
                 shell_blocks::run_shell_blocks_stage_for_markdown(
                     &mut self.content,
                     options,
                     &mut runtime.shell,
                     report,
                     &sb_ctx,
+                    line_offset,
                 )
             }
             ComposeOperation::LinkResolve => link_resolve::link_resolve(self, options, report),

@@ -23,10 +23,10 @@
 //! - **inverse inline code** — the `` `||` `` mode header and alias-row
 //!   descriptions render with the inverse SGR (`\x1b[7m`), never literal
 //!   backticks/markup.
-//! - **unordered list** — operator lists render with the `- ` marker and a
-//!   hanging indent on wrapped continuation lines, surrounded by exactly one
-//!   blank line on each side, and reserve a 1ch right margin so list lines
-//!   never reach the full pane width.
+//! - **unordered list** — the modes consequence list renders with the `- `
+//!   marker and a hanging indent on wrapped continuation lines, surrounded by
+//!   exactly one blank line on each side, and reserves a 1ch right margin so
+//!   list lines never reach the full pane width.
 //!
 //! ## Per-report narrow widths
 //!
@@ -176,46 +176,32 @@ fn assert_fills_to_140_cap_with_right_margin(frame: &CapturedFrame) {
     );
 }
 
-/// Asserts the unordered list bracketed by the `heading` line and the
-/// `next_heading` line is surrounded by exactly one blank line on each side.
+/// Asserts the unordered list that immediately precedes `next_heading` is
+/// surrounded by exactly one blank line on each side.
 ///
 /// The spec requires exactly one blank line before and after every unordered
 /// list. Earlier iterations double-spaced these lists because the caller emitted
 /// its own `log::data("")` on top of the blank line the list helper already
 /// owns. Counting blanks from the bytes the emulator actually displayed guards
-/// that contract: the line directly after `heading` must be blank and the next
-/// must open the list (`- `), and the line directly before `next_heading` must
-/// be blank while the line above it still carries list content.
-fn assert_list_single_blank_lines(frame: &CapturedFrame, heading: &str, next_heading: &str) {
+/// that contract.
+///
+/// The operator sections that once rendered as lists are now descriptor tables,
+/// so the only unordered list left in the `--expressions` report is the modes
+/// consequence list that closes the `Interpolation vs. Condition Mode` section
+/// and precedes `Null Propagation Summary`. That list does not open directly
+/// under its own heading (an intro paragraph and the modes table sit between),
+/// so this anchors on `next_heading` instead: the line directly before it must
+/// be blank, the line above that must carry list content, the list's opening
+/// `- ` marker must be preceded by a blank line, and that blank must not be
+/// doubled.
+fn assert_list_blank_lines_before_heading(frame: &CapturedFrame, next_heading: &str) {
     let lines: Vec<&str> = frame.plain.lines().map(|l| l.trim_end()).collect();
-    let find = |label: &str| {
-        lines
-            .iter()
-            .position(|l| l.trim() == label)
-            .unwrap_or_else(|| panic!("heading `{label}` not found.\nplain:\n{}", frame.plain))
-    };
-    let h = find(heading);
-    let n = find(next_heading);
-    assert!(
-        n >= h + 4,
-        "expected a list between `{heading}` and `{next_heading}`.\nplain:\n{}",
-        frame.plain,
-    );
+    let n = lines
+        .iter()
+        .position(|l| l.trim() == next_heading)
+        .unwrap_or_else(|| panic!("heading `{next_heading}` not found.\nplain:\n{}", frame.plain));
 
-    // Exactly one blank line before the list.
-    assert!(
-        lines[h + 1].is_empty(),
-        "expected one blank line directly after `{heading}`.\nplain:\n{}",
-        frame.plain,
-    );
-    assert!(
-        lines[h + 2].trim_start().starts_with("- "),
-        "expected the list to open one line below the blank (a double blank before \
-         the `{heading}` list).\nplain:\n{}",
-        frame.plain,
-    );
-
-    // Exactly one blank line after the list.
+    // Exactly one blank line after the list, with list content directly above it.
     assert!(
         lines[n - 1].is_empty(),
         "expected one blank line directly before `{next_heading}`.\nplain:\n{}",
@@ -223,8 +209,37 @@ fn assert_list_single_blank_lines(frame: &CapturedFrame, heading: &str, next_hea
     );
     assert!(
         !lines[n - 2].is_empty(),
-        "expected list content directly above the trailing blank (a double blank \
+        "expected list content directly above the trailing blank (no double blank \
          after the list preceding `{next_heading}`).\nplain:\n{}",
+        frame.plain,
+    );
+
+    // Walk up the contiguous, non-blank list block (markers and hanging-indent
+    // continuations) to its top line; the blank above it is the list boundary.
+    let mut top = n - 2;
+    while top > 0 && !lines[top].is_empty() {
+        top -= 1;
+    }
+    // `top` is the blank directly above the list block; the line below it opens
+    // the list with a `- ` marker.
+    assert!(
+        lines[top + 1].trim_start().starts_with("- "),
+        "expected a `- ` list marker to open the block above `{next_heading}`.\nplain:\n{}",
+        frame.plain,
+    );
+
+    // Exactly one blank line before the list opens (not doubled): `top` is blank
+    // and the line above it carries the preceding section's content (the modes
+    // table border).
+    assert!(
+        lines[top].is_empty(),
+        "expected one blank line directly before the list.\nplain:\n{}",
+        frame.plain,
+    );
+    assert!(
+        !lines[top - 1].is_empty(),
+        "expected the list's leading blank to be single (no double blank before the \
+         list preceding `{next_heading}`).\nplain:\n{}",
         frame.plain,
     );
 }
@@ -494,14 +509,20 @@ fn level2_context_values_caps_at_140_in_wide_tmux() {
 // ---------------------------------------------------------------------------
 
 /// `--expressions` narrow (`COLUMNS=100`, below its ~114 natural width so
-/// wrapping is active): the `` `||` `` mode header renders inverse, operator
-/// lists use the `- ` marker with a hanging indent, each list is surrounded by
-/// exactly one blank line, and rows fit the pane.
+/// wrapping is active): the `` `||` `` mode header renders inverse, the modes
+/// consequence list uses the `- ` marker with a hanging indent and is surrounded
+/// by exactly one blank line, and rows fit the pane.
+///
+/// At 100 columns the `Example` column is kept (100 >= the 70-cell threshold),
+/// so the function catalog wraps the report to ~533 lines. The assertions target
+/// the *early* operator sections (`Comparison`/`Arithmetic`, the `||` mode
+/// header), so the pane must hold the whole report — `capture-pane` has no
+/// scrollback. 600 rows fit it with headroom.
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_expressions_narrow_inline_code_and_list_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
-    let frame = capture_context(&["--expressions"], 100, 320);
+    let frame = capture_context(&["--expressions"], 100, 600);
 
     assert!(
         !frame.plain.contains("`||`"),
@@ -514,7 +535,7 @@ fn level2_context_expressions_narrow_inline_code_and_list_in_tmux() {
         frame.raw,
     );
 
-    // Unordered lists use the `- ` marker (e.g. the comparison-operator list).
+    // The modes consequence list uses the `- ` marker.
     let marker_line = frame
         .plain
         .lines()
@@ -536,10 +557,12 @@ fn level2_context_expressions_narrow_inline_code_and_list_in_tmux() {
         frame.plain,
     );
 
-    // The comparison-operator list is bracketed by the `Comparison Operators`
-    // and `Arithmetic Operators` headings and must carry exactly one blank line
-    // on each side (spec: one blank before and after every unordered list).
-    assert_list_single_blank_lines(&frame, "Comparison Operators", "Arithmetic Operators");
+    // The modes consequence list (the only unordered list in this report — the
+    // operator sections are now descriptor tables) closes the
+    // `Interpolation vs. Condition Mode` section and precedes
+    // `Null Propagation Summary`, and must carry exactly one blank line on each
+    // side (spec: one blank before and after every unordered list).
+    assert_list_blank_lines_before_heading(&frame, "Null Propagation Summary");
 
     assert!(
         max_visible_width(&frame) <= 100,
@@ -600,7 +623,12 @@ fn level2_context_expressions_caps_at_140_in_wide_tmux() {
 #[serial(level2_terminal)]
 fn level2_context_expressions_list_reserves_right_margin_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
-    let frame = capture_context(&["--expressions"], 65, 320);
+    // At 65 columns the `--expressions` report wraps to ~413 lines. The only
+    // `- ` list is the modes consequence list, the 7th of 9 sections; the
+    // Functions catalog below it must not push that list above the captured
+    // pane (`capture-pane` has no scrollback). 480 rows fit the full report
+    // with headroom for the prompt echo and footer.
+    let frame = capture_context(&["--expressions"], 65, 480);
 
     assert_list_lines_reserve_right_margin(&frame, 65);
 }

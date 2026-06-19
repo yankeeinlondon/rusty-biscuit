@@ -18,8 +18,12 @@ pub(crate) fn run_stage(
     report: &mut ComposeReport,
     perf: &mut perf::PerfCollector,
 ) -> MarkdownResult<()> {
-    let directives =
-        shell_expansion::parse_directives(markdown.content(), markdown.source_context_for_errors())?;
+    let line_offset = markdown.frontmatter_line_count();
+    let directives = shell_expansion::parse_directives(
+        markdown.content(),
+        markdown.full_source_context_for_errors(),
+        line_offset,
+    )?;
     debug!(
         directive_count = directives.len(),
         "compose: shell expansion directives found"

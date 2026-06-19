@@ -17,6 +17,23 @@ It is read-only by construction: an expression can inspect context, call pure
 functions, and read files, but it can never mutate state. Mutation is the
 separate concern of the [side-effect engine](side-effects.md).
 
+## Runtime-accessible descriptions
+
+Every expression descriptor — functions *and* language semantics — implements
+the shared `Described` trait from `darkmatter::catalog`. This powers exact lookup,
+fuzzy suggestion, and plain-text error enrichment inside the evaluator:
+
+- `describe(EXPRESSION_FUNCTION_DESCRIPTORS, "upper(x)")` returns the matching
+  function descriptor.
+- `suggest(EXPRESSION_FUNCTION_DESCRIPTORS, "uper", 1)` returns `upper(x)`.
+- `describe_for_error(descriptor)` emits a plain-text line with signature,
+  description, and verified example.
+
+When evaluation fails with `Unknown function: uper`, the error message appends
+the nearest match's signature, description, and example. Arity errors likewise
+append the correct signature and example for the matched function. The error
+text itself remains plain text; Claudine owns any terminal styling.
+
 ## How evaluation works
 
 The engine lives in `darkmatter/lib/src/markdown/compose/expression/` and runs a
@@ -114,18 +131,27 @@ kinds of content:
 
 2. **The language-semantics sections** — operator precedence, truthiness, unary,
    comparison, arithmetic, variable access, mode table, and null propagation.
-   These are **hand-written literal arrays in `context.rs`**
-   (`render_expressions_precedence`, `render_expressions_truthiness`, …). They
-   mirror the behavior of the lexer/parser/evaluator but are *not* derived from
-   any Darkmatter type. **This is the engine's primary residual drift surface**
-   — see [Drift Control](drift.md#next-steps).
+   These are rendered from typed descriptor catalogs in
+   `expression/semantics.rs` that are anchored to the parser and evaluator:
+   `operator_precedence_matches_parser` asserts the precedence catalog matches
+   the parser's own table, and per-catalog `*_examples_evaluate_correctly` tests
+   run every example through the real `evaluate` pipeline. **No hand-written
+   literal arrays remain in the CLI.**
+
+## Narrative documentation parity
+
+The function table in `darkmatter/docs/topics/darkmatter-expressions.md` is
+regenerated from `EXPRESSION_FUNCTION_DESCRIPTORS` by
+`just darkmatter regen-expr-doc`. The generated region is guarded by
+`narrative_doc_function_table_matches_catalog`, which fails the build if the
+committed doc diverges from the catalog output.
 
 ## How to add an expression function
 
 1. **Implement and register it.** Add a handler and a `PureFunction` (or
    `FsFunction`) entry in `functions.rs`, listing every signature/overload.
 2. **Describe it.** Add an `ExpressionFunctionDescriptor` to
-   `EXPRESSION_FUNCTION_DESCRIPTORS` in `catalog.rs`.
+   `EXPRESSION_FUNCTION_DESCRIPTORS` in `catalog.rs` with a verified `example`.
 3. The `--expressions` function table needs **no change** — it reads the catalog.
 
 ## Drift control for the function catalog
@@ -144,7 +170,9 @@ overload-aware lockstep by tests in `expression/catalog.rs`:
   removed yields `Unknown function`; a bogus overload yields an arity error.
 - **`lazy_operators_are_dispatchable`** and **`unknown_function_is_rejected`**
   anchor the two ends (real operators dispatch; a fake name is rejected).
+- **`every_example_evaluates_to_its_declared_result`** runs each descriptor's
+  `Example` through the evaluator and asserts the rendered output equals the
+  declared `result`.
 
 So: add a function to only the catalog *or* only the registry, and the build
-fails. The language-semantics prose, however, has no such guard — that gap is
-the subject of [Drift Control](drift.md).
+fails. The language-semantics prose is catalog-driven and parity-checked too.

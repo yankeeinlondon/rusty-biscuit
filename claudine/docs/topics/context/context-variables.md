@@ -94,13 +94,31 @@ A few variables (`memory_used`, `memory_avail`) are deliberately treated as
 volatile and excluded from compose-cache hashing — see
 `compose/cache/hashing.rs`.
 
+## Runtime-accessible descriptions
+
+Every context descriptor implements the shared `Described` trait from
+`darkmatter::catalog`. This means the catalog is queryable at runtime:
+
+- `describe(CONTEXT_VARIABLE_DESCRIPTORS, "today")` returns the matching
+  descriptor.
+- `suggest(CONTEXT_VARIABLE_DESCRIPTORS, "toady", 1)` returns the nearest match
+  (`today`) using fuzzy distance plus stable `order` tie-breaking.
+- `describe_for_error(descriptor)` emits plain text suitable for error messages.
+
+Claudine uses these helpers during composition preparation. A typo such as
+`{{ ctx.toady }}` produces a non-fatal parser-aware diagnostic that suggests the
+nearest real context variable, rather than silently rendering an empty string.
+The diagnostic is suppressed by `--silent` and does not alter null-propagation
+semantics.
+
 ## How to add a context variable
 
 1. **Capture it.** Add a `values.insert("my_var", …)` in the appropriate
    `populate_*` function in `capture.rs`, choosing the right `Value` shape.
 2. **Describe it.** Add a `ContextVariableDescriptor` to
    `CONTEXT_VARIABLE_DESCRIPTORS` in `catalog.rs` with its `name`, accurate
-   `display_type`, `description`, `category`, `subsection`, and `order`.
+   `display_type`, `description`, `category`, `subsection`, `order`, and an
+   optional verified `example`.
 3. The CLI report needs **no change** — it reads the catalog directly.
 
 The `name` in step 2 must exactly match the key in step 1. That contract is not
@@ -113,9 +131,9 @@ Add a variable to only one side and the build fails.
 - **CLI ↔ catalog**: structural — the CLI imports `context_variable_descriptors()`.
 - **Catalog names ↔ runtime keys**: enforced by
   `descriptor_name_set_equals_captured_runtime_key_set`.
-- **Catalog `display_type` ↔ actual captured JSON type**: **not** yet enforced.
-  The name-set test proves a variable *exists* but not that its declared type
-  matches the `Value` shape `capture.rs` produces. (The `Nullable(String)` /
-  `Nullable(Integer)` accuracy described above was corrected by hand, not by a
-  failing test.) This is the one open gap for context variables — see
-  [Drift Control](drift.md#next-steps) for a concrete way to close it.
+- **Catalog `display_type` ↔ actual captured JSON type**: enforced by
+  `capture_value_shape_matches_display_type` and
+  `context_example_results_are_type_consistent`, which capture a `ComposeContext`
+  and assert every descriptor's value shape matches its declared type.
+- **Examples are verified**: any `Example` on a context descriptor is asserted to
+  match the `display_type` shape rules.

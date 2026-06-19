@@ -447,6 +447,13 @@ impl<'a> TransclusionEngine<'a> {
                     state,
                     options.expression_resolution_context(remote_fetch),
                 );
+                for warning in
+                    crate::markdown::compose::conditions::collect_condition_context_warnings(
+                        expr, &lookup, "condition",
+                    )
+                {
+                    report.add_warning(warning.at_line(directive.line));
+                }
                 let should_include = transclusion::evaluate_condition(
                     expr,
                     &lookup,

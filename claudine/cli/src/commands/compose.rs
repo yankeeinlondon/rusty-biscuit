@@ -25,6 +25,7 @@ use claudine::composition::{
 use claudine::provider::Provider;
 use claudine::system_prompt::SystemPromptArgs;
 use color_eyre::eyre::{Result, eyre};
+use darkmatter::markdown::compose::ComposeWarning;
 use tracing::info_span;
 
 use super::wrap::composition::execute_composition_request;
@@ -373,6 +374,22 @@ fn record_prep_substage(
     }
 }
 
+/// Emits non-fatal Darkmatter compose warnings to stderr, unless `--silent` is set.
+fn emit_compose_warnings(warnings: &[ComposeWarning], silent: bool) {
+    if silent {
+        return;
+    }
+    for warning in warnings {
+        let mut message = warning.message.clone();
+        if let Some(line) = warning.line_number {
+            message = format!("[{}] line {line}: {message}", warning.stage);
+        } else {
+            message = format!("[{}] {message}", warning.stage);
+        }
+        crate::log::warn(&message);
+    }
+}
+
 fn run_compose_inner(
     args: ComposeArgs,
     verbose: u8,
@@ -588,8 +605,18 @@ fn run_compose_inner(
     // composition + single render (Decision 4). Loop detection is skipped so
     // a doc with `loop:` frontmatter renders once rather than iterating.
     let file_for_loop = file.clone();
+    let loop_prepare_options = composition::PrepareOptions {
+        set_overrides: set_overrides.clone(),
+        pre_approved_commands: Some(preflight.approved_commands.clone()),
+        env_overrides: env_overrides.clone(),
+        perf_enabled: shared.perf,
+        source_repo_root: prep_context.source_repo_root.clone(),
+        shell_working_directory: Some(
+            prep_context.launch_workspace.child_cwd.clone(),
+        ),
+    };
     if !shared.dry_run && let Some(loop_result) =
-        run_loop_with_overrides(&source, set_overrides.as_ref(), loop_options, |ctx| {
+        run_loop_with_overrides(&source, &loop_prepare_options, loop_options, CompositionMode::ChainedDocument, |ctx| {
             let prepared = {
                 let _span = info_span!("compose_prep.prepare_direct").entered();
                 // Schema-aware variant: typed `SchemaLoad` /
@@ -598,20 +625,15 @@ fn run_compose_inner(
                 // iteration. Interactive collection is NOT driven inside
                 // loops; missing required values surface as
                 // `MissingProperties` on the first iteration.
+                let mut iteration_options = loop_prepare_options.clone();
+                iteration_options.set_overrides = Some(ctx.as_set_overrides());
                 composition::prepare_direct_with_schema(
                     &source,
-                    composition::PrepareOptions {
-                        set_overrides: Some(ctx.as_set_overrides()),
-                        pre_approved_commands: Some(preflight.approved_commands.clone()),
-                        env_overrides: env_overrides.clone(),
-                        perf_enabled: shared.perf,
-                        source_repo_root: prep_context.source_repo_root.clone(),
-                        shell_working_directory: Some(
-                            prep_context.launch_workspace.child_cwd.clone(),
-                        ),
-                    },
+                    iteration_options,
                 )?
             };
+
+            emit_compose_warnings(&prepared.warnings, shared.silent);
 
             let request = {
                 let resolved = shared.resolve_session_interactivity(prepared.selection_hints.interactive);
@@ -725,6 +747,7 @@ fn run_compose_inner(
         )?
     };
     super::schema_interactive::emit_dropped_optional_warnings(&prepared.dropped_optionals);
+    emit_compose_warnings(&prepared.warnings, shared.silent);
 
     let request = {
         let resolved = shared.resolve_session_interactivity(prepared.selection_hints.interactive);
@@ -1076,8 +1099,18 @@ fn run_inline_compose_inner(
     // which returns before the provider launches — so the source file is
     // never mutated (Decision 2).
     let file_for_loop = file.clone();
+    let loop_prepare_options = composition::PrepareOptions {
+        set_overrides: set_overrides.clone(),
+        pre_approved_commands: Some(preflight.approved_commands.clone()),
+        env_overrides: env_overrides.clone(),
+        perf_enabled: shared.perf,
+        source_repo_root: prep_context.source_repo_root.clone(),
+        shell_working_directory: Some(
+            prep_context.launch_workspace.child_cwd.clone(),
+        ),
+    };
     if !shared.dry_run && let Some(loop_result) =
-        run_loop_with_overrides(&source, set_overrides.as_ref(), loop_options, |ctx| {
+        run_loop_with_overrides(&source, &loop_prepare_options, loop_options, CompositionMode::InlineFrontmatterPrompt, |ctx| {
             let prepared = {
                 let _span = info_span!("compose_prep.prepare_inline").entered();
                 // Schema-aware variant: typed `SchemaLoad` /
@@ -1086,20 +1119,15 @@ fn run_inline_compose_inner(
                 // iteration. Interactive collection is NOT driven inside
                 // loops; missing required values surface as
                 // `MissingProperties` on the first iteration.
+                let mut iteration_options = loop_prepare_options.clone();
+                iteration_options.set_overrides = Some(ctx.as_set_overrides());
                 composition::prepare_inline_with_schema(
                     &source,
-                    composition::PrepareOptions {
-                        set_overrides: Some(ctx.as_set_overrides()),
-                        pre_approved_commands: Some(preflight.approved_commands.clone()),
-                        env_overrides: env_overrides.clone(),
-                        perf_enabled: shared.perf,
-                        source_repo_root: prep_context.source_repo_root.clone(),
-                        shell_working_directory: Some(
-                            prep_context.launch_workspace.child_cwd.clone(),
-                        ),
-                    },
+                    iteration_options,
                 )?
             };
+
+            emit_compose_warnings(&prepared.warnings, shared.silent);
 
             let request = {
                 let resolved = shared.resolve_session_interactivity(prepared.selection_hints.interactive);
@@ -1212,6 +1240,7 @@ fn run_inline_compose_inner(
         )?
     };
     super::schema_interactive::emit_dropped_optional_warnings(&prepared.dropped_optionals);
+    emit_compose_warnings(&prepared.warnings, shared.silent);
 
     let request = {
         let resolved = shared.resolve_session_interactivity(prepared.selection_hints.interactive);
@@ -1326,19 +1355,27 @@ fn build_loop_iteration_output(
     }
 }
 
-/// Run a composition loop with CLI `--set` / shorthand setter overrides
-/// merged into the loop's initial frontmatter.
+/// Run a composition loop seeded from resolved control variables.
 ///
 /// Returns `Ok(None)` when the source has no `loop` frontmatter, matching
 /// [`claudine::composition::execute_loop`].
 ///
-/// CLI overrides shadow on-disk frontmatter values from the very first
-/// iteration so that the loop condition and templated body see the values
-/// the user passed on the command line.
+/// `base_prepare_options` provides the env, working directory, repo root,
+/// and CLI `set_overrides` used for the seed compose pass. The same options
+/// (with `set_overrides` replaced by the per-iteration control state) are
+/// expected to be used by the executor closure so the seed and iteration 1
+/// resolve from identical inputs.
+///
+/// `mode` selects the seed compose pass and is forwarded to
+/// [`claudine::composition::build_loop_seed`]. It must match the iteration
+/// executor's prepare variant so the seed and iteration 1 resolve from the
+/// same body: `ChainedDocument` for `compose`, `InlineFrontmatterPrompt`
+/// for `inline-compose`.
 fn run_loop_with_overrides<F>(
     source: &claudine::composition::ResolvedCompositionSource,
-    set_overrides: Option<&serde_json::Value>,
+    base_prepare_options: &claudine::composition::PrepareOptions,
     options: claudine::composition::LoopExecutionOptions,
+    mode: claudine::composition::CompositionMode,
     mut executor: F,
 ) -> std::result::Result<
     Option<claudine::composition::LoopExecutionResult>,
@@ -1356,19 +1393,12 @@ where
         return Ok(None);
     };
 
-    let mut initial_frontmatter: serde_json::Map<String, serde_json::Value> = source
-        .markdown
-        .frontmatter()
-        .as_map()
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
-
-    if let Some(serde_json::Value::Object(overrides)) = set_overrides {
-        for (k, v) in overrides {
-            initial_frontmatter.insert(k.clone(), v.clone());
-        }
-    }
+    let initial_frontmatter = claudine::composition::build_loop_seed(
+        source,
+        &config,
+        base_prepare_options.clone(),
+        mode,
+    )?;
 
     let prompt_path = source.resolved_path.clone();
 

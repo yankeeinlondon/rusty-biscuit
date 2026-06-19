@@ -425,7 +425,7 @@ favorite_color: "red"
 ```
 > found in the `tell-them-what-they-want-hear.md` prompt
 
-- these blocks can use _interpolation_ for more dynamic rules (_interpolation is guaranteed to be transformed in the pipeline before conditional logic is applied_); that means a conditional expression like `favorite_color == {{something-else}}` is perfectly valid syntax.
+- these blocks evaluate their `when` clause with Claudine's expression engine, which reads frontmatter, `ctx`, and `env` values directly; because frontmatter is fully resolved (interpolated and shell-expanded) before any `::block` is evaluated, a conditional expression like `favorite_color == 'red'` reliably sees the resolved value.
 - the `::block` directive uses the 'when' property to define the conditional clause; this is the convention ... most _directives_ will expose a 'when' property which can make it conditional
 - guess what other _directive_ can be made conditional? Did you guess the `::file` directive? If so then give yourself a pat on the back.
 
