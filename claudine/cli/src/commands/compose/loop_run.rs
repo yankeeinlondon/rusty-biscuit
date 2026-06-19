@@ -1,0 +1,236 @@
+//! Loop execution scaffolding and shared prep helpers for composition.
+//!
+//! `run_loop_with_overrides` seeds the iteration engine from resolved control
+//! variables; `build_loop_iteration_output` translates a single execution
+//! outcome into the loop engine's typed iteration result. The prep-timing and
+//! warning helpers are shared by both compose entrypoints.
+
+use darkmatter::markdown::compose::ComposeWarning;
+
+use super::interrupt::USER_INTERRUPT_EXIT_CODE;
+
+/// Record a named prep work unit (P-5a) when `--perf` is active.
+///
+/// Each unit is a disjoint sub-window of the `compose_entry` → request prep
+/// window, so the recorded timings carve `prep_phase` into reconciling
+/// `Structural` children (`shell approval` being the usual dominant cost),
+/// leaving the small remainder in `prep → unattributed`.
+pub(crate) fn record_prep_substage(
+    out: &mut Vec<crate::perf::SubstageTiming>,
+    enabled: bool,
+    name: &'static str,
+    started: std::time::Instant,
+) {
+    if enabled {
+        out.push(crate::perf::SubstageTiming::new(name, started.elapsed()));
+    }
+}
+
+/// Emits non-fatal Darkmatter compose warnings to stderr, unless `--silent` is set.
+pub(crate) fn emit_compose_warnings(warnings: &[ComposeWarning], silent: bool) {
+    if silent {
+        return;
+    }
+    for warning in warnings {
+        let mut message = warning.message.clone();
+        if let Some(line) = warning.line_number {
+            message = format!("[{}] line {line}: {message}", warning.stage);
+        } else {
+            message = format!("[{}] {message}", warning.stage);
+        }
+        crate::log::warn(&message);
+    }
+}
+
+/// Render a `LoopRateLimited` error inline so the user sees the styled
+/// halt notice before the wrapper exits with `EX_TEMPFAIL`.
+pub(crate) fn emit_rate_limit_halt(error: &claudine::composition::CompositionError) {
+    use biscuit_terminal::errors::BlockError;
+    let term = crate::log::terminal();
+    let rendered = error.report_block_error(&term);
+    crate::log::message("");
+    crate::log::message(&rendered);
+    crate::log::message("");
+}
+
+/// Translate a [`SingleCompositionOutcome`] into a
+/// [`claudine::composition::LoopIterationOutput`] that the loop engine can
+/// inspect for rate-limit policy and honest error classification.
+///
+/// On a non-zero `outcome.exit_code` this builds a
+/// [`claudine::composition::CompositionError::LoopIterationFailed`] with a
+/// `reason` and `exit_reason` pulled from the iteration's session_end
+/// signals (e.g. `step_timeout`) — never the old
+/// `LoopInvalid("provider exited with code N")` overload, which was
+/// reserved for malformed `loop:` frontmatter.
+///
+/// Always attaches the iteration's rate-limit trailer and
+/// provider/model attribution so the engine can apply the configured
+/// [`claudine::composition::OnRateLimit`] policy between iterations.
+///
+/// [`SingleCompositionOutcome`]:
+///     crate::commands::wrap::composition::SingleCompositionOutcome
+pub(crate) fn build_loop_iteration_output(
+    iteration: usize,
+    prompt_path: &std::path::Path,
+    outcome: crate::commands::wrap::composition::SingleCompositionOutcome,
+) -> claudine::composition::LoopIterationOutput {
+    let signals = outcome.iteration_signals.unwrap_or_default();
+    let rate_limit = signals.rate_limit.clone();
+    let exit_reason = signals.exit_reason.clone();
+    let provider_id = signals.provider_id.clone();
+    let model_id = signals.model_id.clone();
+
+    if outcome.exit_code == 0 {
+        claudine::composition::LoopIterationOutput::success("")
+            .with_rate_limit(rate_limit)
+            .with_exit_reason(exit_reason)
+            .with_attribution(provider_id, model_id)
+    } else {
+        // Build a human-readable cause that surfaces the structured
+        // exit_reason at the top. Watchdog detail (e.g. "no stream
+        // activity for 30m; terminating due to step_timeout") rides
+        // along on the next line.
+        let reason = match (&exit_reason, &signals.error_message) {
+            (Some(kind), Some(detail)) => format!("{kind}\n  ↳ {detail}"),
+            (Some(kind), None) => kind.clone(),
+            (None, Some(detail)) => detail.clone(),
+            (None, None) => "provider exited non-zero".to_string(),
+        };
+        let error = claudine::composition::CompositionError::LoopIterationFailed {
+            iteration,
+            prompt_path: prompt_path.to_path_buf(),
+            exit_code: outcome.exit_code,
+            reason,
+            exit_reason: exit_reason.clone(),
+        };
+        claudine::composition::LoopIterationOutput::failure("", outcome.exit_code, error)
+            .with_rate_limit(rate_limit)
+            .with_exit_reason(exit_reason)
+            .with_attribution(provider_id, model_id)
+    }
+}
+
+/// Run a composition loop seeded from resolved control variables.
+///
+/// Returns `Ok(None)` when the source has no `loop` frontmatter, matching
+/// [`claudine::composition::execute_loop`].
+///
+/// `base_prepare_options` provides the env, working directory, repo root,
+/// and CLI `set_overrides` used for the seed compose pass. The same options
+/// (with `set_overrides` replaced by the per-iteration control state) are
+/// expected to be used by the executor closure so the seed and iteration 1
+/// resolve from identical inputs.
+///
+/// `mode` selects the seed compose pass and is forwarded to
+/// [`claudine::composition::build_loop_seed`]. It must match the iteration
+/// executor's prepare variant so the seed and iteration 1 resolve from the
+/// same body: `ChainedDocument` for `compose`, `InlineFrontmatterPrompt`
+/// for `inline-compose`.
+pub(crate) fn run_loop_with_overrides<F>(
+    source: &claudine::composition::ResolvedCompositionSource,
+    base_prepare_options: &claudine::composition::PrepareOptions,
+    options: claudine::composition::LoopExecutionOptions,
+    mode: claudine::composition::CompositionMode,
+    mut executor: F,
+) -> std::result::Result<
+    Option<claudine::composition::LoopExecutionResult>,
+    claudine::composition::CompositionError,
+>
+where
+    F: FnMut(
+        claudine::composition::LoopIterationContext,
+    ) -> std::result::Result<
+        claudine::composition::LoopIterationOutput,
+        claudine::composition::CompositionError,
+    >,
+{
+    let Some(config) = claudine::composition::resolve_loop_config(source)? else {
+        return Ok(None);
+    };
+
+    let initial_frontmatter = claudine::composition::build_loop_seed(
+        source,
+        &config,
+        base_prepare_options.clone(),
+        mode,
+    )?;
+
+    let prompt_path = source.resolved_path.clone();
+
+    // Capture the launch CWD (and PWD) before any iteration runs so we can
+    // restore them between iterations. The wrap layer's
+    // `switch_process_cwd` mutates the process-global CWD to the detected
+    // repo/git root inside each iteration; without restoration, iteration
+    // 2's `prepare_direct_with_schema` resolves any CLI-supplied
+    // `file(required)` setter against the post-switch root rather than
+    // the user's original launch directory. A path that validated on
+    // iteration 1 then fails iteration 2 as `not a "darkmatter-file"`,
+    // even though nothing about the value changed.
+    let launch_cwd = std::env::current_dir().ok();
+    let launch_pwd = std::env::var_os("PWD");
+
+    // The Ctrl+C SIGINT handler is installed at the top of the compose
+    // subcommand (see `install_user_interrupt_guard`) so it covers the
+    // entire prep window, not just the loop. The wrapped executor below
+    // simply observes the process-scoped flag and short-circuits
+    // remaining iterations once the user has interrupted.
+    let prompt_path_for_executor = prompt_path.clone();
+    let wrapped_executor = move |ctx: claudine::composition::LoopIterationContext| {
+        if crate::output::user_interrupt_observed() {
+            return Ok(claudine::composition::LoopIterationOutput::failure(
+                "",
+                USER_INTERRUPT_EXIT_CODE,
+                claudine::composition::CompositionError::LoopInterrupted {
+                    prompt_path: prompt_path_for_executor.clone(),
+                },
+            ));
+        }
+        // Restore launch CWD/PWD before each iteration so per-iteration
+        // schema validation (which uses ambient CWD via
+        // `validate_file_reference`) sees the same root that the pre-loop
+        // validation saw. SAFETY: single-threaded loop driver — no other
+        // thread reads or writes `PWD` concurrently.
+        if let Some(ref cwd) = launch_cwd {
+            let _ = std::env::set_current_dir(cwd);
+            unsafe {
+                match launch_pwd {
+                    Some(ref value) => std::env::set_var("PWD", value),
+                    None => std::env::remove_var("PWD"),
+                }
+            }
+        }
+        let output = executor(ctx)?;
+        if crate::output::user_interrupt_observed() {
+            return Ok(claudine::composition::LoopIterationOutput::failure(
+                output.output,
+                USER_INTERRUPT_EXIT_CODE,
+                claudine::composition::CompositionError::LoopInterrupted {
+                    prompt_path: prompt_path_for_executor.clone(),
+                },
+            ));
+        }
+        Ok(output)
+    };
+
+    let mut result = claudine::composition::execute_loop_with_config(
+        &source.resolved_path,
+        &config,
+        initial_frontmatter,
+        options,
+        wrapped_executor,
+    )?;
+
+    if crate::output::user_interrupt_observed() {
+        // Force the interrupt outcome regardless of fail-fast: under
+        // `fail_fast: false` the engine would have continued past the
+        // first short-circuited iteration, so overwrite the result so
+        // callers see exit code 130 and a `LoopInterrupted` error.
+        result.final_exit_code = USER_INTERRUPT_EXIT_CODE;
+        result.error = Some(claudine::composition::CompositionError::LoopInterrupted {
+            prompt_path: prompt_path.clone(),
+        });
+    }
+
+    Ok(Some(result))
+}

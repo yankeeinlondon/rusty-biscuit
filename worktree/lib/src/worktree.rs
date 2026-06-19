@@ -55,6 +55,9 @@ pub struct CreateResult {
     pub target_cwd: PathBuf,
     /// Branch name
     pub branch: String,
+    /// When the branch already existed and was reused as-is, the short commit it
+    /// points at. `None` when a fresh branch was forked from the current HEAD.
+    pub reused_branch_at: Option<String>,
 }
 
 /// Detect the default branch name (main or master).
@@ -503,13 +506,17 @@ pub fn create_worktree(branch: &str, base: &Path) -> Result<CreateResult, Worktr
     // Check if the branch already exists
     let branch_exists = git_command(&["rev-parse", "--verify", branch]).is_ok();
 
-    if branch_exists {
+    let reused_branch_at = if branch_exists {
         git_command(&[
             "worktree",
             "add",
             &target_path.display().to_string(),
             branch,
         ])?;
+        // Reusing the branch as-is checks it out wherever it already points — it
+        // is NOT forked from the current HEAD. Report the commit so callers can
+        // warn about silently resurrecting a stale branch.
+        git_command(&["rev-parse", "--short", branch]).ok()
     } else {
         git_command(&[
             "worktree",
@@ -518,7 +525,8 @@ pub fn create_worktree(branch: &str, base: &Path) -> Result<CreateResult, Worktr
             "-b",
             branch,
         ])?;
-    }
+        None
+    };
 
     let target_cwd = target_path.join(&info.relative_path);
 
@@ -526,6 +534,7 @@ pub fn create_worktree(branch: &str, base: &Path) -> Result<CreateResult, Worktr
         worktree_path: target_path,
         target_cwd,
         branch: branch.to_string(),
+        reused_branch_at,
     })
 }
 

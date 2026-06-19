@@ -174,12 +174,17 @@ fn level2_wezterm_mismatch_renders_yaml_codeblock() {
     let home = staged.workspace.path().to_string_lossy().into_owned();
     let claudine = cargo_bin!("claudine").display().to_string();
 
+    harness.send_text(b"clear\n").expect("clear pane");
+    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
     harness
         .send_text(format!("cd {}\n", staged.workspace.path().display()).as_bytes())
         .expect("cd into workspace");
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
-    let cmd = format!("{claudine} inline-compose {}", staged.doc.display());
+    let cmd = format!(
+        "{claudine} inline-compose {} 2>&1 | sed -n '1,80p'",
+        staged.doc.display()
+    );
     harness
         .send_command_with_env(
             &cmd,
