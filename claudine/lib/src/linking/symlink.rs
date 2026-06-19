@@ -71,65 +71,48 @@ pub fn create_resource_link(
 
     let dest = dest_root.join(relative);
 
-    // Safety: never overwrite existing non-symlink files or directories
-    if dest.exists()
-        && !dest
-            .symlink_metadata()
-            .map(|m| m.file_type().is_symlink())
-            .unwrap_or(false)
-    {
-        let path_label = if dest.is_dir() { "directory" } else { "file" };
-        return Ok(LinkResult::Skipped {
-            reason: format!("real {path_label} already exists at {}", dest.display()),
-        });
-    }
-
-    // If a symlink already exists, check if it points to our source
-    if dest
-        .symlink_metadata()
-        .map(|m| m.file_type().is_symlink())
-        .unwrap_or(false)
-    {
-        let existing_target = fs::read_link(&dest)?;
-        let expected = match scope {
-            ResourceScope::User => source.to_path_buf(),
-            ResourceScope::Repo => {
-                let parent = dest
-                    .parent()
-                    .ok_or_else(|| ClaudineError::LinkingError("dest has no parent".to_string()))?;
-                relative_path(parent, source)
-            }
-        };
-
-        if existing_target == expected {
-            return Ok(LinkResult::AlreadyLinked);
-        }
-
-        return Ok(LinkResult::Skipped {
-            reason: format!(
-                "symlink exists but points to {} (expected {})",
-                existing_target.display(),
-                expected.display()
-            ),
-        });
-    }
-
-    if let Some(parent) = dest.parent() {
-        fs::create_dir_all(parent)?;
-    }
+    let parent = dest
+        .parent()
+        .ok_or_else(|| ClaudineError::LinkingError("dest has no parent".to_string()))?;
+    fs::create_dir_all(parent)?;
 
     let link_target = match scope {
         ResourceScope::User => source.to_path_buf(),
-        ResourceScope::Repo => {
-            let parent = dest
-                .parent()
-                .ok_or_else(|| ClaudineError::LinkingError("dest has no parent".to_string()))?;
-            relative_path(parent, source)
-        }
+        ResourceScope::Repo => relative_path(parent, source),
     };
 
     #[cfg(unix)]
-    std::os::unix::fs::symlink(&link_target, &dest)?;
+    {
+        match std::os::unix::fs::symlink(&link_target, &dest) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                if dest
+                    .symlink_metadata()
+                    .map(|m| m.file_type().is_symlink())
+                    .unwrap_or(false)
+                {
+                    let existing_target = fs::read_link(&dest)?;
+                    if existing_target == link_target {
+                        return Ok(LinkResult::AlreadyLinked);
+                    }
+
+                    return Ok(LinkResult::Skipped {
+                        reason: format!(
+                            "symlink exists but points to {} (expected {})",
+                            existing_target.display(),
+                            link_target.display()
+                        ),
+                    });
+                }
+
+                let path_label = if dest.is_dir() { "directory" } else { "file" };
+                return Ok(LinkResult::Skipped {
+                    reason: format!("real {path_label} already exists at {}", dest.display()),
+                });
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
 
     #[cfg(not(unix))]
     return Err(ClaudineError::LinkingError(
@@ -181,6 +164,20 @@ pub fn create_skill_link(
 /// );
 /// ```
 pub fn relative_path(from_dir: &Path, target: &Path) -> PathBuf {
+    #[cfg(unix)]
+    {
+        debug_assert!(
+            from_dir.is_absolute(),
+            "from_dir must be absolute: {}",
+            from_dir.display()
+        );
+        debug_assert!(
+            target.is_absolute(),
+            "target must be absolute: {}",
+            target.display()
+        );
+    }
+
     let from_components: Vec<Component<'_>> = from_dir.components().collect();
     let target_components: Vec<Component<'_>> = target.components().collect();
 
@@ -234,6 +231,28 @@ mod tests {
         let target = Path::new("/a/c");
         let result = relative_path(from, target);
         assert_eq!(result, PathBuf::from("../c"));
+    }
+
+    #[test]
+    fn relative_path_no_common_prefix() {
+        let from = Path::new("/a/b");
+        let target = Path::new("/c/d");
+        let result = relative_path(from, target);
+        assert_eq!(result, PathBuf::from("../../c/d"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[should_panic]
+    fn relative_path_requires_absolute_from_dir() {
+        relative_path(Path::new("a/b"), Path::new("/c/d"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[should_panic]
+    fn relative_path_requires_absolute_target() {
+        relative_path(Path::new("/a/b"), Path::new("c/d"));
     }
 
     #[test]
