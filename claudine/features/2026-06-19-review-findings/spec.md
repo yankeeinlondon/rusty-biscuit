@@ -2,7 +2,8 @@
 created: "2026-06-19T00:00:00"
 title: "Comprehensive Review Remediation — claudine Package Area"
 source_review: "claudine/reviews/2026-06-19-comprehensive/review.md"
-status: "proposed"
+status: "ready for planning and implementation"
+reviewed: true
 ---
 
 # Specification — Comprehensive Review Remediation
@@ -14,16 +15,20 @@ remediation theme and ordered by priority, with severity preserved from the
 review. Each item lists its source location(s), the defect, the proposed fix,
 and the tests that must accompany it.
 
+**Status:** Reviewed and ready for planning and implementation. The inline review
+filled the missing Priority 2 protect section, chose the protect posture, and
+kept the accepted review findings scoped as remediation work.
+
 Reviewed crates: `claudine` (lib), `claudine-cli`, `claudine-contract`,
 `rendezvous-core`, `rendezvous-client`, `rendezvous-daemon`.
 
 ## Scope and Non-Goals
 
-- **In scope:** all 2 High panic fixes, the `protect` security-posture decision,
-  the rendezvous daemon concurrency hardening, the wrapper termination/`set_var`
-  hardening, the lifecycle ternary guard hole, contract-crate polish, and the
-  cross-cutting hygiene items (JSON-walk de-cloning, secret detection, sensitive
-  paths, `which` unification, silent-swallow logging).
+- **In scope:** all 2 High panic fixes, the `protect` posture/extraction/path
+  hardening, the rendezvous daemon concurrency hardening, the wrapper
+  termination/`set_var` hardening, the lifecycle ternary guard hole,
+  contract-crate polish, and the cross-cutting hygiene items (JSON-walk
+  de-cloning, secret detection, `which` unification, silent-swallow logging).
 - **Rejected findings (do NOT re-raise):** shell injection in the bash action
   runner; "Qwen untagged enum drops arrays"; `LazyLock` regex `.expect()` panic;
   git double-strip / frontmatter slice-order panic / fs-probe collision in the
@@ -131,6 +136,236 @@ or `command.chars().take(80).collect::<String>()`.
 
 Fail-first: a >80-byte multibyte command into `evaluate_bash_command` must not
 panic. Add to the protect test module.
+
+---
+
+# Priority 2 — Protect Posture and Extraction Hardening
+
+The review identified two different classes of protect risk: the catalog is an
+unparsed regex deny list, and the runtime extractor can return "no request" for
+tool shapes that still clearly look command- or write-like. The reviewed design
+does **not** promote protect into a hard security boundary. It keeps protect as a
+best-effort defense-in-depth layer for accidents, obvious destructive commands,
+and simple prompt-injection payloads, while closing fail-open extraction cases
+that are cheap and low-risk.
+
+> **Reader's note from inline review:** The pre-review draft referenced P2.1
+> through P2.6 in acceptance and testing but omitted the Priority 2 body. This
+> section restores that scope and makes the posture decision explicit. If a later
+> feature wants protect to become a real boundary, it must specify shell parsing,
+> provider-specific tool schemas, and fail-closed compatibility behavior as a
+> separate design.
+
+## P2.1 — Decide and document protect as defense-in-depth, not a security boundary
+
+- **Severity:** High · **Confidence:** high
+- **Location:** `claudine/lib/src/protect/catalog.rs`,
+  `claudine/lib/src/protect/matcher.rs:90-109`,
+  `claudine/lib/src/protect/service.rs:76-120`,
+  `claudine/docs/topics/protect-service.md`
+
+### Problem
+
+Protect rules run regexes over literal, unparsed command text. The shell later
+performs quoting, variable expansion, word splitting, globbing, and command
+chaining. That makes rules such as `rm\s+-rf\s+/$`, `curl ... | bash`, and
+`git push --force` useful for obvious cases but bypassable by ordinary shell
+forms (`rm -fr /`, `\rm -rf /`, `X=rm; $X -rf /`, case changes, refspec force
+pushes, and separator/chaining variants).
+
+The current module and topic docs accurately describe a default-allow deny
+catalog, but they do not state the operational consequence plainly enough:
+protect is not the security boundary.
+
+### Reviewed Design Decision
+
+Keep protect as **best-effort defense-in-depth** for this remediation. Do not
+try to make the regex catalog a complete shell security boundary in this spec.
+Making it a boundary would require shell-aware parsing, provider-specific tool
+schemas, Windows command parsing, and stricter compatibility decisions that are
+larger than this review remediation.
+
+Mitigate the side effect by documenting the posture at module level and in
+`docs/topics/protect-service.md`, and by adding a bypass-corpus test suite whose
+assertions encode the chosen posture:
+
+- obvious destructive examples remain blocked;
+- documented bypass forms are either blocked where cheap to support or marked as
+  known non-boundary cases;
+- provider permission systems and contract sandboxing remain the load-bearing
+  controls for actual isolation.
+
+### Tests
+
+Add a protect bypass corpus covering shell variants from the review. Each case
+must state whether it is expected to block under the current best-effort posture
+or is a documented non-boundary case. This prevents future docs from drifting
+back into boundary language without a corresponding implementation change.
+
+## P2.2 — Fail-open extraction on command/write-shaped tools
+
+- **Severity:** High · **Confidence:** high
+- **Location:** `claudine/lib/src/dispatch/mod.rs:261-284`,
+  `claudine/lib/src/dispatch/mod.rs:350-374`,
+  `claudine/lib/src/protect/observe.rs:52-101`
+
+### Problem
+
+Protect blocks only when `extract_protect_request(...)` returns `Some` and the
+service returns `Block`. A command-like tool whose command lives under `cmd`,
+`script`, `input`, or an array currently returns `None` and is allowed. A
+write-like tool using `filename`, `dest`, or `paths[]` similarly bypasses
+sensitive-path scanning. Tool-name detection also misses common names such as
+`run_command` and `terminal`.
+
+### Proposed Solution
+
+Introduce an explicit extraction outcome instead of overloading `Option`:
+
+```rust
+enum ProtectObservation<'a> {
+    Request(ProtectRequest<'a>),
+    NoOpinion,
+    Unparsed { surface: ScanSurface, reason: &'static str },
+}
+```
+
+The dispatch boundary should handle `Unparsed` according to the reviewed
+posture:
+
+- for tool names that are clearly command- or write-shaped, return a blocking
+  provider response with a loud `warn!`;
+- for unrelated tools, keep `NoOpinion` and allow normal execution;
+- include the tool name and a secret-free reason in tracing.
+
+Broaden command keys to include at least `command`, `cmd`, `script`, `input`,
+and string arrays. Broaden write path keys to include at least `path`,
+`file_path`, `file`, `target`, `filename`, `dest`, and `paths[]`.
+
+### Tests
+
+A Bash-like tool with the command under `cmd`, `script`, `input`, and an array is
+not silently allowed. A write-like tool with `filename`, `dest`, and `paths[]` is
+scanned. An unrelated tool with no relevant payload remains `NoOpinion`.
+
+## P2.3 — `allow_paths` matching is too loose
+
+- **Severity:** Medium · **Confidence:** high
+- **Location:** `claudine/lib/src/protect/path.rs:173-188`
+
+### Problem
+
+For relative allow entries, any matching path segment permits the target:
+`allow_paths = ["build"]` permits `/etc/build/passwd`. For absolute entries,
+prefix matching must remain boundary-aware; `/var/tmp` must not permit
+`/var/tmpevil`.
+
+### Proposed Solution
+
+Use the same boundary-aware prefix semantics for absolute entries everywhere.
+For relative entries, match an anchored component sequence under the evaluated
+target rather than any same-named segment anywhere in the path. Keep the common
+developer use case (`node_modules`, `target`, `dist`, `build`, `.cache`) working
+for project-local destructive commands.
+
+### Tests
+
+`/etc/build/passwd` is not allowed by `allow_paths = ["build"]`.
+`/var/tmpevil` is not allowed by `allow_paths = ["/var/tmp"]`.
+Existing intended suppressions for `rm -rf node_modules` and `rm -rf target`
+continue to pass.
+
+## P2.4 — Sensitive write-path prefix list omits credential locations
+
+- **Severity:** Medium · **Confidence:** medium
+- **Location:** `claudine/lib/src/protect/path.rs:14-29`
+
+### Problem
+
+The sensitive-path catalog is the only write-path guard and currently covers a
+small set of absolute and home-relative prefixes. It misses common credential
+and provider config files such as `~/.aws`, `~/.kube`, `~/.docker/config.json`,
+`~/.netrc`, `~/.npmrc`, `~/.git-credentials`, `~/.config/gh`, and the agentic
+CLI provider config directories. The absolute list also omits high-impact
+system locations such as `/Library/LaunchDaemons`, `/sbin`, `/bin`, `/opt`, and
+`/root`.
+
+### Proposed Solution
+
+Extend the built-in home-relative and absolute lists. Keep platform-specific
+entries gated or harmless on other platforms:
+
+- macOS: `/Library/LaunchDaemons`, `/System` (already present);
+- Unix-like: `/bin`, `/sbin`, `/root`, `/opt`;
+- home-relative: `.aws`, `.kube`, `.docker/config.json`, `.netrc`, `.npmrc`,
+  `.git-credentials`, `.config/gh`, `.claude`, `.codex`, `.gemini`, `.goose`,
+  `.opencode`, `.qwen`, `.roo`.
+
+Do not add a user-configurable sensitive-path catalog in this remediation unless
+implementation discovers that the static list creates unacceptable false
+positives. A configurable catalog is useful, but it is not required to close the
+review finding.
+
+### Tests
+
+Writes to the added credential/config paths are blocked. Platform-shaped
+absolute paths are covered with OS-gated tests where needed.
+
+## P2.5 — Custom protect patterns apply only to bash commands
+
+- **Severity:** Medium · **Confidence:** high
+- **Location:** `claudine/lib/src/protect/matcher.rs:74-82`,
+  `claudine/lib/src/protect/service.rs` MCP evaluation path
+
+### Problem
+
+`custom_patterns` are compiled onto the bash-command scan surface only. A user
+who adds a custom deny pattern expecting to block an MCP payload gets no block
+and no warning. That is a security-relevant configuration trap even under the
+best-effort posture.
+
+### Proposed Solution
+
+Add a `surface` field to `CustomPattern` with a default of `bash_command`.
+Accepted values: `bash_command`, `mcp_response`, and `write_path` if write-path
+string scanning is implemented; otherwise reject `write_path` with a clear
+validation error. Route `mcp_response` custom patterns through
+`evaluate_mcp_response`.
+
+This is an intended config expansion. Mitigate compatibility risk by preserving
+the old default and documenting that omitted `surface` means `bash_command`.
+
+### Tests
+
+A custom pattern with `surface = "mcp_response"` blocks an MCP payload. A custom
+pattern with no `surface` still applies to bash commands. Invalid surfaces are
+rejected at config validation.
+
+## P2.6 — `allow_paths` is advertised for commands whose targets are not parsed reliably
+
+- **Severity:** Low · **Confidence:** medium
+- **Location:** `claudine/lib/src/protect/path.rs:139-159`,
+  built-in rules with `supports_allow_paths`
+
+### Problem
+
+`extract_target_paths` is effectively an `rm` operand heuristic. Some rules such
+as `find ... -delete`, `chmod`, and `chown` advertise `supports_allow_paths`
+even though their operand grammar differs from `rm`. That makes
+`allow_paths` unreliable for those rules and can surprise users who think an
+allow-list is active.
+
+### Proposed Solution
+
+For this remediation, mark `supports_allow_paths = false` for rules whose target
+grammar is not parsed correctly, unless a small per-command extractor is added
+in the same change. Document the limitation in `docs/topics/protect-service.md`.
+
+### Tests
+
+`find . -delete` with `allow_paths = ["."]` does not silently claim reliable
+suppression unless a dedicated `find` extractor is implemented. `rm`-shaped
+allow-path behavior remains covered by P2.3.
 
 ---
 
