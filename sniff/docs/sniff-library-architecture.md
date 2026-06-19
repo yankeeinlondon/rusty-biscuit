@@ -75,7 +75,8 @@ Every subsection has a real-world cost. The table below captures approximate lat
 | **Hardware** | Audio devices | ~1.5s (macOS CoreAudio) | Yes |
 | **Network** | Local interfaces | <10ms | Yes |
 | **Network** | WAN IP (HTTP call, TTL-cached) | 500ms-2s cold, <1ms warm | Yes |
-| **Filesystem** | Git summary (branch, dirty counts) | <50ms | Yes |
+| **Filesystem** | Git identity (root, branch, HEAD, worktree flag, org/repo) | <10ms | No (use `GitRequest::identity()`) |
+| **Filesystem** | Git summary (branch + dirty flag) | <50ms | Yes |
 | **Filesystem** | Git file changes (paths + line stats) | 50-500ms | Yes |
 | **Filesystem** | Git file diffs (full unified diffs) | 100ms-1s | No (deep only) |
 | **Filesystem** | Git remote refresh (branches, behind, containment) | 1-5s (network) | No |
@@ -84,7 +85,7 @@ Every subsection has a real-world cost. The table below captures approximate lat
 | **Filesystem** | File inventory (classification + languages) | 50-500ms | Yes |
 | **Filesystem** | EditorConfig | <10ms | Yes |
 | **Filesystem** | Markdown documents | 50-200ms | Yes |
-| **Programs** | All 8 categories (parallel, shared executable index) | 200-800ms | Separate API |
+| **Programs** | All 9 categories (parallel, shared executable index) | 200-800ms | Separate API |
 | **Services** | Init system detection + service list | 50-200ms | Separate API |
 
 Programs and Services are not part of `DetectionPlan` because they have no dependency on the filesystem base directory and their results are system-global rather than project-scoped. They are accessed through `ProgramsInfo::detect()` and `ServiceManager::detect()` respectively.
@@ -120,7 +121,9 @@ WAN IP results are cached per run; call `.force_refresh(true)` to bypass the cac
 
 | Constructor | What it includes |
 |------------|-----------------|
-| `summary()` | Repo root, current branch, dirty status counts. No commits, no file details, no worktrees |
+| `identity()` | Repo root, current branch, HEAD id, worktree flag, base repo root, and org/repo from the preferred remote. **No working-tree status walk**, no commits, no branches, no remotes, no config. This is the cheapest git request level and the new floor below `minimal()`/`summary()`. |
+| `summary()` | Repo root, current branch, and a dirty yes/no flag. No per-category counts, no commits, no file details, no worktrees. **Currently byte-identical to `minimal()`** |
+| `minimal()` | Same field set as `summary()` (repo root, branch, dirty flag) |
 | `full()` | 10 commits, per-file change stats (paths + line counts), worktrees. No unified diff payloads, no network |
 | `deep()` | Everything in `full()` plus full unified diffs for dirty and untracked files, remote tracking refresh, remote branch details, and per-commit remote containment |
 
@@ -155,15 +158,21 @@ Several detection paths would naturally duplicate expensive I/O if implemented n
 
 ### Staged Filesystem Detection
 
-Within the filesystem domain, `detect_filesystem_with_request` runs five stages sequentially so each can reuse work from the previous:
+Within the filesystem domain, `detect_filesystem_with_request` runs a **concurrent prelude** followed by a **sequential reuse phase**, so the working tree is walked at most once and every later stage projects off pre-computed inputs.
 
-1. **Git**: Discovers the repo root (used to retarget subsequent stages at the actual repo rather than the caller's cwd).
-2. **Repo**: Returns both the `RepoInfo` and its internal `FileInventory` via `detect_repo_with_inventory`, so Stage 3 can skip its own walk.
-3. **File inventory + languages**: Reuses the repo-level inventory when available, optionally filtered to a package scope with sibling-package exclusions.
-4. **Formatting (EditorConfig)**: Cheap local lookup.
-5. **Docs**: Markdown discovery, informed by the package list from Stage 2 so doc-to-package association is accurate.
+**Concurrent prelude** (`std::thread::scope`): up to three workers run in parallel, gated by the request —
 
-Each stage is strictly cheaper because the previous stage pre-computed its expensive inputs.
+1. **Git** (`detect_git_with_request`): discovers the repo root, used to retarget the repo/inventory/docs stages at the actual repo rather than the caller's cwd.
+2. **Formatting** (`detect_formatting`): cheap EditorConfig lookup.
+3. **Shared filesystem view** (`build_filesystem_system_view`): a single `ignore`-based parallel directory walk that collects exactly what the request needs — manifests, file inventory, and/or docs — selected by `SharedWalkOptions`.
+
+**Sequential reuse phase** (after the prelude joins):
+
+4. **Repo** (`detect_repo_inner_with_shared`): consumes the shared view's manifest index and inventory, so it never re-walks the tree.
+5. **File inventory + languages**: reuses the shared view's inventory directly, or projects a package-scoped slice from it (`filter_inventory`) with sibling-package exclusions; falls back to a fresh `scan_file_inventory*` only when no shared inventory was collected.
+6. **Docs**: reuses the shared view's markdown set and enriches it with package assignment from the repo stage.
+
+The shared view is itself internally parallel: one `ignore::WalkBuilder::build_parallel()` pass produces manifests, file classifications, and docs together, with per-worker buffers flushed into a shared accumulator on drop.
 
 ### Manifest Index
 
@@ -173,16 +182,18 @@ When full repo detection runs, it builds a `ManifestIndex` from a single filesys
 
 ### File Inventory Projection
 
-The file inventory scan runs once at the repo level inside full repo detection and is threaded back out via `detect_repo_with_inventory`. When the caller's base directory falls within a specific package, Stage 3 produces a package-scoped view by filtering the repo-level scan with path-prefix exclusions for sibling packages. A single walk serves both the overall language breakdown and any package-scoped view.
+The file-tree walk runs once inside the shared filesystem view and is reused by every stage that needs it. When the caller's base directory falls within a specific package, the inventory stage produces a package-scoped view by filtering the shared inventory with path-prefix exclusions for sibling packages (`filter_inventory`). A single walk serves both the overall language breakdown and any package-scoped view.
 
 ### Git Status Layers
 
-Git status collection has two code paths selected by the request:
+Git status collection has four code paths selected by the request (`GitRepo::detect_with_request`):
 
-- **Counts-only** (`include_file_changes: false`): Walks the libgit2 status list once, incrementing staged/unstaged/untracked counters. Used for worktree summaries and the `summary()` preset.
-- **Full status** (`include_file_changes: true`): Collects per-file change details including delta kind and line-level diff stats. Only paid for when the caller actually needs file-level data. An additional `include_file_diffs` flag further opts into full unified diff payloads (used by `deep()`).
+- **Identity only** (`is_identity_only()`): returns repo root, current branch, HEAD id, worktree flag, base repo root, and org/repo. This path performs **no working-tree status walk** and is the cheapest way to obtain repository identity through the plan API.
+- **Dirty flag only** (`is_minimal()` — no commits, no file changes, no worktrees, no remote refresh; this is what `summary()` and `minimal()` request): one gix status walk that resolves only whether the tree is dirty. The per-category `staged_count` / `unstaged_count` / `untracked_count` fields are left at `0`.
+- **Counts** (`include_file_changes: false` but not minimal — e.g. a request that also asks for commits or worktrees): one status walk that populates the staged/unstaged/untracked counts, without per-file detail (`get_repo_status_counts_detailed`).
+- **Full status** (`include_file_changes: true`): per-file change details including delta kind and line-level diff stats. An additional `include_file_diffs` flag further opts into full unified diff payloads (used by `deep()`).
 
-Both paths share the same `libgit2` repository handle opened once by `GitRepo::discover`.
+All status-bearing paths share the same `gix` repository handle opened once by `GitRepo::discover`. The identity-only path is the exception: it returns repository identity without scanning the working tree, and is the only request level below `summary()`/`minimal()`. For bare repo-root access without even branch/HEAD resolution, use the Tier-3 `GitRepo::discover().repo_root()` handle directly.
 
 ### Parallel Program Detection with Shared Executable Index
 

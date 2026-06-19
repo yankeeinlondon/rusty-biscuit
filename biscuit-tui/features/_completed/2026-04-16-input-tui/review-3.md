@@ -4,7 +4,7 @@ ready: false
 
 # Review 3: TUI Inputs Implementation
 
-This review evaluates the implementation of the `input-tui` feature, focusing on the `tui-chrome` library and the `question` CLI.
+This review evaluates the implementation of the `input-tui` feature, focusing on the `biscuit-tui` library and the `question` CLI.
 
 ## 1. Functional Gaps & Design Deviations
 

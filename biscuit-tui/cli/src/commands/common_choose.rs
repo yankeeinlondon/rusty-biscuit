@@ -22,7 +22,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use clap::{Args, ValueEnum};
-use tui_chrome::{
+use biscuit_tui::{
     ABORTED_KIND, ActiveChoiceColor, BorderStyle, CANCELLED_KIND, ChoiceInput, FrameChromeConfig,
     HeightSpec, HotkeyDisplayMode, Margin, Orientation, Padding, SelectionMode, SortOrder,
 };
@@ -631,7 +631,7 @@ fn resolve_border_style(args: &ChooseChromeArgs) -> BorderStyle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tui_chrome::Padding;
+    use biscuit_tui::Padding;
 
     #[test]
     fn build_chrome_returns_default_config_with_padding() {

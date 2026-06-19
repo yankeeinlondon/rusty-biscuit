@@ -21,12 +21,17 @@
 
 mod context;
 pub mod error;
+#[cfg(feature = "fetch")]
+pub mod fetch;
 mod parse;
 mod resolve;
 
 use std::path::{Path, PathBuf};
 
 pub use error::FileReferenceError;
+
+#[cfg(feature = "fetch")]
+pub use error::FetchError;
 
 /// Entry form for a partial completion token.
 ///
@@ -103,6 +108,19 @@ pub(crate) fn make_partial_completion(
         active_segment,
         rendered_prefix,
     }
+}
+
+/// The resolved target of a file reference.
+///
+/// Distinguishes between local filesystem paths and remote URLs so callers
+/// can handle each appropriately.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Resolved {
+    /// A local filesystem path.
+    Local(PathBuf),
+    /// A remote HTTP(S) URL.
+    #[cfg(feature = "url")]
+    Remote(::url::Url),
 }
 
 /// Position for magic path insertion.
@@ -342,6 +360,29 @@ impl FileReference {
 
         Ok(Some(relative))
     }
+
+    /// Resolve the reference to a typed target.
+    ///
+    /// Unlike [`resolve()`], which only returns local filesystem paths,
+    /// this returns a [`Resolved`] that distinguishes between local paths
+    /// and remote URLs.
+    ///
+    /// ## Returns
+    ///
+    /// - `Ok(Some(Resolved::Local(path)))` -- a local file was found
+    /// - `Ok(Some(Resolved::Remote(url)))` -- a remote URL was classified
+    /// - `Ok(None)` -- the reference is well-formed but no local file was found
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if the URL is malformed or if resolution requires
+    /// state that cannot be determined.
+    ///
+    /// [`resolve()`]: Self::resolve
+    #[cfg(feature = "url")]
+    pub fn resolve_target(&self) -> Result<Option<Resolved>, FileReferenceError> {
+        resolve::resolve_target(&self.parsed, &self.magic_paths, &self.vault_roots)
+    }
 }
 
 // --- Internal types ---
@@ -360,6 +401,7 @@ pub(crate) enum ReferenceKind {
     Magic(PathTemplate),
     Package(PathTemplate),
     Vault(PathTemplate),
+    Url(PathTemplate),
 }
 
 impl ReferenceKind {
@@ -370,7 +412,8 @@ impl ReferenceKind {
             | Self::Absolute(t)
             | Self::Magic(t)
             | Self::Package(t)
-            | Self::Vault(t) => t,
+            | Self::Vault(t)
+            | Self::Url(t) => t,
         }
     }
 }

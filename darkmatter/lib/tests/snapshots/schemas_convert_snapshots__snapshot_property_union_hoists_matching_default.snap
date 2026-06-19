@@ -1,0 +1,36 @@
+---
+source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+expression: convert_yaml(yaml)
+---
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "flag": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "enum": [
+                "true",
+                "false",
+                "True",
+                "False",
+                "TRUE",
+                "FALSE"
+              ]
+            }
+          ]
+        }
+      ],
+      "default": true
+    }
+  },
+  "type": "object"
+}

@@ -1,7 +1,7 @@
 //! `question input-table` subcommand.
 //!
-//! Maps CLI args onto a [`tui_chrome::InputTableState`], runs the
-//! component via [`tui_chrome::run_standalone`], and writes the
+//! Maps CLI args onto a [`biscuit_tui::InputTableState`], runs the
+//! component via [`biscuit_tui::run_standalone`], and writes the
 //! captured row-major values as a JSON array of row objects.
 //!
 //! ## JSON Schemas
@@ -29,14 +29,14 @@ use std::io::{self, Write};
 use clap::Args;
 use serde_json::{Value, json};
 #[cfg(test)]
-use tui_chrome::components::input_table::BooleanSwitchConfig;
-use tui_chrome::components::input_table::CellValue;
-use tui_chrome::{
+use biscuit_tui::components::input_table::BooleanSwitchConfig;
+use biscuit_tui::components::input_table::CellValue;
+use biscuit_tui::{
     ABORTED_KIND, CANCELLED_KIND, FrameChromeConfig, HeightSpec, InputTable, InputTableColumn,
     InputTableState, Row, RowCell, run_standalone_with_chrome,
 };
 #[cfg(test)]
-use tui_chrome::{ChoiceInput, ChoiceOption};
+use biscuit_tui::{ChoiceInput, ChoiceOption};
 
 use crate::output::OutputMode;
 

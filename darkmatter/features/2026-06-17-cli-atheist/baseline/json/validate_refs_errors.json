@@ -1,0 +1,17 @@
+{
+  "valid": false,
+  "references_scanned": 1,
+  "references_valid": 0,
+  "issues": [
+    {
+      "code": "MissingLocalTarget",
+      "message": "Missing local target: ./missing.md",
+      "severity": "error",
+      "kind": "hyperlink",
+      "reference": "./missing.md",
+      "line": 3,
+      "source": "<TMP>/errors.md"
+    }
+  ],
+  "warnings": []
+}

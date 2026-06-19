@@ -124,8 +124,8 @@ docs_created_during_phase_12:
   - biscuit-tui/lib/CHANGELOG.md
 skills_files_updated_during_phase12: []
 packages:
-  - tui-chrome
-  - tui-chrome-cli
+  - biscuit-tui
+  - biscuit-tui-cli
 ---
 
 # Choose CLI Enhancements — Execution Plan
@@ -144,7 +144,7 @@ This plan translates the design into concrete, observable steps ordered by depen
 
 **Steps:**
 
-1. Add `nucleo-matcher = "0.3"` to `tui-chrome/Cargo.toml` (feature-gated or direct; confirm with maintainer).
+1. Add `nucleo-matcher = "0.3"` to `biscuit-tui/Cargo.toml` (feature-gated or direct; confirm with maintainer).
 2. Create `lib/src/core/sort.rs` — define `SortOrder` enum and `apply()` method.
 3. Create `lib/src/core/frame.rs` — define `Margin`, `HeightSpec`, `BorderStyle`, `FrameChrome`.
 4. Add `mod sort; mod frame;` to `lib/src/core/mod.rs`.
@@ -152,7 +152,7 @@ This plan translates the design into concrete, observable steps ordered by depen
 6. Wire unit tests for `sort.rs` and `frame.rs` (see tech-design §10.1).
 
 **Validation Checkpoint:**
-- `cargo test -p tui-chrome core::sort core::frame` passes.
+- `cargo test -p biscuit-tui core::sort core::frame` passes.
 - New types are reachable from `tui_chrome::` root.
 
 ---
@@ -170,7 +170,7 @@ This plan translates the design into concrete, observable steps ordered by depen
 5. Add unit tests for `loop_exit_distinguishes_esc_from_ctrl_c`.
 
 **Validation Checkpoint:**
-- `cargo test -p tui-chrome core::standalone` passes.
+- `cargo test -p biscuit-tui core::standalone` passes.
 - Existing component tests still compile (may need mechanical `?` -> `match` updates).
 
 ---
@@ -191,9 +191,9 @@ This plan translates the design into concrete, observable steps ordered by depen
 8. Add integration test scaffold in `cli/tests/choose_cli.rs`.
 
 **Validation Checkpoint:**
-- `cargo test -p tui-chrome-cli --test choose_cli choose_one_reads_from_stdin` passes.
-- `cargo test -p tui-chrome-cli --test choose_cli delimiter_separates_label_and_value` passes.
-- `cargo clippy -p tui-chrome-cli` is clean.
+- `cargo test -p biscuit-tui-cli --test choose_cli choose_one_reads_from_stdin` passes.
+- `cargo test -p biscuit-tui-cli --test choose_cli delimiter_separates_label_and_value` passes.
+- `cargo clippy -p biscuit-tui-cli` is clean.
 
 ---
 
@@ -210,9 +210,9 @@ This plan translates the design into concrete, observable steps ordered by depen
 5. Add unit tests for pre-selection and sort in `components::choose_one` / `choose_many`.
 
 **Validation Checkpoint:**
-- `cargo test -p tui-chrome components::choose_one::initial_value_pre_selects` passes.
-- `cargo test -p tui-chrome components::choose_many::initial_values_pre_select_by_value` passes.
-- `cargo test -p tui-chrome core::sort` passes.
+- `cargo test -p biscuit-tui components::choose_one::initial_value_pre_selects` passes.
+- `cargo test -p biscuit-tui components::choose_many::initial_values_pre_select_by_value` passes.
+- `cargo test -p biscuit-tui core::sort` passes.
 
 ---
 
@@ -228,8 +228,8 @@ This plan translates the design into concrete, observable steps ordered by depen
 4. Add unit tests for fallback in both components.
 
 **Validation Checkpoint:**
-- `cargo test -p tui-chrome components::choose_one::fallback_submit_promotes_hover` passes.
-- `cargo test -p tui-chrome components::choose_many::fallback_submit_selects_active_when_none_chosen` passes.
+- `cargo test -p biscuit-tui components::choose_one::fallback_submit_promotes_hover` passes.
+- `cargo test -p biscuit-tui components::choose_many::fallback_submit_selects_active_when_none_chosen` passes.
 
 ---
 
@@ -245,8 +245,8 @@ This plan translates the design into concrete, observable steps ordered by depen
 4. Add unit tests for bulk operations.
 
 **Validation Checkpoint:**
-- `cargo test -p tui-chrome components::choose_many::ctrl_a_selects_all_enabled_options` passes.
-- `cargo test -p tui-chrome components::choose_many::ctrl_d_clears_all` passes.
+- `cargo test -p biscuit-tui components::choose_many::ctrl_a_selects_all_enabled_options` passes.
+- `cargo test -p biscuit-tui components::choose_many::ctrl_d_clears_all` passes.
 
 ---
 
@@ -262,7 +262,7 @@ This plan translates the design into concrete, observable steps ordered by depen
 4. Add unit tests for filtering, scoring, empty pattern, and mutation.
 
 **Validation Checkpoint:**
-- `cargo test -p tui-chrome core::fuzzy` passes.
+- `cargo test -p biscuit-tui core::fuzzy` passes.
 - `FuzzyFilter` is re-exported from `lib.rs`.
 
 ---
@@ -284,8 +284,8 @@ This plan translates the design into concrete, observable steps ordered by depen
 9. Add unit tests for search open, filter, navigation, and Esc clear.
 
 **Validation Checkpoint:**
-- `cargo test -p tui-chrome components::choose_one::typing_letter_opens_filter` passes.
-- `cargo test -p tui-chrome components::choose_many::submit_blocked_when_filter_hides_everything` passes.
+- `cargo test -p biscuit-tui components::choose_one::typing_letter_opens_filter` passes.
+- `cargo test -p biscuit-tui components::choose_many::submit_blocked_when_filter_hides_everything` passes.
 - Manual QA: run `printf 'a\nb\nc' | question choose-one`, type "b", only "b" remains visible.
 
 ---
@@ -303,7 +303,7 @@ This plan translates the design into concrete, observable steps ordered by depen
 5. Add integration test for border rendering.
 
 **Validation Checkpoint:**
-- `cargo test -p tui-chrome-cli --test choose_cli` border tests pass.
+- `cargo test -p biscuit-tui-cli --test choose_cli` border tests pass.
 - Manual QA: `question choose-one a b c --border --border-label "Pick"` draws a labelled border.
 
 ---
@@ -319,7 +319,7 @@ This plan translates the design into concrete, observable steps ordered by depen
 3. Add integration test for margin geometry.
 
 **Validation Checkpoint:**
-- `cargo test -p tui-chrome-cli --test choose_cli` margin tests pass.
+- `cargo test -p biscuit-tui-cli --test choose_cli` margin tests pass.
 - Manual QA: `question choose-one a b c --margin 2 --mt 0` shows correct spacing.
 
 ---
@@ -336,7 +336,7 @@ This plan translates the design into concrete, observable steps ordered by depen
 4. Add integration tests for cell and percent heights.
 
 **Validation Checkpoint:**
-- `cargo test -p tui-chrome-cli --test choose_cli` height tests pass.
+- `cargo test -p biscuit-tui-cli --test choose_cli` height tests pass.
 - Manual QA: `question choose-one a b c --height 50%` renders at half terminal height.
 
 ---
@@ -354,8 +354,8 @@ This plan translates the design into concrete, observable steps ordered by depen
    - `ctrl_c_exits_with_code_130`
 2. Run the full manual QA checklist from tech-design §10.4.
 3. Update `CHANGELOG.md` with breaking change notice for Esc exit code.
-4. Run `cargo test -p tui-chrome -p tui-chrome-cli` and ensure everything passes.
-5. Run `cargo clippy -p tui-chrome -p tui-chrome-cli -- -D warnings`.
+4. Run `cargo test -p biscuit-tui -p biscuit-tui-cli` and ensure everything passes.
+5. Run `cargo clippy -p biscuit-tui -p biscuit-tui-cli -- -D warnings`.
 6. Run `cargo fmt --all --check`.
 
 **Validation Checkpoint:**
@@ -418,7 +418,7 @@ Phase 12 (tests + QA + CHANGELOG)
 |---|---|
 | `nucleo-matcher` API changes between 0.3 and next patch | Pin exact version `"=0.3"` in Cargo.toml; add smoke test that exercises matcher surface. |
 | Crossterm `/dev/tty` assumption fails in CI | Add `ensure_controlling_tty()` check and skip TTY-dependent integration tests when `CI=true`. |
-| Esc exit code breaks existing scripts | Document in CHANGELOG; bump minor version of `tui-chrome-cli` to signal breaking change. |
+| Esc exit code breaks existing scripts | Document in CHANGELOG; bump minor version of `biscuit-tui-cli` to signal breaking change. |
 | Legacy `--initial` callers confused | Keep `--initial` hidden for one release; print deprecation warning to stderr. |
 
 ---

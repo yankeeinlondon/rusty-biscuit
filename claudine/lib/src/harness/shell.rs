@@ -37,6 +37,10 @@ pub struct ShellApprovalOptions {
     pub approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
     /// Session-local cache for repeated approval decisions.
     pub approval_cache: Arc<Mutex<HashMap<String, CachedApprovalDecision>>>,
+    /// When set, a non-TTY unapproved command is reported with dry-run
+    /// framing (a `Cannot dry-run: …` message pointing at `--yolo` /
+    /// pre-approval) instead of the generic "no approval handler" guidance.
+    pub dry_run: bool,
 }
 
 impl Default for ShellApprovalOptions {
@@ -45,6 +49,7 @@ impl Default for ShellApprovalOptions {
             policy_root: None,
             approval_handler: None,
             approval_cache: Arc::new(Mutex::new(HashMap::new())),
+            dry_run: false,
         }
     }
 }
@@ -85,13 +90,19 @@ pub fn validate_and_approve_command(
 /// cannot accidentally validate a chain as if it were one command.
 /// Chains are split per-command upstream by Darkmatter's discovery layer.
 pub(crate) fn tokenize_words_strict(raw: &str) -> Result<Vec<String>, ShellExpansionError> {
-    let tokens = tokenize(raw)?;
+    let ctx = biscuit_terminal::errors::SourceContext::new(
+        PathBuf::from("<harness-shell>"),
+        PathBuf::from("<harness-shell>"),
+        raw.to_string(),
+    );
+    let tokens = tokenize(raw, &ctx)?;
     let mut words = Vec::with_capacity(tokens.len());
     for tok in tokens {
         match tok {
             ShellToken::Word(w) => words.push(w),
             _ => {
                 return Err(ShellExpansionError::ParseDirective {
+                    ctx: Box::new(ctx.clone()),
                     origin: ShellCommandOrigin::Body { line: 0 },
                     message: format!(
                         "chain operators and redirections are not allowed here: {raw}"

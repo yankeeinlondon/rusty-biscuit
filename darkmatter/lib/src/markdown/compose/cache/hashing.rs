@@ -11,8 +11,8 @@ use serde_json::{Map, Value};
 use std::path::Path;
 
 use super::types::DependencyRef;
-use crate::markdown::compose::state::EffectiveState;
-use crate::markdown::compose::types::{ComposeContext, ComposeOptions};
+use crate::markdown::compose::EffectiveState;
+use crate::markdown::compose::{ComposeContext, ComposeOptions};
 
 // ── Source identification ──────────────────────────────────────────
 
@@ -190,6 +190,13 @@ pub(crate) fn options_hash(options: &ComposeOptions) -> u64 {
     if let Some(ref overrides) = options.set_overrides {
         let canonical = canonical_json_sorted(overrides);
         parts.push(format!("set_overrides={}", canonical));
+    }
+
+    if let Some(ref baseline) = options.baseline_schema {
+        let json = crate::markdown::schemas::to_json_schema(baseline)
+            .unwrap_or_else(|_| serde_json::json!({"baseline_schema_error": true}));
+        let canonical = canonical_json_sorted(&json);
+        parts.push(format!("baseline_schema={}", canonical));
     }
 
     xx_hash(&parts.join("\0"))
@@ -608,5 +615,49 @@ mod tests {
         let h2 = combine_options_overlay_hash(base, 0x2222);
         assert_ne!(h1, h2);
         assert_ne!(h1, base);
+    }
+
+    #[test]
+    fn options_hash_sensitive_to_baseline_schema() {
+        use crate::markdown::schemas::{
+            Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType,
+            TypeExpr,
+        };
+        use indexmap::IndexMap;
+
+        let base = ComposeOptions::new();
+
+        let mut props_a = IndexMap::new();
+        props_a.insert(
+            "title".into(),
+            PropertyDef::Single(PropertyAtom {
+                ty: TypeExpr::Primitive(SimplifiedType::String),
+                is_array: false,
+                constraints: vec![Constraint::Required],
+                array_constraints: vec![],
+                description: None,
+            }),
+        );
+        let schema_a = SimplifiedSchema::Single(SchemaShape { properties: props_a });
+
+        let mut props_b = IndexMap::new();
+        props_b.insert(
+            "owner".into(),
+            PropertyDef::Single(PropertyAtom {
+                ty: TypeExpr::Primitive(SimplifiedType::String),
+                is_array: false,
+                constraints: vec![Constraint::Required],
+                array_constraints: vec![],
+                description: None,
+            }),
+        );
+        let schema_b = SimplifiedSchema::Single(SchemaShape { properties: props_b });
+
+        let with_a = ComposeOptions::new().with_baseline_schema(schema_a);
+        let with_b = ComposeOptions::new().with_baseline_schema(schema_b);
+
+        assert_ne!(options_hash(&base), options_hash(&with_a));
+        assert_ne!(options_hash(&base), options_hash(&with_b));
+        assert_ne!(options_hash(&with_a), options_hash(&with_b));
     }
 }

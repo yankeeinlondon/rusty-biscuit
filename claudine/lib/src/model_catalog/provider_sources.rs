@@ -104,13 +104,23 @@ fn anthropic_models() -> Vec<String> {
 // Dynamic sources
 // ============================================================================
 
-async fn fetch_opencode_models() -> Result<Vec<String>, CatalogFetchError> {
-    let output = Command::new("opencode")
+/// Fetch the OpenCode model catalog via `opencode models`.
+///
+/// Exposed within the crate so [`super::service::ModelCatalogService`]
+/// can implement in-process deduplication when both `OpenCode` and
+/// `QwenCode` would otherwise fetch the same underlying list.
+///
+/// Cancellable: the `opencode` child is spawned with `kill_on_drop(true)`
+/// and the await on its completion races a poll of the process-scoped
+/// [`crate::interrupt`] flag, so a Ctrl+C during a slow or hung subprocess
+/// returns within ~50 ms and the child is killed instead of orphaned.
+pub(super) async fn fetch_opencode_models() -> Result<Vec<String>, CatalogFetchError> {
+    let child = Command::new("opencode")
         .arg("models")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .output()
-        .await
+        .kill_on_drop(true)
+        .spawn()
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 CatalogFetchError::CliNotFound("opencode".into())
@@ -122,6 +132,24 @@ async fn fetch_opencode_models() -> Result<Vec<String>, CatalogFetchError> {
             }
         })?;
 
+    let output = tokio::select! {
+        result = child.wait_with_output() => {
+            result.map_err(|e| CatalogFetchError::CliFailed {
+                exit_code: None,
+                stderr: e.to_string(),
+            })?
+        }
+        _ = wait_for_user_interrupt() => {
+            // `child` was moved into `wait_with_output`; cancelling that
+            // future drops the child and `kill_on_drop(true)` reaps the
+            // subprocess so we do not leak it on Ctrl+C.
+            return Err(CatalogFetchError::CliFailed {
+                exit_code: None,
+                stderr: "interrupted by user".into(),
+            });
+        }
+    };
+
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         return Err(CatalogFetchError::CliFailed {
@@ -132,6 +160,19 @@ async fn fetch_opencode_models() -> Result<Vec<String>, CatalogFetchError> {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     parse_opencode_models(&stdout)
+}
+
+/// Resolves once the process-scoped user-interrupt flag is set.
+///
+/// Polled every 50 ms so the worst-case interrupt-to-return latency for
+/// callers racing this in a `select!` is bounded by the poll cadence.
+async fn wait_for_user_interrupt() {
+    loop {
+        if crate::interrupt::interrupted() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
 }
 
 async fn fetch_qwen_models() -> Result<Vec<String>, CatalogFetchError> {

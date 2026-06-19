@@ -2,7 +2,24 @@
 
 Binary: `md`
 
-A themed markdown renderer for terminal and browser workflows with markdown, HTML, and AST JSON output modes.
+A themed markdown renderer for terminal and browser workflows with markdown, markdown-plus, HTML, and AST JSON output modes.
+
+## Binary Overview
+
+The user-facing CLI surface is defined in `src/args/`: `cli.rs` holds global
+flags, `command.rs` holds subcommands, `target.rs` holds command targets,
+`enums.rs` holds output/format enums, `wrappers.rs` holds CLI conversion types,
+`parsers.rs` holds value parsers, and `completion.rs` holds shell completion
+helpers.
+
+Runtime dispatch lives in `src/commands/mod.rs`, with command-specific
+implementations in `commands/render.rs`, `commands/clean.rs`,
+`commands/validate.rs`, `commands/graph.rs`, `commands/compose.rs`,
+`commands/frontmatter.rs`, `commands/hash.rs`, and `commands/code_block.rs`.
+Shared input loading is in `src/io/`, output artifact handling is in
+`src/artifact.rs`, terminal rendering setup is in `src/render.rs`, and CLI flag
+precedence is lowered to `darkmatter::style::CliStyleClaims` in
+`src/style_claims.rs`.
 
 ## Installation
 
@@ -36,13 +53,16 @@ Use a single `--output <OUTPUT>` switch for render format selection:
 
 - `auto` (default): render ANSI terminal output on TTY, markdown text on non-TTY
 - `markdown` (alias: `text`)
-- `html`
+- `markdown-plus`: markdown with disclosure blocks emitted as inline HTML `<details>`/`<summary>`
+- `html` (alias: `browser`)
 - `json` (alias: `ast`)
 
 ```bash
 md README.md --output markdown
 md README.md --output text
+md README.md --output markdown-plus
 md README.md --output html > output.html
+md README.md --output browser > output.html
 md README.md --output json
 md README.md --output ast
 ```
@@ -126,6 +146,12 @@ md compose README.md --timeout 3 --allow-shell-timeout
 
 # Report compose-tree shell commands without executing them
 md compose README.md --shell
+
+# Allow non-object ctx frontmatter (downgrades error to warning)
+md compose README.md --allow-ctx-override
+
+# Emit structured performance report to stderr
+md compose README.md --perf
 ```
 
 During `compose`, Darkmatter supports both body `::shell ...` directives and top-level frontmatter `$(...)` expressions. Both use the same whitelist/blacklist and approval flow. Frontmatter shell expansion stores trimmed `stdout` only; body shell expansion stores combined `stdout` + `stderr`. Use `--shell` to inspect the shell commands discovered across the compose tree before approving or executing them.
@@ -212,12 +238,31 @@ md README.md --theme dracula
 # Separate prose and code themes
 md README.md --theme nord --code-theme monokai
 
+# Control the code block's light/dark variant (default: inverse)
+md README.md --code-block dark      # always a dark code panel
+md README.md --code-block light     # always a light code panel
+md README.md --code-block same      # match the terminal's mode
+
 # Line numbers in code blocks
 md README.md --line-numbers
 
 # Render mermaid diagrams as images
 md README.md --mermaid
 ```
+
+A theme name (`--theme`, `--code-theme`) is mode-agnostic — the concrete
+light/dark variant is chosen from the terminal color mode. By default code blocks
+use the *inverted* mode (`--code-block inverse`): a light code panel on a dark
+page, and vice versa, so the code contrasts against the page; prose follows the
+real mode. This inversion default applies to **both terminal and HTML** output
+(`--output html`), so the two targets agree. `--code-block <inverse|dark|light|same>`
+overrides the variant for **terminal** rendering — `dark`/`light` pin the
+variant, `same` matches the terminal (HTML currently always uses the inverse
+default). The variant is derived from the terminal (the same source as the page),
+so it is consistent regardless of environment color detection.
+Every `ThemePair` is a (light theme, dark theme) couple, so the inversion applies
+to all of them. See
+[Code Highlighting](../docs/rendering/code-highlighting.md).
 
 ### Verbosity
 

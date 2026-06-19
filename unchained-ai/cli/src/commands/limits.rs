@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use biscuit_terminal::components::progress::Progress;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Result, eyre};
 use unchained_ai::primitives::services::agent_status::{

@@ -97,6 +97,46 @@ At this point you're ready to explore, install, test, whatever you like.
 
 Shell completions help people learn new CLI's as well as navigate a CLI they don't use that often. All of the CLI's in this monorepo have shell completions included for all the major shells (bash, zsh, fish). How to include the shell completions for each CLI is available as part of the CLI's help system but if you are using zsh or bash you can use my conditional script which will add shell completions for the CLI's in this monorepo (and `just`) which you have installed: [Shell Completions](./docs/shell-completions.md).
 
+## Local Development
+
+### Pre-push Hook
+
+A local pre-push hook is available to run fast feedback tests before pushing to remote.
+
+Link the shared hook into your local git repository:
+
+```sh
+ln -s ../../.githooks/pre-push .git/hooks/pre-push
+```
+
+The hook's behavior is controlled by the `RUSTY_BISCUIT_PRE_PUSH` environment variable:
+
+| Value | Behavior |
+| --- | --- |
+| `off` | Skip tests entirely and allow the push |
+| `warn` | Run tests, print failures in red, but still allow the push (default) |
+| `strict` | Run tests and block the push if any test fails |
+
+For example, to enable strict mode in your shell:
+
+```sh
+export RUSTY_BISCUIT_PRE_PUSH=strict
+```
+
+The hook resolves the area list with this priority order:
+
+1. **Explicit override** — `RUSTY_BISCUIT_PRE_PUSH_AREAS` (space-separated area names) is used verbatim if set.
+2. **Top-level-directory heuristic** — `just changed-areas` runs `git diff --name-only` against the configured upstream branch (`@{u}`), then matches the first path segment of each changed file against the curated area list in the root `justfile`. This is a coarse detector: it does not inspect `Cargo.toml` path dependencies, so a change to a workspace member outside one of the curated top-level directories will not be detected.
+3. **Fallback** — when there is no upstream branch (e.g. a first push of a new branch) or when no changed files map to a curated area, the hook falls back to testing `claudine` and `darkmatter`.
+
+Override with:
+
+```sh
+export RUSTY_BISCUIT_PRE_PUSH_AREAS="claudine darkmatter"
+```
+
+Fully dependency-aware detection (mapping changed files to workspace members via `cargo metadata`) is a planned follow-up — see requirement R2 in [`features/2026-05-19-ci-cd/spec.md`](./features/2026-05-19-ci-cd/spec.md).
+
 ## License
 
 This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0-or-later).

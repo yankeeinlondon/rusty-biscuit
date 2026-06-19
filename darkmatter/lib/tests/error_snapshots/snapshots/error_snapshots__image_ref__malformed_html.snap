@@ -2,6 +2,9 @@
 source: darkmatter/lib/tests/error_snapshots/image_ref.rs
 expression: out
 ---
-⨫ ImageRefError: malformed HTML image
+⤫ ImageRefError: malformed HTML image
+┃ 
 ┃ Message: missing end of tag
-Ensure the tag starts with &lt;img and ends with &gt; (self-closing is allowed).
+┃ 
+┃ Ensure the tag starts with &lt;img and ends with &gt; (self-closing is
+┃ allowed).

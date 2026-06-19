@@ -311,6 +311,18 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
     /// does not emit a paired request-side event, so we emit only a
     /// `ToolResult` (no synthesized `ToolCall`). The `tool_calls` counter
     /// still increments so trailer metadata matches the rendered line count.
+    ///
+    /// ## Notes
+    ///
+    /// Subagent lifecycle (`SubagentStart` / `SubagentStop`) is no longer
+    /// synthesized here. The structured stderr log stream is now the
+    /// authoritative source for OpenCode subagent events: child sessions
+    /// emit `service=session ... parentID=...` at start and
+    /// `service=session.prompt ... exiting loop` at stop, which the
+    /// [`crate::stream::logs::opencode::OpenCodeLogBridge`] promotes into
+    /// the same semantic events. Keeping synthesis here as well would
+    /// double-count subagents in `LiveMetricsState.subagent_done_count`
+    /// and produce duplicate render lines.
     fn handle_tool_use_completed(&mut self, tool: OpenCodeTool, raw_kind: &str) {
         self.tool_calls += 1;
         let resolved = tool.resolve();
@@ -338,11 +350,11 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
         }
 
         self.sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: resolved.name,
-            id: resolved.id,
-            status: resolved.status,
+            name: resolved.name.clone(),
+            id: resolved.id.clone(),
+            status: resolved.status.clone(),
             exit_code: None,
-            output: resolved.output,
+            output: resolved.output.clone(),
             extra: Value::Object(result_extra),
         });
     }
@@ -603,8 +615,10 @@ fn classify_error(error_kind: Option<&str>, message: Option<&str>) -> SemanticEr
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
+    use std::time::Instant;
 
     use super::*;
+    use crate::stream::progress::LiveMetricsState;
 
     struct Recording {
         events: Arc<Mutex<Vec<SemanticEvent>>>,
@@ -1070,5 +1084,134 @@ mod tests {
             SemanticEvent::Info { message, .. } => assert_eq!(message, "working"),
             other => panic!("expected Info, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn opencode_task_completion_no_longer_synthesizes_subagent_lifecycle() {
+        // Phase 4 (2026-05-12): the structured stderr stream is now the
+        // authoritative source for OpenCode subagent lifecycle. The stdout
+        // NDJSON parser no longer synthesizes SubagentStart/SubagentStop
+        // from `task` tool completions — those events come from
+        // `service=session ... parentID=...` and the matching `exiting loop`
+        // record on stderr.
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#)
+            .unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"tool_use","part":{"id":"t1","tool":"task",
+                 "state":{"status":"completed",
+                          "input":{"description":"Commit wrap CLI refactor","subagent_type":"coder"},
+                          "metadata":{"sessionId":"child-ses-1"},
+                          "time":{"start":1715340000000},
+                          "output":"ok"}}}"#,
+            )
+            .unwrap();
+
+        let collected = events.lock().unwrap().clone();
+        let ks: Vec<&str> = collected.iter().map(|e| e.kind_str()).collect();
+        assert_eq!(
+            ks,
+            vec!["session_start", "info", "tool_result"],
+            "task tool completion must emit only ToolResult; subagent lifecycle now comes from stderr"
+        );
+
+        // Verify NO subagent_start / subagent_stop in the stdout stream
+        let n_subagent_starts = ks.iter().filter(|k| **k == "subagent_start").count();
+        let n_subagent_stops = ks.iter().filter(|k| **k == "subagent_stop").count();
+        assert_eq!(n_subagent_starts, 0);
+        assert_eq!(n_subagent_stops, 0);
+
+        // subagent_done_count must NOT increment from stdout-side events
+        let mut metrics = LiveMetricsState::default();
+        let now = Instant::now();
+        for event in &collected {
+            metrics.observe_event(event, now);
+        }
+        assert_eq!(
+            metrics.subagent_done_count, 0,
+            "stdout-side task completion must not increment subagent_done_count"
+        );
+    }
+
+    #[test]
+    fn opencode_task_error_completion_no_longer_synthesizes_subagent_lifecycle() {
+        // Companion to opencode_task_completion_no_longer_synthesizes_subagent_lifecycle:
+        // even when a `task` tool errors out, no SubagentStart/SubagentStop
+        // is synthesized from stdout. The matching subagent stop comes from
+        // the stderr `exiting loop` record for the child session.
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#)
+            .unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"tool_use","part":{"id":"t-err","tool":"task",
+                 "state":{"status":"error",
+                          "input":{"description":"Failed subagent","subagent_type":"coder"},
+                          "metadata":{"sessionId":"child-ses-err"},
+                          "error":"agent crashed",
+                          "output":""}}}"#,
+            )
+            .unwrap();
+
+        let collected = events.lock().unwrap().clone();
+        let ks: Vec<&str> = collected.iter().map(|e| e.kind_str()).collect();
+        assert_eq!(
+            ks,
+            vec!["session_start", "info", "tool_result"],
+            "task tool error completion must emit only ToolResult"
+        );
+
+        // ToolResult must still carry the error status so it is rendered.
+        match &collected[2] {
+            SemanticEvent::ToolResult { status, .. } => {
+                assert_eq!(status.as_deref(), Some("error"));
+            }
+            other => panic!("expected ToolResult, got {other:?}"),
+        }
+
+        let mut metrics = LiveMetricsState::default();
+        let now = Instant::now();
+        for event in &collected {
+            metrics.observe_event(event, now);
+        }
+        assert_eq!(
+            metrics.subagent_done_count, 0,
+            "stdout-side task error completion must not increment subagent_done_count"
+        );
+    }
+
+    #[test]
+    fn opencode_non_task_tool_does_not_synthesize_subagent_lifecycle() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#)
+            .unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"tool_use","part":{"id":"t1","tool":"bash",
+                 "state":{"status":"completed","input":{"command":"ls -la"},"output":"file.txt"}}}"#,
+            )
+            .unwrap();
+
+        let collected = events.lock().unwrap().clone();
+        let ks: Vec<&str> = collected.iter().map(|e| e.kind_str()).collect();
+        let n_subagent_starts = ks.iter().filter(|k| **k == "subagent_start").count();
+        let n_subagent_stops = ks.iter().filter(|k| **k == "subagent_stop").count();
+        assert_eq!(
+            n_subagent_starts, 0,
+            "non-task tool must not synthesize SubagentStart; got {ks:?}"
+        );
+        assert_eq!(
+            n_subagent_stops, 0,
+            "non-task tool must not synthesize SubagentStop; got {ks:?}"
+        );
+        assert_eq!(
+            ks,
+            vec!["session_start", "info", "tool_result"],
+            "bash tool must emit only Info + ToolResult"
+        );
     }
 }

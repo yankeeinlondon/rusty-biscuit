@@ -1,0 +1,158 @@
+version: "1"
+description: >
+  Example corpus manifest for Tree Hugger lint rule validation.
+  This manifest defines a small set of representative repositories
+  used for smoke testing high-confidence syntax pattern rules.
+
+enabled_rules:
+  - unwrap-call
+  - expect-call
+  - dbg-macro
+  - debugger-statement
+  - eval-call
+  - exec-call
+  - breakpoint-call
+  - console-log
+  - print-call
+  - fmt-println
+  - dead-code
+
+disabled_rules:
+  - undefined-symbol
+  - unused-symbol
+  - undefined-module
+
+thresholds:
+  unwrap-call: Zero
+  expect-call: Zero
+  dbg-macro: Zero
+  debugger-statement: Zero
+  eval-call: Zero
+  exec-call: Zero
+  breakpoint-call: Zero
+  console-log: Budget
+  print-call: Budget
+  fmt-println: Budget
+  dead-code: Budget
+  undefined-symbol: Unlimited
+  unused-symbol: Unlimited
+  undefined-module: Unlimited
+
+oracles:
+  - tool: clippy
+    version: "0.1.x"
+    languages:
+      - Rust
+    rule_mapping:
+      unwrap_used: unwrap-call
+      expect_used: expect-call
+
+  - tool: oxlint
+    version: "0.2.x"
+    languages:
+      - JavaScript
+      - TypeScript
+    rule_mapping:
+      no-console: console-log
+      no-debugger: debugger-statement
+
+items:
+  - name: serde
+    source: https://github.com/serde-rs/serde
+    revision: v1.0.200
+    license: MIT
+    language: Rust
+    tiers:
+      - Smoke
+    selected_paths:
+      - serde/src/**/*.rs
+    excluded_paths:
+      - serde/src/de/mod.rs
+      - serde/src/ser/mod.rs
+
+  - name: clap
+    source: https://github.com/clap-rs/clap
+    revision: v4.5.0
+    license: MIT
+    language: Rust
+    tiers:
+      - Smoke
+      - Expanded
+    selected_paths:
+      - clap_builder/src/**/*.rs
+    excluded_paths:
+      - clap_builder/src/tests/**/*.rs
+
+  - name: tokio
+    source: https://github.com/tokio-rs/tokio
+    revision: tokio-1.37.0
+    license: MIT
+    language: Rust
+    tiers:
+      - Expanded
+    selected_paths:
+      - tokio/src/**/*.rs
+    excluded_paths:
+      - tokio/src/tests/**/*.rs
+
+  - name: react
+    source: https://github.com/facebook/react
+    revision: v18.3.1
+    license: MIT
+    language: JavaScript
+    tiers:
+      - Smoke
+    selected_paths:
+      - packages/react/src/**/*.js
+    excluded_paths:
+      - packages/react/src/__tests__/**/*.js
+
+  - name: next.js
+    source: https://github.com/vercel/next.js
+    revision: v14.2.0
+    license: MIT
+    language: TypeScript
+    tiers:
+      - Expanded
+    selected_paths:
+      - packages/next/src/**/*.ts
+    excluded_paths:
+      - packages/next/src/**/*.test.ts
+
+  - name: flask
+    source: https://github.com/pallets/flask
+    revision: 3.0.3
+    license: BSD-3-Clause
+    language: Python
+    tiers:
+      - Smoke
+    selected_paths:
+      - src/flask/**/*.py
+    excluded_paths:
+      - src/flask/**/test_*.py
+
+  - name: fastapi
+    source: https://github.com/tiangolo/fastapi
+    revision: 0.111.0
+    license: MIT
+    language: Python
+    tiers:
+      - Expanded
+    selected_paths:
+      - fastapi/**/*.py
+    excluded_paths:
+      - fastapi/**/test_*.py
+
+  - name: go-stdlib
+    source: https://github.com/golang/go
+    revision: go1.22.0
+    license: BSD-3-Clause
+    language: Go
+    tiers:
+      - Smoke
+      - Expanded
+    selected_paths:
+      - src/net/http/*.go
+      - src/os/*.go
+    excluded_paths:
+      - src/**/*_test.go

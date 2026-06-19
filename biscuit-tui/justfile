@@ -16,8 +16,8 @@ ITALIC := '\033[3m'
 RESET := '\033[0m'
 RED := '\033[31m'
 
-LIBRARY := "tui-chrome"
-CLI := "tui-chrome-cli"
+LIBRARY := "biscuit-tui"
+CLI := "biscuit-tui-cli"
 CLI_PATH := "./cli"
 
 default:
@@ -27,107 +27,93 @@ default:
     if command -v md &> /dev/null; then
         md just.md
     fi
-    echo "tui-chrome Library & CLI (binary: question)"
+    echo "biscuit-tui Library & CLI (binary: question)"
     echo "==========================================="
     echo
     just --list | grep -v 'default'
 
 # build library and CLI
 build *args="":
-    @just _build {{LIBRARY}} "tui-chrome Library" {{args}}
-    @just _build {{CLI}} "tui-chrome CLI" {{args}}
+    @just _build {{LIBRARY}} "biscuit-tui Library" {{args}}
+    @just _build {{CLI}} "biscuit-tui CLI" {{args}}
 
-# test library and CLI (levels 1 & 2)
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity {{LIBRARY}}
+    @just _sanity {{CLI}}
+
+# Full L1 suite for library and CLI.
 test *args="":
-    @echo
-    @echo "Level 1 Tests"
     @just _test {{LIBRARY}} {{args}}
-    @just _test {{CLI}} --test keyboard_protocol {{args}}
+    @just _test {{CLI}} {{args}}
+
+# Level-2 (real-terminal) tests for the CLI. Library has no L2 tests.
+#
+# By default, missing harnesses (WezTerm / Kitty / tmux) cause individual
+# tests to skip cleanly. Set `BISCUIT_TEST_LEVEL_REQUIRED=2` in the
+# environment to convert missing harnesses into hard failures (CI use).
+test-l2 *args="":
     @echo
-    @echo "Level 2 Tests (with real terminal render)"
-    @echo "- Note: this will be skipped if the required tools are not available on host"
-    @echo "    - tmux on PATH, and/or"
-    @echo "    - WEZTERM_UNIX_SOCKET + wezterm, and/or"
-    @echo "    - Kitty_LISTEN_ON + remove_control enabled"
+    @echo -e "Running {{BOLD}}Level-2{{RESET}} real-terminal tests"
+    @echo -e "{{DIM}}- export BISCUIT_TEST_LEVEL_REQUIRED=2 to hard-fail on missing harness{{RESET}}"
     @echo
-    @just _test {{CLI}} --test real_terminal_render
-    @echo
-    @echo "Note: Level 3 testing must be run with {{BLUE}}just test-level-3{{RESET}}"
-    @echo
-# Run Level-3 tests (OS keyboard injection via cliclick).
-test-level-3:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    # `--test-threads=1` is required: both Level-3 tests spawn their own
-    # WezTerm window, and parallel runs guarantee one steals focus from
-    # the other before cliclick finishes injecting.
-    #
-    # We also auto-detect a WezTerm parent and relaunch inside a
-    # non-WezTerm host (iTerm2 if available, else Terminal.app). macOS
-    # routes app-activation across all windows of the same app, so a
-    # parent WezTerm process competes with the spawned WezTerm child for
-    # focus mid-test and most key events get dropped. Hosting the test
-    # in iTerm2/Terminal.app puts the parent in a different application
-    # so the spawned WezTerm window keeps focus during cliclick injection.
+    @just _test_l2 {{CLI}} {{args}}
 
-    cmd='RUN_LEVEL3=1 cargo test -p {{CLI}} --test real_terminal_render level3_ -- --test-threads=1 --nocapture'
+# Level-3 (OS keyboard injection) tests for the CLI. macOS only; requires
+# cliclick on PATH and a non-WezTerm parent terminal for focus reliability.
+# Sets `RUN_LEVEL3=1` so the `level3_enabled()` gate trips; individual
+# tests still skip cleanly when cliclick / WezTerm are unavailable.
+test-l3 *args="":
+    @just _test_l3 {{CLI}} {{args}}
 
-    if [[ "$(uname -s)" == "Darwin" && "${TERM_PROGRAM:-}" == "WezTerm" ]]; then
-        echo
-        echo "Detected WezTerm as the parent terminal."
-        echo "Re-running Level-3 tests inside a non-WezTerm host so cliclick"
-        echo "key injection isn't disrupted by parent-window focus events."
-        echo
+# Not applicable: biscuit-tui has no browser-target tests.
+test-browser:
+    @echo "test-browser: not applicable for biscuit-tui"
 
-        # Prefer iTerm2 if installed; fall back to Terminal.app.
-        if osascript -e 'tell application "iTerm" to version' >/dev/null 2>&1; then
-            host=iTerm
-        else
-            host=Terminal
-        fi
-        echo "Hosting the run in: ${host}"
-        echo "Test output will appear in the new ${host} window."
-        echo
+# Not applicable: biscuit-tui has no real-resource (device / network) tier.
+test-real:
+    @echo "test-real: not applicable for biscuit-tui"
 
-        # Self-deleting wrapper script the new host will execute.
-        script=$(mktemp -t biscuit_tui_level3.XXXXXX)
-        printf '%s\n' \
-            '#!/usr/bin/env bash' \
-            "cd $(printf '%q' "$PWD")" \
-            "$cmd" \
-            'code=$?' \
-            'echo' \
-            'echo "(level-3 run exited $code) — press Enter to close this window."' \
-            'read' \
-            'rm -f "$0"' \
-            > "$script"
-        chmod +x "$script"
+# Lint both the library and CLI
+lint:
+    @just _lint {{LIBRARY}}
+    @just _lint {{CLI}}
 
-        if [[ "$host" == iTerm ]]; then
-            osascript \
-                -e 'tell application "iTerm"' \
-                -e '  activate' \
-                -e '  create window with default profile' \
-                -e '  tell current session of current window' \
-                -e "    write text \"bash '$script'\"" \
-                -e '  end tell' \
-                -e 'end tell'
-        else
-            osascript \
-                -e "tell application \"Terminal\" to do script \"bash '$script'\"" \
-                -e 'tell application "Terminal" to activate'
-        fi
+# Per-package LCOV coverage for the library and CLI.
+coverage *args="":
+    @just _coverage {{LIBRARY}} {{args}}
+    @just _coverage {{CLI}} {{args}}
 
-        echo "Dispatched. Switch to ${host} to watch progress; do not move focus"
-        echo "back to this WezTerm window during the run."
-        exit 0
-    fi
+# Doctests for the library and CLI.
+doctest *args="":
+    @just _doctest {{LIBRARY}} {{args}}
+    @just _doctest {{CLI}} {{args}}
 
-    echo
-    echo "Level 3 Testing"
-    eval "$cmd"
-    echo
+# Not applicable: biscuit-tui has no Criterion benches (opted out).
+bench:
+    @echo "bench: not applicable for biscuit-tui (opted out via package metadata)"
 
+# Not applicable: biscuit-tui has no fuzz targets.
+fuzz:
+    @echo "fuzz: not applicable for biscuit-tui"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ---------------------------------------------------------------------------
+
+# Lint (and fix) both the library and CLI
+lint-fix:
+    @just _lint {{LIBRARY}} || just _fix_lint {{LIBRARY}}
+    @just _lint {{CLI}} || just _fix_lint {{CLI}}
 
 # Run the env-gated PTY/shell verification suites
 # (keyboard protocol, completions shell, choose-cli PTY).
@@ -137,20 +123,10 @@ test-pty:
     @RUN_SHELL_TESTS=1 cargo test -p {{CLI}} --test completions_shell -- --nocapture
     @QUESTION_INTERACTIVE_PTY=1 cargo test -p {{CLI}} --test choose_cli pty:: -- --nocapture
 
-# Lint both the library and CLI
-lint:
-    @just _lint {{LIBRARY}}
-    @just _lint {{CLI}}
-
-# Lint (and fix) both the library and CLI
-lint-fix:
-    @just _lint {{LIBRARY}} || just _fix_lint {{LIBRARY}}
-    @just _lint {{CLI}} || just _fix_lint {{CLI}}
-
 # install CLI binary
 install *args="":
     @just build --release
-    @just _install "{{CLI_PATH}}" "tui-chrome" "question" {{args}}
+    @just _install "{{CLI_PATH}}" "biscuit-tui" "question" {{args}}
 
 # Validate the source code without doing a full build
 check:
@@ -158,7 +134,7 @@ check:
 
 # build and show the docs for the library code
 docs:
-    @echo "Build and then show latest docs for the tui-chrome library code"
+    @echo "Build and then show latest docs for the biscuit-tui library code"
     @echo ""
     @cargo doc -p {{LIBRARY}} --open
 

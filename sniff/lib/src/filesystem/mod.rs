@@ -30,17 +30,20 @@ pub use file_types::{
 pub use formatting::{EditorConfigSection, FormattingConfig, detect_formatting};
 pub use git::{
     BehindStatus, CommitDesc, CommitDescSet, CommitInfo, DeltaKind, GitHostingProvider, GitInfo,
-    GitRepo, LocalBranchInfo, PeriodSpecifier, RemoteInfo, RepoStatus, detect_git,
+    GitRepo, LocalBranchInfo, PeriodSpecifier, RemoteInfo, RepoStatus, commit_browser_url,
+    commit_by_sha_at, commit_files_at, commits_for_branch_at, commits_for_path_at, detect_git,
     detect_git_with_request, detect_merge_conflicts, get_commit_by_sha, get_commit_files,
-    get_commits_for_path, get_recent_commits_by_count, get_recent_commits_by_date,
-    get_recent_commits_by_duration, get_recent_commits_by_hash, get_recent_commits_in_range,
-    parse_period,
+    get_commits_for_branch, get_commits_for_path, get_recent_commits_by_count,
+    get_recent_commits_by_date, get_recent_commits_by_duration, get_recent_commits_by_hash,
+    get_recent_commits_in_range, merge_conflicts_at, parse_period, preferred_remote_url,
+    remote_url, repo_root,
 };
 pub use just::{JustRecipe, JustRecipeParam, JustfileInfo, detect_justfiles};
 pub use languages::{LanguageBreakdown, LanguageStats, detect_languages};
 pub use repo::{
-    DependencyEntry, DependencyKind, MonorepoTool, Package, PackageDiscoverySource,
-    PackageEcosystem, RepoInfo, detect_repo, detect_repo_structure,
+    DependencyEntry, DependencyKind, DetectedStandard, DetectionConfidence, MonorepoLayer,
+    MonorepoStandard, MonorepoStandardSpec, Package, PackageEcosystem, PackageProvenance, RepoInfo,
+    detect_repo, detect_repo_structure,
 };
 
 #[deprecated(note = "Use `Package` instead")]
@@ -89,15 +92,33 @@ pub fn detect_filesystem_with_request(
         || request.include_file_inventory
         || request.include_docs
         || request.include_formatting;
-    let shared_root = determine_shared_walk_root(root, request);
+
+    // Discover the repository once up front when git detection is requested,
+    // then thread that single handle into the git stage and reuse its work
+    // directory as the shared-walk root. This removes the redundant second
+    // discovery (parent walk + repo open) the git stage used to perform on
+    // every invocation that renders git alongside repo/docs/inventory. When git
+    // detection is not requested, the provided root is always the walk root.
+    let discovered_git = match request.git.as_ref() {
+        Some(_) => GitRepo::discover(root)?,
+        None => None,
+    };
+    let shared_root = match &discovered_git {
+        Some(handle) => handle.repo_root().to_path_buf(),
+        None => root.to_path_buf(),
+    };
 
     std::thread::scope(|scope| {
         let git_handle = request.git.as_ref().map(|git_request| {
             let collector = collector.clone();
+            let discovered = discovered_git;
             scope.spawn(move || {
                 performance::with_current_collector(collector, || {
                     let git_started = Instant::now();
-                    let git = git::detect_git_with_request(root, git_request);
+                    let git = match discovered {
+                        Some(repo) => repo.detect_with_request(git_request).map(Some),
+                        None => Ok(None),
+                    };
                     performance::record_logged_stage(
                         "filesystem.git",
                         git_started.elapsed(),
@@ -352,33 +373,87 @@ fn filter_inventory(
     }
 }
 
-fn determine_shared_walk_root(root: &Path, request: &FilesystemRequest) -> PathBuf {
-    if request.repo.is_some() && request.git.is_none() {
-        return root.to_path_buf();
-    }
-
-    // Only discover git root when git detection is actually requested
-    if request.git.is_some() {
-        return discover_repo_root(root).unwrap_or_else(|| root.to_path_buf());
-    }
-
-    // For docs-only requests, skip git discovery and use the provided root
-    if request.include_docs {
-        return root.to_path_buf();
-    }
-
-    root.to_path_buf()
-}
-
-fn discover_repo_root(root: &Path) -> Option<PathBuf> {
-    let repo = git2::Repository::discover(root).ok()?;
-    repo.workdir().map(Path::to_path_buf)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::request::RepoRequest;
+    use crate::request::{DetectionPlan, GitRequest, RepoRequest};
+
+    /// Creates a temporary git repo with a committed file and an uncommitted
+    /// modification plus an untracked file, suitable for testing status-walk
+    /// behavior.
+    fn create_dirty_git_repo() -> (tempfile::TempDir, PathBuf) {
+        use git2::{Repository, Signature};
+        use std::fs;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+
+        let file_path = dir.path().join("hello.txt");
+        fs::write(&file_path, "hello world\n").unwrap();
+
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("hello.txt")).unwrap();
+        index.write().unwrap();
+
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = Signature::now("Test", "test@test.com").unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "initial commit", &tree, &[])
+            .unwrap();
+
+        fs::write(&file_path, "hello world\nmodified line\n").unwrap();
+        fs::write(dir.path().join("untracked.txt"), "new file\n").unwrap();
+
+        let path = dir.path().to_path_buf();
+        (dir, path)
+    }
+
+    #[test]
+    fn identity_plan_does_not_walk_status_end_to_end() {
+        let (_dir, path) = create_dirty_git_repo();
+
+        // Measure walks for this repo's path as a before/after delta. The plan's
+        // git stage runs on a scoped thread, but walks are recorded per repo path
+        // regardless of thread, so no cross-thread counter propagation is needed.
+        let before = crate::filesystem::git::status::status_walk_count(&path);
+
+        let plan = DetectionPlan::new()
+            .base_dir(path.clone())
+            .without_os()
+            .without_hardware()
+            .without_network()
+            .filesystem(
+                FilesystemRequest::new()
+                    .git(GitRequest::identity())
+                    .repo(RepoRequest::structure())
+                    .without_file_inventory()
+                    .without_formatting()
+                    .without_docs(),
+            );
+
+        let result = crate::detect_with_plan(plan).unwrap();
+        let fs = result.filesystem.expect("filesystem should be present");
+        let git = fs.git.expect("git should be present");
+
+        assert_eq!(
+            crate::filesystem::git::status::status_walk_count(&path),
+            before,
+            "identity plan must not trigger a working-tree status walk"
+        );
+        assert!(
+            git.status.is_none(),
+            "identity plan must yield status == None"
+        );
+        assert_eq!(
+            git.repo_root.canonicalize().unwrap(),
+            path.canonicalize().unwrap(),
+            "repo_root should match the fixture directory"
+        );
+        assert!(
+            git.current_branch.is_some(),
+            "current_branch should be set on a branch"
+        );
+    }
 
     #[test]
     fn need_shared_view_includes_formatting() {

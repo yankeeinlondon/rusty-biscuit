@@ -2,6 +2,8 @@
 source: darkmatter/lib/tests/error_snapshots/transclusion.rs
 expression: out
 ---
-⨫ TransclusionError: URL parse failure
+⤫ TransclusionError: URL parse failure
+┃ 
 ┃ relative URL without a base
-Verify the URL scheme and format (e.g., https://example.com).
+┃ 
+┃ Verify the URL scheme and format (e.g., https://example.com).

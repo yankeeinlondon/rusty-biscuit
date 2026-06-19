@@ -19,6 +19,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             Constraint::Length(1), // Success
             Constraint::Length(1), // Attention
             Constraint::Length(1), // Error
+            Constraint::Length(1), // blank
+            Constraint::Length(1), // Prompt For Missing
             Constraint::Min(0),
         ])
         .split(area);
@@ -145,6 +147,34 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Paragraph::new(success_line), chunks[6]);
     frame.render_widget(Paragraph::new(attention_line), chunks[7]);
     frame.render_widget(Paragraph::new(error_line), chunks[8]);
+
+    let prompt_for_missing_state = if app.config.prompt_for_missing {
+        "[on]"
+    } else {
+        "[off]"
+    };
+    let prompt_for_missing_line = Line::from(vec![
+        Span::styled(
+            "Prompt For Missing",
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(": "),
+        Span::styled(
+            prompt_for_missing_state,
+            if is_detail {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default()
+            },
+        ),
+        Span::styled(
+            "  (press M to toggle)",
+            Style::default()
+                .fg(Color::Indexed(244))
+                .add_modifier(Modifier::ITALIC),
+        ),
+    ]);
+    frame.render_widget(Paragraph::new(prompt_for_missing_line), chunks[10]);
 
     if let Some(ModalState::AgentSelector { highlighted }) = &app.modal {
         let agents = super::super::get_available_providers(app);
@@ -283,6 +313,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
                 category: SoundCategory::Error,
                 highlighted,
             });
+        }
+        KeyCode::Char('m') | KeyCode::Char('M') => {
+            app.config.prompt_for_missing = !app.config.prompt_for_missing;
+            app.dirty = true;
         }
         _ => {}
     }

@@ -1,6 +1,6 @@
 ---
 name: unfolded-circle-remote
-description: Deep knowledge base for working with and developing the Unfolded Circle Remote's TCP/IP Integrations, the "Core API", and the "Dock API".
+description: Deep knowledge base for the Unfolded Circle Remote's TCP/IP integrations — the Core API and the Dock API. Use when developing or integrating with an Unfolded Circle Remote, implementing the Core or Dock API, or troubleshooting its integration protocol.
 ---
 # Unfolded Circle Remote Two/3
 

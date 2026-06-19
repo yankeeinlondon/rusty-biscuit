@@ -1,4 +1,4 @@
-//! Visual constants shared by every tui-chrome component.
+//! Visual constants shared by every biscuit-tui component.
 //!
 //! [`ComponentTheme`] centralises the glyphs and styles used across
 //! the library so that components render consistently. Each component

@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
-use biscuit_terminal::utils::layout::Margin;
+use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
+use biscuit_terminal::utils::layout::{Length, Edges};
 use clap::Args;
 use color_eyre::eyre::Result;
 
@@ -138,14 +138,14 @@ fn prose_error(msg: &str) -> Prose {
 
 /// Build a provider section with its actions.
 fn build_provider_section(provider: Provider, actions: Vec<SyncAction>) -> UnorderedList {
-    let mut items: Vec<RenderableContent> = vec![];
+    let mut items: Vec<RenderableTerminalContent> = vec![];
 
     // Provider header
     let header = Prose::new(format!("<b><blue>{}</blue></b>", provider));
-    items.push(RenderableContent::from(header));
+    items.push(RenderableTerminalContent::from(header));
 
     // Build action list
-    let action_proses: Vec<RenderableContent> = actions
+    let action_proses: Vec<RenderableTerminalContent> = actions
         .into_iter()
         .map(|action| {
             let prose = match action {
@@ -162,17 +162,17 @@ fn build_provider_section(provider: Provider, actions: Vec<SyncAction>) -> Unord
                 SyncAction::Deregistered => prose_deregistered(),
                 SyncAction::Error(msg) => prose_error(&msg),
             };
-            RenderableContent::from(prose)
+            RenderableTerminalContent::from(prose)
         })
         .collect();
 
     if !action_proses.is_empty() {
         let action_list = UnorderedList::from(action_proses).with_bullet("  ◦ ");
-        items.push(RenderableContent::from(action_list));
+        items.push(RenderableTerminalContent::from(action_list));
     }
 
     let mut list = UnorderedList::from(items).with_bullet("• ");
-    list.layout_mut().top_margin = Margin::Chars(1);
+    list.layout_mut().margin = Edges::y(Length::ch(1));
     list
 }
 

@@ -116,6 +116,7 @@ Steps:
 5. **Select provider** — choose the agentic CLI
 6. **Execute** — run the provider session
 7. **Closure** — Claudine rewrites the file:
+   - The replacement body is the agent's **final response only** — the output text emitted after the agent's last tool call. Interstitial narration between tool calls (e.g. "Let me read the docs…") is dropped, so process commentary never leaks into the artifact. Providers that recover their final message post-hoc (e.g. Codex's `--output-last-message`) supply that message directly.
    - The provider returns replacement body content only (no frontmatter)
    - Original frontmatter properties are preserved byte-for-byte
    - If the provider modified an existing frontmatter property, Claudine reverts it to the original value and emits a warning
@@ -132,6 +133,48 @@ Steps:
 - **`policy`** — content freshness policy (coming soon)
 - **`blast_radius`** — list of source files that trigger re-generation when changed
 
+### Inline-Compose / Sequence Mismatch
+
+A document that authors **both** a non-null `prompt` and a non-null `sequence`
+defines an *inline sequence*: each sequence state is meant to invoke an
+inline-compose operation using the `prompt`. Running such a document with
+`inline-compose` would execute the prompt once, ignoring the sequence — so
+`inline-compose` rejects it and directs the user to `claudine sequence`
+instead.
+
+```yaml
+prompt: |-
+  How do you say "{{state.name}}" in Italian?
+sequence:
+  - name: Hello
+  - name: Goodbye
+```
+
+Detection rules:
+
+- The mismatch triggers when the **authored** frontmatter has a `prompt` key
+  whose value is not `null` **and** a `sequence` key whose value is not `null`.
+  Value type and validity are never inspected — empty strings, empty lists,
+  scalars, mappings, and other wrong-type-but-non-null values all count.
+- `prompt: null`, `sequence: null`, or an absent key does **not** trigger the
+  mismatch; ordinary `inline-compose` validation continues.
+- Detection reads authored frontmatter only. Command-line `key=value` overrides
+  and `--set` neither create nor suppress the mismatch.
+
+The check runs **before** prompt-property validation, schema processing,
+override application, composition, provider selection, and execution, so it is
+fully fail-fast: no shell commands run, no provider launches, and the source
+file is never mutated. Malformed frontmatter retains its existing
+`FrontmatterParse` diagnostic, which takes precedence because no reliable
+frontmatter keys are available to inspect.
+
+The diagnostic identifies the resolved document (OSC8-linked when supported),
+names both `prompt` and `sequence`, points to `claudine sequence`, and notes the
+upcoming `sections` feature. When the error output stream is a TTY it also
+echoes the authored frontmatter YAML verbatim; when stderr is not a TTY the YAML
+is withheld (to avoid exposing frontmatter) and the diagnostic says so. There is
+no flag to reveal the YAML in non-TTY output.
+
 ## Provider Selection
 
 Provider selection behaves differently in **TTY** (interactive terminal) and **non-TTY** (piped or CI) modes. In both modes, explicit `--<provider>` flags always win unconditionally.
@@ -140,7 +183,7 @@ Provider selection behaves differently in **TTY** (interactive terminal) and **n
 
 When stdout is a terminal and no explicit `--<provider>` flag is given:
 
-1. **Interactive picker** — a `tui-chrome` one-shot picker shows all installed providers. Frontmatter `agent` and config `favorite_agent` only influence the **default index** and **row ordering**; they do not bypass the picker.
+1. **Interactive picker** — a `biscuit-tui` one-shot picker shows all installed providers. Frontmatter `agent` and config `favorite_agent` only influence the **default index** and **row ordering**; they do not bypass the picker.
 
 ### Non-TTY Mode
 
@@ -193,15 +236,158 @@ Roo Code is excluded from composition provider selection because it is a VS Code
 
 The shorthand booleans and the `--provider` value both accept fuzzy input (`cl` → `claude`, `gem` → `gemini`, `oc` → `opencode`). The [argv normalizer](argv-normalization.md) rewrites every shorthand into a canonical `--provider <slug>` pair before clap runs, so runtime provider selection only ever reads the single `--provider` field.
 
-### The `--interactive` Flag
+### The `--interactive` and `--no-interactive` Flags
 
-`-i` / `--interactive` controls the **provider session mode**, not provider selection. The composed prompt is still prepared first, then passed as the initial message for an interactive session.
+`-i` / `--interactive` forces an **interactive provider session**; `--no-interactive` forces a **non-interactive provider session**. Both flags control the session mode, not provider selection, and the composed prompt is still prepared first before being passed to the provider.
 
-> **Note:** `inline-compose -i` is provider-gated. Claudine allows it only when the selected provider can recover the final assistant message for the inline rewrite path.
+Session interactivity is resolved from (highest to lowest precedence):
+
+1. `--no-interactive` CLI flag
+2. `-i` / `--interactive` CLI flag
+3. `interactive` frontmatter property (`true` / `false`)
+4. Default: non-interactive
+
+`--interactive` and `--no-interactive` are mutually exclusive; clap rejects `-i --no-interactive` at parse time. The `interactive` frontmatter property is honored by `compose` and `inline-compose`; `claudine sequence` rejects `interactive: true` because a sequence is serial automation and must be driven by the explicit `--interactive` override when needed.
+
+> **Note:** `inline-compose -i` is provider-gated. Claudine allows it only when the selected provider can recover the final assistant message for the inline rewrite path. When interactive mode is triggered by frontmatter `interactive: true`, the diagnostic names `frontmatter` as the source so the remediation is clear.
 
 ### The `--exclude` Flag
 
 `--exclude <PROVIDER>` removes a provider from automatic selection (repeatable). Explicit flags (`--codex`, etc.) override exclusions.
+
+## Dry Run
+
+`--dry-run` runs the **full composition pipeline up to but not including provider launch**, then emits the composed result instead of sending it to an agentic CLI. It is available on `compose`, `inline-compose`, and `sequence`, and is the gate to use for CI rehearsal: the path it exercises is identical to a real run, minus the provider spawn.
+
+### Pipeline Scope
+
+Everything before launch runs normally:
+
+- Schema validation (including the interactive missing-property prompt under a TTY).
+- Shell commands in the document graph are **executed for real** — they produce actual side effects and their output is interpolated into the frontmatter and body.
+- Harness pre-checks (shell-command approval, writability) run normally.
+- Provider and model resolution run normally.
+
+The provider is **never launched**; for `inline-compose` the source file is therefore **never mutated** (`last_updated` is untouched).
+
+### Output Split
+
+Dry-run output follows Unix stream conventions so `claudine compose --dry-run doc.md > body.md` captures only the body:
+
+- **stdout** — the composed document body (the data product).
+- **stderr** — the finalized YAML frontmatter (syntax-highlighted) followed by a metadata table.
+
+The metadata table rows, in order: **Document** (frontmatter `name`, or the relative path, rendered as a blue OSC8 link), **Description** (italic + dim, only when set), **Agent** (the resolved provider name when one is selected, or a classified resolution breakdown — no-agent, invalid frontmatter hint, not-installed hint, multi-suggestion list, auto-selected single suggestion, or zero-installed list — rendered as a multi-line cell), **Model** (the resolved model, or `default`), **YOLO** (`true`/`false`), **Session** (`interactive` or `non-interactive` with the resolved source in parentheses, e.g. `interactive (frontmatter)` or `non-interactive (--no-interactive)`), and **Area** (the focused monorepo area, only when inside a monorepo).
+
+`--quiet` and `--silent` have **no effect** in dry-run mode: the full output is always rendered.
+
+### Non-TTY Shell-Approval Gate
+
+In a TTY, an unapproved shell command triggers the same interactive approval prompt as a normal run. In a non-TTY environment (e.g. CI) there is no way to prompt, so the dry-run **fails fast**: it exits non-zero with
+
+```
+Cannot dry-run: shell command 'X' requires interactive approval. Run with --yolo to auto-approve, or pre-approve the command in your configuration.
+```
+
+This is the gate working correctly — if production would prompt, the dry-run fails. Bypass it with `--yolo` (auto-approve) or by pre-approving the command in configuration.
+
+### Sequence Dry Run
+
+`sequence --dry-run` exercises the whole sequence as one logical command. Each step is composed and rendered in order: all bodies are concatenated to **stdout**, while each step's frontmatter and metadata table go to **stderr**, separated by a `=== Document N of M ===` divider before every document after the first. A composition failure in any step renders the error to stderr and stops the sequence immediately (fail-fast), exiting non-zero without launching any provider.
+
+Any composition error (schema validation failure, missing file, denied shell command, writability failure) is rendered to **stderr** and exits the process non-zero, leaving stdout clean.
+
+## Schema Validation
+
+Composition documents can declare a `$schema` in their frontmatter to constrain the property values that drive the prompt. Schema processing is anchored on Darkmatter's `SimplifiedSchema` and runs as a stage inside the existing `Resolve → Pre-Flight → Prepare → Select → Launch → Closure` pipeline — between override application and shell expansion. The wrapper layer translates Darkmatter's structural failures into typed claudine errors so users see actionable reports instead of a generic compose failure.
+
+### Authoring
+
+`$schema` accepts the same forms Darkmatter accepts: inline `SimplifiedSchema` mappings, references to external YAML/JSON schema files (resolved relative to the prompt document's parent directory), and root-level unions. Raw JSON Schema also validates, but it does not expose typed property metadata, so it does not feed the interactive prompts or shell completion described below.
+
+```yaml
+$schema:
+  topic: 'string(required)'
+  tier: 'enum(small, medium, large; required)'
+  draft: boolean
+  cover: "file(match('*.png'))"
+```
+
+Remote `http://` / `https://` schema references remain unsupported.
+
+### Required vs Optional
+
+For each property declared in `$schema`, claudine routes the validation outcome through three categories:
+
+| Outcome                | Required                                                            | Optional                                                                                |
+| ---------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Present and valid      | continue                                                            | continue                                                                                |
+| Missing                | prompt in Interactive Mode when allowed; otherwise `MissingProperties` | continue                                                                                |
+| Present but invalid    | hard `SchemaValidation` abort (no prompt, no recovery)              | the value is dropped from the prompt context, a `tracing::warn!` fires, composition retries once |
+
+The drop-and-retry for invalid optionals is automatic; users see the discarded value via the `dropping optional schema property with invalid value` log line.
+
+### Interactive Mode
+
+When required properties are missing, claudine offers to collect them interactively. Interactive Mode is allowed only when **every** condition is true:
+
+1. `prompt_for_missing` is `true` (the default user-config value),
+2. stdin is attached to a TTY,
+3. stderr is attached to a TTY (stdout may be piped),
+4. `--silent` is not set,
+5. no required value is present-but-invalid (the abort above wins),
+6. at least one required value is actually missing.
+
+When Interactive Mode is denied, claudine emits a `MissingProperties` error with the prompt file (OSC8-linked), the list of missing property names in declaration order with their type labels and descriptions, the frontmatter `description` (when present), and a remediation hint: `Pass key=value, use --set, or set prompt_for_missing to true in an interactive terminal.`
+
+When Interactive Mode is allowed, claudine first prints a per-property status report to stderr (required and optional, with valid/invalid/missing glyphs) and then drives `biscuit-tui` widgets sized to each property's `SimplifiedType`:
+
+| Property type                                  | Widget                                  |
+| ---------------------------------------------- | --------------------------------------- |
+| `enum(...)`                                    | single-choice picker                    |
+| `enum(...)[]`                                  | multi-choice picker                     |
+| `boolean` / `boolish`                          | boolean switch                          |
+| `number` / `numberlike`                        | text input with parse-and-retry         |
+| `string` / `date` / `datetime` / `time` / `url` / `email` / `file` | text input with format hint |
+| `object`, `any`, property-level union, root-level union without projection | `UnsupportedInteractiveSchema` |
+
+Numeric inputs reprompt with an inline error on parse failure instead of aborting. Collected values feed back into the override set; composition re-runs with the new overrides before any provider session starts.
+
+### Schema Collection Independence
+
+The decision to prompt for missing required values depends **only** on the six signals listed under [Interactive Mode](#interactive-mode) above and **must not** depend on the resolved `session_interactive` value. Collection completes during the pre-flight schema-validation stage, before the provider child process is ever spawned. This means an `interactive: true` document with missing required properties still collects them interactively under a TTY, and a `--no-interactive` invocation of an `interactive: true` document still emits a typed `MissingProperties` error rather than launching a non-interactive session.
+
+### User Config
+
+The user-scoped Claudine config (`~/.claudine/config.json` or `.json5`) exposes a single switch:
+
+```json
+{ "prompt_for_missing": true }
+```
+
+The default is `true`. The field is scoped to the user config only — the repo-scoped config rejects it. The interactive `claudine config` TUI offers a boolean toggle, and the non-interactive setter accepts `claudine config set prompt-for-missing true|false`.
+
+### Validation Timing
+
+For every flavor (`compose`, `inline-compose`, `sequence`):
+
+1. Parse `--set` and shorthand `key=value` setters (JSON5-first).
+2. For `sequence`, merge per-step overlay values after caller setters; reserved overlay keys win.
+3. Compose through Darkmatter.
+4. Build the effective schema for the composed document.
+5. Validate effective frontmatter.
+6. If required values are missing and Interactive Mode is allowed: collect, apply as overrides, re-compose, re-validate.
+7. Proceed to provider/model resolution only after validation succeeds.
+
+`inline-compose` keeps its existing `prompt` checks: a missing or non-string `prompt` still surfaces as `PromptPropertyMissing` / `PromptPropertyWrongType` before schema validation runs. The original `$schema` declaration is preserved byte-for-byte during the inline rewrite — interactive values collected for one run are never written back to the source file.
+
+Source loading (shared by all three commands) parses frontmatter strictly. A document whose `---` block contains malformed YAML — e.g. inconsistent block-scalar indentation — surfaces as a `FrontmatterParse` error that renders Darkmatter's rich frontmatter-parse block (file link, YAML location, offending-line excerpt), not as a misleading `PromptPropertyMissing`.
+
+`sequence` validates every step during Phase 1a, before any provider session starts. When multiple steps share the same missing property with the same shape and description, the user is prompted once and the answer is reused for later steps (unless the step overlay supplies a different value). Non-interactive failures are aggregated into a single `SequenceMissingProperties` error so the user can fix the entire sequence in one edit pass.
+
+### Schema-Aware Shell Completion
+
+The composition completion engine consults `$schema` when the cursor sits on a setter slot AND a positional prompt-file argument is already committed. See [shell-completions.md — Schema-Aware Setter Completion](shell-completions.md#schema-aware-setter-completion) for the full contract.
 
 ## Harness: Validations and Handlers
 
@@ -405,6 +591,15 @@ claudine sequence --fail-fast false @batch.md
 
 Use `claudine sequence` when you have a fixed list of items and need to compose the same template document against each item independently. Each step is a full one-shot composition run — with its own provider selection, harness evaluation, lifecycle notifications, and pre-flight shell approval. The sequence command is serial; steps do not run in parallel.
 
+### Compose vs Inline Steps
+
+A sequence runs each step as either a **compose** step or an **inline** step, decided once for the whole run by the same signal that splits the top-level `compose` and `inline-compose` commands: the presence of a `prompt` frontmatter property on the source document.
+
+- **No `prompt` property** — each step is a `compose` (chained-document) run: the composed **body** is sent as the agent prompt and no file is mutated.
+- **`prompt` property present** — each step is an `inline-compose` run: the composed **`prompt`** (with per-step `{{state}}` interpolation) is sent as the agent prompt, and the provider's output **replaces the document body** on disk, preserving the original frontmatter and bumping `last_updated` (see [Inline Composition](#inline-composition)).
+
+Because steps run serially and the body is written back after each one, an inline step's agent reads the body that the previous step wrote. A `prompt` property that is present but not a string is rejected up front with `PromptPropertyWrongType` — before any step launches — exactly as `inline-compose` does.
+
 ### Inline Sequence Definition
 
 Sequences can be defined directly in the source document's frontmatter as a scalar list or an object list.
@@ -538,15 +733,41 @@ Resolve → Pre-Flight → Prepare → Select Provider → Launch → Closure
 
 ## Performance Reporting
 
-Composition commands support an opt-in `--perf` flag that prints a detailed performance breakdown to stderr after execution completes. The report includes:
+Composition commands (and the provider wrappers) support an opt-in `--perf` flag that prints a performance breakdown to stderr after execution completes. The report is a single **reconciling tree** rooted at the `Performance` headline:
 
-- **CLI Overhead** — arg parsing, config loading, tracing init, and environment setup.
-- **Composition Report** — when `compose` or `inline-compose` (or each step of a `sequence`) triggers document preparation, the Darkmatter composition timings are shown (total time plus per-stage breakdown: interpolation, shell expansion, transclusion apply, etc.).
-- **Agent Execution** — launches, first-response latency, total execution time, and provider-reported API duration when available.
+```text
+Performance                         384.0ms  100%
+├─ pre-dispatch                       29.1ms    8%
+│  ├─ arg parsing                     20.3ms    5%
+│  ├─ tracing init                     3.5ms   <1%
+│  └─ config loading                  23.3ms    6%
+├─ prep phase                        204.3ms   53%
+│  ├─ frontmatter load                33.7ms    9%
+│  ├─ schema validation                4.1ms    1%
+│  ├─ shell approval                  12.3ms    3%
+│  ├─ composition                      4.0ms    1%
+│  │  └─ shell expansion                33µs   <1%  ×2
+│  └─ unattributed                   148.4ms   39%
+├─ environment setup                  85.7ms   22%
+│  ├─ system prompt                   81.6ms   21%  ▇ HOT
+│  └─ unattributed                     1.2ms   <1%
+├─ agent execution                        —       —  (dry run)
+└─ unattributed                       65.0ms   17%
+```
+
+The model and its invariants:
+
+- **Headline is true wall-clock.** The `Performance` total is sampled once at report-build from a single process-start baseline, so it can never disagree with the body the way a mid-flight timer could.
+- **Structural buckets reconcile.** Every `Structural` node's children (plus a synthetic `unattributed` remainder) sum back to the node's own total. The top-level buckets (`pre-dispatch`, `prep phase`, `environment setup`, `agent execution`) therefore sum back to the headline. A debug assertion enforces this at runtime; a unit test (TR-4) enforces it for every command shape.
+- **Breakdown rows itemize without double-counting.** Darkmatter composition stages and the `pre-dispatch`/agent sub-rows are `Breakdown` children — shown and percentaged, but excluded from the reconciliation sum so no cost appears twice. Single-shot `compose`/`inline-compose` nest the `composition` subtree under `prep phase`; `sequence` attaches the merged composition under `environment setup`.
+- **Percent column** shows each row's share of wall-clock (`100%` at the root, `<1%` for sub-one-percent slivers).
+- **`HOT` marker** flags the single dominant leaf when it clears the materiality floor (≥20% of wall-clock).
+- **Run counts** (`×N`) appear on a composition stage that ran more than once.
+- **Dry runs** render `agent execution` as an `—` leaf annotated `(dry run)`; the agent never launches.
 
 For `sequence`, the report is aggregated across all steps: launches and total execution time are summed, first-response latencies are averaged (with the minimum shown in a note), and composition metrics are merged. The report appears exactly once at the end of the run, after the sequence summary.
 
-`--perf` is emitted unconditionally when passed, even alongside `--silent` or `--quiet`, because it is an explicit opt-in.
+`--perf` is a stderr-only artifact — it never writes to stdout, so it does not interfere with piped composition output. It is emitted unconditionally when passed, even alongside `--silent` or `--quiet`, because it is an explicit opt-in.
 
 > **Note:** `provider_api_duration` is only populated for structured-streaming providers. Legacy providers (e.g., Goose) omit this line.
 

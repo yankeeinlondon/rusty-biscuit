@@ -289,14 +289,15 @@ mod tests {
 
     #[test]
     fn test_detect_hardware_returns_valid_info() {
-        let info = detect_hardware().unwrap();
+        // CPU + memory only: avoids the slow GPU/audio probes (system_profiler).
+        let info = detect_hardware_summary().unwrap();
         assert!(info.cpu.logical_cores > 0);
         assert!(info.memory.total_bytes > 0);
     }
 
     #[test]
     fn test_memory_values_are_reasonable() {
-        let info = detect_hardware().unwrap();
+        let info = detect_hardware_summary().unwrap();
         assert!(info.memory.total_bytes > 0);
         assert!(info.memory.total_bytes < u64::MAX);
         assert!(info.memory.available_bytes <= info.memory.total_bytes);
@@ -306,7 +307,7 @@ mod tests {
     fn test_available_bytes_is_not_zero() {
         // Regression test: available_bytes should never be 0 on a running system
         // This catches the macOS bug where sysinfo's available_memory() returns 0
-        let info = detect_hardware().unwrap();
+        let info = detect_hardware_summary().unwrap();
         assert_ne!(
             info.memory.available_bytes, 0,
             "available_bytes should not be 0 on a running system (total: {}, used: {})",
@@ -317,7 +318,7 @@ mod tests {
     #[test]
     fn test_memory_accounting_is_valid() {
         // Regression test: verify memory values have sensible relationships
-        let info = detect_hardware().unwrap();
+        let info = detect_hardware_summary().unwrap();
 
         // Available memory should be non-zero
         assert!(
@@ -353,13 +354,16 @@ mod tests {
 
     #[test]
     fn test_cpu_count_is_positive() {
-        let info = detect_hardware().unwrap();
+        let info = detect_hardware_summary().unwrap();
         assert!(info.cpu.logical_cores > 0);
     }
 
     #[test]
     fn test_storage_info_collected() {
-        let info = detect_hardware().unwrap();
+        // Storage only: storage enumeration is fast, so skip the slow GPU/audio
+        // probes that full detection would otherwise run.
+        let info = detect_hardware_with_request(&HardwareRequest::summary().include_storage(true))
+            .unwrap();
         // At least one disk should be present
         assert!(!info.storage.is_empty());
     }
@@ -373,7 +377,7 @@ mod tests {
 
     #[test]
     fn test_cpu_arch_populated() {
-        let hw = detect_hardware().unwrap();
+        let hw = detect_hardware_summary().unwrap();
         // CPU architecture should be known
         assert!(!hw.cpu.arch.is_empty());
     }
@@ -439,7 +443,8 @@ mod tests {
         let info = detect_hardware_with_request(&gpu_only).unwrap();
         assert!(info.cpu.logical_cores == 0);
         assert!(info.memory.total_bytes == 0);
-        assert!(!info.gpu.is_empty() || true);
+        // GPU presence is environment-dependent (absent on headless CI), so it
+        // is intentionally not asserted here.
     }
 
     #[test]

@@ -148,11 +148,11 @@ Sniff already emits these for editors and agents; this is just another consumer.
 ### 4.4 Sniff CLI
 
 ```
-sniff notification-helpers           # text output
-sniff notification-helpers --json    # JSON
+sniff software notification-helpers           # text output
+sniff software notification-helpers --json    # JSON
 ```
 
-Exposed in the existing `programs` enum so `sniff programs` shows it alongside editors / agents.
+Exposed in the software enum so `sniff software` shows it alongside editors / agents.
 
 ### 4.5 Sniff API surface used by messenger
 
@@ -737,7 +737,7 @@ sniff/lib/src/programs/notification_helpers/
   daemon.rs                   # zbus probe of org.freedesktop.Notifications.GetServerInformation
   helpers.rs                  # per-helper detection (path, version, install hint)
 
-sniff/cli/src/commands/notification_helpers.rs  # NEW — `sniff notification-helpers`
+sniff/cli/src/commands/notification_helpers.rs  # NEW — `sniff software notification-helpers`
 ```
 
 ### 13.4 Modified files (sniff)
@@ -808,7 +808,7 @@ Each phase is independently mergeable. Reviews after each phase.
 ### Phase 1 — Sniff detection
 
 - New `sniff::programs::notification_helpers` module.
-- `sniff notification-helpers` CLI subcommand.
+- `sniff software notification-helpers` CLI subcommand.
 - Tests for path/version/daemon detection.
 
 ### Phase 2 — Helper trait + Linux helpers

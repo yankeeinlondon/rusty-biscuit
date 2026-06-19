@@ -21,9 +21,46 @@ use schematic_definitions::elevenlabs::define_elevenlabs_rest_api;
 use schematic_definitions::openai::define_openai_api;
 use schematic_definitions::registry::get_registries_for_module;
 use schematic_gen::cargo_gen::write_cargo_toml;
+use schematic_gen::export::openapi::write_openapi_grouped;
 use schematic_gen::infer_module_path;
-use schematic_gen::openapi_output::write_openapi_grouped;
 use schematic_gen::output::{generate_and_write, generate_and_write_all};
+
+/// Returns true if a module exists as either a single `.rs` file or a directory
+/// with `mod.rs`.
+fn module_exists(src_dir: &Path, module_name: &str) -> bool {
+    let single_file = src_dir.join(format!("{}.rs", module_name));
+    let dir_mod = src_dir.join(module_name).join("mod.rs");
+    single_file.exists() || dir_mod.exists()
+}
+
+/// Reads module content from either a single file or concatenates all files
+/// in a split directory.
+fn read_module_content(src_dir: &Path, module_name: &str) -> String {
+    let single_file = src_dir.join(format!("{}.rs", module_name));
+    if single_file.exists() {
+        return std::fs::read_to_string(&single_file)
+            .unwrap_or_else(|e| panic!("Failed to read {}: {}", single_file.display(), e));
+    }
+
+    let dir = src_dir.join(module_name);
+    if dir.join("mod.rs").exists() {
+        let mut content = String::new();
+        for file_name in &["mod.rs", "requests.rs", "responses.rs", "client.rs"] {
+            let path = dir.join(file_name);
+            if path.exists() {
+                content.push_str(&std::fs::read_to_string(&path).unwrap_or_default());
+                content.push('\n');
+            }
+        }
+        return content;
+    }
+
+    panic!(
+        "Module '{}' not found as either file or directory in {}",
+        module_name,
+        src_dir.display()
+    );
+}
 
 /// Returns the absolute path to the schematic workspace directory.
 ///
@@ -675,8 +712,7 @@ fn elevenlabs_binary_endpoints_generate_correctly() {
 
     generate_and_write(&api, &src_dir, false).expect("Failed to generate code");
 
-    let api_content = std::fs::read_to_string(src_dir.join("elevenlabs.rs"))
-        .expect("Failed to read elevenlabs.rs");
+    let api_content = read_module_content(&src_dir, "elevenlabs");
 
     // Must have request_bytes for binary endpoints
     assert!(
@@ -728,8 +764,8 @@ fn multiple_apis_generate_together() {
     // Verify both API modules exist
     assert!(src_dir.join("openai.rs").exists(), "openai.rs should exist");
     assert!(
-        src_dir.join("elevenlabs.rs").exists(),
-        "elevenlabs.rs should exist"
+        module_exists(&src_dir, "elevenlabs"),
+        "elevenlabs module should exist"
     );
 
     // Verify lib.rs includes both modules

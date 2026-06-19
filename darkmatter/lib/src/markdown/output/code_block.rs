@@ -9,6 +9,7 @@ use crate::markdown::{
     MarkdownError, MarkdownResult,
     dsl::CodeBlockMeta,
     highlighting::{CodeHighlighter, ColorMode},
+    language_grammar::LanguageGrammar,
     output::html::HtmlOptions,
     output::terminal::TerminalOptions,
 };
@@ -26,11 +27,16 @@ use syntect::util::LinesWithEndings;
 /// ## Arguments
 ///
 /// * `code` - Source code to highlight
-/// * `language` - Programming language identifier (e.g., "rust", "python")
+/// * `language` - Resolved [`LanguageGrammar`] for syntax highlighting
 /// * `highlighter` - Code highlighter with loaded syntax set and theme
 /// * `options` - Terminal rendering options (includes global line numbering flag)
 /// * `meta` - Code block DSL metadata (title, highlight ranges, line numbering override)
 /// * `color_mode` - Dark or light mode for computing highlight background colors
+/// * `target_width` - Optional component render width. When `Some`, each line
+///   pads to exactly `target_width` visible columns using the line background
+///   color instead of clearing to the terminal edge with `\x1b[K`. This is
+///   what component `Layout.max_width`, `width`, and `padding` need so the
+///   code block body honours its resolved width.
 ///
 /// ## Returns
 ///
@@ -38,20 +44,25 @@ use syntect::util::LinesWithEndings;
 /// - Top padding row (blank line with theme background)
 /// - Code lines with syntax highlighting, optional line numbers, and highlight backgrounds
 /// - Bottom padding row (blank line with theme background)
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_terminal_code_block(
     code: &str,
-    language: &str,
+    language: &LanguageGrammar,
     highlighter: &CodeHighlighter,
     options: &TerminalOptions,
     meta: &CodeBlockMeta,
     color_mode: ColorMode,
+    target_width: Option<u16>,
+    override_bg: Option<Color>,
 ) -> Result<String, MarkdownError> {
-    let syntax = find_syntax(language, highlighter.syntax_set())
-        .unwrap_or_else(|| highlighter.syntax_set().find_syntax_plain_text());
+    let syntax = language
+        .resolve(highlighter.syntax_set())
+        .unwrap_or_else(|_| highlighter.syntax_set().find_syntax_plain_text());
     let theme = highlighter.theme();
 
-    // Get background color from theme
-    let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
+    // Use override background when provided (e.g. from page/component style),
+    // otherwise fall back to the theme background.
+    let bg_color = override_bg.unwrap_or_else(|| theme.settings.background.unwrap_or(Color::BLACK));
 
     // Use LinesWithEndings to preserve newlines - required for proper multi-line
     // syntax parsing in grammars like bash/shell that track state across lines
@@ -66,7 +77,7 @@ pub(crate) fn render_terminal_code_block(
     };
 
     // Add top padding row
-    output.push_str(&emit_padding_row(bg_color));
+    output.push_str(&emit_padding_row(bg_color, target_width));
 
     // Create highlighter for this code block
     let mut hl = HighlightLines::new(syntax, theme);
@@ -82,11 +93,19 @@ pub(crate) fn render_terminal_code_block(
             bg_color
         };
 
+        // Code blocks are self-contained surfaces. Clear inherited text
+        // attributes before applying the theme's own background and foreground.
+        output.push_str("\x1b[0m");
+
         // Set background color for the line (applies to gutter and content)
         output.push_str(&format!(
             "\x1b[48;2;{};{};{}m",
             line_bg.r, line_bg.g, line_bg.b
         ));
+
+        // Visible width used by gutter + content so we can pad correctly when
+        // `target_width` is set.
+        let mut visible_used: usize = 0;
 
         // Add line number gutter if enabled (with background already set)
         if line_number_width > 0 {
@@ -96,9 +115,12 @@ pub(crate) fn render_terminal_code_block(
                 line_number,
                 width = line_number_width
             ));
+            // gutter visible width = number digits + " │ " (3 chars: space, │, space)
+            visible_used += line_number_width + 3;
         } else {
             // Add left padding (1 character) when no line numbers
             output.push(' ');
+            visible_used += 1;
         }
 
         // Highlight the line and get styled ranges
@@ -118,22 +140,51 @@ pub(crate) fn render_terminal_code_block(
                     style.foreground.b,
                     text_without_newline
                 ));
+                visible_used +=
+                    biscuit_terminal::utils::block_constraint::visible_width(text_without_newline)
+                        as usize;
             }
         }
 
-        // Clear to end of line with background color, then reset
-        // \x1b[K clears from cursor to end of line using current background
-        output.push_str("\x1b[K\x1b[0m");
+        // Either pad to exact width with spaces (when constrained) or clear to
+        // end of line. Background is still set, so the trailing spaces inherit
+        // the line background color.
+        match target_width {
+            Some(w) => {
+                let pad = (w as usize).saturating_sub(visible_used);
+                if pad > 0 {
+                    output.push_str(&" ".repeat(pad));
+                }
+                output.push_str("\x1b[0m");
+            }
+            None => {
+                // \x1b[K clears from cursor to end of line using current background
+                output.push_str("\x1b[K\x1b[0m");
+            }
+        }
 
         // Add newline after each line (including last line, so bottom padding is on its own line)
         output.push('\n');
     }
 
     // Add bottom padding row (without trailing newline to avoid double spacing)
-    output.push_str(&format!(
-        "\x1b[48;2;{};{};{}m\x1b[K\x1b[0m",
-        bg_color.r, bg_color.g, bg_color.b
-    ));
+    match target_width {
+        Some(w) => {
+            output.push_str(&format!(
+                "\x1b[0m\x1b[48;2;{};{};{}m{}\x1b[0m",
+                bg_color.r,
+                bg_color.g,
+                bg_color.b,
+                " ".repeat(w as usize)
+            ));
+        }
+        None => {
+            output.push_str(&format!(
+                "\x1b[0m\x1b[48;2;{};{};{}m\x1b[K\x1b[0m",
+                bg_color.r, bg_color.g, bg_color.b
+            ));
+        }
+    }
 
     Ok(output)
 }
@@ -148,7 +199,8 @@ pub(crate) fn render_terminal_code_block(
 /// ## Arguments
 ///
 /// * `code` - Source code to highlight
-/// * `language` - Programming language identifier
+/// * `language` - Resolved [`LanguageGrammar`] for syntax highlighting and
+///   the HTML `language-*` class
 /// * `meta` - Code block DSL metadata
 /// * `highlighter` - Code highlighter with loaded syntax set and theme
 /// * `options` - HTML rendering options
@@ -158,7 +210,7 @@ pub(crate) fn render_terminal_code_block(
 /// HTML string containing the highlighted code block.
 pub(crate) fn render_html_code_block(
     code: &str,
-    language: &str,
+    language: &LanguageGrammar,
     meta: &CodeBlockMeta,
     highlighter: &CodeHighlighter,
     options: &HtmlOptions,
@@ -177,9 +229,10 @@ pub(crate) fn render_html_code_block(
     // Determine if we should show line numbers
     let show_line_numbers = meta.line_numbering || options.include_line_numbers;
 
-    // Find syntax definition (mirrors the terminal path via the shared helper)
-    let syntax = find_syntax(language, highlighter.syntax_set())
-        .unwrap_or_else(|| highlighter.syntax_set().find_syntax_plain_text());
+    // Resolve syntax through the same LanguageGrammar path as the terminal renderer.
+    let syntax = language
+        .resolve(highlighter.syntax_set())
+        .unwrap_or_else(|_| highlighter.syntax_set().find_syntax_plain_text());
 
     // Start code block container
     output.push_str(r#"<div class="code-block">"#);
@@ -233,10 +286,11 @@ pub(crate) fn render_html_code_block(
     } else {
         // Simple pre/code block without line numbers
         output.push_str("<pre><code");
-        if !language.is_empty() {
+        let language_label = language.to_string();
+        if !language_label.is_empty() {
             output.push_str(&format!(
                 r#" class="language-{}""#,
-                html_escape::encode_text(language)
+                html_escape::encode_text(&language_label)
             ));
         }
         output.push('>');
@@ -271,55 +325,27 @@ pub(crate) fn render_html_code_block(
     Ok(output)
 }
 
-/// Finds syntax definition by language identifier.
+/// Derives the effective color mode of a code panel from its resolved theme
+/// background, by perceived luminance.
 ///
-/// Searches in the following order:
-/// 1. By file extension (e.g., "rs", "py", "js")
-/// 2. By exact name (e.g., "Rust", "Python")
-/// 3. By case-insensitive name match (e.g., "rust" -> "Rust")
-/// 4. By common alias mapping (e.g., "shell" -> "bash", "c++" -> "cpp")
-pub(crate) fn find_syntax<'a>(
-    language: &str,
-    syntax_set: &'a syntect::parsing::SyntaxSet,
-) -> Option<&'a syntect::parsing::SyntaxReference> {
-    if language.is_empty() {
-        return None;
+/// Code blocks resolve their theme *variant* via [`CodeBlockMode`](crate::markdown::highlighting::CodeBlockMode)
+/// (default `Inverse`, i.e. the opposite of the page mode for contrast), and a
+/// few theme names are single-variant and do not invert. Downstream contrast
+/// decisions — the header pill's text color and the
+/// highlighted-line background math — must therefore key off the panel's
+/// **actual** background, not the requested mode, so a single-variant dark theme
+/// still gets light header text (and vice versa).
+///
+/// Returns [`ColorMode::Light`] when the background is perceptually light
+/// (Rec. 601 luma > 127), otherwise [`ColorMode::Dark`].
+#[inline]
+pub(crate) fn mode_for_background(bg: Color) -> ColorMode {
+    let luma = 0.299 * f32::from(bg.r) + 0.587 * f32::from(bg.g) + 0.114 * f32::from(bg.b);
+    if luma > 127.0 {
+        ColorMode::Light
+    } else {
+        ColorMode::Dark
     }
-
-    // Try by extension first (common case)
-    if let Some(syntax) = syntax_set.find_syntax_by_extension(language) {
-        return Some(syntax);
-    }
-
-    // Try by exact name
-    if let Some(syntax) = syntax_set.find_syntax_by_name(language) {
-        return Some(syntax);
-    }
-
-    // Try case-insensitive name match
-    let language_lower = language.to_lowercase();
-    for syntax in syntax_set.syntaxes() {
-        if syntax.name.to_lowercase() == language_lower {
-            return Some(syntax);
-        }
-    }
-
-    // Try common aliases that differ from extension/name
-    let alias = match language_lower.as_str() {
-        "shell" | "zsh" => "bash",
-        "c++" => "cpp",
-        "dockerfile" => "Dockerfile",
-        "makefile" | "make" => "Makefile",
-        "javascript" => "js",
-        "typescript" => "ts",
-        "python3" => "py",
-        _ => return None,
-    };
-
-    // Try alias as extension first, then as name
-    syntax_set
-        .find_syntax_by_extension(alias)
-        .or_else(|| syntax_set.find_syntax_by_name(alias))
 }
 
 /// Computes a highlighted background color based on the theme background and color mode.
@@ -335,15 +361,25 @@ pub(crate) fn compute_highlight_bg(theme_bg: Color, color_mode: ColorMode) -> Co
 ///
 /// The padding row consists of:
 /// - Setting the background color
-/// - Clearing to end of line (\x1b[K)
+/// - Either painting exactly `target_width` spaces, or clearing to end of line
+///   (`\x1b[K`) when no width constraint applies
 /// - Resetting all attributes (\x1b[0m)
 /// - Adding a newline
 #[inline]
-pub(crate) fn emit_padding_row(bg_color: Color) -> String {
-    format!(
-        "\x1b[48;2;{};{};{}m\x1b[K\x1b[0m\n",
-        bg_color.r, bg_color.g, bg_color.b
-    )
+pub(crate) fn emit_padding_row(bg_color: Color, target_width: Option<u16>) -> String {
+    match target_width {
+        Some(w) => format!(
+            "\x1b[0m\x1b[48;2;{};{};{}m{}\x1b[0m\n",
+            bg_color.r,
+            bg_color.g,
+            bg_color.b,
+            " ".repeat(w as usize)
+        ),
+        None => format!(
+            "\x1b[0m\x1b[48;2;{};{};{}m\x1b[K\x1b[0m\n",
+            bg_color.r, bg_color.g, bg_color.b
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -369,6 +405,8 @@ mod tests {
             max_width: Some(80),
             mermaid_mode: MermaidMode::Off,
             hyperlink_mode: HyperlinkMode::Always,
+            hr_defaults: None,
+            code_block_mode: crate::markdown::highlighting::CodeBlockMode::default(),
         }
     }
 
@@ -384,11 +422,13 @@ mod tests {
         let code = "fn main() {}";
         let result = render_terminal_code_block(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
             ColorMode::Dark,
+            None,
+            None,
         );
 
         assert!(result.is_ok());
@@ -410,11 +450,13 @@ mod tests {
         let code = "foo: 1\nbar: 2";
         let result = render_terminal_code_block(
             code,
-            "yaml",
+            &LanguageGrammar::yaml(),
             &highlighter,
             &options,
             &meta,
             ColorMode::Dark,
+            None,
+            None,
         );
 
         assert!(result.is_ok());
@@ -438,11 +480,13 @@ mod tests {
         let code = "test: value";
         let result = render_terminal_code_block(
             code,
-            "yaml",
+            &LanguageGrammar::yaml(),
             &highlighter,
             &options,
             &meta,
             ColorMode::Light,
+            None,
+            None,
         );
 
         assert!(result.is_ok());
@@ -462,16 +506,45 @@ mod tests {
         let code = "test: value";
         let result = render_terminal_code_block(
             code,
-            "yaml",
+            &LanguageGrammar::yaml(),
             &highlighter,
             &options,
             &meta,
             ColorMode::Dark,
+            None,
+            None,
         );
 
         assert!(result.is_ok());
         let output = result.unwrap();
         assert!(output.contains("\x1b["));
+    }
+
+    #[test]
+    fn test_render_terminal_code_block_clears_inherited_text_attributes() {
+        let highlighter = CodeHighlighter::new(
+            crate::markdown::highlighting::ThemePair::OneHalf,
+            ColorMode::Light,
+        );
+        let options = test_options();
+        let meta = CodeBlockMeta::default();
+
+        let output = render_terminal_code_block(
+            "foo: string\n",
+            &LanguageGrammar::yaml(),
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Light,
+            Some(40),
+            None,
+        )
+        .expect("render code block");
+
+        assert!(
+            output.contains("\x1b[0m\x1b[48;2;"),
+            "code rows must reset inherited SGR state before applying themed code colors: {output:?}"
+        );
     }
 
     #[test]
@@ -484,7 +557,7 @@ mod tests {
         let meta = CodeBlockMeta::default();
 
         let code = "foo: 1\nbar: <script>";
-        let result = render_html_code_block(code, "yaml", &meta, &highlighter, &options);
+        let result = render_html_code_block(code, &LanguageGrammar::yaml(), &meta, &highlighter, &options);
 
         assert!(result.is_ok());
         let html = result.unwrap();
@@ -493,27 +566,6 @@ mod tests {
         assert!(html.contains("language-yaml"));
         // Should escape HTML in scalar content
         assert!(html.contains("&lt;script&gt;") || html.contains("&#60;script&#62;"));
-    }
-
-    #[test]
-    fn test_find_syntax_rust() {
-        let highlighter = CodeHighlighter::new(
-            crate::markdown::highlighting::ThemePair::Github,
-            ColorMode::Dark,
-        );
-        let syntax = find_syntax("rust", highlighter.syntax_set());
-        assert!(syntax.is_some());
-        assert_eq!(syntax.unwrap().name, "Rust");
-    }
-
-    #[test]
-    fn test_find_syntax_unknown() {
-        let highlighter = CodeHighlighter::new(
-            crate::markdown::highlighting::ThemePair::Github,
-            ColorMode::Dark,
-        );
-        let syntax = find_syntax("unknown_language_xyz", highlighter.syntax_set());
-        assert!(syntax.is_none());
     }
 
     #[test]
@@ -552,10 +604,63 @@ mod tests {
             b: 70,
             a: 255,
         };
-        let row = emit_padding_row(bg);
+        let row = emit_padding_row(bg, None);
         assert!(row.contains("\x1b[48;2;50;60;70m"));
         assert!(row.contains("\x1b[K"));
         assert!(row.contains("\x1b[0m"));
         assert!(row.ends_with('\n'));
+    }
+
+    #[test]
+    fn test_emit_padding_row_with_target_width() {
+        let bg = Color {
+            r: 50,
+            g: 60,
+            b: 70,
+            a: 255,
+        };
+        let row = emit_padding_row(bg, Some(20));
+        assert!(row.contains("\x1b[48;2;50;60;70m"));
+        // Should not use clear-to-EOL when constrained.
+        assert!(!row.contains("\x1b[K"));
+        // Should contain exactly 20 spaces.
+        assert!(row.contains(&" ".repeat(20)));
+        assert!(row.contains("\x1b[0m"));
+        assert!(row.ends_with('\n'));
+    }
+
+    #[test]
+    fn test_render_terminal_code_block_with_target_width_pads_spaces() {
+        let highlighter = CodeHighlighter::new(
+            crate::markdown::highlighting::ThemePair::Github,
+            ColorMode::Dark,
+        );
+        let options = test_options();
+        let meta = CodeBlockMeta::default();
+
+        let code = "ok";
+        let result = render_terminal_code_block(
+            code,
+            &LanguageGrammar::rust(),
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            Some(20),
+            None,
+        )
+        .unwrap();
+
+        // Constrained output should not rely on \x1b[K (clear-to-EOL).
+        assert!(!result.contains("\x1b[K"));
+        let plain = strip_ansi_codes(&result);
+        // Each non-empty line should be exactly 20 visible columns wide.
+        for line in plain.lines().filter(|l| !l.is_empty()) {
+            assert_eq!(
+                line.chars().count(),
+                20,
+                "expected exactly 20 visible chars on line: {line:?}"
+            );
+        }
     }
 }

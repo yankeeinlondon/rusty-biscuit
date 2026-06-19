@@ -2,6 +2,8 @@
 source: darkmatter/lib/tests/error_snapshots/reference.rs
 expression: out
 ---
-⨫ ReferenceError: validation failed
+⤫ ReferenceError: validation failed
+┃ 
 ┃ orphan node
-Review the reference graph and fix any reported cycles or dangling edges.
+┃ 
+┃ Review the reference graph and fix any reported cycles or dangling edges.

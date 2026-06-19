@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::git::{ConventionalCommit, FileAction, FileStatus, RefKind};
 use sniff::filesystem::repo::Package;
@@ -82,15 +82,15 @@ mod path_format;
 mod repo;
 
 // Re-exports from submodules
-pub use deps::{render_repo_deps_text, render_repo_deps_visual};
+pub use deps::{render_repo_deps_svg, render_repo_deps_text, render_repo_deps_visual};
 pub use docs::render_docs_output;
 pub(crate) use files::filter_file_breakdown;
 pub use files::{PathListFormat, render_files_section, render_path_list};
 pub(crate) use language::primary_language_name;
 pub use language::{render_language_section, render_repo_language};
 pub use package_areas::{
-    collect_repo_package_area_names, render_dirty_package_areas, render_repo_package_area,
-    render_repo_package_area_root, render_repo_package_areas_formatted,
+    collect_repo_package_area_names, render_dirty_package_areas, render_repo_area,
+    render_repo_package_area, render_repo_package_area_root, render_repo_package_areas_formatted,
     render_staged_package_areas, render_unstaged_package_areas,
 };
 pub(crate) use package_areas::{
@@ -106,7 +106,10 @@ pub(crate) use packages::{
     select_dirty_package_names, select_repo_packages, select_staged_package_names,
     select_unstaged_package_names,
 };
-pub use repo::{render_filesystem_section, render_repo_section};
+pub(crate) use repo::format_monorepo_label;
+pub use repo::{
+    render_filesystem_section, render_repo_default_verbose, render_repo_name, render_repo_section,
+};
 
 /// Format a commit datetime to a relative date string and 12hr time string.
 ///
@@ -226,11 +229,11 @@ fn parse_git_url(
 
 /// Build the commit URL base from the preferred remote (usually "origin").
 ///
-/// Returns `(browse_url, provider)` if a browsable remote is found, or `None`
-/// if no remote has a resolvable browse URL.
+/// Returns `(browse_url, provider, remote_name)` if a browsable remote is
+/// found, or `None` if no remote has a resolvable browse URL.
 fn build_commit_url_base(
     git: &sniff::filesystem::git::GitInfo,
-) -> Option<(String, sniff::filesystem::git::GitHostingProvider)> {
+) -> Option<(String, sniff::filesystem::git::GitHostingProvider, String)> {
     // Prefer "origin", fall back to the first remote with a URL
     let remote = git
         .remotes
@@ -239,7 +242,7 @@ fn build_commit_url_base(
         .or_else(|| git.remotes.first())?;
     let url = remote.url.as_ref()?;
     let (_, browse_url) = parse_git_url(url, &remote.provider);
-    browse_url.map(|base| (base, remote.provider))
+    browse_url.map(|base| (base, remote.provider, remote.name.clone()))
 }
 
 /// Split a path into directory and filename components.
@@ -295,7 +298,7 @@ fn format_commit_line(
     let short_sha = &commit.sha[0..7];
     let sha_display = match commit_url {
         Some(url) => format!("<a href=\"{url}\"><b>{short_sha}</b></a>"),
-        None => format!("<b>{short_sha}</b>"),
+        None => format!("<dim><i>{short_sha}</i></dim>"),
     };
     let date_prefix = if use_on { "<i>on</i> " } else { "" };
     let refs_part = format_ref_decorations(&commit.refs);
@@ -335,8 +338,8 @@ fn format_commit_line(
             first_line.to_string()
         };
         format!(
-            "[{}] <dim>{}</dim> {}<blue><b>{}</b></blue>{}{}",
-            sha_display, truncated, date_prefix, date_str, refs_part, user_part,
+            "[{}] <dim>{}</dim> <i>at</i> <blue><b>{}</b></blue> {}<blue><b>{}</b></blue>{}{}",
+            sha_display, truncated, time_str, date_prefix, date_str, refs_part, user_part,
         )
     }
 }
@@ -414,39 +417,39 @@ fn build_git_status_items(
 ) -> Vec<String> {
     // Build commit URL base from the preferred remote (usually "origin").
     let commit_url_base = build_commit_url_base(git);
-
-    // Determine how many of the most recent commits are unpushed.
-    // Use the "origin" tracking ahead count; if unavailable, assume all are pushed.
-    let unpushed_count = git
-        .tracking
-        .iter()
-        .find(|t| t.remote == "origin")
-        .map(|t| t.ahead)
-        .unwrap_or(0);
+    let url_remote_prefix = commit_url_base
+        .as_ref()
+        .map(|(_, _, name)| format!("{name}/"));
 
     let mut status_items: Vec<String> = Vec::new();
 
-    let conflicted: Vec<_> = git
-        .file_changes
-        .iter()
-        .filter(|f| f.status == FileStatus::Conflicted)
-        .collect();
-    for file in &conflicted {
-        let path = file.path.display().to_string();
-        let absolute = git.repo_root.join(&file.path).display().to_string();
-        let linked_path = format_git_status_filepath(&path, &absolute);
-        let line = format!("<red>conflicted: {linked_path}</red>");
-        status_items.push(line);
-    }
-
-    // Recent commits with conventional commit parsing (oldest first, so most recent is at bottom)
+    // Recent commits with conventional commit parsing (oldest first, so most recent is at bottom).
+    // `git.recent` is newest-first. A commit is considered pushed once we encounter
+    // (walking newest→oldest) a commit with a remote-tracking ref decoration for the
+    // URL-providing remote; that commit and all older ones are pushed. This is robust
+    // to `--branch <other>` queries where `git.tracking` reflects the checked-out
+    // branch, not the queried one.
     let commits: Vec<_> = git.recent.iter().take(history_count).collect();
+    let unpushed_count = url_remote_prefix
+        .as_deref()
+        .map(|prefix| {
+            commits
+                .iter()
+                .take_while(|c| {
+                    !c.refs
+                        .iter()
+                        .any(|r| r.kind == RefKind::RemoteBranch && r.name.starts_with(prefix))
+                })
+                .count()
+        })
+        .unwrap_or(0);
+
     for (display_index, commit) in commits.iter().rev().enumerate() {
         // display_index 0 = oldest displayed commit, last = most recent.
         // The most recent `unpushed_count` commits (at the end) are unpushed.
         let is_pushed = display_index < commits.len().saturating_sub(unpushed_count);
         let commit_url = if is_pushed {
-            commit_url_base.as_ref().map(|(base, provider)| {
+            commit_url_base.as_ref().map(|(base, provider, _)| {
                 format!("{}/{}/{}", base, provider.commit_path_segment(), commit.sha)
             })
         } else {
@@ -509,6 +512,20 @@ fn build_git_status_items(
         status_items.push(line);
     }
 
+    // Conflicted files render last so they're easy to spot at the bottom of the list.
+    let conflicted: Vec<_> = git
+        .file_changes
+        .iter()
+        .filter(|f| f.status == FileStatus::Conflicted)
+        .collect();
+    for file in &conflicted {
+        let path = file.path.display().to_string();
+        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let linked_path = format_git_status_filepath(&path, &absolute);
+        let line = format!("<red>conflicted: {linked_path}</red>");
+        status_items.push(line);
+    }
+
     status_items
 }
 
@@ -516,18 +533,217 @@ fn build_git_status_items(
 ///
 /// * `git` - Git repository information
 /// * `history_count` - Number of recent commits to display
+/// * `target_branch` - When `Some`, annotates the Status heading with the
+///   branch whose commits are being shown (used by `--branch <name>`).
+/// * `target_worktree` - When `Some((name, branch))`, annotates the heading
+///   to indicate the commits and working-tree state are scoped to the named
+///   linked worktree (used by `--worktree <name>`). Takes precedence over
+///   `target_branch` when both are provided.
+///
+/// Renders a section header with double-underline styling.
+///
+/// Emits `<b><uu>{title}</uu></b>` which degrades gracefully on terminals
+/// that do not support double underline via `biscuit-terminal`.
+fn render_header(title: &str, terminal: &Terminal) -> String {
+    Prose::new(format!("<b><uu>{title}</uu></b>")).render(terminal)
+}
+
+/// Formats a worktree directory path as a blue OSC8 hyperlink.
+///
+/// The href is the absolute path; the visible label is computed relative to
+/// the current worktree directory so sibling or parent layouts read as `..`,
+/// `../project`, or `.` instead of a home-abbreviated absolute path.
+fn worktree_path_link(path: &std::path::Path, current_worktree: &std::path::Path) -> String {
+    let absolute = path.display().to_string();
+    let label = relative_path_between(current_worktree, path);
+    format!("<blue><a href=\"{absolute}\">{label}</a></blue>")
+}
+
+/// Formats a worktree directory path as a blue OSC8 hyperlink whose href is the
+/// full absolute path and whose visible label is an aliased, compact form (see
+/// [`alias_path`]).
+///
+/// Used for the current worktree's own "located at" line, where a label
+/// relative to itself would degenerate to `.` and tell the reader nothing.
+fn worktree_path_link_absolute(path: &std::path::Path) -> String {
+    let absolute = path.display().to_string();
+    let label = alias_path(path);
+    format!("<blue><a href=\"{absolute}\">{label}</a></blue>")
+}
+
+/// Computes a compact display label for an absolute path by offsetting it
+/// against an environment variable or the home directory.
+///
+/// Resolution ladder (first match wins):
+/// 1. The environment variable whose value is the longest path-prefix of
+///    `path` renders as `${VAR}/<rest>`. Ties on prefix length are broken by
+///    the lexicographically-first variable name so output is deterministic.
+/// 2. A path under `$HOME` renders as `~/<rest>`.
+/// 3. Anything else renders as its absolute path.
+///
+/// An env-var offset wins only when it is a strictly longer prefix than
+/// `$HOME`; otherwise the `~` form is preferred, since it reads better for the
+/// home directory itself.
+fn alias_path(path: &Path) -> String {
+    let vars: Vec<(std::ffi::OsString, std::ffi::OsString)> = std::env::vars_os().collect();
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    alias_path_with(path, &vars, home.as_deref())
+}
+
+/// Environment variables whose values are absolute paths but denote *transient
+/// shell position* (the current / previous directory) rather than a stable
+/// named root. Offsetting against them yields a label that changes on every
+/// `cd`, so they are skipped. Variables whose values are not absolute paths
+/// (`TERM`, `LANG`, `SHLVL`, ...) are already filtered by the `is_absolute`
+/// check below and need no entry here.
+const POSITIONAL_PATH_VARS: &[&str] = &["PWD", "OLDPWD"];
+
+/// Pure core of [`alias_path`], with the environment supplied explicitly so it
+/// can be tested without mutating global process state.
+fn alias_path_with(
+    path: &Path,
+    vars: &[(std::ffi::OsString, std::ffi::OsString)],
+    home: Option<&Path>,
+) -> String {
+    // "Longest prefix" is measured in path components, not bytes, so a trailing
+    // slash in an env value can't spuriously outrank a real ancestor.
+    let home_components = home.map(|h| h.components().count()).unwrap_or(0);
+
+    let mut best: Option<(String, PathBuf, usize)> = None;
+    for (name, value) in vars {
+        let name = name.to_string_lossy();
+        if POSITIONAL_PATH_VARS.contains(&name.as_ref()) {
+            continue;
+        }
+        let value = PathBuf::from(value);
+        if !value.is_absolute() || !path.starts_with(&value) {
+            continue;
+        }
+        let components = value.components().count();
+        let better = match &best {
+            None => true,
+            Some((best_name, _, best_components)) => {
+                components > *best_components
+                    || (components == *best_components && name.as_ref() < best_name.as_str())
+            }
+        };
+        if better {
+            best = Some((name.into_owned(), value, components));
+        }
+    }
+
+    if let Some((name, value, components)) = best
+        && components > home_components
+        && let Ok(rel) = path.strip_prefix(&value)
+    {
+        return join_alias(&format!("${{{name}}}"), rel);
+    }
+
+    if let Some(home) = home
+        && let Ok(rel) = path.strip_prefix(home)
+    {
+        return join_alias("~", rel);
+    }
+
+    path.display().to_string()
+}
+
+/// Joins an alias prefix (`~` or `${VAR}`) with the remaining relative path,
+/// collapsing to the bare prefix when the path is an exact match.
+fn join_alias(prefix: &str, rel: &Path) -> String {
+    if rel.as_os_str().is_empty() {
+        prefix.to_string()
+    } else {
+        format!("{prefix}/{}", rel.display())
+    }
+}
+
+/// Computes a relative path from `base` to `target`.
+///
+/// Returns `.` when the two paths are the same, otherwise a sequence of `..`
+/// segments and/or the remaining target components. Falls back to the target's
+/// absolute display when the paths do not share a common prefix.
+fn relative_path_between(base: &std::path::Path, target: &std::path::Path) -> String {
+    use std::path::{Component, MAIN_SEPARATOR_STR};
+
+    if let Ok(rel) = target.strip_prefix(base) {
+        return if rel.as_os_str().is_empty() {
+            ".".to_string()
+        } else {
+            rel.display().to_string()
+        };
+    }
+
+    if let Ok(rel) = base.strip_prefix(target) {
+        let ups = rel.components().count();
+        return std::iter::repeat_n("..", ups)
+            .collect::<Vec<_>>()
+            .join(MAIN_SEPARATOR_STR);
+    }
+
+    let base_components: Vec<_> = base.components().collect();
+    let target_components: Vec<_> = target.components().collect();
+    let common = base_components
+        .iter()
+        .zip(target_components.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    // When the paths diverge at (or before) the filesystem root — e.g. a
+    // worktree under `/Users/...` next to one under `/Volumes/...` — the only
+    // shared component is the root, and a relative label degenerates into a
+    // long `../` chain back to root. The absolute path is shorter and clearer.
+    let common_is_root_only = common <= 1
+        && base_components
+            .first()
+            .is_some_and(|c| matches!(c, Component::RootDir | Component::Prefix(_)));
+
+    if common == 0 || common_is_root_only {
+        return target.display().to_string();
+    }
+
+    let ups = base_components.len().saturating_sub(common);
+    let mut parts: Vec<String> = std::iter::repeat_n("..".to_string(), ups).collect();
+    parts.extend(
+        target_components[common..]
+            .iter()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned()),
+    );
+
+    if parts.is_empty() {
+        ".".to_string()
+    } else {
+        parts.join(MAIN_SEPARATOR_STR)
+    }
+}
+
 pub fn render_git_section(
     git: &sniff::filesystem::git::GitInfo,
     history_count: usize,
     verbose: u8,
     compact: bool,
+    target_branch: Option<&str>,
+    target_worktree: Option<(&str, &str)>,
 ) -> String {
     let mut out = String::new();
     let terminal = Terminal::default();
 
     // === Status Section ===
-    let status_title = Prose::new("<b><u>Status</u></b>");
-    writeln!(out, "\n{}\n", status_title.render(&terminal)).unwrap();
+    out.push('\n');
+    let status_title = match (target_worktree, target_branch) {
+        (Some((wt, branch)), _) => render_header(
+            &format!(
+                "Status (<dim>worktree: <green>{wt}</green> <i>on</i> <green><i>{branch}</i></green> <i>branch</i></dim>)"
+            ),
+            &terminal,
+        ),
+        (None, Some(branch)) => {
+            render_header(&format!("Status (branch: <i>{branch}</i>)"), &terminal)
+        }
+        (None, None) => render_header("Status", &terminal),
+    };
+    writeln!(out, "{}", status_title).unwrap();
+    out.push('\n');
 
     let status_items = build_git_status_items(git, history_count, verbose);
 
@@ -548,86 +764,111 @@ pub fn render_git_section(
         return out;
     }
 
-    // === Worktrees Section (only if worktrees exist) ===
-    if !git.worktrees.is_empty() {
-        let wt_title = Prose::new("<b><u>Worktrees</u></b>");
-        writeln!(out, "{}\n", wt_title.render(&terminal)).unwrap();
+    // === Worktrees Section ===
+    // Always rendered — even with zero linked worktrees — so the "0 other
+    // active worktrees" summary is shown (Case B's required output).
+    //
+    // Case selection is by *physical location* (`in_worktree`): are we running
+    // inside the main worktree or a linked one? Branch spelling (`== "main"`)
+    // misclassifies detached HEAD, `master`-default repos, and any non-main
+    // branch checked out in the main worktree — none of which have a usable
+    // entry in the linked-worktree-only `worktrees` map.
+    {
+        out.push('\n');
+        writeln!(out, "{}", render_header("Worktrees", &terminal)).unwrap();
+        out.push('\n');
 
         let mut wt_list = UnorderedList::empty();
 
-        // Base repo line: varies based on whether we're in the base repo or a worktree
         if git.in_worktree {
-            if let Some(ref base_root) = git.base_repo_root {
-                wt_list.add(Prose::new(format!(
-                    "Base Repo: <dim>the base repo is located at <blue-500>{}</blue-500></dim>",
-                    base_root.display()
-                )));
-            }
-        } else if let Some(ref branch) = git.current_branch {
+            // Case A: running inside a linked worktree. Show where main lives,
+            // then this worktree's own details, then a count of the rest.
+            let main_root = git.base_repo_root.as_deref().unwrap_or(&git.repo_root);
+            let main_path = worktree_path_link(main_root, &git.repo_root);
             wt_list.add(Prose::new(format!(
-                "<b>Base Repo:</b> you are in the base repo which is on the <blue-500>{branch}</blue-500> branch"
+                "<b>main:</b> <i>the main worktree for this repo is located at </i>{main_path}"
             )));
+
+            // The current worktree's display name is its directory basename,
+            // not its branch — they routinely differ (e.g. `login-fix` on
+            // `feature/login`).
+            let current_name = git
+                .repo_root
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("worktree");
+            let current_path = worktree_path_link_absolute(&git.repo_root);
+            wt_list.add(Prose::new("<b>Current Worktree:</b>".to_string()));
+
+            let mut current_list = UnorderedList::empty();
+            current_list.add(Prose::new(format!(
+                "you are in the <b>{current_name}</b> worktree located at {current_path}"
+            )));
+
+            // ahead/behind comes from the current worktree's own map entry,
+            // which detection always computes in full because it is `is_current`.
+            let current_entry = git.worktrees.values().find(|wt| wt.is_current);
+            let branch_label = git
+                .current_branch
+                .clone()
+                .unwrap_or_else(|| "detached HEAD".to_string());
+            let ab = match current_entry {
+                Some(wt) => format_ahead_behind_of(wt.ahead, wt.behind, &wt.base_branch),
+                None => format_ahead_behind_of(0, 0, "main"),
+            };
+            current_list.add(Prose::new(format!(
+                "this worktree is on the <b>{branch_label}</b> branch and is {ab}"
+            )));
+            wt_list.add(current_list);
+
+            let other_count = git.worktrees.values().filter(|wt| !wt.is_current).count();
+            wt_list.add(Prose::new("<b>Other Worktrees:</b>".to_string()));
+            let mut other_list = UnorderedList::empty();
+            other_list.add(Prose::new(format!(
+                "there are {other_count} other active worktrees in this repo"
+            )));
+            wt_list.add(other_list);
+        } else {
+            // Case B: running inside the main worktree. The main worktree never
+            // appears in the linked-worktree map, so every entry is "other".
+            let main_path = worktree_path_link_absolute(&git.repo_root);
+            wt_list.add(Prose::new("<b>Current Worktree:</b>".to_string()));
+
+            let mut current_list = UnorderedList::empty();
+            current_list.add(Prose::new(format!(
+                "you are in the <b>main</b> worktree located at {main_path}"
+            )));
+            wt_list.add(current_list);
+
+            let other_count = git.worktrees.len();
+            wt_list.add(Prose::new("<b>Other Worktrees:</b>".to_string()));
+            let mut other_list = UnorderedList::empty();
+            other_list.add(Prose::new(format!(
+                "there are {other_count} other active worktrees in this repo"
+            )));
+            wt_list.add(other_list);
         }
 
-        // Worktree lines: varies based on whether we're inside that worktree
-        for info in git.worktrees.values() {
-            let branch = &info.branch;
-            let status = if info.merged && info.ahead == 0 {
-                format!("merged into <b>{}</b>", &info.base_branch)
-            } else {
-                format_ahead_behind_of(info.ahead, info.behind, &info.base_branch)
-            };
-            let merge_status = if info.has_conflicts {
-                " · <red-500><b>conflicts</b></red-500>"
-            } else {
-                " · <green-500>clean</green-500>"
-            };
-
-            let uncommitted = if info.changed_files > 0 {
-                format!(
-                    " <dim><i>merge</i></dim> · <red-500>{}</red-500> <dim><i>uncommitted {}</i></dim>",
-                    info.changed_files,
-                    if info.changed_files == 1 {
-                        "file"
-                    } else {
-                        "files"
-                    }
-                )
-            } else {
-                String::new()
-            };
-
-            // Check if we're inside this particular worktree
-            let is_current = git.in_worktree
-                && git.repo_root.canonicalize().ok() == info.filepath.canonicalize().ok();
-
-            if is_current {
-                wt_list.add(Prose::new(format!(
-                    "<b>{branch}:</b> you are {status}{merge_status}{uncommitted}"
-                )));
-            } else {
-                wt_list.add(Prose::new(format!(
-                    "{branch}: <dim>is {status}</dim>{merge_status}{uncommitted}"
-                )));
-            }
-        }
         writeln!(out, "{}", wt_list.render(&terminal)).unwrap();
     }
 
     // === Meta Section ===
-    let meta_title = Prose::new("<b><u>Meta</u></b>");
-    writeln!(out, "{}\n", meta_title.render(&terminal)).unwrap();
+    out.push('\n');
+    writeln!(out, "{}", render_header("Meta", &terminal)).unwrap();
+    out.push('\n');
 
     let mut meta_list = UnorderedList::empty();
 
     // --- Local ---
     if let Some(ref current) = git.current_branch {
-        let local_header: RenderableContent = Prose::new("<b>Local:</b>").into();
+        let local_header: RenderableTerminalContent = Prose::new("<b>Local:</b>").into();
         if verbose > 0 {
             // Verbose: nested list with current branch + other branches
             let mut local_list = UnorderedList::empty();
 
-            let dirty = if git.status.is_dirty {
+            // Identity-only `GitInfo` carries no status; render no dirty marker
+            // rather than asserting cleanliness (or panicking) on absent status.
+            let dirty = if git.status.as_ref().is_some_and(|s| s.is_dirty) {
                 "<red>+</red>"
             } else {
                 ""
@@ -654,7 +895,7 @@ pub fn render_git_section(
                 )));
             }
 
-            let branches_header: RenderableContent = Prose::new("<b>Branches:</b>").into();
+            let branches_header: RenderableTerminalContent = Prose::new("<b>Branches:</b>").into();
             let mut local_wrapper = UnorderedList::empty();
             local_wrapper.add(branches_header);
             local_wrapper.add(local_list);
@@ -696,7 +937,7 @@ pub fn render_git_section(
 
     // --- Remotes ---
     if !git.tracking.is_empty() || !git.remotes.is_empty() {
-        let remotes_header: RenderableContent = Prose::new("<b>Remotes:</b>").into();
+        let remotes_header: RenderableTerminalContent = Prose::new("<b>Remotes:</b>").into();
         let mut remotes_list = UnorderedList::empty();
 
         for remote in &git.remotes {
@@ -770,7 +1011,7 @@ pub fn render_git_section(
 
     // --- Config ---
     if git.config.user_name.is_some() {
-        let config_header: RenderableContent = Prose::new("<b>Config:</b>").into();
+        let config_header: RenderableTerminalContent = Prose::new("<b>Config:</b>").into();
         let mut config_list = UnorderedList::empty();
 
         if let Some(ref name) = git.config.user_name {
@@ -788,7 +1029,7 @@ pub fn render_git_section(
 
         // Crypto subsection (verbose only)
         if verbose > 0 {
-            let crypto_header: RenderableContent = Prose::new("<b>Crypto</b>").into();
+            let crypto_header: RenderableTerminalContent = Prose::new("<b>Crypto</b>").into();
             let mut crypto_list = UnorderedList::empty();
 
             let agent = git
@@ -944,13 +1185,15 @@ pub(crate) fn current_package_area_is_dirty(
 
     let area_prefix = if area == "root" { "" } else { area };
 
-    let has_dirty = git
-        .status
+    // Without computed status (identity-only request) dirtiness is
+    // indeterminate, so return `None` like the other missing-data early exits.
+    let status = git.status.as_ref()?;
+    let has_dirty = status
         .dirty
         .iter()
         .map(|d| d.filepath.to_str().unwrap_or(""))
         .chain(
-            git.status
+            status
                 .untracked
                 .iter()
                 .map(|u| u.filepath.to_str().unwrap_or("")),
@@ -1019,13 +1262,16 @@ pub(crate) fn package_area_source_code_change_count(
 
     let area_prefix = if area == "root" { "" } else { area };
 
-    let count = git
-        .status
+    // Without computed status (identity-only request) the change count is
+    // indeterminate, so return `None` like the other missing-data early exits.
+    let status = git.status.as_ref()?;
+
+    let count = status
         .dirty
         .iter()
         .map(|d| d.filepath.to_str().unwrap_or(""))
         .chain(
-            git.status
+            status
                 .untracked
                 .iter()
                 .map(|u| u.filepath.to_str().unwrap_or("")),
@@ -1092,7 +1338,7 @@ fn resolve_dir(base_dir: Option<&Path>) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::deps::build_deps_mermaid;
+    use super::deps::build_deps_dot;
     use super::repo::build_area_hierarchy;
     use super::*;
     use chrono::Utc;
@@ -1112,7 +1358,8 @@ mod tests {
             package_area: area.to_string(),
             name: name.to_string(),
             ecosystem: sniff::filesystem::repo::PackageEcosystem::Unknown,
-            discovery_sources: vec![],
+            standard: sniff::filesystem::repo::MonorepoStandard::Unknown,
+            provenance: sniff::filesystem::repo::PackageProvenance::ManifestScan,
             nested_packages: vec![],
             primary_language: None,
             secondary_languages: vec![],
@@ -1124,6 +1371,7 @@ mod tests {
             editor_config: None,
             command_runner: vec![],
             package_managers: vec![],
+            test_runners: vec![],
             version: None,
             features: vec![],
             depends_on: depends_on.iter().map(|s| s.to_string()).collect(),
@@ -1157,6 +1405,7 @@ mod tests {
             org: None,
             repo: None,
             current_branch: Some("main".to_string()),
+            head_id: None,
             branches: vec![],
             in_worktree: false,
             base_repo_root: None,
@@ -1168,7 +1417,7 @@ mod tests {
                 remotes: None,
                 refs: vec![],
             }],
-            status: RepoStatus {
+            status: Some(RepoStatus {
                 is_dirty: !file_changes.is_empty(),
                 staged_count,
                 unstaged_count,
@@ -1176,7 +1425,7 @@ mod tests {
                 dirty: vec![],
                 untracked: vec![],
                 is_behind: None,
-            },
+            }),
             remotes: vec![],
             worktrees: HashMap::new(),
             config: GitConfig::default(),
@@ -1189,7 +1438,7 @@ mod tests {
         use super::*;
 
         #[test]
-        fn conflicted_files_render_before_commits_and_untracked_is_dimmed() {
+        fn conflicted_files_render_last_and_untracked_is_dimmed() {
             let git = make_git_info(vec![
                 FileChange {
                     path: PathBuf::from("src/main.rs"),
@@ -1216,16 +1465,28 @@ mod tests {
 
             let items = build_git_status_items(&git, 10, 0);
 
-            assert!(items[0].starts_with("<red>conflicted: <a href=\"/repo/conflict.txt\">"));
-            assert!(items[0].contains("<b>conflict.txt</b></a>"));
-            assert!(items.iter().any(|item| {
-                item.starts_with("<dim>untracked: <a href=\"/repo/notes.md\">")
-                    && item.contains("<b>notes.md</b></a>")
-            }));
-            assert!(items.iter().any(|item| {
-                item.starts_with("<lime>staged(")
-                    && item.contains("<a href=\"/repo/src/main.rs\">src/<b>main.rs</b></a>")
-            }));
+            let last = items.last().expect("at least one status item");
+            assert!(last.starts_with("<red>conflicted: <a href=\"/repo/conflict.txt\">"));
+            assert!(last.contains("<b>conflict.txt</b></a>"));
+
+            let staged_index = items
+                .iter()
+                .position(|item| {
+                    item.starts_with("<lime>staged(")
+                        && item.contains("<a href=\"/repo/src/main.rs\">src/<b>main.rs</b></a>")
+                })
+                .expect("staged item present");
+            let untracked_index = items
+                .iter()
+                .position(|item| {
+                    item.starts_with("<dim>untracked: <a href=\"/repo/notes.md\">")
+                        && item.contains("<b>notes.md</b></a>")
+                })
+                .expect("untracked item present");
+            let conflicted_index = items.len() - 1;
+
+            assert!(staged_index < conflicted_index);
+            assert!(untracked_index < conflicted_index);
         }
 
         #[test]
@@ -1238,11 +1499,601 @@ mod tests {
                 lines_removed: 0,
             }]);
 
-            let output = render_git_section(&git, 10, 0, true);
+            let output = render_git_section(&git, 10, 0, true, None, None);
 
             assert!(output.contains("Status"));
             assert!(!output.contains("\x1b[1m\x1b[4mMeta"));
             assert!(!output.contains("Worktrees"));
+        }
+
+        #[test]
+        fn git_status_headers_use_double_underline_markup() {
+            let git = make_git_info(vec![]);
+            let output = render_git_section(&git, 10, 0, false, None, None);
+            // The header is produced via Prose with <b><uu>Status</uu></b>.
+            // In a TTY with double-underline support this renders as \x1b[4:2m;
+            // otherwise it degrades to regular underline or plain text.  We
+            // simply verify the header text appears and the section renders
+            // without panicking.
+            assert!(output.contains("Status"));
+        }
+
+        #[test]
+        fn git_status_sections_have_single_blank_line_separator() {
+            let mut git = make_git_info(vec![]);
+            git.worktrees.insert(
+                "feature".to_string(),
+                sniff::filesystem::git::WorktreeInfo {
+                    branch: "feature".to_string(),
+                    filepath: PathBuf::from("/repo/feature"),
+                    sha: "abc123".to_string(),
+                    dirty: false,
+                    ahead: 1,
+                    behind: 0,
+                    base_branch: "main".to_string(),
+                    has_conflicts: false,
+                    merged: false,
+                    changed_files: 0,
+                    is_current: true,
+                },
+            );
+            git.base_repo_root = Some(PathBuf::from("/repo"));
+            git.in_worktree = true;
+            git.current_branch = Some("feature".to_string());
+
+            let output = render_git_section(&git, 10, 0, false, None, None);
+            let lines: Vec<&str> = output.lines().collect();
+
+            // Find section headers (they contain the rendered header text)
+            let status_idx = lines
+                .iter()
+                .position(|l| l.contains("Status"))
+                .expect("Status header present");
+            let worktrees_idx = lines
+                .iter()
+                .position(|l| l.contains("Worktrees"))
+                .expect("Worktrees header present");
+            let meta_idx = lines
+                .iter()
+                .position(|l| l.contains("Meta"))
+                .expect("Meta header present");
+
+            // Exactly one blank line before each header
+            assert!(
+                lines[status_idx - 1].trim().is_empty(),
+                "blank line before Status"
+            );
+            assert!(
+                lines[worktrees_idx - 1].trim().is_empty(),
+                "blank line before Worktrees"
+            );
+            assert!(
+                lines[meta_idx - 1].trim().is_empty(),
+                "blank line before Meta"
+            );
+
+            // Exactly one blank line after each header
+            assert!(
+                lines[status_idx + 1].trim().is_empty(),
+                "blank line after Status"
+            );
+            assert!(
+                lines[worktrees_idx + 1].trim().is_empty(),
+                "blank line after Worktrees"
+            );
+            assert!(
+                lines[meta_idx + 1].trim().is_empty(),
+                "blank line after Meta"
+            );
+
+            // EXACTLY one — not two. The line two rows out from each header (the
+            // content side) must be non-blank, proving there is no second blank
+            // row padding the separation. Status is the first section, so only
+            // its trailing side has a preceding content row to check.
+            assert!(
+                !lines[status_idx + 2].trim().is_empty(),
+                "no double blank line after Status: {:?}",
+                &lines[status_idx..=status_idx + 2]
+            );
+            assert!(
+                !lines[worktrees_idx - 2].trim().is_empty(),
+                "no double blank line before Worktrees: {:?}",
+                &lines[worktrees_idx - 2..=worktrees_idx]
+            );
+            assert!(
+                !lines[worktrees_idx + 2].trim().is_empty(),
+                "no double blank line after Worktrees: {:?}",
+                &lines[worktrees_idx..=worktrees_idx + 2]
+            );
+            assert!(
+                !lines[meta_idx - 2].trim().is_empty(),
+                "no double blank line before Meta: {:?}",
+                &lines[meta_idx - 2..=meta_idx]
+            );
+            assert!(
+                !lines[meta_idx + 2].trim().is_empty(),
+                "no double blank line after Meta: {:?}",
+                &lines[meta_idx..=meta_idx + 2]
+            );
+        }
+
+        #[test]
+        fn git_status_case_a_linked_worktree_shows_main_and_current() {
+            let mut git = make_git_info(vec![]);
+            git.repo_root = PathBuf::from("/repo/feature");
+            git.base_repo_root = Some(PathBuf::from("/repo"));
+            git.in_worktree = true;
+            git.current_branch = Some("feature".to_string());
+
+            git.worktrees.insert(
+                "feature".to_string(),
+                sniff::filesystem::git::WorktreeInfo {
+                    branch: "feature".to_string(),
+                    filepath: PathBuf::from("/repo/feature"),
+                    sha: "abc123".to_string(),
+                    dirty: false,
+                    ahead: 2,
+                    behind: 1,
+                    base_branch: "main".to_string(),
+                    has_conflicts: false,
+                    merged: false,
+                    changed_files: 0,
+                    is_current: true,
+                },
+            );
+            git.worktrees.insert(
+                "hotfix".to_string(),
+                sniff::filesystem::git::WorktreeInfo {
+                    branch: "hotfix".to_string(),
+                    filepath: PathBuf::from("/repo/hotfix"),
+                    sha: "def456".to_string(),
+                    dirty: false,
+                    ahead: 0,
+                    behind: 0,
+                    base_branch: "main".to_string(),
+                    has_conflicts: false,
+                    merged: false,
+                    changed_files: 0,
+                    is_current: false,
+                },
+            );
+
+            let output = render_git_section(&git, 10, 0, false, None, None);
+
+            assert!(
+                output.contains("main:"),
+                "Case A should show main worktree label"
+            );
+            assert!(
+                output.contains("Current Worktree:"),
+                "Case A should show current worktree header"
+            );
+            assert!(
+                output.contains("feature"),
+                "Case A should mention the current branch"
+            );
+            assert!(
+                output.contains("2 ahead"),
+                "Case A should show ahead/behind for current worktree"
+            );
+            assert!(
+                output.contains("Other Worktrees:"),
+                "Case A should show other worktrees header"
+            );
+            assert!(
+                output.contains("1 other active worktrees in this repo"),
+                "Case A should count other worktrees"
+            );
+        }
+
+        #[test]
+        fn git_status_case_b_main_branch_shows_current_and_others() {
+            let mut git = make_git_info(vec![]);
+            git.repo_root = PathBuf::from("/repo");
+            git.in_worktree = false;
+            git.current_branch = Some("main".to_string());
+
+            git.worktrees.insert(
+                "feature".to_string(),
+                sniff::filesystem::git::WorktreeInfo {
+                    branch: "feature".to_string(),
+                    filepath: PathBuf::from("/repo/feature"),
+                    sha: "abc123".to_string(),
+                    dirty: false,
+                    ahead: 0,
+                    behind: 0,
+                    base_branch: "main".to_string(),
+                    has_conflicts: false,
+                    merged: false,
+                    changed_files: 0,
+                    is_current: false,
+                },
+            );
+
+            let output = render_git_section(&git, 10, 0, false, None, None);
+
+            assert!(
+                output.contains("Current Worktree:"),
+                "Case B should show current worktree header"
+            );
+            assert!(output.contains("main"), "Case B should mention main branch");
+            assert!(
+                output.contains("Other Worktrees:"),
+                "Case B should show other worktrees header"
+            );
+            assert!(
+                output.contains("1 other active worktree"),
+                "Case B should count other worktrees"
+            );
+            assert!(
+                !output.contains("main:"),
+                "Case B should NOT show a separate main label"
+            );
+        }
+
+        #[test]
+        fn git_status_no_worktrees_still_renders_case_b_with_zero_count() {
+            // A repo with no linked worktrees is the common case. Case B must
+            // still render the current (main) worktree and a zero "other" count
+            // rather than omitting the section entirely.
+            let mut git = make_git_info(vec![]);
+            git.worktrees = HashMap::new();
+            git.current_branch = Some("main".to_string());
+            git.in_worktree = false;
+
+            let output = render_git_section(&git, 10, 0, false, None, None);
+
+            assert!(
+                output.contains("Worktrees"),
+                "Worktrees section must render even with no linked worktrees"
+            );
+            assert!(
+                output.contains("Current Worktree:"),
+                "Case B must show the current worktree"
+            );
+            assert!(
+                output.contains("there are 0 other active worktrees in this repo"),
+                "Case B must report a zero other-worktree count: {output}"
+            );
+            assert!(
+                output.contains("Status"),
+                "Status section should still render"
+            );
+            assert!(output.contains("Meta"), "Meta section should still render");
+        }
+
+        #[test]
+        fn git_status_case_a_uses_directory_name_and_relative_path() {
+            // The current worktree's display name is its directory basename, and
+            // the path label is relative to the current worktree directory. A
+            // branch named differently from the directory must not be substituted
+            // for the name.
+            let wt_dir = "/tmp/demo/login-fix";
+            let main_dir = "/tmp/demo/project";
+
+            let mut git = make_git_info(vec![]);
+            git.repo_root = PathBuf::from(wt_dir);
+            git.base_repo_root = Some(PathBuf::from(main_dir));
+            git.in_worktree = true;
+            git.current_branch = Some("feature/login".to_string());
+            git.worktrees.insert(
+                "feature/login".to_string(),
+                sniff::filesystem::git::WorktreeInfo {
+                    branch: "feature/login".to_string(),
+                    filepath: PathBuf::from(wt_dir),
+                    sha: "abc123".to_string(),
+                    dirty: false,
+                    ahead: 3,
+                    behind: 0,
+                    base_branch: "main".to_string(),
+                    has_conflicts: false,
+                    merged: false,
+                    changed_files: 0,
+                    is_current: true,
+                },
+            );
+
+            let output = render_git_section(&git, 10, 0, false, None, None);
+
+            assert!(
+                output.contains("login-fix"),
+                "current worktree must be named by its directory: {output}"
+            );
+            assert!(
+                output.contains("feature/login"),
+                "current branch must still be shown: {output}"
+            );
+            // Main worktree is a sibling directory, so its visible label is
+            // `../project`. The current worktree shows its own absolute path —
+            // a label relative to itself (`.`) would tell the reader nothing.
+            assert!(
+                output.contains("[../project](file://"),
+                "main worktree label must be relative to the current directory: {output}"
+            );
+            // The visible absolute label may word-wrap at the terminal width,
+            // so assert on the OSC8 href, which is emitted intact.
+            assert!(
+                output.contains("(file:///tmp/demo/login-fix)"),
+                "current worktree must link to its absolute path: {output}"
+            );
+        }
+
+        #[test]
+        fn relative_path_between_labels_worktree_paths() {
+            assert_eq!(
+                relative_path_between(
+                    &PathBuf::from("/tmp/demo/login-fix"),
+                    &PathBuf::from("/tmp/demo/project")
+                ),
+                "../project"
+            );
+            assert_eq!(
+                relative_path_between(
+                    &PathBuf::from("/tmp/demo/login-fix"),
+                    &PathBuf::from("/tmp/demo/login-fix")
+                ),
+                "."
+            );
+            assert_eq!(
+                relative_path_between(&PathBuf::from("/repo/feature"), &PathBuf::from("/repo")),
+                ".."
+            );
+            assert_eq!(
+                relative_path_between(&PathBuf::from("/repo"), &PathBuf::from("/repo/feature")),
+                "feature"
+            );
+            // Paths that share only the filesystem root fall back to the
+            // absolute target — a `../` chain back to root reads worse than the
+            // plain absolute path (e.g. a `/Users/...` worktree next to a
+            // `/Volumes/...` checkout).
+            assert_eq!(
+                relative_path_between(
+                    &PathBuf::from("/repo/feature"),
+                    &PathBuf::from("/other/project")
+                ),
+                "/other/project"
+            );
+        }
+
+        /// Builds an owned env-var list for `alias_path_with` from string pairs.
+        fn env(pairs: &[(&str, &str)]) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
+            pairs
+                .iter()
+                .map(|(k, v)| (std::ffi::OsString::from(k), std::ffi::OsString::from(v)))
+                .collect()
+        }
+
+        #[test]
+        fn alias_path_offsets_against_env_var() {
+            let path = PathBuf::from("/Users/ken/.claudine/worktrees/rusty-biscuit/sniff");
+            let vars = env(&[("CLAUDINE_WT", "/Users/ken/.claudine/worktrees")]);
+            assert_eq!(
+                alias_path_with(&path, &vars, Some(Path::new("/Users/ken"))),
+                "${CLAUDINE_WT}/rusty-biscuit/sniff"
+            );
+        }
+
+        #[test]
+        fn alias_path_falls_back_to_home_tilde() {
+            let path = PathBuf::from("/Users/ken/.claudine/worktrees/rusty-biscuit/sniff");
+            assert_eq!(
+                alias_path_with(&path, &[], Some(Path::new("/Users/ken"))),
+                "~/.claudine/worktrees/rusty-biscuit/sniff"
+            );
+        }
+
+        #[test]
+        fn alias_path_prefers_tilde_over_shorter_env_offset() {
+            // An env var that is a *shorter* prefix than $HOME must yield to the
+            // `~` form, which reads better for paths inside the home directory.
+            let path = PathBuf::from("/Users/ken/project/src");
+            let vars = env(&[("ROOT", "/Users")]);
+            assert_eq!(
+                alias_path_with(&path, &vars, Some(Path::new("/Users/ken"))),
+                "~/project/src"
+            );
+        }
+
+        #[test]
+        fn alias_path_picks_longest_prefix_then_name_for_ties() {
+            let path = PathBuf::from("/a/b/c/d");
+            // `DEEP` is the longer prefix and wins over `SHALLOW`.
+            let vars = env(&[("SHALLOW", "/a"), ("DEEP", "/a/b/c")]);
+            assert_eq!(alias_path_with(&path, &vars, None), "${DEEP}/d");
+
+            // Equal-length prefixes tie-break on the lexicographically-first name.
+            let vars = env(&[("ZED", "/a/b"), ("ACE", "/a/b")]);
+            assert_eq!(alias_path_with(&path, &vars, None), "${ACE}/c/d");
+        }
+
+        #[test]
+        fn alias_path_collapses_exact_match_to_bare_prefix() {
+            let path = PathBuf::from("/srv/data");
+            let vars = env(&[("DATA", "/srv/data")]);
+            assert_eq!(alias_path_with(&path, &vars, None), "${DATA}");
+
+            assert_eq!(
+                alias_path_with(Path::new("/Users/ken"), &[], Some(Path::new("/Users/ken"))),
+                "~"
+            );
+        }
+
+        #[test]
+        fn alias_path_skips_positional_shell_vars() {
+            // PWD/OLDPWD often equal (an exact prefix of) the target, but alias
+            // to a transient label — they must be ignored in favor of `~`.
+            let path = PathBuf::from("/Users/ken/.claudine/worktrees/rusty-biscuit/sniff");
+            let vars = env(&[
+                (
+                    "OLDPWD",
+                    "/Users/ken/.claudine/worktrees/rusty-biscuit/sniff",
+                ),
+                ("PWD", "/Users/ken/.claudine/worktrees/rusty-biscuit/sniff"),
+            ]);
+            assert_eq!(
+                alias_path_with(&path, &vars, Some(Path::new("/Users/ken"))),
+                "~/.claudine/worktrees/rusty-biscuit/sniff"
+            );
+        }
+
+        #[test]
+        fn alias_path_ignores_non_absolute_and_falls_back_to_absolute() {
+            let path = PathBuf::from("/opt/tool/bin");
+            // Relative and empty env values must never match.
+            let vars = env(&[("REL", "opt/tool"), ("EMPTY", "")]);
+            assert_eq!(
+                alias_path_with(&path, &vars, Some(Path::new("/home/other"))),
+                "/opt/tool/bin"
+            );
+        }
+
+        #[test]
+        fn git_status_main_worktree_on_non_main_branch_is_case_b() {
+            // Regression: a non-main branch checked out in the MAIN worktree
+            // (in_worktree == false) must render Case B, not vanish. Selecting
+            // by branch spelling produced empty output here.
+            let mut git = make_git_info(vec![]);
+            git.repo_root = PathBuf::from("/repo");
+            git.in_worktree = false;
+            git.current_branch = Some("feature-x".to_string());
+
+            let output = render_git_section(&git, 10, 0, false, None, None);
+
+            assert!(
+                output.contains("Current Worktree:"),
+                "main worktree on a non-main branch must still show Case B: {output}"
+            );
+            assert!(
+                output.contains("there are 0 other active worktrees in this repo"),
+                "must report the other-worktree count: {output}"
+            );
+            assert!(
+                !output.contains("main:"),
+                "Case B must not show a separate main location line: {output}"
+            );
+        }
+
+        #[test]
+        fn git_status_master_default_main_worktree_is_case_b() {
+            // A repository whose primary branch is `master` is still the main
+            // worktree (in_worktree == false) and must render Case B.
+            let mut git = make_git_info(vec![]);
+            git.repo_root = PathBuf::from("/repo");
+            git.in_worktree = false;
+            git.current_branch = Some("master".to_string());
+
+            let output = render_git_section(&git, 10, 0, false, None, None);
+
+            assert!(
+                output.contains("Current Worktree:") && !output.contains("main:"),
+                "master-default repo must render Case B: {output}"
+            );
+        }
+
+        #[test]
+        fn git_status_detached_head_in_linked_worktree_renders_case_a() {
+            // Detached HEAD (current_branch == None) inside a linked worktree
+            // must still render Case A with a sensible branch label.
+            let mut git = make_git_info(vec![]);
+            git.repo_root = PathBuf::from("/repo/wt");
+            git.base_repo_root = Some(PathBuf::from("/repo"));
+            git.in_worktree = true;
+            git.current_branch = None;
+            git.worktrees.insert(
+                "wt".to_string(),
+                sniff::filesystem::git::WorktreeInfo {
+                    branch: "wt".to_string(),
+                    filepath: PathBuf::from("/repo/wt"),
+                    sha: "abc123".to_string(),
+                    dirty: false,
+                    ahead: 0,
+                    behind: 0,
+                    base_branch: "main".to_string(),
+                    has_conflicts: false,
+                    merged: false,
+                    changed_files: 0,
+                    is_current: true,
+                },
+            );
+
+            let output = render_git_section(&git, 10, 0, false, None, None);
+
+            assert!(
+                output.contains("main:"),
+                "Case A shows main location: {output}"
+            );
+            assert!(
+                output.contains("detached HEAD"),
+                "detached HEAD must be labeled rather than blank: {output}"
+            );
+        }
+
+        #[test]
+        fn git_status_single_linked_worktree_counts_correctly() {
+            let mut git = make_git_info(vec![]);
+            git.repo_root = PathBuf::from("/repo");
+            git.in_worktree = false;
+            git.current_branch = Some("main".to_string());
+
+            git.worktrees.insert(
+                "feature".to_string(),
+                sniff::filesystem::git::WorktreeInfo {
+                    branch: "feature".to_string(),
+                    filepath: PathBuf::from("/repo/feature"),
+                    sha: "abc123".to_string(),
+                    dirty: false,
+                    ahead: 0,
+                    behind: 0,
+                    base_branch: "main".to_string(),
+                    has_conflicts: false,
+                    merged: false,
+                    changed_files: 0,
+                    is_current: false,
+                },
+            );
+
+            let output = render_git_section(&git, 10, 0, false, None, None);
+
+            assert!(
+                output.contains("Current Worktree:"),
+                "Case B should show current worktree header"
+            );
+            assert!(
+                output.contains("Other Worktrees:"),
+                "Case B should show other worktrees header"
+            );
+            assert!(
+                output.contains("1 other active worktrees in this repo"),
+                "Single worktree should be counted correctly"
+            );
+        }
+
+        #[test]
+        fn merge_commit_line_includes_time_segment() {
+            // Merge subjects do not parse as conventional commits, so they take
+            // the non-conventional branch of `format_commit_line`. That branch
+            // must still render the `at <time>` segment.
+            let commit = CommitInfo {
+                sha: "3e2ca7f1234567".to_string(),
+                message: "Merge branch 'claudine'".to_string(),
+                author: "Test User".to_string(),
+                timestamp: Utc::now(),
+                remotes: None,
+                refs: vec![],
+            };
+
+            let line = format_commit_line(&commit, 0, None);
+
+            // Derive the expected time string the same way the formatter does to
+            // avoid timezone/relative-day flakiness across machines.
+            let (_, time_str, _) = format_commit_datetime(&commit.timestamp);
+
+            assert!(line.contains("<i>at</i>"), "missing `at` segment: {line}");
+            assert!(line.contains(&time_str), "missing time string: {line}");
+            assert!(
+                line.contains("Merge branch 'claudine'"),
+                "missing merge subject: {line}"
+            );
         }
     }
 
@@ -1495,13 +2346,13 @@ mod tests {
         fn make_repo(packages: Vec<Package>, is_monorepo: bool) -> RepoInfo {
             RepoInfo {
                 is_monorepo,
-                monorepo_tool: None,
-                workspace_tools: Vec::new(),
                 root: PathBuf::from("/repo"),
                 dependencies: None,
                 dev_dependencies: None,
                 peer_dependencies: None,
                 optional_dependencies: None,
+                monorepo_standards: Vec::new(),
+                monorepo_layers: Vec::new(),
                 packages: if packages.is_empty() {
                     None
                 } else {
@@ -1531,7 +2382,7 @@ mod tests {
             let packages = vec![make_package("alpha", "alpha", &[])];
             let repo = make_repo(packages, false);
             let mut git = make_git_info(vec![]);
-            git.status.dirty = vec![make_dirty_file("alpha/src/main.rs")];
+            git.status.as_mut().unwrap().dirty = vec![make_dirty_file("alpha/src/main.rs")];
             let result = build_result(repo, git);
 
             let names = select_dirty_package_names(&result, &[], None, None);
@@ -1554,7 +2405,7 @@ mod tests {
 
             let repo = make_repo(packages, true);
             let mut git = make_git_info(vec![]);
-            git.status.dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
+            git.status.as_mut().unwrap().dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
             let result = build_result(repo, git);
 
             let names = select_dirty_package_names(&result, &[], None, None);
@@ -1572,7 +2423,7 @@ mod tests {
 
             let repo = make_repo(packages, true);
             let mut git = make_git_info(vec![]);
-            git.status.dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
+            git.status.as_mut().unwrap().dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
             let result = build_result(repo, git);
 
             let areas = select_dirty_package_area_names(&result, &[], None, None);
@@ -1590,7 +2441,7 @@ mod tests {
 
             let repo = make_repo(packages, true);
             let mut git = make_git_info(vec![]);
-            git.status.dirty = vec![
+            git.status.as_mut().unwrap().dirty = vec![
                 make_dirty_file("area-a/alpha/src/main.rs"),
                 make_dirty_file("area-b/beta/src/lib.rs"),
             ];
@@ -1683,13 +2534,13 @@ mod tests {
         fn make_repo(packages: Vec<Package>) -> RepoInfo {
             RepoInfo {
                 is_monorepo: true,
-                monorepo_tool: None,
-                workspace_tools: Vec::new(),
                 root: PathBuf::from("/repo"),
                 dependencies: None,
                 dev_dependencies: None,
                 peer_dependencies: None,
                 optional_dependencies: None,
+                monorepo_standards: Vec::new(),
+                monorepo_layers: Vec::new(),
                 packages: if packages.is_empty() {
                     None
                 } else {
@@ -1711,7 +2562,8 @@ mod tests {
         fn build_result(repo: RepoInfo, dirty_paths: &[&str]) -> SniffResult {
             let mut git = make_git_info(vec![]);
             git.repo_root = repo.root.clone();
-            git.status.dirty = dirty_paths.iter().map(|p| dirty_file(p)).collect();
+            git.status.as_mut().unwrap().dirty =
+                dirty_paths.iter().map(|p| dirty_file(p)).collect();
             let filesystem = FilesystemInfo {
                 repo: Some(repo),
                 git: Some(git),
@@ -1724,6 +2576,56 @@ mod tests {
                 filesystem: Some(filesystem),
                 performance: None,
             }
+        }
+
+        /// Build a `SniffResult` whose `GitInfo` is identity-only: `status`
+        /// is `None` (as produced by `GitRequest::identity()`), mirroring a
+        /// valid library state the CLI helpers must tolerate without panicking.
+        fn build_identity_only_result(repo: RepoInfo) -> SniffResult {
+            let mut git = make_git_info(vec![]);
+            git.repo_root = repo.root.clone();
+            git.status = None;
+            git.head_id = Some("1234567890abcdef".to_string());
+            let filesystem = FilesystemInfo {
+                repo: Some(repo),
+                git: Some(git),
+                ..Default::default()
+            };
+            SniffResult {
+                os: None,
+                hardware: None,
+                network: None,
+                filesystem: Some(filesystem),
+                performance: None,
+            }
+        }
+
+        #[test]
+        fn identity_only_git_info_yields_indeterminate_not_panic() {
+            let mut packages = vec![make_package("alpha", "area-a", &[])];
+            packages[0].relative = "area-a/alpha".to_string();
+            let repo = make_repo(packages);
+            let result = build_identity_only_result(repo);
+            let area_dir = PathBuf::from("/repo/area-a/alpha");
+
+            // Selection helpers report "indeterminate" (None / empty) rather
+            // than silently claiming clean — and never panic on absent status.
+            assert_eq!(
+                current_package_area_is_dirty(&result, Some(&area_dir)),
+                None
+            );
+            assert_eq!(
+                package_area_source_code_change_count(&result, Some(&area_dir)),
+                None
+            );
+
+            let fs = result.filesystem.as_ref().unwrap();
+            let git = fs.git.as_ref().unwrap();
+            assert!(super::packages::dirty_package_names(&result).is_empty());
+
+            // Status-oriented renderers must produce output without panicking.
+            let _ = render_git_section(git, 10, 1, false, None, None);
+            let _ = super::repo::render_filesystem_section(fs, 1, Some(&git.repo_root), false);
         }
 
         #[test]
@@ -1827,8 +2729,8 @@ mod tests {
             git.repo_root = repo.root.clone();
             // Force status.dirty / status.untracked empty so the test
             // exclusively exercises the file_changes branch.
-            git.status.dirty = Vec::new();
-            git.status.untracked = Vec::new();
+            git.status.as_mut().unwrap().dirty = Vec::new();
+            git.status.as_mut().unwrap().untracked = Vec::new();
             let filesystem = FilesystemInfo {
                 repo: Some(repo),
                 git: Some(git),
@@ -2053,7 +2955,7 @@ mod tests {
         }
     }
 
-    mod deps_mermaid {
+    mod deps_dot {
         use super::*;
 
         #[test]
@@ -2062,19 +2964,20 @@ mod tests {
                 make_package("alpha", "area-a", &[]),
                 make_package("beta", "area-b", &[]),
             ];
-            assert!(build_deps_mermaid(&packages).is_none());
+            assert!(build_deps_dot(&packages, None).is_none());
         }
 
         #[test]
-        fn generates_flowchart_with_edges() {
+        fn generates_digraph_with_edges() {
             let packages = vec![
                 make_package("cli", "sniff", &["lib"]),
                 make_package("lib", "sniff", &[]),
             ];
-            let result = build_deps_mermaid(&packages).unwrap();
-            assert!(result.starts_with("flowchart TD"));
-            assert!(result.contains("subgraph sniff"));
-            assert!(result.contains("n0 --> n1"));
+            let result = build_deps_dot(&packages, None).unwrap();
+            assert!(result.starts_with("digraph G {"));
+            assert!(result.contains("subgraph cluster_"));
+            assert!(result.contains("label=\"sniff\""));
+            assert!(result.contains("n0 -> n1;"));
         }
 
         #[test]
@@ -2085,9 +2988,9 @@ mod tests {
                 make_package("sniff-cli", "sniff", &["sniff-lib"]),
                 make_package("sniff-lib", "sniff", &[]),
             ];
-            let result = build_deps_mermaid(&packages).unwrap();
-            assert!(result.contains("subgraph biscuit-speaks"));
-            assert!(result.contains("subgraph sniff"));
+            let result = build_deps_dot(&packages, None).unwrap();
+            assert!(result.contains("label=\"biscuit-speaks\""));
+            assert!(result.contains("label=\"sniff\""));
         }
 
         #[test]
@@ -2096,8 +2999,112 @@ mod tests {
                 make_package("app", "apps", &["core"]),
                 make_package("core", "libs", &[]),
             ];
-            let result = build_deps_mermaid(&packages).unwrap();
-            assert!(result.contains("n0 --> n1"));
+            let result = build_deps_dot(&packages, None).unwrap();
+            assert!(result.contains("n0 -> n1;"));
+        }
+
+        #[test]
+        fn focus_groups_focus_subgraph_and_floats_external_nodes() {
+            // dm-cli depends on dm-lib (both in darkmatter area);
+            // dm-lib depends on biscuit-terminal (external);
+            // claudine (external) depends on dm-cli.
+            let packages = vec![
+                make_package("dm-cli", "darkmatter", &["dm-lib"]),
+                make_package("dm-lib", "darkmatter", &["biscuit-terminal"]),
+                make_package("biscuit-terminal", "biscuit-terminal", &[]),
+                make_package("claudine", "claudine", &["dm-cli"]),
+            ];
+            let focus: std::collections::HashSet<&str> = ["dm-cli", "dm-lib"].into_iter().collect();
+            let result = build_deps_dot(&packages, Some(&focus)).unwrap();
+
+            // Focus area is the only cluster (count `subgraph cluster_` occurrences).
+            assert_eq!(
+                result.matches("subgraph cluster_").count(),
+                1,
+                "expected exactly one cluster wrapping the focus area"
+            );
+            assert!(result.contains("label=\"darkmatter\""));
+
+            // External packages still appear as bare nodes, drawn dashed
+            assert!(result.contains("n2 [label=\"biscuit-terminal\", style=dashed];"));
+            assert!(result.contains("n3 [label=\"claudine\", style=dashed];"));
+
+            // Edges touching focus are emitted
+            assert!(
+                result.contains("n0 -> n1;"),
+                "dm-cli -> dm-lib edge missing"
+            );
+            assert!(
+                result.contains("n1 -> n2;"),
+                "dm-lib -> biscuit-terminal edge missing"
+            );
+            assert!(
+                result.contains("n3 -> n0;"),
+                "claudine -> dm-cli edge missing"
+            );
+        }
+
+        #[test]
+        fn focus_omits_edges_between_external_only() {
+            // Both biscuit-terminal and biscuit-file are 1-hop external context for
+            // the darkmatter focus. Their internal edge must NOT be drawn because
+            // it doesn't touch the focus area.
+            let packages = vec![
+                make_package(
+                    "dm-lib",
+                    "darkmatter",
+                    &["biscuit-terminal", "biscuit-file"],
+                ),
+                make_package("biscuit-terminal", "biscuit-terminal", &["biscuit-file"]),
+                make_package("biscuit-file", "biscuit-file", &[]),
+            ];
+            let focus: std::collections::HashSet<&str> = ["dm-lib"].into_iter().collect();
+            let result = build_deps_dot(&packages, Some(&focus)).unwrap();
+
+            assert!(
+                result.contains("n0 -> n1;"),
+                "focus -> external edge missing"
+            );
+            assert!(
+                result.contains("n0 -> n2;"),
+                "focus -> external edge missing"
+            );
+            // External-only edge: biscuit-terminal (n1) -> biscuit-file (n2)
+            assert!(
+                !result.contains("n1 -> n2;"),
+                "external-only edge should not be drawn"
+            );
+        }
+    }
+
+    mod monorepo_label {
+        use super::*;
+        use sniff::filesystem::repo::MonorepoStandard;
+
+        #[test]
+        fn label_is_authority_alone_with_no_orchestrators() {
+            let label = format_monorepo_label(MonorepoStandard::PnpmWorkspaces, &[]);
+            assert_eq!(label, "pnpm workspaces");
+        }
+
+        #[test]
+        fn label_wraps_single_orchestrator_with_authority() {
+            let label =
+                format_monorepo_label(MonorepoStandard::PnpmWorkspaces, &[MonorepoStandard::Nx]);
+            assert_eq!(label, "Nx (using pnpm workspaces)");
+        }
+
+        #[test]
+        fn label_joins_every_orchestrator_in_layer_order() {
+            // A layer may carry multiple orchestrators (e.g. Nx + Lerna over a
+            // pnpm workspace). Every orchestrator must surface in the text,
+            // joined deterministically in the order the topology layer carries
+            // them (the same order the JSON `orchestrators` array emits).
+            let label = format_monorepo_label(
+                MonorepoStandard::PnpmWorkspaces,
+                &[MonorepoStandard::Nx, MonorepoStandard::Lerna],
+            );
+            assert_eq!(label, "Nx + Lerna (using pnpm workspaces)");
         }
     }
 }

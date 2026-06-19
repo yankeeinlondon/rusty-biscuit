@@ -1,9 +1,9 @@
 use color_eyre::eyre::Result;
 
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
-use biscuit_terminal::utils::layout::{Alignment, Margin};
+use biscuit_terminal::utils::layout::{Alignment, Length, Edges};
 use claudine::events::event_support_matrix;
 use claudine::provider::EventSupportLevel;
 
@@ -34,7 +34,7 @@ pub(super) fn run_capture_method() -> Result<()> {
     }
 
     let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
-    table.layout_mut().left_margin = Margin::Chars(1);
+    table.layout_mut().margin = Edges::x(Length::ch(1));
 
     for matrix_row in matrix {
         let mut row: Vec<TableCellContent> = vec![matrix_row.event.as_pascal_case().into()];
@@ -50,11 +50,9 @@ pub(super) fn run_capture_method() -> Result<()> {
                 }
                 EventSupportLevel::Wrapper { .. } => "wrapper".into(),
                 EventSupportLevel::Acp { .. } => {
-                    Prose::new("{{cyan}}acp{{reset}}").render(&term).into()
+                    Prose::new("<cyan>acp</cyan>").render(&term).into()
                 }
-                EventSupportLevel::NotSupported => {
-                    Prose::new("{{dim}}-{{reset}}").render(&term).into()
-                }
+                EventSupportLevel::NotSupported => Prose::new("<dim>-</dim>").render(&term).into(),
             };
             row.push(rendered);
         }
@@ -67,12 +65,12 @@ pub(super) fn run_capture_method() -> Result<()> {
 
     log::data("");
     let legend = Prose::new(
-        "{{dim}}Legend: {{reset}}hook{{dim}} = config-file hook, {{reset}}stream-parse{{dim}} = stream parsing, {{reset}}wire-proxy{{dim}} = wire-mode proxy, {{reset}}wrapper{{dim}} = wrapper script, {{reset}}{{cyan}}acp{{reset}}{{dim}} = Agent Client Protocol, {{reset}}-{{dim}} = not supported{{reset}}",
+        "<dim>Legend: </dim>hook<dim> = config-file hook, </dim>stream-parse<dim> = stream parsing, </dim>wire-proxy<dim> = wire-mode proxy, </dim>wrapper<dim> = wrapper script, </dim><cyan>acp</cyan><dim> = Agent Client Protocol, </dim>-<dim> = not supported</dim>",
     );
     log::data(&format!(" {}", legend.render(&term)));
 
     let acp_note = Prose::new(
-        "{{dim}}- 🅐 next to a provider name marks an ACP-supported provider (server or wire-proxy){{reset}}",
+        "<dim>- 🅐 next to a provider name marks an ACP-supported provider (server or wire-proxy)</dim>",
     );
     log::data(&format!(" {}", acp_note.render(&term)));
 

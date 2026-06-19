@@ -3,9 +3,9 @@ use std::collections::HashSet;
 use color_eyre::eyre::Result;
 
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
-use biscuit_terminal::utils::layout::Margin;
+use biscuit_terminal::utils::layout::{Length, Edges, TargetValue};
 use claudine::actions::{HookAction, ReportFormat};
 use claudine::config::AgentConfigurator;
 use claudine::config::claudine_config::ClaudineConfig;
@@ -135,7 +135,7 @@ pub(super) fn validate_sound_effects(config: &ClaudineConfig) {
     }
 
     log::data("");
-    let header = Prose::new("{{yellow}}{{bold}}⚠ Invalid sound effects:{{reset}}");
+    let header = Prose::new("<yellow><bold>⚠ Invalid sound effects:</bold></yellow>");
     log::data(&format!(
         " {}",
         header.render(&crate::log::optimistic_terminal(Some(100)))
@@ -147,13 +147,14 @@ pub(super) fn validate_sound_effects(config: &ClaudineConfig) {
             Some(similar) => {
                 has_fixable = true;
                 format!(
-                    "  {{{{dim}}}}-{{{{reset}}}} {{{{red}}}}{}{{{{reset}}}} {{{{dim}}}}(did you mean {{{{green}}}}{}{{{{reset}}}}{{{{dim}}}}){{{{reset}}}}",
-                    effect.invalid_name, similar
+                    "  <dim>-</dim> <red>{}</red> <dim>(did you mean <green>{}</green>)</dim>",
+                    Prose::escape_text(&effect.invalid_name),
+                    Prose::escape_text(similar)
                 )
             }
             None => format!(
-                "  {{{{dim}}}}-{{{{reset}}}} {{{{red}}}}{}{{{{reset}}}} {{{{dim}}}}(no similar effect found){{{{reset}}}}",
-                effect.invalid_name
+                "  <dim>-</dim> <red>{}</red> <dim>(no similar effect found)</dim>",
+                Prose::escape_text(&effect.invalid_name)
             ),
         };
         log::data(&format!(
@@ -165,16 +166,15 @@ pub(super) fn validate_sound_effects(config: &ClaudineConfig) {
     log::data("");
     if has_fixable {
         let hint = Prose::new(
-            "{{dim}}Edit {{blue}}~/.claudine/config.json{{reset}}{{dim}} to apply suggested fixes{{reset}}",
+            "<dim>Edit <blue>~/.claudine/config.json</blue> to apply suggested fixes</dim>",
         );
         log::data(&format!(
             " {}",
             hint.render(&crate::log::optimistic_terminal(Some(100)))
         ));
     }
-    let hint = Prose::new(
-        "{{dim}}Run {{blue}}playa list-effects{{reset}}{{dim}} to see available effects{{reset}}",
-    );
+    let hint =
+        Prose::new("<dim>Run <blue>playa list-effects</blue> to see available effects</dim>");
     log::data(&format!(
         " {}",
         hint.render(&crate::log::optimistic_terminal(Some(100)))
@@ -242,16 +242,16 @@ fn normalize_effect_name(name: &str) -> String {
 }
 
 /// Dim+italic opener for action parameters (inside parentheses, not the parens themselves).
-const DI: &str = "{{dim}}{{italic}}";
+const DI: &str = "<dim><italic>";
 /// Undo dim+italic only (preserves background for table striping).
-const DI_R: &str = "{{normal-font-weight}}{{not-italic}}";
+const DI_R: &str = "</italic></dim>";
 
 fn format_action(action: &HookAction) -> String {
     match action {
         HookAction::Speak { message, .. } => {
             format!(
                 "<cyan>Speak</cyan>({DI}\"{}\"{DI_R})",
-                truncate_string(message, 40)
+                Prose::escape_text(&truncate_string(message, 40))
             )
         }
         HookAction::SoundEffect {
@@ -274,7 +274,8 @@ fn format_action(action: &HookAction) -> String {
             };
             format!(
                 "<magenta>SoundEffect</magenta>({DI}{}{}{DI_R})",
-                effect, params_str
+                Prose::escape_text(effect),
+                params_str
             )
         }
         HookAction::Report { handler, .. } => {
@@ -297,7 +298,8 @@ fn format_action(action: &HookAction) -> String {
                     .unwrap_or_default();
                 format!(
                     "<yellow>Report</yellow>({DI}format={}, template=\"{}\"{DI_R})",
-                    format_str, template
+                    format_str,
+                    Prose::escape_text(&template)
                 )
             } else {
                 format!("<yellow>Report</yellow>({DI}format={}{DI_R})", format_str)
@@ -307,12 +309,15 @@ fn format_action(action: &HookAction) -> String {
             command, params, ..
         } => {
             if params.is_empty() {
-                format!("<green>Bash</green>({DI}\"{}\"{DI_R})", command)
+                format!(
+                    "<green>Bash</green>({DI}\"{}\"{DI_R})",
+                    Prose::escape_text(command)
+                )
             } else {
                 format!(
                     "<green>Bash</green>({DI}\"{} {}\"{DI_R})",
-                    command,
-                    truncate_string(params, 30)
+                    Prose::escape_text(command),
+                    Prose::escape_text(&truncate_string(params, 30))
                 )
             }
         }
@@ -326,7 +331,12 @@ fn format_action(action: &HookAction) -> String {
             if let Some(a) = args
                 && !a.is_empty()
             {
-                params.push(a.join(" "));
+                params.push(
+                    a.iter()
+                        .map(|arg| Prose::escape_text(arg))
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                );
             }
             if let Some(t) = timeout_ms {
                 params.push(format!("timeout={}ms", t));
@@ -338,7 +348,7 @@ fn format_action(action: &HookAction) -> String {
             };
             format!(
                 "<green>Call</green>({DI}\"{}{}\"{DI_R})",
-                truncate_string(command, 30),
+                Prose::escape_text(&truncate_string(command, 30)),
                 params_str
             )
         }
@@ -365,14 +375,14 @@ pub(super) fn run_provider_detail(
 
     let status_icon = if installed { "✅" } else { "❌" };
     let header = Prose::new(format!(
-        "{{{{bold}}}}{}{{{{reset}}}} {} {{{{dim}}}}({}installed){{{{reset}}}}",
+        "<bold>{}</bold> {} <dim>({}installed)</dim>",
         provider,
         status_icon,
         if installed { "" } else { "not " }
     ));
     log::data(&format!("\n {}", header.render(&term)));
 
-    let docs = Prose::new(format!("{{{{dim}}}}{}{{{{reset}}}}", provider.docs_url()));
+    let docs = Prose::new(format!("<dim>{}</dim>", provider.docs_url()));
     log::data(&format!(" {}", docs.render(&term)));
     log::data("");
 
@@ -391,7 +401,7 @@ pub(super) fn run_provider_detail(
         .with_columns(columns)
         .prefer_cursor_alignment()
         .alternate_background_color();
-    table.layout_mut().left_margin = Margin::Chars(1);
+    table.layout_mut().margin = Edges::x(Length::ch(1));
 
     for (event, actions) in &event_rows {
         let support_level = provider.event_support_level(event);
@@ -400,19 +410,15 @@ pub(super) fn run_provider_detail(
             EventSupportLevel::StreamParse { .. }
             | EventSupportLevel::WireProxy { .. }
             | EventSupportLevel::Wrapper { .. } => {
-                Prose::new("{{dim}}non-hook{{reset}}").render(&term).into()
+                Prose::new("<dim>non-hook</dim>").render(&term).into()
             }
-            EventSupportLevel::Acp { .. } => {
-                Prose::new("{{cyan}}acp{{reset}}").render(&term).into()
-            }
-            EventSupportLevel::NotSupported => Prose::new("{{dim}}-{{reset}}").render(&term).into(),
+            EventSupportLevel::Acp { .. } => Prose::new("<cyan>acp</cyan>").render(&term).into(),
+            EventSupportLevel::NotSupported => Prose::new("<dim>-</dim>").render(&term).into(),
         };
 
         let actions_cell: TableCellContent = match actions {
             None => "-".into(),
-            Some(a) if a.is_empty() => Prose::new("{{dim}}(no actions){{reset}}")
-                .render(&term)
-                .into(),
+            Some(a) if a.is_empty() => Prose::new("<dim>(no actions)</dim>").render(&term).into(),
             Some(a) => {
                 let text = a.iter().map(format_action).collect::<Vec<_>>().join("\n");
                 Prose::new(text).render(&term).into()
@@ -437,7 +443,7 @@ pub(super) fn run_provider_detail(
 
     log::data("");
     let summary = Prose::new(format!(
-        "{{{{bold}}}}{}{{{{reset}}}} supports {{{{yellow}}}}{}{{{{reset}}}} of the {{{{bold}}}}{{{{yellow}}}}{}{{{{reset}}}} unified events",
+        "<bold>{}</bold> supports <yellow>{}</yellow> of the <bold><yellow>{}</yellow></bold> unified events",
         provider, configured_count, total_unified_events
     ));
     log::data(&format!(" {}", summary.render(&term)));
@@ -457,11 +463,11 @@ pub(super) fn run_provider_detail(
         log::data("");
         let enabled_header = if unsupported_count > 0 {
             Prose::new(format!(
-                "{{{{bold}}}}Event Descriptions{{{{reset}}}} {{{{red}}}}(⚠ {} unsupported){{{{reset}}}}",
+                "<bold>Event Descriptions</bold> <red>(⚠ {} unsupported)</red>",
                 unsupported_count
             ))
         } else {
-            Prose::new("{{bold}}Event Descriptions{{reset}}")
+            Prose::new("<bold>Event Descriptions</bold>")
         };
         log::data(&format!(" {}", enabled_header.render(&term)));
 
@@ -473,13 +479,13 @@ pub(super) fn run_provider_detail(
             .with_columns(desc_columns)
             .prefer_cursor_alignment()
             .alternate_background_color();
-        desc_table.layout_mut().left_margin = Margin::Chars(1);
+        desc_table.layout_mut().margin = Edges::x(Length::ch(1));
 
         for event in enabled_events {
             let is_unsupported = !provider.supports_event_via_hook(event);
             let event_cell: TableCellContent = if is_unsupported {
                 Prose::new(format!(
-                    "{{{{red}}}}{{{{strikethrough}}}}{}{{{{reset}}}}",
+                    "<red><strikethrough>{}</strikethrough></red>",
                     event.as_pascal_case()
                 ))
                 .render(&term)
@@ -488,7 +494,7 @@ pub(super) fn run_provider_detail(
                 event.as_pascal_case().into()
             };
             let desc_cell: TableCellContent = if is_unsupported {
-                Prose::new(format!("{{{{dim}}}}{}{{{{reset}}}}", event.description()))
+                Prose::new(format!("<dim>{}</dim>", event.description()))
                     .render(&term)
                     .into()
             } else {
@@ -515,7 +521,7 @@ pub(super) fn run_simple(
         TableColumn::new(bold("Installed")),
         TableColumn::new(bold("Subscribed Hooks")),
     ]);
-    table.layout_mut().left_margin = Margin::Chars(1);
+    table.layout_mut().margin = Edges::x(Length::ch(1));
 
     let mut has_sync_issues = false;
     let mut has_unsupported_issues = false;
@@ -594,17 +600,14 @@ pub(super) fn run_simple(
         let mut legend_parts = Vec::new();
         if has_unsupported_issues {
             legend_parts.push(
-                "{{red}}{{strikethrough}}strikethrough{{reset}}{{dim}} = unsupported (won't fire)",
+                "<red><strikethrough>strikethrough</strikethrough></red> = unsupported (won't fire)",
             );
         }
         if has_sync_issues {
-            legend_parts.push("{{red}}red{{reset}}{{dim}} = stale (remove with sync)");
-            legend_parts.push("{{yellow}}orange{{reset}}{{dim}} = missing (add with sync)");
+            legend_parts.push("<red>red</red> = stale (remove with sync)");
+            legend_parts.push("<yellow>orange</yellow> = missing (add with sync)");
         }
-        let legend = Prose::new(format!(
-            "{{{{dim}}}}- Legend: {}{{{{reset}}}}",
-            legend_parts.join(", ")
-        ));
+        let legend = Prose::new(format!("<dim>- Legend: {}</dim>", legend_parts.join(", ")));
         log::data(&format!(
             " {}",
             legend.render(&crate::log::optimistic_terminal(Some(120)))
@@ -613,12 +616,12 @@ pub(super) fn run_simple(
 
     log::data("");
     let hints = [
-        "{{dim}}- Use <blue><bold>-v</bold></blue>{{dim}} for detailed event matrix{{reset}}",
-        "{{dim}}- Use <blue><bold>--support</bold></blue>{{dim}} to see which events each provider supports{{reset}}",
-        "{{dim}}- Use <blue><bold>--mapping</bold></blue>{{dim}} to see native event name mappings{{reset}}",
-        "{{dim}}- Use <blue><bold>--describe</bold></blue>{{dim}} to see event descriptions and schemas{{reset}}",
-        "{{dim}}- Use <blue><bold>--variables</bold></blue>{{dim}} to see template variables for speak/report{{reset}}",
-        "{{dim}}- Use <blue><bold>--capture-method</bold></blue>{{dim}} to see how each event is captured (hook / non-hook / acp){{reset}}",
+        "<dim>- Use <blue><bold>-v</bold></blue> for detailed event matrix</dim>",
+        "<dim>- Use <blue><bold>--support</bold></blue> to see which events each provider supports</dim>",
+        "<dim>- Use <blue><bold>--mapping</bold></blue> to see native event name mappings</dim>",
+        "<dim>- Use <blue><bold>--describe</bold></blue> to see event descriptions and schemas</dim>",
+        "<dim>- Use <blue><bold>--variables</bold></blue> to see template variables for speak/report</dim>",
+        "<dim>- Use <blue><bold>--capture-method</bold></blue> to see how each event is captured (hook / non-hook / acp)</dim>",
     ];
     for hint in hints {
         log::data(&format!(
@@ -653,7 +656,7 @@ pub(super) fn run_verbose(
     }
 
     let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
-    table.layout_mut().left_margin = Margin::Chars(1);
+    table.layout_mut().margin = Edges::x(Length::ch(1));
 
     for provider in ALL_PROVIDERS {
         let installed = clients.is_installed(provider.sniff_ai_cli());
@@ -691,15 +694,15 @@ pub(super) fn run_verbose(
 
     log::data("");
     let legend = Prose::new(
-        "{{dim}}Legend: {{reset}}⚠️{{dim}} = not supported, {{reset}}-{{dim}} = not configured, {{reset}}⓪{{dim}} = 0 actions, {{reset}}❶{{dim}} = 1 action, etc.{{reset}}",
-    ).with_left_margin(Margin::Chars(8));
+        "<dim>Legend: </dim>⚠️<dim> = not supported, </dim>-<dim> = not configured, </dim>⓪<dim> = 0 actions, </dim>❶<dim> = 1 action, etc.</dim>",
+    ).with_left_margin(TargetValue::universal(Length::ch(8)));
     log::data(&format!(" {}\n", legend.render(&term)));
 
     let hints = [
-        "{{dim}}- Use <blue><bold>--support</bold></blue>{{dim}} to see which events each provider supports{{reset}}",
-        "{{dim}}- Use <blue><bold>--mapping</bold></blue>{{dim}} to see native event name mappings{{reset}}",
-        "{{dim}}- Use <blue><bold>--describe</bold></blue>{{dim}} to see event descriptions and schemas{{reset}}",
-        "{{dim}}- Use <blue><bold>--variables</bold></blue>{{dim}} to see template variables for speak/report{{reset}}",
+        "<dim>- Use <blue><bold>--support</bold></blue> to see which events each provider supports</dim>",
+        "<dim>- Use <blue><bold>--mapping</bold></blue> to see native event name mappings</dim>",
+        "<dim>- Use <blue><bold>--describe</bold></blue> to see event descriptions and schemas</dim>",
+        "<dim>- Use <blue><bold>--variables</bold></blue> to see template variables for speak/report</dim>",
     ];
     for hint in hints {
         log::data(&format!(" {}", Prose::new(hint).render(&term)));

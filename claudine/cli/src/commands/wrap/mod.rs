@@ -32,11 +32,11 @@ pub(crate) use flags::{
 };
 pub(crate) use harness_orch::{
     AttemptLaunch, CachedHarnessLoopContext, HarnessPromptMode, HarnessPromptState,
-    MaterializedHarnessPrompt, build_harness_launch, build_harness_shell_options,
-    build_harness_shell_options_with_cache, execute_harness_attempt, find_wrapper_harness_source,
-    harness_policy_root, harness_prompt_mode_label, materialize_harness_prompt,
-    materialize_passthrough_harness_seed, materialized_harness_prompt_from_prepared,
-    run_harness_loop,
+    MaterializedHarnessPrompt, apply_composition_shell_overrides, build_harness_launch,
+    build_harness_shell_options, build_harness_shell_options_with_cache, execute_harness_attempt,
+    find_wrapper_harness_source, harness_policy_root, harness_prompt_mode_label,
+    materialize_harness_prompt, materialize_passthrough_harness_seed,
+    materialized_harness_prompt_from_prepared, run_harness_loop,
 };
 pub(crate) use inline::{
     extract_tags_from_prompt, report_inline_agent_status, strip_prompt_tags_for_provider,
@@ -46,7 +46,7 @@ pub(crate) use overlay::{frontmatter_map_to_value, merge_frontmatter_overlay};
 pub(crate) use policy::{
     StreamSummaryContext, StructuredCodexOutput, StructuredSummaryDetails,
     WrapperHarnessPermissionProbe, build_structured_plumbing, emit_stream_summary,
-    emit_stream_summary_with_context, format_summary_prose, format_verbose_summary_details_prose,
+    format_summary_prose, format_verbose_summary_details_prose,
 };
 pub(crate) use prompt_source::{maybe_edit_prompt_source, maybe_edit_prompt_source_with};
 pub(crate) use resume::{
@@ -55,6 +55,7 @@ pub(crate) use resume::{
 };
 
 use biscuit_terminal::terminal::Terminal;
+use claudine::composition::InstalledProviderSnapshot;
 use claudine::events::EnvironmentContext;
 use claudine::provider::Provider;
 use claudine::stream::stderr::Verbosity;
@@ -94,7 +95,7 @@ pub(crate) struct McpRuntimeInfo {
 pub(crate) struct WrapStartupDetection {
     pub(crate) env_context: EnvironmentContext,
     pub(crate) launch_context: claudine::system_prompt::LaunchContext,
-    pub(crate) launch_workspace: env::LaunchWorkspaceContext,
+    pub(crate) launch_workspace: claudine::composition::LaunchWorkspaceContext,
 }
 
 /// Run one sniff-based filesystem scan and build every startup context
@@ -138,8 +139,10 @@ pub(crate) fn detect_wrap_startup(cwd: &Path) -> Result<WrapStartupDetection> {
         })
         .unwrap_or((None, None));
 
+    // Direct wrapper has no composed-document source, so no source-repo
+    // hint to pass. `repo_root` and `child_cwd` both follow the launch CWD.
     let launch_workspace =
-        env::launch_workspace_context_from_repo_info(cwd, git_root.as_deref(), repo.as_ref());
+        env::launch_workspace_context_from_repo_info(cwd, git_root.as_deref(), repo.as_ref(), None);
 
     let env_context = claudine::events::environment_context_from_sniff_result(result);
 
@@ -158,8 +161,9 @@ fn fallback_wrap_startup(cwd: &Path) -> WrapStartupDetection {
             repo_root: None,
             package_area_root: None,
             package_root: None,
+            agent: None,
         },
-        launch_workspace: env::LaunchWorkspaceContext {
+        launch_workspace: claudine::composition::LaunchWorkspaceContext {
             launch_cwd: cwd.to_path_buf(),
             repo_root: None,
             child_cwd: cwd.to_path_buf(),
@@ -173,6 +177,21 @@ pub(crate) fn switch_process_cwd(child_cwd: &Path) -> Result<()> {
     let current = std::env::current_dir()?;
     if current != child_cwd {
         std::env::set_current_dir(child_cwd)?;
+    }
+    // Rust's `set_current_dir` calls `chdir(2)` but does NOT touch the
+    // `PWD` environment variable — the shell convention is that `PWD`
+    // tracks "where the user thinks they are", which can differ from
+    // `getcwd(3)`. Several downstream tools (notably OpenCode's
+    // `run.ts:276` resolving `process.env.PWD ?? process.cwd()`) trust
+    // `PWD` over the real cwd. If we don't sync them, the spawned
+    // child inherits the user's pre-chdir `PWD` (e.g. a package
+    // subdirectory the user ran `just commit` from) and resolves paths
+    // against the wrong root.
+    //
+    // SAFETY: single-threaded wrapper startup; no other thread reads
+    // or writes `PWD` concurrently with this call.
+    unsafe {
+        std::env::set_var("PWD", child_cwd.as_os_str());
     }
     Ok(())
 }
@@ -199,6 +218,7 @@ fn wrap_terminal_for_mode(non_interactive: bool) -> Terminal {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn resolve_binary_path(
     profile: &dyn WrapperProfile,
     clients: &InstalledAiClients,
@@ -213,7 +233,18 @@ pub(crate) fn resolve_binary_path(
 /// entire set of known AI CLIs. Used on the hot path of the direct wrapper
 /// so we don't pay for a full PATH walk over ~9 binaries when only one is
 /// needed.
-pub(crate) fn resolve_binary_path_direct(profile: &dyn WrapperProfile) -> Result<PathBuf> {
+///
+/// When `snapshot` is provided and contains a path for the provider, the
+/// cached path is returned immediately, avoiding the `which` syscall.
+pub(crate) fn resolve_binary_path_direct(
+    profile: &dyn WrapperProfile,
+    snapshot: Option<&InstalledProviderSnapshot>,
+) -> Result<PathBuf> {
+    if let Some(snapshot) = snapshot
+        && let Some(path) = snapshot.binary_path(profile.provider())
+    {
+        return Ok(path.to_path_buf());
+    }
     which::which(profile.binary()).map_err(|_| binary_missing_error(profile))
 }
 
@@ -279,7 +310,6 @@ pub fn run_provider_wrapper(
         return Ok(());
     }
 
-    let wrapper_start = std::time::Instant::now();
     let mut perf_collector =
         startup_timings.map(|timings| crate::perf::CommandPerfCollector::new("Wrapper", timings));
 
@@ -300,9 +330,7 @@ pub fn run_provider_wrapper(
     // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
     // The perf report is always emitted to stderr when requested.
     if let Some(collector) = perf_collector {
-        let total = wrapper_start.elapsed();
-        let report = collector.into_report(total);
-        eprint!("{}", crate::perf::render_perf_report(&report));
+        crate::perf::emit_report(&collector.into_report());
     }
 
     std::process::exit(code);
@@ -321,23 +349,13 @@ fn run_provider_wrapper_inner(
         )
     })?;
 
-    // SAFETY: this runs at subcommand entry on the main task before any
-    // child threads, sub-renders, or hooks have been spawned. No concurrent
-    // env reads exist at this point, so mutating the process env upholds
-    // Rust 2024's `std::env::set_var` safety contract. Setting AGENT
-    // here lets `{{env.AGENT}}` resolve in any prompt rendered by the
-    // parent (system prompt, dispatch templates) before the child launch.
-    unsafe {
-        std::env::set_var("AGENT", profile.agent_env());
-    }
-
     let cwd = std::env::current_dir()?;
 
     let binary_path = info_span!(
         "wrapper_binary_resolution",
         provider = %provider,
     )
-    .in_scope(|| resolve_binary_path_direct(profile))?;
+    .in_scope(|| resolve_binary_path_direct(profile, None))?;
 
     let raw_agent_params: Vec<String> = std::env::args().skip(2).collect();
     let mut child_args = args.passthrough.clone();
@@ -497,22 +515,33 @@ fn run_provider_wrapper_inner(
     profile.reject_direct_yolo(&child_args)?;
     flags::reject_retired_composition_flags(&child_args)?;
 
-    if yolo_requested
-        && let Some(warn) = profile.apply_yolo_for_mode(
+    if yolo_requested {
+        let outcome = profile.apply_yolo_for_mode(
             &mut child_args,
             &mut env_overrides,
             !non_interactive_requested,
-        )?
-    {
-        deferred_warnings.push(warn);
-        // A returned warning means yolo was NOT actually applied for this
-        // invocation (e.g. OpenCode interactive mode), so the summary and
-        // header badge should reflect the disabled state.
-        yolo_enabled = false;
+        )?;
+        if let Some(warn) = outcome.warning {
+            deferred_warnings.push(warn);
+        }
+        // `outcome.applied` is the single source of truth. The summary
+        // and header badge should reflect this — not `yolo_requested`
+        // intent on its own — because some launch modes silently
+        // suppress the flag (e.g. OpenCode interactive TUI).
+        yolo_enabled = outcome.applied;
     }
     if yolo_requested && !profile.has_supported_yolo() {
         yolo_enabled = false;
     }
+    tracing::debug!(
+        target: "claudine::wrap::yolo",
+        provider = %profile.provider(),
+        request_yolo = yolo_requested,
+        effective_yolo = yolo_enabled,
+        non_interactive = non_interactive_requested,
+        child_args = ?child_args,
+        "yolo applied to provider argv",
+    );
 
     profile.apply_entrypoint(&mut child_args, non_interactive_requested);
 
@@ -611,6 +640,11 @@ fn run_provider_wrapper_inner(
         append_file: args.append_system_prompt.clone(),
         replace_file: args.replace_system_prompt.clone(),
     };
+    // Plumb the provider slug into the launch context so system-prompt
+    // templates that reference {{env.AGENT}} resolve correctly without
+    // mutating the parent process env.
+    let mut launch_context = launch_context;
+    launch_context.agent = Some(profile.agent_env().to_string());
     let effective_sp = claudine::system_prompt::resolve_and_prepare_for_session(
         &sp_args,
         &launch_context,
@@ -619,12 +653,24 @@ fn run_provider_wrapper_inner(
 
     let mut sp_artifacts: Vec<system_prompt::SystemPromptArtifact> = Vec::new();
 
+    let scoped_tmp = system_prompt::scoped_tmp_dir(&launch_workspace);
+    system_prompt::maybe_gitignore_claudine_tmp(
+        launch_workspace
+            .repo_root
+            .as_deref()
+            .unwrap_or(&launch_workspace.launch_cwd),
+    );
+
     match &effective_sp {
-        claudine::system_prompt::EffectiveSystemPrompt::None
-        | claudine::system_prompt::EffectiveSystemPrompt::Disabled { .. } => {}
-        claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
-            let application =
-                profile.apply_system_prompt(prepared, !non_interactive_requested, &cwd)?;
+        claudine::system_prompt::ResolvedSystemPrompt::None
+        | claudine::system_prompt::ResolvedSystemPrompt::Disabled { .. } => {}
+        claudine::system_prompt::ResolvedSystemPrompt::Ready(prepared) => {
+            let application = profile.apply_system_prompt(
+                prepared,
+                !non_interactive_requested,
+                &cwd,
+                &scoped_tmp,
+            )?;
             child_args.extend(application.args);
             env_overrides.extend(
                 application
@@ -660,11 +706,12 @@ fn run_provider_wrapper_inner(
         repo_requested,
         needs_mcp_shadow_home,
         launch_workspace,
+        false,
     )?;
 
     if !silent_requested && !quiet_requested {
         use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
-        use biscuit_terminal::prelude::Renderable as _;
+        use biscuit_terminal::prelude::TerminalRenderable as _;
 
         let status = Status::from_prose("Starting pre-flight checks".to_string())
             .state(StatusState::Info)
@@ -909,17 +956,22 @@ fn run_provider_wrapper_inner(
 
             if let Some(ref source) = opencode_model_source {
                 use biscuit_terminal::components::status::Status;
-                use biscuit_terminal::prelude::Renderable as _;
+                use biscuit_terminal::prelude::TerminalRenderable as _;
                 let status = Status::from_prose(source.status_markup());
                 log::message(&status.render(&term));
             }
         }
 
-        crate::output::log_system_prompt(
+        let scope_for_report = launch_context
+            .repo_root
+            .as_deref()
+            .unwrap_or(&launch_context.cwd);
+        crate::output::log_system_prompt_with_scope(
             &effective_sp,
             detail_requested,
             silent_requested,
             quiet_requested,
+            Some(scope_for_report),
             &term,
         );
 
@@ -928,7 +980,7 @@ fn run_provider_wrapper_inner(
         if !quiet_requested
             || matches!(
                 effective_sp,
-                claudine::system_prompt::EffectiveSystemPrompt::Ready(_)
+                claudine::system_prompt::ResolvedSystemPrompt::Ready(_)
             )
         {
             log::message("");
@@ -1014,6 +1066,7 @@ fn run_provider_wrapper_inner(
             let seed = harness_orch::materialize_passthrough_harness_seed(
                 &source_path,
                 base_prompt.clone(),
+                Some(child_cwd),
             )?;
             let harness_enabled = claudine::harness::has_harness_properties(&seed.frontmatter);
             if harness_enabled {
@@ -1054,7 +1107,7 @@ fn run_provider_wrapper_inner(
 
     if !silent_requested && !quiet_requested {
         use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
-        use biscuit_terminal::prelude::Renderable as _;
+        use biscuit_terminal::prelude::TerminalRenderable as _;
 
         let status = Status::from_prose("Pre-flight checks have passed".to_string())
             .state(StatusState::Success)
@@ -1104,7 +1157,7 @@ fn run_provider_wrapper_inner(
         };
         let default_lifecycle_emitter = claudine::composition::DefaultLifecycleEmitter;
 
-        let (harness_code, harness_perf) = harness_orch::run_harness_loop(
+        let (harness_code, harness_perf, _harness_signals) = harness_orch::run_harness_loop(
             provider,
             profile,
             binary_path.as_path(),
@@ -1201,7 +1254,8 @@ fn run_provider_wrapper_inner(
                 None,
                 cli_step_timeout.clone(),
                 None,
-            );
+            )
+            .with_provider(provider);
             exec::run_child_stream_semantic(
                 binary_path.as_path(),
                 &child_args,
@@ -1233,7 +1287,15 @@ fn run_provider_wrapper_inner(
         if let Some(codex_output) = structured_codex_output.as_ref() {
             codex_output.apply_to_summary(&mut summary);
         }
-        if provider == Provider::Codex && !summary.assistant_text.is_empty() {
+        // Codex delivers its final assistant message via the
+        // `--output-last-message` file; this block renders that file's
+        // contents to stdout. Suppress on user interrupt because the
+        // overlapping `agent_message` prose already rendered live as
+        // `▌ ` thinking blocks above.
+        if provider == Provider::Codex
+            && !summary.assistant_text.is_empty()
+            && !crate::output::user_interrupt_observed()
+        {
             section_stream.enter_final_stdout();
             let text = &summary.assistant_text;
             if std::io::stdout().is_terminal() {
@@ -1259,6 +1321,7 @@ fn run_provider_wrapper_inner(
             detail_requested,
             &summary_details.lock().unwrap().clone(),
             Some(&section_stream),
+            stream_result.agent_pid,
         );
 
         let stderr_text = summary.stderr_text.clone();
@@ -1300,6 +1363,52 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
+    /// Regression: `switch_process_cwd` must update both the OS cwd
+    /// (`chdir(2)`) AND the `PWD` env var. Rust's `set_current_dir`
+    /// only does the former; the latter is the shell convention that
+    /// downstream tools (OpenCode, bash, fish, etc.) trust over the
+    /// real cwd. Leaving them out of sync produces spec-vs-reality
+    /// drift in child processes that resolve project / git roots from
+    /// `process.env.PWD`.
+    #[test]
+    fn switch_process_cwd_syncs_pwd_env_var() {
+        // Test mutates process cwd and PWD; serialize it informally
+        // by running synchronously and restoring before assert prints.
+        let target = tempfile::tempdir().unwrap();
+        // Canonicalize: macOS prefixes /private/ on /var paths and
+        // `current_dir()` returns the canonical form.
+        let target_canon = std::fs::canonicalize(target.path()).unwrap();
+
+        let prior_cwd = std::env::current_dir().unwrap();
+        let prior_pwd = std::env::var_os("PWD");
+        // SAFETY: scoped mutation; we restore before returning.
+        unsafe {
+            std::env::set_var("PWD", "/definitely/not/the/target");
+        }
+
+        switch_process_cwd(&target_canon).unwrap();
+        let observed_cwd = std::env::current_dir().unwrap();
+        let observed_pwd = std::env::var_os("PWD");
+
+        // Restore.
+        let _ = std::env::set_current_dir(&prior_cwd);
+        unsafe {
+            match prior_pwd {
+                Some(value) => std::env::set_var("PWD", value),
+                None => std::env::remove_var("PWD"),
+            }
+        }
+
+        assert_eq!(observed_cwd, target_canon, "chdir must take effect",);
+        assert_eq!(
+            observed_pwd.as_deref(),
+            Some(target_canon.as_os_str()),
+            "PWD env var must track child_cwd after switch_process_cwd \
+             (the bug: chdir without PWD-sync lets child processes resolve \
+             paths against stale shell PWD)",
+        );
+    }
+
     #[test]
     fn missing_binary_preflight_has_actionable_message() {
         let clients = InstalledAiClients::default();
@@ -1312,6 +1421,77 @@ mod tests {
         assert!(message.contains("docs:"));
     }
 
+    /// W2 regression: when the prep snapshot already knows where the
+    /// provider binary lives, `resolve_binary_path_direct` must return
+    /// that path without touching `which::which`. We verify this by
+    /// seeding the snapshot with a synthetic path that does **not** exist
+    /// on `PATH`; if the function fell through to `which::which`, the
+    /// call would error with `binary_missing_error`.
+    #[test]
+    fn resolve_binary_path_direct_uses_snapshot_without_which_lookup() {
+        use std::collections::{BTreeMap, BTreeSet};
+
+        let synthetic = PathBuf::from("/nonexistent/cache/codex-bin-stub");
+        let mut binary_paths = BTreeMap::new();
+        binary_paths.insert(Provider::Codex, synthetic.clone());
+        let snapshot = InstalledProviderSnapshot {
+            runnable: vec![Provider::Codex],
+            excluded: BTreeSet::new(),
+            all_installed: vec![Provider::Codex],
+            binary_paths,
+        };
+
+        let profile = profile::profile_for_provider(Provider::Codex).unwrap();
+        let resolved =
+            resolve_binary_path_direct(profile, Some(&snapshot)).expect("snapshot path wins");
+
+        assert_eq!(
+            resolved, synthetic,
+            "snapshot path must be returned verbatim, not re-resolved via `which`"
+        );
+    }
+
+    /// Companion: when the snapshot has no entry for the requested
+    /// provider, the legacy `which::which` fallback path is taken.
+    /// In an unhydrated environment (no real `codex` binary on PATH),
+    /// that path must still surface the actionable missing-binary error
+    /// rather than panic.
+    #[test]
+    fn resolve_binary_path_direct_falls_back_when_snapshot_lacks_provider() {
+        use std::collections::{BTreeMap, BTreeSet};
+
+        let snapshot = InstalledProviderSnapshot {
+            runnable: vec![],
+            excluded: BTreeSet::new(),
+            all_installed: vec![],
+            binary_paths: BTreeMap::new(),
+        };
+        let profile = profile::profile_for_provider(Provider::Codex).unwrap();
+
+        // Force PATH to a directory we know contains no binaries so the
+        // `which::which` fallback deterministically misses.
+        let empty = tempfile::tempdir().unwrap();
+        let prev_path = std::env::var_os("PATH");
+        // SAFETY: tests in this binary are not parallelised across this
+        // env var; the variable is restored before returning.
+        unsafe {
+            std::env::set_var("PATH", empty.path());
+        }
+        let result = resolve_binary_path_direct(profile, Some(&snapshot));
+        unsafe {
+            match prev_path {
+                Some(p) => std::env::set_var("PATH", p),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+
+        let error = result.expect_err("missing-binary fallback should error");
+        assert!(
+            error.to_string().contains("cannot run wrapped Codex"),
+            "expected actionable error; got {error}"
+        );
+    }
+
     #[test]
     fn package_name_display_shows_resolved_package_and_area() {
         let env_plan = env::EnvPlan {
@@ -1321,13 +1501,14 @@ mod tests {
             added: Vec::new(),
             repo_root: None,
             child_cwd: PathBuf::from("/tmp"),
-            package_context: Some(env::PackageContext {
+            package_context: Some(claudine::composition::PackageContext {
                 package_area: "claudine".to_string(),
                 package: Some("claudine-cli".to_string()),
                 candidates: vec!["claudine-cli".to_string()],
             }),
             warnings: Vec::new(),
             shadow_home_path: None,
+            perf_substages: Vec::new(),
         };
 
         let rendered = crate::output::package_name_display(&env_plan).unwrap();
@@ -1344,13 +1525,14 @@ mod tests {
             added: Vec::new(),
             repo_root: None,
             child_cwd: PathBuf::from("/tmp"),
-            package_context: Some(env::PackageContext {
+            package_context: Some(claudine::composition::PackageContext {
                 package_area: "claudine".to_string(),
                 package: None,
                 candidates: vec!["claudine".to_string(), "claudine-cli".to_string()],
             }),
             warnings: Vec::new(),
             shadow_home_path: None,
+            perf_substages: Vec::new(),
         };
 
         assert!(crate::output::package_name_display(&env_plan).is_none());

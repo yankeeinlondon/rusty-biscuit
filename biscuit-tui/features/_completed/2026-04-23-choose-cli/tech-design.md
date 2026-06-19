@@ -1,6 +1,6 @@
 # Choose CLI Enhancements — Technical Design
 
-This document is the engineering companion to the [spec](./spec.md). The spec describes *what* the enhanced `choose-one` and `choose-many` subcommands of the `question` CLI should do; this document describes *how* the existing `tui-chrome` library + `tui-chrome-cli` binary will be extended to deliver it.
+This document is the engineering companion to the [spec](./spec.md). The spec describes *what* the enhanced `choose-one` and `choose-many` subcommands of the `question` CLI should do; this document describes *how* the existing `biscuit-tui` library + `biscuit-tui-cli` binary will be extended to deliver it.
 
 The implementation deliberately preserves the existing public API surface (`ChooseOne`, `ChooseOneState`, `ChooseMany`, `ChooseManyState`, `ChoiceInput`, `ChoiceOption`, `run_standalone`, …) and layers the new features additively. Existing tests keep passing; new tests pin the new behaviour.
 
@@ -21,7 +21,7 @@ The implementation deliberately preserves the existing public API surface (`Choo
 
 - Changes to `text-input`, `text-area-input`, `boolean-switch`, or `input-table`.
 - Changes to `OutputMode` (`raw` / `json` / `null` continue to work as today).
-- Re-organising the `tui-chrome` crate (see [§13](#13-deferred-and-out-of-scope)).
+- Re-organising the `biscuit-tui` crate (see [§13](#13-deferred-and-out-of-scope)).
 - Rewriting the existing `--options-from-file` / `--options-from-dictionary` paths (kept verbatim — the spec's "STDIN + positional" path is an *additional* source, not a replacement).
 
 ---
@@ -30,7 +30,7 @@ The implementation deliberately preserves the existing public API surface (`Choo
 
 ```mermaid
 flowchart TD
-    subgraph cli["tui-chrome-cli (binary: question)"]
+    subgraph cli["biscuit-tui-cli (binary: question)"]
         ARGS["clap parse:<br/>ChooseOneArgs / ChooseManyArgs"]
         SRC["resolve option source<br/>(stdin | positional | --options* )"]
         BUILD["build ChoiceInput&lt;String&gt;<br/>(label/value via --delimiter)"]
@@ -38,7 +38,7 @@ flowchart TD
         RUN["run_standalone(component, state, frame)"]
     end
 
-    subgraph lib["tui-chrome (library)"]
+    subgraph lib["biscuit-tui (library)"]
         STATE["ChooseOneState / ChooseManyState"]
         FILTER["FuzzyFilter (new)"]
         WIDGET["ChooseOne / ChooseMany render"]
@@ -87,7 +87,7 @@ pub use core::{
 };
 ```
 
-### 3.3 CLI additions (`tui-chrome-cli`)
+### 3.3 CLI additions (`biscuit-tui-cli`)
 
 `ChooseOneArgs` and `ChooseManyArgs` gain the following flags. `choose-many` adds two extras (`--max-selections` already exists; `--min-selections` already exists).
 
@@ -622,7 +622,7 @@ sequenceDiagram
     participant User
     participant Shell
     participant Question as `question` CLI
-    participant Lib as tui-chrome lib
+    participant Lib as biscuit-tui lib
     participant Tui as terminal (/dev/tty)
 
     User->>Shell: printf 'a\nb\nc' | question choose-one --border --sort asc
@@ -735,7 +735,7 @@ To be run by the implementer before opening a PR:
 | `ChooseOneState::with_initial_selection(id)` still works | None (kept) | New `with_initial_value(value)` is added next to it |
 | `ChooseManyState::with_initial_selection(&[ids])` still works | None (kept) | New `with_initial_values(&[values])` added next to it |
 | CLI `--initial` deprecated, `--selected` preferred | One release of overlap | Deprecation `#[arg(hide = true)]` plus message on use |
-| Esc exit code: `130 → 1` | Breaking for scripted callers | Documented in CHANGELOG as breaking; major version bump for `tui-chrome-cli` |
+| Esc exit code: `130 → 1` | Breaking for scripted callers | Documented in CHANGELOG as breaking; major version bump for `biscuit-tui-cli` |
 | Single-letter hotkey jump no longer fires when filter is active by default | Soft-breaking | Opt-out via `--no-filter` and `ChoiceInput::with_filter_enabled(false)` |
 | New library types (`FuzzyFilter`, `FrameChrome`, `BorderStyle`, `Margin`, `HeightSpec`, `SortOrder`) | Additive | n/a |
 | `KeyBindings` gains `select_all` / `deselect_all` | Source-breaking for callers constructing `KeyBindings { ... }` literally | `Default` keeps working; recommend `..KeyBindings::default()` in user code |

@@ -3,11 +3,11 @@
 use super::LiveSemanticSink;
 use super::{Section, SemanticErrorKind};
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::prelude::StatusBlock;
 use biscuit_terminal::utils::color::{Color, Tailwind};
-use biscuit_terminal::utils::layout::{Margin, WordWrap};
+use biscuit_terminal::utils::layout::{Length, Edges, TargetValue, WordWrap};
 
 impl LiveSemanticSink {
     /// Render a typed [`SemanticEvent::Error`] as a colored `BlockQuote`
@@ -20,15 +20,28 @@ impl LiveSemanticSink {
         kind: SemanticErrorKind,
         message: &str,
     ) {
-        let (label, border_color) = error_kind_presentation(kind);
-        let escaped = super::escape_prose(message);
-        let body = format!("<red><b>{label}</b></red>\n{escaped}");
+        // When the user has Ctrl+C'd this run, the agent's dying-breath
+        // event is not an "Agent Error" — relabel it so operators see the
+        // real cause. The classification machinery itself stays untouched
+        // because the parsers cannot know about our process-scoped flag.
+        let interrupted = crate::output::user_interrupt_observed();
+        let (label, border_color, body_text) = if interrupted {
+            (
+                "User Action",
+                Color::Tailwind(Tailwind::Yellow700),
+                "User pressed CTRL+C to stop the session".to_string(),
+            )
+        } else {
+            let (label, border_color) = error_kind_presentation(kind);
+            (label, border_color, super::escape_prose(message))
+        };
+        let body = format!("<red><b>{label}</b></red>\n{body_text}");
         let prose = Prose::new(body).with_word_wrap(WordWrap::WrapProse(None, None));
         let block = StatusBlock::new(StatusState::Error)
             .body(prose)
             .border_color(border_color)
-            .left_margin(Margin::Chars(0))
-            .right_margin(Margin::Chars(0));
+            .left_margin(TargetValue::universal(Length::ch(0)))
+            .right_margin(TargetValue::universal(Length::ch(0)));
         let rendered = block.render(&self.terminal);
         for line in rendered.lines() {
             self.emit_section_line(section, line);
@@ -80,8 +93,8 @@ impl LiveSemanticSink {
             .header(header_prose)
             .body(body)
             .border_color(border_color)
-            .left_margin(Margin::Chars(0))
-            .right_margin(Margin::Chars(0));
+            .left_margin(TargetValue::universal(Length::ch(0)))
+            .right_margin(TargetValue::universal(Length::ch(0)));
         let rendered = block.render(&self.terminal);
         for line in rendered.lines() {
             self.emit_section_line(section, line);

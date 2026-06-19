@@ -2,6 +2,8 @@
 source: darkmatter/lib/tests/error_snapshots/link.rs
 expression: out
 ---
-⨫ LinkError: missing href
+⤫ LinkError: missing href
+┃ 
 ┃ Link has no `href`/`url` attribute.
-Add an href="..." attribute (HTML) or a URL inside ( ) (Markdown).
+┃ 
+┃ Add an href="..." attribute (HTML) or a URL inside ( ) (Markdown).

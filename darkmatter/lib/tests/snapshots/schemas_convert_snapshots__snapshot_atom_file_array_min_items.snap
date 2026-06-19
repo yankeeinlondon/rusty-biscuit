@@ -1,0 +1,22 @@
+---
+source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+expression: "convert_atom(\"file(match('*.png'))[](min(1))\")"
+---
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "field": {
+      "items": {
+        "format": "darkmatter-file",
+        "type": "string",
+        "x-darkmatter-match": [
+          "*.png"
+        ]
+      },
+      "minItems": 1,
+      "type": "array"
+    }
+  },
+  "type": "object"
+}

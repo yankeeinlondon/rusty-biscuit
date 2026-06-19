@@ -84,7 +84,7 @@ TableColumn::new("Status")
 
 ### `TableCellContent`
 
-Enum representing cell values with four active variants:
+Enum representing cell values with five active variants:
 
 | Variant | Wraps | Formatting |
 |---------|-------|------------|
@@ -92,12 +92,55 @@ Enum representing cell values with four active variants:
 | `Integer(i64)` | `i64` | Thousands separators (e.g., `1,234`) |
 | `Float(f64)` | `f64` | Two decimal places with thousands separators (e.g., `1,234.56`) |
 | `Currency(Currency, f64)` | `Currency` + `f64` | Symbol prefix with thousands separators (e.g., `$1,234.56`) |
+| `StyledProse(Box<Prose>)` | `Prose` | Inline styles, links, and emphasis preserved (see below) |
 
-`From` impls are provided for `String`, `&str`, `i64`, and `f64`:
+`From` impls are provided for `String`, `&str`, `i64`, `f64`, and `Prose`:
 
 ```rust
 vec!["Alice".into(), 30i64.into(), TableCellContent::Currency(Currency::USD, 99.95)]
 ```
+
+#### `StyledProse` cells
+
+A `StyledProse` cell embeds a [`Prose`](../../../../docs/components/prose.md) value
+so callers can place styled, capability-aware inline content (bold, emphasis,
+strikethrough, links, colors) in a cell without pre-rendering to terminal bytes
+during construction. Build one with `Prose::new(...).into()`:
+
+```rust
+use biscuit_terminal::prelude::*;
+use biscuit_terminal::components::table::{Table, TableColumn, TableCellContent};
+
+let table = Table::new()
+    .with_columns(vec![
+        TableColumn::new("Feature"),
+        TableColumn::new("Status"),
+    ])
+    .with_data(vec![
+        vec![
+            Prose::new("**Bold** feature").into(),
+            Prose::new("[docs](https://example.com) — _ready_").into(),
+        ],
+        vec!["Plain feature".into(), TableCellContent::Text("pending".into())],
+    ]);
+
+println!("{}", table.render(&Terminal::default()));
+```
+
+Resolution differs by render path:
+
+- **Render tree** (Browser/Markdown and the terminal tree path) — the cell
+  projects Prose's parsed inline `RenderNode` children (`Strong`, `Emphasis`,
+  `Delete`, `Link`, `Span`, …) directly, so semantic structure survives to each
+  target. Any top-level fenced-code child degrades to escaped literal text.
+- **Terminal bespoke path** — every `StyledProse` cell is resolved to
+  `Text(prose.render(term))` **once**, before width planning, so the ANSI-aware
+  table machinery measures visible width and styles never bleed into borders or
+  padding.
+
+The cell's hint records `kind == "styled_prose"` with a null `raw_value`. Prose's
+own outer `Layout` is **not** applied as nested cell layout — the table owns cell
+geometry. See [Prose: inline Prose in table cells](../../../../docs/components/prose.md#prose-in-table-cells).
 
 ### `Conditional`
 
@@ -169,12 +212,13 @@ Cell alignment follows each column's effective alignment (for example: text defa
 | `render(term_width)` | Optimistic path -- assumes full terminal capabilities. Falls back to 80 columns when `term_width` is `None`. |
 | `render(term)` | Conservative path -- receives a `Terminal` reference for capability-aware decisions. Uses `term.width()` for sizing. |
 
-Both paths call `render_content()` to produce raw table text, then pass it through `Layout::apply_layout()` which applies:
+Both paths call `render_content()` to produce raw table text, then pass it through `Layout::apply_block_layout()` which applies:
 
 - Left/right margin resolution (chars, percent, or nested offset)
-- Word wrapping (if configured)
-- Text alignment (left, center, right)
+- Block-level alignment (left, center, right) — all rows shift by the same offset so column borders remain vertically aligned
 - Row-fill padding (for opaque backgrounds)
+
+> Tables intentionally use block alignment rather than per-line alignment so the box-drawing borders form straight vertical lines under center/right alignment. Word wrap is not applied at this stage; column widths are negotiated inside `render_content`.
 
 ### Block-Level Behavior
 

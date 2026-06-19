@@ -13,16 +13,23 @@
 
 mod common;
 
-use biscuit_test_harness::{TerminalHarness, skip_with_reason};
+use biscuit_test_harness::TerminalHarness;
+use biscuit_test_harness::shared::SharedHarness;
+use biscuit_test_harness::wezterm::WezTermHarness;
 use common::pane_geometry::{find_row_of, parse_debug_cursor_before, parse_debug_cursor_rows};
 use common::send_bt_command;
 use serial_test::serial;
 use std::time::Duration;
+use test_toolkit::{Level, require_level};
 use unicode_width::UnicodeWidthStr;
 
-/// Extra settle time after spawning a WezTerm shell to avoid racing
-/// shell initialization (custom prompts, completions, etc.).
-const SHELL_READY_MS: u64 = 1500;
+/// Process-shared WezTerm pane reused across the cursor / hygiene tests.
+/// Every test drives this single pane sequentially, clearing it before each
+/// command so a capture reflects only that command's output. Per-test
+/// spawning costs ~8 s per pane, so spawning three panes in one test blows
+/// the 30 s nextest timeout — the "no orphan save/restore" test therefore
+/// runs its three command flavours on this shared pane too.
+static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
 
 /// Returns the absolute path to a fixture file.
 fn fixture_path(name: &str) -> String {
@@ -45,16 +52,15 @@ fn position_cursor(harness: &mut impl TerminalHarness, row: u32) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_cursor_lands_below_rendered_image() {
-    use biscuit_test_harness::wezterm::WezTermHarness;
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
-
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
 
     // Clear the screen and position the cursor high in the pane so the
     // image renders without triggering scroll-margin compensation. The
@@ -62,14 +68,14 @@ fn level2_cursor_lands_below_rendered_image() {
     // `level2_image_scroll_compensation_at_bottom_margin`.
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
-    position_cursor(&mut harness, 5);
+    position_cursor(harness, 5);
 
     // Force a tiny render width so the image occupies only ~1 row —
     // this keeps the entire bt invocation + image + debug block inside
     // a single pane height and prevents post-image scrolling from
     // shifting absolute row indices.
     let path = fixture_path("tiny.png");
-    send_bt_command(&mut harness, &format!("image --debug --width 2 {path}"));
+    send_bt_command(harness, &format!("image --debug --width 2 {path}"));
 
     // Append a sentinel that must land *below* the rendered image area.
     harness
@@ -160,41 +166,31 @@ fn level2_cursor_lands_below_rendered_image() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_no_orphan_save_restore_sequences() {
-    use biscuit_test_harness::wezterm::WezTermHarness;
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
 
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
-
-    // Test with image rendering (known to use save/restore).
+    // Each command flavour is exercised on the shared pane, cleared first so
+    // the capture holds only that command's output. Three independent spawns
+    // would each cost ~8 s and blow the nextest timeout.
     let path = fixture_path("tiny.png");
-    send_bt_command(&mut harness, &format!("image --debug {}", path));
-
-    let frame = harness.capture().expect("capture failed");
-    assert_balanced_save_restore(&frame.raw);
-
-    // Test with a prose command (should not produce orphans either).
-    let mut harness2 = WezTermHarness::new();
-    harness2.spawn_shell().expect("spawn_shell failed");
-    std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
-    send_bt_command(&mut harness2, "prose \"<red>hello</red>\"");
-
-    let frame2 = harness2.capture().expect("capture failed");
-    assert_balanced_save_restore(&frame2.raw);
-
-    // Test with two-column layout (uses save/restore internally).
-    let mut harness3 = WezTermHarness::new();
-    harness3.spawn_shell().expect("spawn_shell failed");
-    std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
-    send_bt_command(&mut harness3, "columns \"left\" \"right\"");
-
-    let frame3 = harness3.capture().expect("capture failed");
-    assert_balanced_save_restore(&frame3.raw);
+    for command in [
+        format!("image --debug {path}"), // image rendering uses save/restore
+        "prose \"<red>hello</red>\"".to_string(), // prose must not orphan either
+        "columns \"left\" \"right\"".to_string(), // two-column layout uses save/restore
+    ] {
+        harness.send_text(b"clear\n").expect("send_text failed");
+        harness.settle();
+        send_bt_command(harness, &command);
+        let frame = harness.capture().expect("capture failed");
+        assert_balanced_save_restore(&frame.raw);
+    }
 }
 
 // ------------------------------------------------------------------
@@ -204,19 +200,22 @@ fn level2_no_orphan_save_restore_sequences() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_dir_command_unicode_widths_in_capture() {
-    use biscuit_test_harness::wezterm::WezTermHarness;
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
-
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    // Reset the pane so prior tests' rendered output cannot leak into
+    // this run's capture window.
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
     let dir_path = fixture_path("unicode_dir");
-    send_bt_command(&mut harness, &format!("dir {dir_path}"));
+    send_bt_command(harness, &format!("dir {dir_path}"));
 
     let frame = harness.capture().expect("capture failed");
     let plain = &frame.plain;

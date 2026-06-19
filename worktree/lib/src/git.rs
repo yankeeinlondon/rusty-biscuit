@@ -86,6 +86,9 @@ fn git_rev_parse(arg: &str) -> Result<String, WorktreeError> {
 
 /// Run an arbitrary git command and return trimmed stdout.
 pub fn git_command(args: &[&str]) -> Result<String, WorktreeError> {
+    #[cfg(any(test, feature = "count-git"))]
+    recorder::record(args);
+
     let output = Command::new("git")
         .args(args)
         .output()
@@ -101,6 +104,9 @@ pub fn git_command(args: &[&str]) -> Result<String, WorktreeError> {
 
 /// Run a git command in a specific directory.
 pub fn git_command_in(dir: &std::path::Path, args: &[&str]) -> Result<String, WorktreeError> {
+    #[cfg(any(test, feature = "count-git"))]
+    recorder::record(args);
+
     let output = Command::new("git")
         .current_dir(dir)
         .args(args)
@@ -115,9 +121,105 @@ pub fn git_command_in(dir: &std::path::Path, args: &[&str]) -> Result<String, Wo
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+#[cfg(any(test, feature = "count-git"))]
+pub mod recorder {
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    pub struct GitCallLog {
+        pub calls: Vec<Vec<String>>,
+    }
+
+    static RECORDER: Mutex<Option<GitCallLog>> = Mutex::new(None);
+
+    pub fn start_recording() {
+        *RECORDER.lock().expect("recorder mutex poisoned") = Some(GitCallLog::default());
+    }
+
+    pub fn finish_recording() -> Vec<Vec<String>> {
+        RECORDER
+            .lock()
+            .expect("recorder mutex poisoned")
+            .take()
+            .map(|log| log.calls)
+            .unwrap_or_default()
+    }
+
+    pub fn record(args: &[&str]) {
+        let mut guard = RECORDER.lock().expect("recorder mutex poisoned");
+        if let Some(ref mut log) = *guard {
+            log.calls.push(args.iter().map(|s| s.to_string()).collect());
+        }
+    }
+
+    pub fn count_matching(calls: &[Vec<String>], predicate: impl Fn(&[String]) -> bool) -> usize {
+        calls.iter().filter(|args| predicate(args)).count()
+    }
+
+    pub fn has_any_matching(calls: &[Vec<String>], predicate: impl Fn(&[String]) -> bool) -> bool {
+        count_matching(calls, predicate) > 0
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+
     use super::*;
+    use crate::worktree::default_branch;
+
+    fn run_git(repo: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .current_dir(repo)
+            .args(args)
+            .status()
+            .expect("git should be installed");
+        assert!(status.success(), "git {:?} failed in {:?}", args, repo);
+    }
+
+    /// RAII guard that changes CWD for the duration of a test and restores it on drop.
+    struct DirGuard {
+        old: PathBuf,
+    }
+
+    impl DirGuard {
+        fn enter(dir: &Path) -> Self {
+            let old = std::env::current_dir().expect("get cwd");
+            std::env::set_current_dir(dir).expect("set cwd");
+            DirGuard { old }
+        }
+    }
+
+    impl Drop for DirGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.old);
+        }
+    }
+
+    /// Create a temporary git repo with a known branch structure for
+    /// deterministic subprocess-count assertions.
+    fn temp_repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path();
+
+        run_git(path, &["init", "-b", "main"]);
+        run_git(path, &["config", "user.email", "test@example.com"]);
+        run_git(path, &["config", "user.name", "Test User"]);
+        run_git(path, &["config", "commit.gpgsign", "false"]);
+        // Suppress background/detached git work so nextest leak detection
+        // sees no lingering child processes after the test returns.
+        run_git(path, &["config", "gc.auto", "0"]);
+        run_git(path, &["config", "core.fsmonitor", "false"]);
+        run_git(path, &["config", "core.commitGraph", "false"]);
+
+        fs::write(path.join("file.txt"), "1\n").unwrap();
+        run_git(path, &["add", "."]);
+        run_git(path, &["commit", "-m", "commit 1"]);
+
+        dir
+    }
 
     #[test]
     fn ensure_git_succeeds() {
@@ -125,10 +227,31 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn repo_info_from_monorepo() {
         let info = repo_info().unwrap();
         assert_eq!(info.name, "rusty-biscuit");
-        // Just verify we can access the relative path
         let _ = info.relative_path.to_string_lossy();
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn recorder_captures_default_branch_call() {
+        let repo = temp_repo();
+        let _guard = DirGuard::enter(repo.path());
+
+        recorder::start_recording();
+        let result = default_branch();
+        let calls = recorder::finish_recording();
+
+        assert!(result.is_ok(), "default_branch should succeed: {result:?}");
+
+        let symbolic_ref_count = recorder::count_matching(&calls, |args| {
+            args.first().map(String::as_str) == Some("symbolic-ref")
+        });
+        assert_eq!(
+            symbolic_ref_count, 1,
+            "expected exactly one symbolic-ref call, got {calls:?}"
+        );
     }
 }

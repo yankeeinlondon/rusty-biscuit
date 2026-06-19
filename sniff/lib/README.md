@@ -9,7 +9,7 @@
 - **Network Detection**: Interface enumeration with IPv4/IPv6 addresses, flags, and WAN IP lookup
 - **Filesystem Analysis**: Git repositories, monorepo tools, structured language detection, broad file associations, EditorConfig, blast radius, justfile detection, recent commits
 - **Package Management**: Unified abstraction for 110+ OS and language package managers
-- **Programs Detection**: 8 categories (editors, utilities, package managers, TTS, terminals, AI tools)
+- **Programs Detection**: 9 categories (editors, utilities, package managers, TTS, terminals, AI tools, test runners)
 - **Services Detection**: Init system detection and service listing across systemd, launchd, OpenRC, etc.
 - **Dependency Enrichment**: Network-based registry queries for latest versions
 - **Type-Safe Errors**: Structured error types with `thiserror`
@@ -137,7 +137,7 @@ sniff/
 ├── network/        # Network interfaces
 ├── filesystem/     # Git, monorepo, languages, file types, docs, blast radius, just
 ├── package/        # Package manager abstraction (110+)
-├── programs/       # Installed program detection and install (8 categories)
+├── programs/       # Installed program detection and install (9 categories)
 ├── remote/         # Remote repo inspection (GitHub, GitLab, Gitea, Bitbucket)
 ├── services/       # System service and init system detection
 ├── request         # Fine-grained detection control (DetectionPlan, request types)
@@ -367,7 +367,10 @@ Comprehensive filesystem analysis including Git, monorepo detection, language br
 
 #### Git Detection
 
-Uses `libgit2` (via `git2` crate) for repository inspection.
+Uses the pure-Rust `gix` (gitoxide) crate for repository inspection. Every
+production repository open rejects untrusted repositories (`bail_if_untrusted`),
+and the existing out-of-process `git fetch --quiet --prune` is retained for
+remote-tracking refresh.
 
 **Key Types:**
 
@@ -378,6 +381,8 @@ Uses `libgit2` (via `git2` crate) for repository inspection.
 - `HostingProvider` - GitHub, GitLab, Bitbucket, etc.
 - `BehindStatus` - Whether local branch is behind remote
 - `WorktreeInfo` - Linked worktree information
+- `WorktreeEntry` - Worktree name, branch, path, current flag, and detached-HEAD state
+- `list_worktrees` - List all worktrees including the main worktree (sorted alphabetically)
 
 **Detection Strategy:**
 
@@ -395,7 +400,7 @@ let git = detect_git(Path::new("."), false, 10)?;
 if let Some(info) = git {
     println!("Repository: {:?}", info.repo_root);
     println!("Branch: {:?}", info.current_branch);
-    println!("Dirty: {}", info.status.is_dirty);
+    println!("Dirty: {}", info.status.as_ref().map_or(false, |s| s.is_dirty));
     println!("Commits ahead: {}", info.recent.len());
 
     for commit in info.recent.iter().take(5) {
@@ -414,37 +419,52 @@ if let Some(info) = git_deep {
     }
 
     // Check if behind
-    if let Some(ref behind) = info.status.is_behind {
-        match behind {
-            sniff::filesystem::git::BehindStatus::NotBehind => {
-                println!("Up to date with remotes");
-            }
-            sniff::filesystem::git::BehindStatus::Behind(remotes) => {
-                println!("Behind: {}", remotes.join(", "));
+    if let Some(status) = &info.status {
+        if let Some(behind) = &status.is_behind {
+            match behind {
+                sniff::filesystem::git::BehindStatus::NotBehind => {
+                    println!("Up to date with remotes");
+                }
+                sniff::filesystem::git::BehindStatus::Behind(remotes) => {
+                    println!("Behind: {}", remotes.join(", "));
+                }
             }
         }
+    }
+}
+
+// List all worktrees
+if let Some(worktrees) = sniff::filesystem::git::list_worktrees(Path::new("."))? {
+    for wt in &worktrees {
+        let marker = if wt.is_current { "* " } else { "  " };
+        let branch = wt.branch.as_deref().unwrap_or("detached HEAD");
+        println!("{}{} (on {})", marker, wt.name, branch);
     }
 }
 ```
 
 #### Repository Detection
 
-Detects monorepo tools and package structure.
+Detects monorepo standards, package structure, and acting binaries.
 
-**Supported Tools:**
+**Supported Standards:**
 
 - Cargo workspaces (Rust)
-- pnpm workspaces
-- npm workspaces
-- Yarn workspaces
-- Nx
-- Turborepo
-- Lerna
+- pnpm / npm / Yarn / Bun workspaces (JavaScript)
+- uv workspaces (Python)
+- Go workspaces
+- Gradle multi-project builds and Maven multi-module builds (JVM)
+- .NET solutions
+- Bazel, Pants, Buck2 (polyglot build systems)
+- Rush Stack
+- Nx, Turborepo, Lerna (orchestrators layered on a membership authority)
 
 **Key Types:**
 
 - `RepoInfo` - Repository metadata and packages
-- `MonorepoTool` - Detected monorepo tool
+- `MonorepoStandard` - Standard-based monorepo descriptor
+- `MonorepoLayer` - One membership layer: authority + orchestrators + packages
+- `DetectedStandard` - A matched standard with its resolved binary and confidence
 - `Package` - Package path, languages, managers, dependencies
 - `DependencyEntry` - Dependency with version requirements
 
@@ -457,13 +477,19 @@ use std::path::Path;
 let repo = detect_repo(Path::new("."))?;
 if let Some(info) = repo {
     if info.is_monorepo {
-        println!("Monorepo tool: {:?}", info.monorepo_tool);
+        // New topology model
+        for layer in &info.monorepo_layers {
+            println!("Authority: {:?}", layer.authority);
+            println!("Orchestrators: {:?}", layer.orchestrators);
+            println!("Packages: {}", layer.packages.len());
+        }
+
         if let Some(packages) = info.packages {
             println!("Packages: {}", packages.len());
             for pkg in packages {
                 println!("  {} at {}", pkg.name, pkg.path.display());
                 println!("    Language: {:?}", pkg.primary_language);
-                println!("    Managers: {:?}", pkg.detected_managers);
+                println!("    Managers: {:?}", pkg.package_managers);
 
                 if let Some(deps) = pkg.dependencies {
                     println!("    Dependencies:");
@@ -476,6 +502,13 @@ if let Some(info) = repo {
     }
 }
 ```
+
+**Topology JSON:**
+
+When `RepoInfo` is serialized, the new keys appear only when populated:
+
+- `monorepo_standards` — array of detected standards with resolved binary metadata.
+- `monorepo_layers` — array of layers, each with `authority`, `orchestrators`, `provenance`, and `packages`.
 
 #### Language Analysis
 
@@ -579,13 +612,13 @@ for dep in &enriched {
 
 ### Programs Module
 
-Detects installed programs across 8 categories with parallel execution and macOS app bundle support.
+Detects installed programs across 9 categories with parallel execution, macOS app bundle support, and cwd-aware test-runner availability.
 
 **Key Types:**
 
 - `ProgramsInfo` - Aggregated detection results for all categories
 - `ProgramMetadata` - Trait for program metadata (display name, description, website)
-- `ExecutableSource` - How program was discovered (PATH vs macOS bundle)
+- `ExecutableSource` - How program was discovered (PATH, project-local bin, macOS bundle, or not found)
 - `InstallOptions`, `InstallResult` - Installation infrastructure types
 
 **Categories:**
@@ -600,10 +633,11 @@ Detects installed programs across 8 categories with parallel execution and macOS
 | Terminal Apps | alacritty, wezterm, kitty | PATH + macOS bundles |
 | Headless Audio | afplay, pacat, aplay | PATH lookup |
 | AI CLI | claude, aider, goose | PATH lookup |
+| Test Runners | cargo test, vitest, pytest, go test | project-local bins + PATH + parent binaries |
 
 **Performance notes:**
 
-`ProgramsInfo::detect()` builds a single shared `ExecutableIndex` by scanning every `PATH` directory and macOS app bundle location once, then runs all 8 categories in parallel using `rayon::join` pairs. Per-program lookups are O(1) HashMap hits rather than repeated filesystem traversals, so the total cost is dominated by the one-time index build.
+`ProgramsInfo::detect()` builds a single shared `ExecutableIndex` by scanning every `PATH` directory and macOS app bundle location once, then runs all 9 categories in parallel. Per-program lookups are O(1) HashMap hits rather than repeated filesystem traversals, so the total cost is dominated by the one-time index build. Test runners also consult project-local bin directories and parent binaries, reporting whether each runner is installed, local, available via a parent, or not found.
 
 **Example:**
 
@@ -616,6 +650,7 @@ let programs = ProgramsInfo::detect();
 println!("Editors: {:?}", programs.editors);
 println!("Utilities: {:?}", programs.utilities);
 println!("AI CLI tools: {:?}", programs.ai_clients);
+println!("Test runners: {:?}", programs.test_runners);
 
 // Access metadata
 for editor in &programs.editors {
@@ -708,8 +743,11 @@ pub enum SniffError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("Git error: {0}")]
-    Git(#[from] git2::Error),
+    #[error("Git error during {operation}: {source}")]
+    Git {
+        operation: &'static str,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 
     #[error("Not a git repository: {0}")]
     NotARepository(PathBuf),
@@ -824,7 +862,7 @@ let metadata = provider.get_repo_metadata("rust-lang", "cargo").await?;
 | Crate | Version | Purpose |
 |-------|---------|---------|
 | `sysinfo` | 0.38 | CPU, memory, storage detection |
-| `git2` | 0.20 | Git repository inspection |
+| `gix` | =0.84.0 | Pure-Rust Git repository inspection (status, diff, history, refs, remotes, config, worktrees) |
 | `biscuit-hash` | workspace | xxHash content hashing for document fingerprinting |
 | `biscuit-file` | workspace | TOML/YAML file parsing |
 | `getifaddrs` | 0.6 | Network interface enumeration |
@@ -965,12 +1003,12 @@ SNIFF_BIN="$(cargo metadata --format-version 1 --no-deps \
 SHORT_PATH="/usr/bin:/bin"
 LONG_PATH="${PATH}"
 hyperfine --warmup 3 \
-    -n short_path "PATH=${SHORT_PATH} ${SNIFF_BIN} programs --json >/dev/null" \
-    -n full_path  "PATH=${LONG_PATH}  ${SNIFF_BIN} programs --json >/dev/null"
+    -n short_path "PATH=${SHORT_PATH} ${SNIFF_BIN} software --json >/dev/null" \
+    -n full_path  "PATH=${LONG_PATH}  ${SNIFF_BIN} software --json >/dev/null"
 
 # Flamegraph the high-fan-out CLI commands
 cargo flamegraph --profile profiling -p sniff-cli -- repo git-status
-cargo flamegraph --profile profiling -p sniff-cli -- programs --json
+cargo flamegraph --profile profiling -p sniff-cli -- software --json
 
 # Compile-time / symbol-cost baselines for Phase 5.3
 cargo bloat -p sniff-cli --release --bin sniff

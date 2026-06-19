@@ -2,8 +2,11 @@
 source: darkmatter/lib/tests/error_snapshots/deferred_set.rs
 expression: out
 ---
-⨫ DeferredSetError: invalid set assignment
+⤫ DeferredSetError: invalid set assignment
+┃ 
 ┃ Line: 8
 ┃ Value: "not json"
 ┃ Reason: expected JSON5 object
-Use a JSON5 object like set={ key: "value" } or a property form like set.key="value".
+┃ 
+┃ Use a JSON5 object like set={ key: "value" } or a property form like
+┃ set.key="value".

@@ -21,6 +21,6 @@
 (function_call_expression
   function: (name) @reference)
 
-; Class constant access
+; Class constant access (the class name is the first child)
 (class_constant_access_expression
-  class: (name) @reference)
+  . (name) @reference)

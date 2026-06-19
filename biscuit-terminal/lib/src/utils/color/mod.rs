@@ -1,31 +1,20 @@
-use std::borrow::Cow;
+//! Terminal color rendering.
+//!
+//! The color *data* types live in [`renderable::color`] and are re-exported
+//! here for backwards compatibility. Terminal-specific ANSI emission (the
+//! [`TermColor`] trait, its impls, and the `RenderableWrapper` color wrappers)
+//! lives in this crate.
 
-pub mod basic;
-pub mod color_enum;
-pub mod hdr;
-pub mod octet;
-pub mod rgb;
-pub mod tailwind;
-pub mod web;
+pub mod color_terminal;
 pub mod wrappers;
 
-pub use basic::{BasicColor, FgBg, basic_color_to_rgb};
-pub use color_enum::Color;
-pub use hdr::HdrColor;
-pub use octet::{Octet, OctetError};
-pub use rgb::RgbColor;
-pub use tailwind::Tailwind;
-pub use web::{WEB_COLOR_LOOKUP, WebColor};
-pub use wrappers::{BasicColorWrapper, RgbColorWrapper, TailwindColorWrapper, WebColorWrapper};
+pub use renderable::color::{
+    BasicColor, Color, FgBg, HdrColor, Octet, OctetError, RgbColor, Tailwind, WEB_COLOR_LOOKUP,
+    WebColor, basic_color_to_rgb,
+};
 
-pub trait TermColor<'a> {
-    /// wraps the content passed in with the escape-codes required
-    /// to start and stop the foreground color rendering.
-    fn fg(self, content: impl Into<Cow<'a, str>>) -> String;
-    /// wraps the content passed in with the escape-codes required
-    /// to start and stop the background color rendering.
-    fn bg(self, content: impl Into<Cow<'a, str>>) -> String;
-}
+pub use crate::utils::term_color::TermColor;
+pub use wrappers::{BasicColorWrapper, RgbColorWrapper, TailwindColorWrapper, WebColorWrapper};
 
 #[cfg(test)]
 mod tests;

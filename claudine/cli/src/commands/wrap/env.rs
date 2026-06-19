@@ -9,6 +9,8 @@ use sniff::filesystem::repo::{Package, RepoInfo, detect_repo};
 use super::profile::WrapperProfile;
 use super::repo_home;
 
+pub(crate) use claudine::composition::{LaunchWorkspaceContext, PackageContext};
+
 #[derive(Debug, Default)]
 #[allow(dead_code)]
 pub(crate) struct EnvPlan {
@@ -24,26 +26,18 @@ pub(crate) struct EnvPlan {
     pub(crate) child_cwd: PathBuf,
     pub(crate) warnings: Vec<String>,
     pub(crate) shadow_home_path: Option<PathBuf>,
-}
-
-#[derive(Debug)]
-#[allow(dead_code)]
-pub(crate) struct LaunchWorkspaceContext {
-    pub(crate) launch_cwd: PathBuf,
-    pub(crate) repo_root: Option<PathBuf>,
-    pub(crate) child_cwd: PathBuf,
-    pub(crate) package_context: Option<PackageContext>,
-    pub(crate) warnings: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PackageContext {
-    pub(crate) package_area: String,
-    pub(crate) package: Option<String>,
-    pub(crate) candidates: Vec<String>,
+    /// Measured breakdown of the child-env build cost, for `--perf`. Empty
+    /// unless the caller requested perf timing; when no effective root is
+    /// supplied the dominant cost is the shadow-HOME `repo root detect` sniff
+    /// git walk (~hundreds of ms under `--repo`). When the caller threads a
+    /// known root through `build_child_env_with_launch`, that cost collapses
+    /// to microseconds. The caller attaches these as `Breakdown` children of
+    /// the `child env build` substage.
+    pub(crate) perf_substages: Vec<crate::perf::SubstageTiming>,
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)] // kept for tests and legacy callers; production paths use `build_child_env_with_launch`
 pub(crate) fn build_child_env(
     profile: &dyn WrapperProfile,
     provider: claudine::provider::Provider,
@@ -69,6 +63,7 @@ pub(crate) fn build_child_env(
         repo,
         force_shadow_home,
         launch_ctx,
+        false,
     )
 }
 
@@ -94,7 +89,16 @@ pub(crate) fn build_child_env_with_launch(
     repo: bool,
     force_shadow_home: bool,
     launch_ctx: LaunchWorkspaceContext,
+    perf: bool,
 ) -> Result<EnvPlan> {
+    // `child env build` is dominated by the shadow-HOME branch under `--repo`;
+    // when perf is requested we time `env sanitize` and `shadow home sync` so
+    // the substage breakdown points at the real cost. On the production path the
+    // already-resolved launch-child root is threaded through, so `repo root
+    // detect` collapses to microseconds and the shadow sync's filesystem linking
+    // is what remains; only the fallback (no supplied root) still pays the sniff
+    // git walk.
+    let sanitize_start = perf.then(std::time::Instant::now);
     let include_set = validate_include_names(include)?;
     let auto_include: HashSet<String> = profile
         .allowed_env_keys()
@@ -104,6 +108,7 @@ pub(crate) fn build_child_env_with_launch(
     let (mut env, removed, included, mut warnings) =
         sanitize_process_env(&include_set, &auto_include);
     let mut added = BTreeMap::new();
+    let sanitize_elapsed = sanitize_start.map(|t| t.elapsed());
 
     let redacted_params = redact_sensitive_args(agent_params);
     let encoded_agent_params = serde_json::to_string(&redacted_params)?;
@@ -140,6 +145,16 @@ pub(crate) fn build_child_env_with_launch(
         "CLAUDINE_SESSION_ID",
         uuid::Uuid::new_v4().to_string(),
     );
+    // Stamp Claudine's own PID so wrapped providers and downstream
+    // consumers (logs, reports) can correlate back to the wrapper
+    // process. Set before provider-specific overrides so profiles can
+    // never accidentally strip it.
+    set_added_env(
+        &mut env,
+        &mut added,
+        "CLAUDINE_PID",
+        std::process::id().to_string(),
+    );
 
     for (key, value) in env_overrides {
         set_added_env(&mut env, &mut added, key, value.clone());
@@ -148,18 +163,34 @@ pub(crate) fn build_child_env_with_launch(
     warnings.extend(launch_ctx.warnings.iter().cloned());
 
     let mut shadow_home_path = None;
-    let needs_shadow_home =
-        force_shadow_home || repo_home::needs_shadow_home(provider, &launch_ctx.child_cwd, repo);
+    let needs_shadow_home = force_shadow_home
+        || repo_home::needs_shadow_home(
+            provider,
+            &launch_ctx.child_cwd,
+            repo,
+            Some(launch_ctx.child_cwd.as_path()),
+        );
+
+    let mut shadow_breakdown: Option<repo_home::RepoHomeTimings> = None;
 
     // Use a shadow HOME when repo-only isolation is requested, or when Codex
     // needs repo-local prompt overlay because custom prompts are user-scoped.
+    // The already-resolved launch-child root is passed through so the shadow-HOME
+    // pipeline does not re-run repo-root detection.
     if needs_shadow_home {
-        match repo_home::build_repo_home_env(provider, &launch_ctx.child_cwd, repo) {
-            Ok((shadow_env, shadow_path)) => {
+        match repo_home::build_repo_home_env(
+            provider,
+            &launch_ctx.child_cwd,
+            repo,
+            perf,
+            Some(launch_ctx.child_cwd.as_path()),
+        ) {
+            Ok((shadow_env, shadow_path, timings)) => {
                 for (key, value) in shadow_env {
                     env.insert(key, value);
                 }
                 shadow_home_path = shadow_path;
+                shadow_breakdown = timings;
             }
             Err(e) => {
                 warnings.push(format!("failed to create shadow HOME: {}", e));
@@ -183,6 +214,24 @@ pub(crate) fn build_child_env_with_launch(
         }
     }
 
+    // Sync `PWD` to `child_cwd`. The parent shell sets `PWD` to wherever
+    // the user invoked claudine from (often a package subdirectory of the
+    // worktree). Rust's `set_current_dir` calls `chdir(2)` but does not
+    // update `PWD`, so without this override the spawned child inherits
+    // the stale shell `PWD`. Several downstream tools resolve project
+    // directory from `process.env.PWD` before `process.cwd()` (notably
+    // OpenCode's `cli/cmd/run.ts:276`), which is the standard shell
+    // convention. Inject the corrected `PWD` so the child's project /
+    // git resolution agrees with the cwd we chose.
+    set_added_env(
+        &mut env,
+        &mut added,
+        "PWD",
+        launch_ctx.child_cwd.display().to_string(),
+    );
+
+    let perf_substages = build_env_perf_substages(sanitize_elapsed, shadow_breakdown);
+
     Ok(EnvPlan {
         env,
         removed,
@@ -193,7 +242,37 @@ pub(crate) fn build_child_env_with_launch(
         child_cwd: launch_ctx.child_cwd,
         warnings,
         shadow_home_path,
+        perf_substages,
     })
+}
+
+/// Assemble the `child env build` perf breakdown from the measured phases.
+///
+/// Returns empty when perf was not requested (`sanitize_elapsed` is `None`).
+/// `shadow home sync` is only present when the shadow-HOME branch ran (i.e.
+/// under `--repo` or a Codex prompt overlay); it carries `repo root detect`
+/// as its own child, which is either microsecond-scale local work when a
+/// known root was supplied or the sniff git walk that dominates the substage
+/// when falling back.
+fn build_env_perf_substages(
+    sanitize_elapsed: Option<std::time::Duration>,
+    shadow: Option<repo_home::RepoHomeTimings>,
+) -> Vec<crate::perf::SubstageTiming> {
+    let Some(sanitize) = sanitize_elapsed else {
+        return Vec::new();
+    };
+    let mut out = vec![crate::perf::SubstageTiming::new("env sanitize", sanitize)];
+    if let Some(t) = shadow {
+        out.push(crate::perf::SubstageTiming {
+            name: "shadow home sync",
+            elapsed: t.total,
+            children: vec![crate::perf::SubstageTiming::new(
+                "repo root detect",
+                t.repo_root_detect,
+            )],
+        });
+    }
+    out
 }
 
 fn set_added_env(
@@ -405,15 +484,28 @@ pub(crate) fn resolve_launch_workspace_context(
 /// `SniffResult`; `repo` should come from its repo section. Callers that
 /// have neither can pass `None` for both — the resulting context will
 /// behave as if no repo was detected.
+///
+/// `source_repo_root_hint` preserves the legacy
+/// [`resolve_launch_workspace_context`] split contract: when a composed
+/// markdown source lives in a different repo than the launch CWD (sibling
+/// clone, external prompt), the metadata-bearing `repo_root` should follow
+/// the source's repo so guardrails, MCP defaults, and harness path
+/// resolution key off the document. The `child_cwd` (where the spawned
+/// provider process actually runs) must still follow the launch CWD's
+/// repo root so the provider does not jump into an unrelated worktree.
 pub(crate) fn launch_workspace_context_from_repo_info(
     launch_cwd: &Path,
     git_root: Option<&Path>,
     repo: Option<&RepoInfo>,
+    source_repo_root_hint: Option<&Path>,
 ) -> LaunchWorkspaceContext {
-    let repo_root = git_root
+    let launch_repo_root = git_root
         .map(Path::to_path_buf)
         .or_else(|| repo.map(|r| r.root.clone()));
-    let child_cwd = repo_root
+    let repo_root = source_repo_root_hint
+        .map(Path::to_path_buf)
+        .or_else(|| launch_repo_root.clone());
+    let child_cwd = launch_repo_root
         .clone()
         .unwrap_or_else(|| launch_cwd.to_path_buf());
 
@@ -698,7 +790,9 @@ mod tests {
                 package_area: "apps".to_string(),
                 name: "browser-root".to_string(),
                 ecosystem: Default::default(),
-                discovery_sources: vec![],
+                standard: Default::default(),
+                provenance: Default::default(),
+                test_runners: vec![],
                 nested_packages: vec![],
                 primary_language: None,
                 secondary_languages: vec![],
@@ -728,7 +822,9 @@ mod tests {
                 package_area: "apps/browser".to_string(),
                 name: "my-app".to_string(),
                 ecosystem: Default::default(),
-                discovery_sources: vec![],
+                standard: Default::default(),
+                provenance: Default::default(),
+                test_runners: vec![],
                 nested_packages: vec![],
                 primary_language: None,
                 secondary_languages: vec![],
@@ -770,7 +866,9 @@ mod tests {
                 package_area: "claudine".to_string(),
                 name: "claudine".to_string(),
                 ecosystem: Default::default(),
-                discovery_sources: vec![],
+                standard: Default::default(),
+                provenance: Default::default(),
+                test_runners: vec![],
                 nested_packages: vec![],
                 primary_language: None,
                 secondary_languages: vec![],
@@ -800,7 +898,9 @@ mod tests {
                 package_area: "claudine".to_string(),
                 name: "claudine-cli".to_string(),
                 ecosystem: Default::default(),
-                discovery_sources: vec![],
+                standard: Default::default(),
+                provenance: Default::default(),
+                test_runners: vec![],
                 nested_packages: vec![],
                 primary_language: None,
                 secondary_languages: vec![],
@@ -835,6 +935,122 @@ mod tests {
         );
     }
 
+    fn fake_repo_info(root: &Path) -> RepoInfo {
+        RepoInfo {
+            is_monorepo: false,
+            root: root.to_path_buf(),
+            dependencies: None,
+            dev_dependencies: None,
+            peer_dependencies: None,
+            optional_dependencies: None,
+            packages: None,
+            monorepo_standards: vec![],
+            monorepo_layers: vec![],
+        }
+    }
+
+    #[test]
+    fn launch_workspace_repo_root_follows_source_when_outside_launch_repo() {
+        // Out-of-repo prompt case: launch CWD lives in repo A, prompt
+        // markdown lives in repo B. `repo_root` (metadata) must follow
+        // repo B so guardrails / MCP / harness key off the document repo,
+        // but `child_cwd` must follow repo A so the spawned provider
+        // process stays in the user's worktree.
+        let launch_cwd = PathBuf::from("/repo-a/sub");
+        let launch_git = PathBuf::from("/repo-a");
+        let source_repo = PathBuf::from("/repo-b");
+        let launch_repo_info = fake_repo_info(&launch_git);
+
+        let ctx = launch_workspace_context_from_repo_info(
+            &launch_cwd,
+            Some(&launch_git),
+            Some(&launch_repo_info),
+            Some(&source_repo),
+        );
+
+        assert_eq!(ctx.repo_root.as_deref(), Some(source_repo.as_path()));
+        assert_eq!(ctx.child_cwd, launch_git);
+        assert_eq!(ctx.launch_cwd, launch_cwd);
+    }
+
+    #[test]
+    fn launch_workspace_falls_back_to_launch_repo_when_no_source_hint() {
+        // Common case (source inside launch repo, or direct wrapper with no
+        // source at all): `repo_root` and `child_cwd` should both follow
+        // the launch git root.
+        let launch_cwd = PathBuf::from("/repo-a/sub");
+        let launch_git = PathBuf::from("/repo-a");
+        let launch_repo_info = fake_repo_info(&launch_git);
+
+        let ctx = launch_workspace_context_from_repo_info(
+            &launch_cwd,
+            Some(&launch_git),
+            Some(&launch_repo_info),
+            None,
+        );
+
+        assert_eq!(ctx.repo_root.as_deref(), Some(launch_git.as_path()));
+        assert_eq!(ctx.child_cwd, launch_git);
+    }
+
+    #[test]
+    fn launch_workspace_source_hint_with_no_launch_repo_uses_source_for_meta_only() {
+        // Edge case: launch CWD is not inside any git repo, but the
+        // composed source lives in one. Metadata follows the source repo;
+        // the child process still launches in the user's CWD because we
+        // have no launch-repo root to anchor it.
+        let launch_cwd = PathBuf::from("/tmp/scratch");
+        let source_repo = PathBuf::from("/repo-b");
+
+        let ctx =
+            launch_workspace_context_from_repo_info(&launch_cwd, None, None, Some(&source_repo));
+
+        assert_eq!(ctx.repo_root.as_deref(), Some(source_repo.as_path()));
+        assert_eq!(ctx.child_cwd, launch_cwd);
+    }
+
+    /// Regression: the spawned child's `PWD` env var must equal
+    /// `child_cwd`, not whatever the parent shell set as `PWD` before
+    /// invoking claudine. OpenCode (and other shell-aware tooling)
+    /// reads `process.env.PWD` BEFORE falling back to `process.cwd()`
+    /// when resolving its project root; without this sync claudine
+    /// silently leaks the user's pre-invocation shell PWD (often a
+    /// package subdirectory of the worktree) into the child, causing
+    /// git snapshot pathspec mismatches and external_directory false
+    /// positives.
+    #[test]
+    fn build_child_env_overrides_pwd_to_match_child_cwd() {
+        let profile = profile_for_provider(claudine::provider::Provider::OpenCode).unwrap();
+        let cwd = tempfile::tempdir().unwrap();
+
+        let plan = build_child_env(
+            profile,
+            claudine::provider::Provider::OpenCode,
+            &[],
+            false,
+            false,
+            &[],
+            cwd.path(),
+            &[],
+            false,
+            false,
+            None,
+        )
+        .unwrap();
+
+        let pwd = plan
+            .env
+            .get(std::ffi::OsStr::new("PWD"))
+            .map(|v| v.to_string_lossy().into_owned())
+            .expect("env plan must always set PWD for the spawned child");
+        assert_eq!(
+            std::path::PathBuf::from(&pwd),
+            plan.child_cwd,
+            "child PWD must equal child_cwd; got PWD={pwd:?} child_cwd={:?}",
+            plan.child_cwd,
+        );
+    }
+
     #[test]
     fn build_child_env_uses_interactive_without_claudine_duplicate() {
         let profile = profile_for_provider(claudine::provider::Provider::Claude).unwrap();
@@ -858,6 +1074,151 @@ mod tests {
         let added: std::collections::HashMap<_, _> = plan.added.into_iter().collect();
         assert_eq!(added.get("INTERACTIVE").map(String::as_str), Some("true"));
         assert!(!added.contains_key("CLAUDINE_INTERACTIVE"));
+    }
+
+    /// `CLAUDINE_PID` must be stamped onto every wrapper env plan so the
+    /// spawned provider can correlate back to the Claudine process. It
+    /// is provider-agnostic, so a single assertion covers every profile.
+    #[test]
+    fn build_child_env_includes_claudine_pid_for_interactive_wrapper() {
+        let profile = profile_for_provider(claudine::provider::Provider::Claude).unwrap();
+        let cwd = tempfile::tempdir().unwrap();
+
+        let plan = build_child_env(
+            profile,
+            claudine::provider::Provider::Claude,
+            &[],
+            false,
+            true,
+            &[],
+            cwd.path(),
+            &[],
+            false,
+            false,
+            None,
+        )
+        .unwrap();
+
+        let added: std::collections::HashMap<_, _> = plan.added.into_iter().collect();
+        let pid_str = added
+            .get("CLAUDINE_PID")
+            .expect("CLAUDINE_PID must be added to every wrapper env plan");
+        let pid: u32 = pid_str
+            .parse()
+            .expect("CLAUDINE_PID must be a valid u32 (matches std::process::id())");
+        assert_eq!(pid, std::process::id());
+        assert_eq!(
+            plan.env
+                .get(std::ffi::OsStr::new("CLAUDINE_PID"))
+                .map(|v| v.to_string_lossy().into_owned())
+                .as_deref(),
+            Some(pid_str.as_str()),
+            "CLAUDINE_PID must also be present in the child env map"
+        );
+    }
+
+    /// Non-interactive wrapper runs (compose, inline-compose, sequence,
+    /// harness attempts) must receive the same `CLAUDINE_PID` injection
+    /// as interactive ones — the spec requires it regardless of mode.
+    #[test]
+    fn build_child_env_includes_claudine_pid_for_non_interactive_wrapper() {
+        let profile = profile_for_provider(claudine::provider::Provider::OpenCode).unwrap();
+        let cwd = tempfile::tempdir().unwrap();
+
+        let plan = build_child_env(
+            profile,
+            claudine::provider::Provider::OpenCode,
+            &[],
+            false,
+            false,
+            &[],
+            cwd.path(),
+            &[],
+            false,
+            false,
+            None,
+        )
+        .unwrap();
+
+        let added: std::collections::HashMap<_, _> = plan.added.into_iter().collect();
+        let pid_str = added
+            .get("CLAUDINE_PID")
+            .expect("CLAUDINE_PID must be added even in non-interactive mode");
+        let pid: u32 = pid_str.parse().expect("CLAUDINE_PID must parse as u32");
+        assert_eq!(pid, std::process::id());
+    }
+
+    /// Regression for the source-repo vs launch-repo split through the real
+    /// env wiring. When a composed source document lives in one repo (its
+    /// enclosing git root becomes `repo_root`, the metadata anchor) but the
+    /// user launched from a different repo (`child_cwd`), Codex shadow-HOME
+    /// prompt materialization must follow `child_cwd`, NOT the source
+    /// metadata root. This exercises `build_child_env_with_launch` ->
+    /// `needs_shadow_home` -> `build_repo_home_env`, so a future change that
+    /// accidentally threads `repo_root`/source metadata into the shadow-HOME
+    /// call is caught here even if the low-level `repo_home` tests stay green.
+    #[cfg(unix)]
+    #[test]
+    #[serial_test::serial]
+    fn build_child_env_codex_shadow_home_uses_child_cwd_not_source_repo_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fake_home = tmp.path().join("home");
+        let launch_repo = tmp.path().join("launch-repo");
+        let source_repo = tmp.path().join("source-repo");
+
+        fs::create_dir_all(fake_home.join(".codex")).unwrap();
+        fs::create_dir_all(launch_repo.join(".claude/commands")).unwrap();
+        fs::create_dir_all(source_repo.join(".claude/commands")).unwrap();
+        fs::write(launch_repo.join(".claude/commands/launch.md"), "launch").unwrap();
+        fs::write(source_repo.join(".claude/commands/source.md"), "source").unwrap();
+
+        let profile = profile_for_provider(claudine::provider::Provider::Codex).unwrap();
+        // repo_root (metadata) follows the source document's repo; child_cwd
+        // (where the spawned provider runs) follows the launch repo.
+        let launch_ctx = LaunchWorkspaceContext {
+            launch_cwd: launch_repo.clone(),
+            repo_root: Some(source_repo.clone()),
+            child_cwd: launch_repo.clone(),
+            package_context: None,
+            warnings: Vec::new(),
+        };
+
+        let old_home = std::env::var_os("HOME");
+        unsafe { std::env::set_var("HOME", &fake_home) };
+
+        let plan = build_child_env_with_launch(
+            profile,
+            claudine::provider::Provider::Codex,
+            &[],
+            false,
+            false,
+            &[],
+            &[],
+            false,
+            false,
+            launch_ctx,
+            false,
+        );
+
+        match old_home {
+            Some(v) => unsafe { std::env::set_var("HOME", v) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+
+        let plan = plan.unwrap();
+        let shadow_path = plan
+            .shadow_home_path
+            .expect("Codex repo-local prompts must trigger a shadow home");
+        let prompts_dir = shadow_path.join("prompts");
+
+        assert!(
+            fs::symlink_metadata(prompts_dir.join("launch.md")).is_ok(),
+            "shadow prompts must come from child_cwd (launch repo)"
+        );
+        assert!(
+            fs::symlink_metadata(prompts_dir.join("source.md")).is_err(),
+            "shadow prompts must NOT come from the source metadata repo_root"
+        );
     }
 
     fn sanitize_env_for_test(
@@ -956,13 +1317,15 @@ mod tests {
         let repo_root = tempfile::tempdir().unwrap();
         let docs_dir = repo_root.path().join("docs");
         let package_dir = repo_root.path().join("claudine/cli");
+        let lib_dir = repo_root.path().join("claudine/lib");
         fs::create_dir_all(&docs_dir).unwrap();
         fs::create_dir_all(&package_dir).unwrap();
+        fs::create_dir_all(&lib_dir).unwrap();
 
         fs::write(
             repo_root.path().join("Cargo.toml"),
             r#"[workspace]
-members = ["claudine/cli"]
+members = ["claudine/cli", "claudine/lib"]
 "#,
         )
         .unwrap();
@@ -970,6 +1333,15 @@ members = ["claudine/cli"]
             package_dir.join("Cargo.toml"),
             r#"[package]
 name = "claudine-cli"
+version = "0.1.0"
+edition = "2024"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            lib_dir.join("Cargo.toml"),
+            r#"[package]
+name = "claudine-lib"
 version = "0.1.0"
 edition = "2024"
 "#,
@@ -986,10 +1358,10 @@ edition = "2024"
 
         assert_eq!(ctx.launch_cwd, docs_dir);
         assert_eq!(
-            ctx.repo_root.as_deref(),
-            Some(canonical_repo_root.as_path())
+            ctx.repo_root.as_deref().map(canonical_or_self),
+            Some(canonical_repo_root.clone())
         );
-        assert_eq!(ctx.child_cwd.as_path(), canonical_repo_root.as_path());
+        assert_eq!(canonical_or_self(&ctx.child_cwd), canonical_repo_root);
         assert!(ctx.package_context.is_none());
         assert!(
             ctx.warnings

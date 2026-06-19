@@ -74,13 +74,25 @@ impl std::fmt::Display for DetectionMethod {
 ///
 /// ## Detection Strategy
 ///
-/// This function uses viuer's runtime detection which actually queries
-/// the terminal:
-/// 1. `viuer::get_kitty_support()` - Probes for Kitty Graphics Protocol
-/// 2. `viuer::is_iterm_supported()` - Checks for iTerm2 inline images
+/// Detection is env-only and does not probe the terminal:
+/// 1. [`image_support_from_known_terminals`] inspects `TERM_PROGRAM`,
+///    `TERM`, and `ITERM_*` against a curated list of terminals known to
+///    support Kitty or iTerm2 image protocols.
+/// 2. [`image_support_from_env`] is the fallback for anything not on
+///    the curated list and conservatively returns [`ImageSupport::None`].
 ///
-/// Falls back to environment variable heuristics when viuer detection
-/// returns no support.
+/// We deliberately avoid stdout-based probing (such as `viuer`'s
+/// `\x1b_G…a=q…\x1b\\\x1b[c` query) because the probe bytes leak into
+/// captured output on any environment that doesn't reply — CI runners,
+/// some multiplexers, Apple Terminal — and the test harness sees probe
+/// bytes instead of the real CLI output.
+///
+/// If probe-based detection becomes necessary (to auto-discover a
+/// Kitty-capable terminal not on the curated list), implement it the
+/// same way [`crate::discovery::osc_queries::query::query_osc_actual`]
+/// does: write the query bytes to `/dev/tty` (not stdout) under a
+/// [`RawModeGuard`](crate::discovery::raw_mode::RawModeGuard), gated by
+/// `is_tty() && !is_ci() && !multiplexer && terminal_is_known_to_respond`.
 ///
 /// ## Examples
 ///
@@ -123,66 +135,16 @@ pub fn image_support_with_reason() -> ImageSupportResult {
         };
     }
 
-    // Check for terminals with KNOWN Kitty support first (via environment variables).
-    // This avoids sending terminal probes that can cause response leakage issues
-    // on some terminals (notably Ghostty where responses arrive asynchronously).
+    // Authoritative env-only answer. `image_support_from_known_terminals`
+    // matches curated terminal identifiers (Kitty, Ghostty, WezTerm, Warp,
+    // Konsole, iTerm2, Apple Terminal, …); anything else falls through to
+    // `image_support_from_env`, which conservatively returns
+    // `ImageSupport::None`. See the module-level docstring above for why
+    // we do not probe and where a future `/dev/tty`-based probe would
+    // belong.
     if let Some(result) = image_support_from_known_terminals() {
         return result;
     }
-
-    // For unknown terminals, use viuer's runtime detection
-    {
-        use viuer::{KittySupport, get_kitty_support, is_iterm_supported};
-
-        // Check for Kitty Graphics Protocol support
-        match get_kitty_support() {
-            KittySupport::Local | KittySupport::Remote => {
-                let support_type = match get_kitty_support() {
-                    KittySupport::Local => "local files only",
-                    KittySupport::Remote => "full remote support",
-                    KittySupport::None => unreachable!(),
-                };
-                tracing::debug!(
-                    image_support = "Kitty",
-                    kitty_level = support_type,
-                    method = "viuer",
-                    "Detected Kitty graphics protocol via viuer"
-                );
-                return ImageSupportResult {
-                    support: ImageSupport::Kitty,
-                    reason: format!("viuer detected Kitty graphics protocol ({})", support_type),
-                    method: DetectionMethod::Viuer,
-                };
-            }
-            KittySupport::None => {
-                tracing::trace!(
-                    method = "viuer",
-                    "viuer reports no Kitty support, checking iTerm2"
-                );
-            }
-        }
-
-        // Check for iTerm2 inline images support
-        if is_iterm_supported() {
-            tracing::debug!(
-                image_support = "ITerm",
-                method = "viuer",
-                "Detected iTerm2 inline images via viuer"
-            );
-            return ImageSupportResult {
-                support: ImageSupport::ITerm,
-                reason: "viuer detected iTerm2 inline images support".to_string(),
-                method: DetectionMethod::Viuer,
-            };
-        }
-
-        tracing::trace!(
-            method = "viuer",
-            "viuer reports no image protocol support, falling back to env heuristics"
-        );
-    }
-
-    // Fallback: environment variable heuristics for remaining cases
     image_support_from_env()
 }
 
@@ -663,8 +625,7 @@ mod tests {
     }
 
     #[test]
-    fn test_viuer_detection_completes() {
-        // The detection should work without panicking
+    fn test_image_support_detection_does_not_panic() {
         let _ = image_support_with_reason();
     }
 

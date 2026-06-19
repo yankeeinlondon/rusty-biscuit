@@ -350,7 +350,7 @@ Use the skill tool to load a skill when a task matches its description.
       </skill>
       <skill>
         <name>biscuit-tui</name>
-        <description>Expert knowledge for the biscuit-tui package area in the rusty-biscuit monorepo. Provides reusable TUI input components (tui-chrome library) and a CLI (question) for shell-scriptable prompts. Use when building or modifying ratatui-based input widgets, adding new components to the tui-chrome library, working with the question CLI, or implementing standalone/embedded terminal prompts.</description>
+        <description>Expert knowledge for the biscuit-tui package area in the rusty-biscuit monorepo. Provides reusable TUI input components (biscuit-tui library) and a CLI (question) for shell-scriptable prompts. Use when building or modifying ratatui-based input widgets, adding new components to the biscuit-tui library, working with the question CLI, or implementing standalone/embedded terminal prompts.</description>
         <location>file:///Users/ken/.claudine/worktrees/rusty-biscuit/schematic/.opencode/skill/biscuit-tui/SKILL.md</location>
       </skill>
       <skill>

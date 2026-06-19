@@ -1,5 +1,5 @@
-set dotenv-load := true
-set positional-arguments := true
+set dotenv-load
+set positional-arguments
 
 # set allow-duplicate-recipes
 
@@ -15,12 +15,13 @@ import "./just/spec.just"
 
 # List of areas in this monorepo
 
-areas := "biscuit-hash biscuit-location biscuit-speaks biscuit-terminal schematic biscuit-file unchained-ai playa so-you-say tree-hugger darkmatter sniff model-citizen claudine research queue homelab"
+areas := "biscuit-hash biscuit-location biscuit-speaks biscuit-terminal biscuit-tui schematic biscuit-file unchained-ai playa tree-hugger darkmatter sniff model-citizen claudine research queue homelab biscuit-contract"
 BOLD := '\033[1m'
 DIM := '\033[2m'
 ITALIC := '\033[3m'
 RESET := '\033[0m'
 RED := '\033[31m'
+GREEN := '\033[32m'
 
 default:
     #!/usr/bin/env bash
@@ -38,6 +39,64 @@ default:
 
 modules:
     @cargo modules structure
+
+# Run Level-1 tests for all Cargo workspace packages. Optional selectors may
+# name packages or package-area paths: `just test claudine darkmatter`.
+test *args="":
+    @just _test_workspace {{ args }}
+
+# Verify that every package-area test recipe preserves Ctrl+C as exit 130.
+check-test-interrupts:
+    @just _check_test_interrupts
+
+# run the test suite, then sweep for child processes that outlived it
+#
+# Wraps `just test` in the cross-platform `leak-sweep` detector (tools/test-toolkit).
+# nextest's per-test LEAK status only catches children still holding a test's
+# stdout/stderr; this also catches detached orphans (exit code 99 if any survive,
+# rooted at the repo). Pass `--warn-only` semantics by running leak-sweep directly.
+test-leaks *args="":
+    @cargo run -q -p test-toolkit --features leak-sweep --bin leak-sweep -- just test {{ args }}
+
+# detect which monorepo areas have changed files compared to the upstream branch
+#
+# `[no-cd]` lets callers (and Level 1 tests) invoke this recipe inside a
+# different git working tree without `just` resetting the shell cwd back
+# to the justfile's directory. In production the pre-push hook already
+# runs at the repo root, so the attribute is a no-op there.
+[no-cd]
+changed-areas:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    upstream=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || true)
+    if [[ -z "${upstream:-}" ]]; then
+        # No upstream branch; return empty so caller can fall back
+        exit 0
+    fi
+    changed=$(git diff --name-only "$upstream..HEAD" | cut -d/ -f1 | sort -u)
+    matched=""
+    for area in {{ areas }}; do
+        if echo "$changed" | grep -qx "$area"; then
+            matched="$matched $area"
+        fi
+    done
+    # Trim leading space
+    echo "${matched# }"
+
+# pre-push hook entry point (default areas: claudine darkmatter)
+pre-push *areas="claudine darkmatter":
+    @just test {{ areas }}
+
+# run Level 1 tests for the .githooks/pre-push shell hook itself
+test-pre-push-hook:
+    @./.githooks/tests/test-pre-push.sh
+
+# run Level 1 tests for the `changed-areas` recipe heuristic itself
+test-changed-areas:
+    @./.githooks/tests/test-changed-areas.sh
+
+# run Level 1 tests for both the pre-push hook and the changed-areas recipe
+test-githooks: test-pre-push-hook test-changed-areas
 
 # run doctests (all workspace crates, or specific areas: just doctest claudine playa)
 doctest *args="":
@@ -193,15 +252,103 @@ lint:
           fi
       done
 
+# run sanity checks (all areas, or specific areas: just sanity claudine darkmatter)
+sanity *args="":
+    @just _orchestrate sanity {{ args }}
+
+# run benchmarks (all areas, or specific areas: just bench claudine darkmatter)
+bench *args="":
+    @just _orchestrate bench {{ args }}
+
+# run coverage (all areas, or specific areas: just coverage claudine darkmatter)
+coverage *args="":
+    @just _orchestrate coverage {{ args }}
+
+# run fuzz targets (all areas, or specific areas: just fuzz claudine darkmatter)
+fuzz *args="":
+    @just _orchestrate fuzz {{ args }}
+
+# run all canonical tiers (all areas, or specific areas: just all claudine darkmatter)
+all *args="":
+    @just _orchestrate all {{ args }}
+
+# validate that every curated package area defines the canonical 12-recipe set
+#
+# Parses each area's `justfile` directly with grep rather than spawning a
+# nested `just --summary` per area. The nested form is prone to hangs on
+# large workspaces (observed timing out at `homelab` under cold caches),
+# and even when it does not hang it spawns 17+ `just` parser processes
+# that each re-walk shared imports. Direct parsing keeps this gate fast
+# (~50 ms) and deterministic in CI.
+check-canonical *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    failed_areas=()
+    passed_areas=()
+    required=(sanity test test-l2 test-l3 test-browser test-real lint bench coverage doctest fuzz all)
+
+    if [[ -z "{{ args }}" ]]; then
+        target_areas=({{ areas }})
+    else
+        IFS=', ' read -ra target_areas <<< "{{ args }}"
+    fi
+
+    echo ""
+    echo "Validating canonical recipe set for: ${target_areas[*]}"
+    echo "------------------------------------------------"
+    echo ""
+
+    for area in "${target_areas[@]}"; do
+        if [ ! -f "$area/justfile" ]; then
+            echo -e "{{ RED }}❌ $area:{{ RESET }} no justfile"
+            failed_areas+=("$area")
+            continue
+        fi
+        echo "Checking $area..."
+        missing=()
+        for r in "${required[@]}"; do
+            # A recipe definition in just starts at column 0 with the recipe
+            # name followed by optional `*args=""` / parameters and a `:`.
+            # We deliberately do not invoke `just` here — see recipe header.
+            if ! grep -Eq "^${r}( |:|\$)" "$area/justfile"; then
+                missing+=("$r")
+            fi
+        done
+        if (( ${#missing[@]} > 0 )); then
+            echo -e "  {{ RED }}❌ Missing canonical recipes:{{ RESET }} ${missing[*]}"
+            failed_areas+=("$area")
+        else
+            echo -e "  {{ GREEN }}✅ Justfile defines all ${#required[@]} canonical recipes{{ RESET }}"
+            passed_areas+=("$area")
+        fi
+    done
+
+    echo ""
+    echo "================================================"
+    echo "check-canonical summary"
+    echo "================================================"
+    echo -e "{{ GREEN }}Passed{{ RESET }} (${#passed_areas[@]}): ${passed_areas[*]:-(none)}"
+    if [[ ${#failed_areas[@]} -gt 0 ]]; then
+        echo -e "{{ RED }}Failed{{ RESET }} (${#failed_areas[@]}): ${failed_areas[*]}"
+    else
+        echo -e "{{ RED }}Failed{{ RESET }} (${#failed_areas[@]}): (none)"
+    fi
+    echo "================================================"
+    echo ""
+
+    if [[ ${#failed_areas[@]} -gt 0 ]]; then
+        exit 1
+    fi
+
 # commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
-commit:
+commit *args="":
     @echo ""
     @echo -e "Committing staged changes in the {{ BOLD }}Rusty Biscuit{{ RESET }} monorepo to git"
-    @echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{ DIM }}model{{ RESET }}"
+    @echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M3}} {{ DIM }}model{{ RESET }}"
     @echo ""
     @echo -e "{{ BOLD }}{{ BLUE }}Staged Files:{{ RESET }}"
     @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose "@prompts/commit.md" --opencode --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}" -y
+    @claudine compose "@prompts/commit.md" --opencode --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M3}}" -y {{ args }}
     @just _speak "git commits completed in rusty-biscuit monorepo"
     @sniff repo git-status 2>/dev/null || exit 0
     @echo
@@ -276,6 +423,91 @@ _ensure-build-deps:
 # sync a just recipe from one justfile to all others that have it
 sync-recipe recipe source:
     @./scripts/sync-recipe.sh "{{ recipe }}" "{{ source }}"
+
+# heuristic check for comment quality anti-patterns (warn-only)
+check-comments *args="":
+    @./scripts/check-comments.sh {{ args }}
+
+# run fixture tests for the comment-quality heuristic checker
+check-comments-test:
+    @./scripts/check-comments-tests.sh
+
+# Internal helper: run a named recipe across all curated areas (or specific areas).
+_orchestrate recipe *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    failed_areas=()
+    passed_areas=()
+
+    if [[ -z "{{ args }}" ]]; then
+        echo ""
+        echo "Running {{ recipe }} for all areas..."
+        echo "------------------------------------------------"
+        echo ""
+        for area in {{ areas }}; do
+            if [ -f "$area/justfile" ]; then
+                if (cd "./$area" && just --summary 2>/dev/null) | grep -qw "{{ recipe }}"; then
+                    echo
+                    echo "{{ recipe }} $area..."
+                    if (cd "./$area" && just {{ recipe }}); then
+                        passed_areas+=("$area")
+                    else
+                        failed_areas+=("$area")
+                        just _message "{{ recipe }} failed in $area"
+                    fi
+                else
+                    echo "Error: area '$area' has no {{ recipe }} recipe" >&2
+                    failed_areas+=("$area (no {{ recipe }} recipe)")
+                fi
+            else
+                echo "Error: area '$area' has no justfile" >&2
+                failed_areas+=("$area (no justfile)")
+            fi
+        done
+    else
+        IFS=', ' read -ra areas <<< "{{ args }}"
+        echo ""
+        echo "Running {{ recipe }} for: ${areas[*]}"
+        echo "------------------------------------------------"
+        echo ""
+        for area in "${areas[@]}"; do
+            if [ -d "$area" ] && [ -f "$area/justfile" ]; then
+                if (cd "./$area" && just --summary 2>/dev/null) | grep -qw "{{ recipe }}"; then
+                    echo
+                    echo "{{ recipe }} $area..."
+                    if (cd "./$area" && just {{ recipe }}); then
+                        passed_areas+=("$area")
+                    else
+                        failed_areas+=("$area")
+                        just _message "{{ recipe }} failed in $area"
+                    fi
+                else
+                    echo "Error: area '$area' has no {{ recipe }} recipe" >&2
+                    failed_areas+=("$area (no {{ recipe }} recipe)")
+                fi
+            else
+                echo "Error: area '$area' not found or has no justfile" >&2
+                failed_areas+=("$area (not found / no justfile)")
+            fi
+        done
+    fi
+
+    echo ""
+    echo "================================================"
+    echo "{{ recipe }} summary"
+    echo "================================================"
+    echo -e "{{ GREEN }}Passed{{ RESET }} (${#passed_areas[@]}): ${passed_areas[*]:-(none)}"
+    if [[ ${#failed_areas[@]} -gt 0 ]]; then
+        echo -e "{{ RED }}Failed{{ RESET }} (${#failed_areas[@]}): ${failed_areas[*]}"
+    else
+        echo -e "{{ RED }}Failed{{ RESET }} (${#failed_areas[@]}): (none)"
+    fi
+    echo "================================================"
+    echo ""
+
+    if [[ ${#failed_areas[@]} -gt 0 ]]; then
+        exit 1
+    fi
 
 audio-reset:
     sudo killall coreaudiod

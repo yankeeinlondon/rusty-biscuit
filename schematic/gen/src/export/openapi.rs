@@ -55,7 +55,7 @@ use crate::export::resolve_module_name;
 /// use std::path::Path;
 /// use schematic_define::openapi::ExportOptions;
 /// use schematic_definitions::openai::{define_openai_api, openapi_registry};
-/// use schematic_gen::openapi_output::write_openapi;
+/// use schematic_gen::export::openapi::write_openapi;
 ///
 /// let api = define_openai_api();
 /// let registry = openapi_registry();

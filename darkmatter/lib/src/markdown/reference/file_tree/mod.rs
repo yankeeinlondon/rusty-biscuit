@@ -7,7 +7,7 @@
 //!
 //! ```no_run
 //! use darkmatter::markdown::reference::file_tree::FileTree;
-//! use biscuit_terminal::components::renderable::Renderable;
+//! use biscuit_terminal::components::renderable::TerminalRenderable;
 //! use biscuit_terminal::terminal::Terminal;
 //!
 //! let mut tree = FileTree::new("doc.md").unwrap();
@@ -23,9 +23,9 @@ mod render;
 use std::any::Any;
 use std::path::{Path, PathBuf};
 
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
-use biscuit_terminal::utils::layout::Layout;
+use biscuit_terminal::utils::layout::{Layout, LayoutTerminalExt};
 
 use crate::markdown::Markdown;
 use crate::markdown::reference::ReferenceError;
@@ -265,7 +265,7 @@ impl FileTree {
     }
 }
 
-impl Renderable for FileTree {
+impl TerminalRenderable for FileTree {
     fn render(&self, term: &Terminal) -> String {
         match &self.model {
             Some(model) => {

@@ -5,3 +5,5 @@ prefix ls
 prefix basename
 prefix just
 prefix dirname
+exact pwd
+prefix hug

@@ -8,29 +8,39 @@ Tree Hugger provides three categories of diagnostics: lint (pattern-based), sema
 
 Pattern-based rules defined in `<lang>/lint.scm` queries.
 
-| Language | Rule | Description |
-|----------|------|-------------|
-| **Rust** | `unwrap-call` | Explicit `.unwrap()` call |
-| **Rust** | `expect-call` | Explicit `.expect()` call |
-| **Rust** | `dbg-macro` | Debug macro `dbg!()` usage |
-| **JS/TS** | `debugger-statement` | `debugger;` statement |
-| **JS/TS** | `eval-call` | Usage of `eval()` |
-| **Python** | `eval-call` | Usage of `eval()` |
-| **Python** | `exec-call` | Usage of `exec()` |
-| **Python** | `breakpoint-call` | Usage of `breakpoint()` |
-| **PHP** | `eval-call` | Usage of `eval()` |
+| Language | Rule | Description | Default |
+|----------|------|-------------|---------|
+| **Rust** | `unwrap-call` | Explicit `.unwrap()` call | off (`restriction`) |
+| **Rust** | `expect-call` | Explicit `.expect()` call | off (`restriction`) |
+| **Rust** | `dbg-macro` | Debug macro `dbg!()` usage | on |
+| **JS/TS** | `debugger-statement` | `debugger;` statement | on |
+| **JS/TS** | `eval-call` | Usage of `eval()` | on |
+| **Python** | `eval-call` | Usage of `eval()` | on |
+| **Python** | `exec-call` | Usage of `exec()` | on |
+| **Python** | `breakpoint-call` | Usage of `breakpoint()` | on |
+| **PHP** | `eval-call` | Usage of `eval()` | on |
+
+`unwrap-call` and `expect-call` are `restriction`-category rules: the construct is
+valid and deliberate, so they are silent unless opted in with `--warn <rule>` or
+`--deny <rule>` (or `--deny category:restriction`). `--allow` and `--strict` never
+enable an off-by-default rule.
 
 ### Semantic Diagnostics
 
 Symbol analysis rules computed at runtime:
 
-| Rule | Severity | Description |
-|------|----------|-------------|
-| `undefined-symbol` | Error | Reference to undefined symbol |
-| `undefined-module` | Warning | Reference to undefined module or namespace |
-| `unused-symbol` | Warning | Symbol defined but never used |
-| `unused-import` | Warning | Imported symbol never referenced |
-| `dead-code` | Warning | Code after unconditional return/throw/panic |
+| Rule | Severity | Description | Default |
+|------|----------|-------------|---------|
+| `undefined-symbol` | Error | Reference to undefined symbol | experimental |
+| `undefined-module` | Warning | Reference to undefined module or namespace | experimental |
+| `unused-symbol` | Warning | Symbol defined but never used | experimental |
+| `unused-import` | Warning | Imported symbol never referenced | off (low confidence) |
+| `dead-code` | Warning | Code after unconditional return/throw/panic | on |
+
+`unused-import` is off by default (opt in with `--warn unused-import`): a syntactic
+scan cannot resolve imports used only via trait methods or macros, so it has an
+irreducible false-positive rate. `pub use` re-exports and type-position usages
+(`fn f(x: T)`, `field: T`) are **not** flagged — those were fixed.
 
 ### Syntax Diagnostics
 

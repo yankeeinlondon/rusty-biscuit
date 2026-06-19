@@ -4,9 +4,9 @@
 //! It ensures that required fields are present and non-empty, and provides detailed error
 //! messages for various failure scenarios.
 
+use crate::changelog::types::ConfidenceLevel;
 use biscuit_file::YamlParseError;
 use biscuit_file::serde_yaml_ng;
-use crate::changelog::types::ConfidenceLevel;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -1296,10 +1296,7 @@ Body
             FrontmatterError::InvalidYaml(_) => {
                 // serde can't deserialize "" into ConfidenceLevel enum
             }
-            other => panic!(
-                "Expected InvalidYaml for empty confidence, got {:?}",
-                other
-            ),
+            other => panic!("Expected InvalidYaml for empty confidence, got {:?}", other),
         }
     }
 

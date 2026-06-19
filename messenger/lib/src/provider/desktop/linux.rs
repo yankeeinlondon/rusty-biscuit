@@ -32,6 +32,9 @@ use super::helpers::notify_send::NotifySendHelper;
 use super::helpers::{HelperAttempt, HelperBackend, HelperError, HelperName, elect_helpers};
 use super::request::{DesktopNotificationReceipt, DesktopNotificationRequest};
 
+#[cfg(target_os = "linux")]
+use notify_rust::{Hint, Notification, Timeout};
+
 /// D-Bus notification backend for Linux / freedesktop.org desktops.
 pub(crate) struct LinuxBackend {
     desktop_entry: Option<String>,
@@ -67,8 +70,6 @@ impl LinuxBackend {
     /// Build the native (notify-rust) notification object from the request.
     #[cfg(target_os = "linux")]
     fn build_native_notification(&self, request: &DesktopNotificationRequest) -> Notification {
-        use notify_rust::{Hint, Notification, Timeout};
-
         let mut notification = Notification::new();
         notification.summary(&request.title);
         notification.appname(&request.app_name);

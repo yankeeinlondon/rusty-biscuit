@@ -18,7 +18,7 @@ RED := '\033[31m'
 DOCS := ""
 
 default:
-    @echo "{{BOLD}}Queue CLI and Library{{RESET}}"
+    @echo "{{ BOLD }}Queue CLI and Library{{ RESET }}"
     @echo
     @just --list | grep -v 'default'
 
@@ -26,34 +26,81 @@ default:
 build *args="":
     @echo "Building ..."
     @echo
-    @cargo build -p queue {{args}}
-    @cargo build -p queue-cli {{args}}
+    @cargo build -p queue {{ args }}
+    @cargo build -p queue-cli {{ args }}
     @echo
+
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 3) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity queue
+    @just _sanity queue-cli
 
 # test library and CLI
 test *args="":
-    @echo "Testing {{BOLD}}Library{{RESET}} code"
-    @echo ""
-    @cargo test -p queue {{args}}
-    @echo ""
-    @echo "Testing {{BOLD}}CLI{{RESET}} code"
-    @echo ""
-    @cargo test -p queue-cli {{args}}
+    @just _test queue {{ args }}
+    @just _test queue-cli {{ args }}
+
+# not applicable: queue has no real-terminal (Level-2) tests
+test-l2:
+    @echo "test-l2: not applicable for queue"
+
+# not applicable: queue has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for queue"
+
+# not applicable: queue emits queue data, not HTML
+test-browser:
+    @echo "test-browser: not applicable for queue"
+
+# not applicable: queue has no real-resource tier
+test-real:
+    @echo "test-real: not applicable for queue"
 
 # lint with clippy
 lint *args="":
-    @cargo clippy -p queue -p queue-cli {{args}}
+    @cargo clippy -p queue -p queue-cli {{ args }}
+
+# not applicable: no criterion benches yet
+bench:
+    @echo "bench: not applicable for queue"
+
+# Per-package LCOV coverage.
+coverage *args="":
+    @just _coverage queue {{ args }}
+    @just _coverage queue-cli {{ args }}
+
+# Doctests.
+doctest *args="":
+    @just _doctest queue {{ args }}
+    @just _doctest queue-cli {{ args }}
+
+# not applicable: no cargo-fuzz targets
+fuzz:
+    @echo "fuzz: not applicable for queue"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
 
 # install latest release version of CLI
 install *args="":
     @echo ""
-    @echo "{{BOLD}}Building Queue Library"
+    @echo "{{ BOLD }}Building Queue Library"
     @cargo build --release -p queue
     @echo ""
-    @echo "{{BOLD}}{{YELLOW}}Installing Queue CLI{{RESET}}"
-    @cargo install --path cli {{args}}
+    @echo "{{ BOLD }}{{ YELLOW }}Installing Queue CLI{{ RESET }}"
+    @cargo install --path cli {{ args }}
     @echo ""
-    @echo "{{BOLD}}{{BLUE}}Queue CLI Installed!{{RESET}}"
+    @echo "{{ BOLD }}{{ BLUE }}Queue CLI Installed!{{ RESET }}"
     @echo ""
 
 # build and show the docs for the library code
@@ -64,18 +111,17 @@ docs:
 
 # run the debug release of the Queue CLI
 cli *args="":
-    @cargo run -p queue-cli -- {{args}}
-
+    @cargo run -p queue-cli -- {{ args }}
 
 # commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
 commit:
     @echo ""
-    @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
-    @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{DIM}}model{{RESET}}"
+    @echo -e "Committing staged changes in the {{ BOLD }}Rusty Biscuit{{ RESET }} monorepo to git"
+    @echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M3}} {{ DIM }}model{{ RESET }}"
     @echo ""
-    @echo -e "{{BOLD}}{{BLUE}}Staged Files:{{RESET}}"
+    @echo -e "{{ BOLD }}{{ BLUE }}Staged Files:{{ RESET }}"
     @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}"
+    @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M3}}"
     @just _speak "git commits completed in rusty-biscuit monorepo"
     @sniff repo git-status 2>/dev/null || exit 0
     @echo
@@ -83,17 +129,17 @@ commit:
 # fix documentation drift, refresh the skill, and review CLAUDE.md
 drift *args="":
     @echo
-    @printf "%b\n" "Running drift workflow for {{BOLD}}queue{{RESET}} via Rust drift script"
+    @printf "%b\n" "Running drift workflow for {{ BOLD }}queue{{ RESET }} via Rust drift script"
     @echo
     @echo "- step 1: update package docs for code drift"
     @echo "- step 2: refresh package skill from updated docs"
     @echo "- step 3: review CLAUDE.md for needed updates"
     @echo "- export PREFER_AGENT=codex to force codex (default is claude)"
     @echo
-    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- queue {{DOCS}} {{args}}
+    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- queue {{ DOCS }} {{ args }}
     @_speak "the drift recipe for the queue package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).
 _colors:
-    @: {{BOLD}} {{ITALIC}} {{RESET}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} {{DIM}} >/dev/null || true
+    @: {{ BOLD }} {{ ITALIC }} {{ RESET }} {{ BLACK }} {{ RED }} {{ GREEN }} {{ YELLOW }} {{ BLUE }} {{ MAGENTA }} {{ CYAN }} {{ WHITE }} {{ DIM }} >/dev/null || true

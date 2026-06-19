@@ -17,7 +17,7 @@ impl WrapperProfile for OpencodeWrapper {
         &self,
         args: &mut Vec<String>,
         env_overrides: &mut Vec<(String, String)>,
-    ) -> Result<Option<String>> {
+    ) -> Result<super::YoloOutcome> {
         // Delegate to the mode-aware variant with `interactive = false` so
         // the non-interactive forwarding path is used when callers have not
         // yet migrated to [`apply_yolo_for_mode`].
@@ -29,20 +29,21 @@ impl WrapperProfile for OpencodeWrapper {
         args: &mut Vec<String>,
         _env_overrides: &mut Vec<(String, String)>,
         interactive: bool,
-    ) -> Result<Option<String>> {
-        // OpenCode only honors this flag under `run`; the typed catalog can
-        // mark it non-interactive-only, but the wrapper still needs to emit a
-        // refined warning and avoid mutating interactive TUI argv.
+    ) -> Result<super::YoloOutcome> {
+        // OpenCode only honors `--dangerously-skip-permissions` under
+        // `opencode run` (the non-interactive entrypoint). In interactive
+        // TUI mode the flag is silently rejected, so emit a refined
+        // warning and report `applied = false` so the badge / reporter
+        // surface reflects the disabled state.
         if interactive {
-            return Ok(Some(
-                "--yolo mode is not supported in OpenCode <i>interactive</i> sessions and was ignored"
-                    .to_string(),
+            return Ok(super::YoloOutcome::not_applied(
+                "--yolo mode is not supported in OpenCode <i>interactive</i> sessions and was ignored",
             ));
         }
         if !args.iter().any(|a| a == "--dangerously-skip-permissions") {
             args.push("--dangerously-skip-permissions".to_string());
         }
-        Ok(None)
+        Ok(super::YoloOutcome::applied())
     }
 
     fn apply_system_prompt(
@@ -50,6 +51,7 @@ impl WrapperProfile for OpencodeWrapper {
         prompt: &PreparedSystemPrompt,
         _interactive: bool,
         _cwd: &Path,
+        _scoped_tmp: &Path,
     ) -> Result<crate::commands::wrap::system_prompt::SystemPromptApplication> {
         use crate::commands::wrap::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
 
@@ -85,11 +87,17 @@ impl WrapperProfile for OpencodeWrapper {
         env_overrides: &mut Vec<(String, String)>,
         model: &str,
     ) -> Option<String> {
-        // OpenCode requires both the CLI --model flag AND the MODEL env var.
-        // The typed catalog has no field for dual-delivery model side effects,
-        // so this override is kept to set both surfaces.
-        args.push("--model".to_string());
-        args.push(model.to_string());
+        // This path runs only for *interactive* OpenCode — the non-interactive
+        // pipeline resolves the model via `apply_opencode_model_resolution`,
+        // which short-circuits when interactive. The OpenCode TUI honors the
+        // `--model` flag (never a bare `MODEL` env var), so the argv push is
+        // what actually selects the model; the env override is kept for
+        // Claudine's own templating/reporting surfaces.
+        let has_model_flag = args.iter().any(|a| a == "--model" || a == "-m");
+        if !has_model_flag {
+            args.push("--model".to_string());
+            args.push(model.to_string());
+        }
         env_overrides.push(("MODEL".to_string(), model.to_string()));
         None
     }
@@ -151,14 +159,16 @@ impl WrapperProfile for OpencodeWrapper {
 
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         // OpenCode uses --format json (cataloged) plus --print-logs and
-        // --log-level ERROR for reliable structured streaming. The extra
-        // flags are transport-level concerns not modeled in the output-format
-        // catalog, so this override is kept.
+        // --log-level INFO for reliable structured streaming. INFO provides
+        // enough signal (sessions, LLM calls, step loops, HTTP responses)
+        // for the stderr bridge to detect progress during NDJSON silence
+        // windows, while the aggressive `service=bus` filter in the bridge
+        // keeps noise out of the semantic event stream.
         args.push("--format".to_string());
         args.push("json".to_string());
         args.push("--print-logs".to_string());
         args.push("--log-level".to_string());
-        args.push("ERROR".to_string());
+        args.push("INFO".to_string());
     }
 
     fn stderr_noise_prefixes(&self) -> &'static [&'static str] {
@@ -178,4 +188,31 @@ pub(crate) fn opencode_default_tui_noise_prefixes() -> &'static [&'static str] {
         "\u{2588}\u{2588}\u{2588}\u{2588} ", // ████  — subheader marker
         "\u{2699} ", // ⚙  — MCP tool-invocation prefix (see investigations.md §0b)
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Interactive OpenCode reaches model selection only through `apply_model`
+    // (`apply_opencode_model_resolution` returns early when interactive). The
+    // OpenCode TUI honors `--model` / `OPENCODE_MODEL`, never a bare `MODEL`
+    // env var — so `apply_model` must push the `--model` argv flag or the
+    // user's `-i --model X` selection is silently dropped (regression in
+    // 9e38c794c).
+    #[test]
+    fn apply_model_pushes_model_flag_for_interactive_opencode() {
+        let wrapper = OpencodeWrapper;
+        let mut args: Vec<String> = Vec::new();
+        let mut env_overrides: Vec<(String, String)> = Vec::new();
+
+        let warn = wrapper.apply_model(&mut args, &mut env_overrides, "kimi-for-coding/k2p6");
+
+        assert!(warn.is_none());
+        let model_idx = args
+            .iter()
+            .position(|a| a == "--model")
+            .expect("--model flag must be pushed for interactive OpenCode");
+        assert_eq!(args.get(model_idx + 1).map(String::as_str), Some("kimi-for-coding/k2p6"));
+    }
 }

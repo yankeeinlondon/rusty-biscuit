@@ -66,12 +66,10 @@ impl DispatchRuntimeContext {
         }
     }
 
-    /// Return true when a compiled runtime config is available.
     pub fn has_config(&self) -> bool {
         self.canonical_config.is_some()
     }
 
-    /// Get the canonical runtime config, if loaded.
     pub fn canonical_config(&self) -> Option<&loader::CanonicalRuntimeConfig> {
         self.canonical_config.as_deref()
     }
@@ -165,7 +163,8 @@ pub async fn dispatch_event_meta_with_runtime(
 
 /// High-level canonical dispatch entry point.
 ///
-/// Parses raw provider JSON, loads the new [`ClaudineConfig`], compiles the
+/// Parses raw provider JSON, loads the new
+/// [`ClaudineConfig`](crate::config::ClaudineConfig), compiles the
 /// canonical runtime, and delegates to [`dispatch_canonical_with_runtime`].
 pub async fn dispatch_canonical(
     raw: &Value,
@@ -465,6 +464,22 @@ fn prepare_meta_for_dispatch(meta: &mut EventMeta, env: &EnvironmentContext) {
         meta.extra
             .entry("yolo".to_string())
             .or_insert_with(|| Value::String(yolo));
+    }
+
+    // Mirror wrapper PID fields into `extra` so templates and expressions
+    // can resolve `claudine_pid` / `agent_pid` alongside the existing
+    // stringly-typed wrapper context keys. The typed fields on
+    // `EnvironmentContext` and `EventMeta` remain the source of truth for
+    // JSONL and SQL ingest; this mirror exists only for template bridging.
+    if let Some(pid) = meta.env.claudine_pid {
+        meta.extra
+            .entry("claudine_pid".to_string())
+            .or_insert(Value::Number(serde_json::Number::from(pid)));
+    }
+    if let Some(pid) = meta.agent_pid {
+        meta.extra
+            .entry("agent_pid".to_string())
+            .or_insert(Value::Number(serde_json::Number::from(pid)));
     }
 }
 
@@ -890,6 +905,7 @@ mod tests {
             agent_type: None,
             notification_type: None,
             notification_message: None,
+            agent_pid: None,
             extra: HashMap::new(),
             env: env.clone(),
         };
@@ -970,6 +986,7 @@ mod tests {
             agent_type: None,
             notification_type: None,
             notification_message: None,
+            agent_pid: None,
             extra: HashMap::new(),
             env: env.clone(),
         };
@@ -1021,6 +1038,7 @@ mod tests {
             agent_type: None,
             notification_type: None,
             notification_message: None,
+            agent_pid: None,
             extra: HashMap::new(),
             env: EnvironmentContext::default(),
         };

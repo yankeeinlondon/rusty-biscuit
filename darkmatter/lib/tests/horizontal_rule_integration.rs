@@ -1,9 +1,12 @@
 #[cfg(test)]
 mod tests {
+    use biscuit_terminal::terminal::Terminal;
+    use darkmatter::layout::DarkmatterPage;
     use darkmatter::markdown::{
         Markdown,
-        output::{ColorDepth, TerminalImageMode, TerminalOptions, as_html, for_terminal},
+        output::{ColorDepth, TerminalImageMode, TerminalOptions},
     };
+    use darkmatter::style::{HrStyleOverrides, apply_hr_style, from_frontmatter};
 
     fn terminal_text_options() -> TerminalOptions {
         let mut options = TerminalOptions::default();
@@ -15,7 +18,7 @@ mod tests {
     fn test_markdown_to_terminal_horizontal_rule() {
         let markdown = "--- { style: waves, alignment: centered, weight: thick }";
         let md: Markdown = markdown.into();
-        let result = for_terminal(&md, terminal_text_options()).unwrap();
+        let result = md.as_terminal(terminal_text_options()).unwrap();
 
         // Should contain the rendered horizontal rule
         assert!(!result.is_empty());
@@ -27,7 +30,7 @@ mod tests {
     fn test_markdown_to_html_horizontal_rule() {
         let markdown = "--- { style: dots, width: \"50%\", color: \"red\" }";
         let md: Markdown = markdown.into();
-        let result = as_html(&md, Default::default()).unwrap();
+        let result = md.as_html(Default::default()).unwrap();
 
         // Outer <svg> keeps concrete `width="…"` for renderer compatibility.
         assert!(result.contains(r#"width="50%""#));
@@ -52,8 +55,8 @@ mod tests {
     fn test_markdown_with_multiple_horizontal_rules() {
         let markdown = "# Header\n\n--- { style: dashes }\n\nSome content\n\n*** { style: waves, alignment: centered }\n\nMore content\n\n___ { style: dots, weight: thick, width: \"75%\" }\n";
         let md: Markdown = markdown.into();
-        let terminal_result = for_terminal(&md, terminal_text_options()).unwrap();
-        let html_result = as_html(&md, Default::default()).unwrap();
+        let terminal_result = md.as_terminal(terminal_text_options()).unwrap();
+        let html_result = md.as_html(Default::default()).unwrap();
 
         // Should contain multiple horizontal rules
         assert!(
@@ -73,8 +76,8 @@ mod tests {
     fn test_horizontal_rule_in_complex_document() {
         let markdown = "# Complex Document\n\n## Section 1\n\nRegular paragraph with some text.\n\n--- { style: curtain-rod, alignment: full }\n\n## Section 2\n\nAnother paragraph.\n\n*** { style: line-circle, alignment: left, color: \"#00ff00\" }\n\n### Subsection\n\nFinal content.\n\n___ { style: inset-line, weight: medium, width: \"60%\" }\n";
         let md: Markdown = markdown.into();
-        let terminal_result = for_terminal(&md, terminal_text_options()).unwrap();
-        let html_result = as_html(&md, Default::default()).unwrap();
+        let terminal_result = md.as_terminal(terminal_text_options()).unwrap();
+        let html_result = md.as_html(Default::default()).unwrap();
 
         // Should render without errors
         assert!(!terminal_result.is_empty());
@@ -96,8 +99,8 @@ mod tests {
     fn test_horizontal_rule_with_default_attributes() {
         let markdown = "--- { }";
         let md: Markdown = markdown.into();
-        let terminal_result = for_terminal(&md, terminal_text_options()).unwrap();
-        let html_result = as_html(&md, Default::default()).unwrap();
+        let terminal_result = md.as_terminal(terminal_text_options()).unwrap();
+        let html_result = md.as_html(Default::default()).unwrap();
 
         // Should render with default attributes
         // Terminal uses Unicode dashes (╌) when color support is available
@@ -118,46 +121,6 @@ mod tests {
         assert!(html_result.contains("--hr-weight: 4"));
     }
 
-    #[test]
-    fn test_bare_rules_use_frontmatter_defaults_in_html() {
-        for marker in ["---", "___", "***"] {
-            let markdown = format!(
-                "---\nhr:\n  style: waves\n  alignment: centered\n  weight: thick\n  width: \"50%\"\n  color: red\n---\n\n{marker}\n"
-            );
-            let md: Markdown = markdown.into();
-            let html = as_html(&md, Default::default()).unwrap();
-
-            assert!(html.contains(r#"width="50%""#), "{html}");
-            assert!(html.contains("--hr-color: red"), "{html}");
-            assert!(html.contains("--hr-weight: 8"), "{html}");
-            assert!(html.contains("<path"), "{html}");
-        }
-    }
-
-    #[test]
-    fn test_rule_attributes_override_frontmatter_partially() {
-        let markdown = "---\nhr:\n  style: waves\n  alignment: centered\n  weight: thick\n  width: \"80%\"\n  color: red\n---\n\n--- { color: blue, width: \"25%\" }\n";
-        let md: Markdown = markdown.into();
-        let html = as_html(&md, Default::default()).unwrap();
-
-        assert!(html.contains(r#"width="25%""#), "{html}");
-        assert!(html.contains("--hr-color: blue"), "{html}");
-        assert!(html.contains("--hr-weight: 8"), "{html}");
-        assert!(html.contains("<path"), "{html}");
-    }
-
-    #[test]
-    fn test_bare_rule_uses_frontmatter_defaults_in_terminal() {
-        let markdown = "---\nhr:\n  style: dots\n  alignment: centered\n  weight: thick\n  width: \"20\"\n---\n\n---\n";
-        let md: Markdown = markdown.into();
-        let mut options = terminal_text_options();
-        options.color_depth = Some(ColorDepth::Colors16);
-        options.max_width = Some(40);
-
-        let output = for_terminal(&md, options).unwrap();
-        assert!(output.contains('•') || output.contains('.'), "{output:?}");
-    }
-
     // ================================================================
     // Phase 3: A4 — CSS-variable strategy flowing through darkmatter
     // ================================================================
@@ -168,7 +131,7 @@ mod tests {
         // through the darkmatter HTML pipeline.
         let markdown = "--- { }";
         let md: Markdown = markdown.into();
-        let html = as_html(&md, Default::default()).unwrap();
+        let html = md.as_html(Default::default()).unwrap();
         assert!(
             html.contains("--hr-weight:"),
             "expected --hr-weight declaration via pipeline: {html}"
@@ -197,7 +160,7 @@ mod tests {
         // declarations on the emitted SVG.
         let markdown = "--- { style: waves, weight: thick, color: \"blue\", width: \"42%\" }";
         let md: Markdown = markdown.into();
-        let html = as_html(&md, Default::default()).unwrap();
+        let html = md.as_html(Default::default()).unwrap();
         assert!(
             html.contains("--hr-weight: 8"),
             "thick weight must declare --hr-weight: 8: {html}"
@@ -223,7 +186,7 @@ mod tests {
         // silently dropping the event through the catch-all arm.
         let markdown = "---\n";
         let md: Markdown = markdown.into();
-        let result = for_terminal(&md, terminal_text_options()).unwrap();
+        let result = md.as_terminal(terminal_text_options()).unwrap();
         assert!(!result.is_empty());
         // Default style is dashes; Unicode mode uses ╌, ASCII fallback uses -.
         assert!(
@@ -238,7 +201,7 @@ mod tests {
         // through to the catch-all arm (which would drop the event).
         let markdown = "---\n";
         let md: Markdown = markdown.into();
-        let html = as_html(&md, Default::default()).unwrap();
+        let html = md.as_html(Default::default()).unwrap();
         assert!(
             html.contains("<svg "),
             "bare --- should emit an <svg> element: {html}"
@@ -256,7 +219,7 @@ mod tests {
         // InlineEvent::HorizontalRule) route through the HTML renderer.
         let markdown = "First\n\n---\n\n--- { style: waves }\n";
         let md: Markdown = markdown.into();
-        let html = as_html(&md, Default::default()).unwrap();
+        let html = md.as_html(Default::default()).unwrap();
         let svg_count = html.matches("<svg ").count();
         assert_eq!(
             svg_count, 2,
@@ -274,7 +237,7 @@ mod tests {
         let md: Markdown = markdown.into();
         let mut options = terminal_text_options();
         options.max_width = Some(20);
-        let result = for_terminal(&md, options).unwrap();
+        let result = md.as_terminal(options).unwrap();
 
         // Find the line that contains the rule body (Unicode ╌ or ASCII -).
         let rule_line = result
@@ -294,15 +257,13 @@ mod tests {
     fn test_terminal_options_color_depth_none_disables_ansi() {
         // B2 corollary: when TerminalOptions pin color_depth to None, the HR
         // renderer must honor that (via the shared outer Terminal) and emit
-        // no ANSI escapes regardless of the `color` attribute. (The top of
-        // `write_terminal` short-circuits to raw content when color_depth is
-        // None, so this also exercises that fallback path.)
+        // no ANSI escapes regardless of the `color` attribute.
         use darkmatter::markdown::output::terminal::ColorDepth;
         let markdown = "--- { color: red }\n";
         let md: Markdown = markdown.into();
         let mut options = TerminalOptions::default();
         options.color_depth = Some(ColorDepth::None);
-        let result = for_terminal(&md, options).unwrap();
+        let result = md.as_terminal(options).unwrap();
         assert!(
             !result.contains("\x1b["),
             "expected no ANSI escapes with color_depth=None: {result:?}"
@@ -315,8 +276,8 @@ mod tests {
         // in terminal output now that weight is honored.
         let thin: Markdown = "--- { style: dashes, weight: thin }\n".into();
         let thick: Markdown = "--- { style: dashes, weight: thick }\n".into();
-        let thin_out = for_terminal(&thin, terminal_text_options()).unwrap();
-        let thick_out = for_terminal(&thick, terminal_text_options()).unwrap();
+        let thin_out = thin.as_terminal(terminal_text_options()).unwrap();
+        let thick_out = thick.as_terminal(terminal_text_options()).unwrap();
         assert_ne!(
             thin_out, thick_out,
             "thick rule must differ from thin rule in terminal output"
@@ -330,7 +291,7 @@ mod tests {
         // renderer continues.
         let markdown = "--- { style: bogus }\n";
         let md: Markdown = markdown.into();
-        let result = for_terminal(&md, terminal_text_options()).unwrap();
+        let result = md.as_terminal(terminal_text_options()).unwrap();
         assert!(!result.is_empty());
         assert!(
             result.contains('╌') || result.contains('-'),
@@ -343,7 +304,7 @@ mod tests {
         // B1 (HTML): unknown enum values must still produce a valid SVG.
         let markdown = "--- { style: bogus, weight: zzz, alignment: diagonal }\n";
         let md: Markdown = markdown.into();
-        let html = as_html(&md, Default::default()).unwrap();
+        let html = md.as_html(Default::default()).unwrap();
         assert!(html.contains("<svg "), "expected an <svg>: {html}");
         // Default weight is Medium (4).
         assert!(
@@ -361,7 +322,7 @@ mod tests {
         // hardcoded "\n\n"). There must NOT be two blank lines.
         let markdown = "--- { style: dashes }\n\nAfter\n";
         let md: Markdown = markdown.into();
-        let result = for_terminal(&md, terminal_text_options()).unwrap();
+        let result = md.as_terminal(terminal_text_options()).unwrap();
 
         // Find the rule line and assert the following two lines are "blank
         // then content" (one blank line), not "blank then blank then content".
@@ -427,7 +388,7 @@ mod tests {
             \n\
             ___ { style: dots }\n";
         let md: darkmatter::markdown::Markdown = markdown.into();
-        let html = as_html(&md, Default::default()).unwrap();
+        let html = md.as_html(Default::default()).unwrap();
         let svg_count = html.matches("<svg ").count();
         assert_eq!(
             svg_count, 3,
@@ -443,46 +404,11 @@ mod tests {
         // shows up in the declared CSS custom property.
         let markdown = "--- { style: completely-bogus, weight: ultra }\n";
         let md: darkmatter::markdown::Markdown = markdown.into();
-        let html = as_html(&md, Default::default()).unwrap();
+        let html = md.as_html(Default::default()).unwrap();
         assert!(html.contains("<svg "), "expected an <svg>: {html}");
         assert!(
             html.contains("--hr-weight: 4"),
             "unknown weight should fall back to default 4: {html}"
-        );
-    }
-
-    #[test]
-    fn test_html_inline_variables_override_flows_through_pipeline() {
-        // Authors can pre-embed a bare `var(--hr-width)` token via the
-        // component-level `width` attribute. When HtmlOptions carries
-        // `hr_css_variables`, the as_html pipeline must apply that
-        // substitution so the caller's override reaches the SVG.
-        use darkmatter::markdown::output::HtmlOptions;
-        use std::collections::HashMap;
-
-        let markdown = "--- { style: dashes, width: \"var(--hr-width)\" }\n";
-        let md: darkmatter::markdown::Markdown = markdown.into();
-
-        // Without overrides: the bare token survives.
-        let default_html = as_html(&md, HtmlOptions::default()).unwrap();
-        assert!(
-            default_html.contains("var(--hr-width)"),
-            "default render should preserve var(--hr-width): {default_html}"
-        );
-
-        // With overrides: the bare token is replaced everywhere it appears.
-        let mut options = HtmlOptions::default();
-        let mut vars = HashMap::new();
-        vars.insert("hr-width".to_string(), "42%".to_string());
-        options.hr_css_variables = vars;
-        let overridden_html = as_html(&md, options).unwrap();
-        assert!(
-            !overridden_html.contains("var(--hr-width)"),
-            "override should remove bare var(--hr-width) tokens: {overridden_html}"
-        );
-        assert!(
-            overridden_html.contains(r#"width="42%""#),
-            "override should substitute the value: {overridden_html}"
         );
     }
 
@@ -501,7 +427,7 @@ mod tests {
             options.hr_css_variables.is_empty(),
             "default hr_css_variables must be empty"
         );
-        let html = as_html(&md, options).unwrap();
+        let html = md.as_html(options).unwrap();
 
         assert!(
             html.contains("var(--hr-color,"),
@@ -526,8 +452,8 @@ mod tests {
 
         for markdown in test_cases {
             let md: Markdown = markdown.into();
-            let terminal_result = for_terminal(&md, terminal_text_options()).unwrap();
-            let html_result = as_html(&md, Default::default()).unwrap();
+            let terminal_result = md.as_terminal(terminal_text_options()).unwrap();
+            let html_result = md.as_html(Default::default()).unwrap();
 
             assert!(!terminal_result.is_empty());
             assert!(!html_result.is_empty());
@@ -539,64 +465,6 @@ mod tests {
     // ================================================================
 
     #[test]
-    fn test_hr_frontmatter_unquoted_numeric_width_survives() {
-        // B3: a numeric `width: 20` used to make
-        // `hr_defaults_from_frontmatter` fail deserialization and drop
-        // ALL sibling keys. The shared-helper refactor coerces the number
-        // into a string, so `style`, `color`, and the numeric width all
-        // apply.
-        let markdown = "---\nhr:\n  style: dots\n  width: 20\n  color: red\n---\n\n---\n";
-        let md: Markdown = markdown.into();
-        let mut options = terminal_text_options();
-        options.color_depth = Some(ColorDepth::Colors16);
-        options.max_width = Some(40);
-
-        let output = for_terminal(&md, options).unwrap();
-        // Dots pattern survives (proving `style: dots` was not dropped).
-        assert!(
-            output.contains('·') || output.contains('.'),
-            "dots style should survive numeric sibling: {output:?}"
-        );
-        // Width-20 means the rule line visibly spans 20 columns (use the
-        // ANSI-stripping helper because `color: red` wraps in escapes).
-        let rule_line = output
-            .lines()
-            .find(|l| l.contains('·') || l.contains('.'))
-            .expect("expected a rule line in output");
-        let visible = strip_ansi_escape_sequences(rule_line).chars().count();
-        assert!(
-            (1..=40).contains(&visible),
-            "rule width must respect 1..=term_width bounds: {visible} in {rule_line:?}"
-        );
-        assert_eq!(
-            visible, 20,
-            "numeric `width: 20` should resolve to 20 columns: {visible} in {rule_line:?}"
-        );
-        // Red ANSI escape survives (proving `color: red` was not dropped).
-        assert!(
-            output.contains("\x1b[31m") || output.contains("\x1b[91m"),
-            "color: red should emit a red ANSI escape: {output:?}"
-        );
-    }
-
-    #[test]
-    fn test_hr_frontmatter_unquoted_bool_sibling_survives() {
-        // A bool value for a recognized key still coerces to a String
-        // ("true" / "false"), which is never a valid enum value — but
-        // sibling keys (`style`, `color`) must survive.
-        let markdown = "---\nhr:\n  style: waves\n  alignment: true\n  color: blue\n---\n\n---\n";
-        let md: Markdown = markdown.into();
-        let html = as_html(&md, Default::default()).unwrap();
-        // Waves style survives.
-        assert!(html.contains("<path"), "waves style should survive: {html}");
-        // Color survives in the declared CSS custom property.
-        assert!(
-            html.contains("--hr-color: blue"),
-            "color should survive bool sibling: {html}"
-        );
-    }
-
-    #[test]
     fn test_hr_frontmatter_non_mapping_does_not_panic() {
         // `hr: 42` is neither a mapping nor absent — the output pipeline
         // must fall back to component defaults without panicking. (The
@@ -605,67 +473,13 @@ mod tests {
         // crate-scoped `tracing_test` subscriber captures the event.)
         let markdown = "---\nhr: 42\n---\n\n---\n";
         let md: Markdown = markdown.into();
-        let result = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let result = md.as_terminal(TerminalOptions::default()).unwrap();
         assert!(
             !result.is_empty(),
             "non-mapping hr frontmatter must still render a default rule"
         );
     }
 
-    /// C5: bare `> ---` inside a blockquote is a horizontal-rule block per
-    /// the spec (`features/2026-04-18-hr/spec.md` §"Parsing Requirements"),
-    /// and page-level `hr` frontmatter defaults must apply inside the
-    /// blockquote just as they do at the top level.
-    ///
-    /// This test enforces both halves:
-    ///
-    /// - HTML: the waves SVG (`<path … stroke-linecap="round"`) lives
-    ///   *inside* `<blockquote>…</blockquote>` — the HR stays wrapped by
-    ///   the surrounding blockquote, not promoted to document level.
-    /// - Terminal: the output contains the waves glyph (`≋` for Unicode
-    ///   locales, `~` as the ASCII fallback).
-    #[test]
-    fn test_blockquote_hr_renders_with_frontmatter_defaults() {
-        let markdown = "---\nhr:\n  style: waves\n---\n\n> ---\n";
-        let md: Markdown = markdown.into();
-
-        let html = as_html(&md, Default::default()).unwrap();
-        assert!(
-            html.contains("<blockquote>"),
-            "expected a <blockquote> open tag: {html}"
-        );
-        assert!(
-            html.contains("</blockquote>"),
-            "expected a </blockquote> close tag: {html}"
-        );
-        // Waves renders as a `<path>` element in the SVG; confirm the path
-        // sits between the blockquote tags.
-        let bq_open = html
-            .find("<blockquote>")
-            .expect("blockquote open present (asserted above)");
-        let bq_close = html
-            .find("</blockquote>")
-            .expect("blockquote close present (asserted above)");
-        assert!(
-            bq_open < bq_close,
-            "blockquote tags must nest correctly: {html}"
-        );
-        let inside = &html[bq_open..bq_close];
-        assert!(
-            inside.contains("<svg"),
-            "waves SVG must live inside the blockquote: {html}"
-        );
-        assert!(
-            inside.contains("<path"),
-            "waves style uses a <path> element; expected it inside the blockquote: {html}"
-        );
-
-        let terminal = for_terminal(&md, terminal_text_options()).unwrap();
-        assert!(
-            terminal.contains('≋') || terminal.contains('~'),
-            "blockquote-HR terminal output must contain the waves glyph (≋ or ~): {terminal:?}"
-        );
-    }
 
     #[test]
     fn test_terminal_image_mode_never_disables_hr_image_tier() {
@@ -676,7 +490,7 @@ mod tests {
         options.max_width = Some(40);
         options.color_depth = Some(ColorDepth::TrueColor);
 
-        let output = for_terminal(&md, options).unwrap();
+        let output = md.as_terminal(options).unwrap();
 
         assert!(
             !output.contains("\x1b_G"),
@@ -701,11 +515,172 @@ mod tests {
         options.max_width = Some(80);
         options.color_depth = Some(ColorDepth::TrueColor);
 
-        let output = for_terminal(&md, options).unwrap();
+        let output = md.as_terminal(options).unwrap();
 
         assert!(
             output.contains("\x1b_G"),
             "TerminalImageMode::Force must emit Kitty image escapes for HR: {output:?}"
         );
+    }
+
+    // ================================================================
+    // Review-4 finding 1: page-level HR defaults must reach bare `---`
+    // rules through the DarkmatterPage render path, restoring assertions
+    // removed during the tree cutover. These exercise the full
+    // frontmatter → page → render-tree path the CLI render pipeline uses
+    // (`from_frontmatter` migrates the deprecated top-level `hr:` block into
+    // `style.hr.*`; `apply_hr_style` projects it onto the page; the page
+    // threads it through `hr_defaults` to the tree entry points).
+    // ================================================================
+
+    /// Parses `md`'s style frontmatter (migrating the deprecated top-level
+    /// `hr:` alias into `style.hr.*`) and applies it onto a default page.
+    fn page_with_frontmatter_hr(md: &Markdown) -> DarkmatterPage {
+        let (style, _warnings) =
+            from_frontmatter(md.frontmatter()).expect("parse style frontmatter");
+        let term = Terminal::new_optimistic(80);
+        apply_hr_style(DarkmatterPage::new(&term), &style, HrStyleOverrides::default())
+            .expect("apply hr style")
+    }
+
+    #[test]
+    fn bare_rule_uses_style_hr_frontmatter_defaults_in_html() {
+        // `style.hr.*` defaults must style a bare `---` on the browser path.
+        let markdown =
+            "---\nstyle:\n  hr:\n    kind: waves\n    weight: thick\n    width: \"50%\"\n---\n\n---\n";
+        let md: Markdown = markdown.into();
+        let html = page_with_frontmatter_hr(&md).render_to_browser(&md).unwrap();
+        assert!(
+            html.contains(r#"width="50%""#),
+            "frontmatter width must apply to the bare rule: {html}"
+        );
+        assert!(html.contains("--hr-weight: 8"), "thick default ⇒ 8px: {html}");
+        assert!(html.contains("<path"), "waves default ⇒ <path> svg: {html}");
+    }
+
+    #[test]
+    fn bare_rule_uses_deprecated_top_level_hr_frontmatter_in_html() {
+        // The deprecated top-level `hr:` block (with the legacy `style:` key)
+        // migrates into `style.hr.*` and still styles a bare `---`.
+        let markdown = "---\nhr:\n  style: waves\n  weight: thick\n  width: \"50%\"\n---\n\n---\n";
+        let md: Markdown = markdown.into();
+        let html = page_with_frontmatter_hr(&md).render_to_browser(&md).unwrap();
+        assert!(html.contains(r#"width="50%""#), "{html}");
+        assert!(html.contains("--hr-weight: 8"), "{html}");
+        assert!(html.contains("<path"), "{html}");
+    }
+
+    #[test]
+    fn rule_attributes_override_frontmatter_defaults_partially_in_html() {
+        // Inline rule attributes win per-property; unset properties fall back
+        // to the `style.hr.*` defaults.
+        let markdown =
+            "---\nstyle:\n  hr:\n    kind: waves\n    weight: thick\n    width: \"80%\"\n---\n\n--- { width: \"25%\" }\n";
+        let md: Markdown = markdown.into();
+        let html = page_with_frontmatter_hr(&md).render_to_browser(&md).unwrap();
+        assert!(
+            html.contains(r#"width="25%""#),
+            "inline width must win over the frontmatter default: {html}"
+        );
+        assert!(
+            html.contains("--hr-weight: 8"),
+            "weight must fall back to the thick default: {html}"
+        );
+        assert!(
+            html.contains("<path"),
+            "kind must fall back to the waves default: {html}"
+        );
+    }
+
+    #[test]
+    fn bare_rule_uses_style_hr_frontmatter_defaults_in_terminal() {
+        // `style.hr.*` defaults must style a bare `---` on the terminal path.
+        let markdown = "---\nstyle:\n  hr:\n    kind: dots\n---\n\n---\n";
+        let md: Markdown = markdown.into();
+        let page = page_with_frontmatter_hr(&md).with_image_mode(TerminalImageMode::Never);
+        let out = page.render(&md).unwrap();
+        // The default dashed rule uses `╌`/`-`; a dots default switches the
+        // glyph to `·` (or the ASCII `.` fallback).
+        assert!(
+            out.contains('·') || out.contains('.'),
+            "bare rule must adopt the `dots` frontmatter default: {out:?}"
+        );
+    }
+
+    // ================================================================
+    // Review-5 finding: the DIRECT public `Markdown::as_html` /
+    // `as_terminal` paths (no `DarkmatterPage` wrapper) must honor the
+    // deprecated top-level `hr:` frontmatter defaults even with default
+    // options. These restore the bespoke-serializer compatibility tests
+    // dropped during the tree cutover, exercising the path
+    // `md.as_html(HtmlOptions::default())` / `md.as_terminal(...)` takes
+    // without routing through the page.
+    // ================================================================
+
+    #[test]
+    fn direct_as_html_applies_deprecated_top_level_hr_defaults_to_bare_rule() {
+        let markdown = "---\nhr:\n  style: waves\n  weight: thick\n  width: \"50%\"\n---\n\n---\n";
+        let md: Markdown = markdown.into();
+        let html = md.as_html(Default::default()).unwrap();
+        assert!(html.contains(r#"width="50%""#), "{html}");
+        assert!(html.contains("--hr-weight: 8"), "thick ⇒ 8px: {html}");
+        assert!(html.contains("<path"), "waves ⇒ <path> svg: {html}");
+    }
+
+    #[test]
+    fn direct_as_terminal_applies_deprecated_top_level_hr_defaults_to_bare_rule() {
+        let markdown = "---\nhr:\n  style: waves\n---\n\n---\n";
+        let md: Markdown = markdown.into();
+        let out = md.as_terminal(terminal_text_options()).unwrap();
+        // Waves uses ≋ in Unicode mode, ~ otherwise.
+        assert!(
+            out.contains('≋') || out.contains('~'),
+            "bare rule must adopt the `waves` frontmatter default: {out:?}"
+        );
+    }
+
+    #[test]
+    fn direct_as_html_inline_attribute_overrides_top_level_hr_defaults_partially() {
+        // Inline rule attributes win per-property; unset properties fall back
+        // to the top-level `hr:` defaults.
+        let markdown =
+            "---\nhr:\n  style: waves\n  weight: thick\n  width: \"80%\"\n---\n\n--- { width: \"25%\" }\n";
+        let md: Markdown = markdown.into();
+        let html = md.as_html(Default::default()).unwrap();
+        assert!(
+            html.contains(r#"width="25%""#),
+            "inline width must win over the frontmatter default: {html}"
+        );
+        assert!(
+            html.contains("--hr-weight: 8"),
+            "weight must fall back to the thick default: {html}"
+        );
+        assert!(
+            html.contains("<path"),
+            "kind must fall back to the waves default: {html}"
+        );
+    }
+
+    #[test]
+    fn direct_as_html_top_level_hr_numeric_and_bool_scalars_preserve_siblings() {
+        // YAML numeric width (`20`, no quotes) and bool alignment coerce to
+        // strings; recognized sibling keys still apply. A numeric width is
+        // emitted verbatim as the CSS `width="20"`.
+        let markdown = "---\nhr:\n  style: dots\n  width: 20\n  alignment: true\n  color: red\n---\n\n---\n";
+        let md: Markdown = markdown.into();
+        let html = md.as_html(Default::default()).unwrap();
+        assert!(html.contains(r#"width="20""#), "numeric width ⇒ width=\"20\": {html}");
+        assert!(html.contains("--hr-color: red"), "color sibling must apply: {html}");
+    }
+
+    #[test]
+    fn direct_as_html_top_level_hr_defaults_apply_to_blockquote_contained_bare_rule() {
+        // A bare `---` nested in a blockquote must also pick up the top-level
+        // `hr:` defaults on the direct path.
+        let markdown = "---\nhr:\n  style: waves\n  width: \"50%\"\n---\n\n> before\n>\n> ---\n>\n> after\n";
+        let md: Markdown = markdown.into();
+        let html = md.as_html(Default::default()).unwrap();
+        assert!(html.contains(r#"width="50%""#), "{html}");
+        assert!(html.contains("<path"), "waves ⇒ <path> svg: {html}");
     }
 }

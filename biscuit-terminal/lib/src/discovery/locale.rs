@@ -91,20 +91,6 @@ pub fn effective_locale_tag(category: LocaleCategory) -> Option<String> {
     normalize_locale_to_tag(&raw)
 }
 
-#[cfg(windows)]
-fn windows_locale_tag() -> Option<String> {
-    use windows_sys::Win32::Globalization::GetUserDefaultLocaleName;
-
-    // Per docs, max locale name length is 85 incl. null.
-    let mut buf = [0u16; 85];
-    let len = unsafe { GetUserDefaultLocaleName(buf.as_mut_ptr(), buf.len() as i32) };
-    if len == 0 {
-        return None;
-    }
-    let s = String::from_utf16_lossy(&buf[..(len as usize - 1)]);
-    Some(s) // already like "en-US"
-}
-
 /// Effective locale for a specific category, following common precedence:
 /// LC_ALL > LC_<CATEGORY> > LANG > "C"
 pub fn effective_locale_for(category: LocaleCategory) -> String {

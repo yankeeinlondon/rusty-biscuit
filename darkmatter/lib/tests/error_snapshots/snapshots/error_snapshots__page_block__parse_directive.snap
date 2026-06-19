@@ -2,10 +2,14 @@
 source: darkmatter/lib/tests/error_snapshots/page_block.rs
 expression: out
 ---
-⨫ PageBlockError: directive parse failed
+⤫ PageBlockError: directive parse failed
+┃ 
 ┃ Message: unexpected token
 ┃ 
-┃     11 │ line 11
-┃   > 12 │ line 12
-┃     13 │ line 13
-Opening syntax: ::block when="expr" — close with ::end-block.
+┃ ```md
+┃   11 │ line 11
+┃ > 12 │ line 12
+┃   13 │ line 13
+┃ ```
+┃ 
+┃ Opening syntax: ::block when="expr" — close with ::end-block.

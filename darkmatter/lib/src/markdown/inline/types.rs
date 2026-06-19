@@ -41,7 +41,11 @@ pub enum InlineTag {
 /// Attributes for horizontal rule with custom styling.
 #[derive(Debug, Clone, PartialEq, Default, serde::Deserialize)]
 pub struct HorizontalRuleAttrs {
-    pub style: Option<String>,
+    /// Canonical inline key for the visual kind (`kind: waves`).
+    pub kind: Option<String>,
+    /// Legacy inline key (`style: waves`) preserved for deprecation
+    /// warning provenance. When both are present, `kind` wins.
+    pub legacy_style: Option<String>,
     pub alignment: Option<String>,
     pub weight: Option<String>,
     pub width: Option<String>,

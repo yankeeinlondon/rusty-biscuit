@@ -1,0 +1,31 @@
+[package]
+name = "test-toolkit"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+description = "Shared test lifecycle helpers for the Rusty Biscuit workspace"
+
+[dependencies]
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Pulled in only for the `leak-sweep` binary (feature-gated) so the many crates
+# that depend on this crate as a dev-dependency do not inherit them.
+clap = { version = "4", features = ["derive"], optional = true }
+sysinfo = { version = "0.38", default-features = false, features = ["system"], optional = true }
+
+[features]
+# Enables the cross-platform `leak-sweep` post-run orphan detector binary.
+leak-sweep = ["dep:clap", "dep:sysinfo"]
+
+[[bin]]
+name = "leak-sweep"
+required-features = ["leak-sweep"]
+
+[dev-dependencies]
+serial_test = "3"
+
+# Opt-out of benchmarking: this crate has no algorithmic hot paths.
+[package.metadata.benchmarks]
+required = false
+reason = "Test helper crate; no measurable hot paths."

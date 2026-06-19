@@ -1,3 +1,5 @@
+use renderable::style::Style;
+
 use crate::{
     components::prose::Prose,
     utils::{layout::Alignment, wrap_policy::WordWrap},
@@ -118,8 +120,18 @@ enum DropBehavior {
 pub struct TableColumn {
     /// Header text for the column
     pub header: String,
-    /// Optional styled header using Prose (takes precedence over `header` when rendering)
+    /// Optional styled header using Prose.
+    ///
+    /// Compatibility shim: [`new_with_bold`](Self::new_with_bold) still
+    /// populates this so existing callers keep working. The canonical typed
+    /// home of header appearance is [`header_style`](Self::header_style).
     pub header_prose: Option<Prose>,
+    /// Typed appearance slot for this column's header cell (Spec B D5).
+    ///
+    /// This per-column override is merged on top of the table-wide
+    /// [`TableStyle::header`](crate::components::table::types::TableStyle::header)
+    /// slot. An empty `Style` leaves the header to the table-wide default.
+    pub header_style: Style,
     /// Fixed width for the column (overrides header/data widths when set)
     pub fixed_width: Option<usize>,
     /// Minimum width for the column (optional)
@@ -158,6 +170,7 @@ impl TableColumn {
         TableColumn {
             header: header.into(),
             header_prose: None,
+            header_style: Style::default(),
             fixed_width: None,
             min_width: None,
             max_width: None,
@@ -172,12 +185,25 @@ impl TableColumn {
     }
 
     /// Create a new column with a bold header.
+    ///
+    /// The bold appearance is recorded on the typed
+    /// [`header_style`](Self::header_style) slot (Spec B D5/D9). The legacy
+    /// [`header_prose`](Self::header_prose) field is also populated as a
+    /// compatibility shim.
     pub fn new_with_bold<T: Into<String>>(header: T) -> Self {
         let text = header.into();
         let prose = Prose::new(format!("<bold>{text}</bold>"));
+        let header_style = Style {
+            emphasis: renderable::style::TextEmphasis {
+                bold: true,
+                ..Default::default()
+            },
+            ..Style::default()
+        };
         TableColumn {
             header: text,
             header_prose: Some(prose),
+            header_style,
             fixed_width: None,
             min_width: None,
             max_width: None,
@@ -218,6 +244,29 @@ impl TableColumn {
     /// Set an explicit alignment override.
     pub fn with_alignment(mut self, alignment: Alignment) -> Self {
         self.alignment = Some(alignment);
+        self
+    }
+
+    /// Set the typed appearance [`Style`] for this column's header cell.
+    ///
+    /// This per-column override is merged on top of the table-wide
+    /// [`TableStyle::header`](crate::components::table::types::TableStyle::header)
+    /// slot when the table renders.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_terminal::components::table::TableColumn;
+    /// use renderable::style::{Style, TextEmphasis};
+    ///
+    /// let col = TableColumn::new("Score").with_header_style(Style {
+    ///     emphasis: TextEmphasis { bold: true, ..Default::default() },
+    ///     ..Style::default()
+    /// });
+    /// assert!(col.header_style.emphasis.bold);
+    /// ```
+    pub fn with_header_style(mut self, style: Style) -> Self {
+        self.header_style = style;
         self
     }
 
@@ -332,6 +381,16 @@ impl TableColumn {
             .unwrap_or_else(|| self.column_type.default_alignment())
     }
 
+    /// Returns the effective header [`Style`] for this column.
+    ///
+    /// The per-column [`header_style`](Self::header_style) override is merged
+    /// on top of the table-wide header slot via [`Style::inherited_from`], so
+    /// the column's own appearance wins where it is set and the table-wide
+    /// slot fills the rest.
+    pub fn effective_header_style(&self, table_header: &Style) -> Style {
+        self.header_style.inherited_from(table_header)
+    }
+
     /// Returns the effective word wrap strategy.
     ///
     /// For numeric columns, always returns `WordWrap::None` regardless of override.
@@ -354,5 +413,40 @@ impl TableColumn {
 
     pub(super) fn is_droppable(&self) -> bool {
         !matches!(self.drop_behavior, DropBehavior::Keep)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_has_no_header_style() {
+        let col = TableColumn::new("Name");
+        assert!(col.header_style.is_empty());
+    }
+
+    #[test]
+    fn new_with_bold_sets_bold_header_style_slot() {
+        let col = TableColumn::new_with_bold("Status");
+        assert!(
+            col.header_style.emphasis.bold,
+            "new_with_bold should set the typed bold header slot"
+        );
+        // The compatibility-shim Prose representation is still populated.
+        assert!(col.header_prose.is_some());
+    }
+
+    #[test]
+    fn with_header_style_overrides_the_slot() {
+        let style = renderable::style::Style {
+            emphasis: renderable::style::TextEmphasis {
+                italic: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let col = TableColumn::new("Name").with_header_style(style.clone());
+        assert_eq!(col.header_style, style);
     }
 }

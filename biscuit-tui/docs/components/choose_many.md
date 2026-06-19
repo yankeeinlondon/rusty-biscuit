@@ -84,7 +84,7 @@ On terminals that do not emit modifier-only key events, the component falls back
 
 ## Helper Functions
 
-The `tui_chrome::helpers::choice_builders` module provides convenience functions for constructing `ChoiceInput<String>` from common sources:
+The `biscuit_tui::helpers::choice_builders` module provides convenience functions for constructing `ChoiceInput<String>` from common sources:
 
 - `choose_many_from_csv(id, prompt, csv)` — builds options from a comma-separated string.
 - `choose_many_from_markdown_list(id, prompt, markdown)` — builds options from a Markdown bullet or numbered list.
@@ -98,8 +98,8 @@ See the [CLI Reference](../cli-reference.md) and [Theming & Configuration](../th
 A simple list of options using the default `String` value type.
 
 ```rust
-use tui_chrome::components::choose::{ChoiceInput, ChoiceOption};
-use tui_chrome::components::choose_many::ChooseManyState;
+use biscuit_tui::components::choose::{ChoiceInput, ChoiceOption};
+use biscuit_tui::components::choose_many::ChooseManyState;
 
 let input = ChoiceInput::new("toppings", "Pick your toppings")
     .with_options(vec![

@@ -1,6 +1,6 @@
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::components::table::table::TableColumn;
 use biscuit_terminal::components::table::types::ColumnType;
 use biscuit_terminal::utils::layout::{Alignment, WordWrap};
@@ -77,31 +77,31 @@ pub(super) fn render_trends_report(report: &TrendsReport, error_hint: Option<&st
 
     // Definitions footer
     let mut definitions = vec![
-        RenderableContent::from(Prose::new(
+        RenderableTerminalContent::from(Prose::new(
             "<b>Wrapped:</b> <i><dim>interactive sessions where <blue>claudine</blue> is wrapping the execution of an Agent (e.g. `claudine claude`, `claudine codex`, etc.)</dim></i>",
         )),
-        RenderableContent::from(Prose::new(
+        RenderableTerminalContent::from(Prose::new(
             "<b>Unwrapped:</b> <i><dim>sessions detected via hooks, execution was not wrapped by <blue>claudine</blue></dim></i>",
         )),
-        RenderableContent::from(Prose::new(
+        RenderableTerminalContent::from(Prose::new(
             "<b>Non Interactive:</b> <i><dim>non-interactive sessions wrapped by <blue>claudine</blue></dim></i>",
         )),
-        RenderableContent::from(Prose::new(
+        RenderableTerminalContent::from(Prose::new(
             "<b>Yolo:</b> <i><dim>percentage of daily sessions that ran with YOLO enabled</dim></i>",
         )),
-        RenderableContent::from(Prose::new(
+        RenderableTerminalContent::from(Prose::new(
             "<b>Tools:</b> <i><dim>total tool invocations across all sessions (Read, Edit, Bash, etc.)</dim></i>",
         )),
-        RenderableContent::from(Prose::new(
+        RenderableTerminalContent::from(Prose::new(
             "<b>Tool Err:</b> <i><dim>failed tool calls (file not found, permission denied, command failed)</dim></i>",
         )),
-        RenderableContent::from(Prose::new(
+        RenderableTerminalContent::from(Prose::new(
             "<b>Turn Err:</b> <i><dim>failed response cycles (API errors, rate limits, context overflow)</dim></i>",
         )),
-        RenderableContent::from(Prose::new(
+        RenderableTerminalContent::from(Prose::new(
             "<b>Repos:</b> <i><dim>repositories worked on that day</dim></i>",
         )),
-        RenderableContent::from(Prose::new(
+        RenderableTerminalContent::from(Prose::new(
             "<b>Providers:</b> <i><dim>active agentic providers with usage dashboard links; providers with errors are shown in red</dim></i>",
         )),
     ];
@@ -110,9 +110,9 @@ pub(super) fn render_trends_report(report: &TrendsReport, error_hint: Option<&st
         .iter()
         .any(|point| point.tool_errors + point.turn_errors > 0)
     {
-        definitions.push(RenderableContent::from(Prose::new(error_hint_markup(
-            error_hint.unwrap_or("week"),
-        ))));
+        definitions.push(RenderableTerminalContent::from(Prose::new(
+            error_hint_markup(error_hint.unwrap_or("week")),
+        )));
     }
     let definitions = UnorderedList::from(definitions).with_bullet("  ");
     log::data(&definitions.render(&term));

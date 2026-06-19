@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use renderable::browser::fragment::{BrowserFragment, Ready};
 
 use crate::components::renderable::BrowserRenderable;
 use crate::utils::color::{BasicColor, RgbColor};
-use crate::utils::layout::Margin;
+use crate::utils::layout::{Length, TargetValue};
 
 use super::HorizontalRule;
 use super::style::{RuleStyle, RuleWeight};
@@ -100,7 +100,7 @@ pub(super) fn nearest_basic_color(r: u8, g: u8, b: u8) -> BasicColor {
     }
 }
 
-impl BrowserRenderable for HorizontalRule {
+impl HorizontalRule {
     /// Renders the rule as an SVG `<svg>` element with CSS-variable-driven
     /// styling.
     ///
@@ -115,18 +115,15 @@ impl BrowserRenderable for HorizontalRule {
     /// `var(--hr-color, currentColor)`, etc. so that the SVG renders
     /// correctly even when the declared inline variables are stripped —
     /// the fallback inside each `var()` expression is the concrete value
-    /// that was baked in at render time.
-    ///
-    /// Callers that want to override those values after generation can use
-    /// [`render_to_browser_with_inline_variables`](Self::render_to_browser_with_inline_variables)
-    /// which performs string substitution for `var(--name)` tokens.
+    /// that was baked in at render time. The page declares the variables;
+    /// the component emits `var(--foo)` literally.
     ///
     /// ## Notes
     ///
     /// Geometry attributes (`x1`, `x2`, `cx`, `cy`, `r`, `d`, ...) remain
     /// concrete values because not every SVG renderer honors `var()` inside
     /// geometry properties. Only color and stroke-width are variable-driven.
-    fn render_to_browser(&self) -> String {
+    pub(crate) fn render_browser_svg(&self) -> String {
         // Weight in pixels (used both as the declared --hr-weight value and
         // as the fallback inside every var(--hr-weight, N) expression).
         let stroke_width = match self.weight {
@@ -137,14 +134,13 @@ impl BrowserRenderable for HorizontalRule {
 
         let width_attr = self.width.as_deref().unwrap_or("100%");
         let color_attr = self.color.as_deref().unwrap_or("currentColor");
-        let margin_top = self.layout.top_margin.to_css_value("0");
-        let margin_bottom = self.layout.bottom_margin.to_css_value("0");
+        let margin_top = self.layout.margin.top.to_css_value("0");
+        let margin_bottom = self.layout.margin.bottom.to_css_value("0");
 
         // Every `stroke`, `fill`, and `stroke-width` expression goes through
-        // these `var(--hr-xxx, FALLBACK)` forms so downstream overrides via
-        // `render_to_browser_with_inline_variables` (or page-level CSS that
-        // sets `--hr-weight` / `--hr-color`) take effect without the SVG
-        // losing its visual fidelity when the variables are stripped.
+        // these `var(--hr-xxx, FALLBACK)` forms so page-level CSS that sets
+        // `--hr-weight` / `--hr-color` takes effect without the SVG losing
+        // its visual fidelity when the variables are stripped.
         let stroke_var = format!("var(--hr-color, {})", color_attr);
         let width_var = format!("var(--hr-weight, {})", stroke_width);
         let fill_var = format!("var(--hr-color, {})", color_attr);
@@ -204,8 +200,12 @@ impl BrowserRenderable for HorizontalRule {
         // renderers don't honor `var()` inside geometry attributes. The
         // `--hr-width` variable is still declared for downstream CSS that
         // may want to use it (e.g., authors styling the ancestor).
+        //
+        // The `darkmatter-hr` class is the page-component selector hook so
+        // `style.hr.color` and `style.hr.bg-color` can target the actual
+        // emitted HR element instead of a non-existent `<hr>`.
         format!(
-            r#"<svg width="{width}" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: {top} auto {bot} auto; --hr-weight: {weight}; --hr-color: {color}; --hr-width: {width};">
+            r#"<svg class="darkmatter-hr" width="{width}" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: {top} auto {bot} auto; --hr-weight: {weight}; --hr-color: {color}; --hr-width: {width};">
   {content}
 </svg>"#,
             width = width_attr,
@@ -216,44 +216,20 @@ impl BrowserRenderable for HorizontalRule {
             content = svg_content,
         )
     }
+}
 
-    /// Renders the rule and then substitutes caller-provided CSS variables
-    /// into any `var(--name)` token found in the output.
+impl BrowserRenderable for HorizontalRule {
+    /// Wraps the rule's SVG as a [`ComposableNode::RawHtml`] island.
     ///
-    /// Because [`render_to_browser`](Self::render_to_browser) now embeds
-    /// `var(--hr-weight, …)`, `var(--hr-color, …)`, and declares
-    /// `--hr-weight` / `--hr-color` / `--hr-width` on the root `<svg>`,
-    /// callers get a natural override surface:
+    /// The SVG is caller-owned, already-formed markup; emitting it as a
+    /// `RawHtml` node tells the renderer to pass it through verbatim
+    /// rather than HTML-escaping it.
     ///
-    /// - Key `"hr-weight"` replaces every `var(--hr-weight)` occurrence.
-    /// - Key `"hr-color"` replaces every `var(--hr-color)` occurrence.
-    /// - Key `"hr-width"` replaces every `var(--hr-width)` occurrence.
-    ///
-    /// The realignment is independent per key — `HashMap` iteration order
-    /// does not affect the result because each `var(--name)` token is
-    /// unique per key.
-    ///
-    /// ## Notes
-    ///
-    /// Tokens with embedded fallbacks (`var(--hr-weight, 4)`) are not
-    /// substituted because their serialized form includes the fallback.
-    /// Pass the bare `var(--hr-weight)` form if you want to be replaced.
-    /// The substitution performed here targets the bare `var(--name)`
-    /// form for backward compatibility with callers that pre-embed
-    /// that exact token (e.g., `HorizontalRule::new().width("var(--rule-width)")`).
-    fn render_to_browser_with_inline_variables(
-        &self,
-        variables: &HashMap<String, String>,
-    ) -> String {
-        // Apply CSS variables if provided
-        let mut svg = self.render_to_browser();
-
-        // Replace any placeholders with actual variables
-        for (key, value) in variables {
-            svg = svg.replace(&format!("var(--{})", key), value);
-        }
-
-        svg
+    /// [`ComposableNode::RawHtml`]: renderable::browser::fragment::ComposableNode::RawHtml
+    fn render_html_fragment(&self) -> BrowserFragment<Ready> {
+        BrowserFragment::new()
+            .define_as_raw_html(self.render_browser_svg())
+            .finalize()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -261,38 +237,20 @@ impl BrowserRenderable for HorizontalRule {
     }
 }
 
-// Helper trait extension for Margin to convert to CSS values
+// Helper trait extension for a `TargetValue<Length>` margin to convert to a
+// CSS value, resolved for the [`RenderTarget::Browser`] target.
 pub(super) trait MarginToCss {
     fn to_css_value(&self, default: &str) -> String;
 }
 
-impl MarginToCss for Margin {
-    fn to_css_value(&self, _default: &str) -> String {
-        match self {
-            Margin::Chars(chars) => format!("{}ch", chars),
-            Margin::Percent(pct) => format!("{}%", pct),
-            Margin::None => "0".to_string(),
-            Margin::Offset(base, chars) => {
-                // `Margin::Offset(base, chars)` combines a heterogeneous base
-                // (percent / chars / none) with an additional character
-                // offset. Raw `{base} + {chars}ch` is not legal CSS —
-                // browsers reject it. Wrap the combination in `calc(...)`
-                // so the emitted `style="margin: calc(2% + 3ch) …"` stays
-                // valid. Two fast paths collapse degenerate cases:
-                //   - `chars == 0` returns the base verbatim (no
-                //     `calc(5% + 0ch)` noise)
-                //   - a `None` base (`base_value == "0"`) collapses to the
-                //     plain `{chars}ch` form
-                let base_value = base.to_css_value("0");
-                if *chars == 0 {
-                    return base_value;
-                }
-                if base_value == "0" {
-                    format!("{}ch", chars)
-                } else {
-                    format!("calc({} + {}ch)", base_value, chars)
-                }
-            }
+impl MarginToCss for TargetValue<Length> {
+    fn to_css_value(&self, default: &str) -> String {
+        use renderable::target::RenderTarget;
+        match self.resolve(RenderTarget::Browser) {
+            Some(Length::Zero) | None => default.to_string(),
+            Some(Length::Ch(n)) => format!("{}ch", n),
+            Some(Length::Percent(pct)) => format!("{}%", pct),
+            Some(Length::Css(sizing)) => sizing.to_string(),
         }
     }
 }

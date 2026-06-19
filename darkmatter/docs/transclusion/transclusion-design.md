@@ -20,7 +20,7 @@ This design is meant to be implementation-ready and aligned with the current Sta
 
 In scope:
 
-1. Block/code transclusion (`::file`, `::code`, `::url`) design and execution model
+1. Block/code transclusion (`::file`, `::code`, `::url`) and file-link tree rendering (`::file-links`) design and execution model
 2. Frontmatter transclusion (`prologue`, `epilogue`)
 3. Recursive processing model, cycle detection, and depth limits
 4. State inheritance semantics (parent -> child)
@@ -98,7 +98,7 @@ From the transclusion docs, Stage 2 must support:
 Pipeline order remains:
 
 1. Stage 1 (Preparation): replacement -> interpolation -> cleanup -> normalization
-2. Stage 2 (Transclusion): directive transclusion (`::file`, `::code`; `::url` future) -> frontmatter transclusion
+2. Stage 2 (Transclusion): directive transclusion (`::file`, `::code`, `::file-links`; `::url` future) -> frontmatter transclusion
 3. Stage 3 (Rendering)
 
 Rationale:
@@ -358,11 +358,11 @@ Reuse interpolation parser/evaluator infrastructure with transclusion condition 
 
 1. Add unary `!` support
 2. Add function aliases/case-insensitive names:
-   - `HasKey`/`has_key`
-   - `Contains`/`contains`
-   - `Length`/`length`
-   - `And`/`and`
-   - `Or`/`or`
+   - `has_key`/`has_key`
+   - `contains`/`contains`
+   - `length`/`length`
+   - `and`/`and`
+   - `or`/`or`
 3. Use boolean evaluation mode for `when`
 
 ### Semantics
@@ -370,8 +370,8 @@ Reuse interpolation parser/evaluator infrastructure with transclusion condition 
 1. Missing values evaluate as falsy
 2. Equality/inequality compare normalized scalar strings
 3. Numeric comparisons in `when` coerce non-numeric values to `0` (per functional spec)
-4. `And(a,b,c)` requires all truthy
-5. `Or(a,b,c)` requires any truthy
+4. `and(a,b,c)` requires all truthy
+5. `or(a,b,c)` requires any truthy
 
 `when` false behavior:
 
@@ -445,16 +445,23 @@ If re-level would overflow H6:
 
 ### `disclosure`
 
-Wrap included content as:
+Wrap included content in the render-time disclosure DSL triple rather than
+inline HTML:
 
-```html
-<details>
-<summary>Summary text</summary>
+```md
+::disclosure
+Summary text
+::details
 
 ...included content...
 
-</details>
+::end-disclosure
 ```
+
+`disclosure=true` (or an empty summary) uses the default summary `"Details"`.
+The DSL is lowered per render target during rendering (terminal block quote,
+browser `<details>`/`<summary>`, etc.); no `<details>` HTML is emitted at
+compose time. See [Disclosure Blocks](../rendering/disclosure.md).
 
 Wrapper order if both present:
 
@@ -527,7 +534,7 @@ Performance:
    - `./`, `/`, `~`, `@`
    - unknown source failures
 3. Condition evaluator:
-   - unary, comparisons, `And`/`Or`, `HasKey`, `Contains`, `Length`
+   - unary, comparisons, `and`/`or`, `has_key`, `contains`, `length`
 4. State merge:
    - deep merge and precedence
    - `replace` option variants

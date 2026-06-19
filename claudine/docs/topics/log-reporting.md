@@ -39,6 +39,8 @@ Every event is serialized as a single-line JSON record with these fields:
 | `notification_message` | `Option<String>` | Notification body text                                          |
 | `extra`             | `HashMap`         | Provider-specific fields (model, permission_mode, transcript_path, tool_use_id, stop_hook_active) |
 | `env`               | `EnvironmentContext` | Full environment snapshot (see below)                         |
+| `env.claudine_pid`  | `Option<u32>`     | Claudine's own process ID, captured at wrapper startup          |
+| `agent_pid`         | `Option<u32>`     | Immediate child PID after successful spawn; omitted when unavailable |
 
 ### Environment Context (embedded in every event)
 
@@ -47,7 +49,7 @@ Every event is serialized as a single-line JSON record with these fields:
 | `env.os`    | `os_type`, `name`, `version`, `kernel`, `hostname`, `linux_family`, `package_managers`                     |
 | `env.hardware` | `arch`, `cpu`, `cores`, `memory_bytes`, `memory_available_bytes`                                       |
 | `env.git`   | `repo_root`, `branch`, `is_dirty`, `staged_count`, `unstaged_count`, `untracked_count`, `head_sha`, `head_message`, `user_name`, `user_email`, `remote_name`, `remote_url`, `hosting_provider`, `repo_name`, `repo_org` |
-| `env.repo`  | `is_monorepo`, `monorepo_tool`, `root`, `packages[]`                                                      |
+| `env.repo`  | `is_monorepo`, `monorepo_standard`, `monorepo_orchestrators`, `monorepo_tool` (deprecated alias), `root`, `packages[]` |
 | `primary_language` | Top-level string field                                                                              |
 | wrapper package context | Top-level `package_area` and `package` fields populated from wrapper-provided `PACKAGE_AREA` / `PACKAGE` env vars when present |
 

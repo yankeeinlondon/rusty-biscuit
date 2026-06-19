@@ -155,7 +155,7 @@ pub(crate) fn try_inline_closure(
         Ok(result) => {
             if show_checks {
                 use biscuit_terminal::components::status::{Status, StatusState};
-                use biscuit_terminal::prelude::Renderable;
+                use biscuit_terminal::prelude::TerminalRenderable;
 
                 log::message(&crate::output::fm_check_ok(
                     "Applied the captured replacement body to the target document",
@@ -181,6 +181,27 @@ pub(crate) fn try_inline_closure(
                     log::message(&status.render(term));
                 }
             }
+
+            match super::composition::inline_cleanup::cleanup_inline_output(source_path) {
+                Ok(true) => {
+                    if show_checks {
+                        log::message(&crate::output::fm_check_ok(
+                            "Cleaned up generated markdown formatting",
+                            term,
+                        ));
+                    }
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    if show_checks {
+                        log::message(&crate::output::fm_check_fail(
+                            &format!("markdown cleanup failed: {error}"),
+                            term,
+                        ));
+                    }
+                }
+            }
+
             Ok(())
         }
         Err(error) => {
@@ -208,7 +229,10 @@ pub(crate) fn try_inline_closure(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biscuit_terminal::terminal::Terminal;
+    use claudine::composition::InlineClosurePlan;
     use claudine::mcp::session::lex_tags;
+    use tempfile::TempDir;
 
     #[test]
     fn extracts_tags_from_codex_prompt_position() {
@@ -228,5 +252,88 @@ mod tests {
 
         assert_eq!(tags, vec!["slack"]);
         assert_eq!(cleaned.as_deref(), Some("debug auth"));
+    }
+
+    #[test]
+    fn try_inline_closure_writes_cleaned_body_to_disk() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("doc.md");
+
+        let original = "---\nprompt: test\nlast_updated: 2026-01-01\n---\nOld body\n";
+        std::fs::write(&file, original).unwrap();
+
+        let original_md: darkmatter::markdown::Markdown = original.to_string().into();
+        let plan = InlineClosurePlan {
+            original_document_text: original.to_string(),
+            original_body_hash: original_md.hash_body(false),
+        };
+
+        let term = Terminal::new_optimistic(120);
+        // "Dirty" replacement: no blank line between header and paragraph
+        let dirty_response = "# Generated Title\nParagraph without blank line\n";
+
+        try_inline_closure(
+            &plan,
+            dirty_response,
+            &file,
+            file.parent().unwrap(),
+            false,
+            &term,
+        )
+        .expect("closure should succeed");
+
+        let on_disk = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            on_disk.contains("# Generated Title\n\nParagraph without blank line"),
+            "body must be cleaned (blank line between header and paragraph); got:\n{on_disk}"
+        );
+        assert!(
+            on_disk.contains("last_updated:"),
+            "frontmatter must include last_updated"
+        );
+        assert!(
+            on_disk.contains("prompt: test"),
+            "original frontmatter must be preserved"
+        );
+    }
+
+    #[test]
+    fn try_inline_closure_cleans_table_alignment() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("doc.md");
+
+        let original = "---\nprompt: test\n---\nOld body\n";
+        std::fs::write(&file, original).unwrap();
+
+        let original_md: darkmatter::markdown::Markdown = original.to_string().into();
+        let plan = InlineClosurePlan {
+            original_document_text: original.to_string(),
+            original_body_hash: original_md.hash_body(false),
+        };
+
+        let term = Terminal::new_optimistic(120);
+        // Unaligned table
+        let dirty_response =
+            "|A|B|\n|---|---|\n|short|much longer column|\n";
+
+        try_inline_closure(
+            &plan,
+            dirty_response,
+            &file,
+            file.parent().unwrap(),
+            false,
+            &term,
+        )
+        .expect("closure should succeed");
+
+        let on_disk = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            on_disk.contains("| A "),
+            "table cells should be padded with leading space; got:\n{on_disk}"
+        );
+        assert!(
+            on_disk.contains("| B "),
+            "table cells should be padded with leading space; got:\n{on_disk}"
+        );
     }
 }

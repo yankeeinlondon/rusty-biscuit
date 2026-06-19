@@ -2928,3 +2928,124 @@ fn extracts_php_import_source() -> Result<(), TreeHuggerError> {
 
     Ok(())
 }
+
+// ============================================================================
+// Dead code detection (public API)
+// ============================================================================
+
+#[test]
+fn dead_code_returns_unreachable_blocks() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "dead.js",
+        "function demo() {\n  return 1;\n  const neverReached = 2;\n}\n",
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let dead = tree_file.dead_code();
+
+    assert!(
+        !dead.is_empty(),
+        "expected an unreachable code block after the return"
+    );
+    let snippet = dead[0].snippet.as_deref().unwrap_or_default();
+    assert!(
+        snippet.contains("neverReached"),
+        "snippet should capture the unreachable statement, got: {snippet:?}"
+    );
+}
+
+#[test]
+fn dead_code_is_empty_for_clean_file() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(&dir, "clean.rs", "fn demo() -> i32 {\n    1\n}\n");
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    assert!(tree_file.dead_code().is_empty());
+}
+
+// ============================================================================
+// Fallible diagnostics API
+// ============================================================================
+
+#[test]
+fn try_diagnostics_succeeds_for_all_languages() {
+    // Every fixture's analyzer must run end-to-end; a failing query would now
+    // surface as an error rather than a silently empty diagnostic list.
+    for entry in fs::read_dir(fixture_path("")).unwrap() {
+        let path = entry.unwrap().path();
+        if !path.is_file() {
+            continue;
+        }
+        if ProgrammingLanguage::from_path(&path).is_none() {
+            continue;
+        }
+
+        let tree_file = TreeFile::new(&path).unwrap();
+        assert!(
+            tree_file.try_diagnostics().is_ok(),
+            "try_diagnostics should succeed for {}",
+            path.display()
+        );
+        assert!(
+            tree_file.try_lint_diagnostics().is_ok(),
+            "try_lint_diagnostics should succeed for {}",
+            path.display()
+        );
+    }
+}
+
+#[test]
+fn semantic_analysis_runs_for_reference_query_languages() {
+    // PHP, Perl, and Zsh references queries were broken and silently disabled
+    // semantic analysis. They must now compile and run without error.
+    for (name, content) in [
+        (
+            "refs.php",
+            "<?php\nfunction foo() {\n    $x = Bar::BAZ;\n}\n",
+        ),
+        ("refs.pl", "my $x = foo();\nFoo::bar();\n"),
+        ("refs.zsh", "foo=1\necho $foo\nmyfunc arg\n"),
+    ] {
+        let dir = TempDir::new().unwrap();
+        let path = create_temp_file(&dir, name, content);
+        let tree_file = TreeFile::new(&path).unwrap();
+        assert!(
+            tree_file.referenced_symbols().is_ok(),
+            "referenced_symbols should succeed for {name}"
+        );
+        assert!(
+            tree_file.try_lint_diagnostics().is_ok(),
+            "try_lint_diagnostics should succeed for {name}"
+        );
+    }
+}
+
+// ============================================================================
+// Forced-language grammar selection
+// ============================================================================
+
+#[test]
+fn forced_typescript_preserves_tsx_grammar() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "component.tsx",
+        "export function App() {\n  return <div className=\"x\">hi</div>;\n}\n",
+    );
+
+    // Forcing TypeScript on a .tsx file must still use the TSX grammar so the
+    // JSX parses cleanly and the symbol is extracted.
+    let tree_file = TreeFile::with_language(&path, Some(ProgrammingLanguage::TypeScript)).unwrap();
+    let symbols = tree_file.symbols().unwrap();
+
+    assert!(
+        symbols.iter().any(|s| s.name == "App"),
+        "expected to extract the App function from forced-TypeScript TSX"
+    );
+    assert!(
+        tree_file.syntax_diagnostics().is_empty(),
+        "TSX grammar should parse JSX without syntax errors"
+    );
+}

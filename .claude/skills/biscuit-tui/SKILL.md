@@ -1,18 +1,18 @@
 ---
 name: biscuit-tui
-description: Expert knowledge for the biscuit-tui package area in the rusty-biscuit monorepo. Provides reusable TUI input components (tui-chrome library) and a CLI (question) for shell-scriptable prompts. Use when building or modifying ratatui-based input widgets, adding new components to the tui-chrome library, working with the question CLI, or implementing standalone/embedded terminal prompts.
+description: Expert knowledge for the biscuit-tui package area in the rusty-biscuit monorepo. Provides reusable TUI input components (biscuit-tui library) and a CLI (question) for shell-scriptable prompts. Use when building or modifying ratatui-based input widgets, adding new components to the biscuit-tui library, working with the question CLI, or implementing standalone/embedded terminal prompts.
 ---
 
 # biscuit-tui
 
-Reusable TUI input components for Rust, built on ratatui. Provides both a library (`tui-chrome`) and a CLI (`question`).
+Reusable TUI input components for Rust, built on ratatui. Provides both a library (`biscuit-tui`) and a CLI (`question`).
 
 ## Package Structure
 
 | Crate | Path | Binary | Purpose |
 |-------|------|--------|---------|
-| `tui-chrome` | `lib/` | — | Input widget library |
-| `tui-chrome-cli` | `cli/` | `question` | CLI front-end |
+| `biscuit-tui` | `lib/` | — | Input widget library |
+| `biscuit-tui-cli` | `cli/` | `question` | CLI front-end |
 
 ## Architecture
 
@@ -31,7 +31,7 @@ Every component follows the same pattern:
 Single-line text input. Uses `tui_input` as private edit engine.
 
 ```rust
-use tui_chrome::prelude::*;
+use biscuit_tui::prelude::*;
 let state = TextInputState::new()
     .with_label(Label::new("Name", LabelPosition::Above))
     .with_max_length(50)
@@ -39,7 +39,7 @@ let state = TextInputState::new()
 ```
 
 #### TextAreaInput
-Multi-line editor. Uses `tui_textarea` as private edit engine. Default submit is `Ctrl+S` (not Enter).
+Multi-line editor. Uses `ratatui_textarea` as private edit engine. Default submit is `Ctrl+S` (not Enter).
 
 ```rust
 let state = TextAreaInputState::new(60, 10)
@@ -88,7 +88,7 @@ let state = ChooseManyState::new(input);
 Wraps any `StatefulWidget` with optional border, title, and margin. Not an input itself — adds visual chrome. Used by the CLI via `--border` / `--border-label` / `--border-style` / `--margin` flags on choose commands.
 
 ```rust
-use tui_chrome::core::{BorderStyle, FrameChrome, FrameChromeConfig, Margin};
+use biscuit_tui::core::{BorderStyle, FrameChrome, FrameChromeConfig, Margin};
 
 let config = FrameChromeConfig {
     border: BorderStyle::Rounded,
@@ -282,6 +282,36 @@ cli/src/
 - Synthetic events via `drive_event_loop` with `Vec<Event>` iterator
 - Prefer `assert_eq!` on `EventOutcome` variants
 
+### Headless guard
+
+`run_standalone_with_chrome` returns an immediate `io::Error` when both
+stdout and stderr are piped (`!is_terminal()`). This is **load-bearing**
+for the test suite: without it, a subprocess that spawns the binary
+from an interactive `just test` shell would call `enable_raw_mode()`
+on `/dev/tty`, mutating the **shared** controlling terminal's termios
+(OPOST off → `\n` loses CR translation) and corrupting any redrawing
+UI in the parent (nextest progress bar, indicatif, etc.). The stderr
+check preserves the shell command-substitution case
+(`FOO=$(question ...)` — stderr stays attached to the terminal).
+
+Do not write integration tests that spawn `question` just to assert
+"reached the event loop and bailed" — that pattern relies on
+`enable_raw_mode()` failing with ENXIO when no controlling tty is
+present, which is environment-dependent. Use the Writer-seam pattern
+below instead.
+
+### Writer-seam unit testing
+
+Each `run` function in `cli/src/commands/*.rs` is factored into a
+`run_with_writer(args, output, height, writer, run_prompt)` shape
+where `run_prompt: FnOnce(State, Option<HeightSpec>) -> io::Result<V>`
+is injectable. Tests substitute a closure that returns a synthetic
+value or `io::Error::new(CANCELLED_KIND|ABORTED_KIND, ...)` without
+ever calling `run_standalone`. This is the canonical place to assert
+flag plumbing, height propagation, hotkey normalization, and exit-code
+mapping. See `run_propagates_*_height_to_prompt` and `run_writes_*` in
+`choose_one.rs` and `choose_many.rs` for working examples.
+
 ## DevOps
 
 ```bash
@@ -294,10 +324,10 @@ just cli <args>  # run in dev mode
 
 ## Dependencies
 
-- `ratatui` 0.29 — core TUI framework
-- `crossterm` 0.28 — terminal events
-- `tui-input` 0.11 — single-line edit engine
-- `tui-textarea` 0.7 — multi-line edit engine
+- `ratatui` 0.30 — core TUI framework
+- `crossterm` 0.29 — terminal events
+- `tui-input` 0.15 — single-line edit engine
+- `ratatui-textarea` 0.9 — multi-line edit engine (Ratatui-org fork of `tui-textarea`, which caps at ratatui 0.29)
 - `nucleo-matcher` 0.3 — fuzzy matching
 - `serde_yaml_ng` 0.10 — dictionary parsing
 - `thiserror` 2 — error types

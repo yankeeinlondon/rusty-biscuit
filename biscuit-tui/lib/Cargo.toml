@@ -1,14 +1,16 @@
 [package]
-name = "tui-chrome"
+name = "biscuit-tui"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
 
 [dependencies]
-ratatui = "0.29"
-crossterm = "0.28"
-tui-input = "0.11"
-tui-textarea = "0.7"
+ratatui = "0.30"
+crossterm = "0.29"
+tui-input = "0.15"
+# Ratatui-org's maintained fork of `tui-textarea` (rhysd's crate caps at
+# ratatui 0.29). API-compatible; imported as `ratatui_textarea`.
+ratatui-textarea = "0.9"
 thiserror = "2"
 unicode-width = "0.2"
 serde_yaml_ng = "0.10"
@@ -17,3 +19,10 @@ nucleo-matcher = "0.3"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# Opt-out of benchmarking: interactive TUI component library; performance
+# is dominated by terminal I/O and ratatui's own rendering, neither of
+# which benefit from per-crate microbenchmarks.
+[package.metadata.benchmarks]
+required = false
+reason = "Interactive TUI component library; no measurable hot paths."

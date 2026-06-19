@@ -3,10 +3,33 @@ schema: ""
 schema_type: ""
 data_format: ndjson
 docs: https://opencode.ai/docs/cli/
-last_updated: 2026-04-06
+last_updated: 2026-05-12
 ---
 
 # OpenCode CLI Structured Output in Non-Interactive Sessions
+
+## ⚠ The "DONE-only" NDJSON Rule (Read First)
+
+OpenCode's `opencode run --format json` stream is **"DONE-only"** for tool
+and subagent lifecycle:
+
+- **No `tool_start`.** `tool_use` is emitted *only* after the tool reaches
+  `completed` / `error`. There is no paired request-side event on the wire.
+- **No native `task_started`.** The variant exists in the SDK but current
+  OpenCode releases do not emit it.
+- **No reliable session-complete event.** Token/cost data lives on
+  `step_finish`; the closing turn often goes silent on stdout for minutes.
+- **Often no `init` payload.** The run's primary provider/model identity
+  is frequently absent from stdout entirely.
+
+**Consumers cannot rely on stdout NDJSON alone** to observe an OpenCode
+run. The structured stderr stream (`--print-logs --log-level INFO`) is
+the second mandatory source for tool/subagent lifecycle, primary
+provider/model identity, and progress signal during long synthesis
+turns. Claudine treats this as a **Dual-Source Contract** and promotes
+selected stderr log records to first-class `SemanticEvent`s; see
+[`opencode-event-sources.md`](../../../../.claude/skills/claudine/opencode-event-sources.md)
+for the full mapping table.
 
 ## Summary
 
@@ -21,6 +44,8 @@ For automation, the practical split is:
 - Use plugin hooks or the SDK event stream, not `opencode run --format json`, when you need model identity, permission prompts, user questions, or raw session lifecycle events.
 
 The biggest gaps today are the lack of a formal CLI stream schema, the lack of a dedicated session-complete event, and the fact that important human-in-the-loop signals are available to hooks but not surfaced in the CLI JSON stream.
+
+Beyond the NDJSON stream on stdout, OpenCode also writes a parallel diagnostic stream to **stderr**. That stream has two layers: a structured logger (off by default, opted into with `--print-logs` and tuned via `--log-level`) that emits `LEVEL  YYYY-MM-DDTHH:MM:SS +Nms key=value ... message` lines, and a smaller "human chrome" channel written through `UI.println`/`UI.error` that emits ANSI-styled banners, share URLs, warnings, and human-readable error messages. The structured layer is the **richest source of internal lifecycle metadata that OpenCode currently exposes** — for example, parent-vs-subagent session distinction (`mode=primary` vs `mode=subagent`), provider/model identity per LLM call, permission evaluations, retry-classified errors, and HTTP request spans. None of this is documented officially; the schema below was reconstructed from source plus real captures against opencode 1.14.48.
 
 ## Schema
 
@@ -209,6 +234,378 @@ Current emitted event types:
 ### Related but different `--format` flags
 
 OpenCode also uses `--format json` on some non-streaming commands such as session/model listing, but those return regular JSON documents or tables rather than the NDJSON event stream used by `opencode run`.
+
+## Logging (STDERR Stream)
+
+OpenCode emits diagnostic output to **stderr** in non-interactive `run` mode. This is distinct from the NDJSON event stream on stdout described above and is the only place where many internal lifecycle signals are exposed — provider/model selection per call, session creation with `parentID` lineage, permission evaluations, retry-classified API errors, and HTTP span timings. There is no official documentation for this stream; the schema and examples here were reconstructed from source against opencode 1.14.48.
+
+### Three distinct stderr producers
+
+OpenCode `run` writes to stderr from exactly three sources, all of which can interleave in a single capture:
+
+| Producer | Source | Activation | Format |
+| --- | --- | --- | --- |
+| Structured logger | [`packages/core/src/util/log.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/core/src/util/log.ts) | `--print-logs` flag (off by default — writes go to a log file instead) | Plain-text `LEVEL  TIMESTAMP +Nms key=val ... message\n` |
+| UI helpers | [`packages/opencode/src/cli/ui.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/cli/ui.ts) | Always on; gated per call by `--format` | ANSI-colored prose with no timestamp; bare bytes via `process.stderr.write` |
+| Direct stderr writes | [`packages/opencode/src/index.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/index.ts) (~lines 127–155, 232–247) | First-run DB migration; top-level fatal fallback | Plain text; on TTY uses cursor and progress glyphs (`\x1b[?25l`, `■`); on pipe uses `sqlite-migration:N\n` lines |
+
+The structured logger is always created — when `--print-logs` is omitted, the same stream is written to a file under OpenCode's data dir instead of being redirected to stderr.
+
+### Activating the structured logger
+
+```bash
+opencode run --format json --print-logs --log-level INFO  "your prompt"   # default ~280 lines for a small session
+opencode run --format json --print-logs --log-level DEBUG "your prompt"   # adds verbose config-loading paths
+opencode run --format json --print-logs --log-level WARN  "your prompt"   # only WARN/ERROR (typically duplicate-skill notes)
+opencode run --format json --print-logs --log-level ERROR "your prompt"   # only ERROR (silent on success)
+```
+
+Source wiring (`packages/opencode/src/index.ts` ~lines 75–104):
+
+```ts
+.option("print-logs", { describe: "print logs to stderr", type: "boolean" })
+.option("log-level",  { type: "string", choices: ["DEBUG", "INFO", "WARN", "ERROR"] })
+.middleware(async (opts) => {
+  await Log.init({
+    print: process.argv.includes("--print-logs"),
+    dev:   Installation.isLocal(),
+    level: opts.logLevel ?? (Installation.isLocal() ? "DEBUG" : "INFO"),
+  })
+  Log.Default.info("opencode", { version, args, process_role, run_id })
+})
+```
+
+Default level is `INFO` for installed builds, `DEBUG` for `dev` checkouts. The first line written to the stream is always the `opencode` boot banner with `version`, `args`, `process_role`, and `run_id` — useful for parsers as a deterministic stream anchor.
+
+### Log line format
+
+Source: `build()` in `packages/core/src/util/log.ts` (lines ~113–139).
+
+The wire format is:
+
+```
+LEVEL  YYYY-MM-DDTHH:MM:SS +Nms key=value [key=value ...] [free-form message]\n
+```
+
+Notable details:
+
+- **Level token** is one of `DEBUG`, `INFO `, `WARN `, `ERROR` — every level is padded to **five characters** by trailing spaces so the prefix is fixed width. Followed by a single space (so the `LEVEL ` prefix is always six characters before the timestamp).
+- **Timestamp** is `new Date().toISOString().split(".")[0]` — second precision only, **no milliseconds, no trailing `Z`** (e.g. `2026-05-12T20:00:12`).
+- **Delta** is `+Nms` since the previous log line written by this process (not since the timestamped second).
+- **Tags** are space-joined `key=value` pairs from logger tags plus per-call extras. Object values are JSON-stringified inline (no internal newlines, but values may contain spaces if the inner JSON contains a space-bearing string). `Error` values are formatted via `formatError()` which concatenates `message + " Caused by: " + cause.message`.
+- **Free-form message** follows the tags and may be any prose (e.g. `created`, `loop`, `exiting loop`, `Sent HTTP response`, `stream`, `stream error`). It is always last on the line.
+- A single `\n` terminates the line; values **never** contain bare newlines because object serialization inlines and string messages are trusted.
+
+Conservative parse regex (matches all four levels, captures level/timestamp/delta/rest):
+
+```
+^(DEBUG|INFO |WARN |ERROR) (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}) \+(\d+)ms (.*)\n
+```
+
+### Tags catalog
+
+The `service` tag is the primary discriminator. Observed services in a single non-interactive run against opencode 1.14.48:
+
+| Service | What it logs |
+| --- | --- |
+| `default` | Boot banner (`opencode`), `creating instance`, `bootstrapping`, HTTP request spans (`http.method`, `http.url`, `http.status`, `logSpan.http.span.N`), instance disposal |
+| `file` | File subsystem init |
+| `project` | `directory=... fromDirectory` |
+| `db` | `opening database`, `applying migrations` (with `count` and `mode`) |
+| `config` | `loading` per config path; `DEBUG` adds `loading config from <path>` for `.opencode/*.json[c]` |
+| `plugin` | `loading internal plugin` (with `name=<obfuscated>`); `loading plugin` for external plugins (`path=file://...`) |
+| `bus` | `subscribing`/`publishing`/`unsubscribing` for every event type (very noisy — see Gotchas below) |
+| `lsp` | `all LSPs are disabled` or per-LSP startup |
+| `format` | `all formatters are disabled` or per-formatter startup |
+| `file.watcher` | `init` plus `platform=<os>` and `backend=<fs-events|inotify|...>` |
+| `session` | **Session-created records** with full metadata (see use cases) |
+| `session.prompt` | Per-step loop markers (`step=N loop`, `exiting loop`), `status=started/completed resolveTools` |
+| `session.processor` | Per-message processing (`messageID=...`) |
+| `provider` | Per-provider availability (`providerID=X found`), provider init spans |
+| `tool.registry` | Per-tool registration (`status=started/completed duration=N <toolName>`) — see warning about meaning below |
+| `shell-tool` | `shell=/bin/zsh shell tool using shell` |
+| `skill` | `init` plus `WARN duplicate skill name` for every skill collision |
+| `llm` | **Per-LLM-call provider/model identification** (see use cases) |
+| `permission` | **Permission evaluation results** (see use cases) |
+| `server` | Internal API server lifecycle and request errors (with stack traces for fatals) |
+| `share-next` | Share subscriber failures (carries Effect `Cause` tree) |
+| `image` | (Source-only — image attachment processing) |
+| `acp.session` | (Source-only — ACP integration) |
+
+Other recurring tag keys: `session.id`, `messageID`, `providerID`, `modelID`, `agent`, `mode`, `small`, `step`, `duration`, `cause`, `error`, `logSpan.<name>.span.<N>`.
+
+### What `tool.registry status=started/completed` does NOT mean
+
+This is the easiest log line to misread. `service=tool.registry status=started <name>` is logged **only** for tool **registration** at session startup, not for tool **invocation**. The duration on the completed line is the time to register the tool definition (typically `duration=0` or `duration=1`). Actual tool calls do not produce a `service=tool.registry` line. The only stderr signal for an actual tool invocation in INFO/DEBUG modes is the `service=session.prompt` loop transitions and any `service=permission ... evaluated` lines — the real per-call payload lives on stdout as `tool_use` events.
+
+### Default-format vs JSON-format stderr behavior
+
+| Behavior | `--format default` | `--format json` |
+| --- | --- | --- |
+| `> agent · modelID` start banner | Yes (once per session) | Suppressed |
+| Tool call inline lines (icon + title) | Yes | Suppressed (moves to stdout as `tool_use`) |
+| Completed text output | Stderr if stdout is a TTY; stdout otherwise | Suppressed (moves to stdout as `text` parts) |
+| Share URL line `~ <url>` | Yes | Yes (still printed via `UI.println`) |
+| Permission auto-reject warning `! permission requested: ...; auto-rejecting` | Yes | Yes |
+| Agent-not-found fallback `! agent "X" not found. Falling back to default agent` | Yes | Yes |
+| `UI.error("...")` for fatals (e.g. `Error: Model not found: ...`) | Yes | **Yes** — `UI.error` fires after `emit("error", ...)` writes to stdout (`emit` returns false when `args.format !== "json"` was the original intent, but the model-not-found path still hits `UI.error` via the top-level catch in `index.ts`) |
+| Structured logger output | Same in both formats (gated by `--print-logs`) | Same in both formats |
+
+### Stripping the structured-logger frame
+
+The structured logger uses bare ASCII; the UI helpers use ANSI SGR escapes (`\x1b[91m\x1b[1m` danger-bold, `\x1b[94m\x1b[1m` info-bold, `\x1b[93m\x1b[1m` warning-bold, `\x1b[90m` dim, `\x1b[0m` reset). A captured stream can be split into "structured" and "UI" by matching the level token at column 0 — any line that does not start with one of `DEBUG`, `INFO `, `WARN `, `ERROR` followed by a space is a UI helper or direct write, and should typically be SGR-stripped before further parsing.
+
+### Informal schema for the structured-log stream
+
+```ts
+type OpenCodeStderrLogLine = {
+  level: "DEBUG" | "INFO" | "WARN" | "ERROR"
+  timestamp: string          // "YYYY-MM-DDTHH:MM:SS", no millis, no Z
+  delta_ms: number           // ms since previous log line written by this process
+  service?: string           // e.g. "default" | "session" | "session.prompt" | "llm" | "tool.registry" | "permission" | "server" | "share-next" | "config" | "db" | ...
+  tags: Record<string, string | number | boolean | object>
+                             // free-form key=value pairs; object values are inline-JSON
+  message: string            // free-form trailing prose, e.g. "created" | "loop" | "exiting loop" | "stream" | "stream error" | "Sent HTTP response"
+}
+```
+
+Important tags carried by specific services:
+
+- `service=default` boot line: `version`, `args` (JSON array), `process_role`, `run_id` (UUID), trailing message `opencode`.
+- `service=session` created line: `id` (session ID), `slug`, `version`, `projectID`, `directory`, `path`, `parentID?` (only for subagent child sessions), `title`, `permission` (inline JSON array), `time` (inline JSON object), trailing message `created`.
+- `service=session.prompt`: `session.id`, `step`, `logSpan.http.span.N`, trailing message `loop` / `exiting loop` / `resolveTools` / status pairs.
+- `service=llm`: `providerID`, `modelID`, `session.id`, `small` (boolean), `agent`, `mode` (`primary` | `subagent`), trailing message `stream`. On failure: trailing message `stream error` and an additional `error=<JSON>` tag with the full AI SDK error object.
+- `service=permission`: `permission` (type, e.g. `task`, `read`, `write`), `pattern`, `action` (inline JSON), trailing message `evaluated`.
+- `service=server` error: `error=<ClassName>`, `cause=<ClassName>: <message>\n    at <stack>...`, trailing message `failed`.
+- `service=share-next` error: `type=<bus event type>`, `cause=<Effect Cause JSON>`, trailing message `share subscriber failed`.
+- `service=default` HTTP request: `http.method`, `http.url`, `http.status`, `logSpan.http.span.<N>` (duration in ms), trailing message `Sent HTTP response`.
+
+### Real-capture examples
+
+These lines are from a captured `--format json --print-logs --log-level INFO` run against opencode 1.14.48. Long inline-JSON fields are abbreviated with `…`.
+
+Boot banner:
+
+```
+INFO  2026-05-12T20:00:11 +97ms service=default version=1.14.48 args=["run","--format","json","--print-logs","--log-level","INFO","say hello in one word"] process_role=main run_id=48277674-19e5-40b6-b2b5-efa7577f08ea opencode
+```
+
+Session created (primary):
+
+```
+INFO  2026-05-12T20:00:12 +20ms service=session id=ses_1e23972b3ffe8QLhzuFpWS5bzd slug=happy-panda version=1.14.48 projectID=global directory=/private/tmp/oc-test path=private/tmp/oc-test title=New session - 2026-05-12T20:00:12.108Z permission=[{"permission":"question","pattern":"*","action":"deny"},{"permission":"plan_enter","pattern":"*","action":"deny"},{"permission":"plan_exit","pattern":"*","action":"deny"}] time={"created":1778616012108,"updated":1778616012108} created
+```
+
+LLM call (primary, title generation):
+
+```
+INFO  2026-05-12T20:00:12 +4ms service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_1e23972b3ffe8QLhzuFpWS5bzd small=true agent=title mode=primary stream
+```
+
+LLM call (primary, real work):
+
+```
+INFO  2026-05-12T20:00:12 +0ms service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_1e23972b3ffe8QLhzuFpWS5bzd small=false agent=build mode=primary stream
+```
+
+Step loop:
+
+```
+INFO  2026-05-12T20:00:12 +0ms service=session.prompt session.id=ses_1e23972b3ffe8QLhzuFpWS5bzd step=0 logSpan.http.span.4=55ms loop
+INFO  2026-05-12T20:00:19 +0ms service=session.prompt session.id=ses_1e23972b3ffe8QLhzuFpWS5bzd step=1 logSpan.http.span.4=7436ms loop
+INFO  2026-05-12T20:00:19 +1ms service=session.prompt session.id=ses_1e23972b3ffe8QLhzuFpWS5bzd logSpan.http.span.4=7437ms exiting loop
+```
+
+Provider rate-limit error from the Kimi backend (note the trailing `stream error` message and the massive inline `error=` payload that contains the full request body **and** the parsed retry classification):
+
+```
+ERROR 2026-05-12T20:02:20 +1967ms service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_1e237a304ffeqwr10bXJSRYGHJ small=false agent=build mode=primary error={"error":{"name":"AI_APICallError","url":"https://api.kimi.com/coding/v1/messages","requestBodyValues":{…},"responseBody":"{\"error\":{\"type\":\"rate_limit_error\",\"message\":\"The engine is currently overloaded, please try again later\"},\"type\":\"error\"}","isRetryable":true,"data":{"type":"error","error":{"type":"rate_limit_error","message":"The engine is currently overloaded, please try again later"}}}} stream error
+```
+
+Bad-model fatal (server + share-next both emit, then JSON stdout emits `{"type":"error",...}`):
+
+```
+ERROR 2026-05-12T20:05:54 +15ms service=server error=ProviderModelNotFoundError cause=ProviderModelNotFoundError: ProviderModelNotFoundError
+    at <anonymous> (/$bunfs/root/chunk-71tjptxz.js:519:65509)
+    at Provider.getModel (/$bunfs/root/chunk-jxv846wz.js:1900:1166)
+    ...stack frames... failed
+INFO  2026-05-12T20:05:54 +0ms service=default http.method=POST http.url=/session/ses_1e2343b5cffeGOb3bcdTjvh1wZ/message http.status=500 logSpan.http.span.4=99ms Sent HTTP response
+ERROR 2026-05-12T20:05:54 +0ms service=share-next type=message.updated cause={"_id":"Cause","failures":[{"_tag":"Die","defect":{"name":"ProviderModelNotFoundError","data":{"providerID":"nonexistent","modelID":"bogus-model","suggestions":[]}}}]} share subscriber failed
+```
+
+Bad-agent fallback (UI helper, **not** a structured log line — ANSI bytes shown verbatim):
+
+```
+^[[93m^[[1m! ^[[0m agent "nonexistent-agent" not found. Falling back to default agent
+```
+
+### Things that are NOT on stderr (even with `--log-level DEBUG`)
+
+- **Token totals or per-message token usage** — token counts only appear in the JSON stdout `step_finish` part. No `service=llm` log line includes `tokens.input` / `tokens.output` / `cost` fields.
+- **Live tool invocation arguments and results** — those are only in stdout `tool_use` events. The stderr stream tells you when the parent session looped (`step=N loop`) and when a child session was created, but not which arguments the model passed to a tool.
+- **Rate-limit headroom or quota status** — there is no `service=quota` or `service=billing` stream. Cap-related signals only appear as provider error payloads inside the `error=` tag on `service=llm` ERROR lines, with provider-specific text.
+- **"Approaching plan cap" warnings** — no first-class signal, same as on stdout.
+- **Permission requests in interactive sense** — `service=permission ... evaluated` only logs decisions, not pending asks; in non-interactive `run` the engine pre-denies `question` / `plan_enter` / `plan_exit`, and other asks become UI-helper warnings (`! permission requested: ...; auto-rejecting`).
+
+### Gotchas
+
+- **Bus chatter dominates INFO output.** In a non-trivial session, the majority of INFO lines are `service=bus type=message.part.delta publishing` and `service=bus type=message.part.updated publishing`. A 207-line stderr capture for a single tool call had ~150 of those. Filter `service=bus` aggressively unless you are debugging the bus itself.
+- **The `error=` payload can be tens of kilobytes per line.** AI SDK `AI_APICallError` objects include `requestBodyValues` with the full system prompt and message history. Parsers must allow very long single lines (no synthetic line wrap) and budget memory accordingly.
+- **Exit code is `0` even on fatal-looking errors.** A `ProviderModelNotFoundError` produces stderr `ERROR` lines, a stdout `{"type":"error",...}` event, and exits `0`. Do not use exit code as a success signal — inspect the JSON stream and/or look for ERROR-level lines.
+- **DEBUG adds very little above INFO in installed builds.** In 1.14.48, the only INFO→DEBUG delta observed was two extra `service=config loading config from <path>` lines. Most of the verbose detail OpenCode developers see is gated on `Installation.isLocal()` (dev checkouts), not on the `--log-level` flag.
+- **Timestamps have second precision only.** Sub-second ordering must use the `+Nms` delta.
+- **First-run DB migration prints non-log lines.** A fresh install emits `sqlite-migration:N\n` lines (or a TTY progress bar) before any structured log appears. Treat these as a one-shot pre-amble.
+
+### Logging Use Cases
+
+These are the answers to the practical questions a wrapper needs to ask of the stderr stream, with the exact log lines that surface each signal.
+
+#### 1. Subagent created and returned
+
+Triggered when the parent agent calls the `task` tool. Sequence observed on stderr (all `INFO`):
+
+```
+service=permission permission=task pattern=<subagent-type> action={...} evaluated
+service=session id=ses_<CHILD> slug=<slug> version=<ver> projectID=<id> directory=<cwd> path=<rel> parentID=ses_<PARENT> title=<title> permission=[...] time={...} created
+service=session.prompt session.id=ses_<CHILD> step=0 logSpan.http.span.4=<Nms> loop
+service=session.prompt status=started resolveTools
+service=tool.registry status=started <tool> ... (per registered child tool)
+service=session.prompt status=completed duration=<N> resolveTools
+service=session.processor session.id=ses_<CHILD> messageID=msg_<...> process
+service=llm providerID=<X> modelID=<Y> session.id=ses_<CHILD> small=false agent=<subagent-name> mode=subagent stream
+service=session.prompt session.id=ses_<CHILD> step=1 logSpan.http.span.4=<Nms> loop
+service=session.prompt session.id=ses_<CHILD> logSpan.http.span.4=<Nms> exiting loop
+service=session.prompt session.id=ses_<PARENT> step=N logSpan.http.span.4=<Nms> loop   ← parent resumes
+```
+
+The three definitive signals that distinguish a subagent from the primary session:
+
+| Signal | Where | Discriminator |
+| --- | --- | --- |
+| Child session creation | `service=session ... created` | Has `parentID=ses_<PARENT>`; primary sessions never carry `parentID` |
+| LLM call mode | `service=llm ... mode=subagent stream` | Primary sessions emit `mode=primary` |
+| Agent identity | `service=llm ... agent=<name>` | `agent=build` is the primary work agent; `agent=title` is the auxiliary title generator; anything else (e.g. `agent=general`) is a subagent |
+
+There is no explicit `subagent stopped` log line — completion is signaled by `service=session.prompt session.id=ses_<CHILD> ... exiting loop` followed immediately by the parent's next `loop` line. The corresponding JSON `tool_use` event for the `task` tool on stdout includes `metadata.sessionId` matching the child's session ID, which lets you cross-reference the two streams.
+
+Real captured example (Claude Haiku 4.5, `general` subagent):
+
+```
+INFO  2026-05-12T20:05:26 +160ms service=permission permission=task pattern=general action={"permission":"*","action":"allow","pattern":"*"} evaluated
+INFO  2026-05-12T20:05:26 +1ms   service=session id=ses_1e234a70dffeOCARJZRL9dhpHT slug=lucky-orchid version=1.14.48 projectID=global directory=/private/tmp/oc-test path=private/tmp/oc-test parentID=ses_1e234af48ffeViMPs5pMk6UhYk title=Count letters in 'banana' (@general subagent) permission=[…] time={…} created
+INFO  2026-05-12T20:05:26 +1ms   service=llm providerID=opencode modelID=claude-haiku-4-5 session.id=ses_1e234a70dffeOCARJZRL9dhpHT small=false agent=general mode=subagent stream
+INFO  2026-05-12T20:05:27 +1ms   service=session.prompt session.id=ses_1e234a70dffeOCARJZRL9dhpHT logSpan.http.span.4=3519ms exiting loop
+INFO  2026-05-12T20:05:27 +0ms   service=session.prompt session.id=ses_1e234af48ffeViMPs5pMk6UhYk step=1 logSpan.http.span.4=3590ms loop
+```
+
+#### 2. Tool calling
+
+The structured stderr stream does **not** log per-call tool invocations at INFO or DEBUG. `service=tool.registry` lines log only the tool **registration phase** at session bootstrap (with `duration=0`/`duration=1`), not the calls themselves. To observe actual tool calls you must either:
+
+- Read the **stdout NDJSON** `tool_use` events (the only place `tool`, `callID`, `input`, `output`, `metadata`, and `state.status` are exposed). This is the authoritative tool-call channel.
+- Or use the **plugin/hook layer** described earlier in this document — `tool.execute.before/after` plus raw `event` subscriptions are much richer than anything that lands in stderr.
+
+What stderr **does** give you adjacent to tool calling:
+
+| Signal | Meaning |
+| --- | --- |
+| `service=session.prompt ... step=N loop` | The parent went into another LLM step — usually because a tool result was added to the conversation |
+| `service=permission permission=<type> pattern=<arg> action={...} evaluated` | A permission for a tool argument was evaluated (allow/deny/auto-allow) |
+| UI helper line `! permission requested: <type> (<patterns>); auto-rejecting` | Non-interactive auto-reject for a tool that asked for permission (e.g. `bash`, `write`, `task`, etc.) |
+| `service=session.processor session.id=<X> messageID=<Y> process` | A new assistant message is being processed — usually follows a tool result |
+
+So in practice: stderr tells you that a step boundary happened and that a permission was decided; stdout tells you *which tool* and *with what arguments*.
+
+#### 3. Provider rate-cap reached and approaching
+
+**Cap reached.** The stderr signal is an `ERROR` line on `service=llm` whose `error=` tag contains the AI SDK's classified error. The error JSON is the same structure that downstream emits as a `session.error` bus event and as the JSON-stdout `{"type":"error", ...}` envelope, but stderr exposes the **full raw provider response** including the original retry classification.
+
+Concrete pattern for an Anthropic-style rate cap:
+
+```
+ERROR <ts> +<N>ms service=llm providerID=<P> modelID=<M> session.id=<S> small=<bool> agent=<A> mode=<primary|subagent> error={"error":{"name":"AI_APICallError","url":"<endpoint>","requestBodyValues":{…},"responseBody":"{\"error\":{\"type\":\"rate_limit_error\",\"message\":\"<vendor message>\"},…}","isRetryable":true|false,"data":{"type":"error","error":{"type":"<rate_limit_error|insufficient_quota|usage_not_included>","message":"<vendor message>"}}}} stream error
+```
+
+Fields a wrapper should inspect from inside the `error=` payload:
+
+- `error.name` — `AI_APICallError`, `ProviderAuthError`, or other AI SDK class name
+- `error.isRetryable` — boolean; `true` for rate-limit-style errors, useful to distinguish "wait and retry" from "stop"
+- `error.data.error.type` — `rate_limit_error` (engine overloaded / per-window rate cap), `insufficient_quota` (OpenAI-style billing cap), `usage_not_included` (subscription/plan cap)
+- `error.data.error.message` — provider-supplied human text; OpenCode does not normalize this further
+
+Observed at 2026-05-12 against Kimi:
+
+```
+ERROR 2026-05-12T20:02:20 +1967ms service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_1e237a304ffeqwr10bXJSRYGHJ small=false agent=build mode=primary error={…"responseBody":"{\"error\":{\"type\":\"rate_limit_error\",\"message\":\"The engine is currently overloaded, please try again later\"},\"type\":\"error\"}","isRetryable":true,…} stream error
+```
+
+OpenCode retries internally, so on a sustained cap you typically see this line **repeated** (the capture above had 6 retries before giving up). The retry classifier lives in [`packages/opencode/src/session/retry.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/session/retry.ts) and emits no separate stderr text — counting `ERROR ... service=llm ... stream error` lines is the cheapest way for a wrapper to detect "we are being rate-limited" before the request finally fails.
+
+**Cap approaching.** OpenCode does **not** surface a "cap approaching" signal anywhere — neither as a stderr log line nor as a JSON event. Provider-side soft warnings (e.g. Anthropic's `X-RateLimit-Remaining` headers, OpenAI usage warnings) are not propagated. The only way a wrapper can preview an upcoming cap is to track its own `step_finish.cost` totals from the JSON stream and apply a local threshold.
+
+#### 4. Token usage
+
+Not on stderr. The `service=llm` lines log model identity and stream success/failure, but never carry token counts. To get tokens, parse the JSON stdout `step_finish.part.tokens` (`input`, `output`, `reasoning`, `cache.read`, `cache.write`) and `step_finish.part.cost`. Each step emits one such record; summing them is the canonical way to get per-session totals because OpenCode does not emit a terminal session-summary event.
+
+Adjacent stderr signals that help correlate token use to wall-clock time:
+
+- `service=session.prompt ... step=N loop` — marks the start of a step
+- `service=default http.method=POST http.url=/session/<id>/message http.status=200 logSpan.http.span.4=<Nms> Sent HTTP response` — marks the end of the prompt's HTTP request
+
+#### 5. Cleanest way to extract provider and model
+
+The single best line for provider/model identification is `service=llm`:
+
+```
+INFO  <ts> +<N>ms service=llm providerID=<P> modelID=<M> session.id=<S> small=<bool> agent=<A> mode=<primary|subagent> stream
+```
+
+Recommended extractor for Claudine:
+
+- Match each stderr line against a regex that captures the structured prefix and the trailing `service=llm ... stream` shape.
+- Project the four fields the wrapper needs: `providerID`, `modelID`, `agent`, `mode`.
+- Treat the **first** `service=llm ... small=false mode=primary stream` line as the authoritative primary provider/model for the session. Earlier `small=true agent=title` lines reflect the auxiliary title-generation call (usually a smaller, faster model — e.g. `gpt-5-nano` even when the main agent runs on `claude-haiku-4-5`) and should be reported separately if reported at all.
+- For subagents, capture every `mode=subagent` line and pair it with the most recent `service=session ... parentID=... created` line to attribute the call to its child session ID.
+
+Suggested Rust extractor (illustrative, not authoritative):
+
+```rust
+// Per-line regex; fields are unordered in the source but stable in practice.
+// Allowing flexible ordering avoids breakage on logger refactors.
+const RE: &str = r"^(?P<level>DEBUG|INFO |WARN |ERROR) (?P<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}) \+(?P<delta>\d+)ms (?P<body>.*)$";
+
+fn extract_llm_call(body: &str) -> Option<LlmCall> {
+    if !body.starts_with("service=llm ") { return None; }
+    if !body.ends_with(" stream") && !body.ends_with(" stream error") { return None; }
+    let mut out = LlmCall::default();
+    for kv in body.split(' ') {
+        let (k, v) = kv.split_once('=')?;
+        match k {
+            "providerID" => out.provider = v.to_string(),
+            "modelID"    => out.model    = v.to_string(),
+            "agent"      => out.agent    = v.to_string(),
+            "mode"       => out.mode     = v.to_string(),  // "primary" | "subagent"
+            "small"      => out.small    = v == "true",
+            "session.id" => out.session  = v.to_string(),
+            _ => {}
+        }
+    }
+    Some(out)
+}
+```
+
+Why not parse the JSON stdout for this? The `step_finish` part on stdout includes `cost` and `tokens` but **no `providerID` / `modelID` field** — those identifiers are surfaced only as part of the `task` tool's child-session `metadata.model` (for subagents) and never at the top of the parent stream. The stderr `service=llm` line is OpenCode's only reliable top-of-stream announcement of "this call is being routed to provider X model Y".
+
+#### 6. Other useful signals for a wrapper
+
+| Need | Stderr signal |
+| --- | --- |
+| Session ID assigned | `service=session id=ses_<X> ... created` (first match wins for primary session) |
+| Project / repo OpenCode thinks it's in | `service=project directory=<path> fromDirectory` |
+| Permissions OpenCode actually enforces in this session | `permission=[...]` inline JSON inside the session-created line — non-interactive sessions show `question`/`plan_enter`/`plan_exit` denied by default; subagents add `task` deny and several `repo_*` denies |
+| HTTP timings end-to-end | `service=default http.method=... http.url=... http.status=... logSpan.http.span.N=<Nms> Sent HTTP response` (one per request, including `/session`, `/config`, `/event`, `/session/<id>/message`) |
+| Configuration files loaded | `service=config path=<path> loading` — useful to detect that the wrapper's intended config override was picked up |
+| Plugins loaded | `service=plugin name=<obfuscated> loading internal plugin` (built-ins) and `service=plugin path=file://<...> loading plugin` (external — readable path) |
 
 ## Tools
 

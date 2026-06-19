@@ -10,7 +10,7 @@
 //!                | logical_or                     (condition mode)
 //! logical_or     = logical_and ("||" logical_and)*
 //! fallback       = logical_and ("||" logical_and)*
-//! logical_and    = comparison ("&&" comparison)*  (condition mode only)
+//! logical_and    = comparison ("&&" comparison)*  (both modes)
 //! comparison     = additive (comp_op additive)?
 //! additive       = multiplicative (("+" | "-") multiplicative)*
 //! multiplicative = unary (("*" | "/" | "%") unary)*
@@ -30,7 +30,7 @@
 //! 3. **Multiplicative** - `*`, `/`, `%`
 //! 4. **Additive** - `+`, `-`
 //! 5. **Comparison** - `==`, `!=`, `>`, `>=`, `<`, `<=`
-//! 6. **Logical AND** - `&&` (condition mode)
+//! 6. **Logical AND** - `&&`
 //! 7. **Logical OR / Fallback** - `||`
 //! 8. **Ternary** - `? :` (right-associative)
 //!
@@ -133,9 +133,9 @@ impl<'a> Parser<'a> {
 
     /// Creates a new parser for the given expression with a specific parse mode.
     ///
-    /// Condition mode enables `&&` and `||` as logical operators following the
-    /// condition-mode precedence ladder. Interpolation mode keeps the default
-    /// interpolation grammar.
+    /// `&&` is logical AND in both modes. Condition mode additionally enables
+    /// `||` as logical OR; interpolation mode keeps `||` as the fallback
+    /// operator.
     ///
     /// ## Errors
     ///
@@ -244,7 +244,7 @@ impl<'a> Parser<'a> {
     /// `logical_and ("||" logical_and)*`.
     ///
     /// Infix `a || b` is lowered into the existing function-call AST as
-    /// `Or(a, b)` so downstream evaluation and AST consumers do not need to
+    /// `or(a, b)` so downstream evaluation and AST consumers do not need to
     /// learn a new variant.
     fn parse_logical_or(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.parse_logical_and()?;
@@ -253,7 +253,7 @@ impl<'a> Parser<'a> {
             self.advance()?; // consume ||
             let rhs = self.parse_logical_and()?;
             expr = Expr::FunctionCall {
-                name: "Or".to_string(),
+                name: "or".to_string(),
                 args: vec![expr, rhs],
             };
         }
@@ -261,11 +261,12 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    /// Parses a logical AND expression (condition mode only):
-    /// `comparison ("&&" comparison)*`.
+    /// Parses a logical AND expression: `comparison ("&&" comparison)*`.
     ///
-    /// Infix `a && b` is lowered into the existing function-call AST as
-    /// `And(a, b)`.
+    /// Reached in both parse modes — condition mode via `logical_or`, and
+    /// interpolation mode via the `fallback` ladder — so `&&` is available
+    /// wherever expressions are parsed. Infix `a && b` is lowered into the
+    /// existing function-call AST as `and(a, b)`.
     fn parse_logical_and(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.parse_comparison()?;
 
@@ -273,7 +274,7 @@ impl<'a> Parser<'a> {
             self.advance()?; // consume &&
             let rhs = self.parse_comparison()?;
             expr = Expr::FunctionCall {
-                name: "And".to_string(),
+                name: "and".to_string(),
                 args: vec![expr, rhs],
             };
         }
@@ -520,7 +521,7 @@ pub fn parse(input: &str) -> Result<Expr, ParseError> {
 /// Parses an expression string using condition-mode grammar.
 ///
 /// In condition mode, `&&` and `||` are recognized as infix logical operators
-/// and lowered into `And(...)` / `Or(...)` function-call nodes. Use this
+/// and lowered into `and(...)` / `or(...)` function-call nodes. Use this
 /// entrypoint for every `when="..."` expression so interpolation parsing
 /// elsewhere is unaffected.
 ///
@@ -532,10 +533,10 @@ pub fn parse(input: &str) -> Result<Expr, ParseError> {
 /// let expr = parse_condition("a && b").unwrap();
 /// match expr {
 ///     Expr::FunctionCall { name, args } => {
-///         assert_eq!(name, "And");
+///         assert_eq!(name, "and");
 ///         assert_eq!(args.len(), 2);
 ///     }
-///     _ => panic!("expected And(...) function call"),
+///     _ => panic!("expected and(...) function call"),
 /// }
 /// ```
 ///
@@ -1725,7 +1726,7 @@ mod tests {
         fn condition_parses_infix_and() {
             let expr = parse_condition("a && b").unwrap();
             let (name, args) = extract_call(&expr);
-            assert_eq!(name, "And");
+            assert_eq!(name, "and");
             assert_eq!(args.len(), 2);
             assert!(matches!(&args[0], Expr::Variable(n) if n == "a"));
             assert!(matches!(&args[1], Expr::Variable(n) if n == "b"));
@@ -1735,7 +1736,7 @@ mod tests {
         fn condition_parses_infix_or() {
             let expr = parse_condition("a || b").unwrap();
             let (name, args) = extract_call(&expr);
-            assert_eq!(name, "Or");
+            assert_eq!(name, "or");
             assert_eq!(args.len(), 2);
             assert!(matches!(&args[0], Expr::Variable(n) if n == "a"));
             assert!(matches!(&args[1], Expr::Variable(n) if n == "b"));
@@ -1746,10 +1747,10 @@ mod tests {
             // a && b || c parses as (a && b) || c
             let expr = parse_condition("a && b || c").unwrap();
             let (outer, args) = extract_call(&expr);
-            assert_eq!(outer, "Or");
+            assert_eq!(outer, "or");
             assert_eq!(args.len(), 2);
             let (inner, inner_args) = extract_call(&args[0]);
-            assert_eq!(inner, "And");
+            assert_eq!(inner, "and");
             assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "a"));
             assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "b"));
             assert!(matches!(&args[1], Expr::Variable(n) if n == "c"));
@@ -1760,28 +1761,28 @@ mod tests {
             // a || b && c parses as a || (b && c)
             let expr = parse_condition("a || b && c").unwrap();
             let (outer, args) = extract_call(&expr);
-            assert_eq!(outer, "Or");
+            assert_eq!(outer, "or");
             assert_eq!(args.len(), 2);
             assert!(matches!(&args[0], Expr::Variable(n) if n == "a"));
             let (inner, inner_args) = extract_call(&args[1]);
-            assert_eq!(inner, "And");
+            assert_eq!(inner, "and");
             assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "b"));
             assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "c"));
         }
 
         #[test]
         fn condition_parenthesized_or_then_and() {
-            // (a || b) && c parses as And(Paren(Or(a, b)), c)
+            // (a || b) && c parses as and(Paren(or(a, b)), c)
             let expr = parse_condition("(a || b) && c").unwrap();
             let (outer, args) = extract_call(&expr);
-            assert_eq!(outer, "And");
+            assert_eq!(outer, "and");
             assert_eq!(args.len(), 2);
             let paren = match &args[0] {
                 Expr::Paren(inner) => inner,
                 other => panic!("expected Paren, got {other:?}"),
             };
             let (inner, inner_args) = extract_call(paren);
-            assert_eq!(inner, "Or");
+            assert_eq!(inner, "or");
             assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "a"));
             assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "b"));
             assert!(matches!(&args[1], Expr::Variable(n) if n == "c"));
@@ -1792,7 +1793,7 @@ mod tests {
             // a || (b || c) — chained OR
             let expr = parse_condition("a || (b || c)").unwrap();
             let (outer, args) = extract_call(&expr);
-            assert_eq!(outer, "Or");
+            assert_eq!(outer, "or");
             assert_eq!(args.len(), 2);
             assert!(matches!(&args[0], Expr::Variable(n) if n == "a"));
             let paren = match &args[1] {
@@ -1800,7 +1801,7 @@ mod tests {
                 other => panic!("expected Paren, got {other:?}"),
             };
             let (inner, inner_args) = extract_call(paren);
-            assert_eq!(inner, "Or");
+            assert_eq!(inner, "or");
             assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "b"));
             assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "c"));
         }
@@ -1818,20 +1819,39 @@ mod tests {
         }
 
         #[test]
-        fn interpolation_rejects_infix_and() {
-            let result = parse("a && b");
-            assert!(result.is_err(), "&& must be rejected in interpolation mode");
+        fn interpolation_parses_infix_and() {
+            // `&&` is valid in interpolation mode and lowers to `and(a, b)`,
+            // just like condition mode.
+            let expr = parse("a && b").unwrap();
+            let (name, args) = extract_call(&expr);
+            assert_eq!(name, "and");
+            assert_eq!(args.len(), 2);
+            assert!(matches!(&args[0], Expr::Variable(n) if n == "a"));
+            assert!(matches!(&args[1], Expr::Variable(n) if n == "b"));
+        }
+
+        #[test]
+        fn interpolation_and_binds_tighter_than_ternary() {
+            // Mirrors the real `ready` frontmatter shape `x && y ? a : b`:
+            // `&&` binds tighter than `?:`, so the condition is `and(x, y)`.
+            let expr = parse("x && y ? a : b").unwrap();
+            let Expr::Ternary { condition, .. } = expr else {
+                panic!("expected ternary, got {expr:?}");
+            };
+            let (name, args) = extract_call(&condition);
+            assert_eq!(name, "and");
+            assert_eq!(args.len(), 2);
         }
 
         #[test]
         fn condition_chained_and_left_associative() {
-            // a && b && c parses as And(And(a, b), c)
+            // a && b && c parses as and(and(a, b), c)
             let expr = parse_condition("a && b && c").unwrap();
             let (outer, args) = extract_call(&expr);
-            assert_eq!(outer, "And");
+            assert_eq!(outer, "and");
             assert_eq!(args.len(), 2);
             let (inner, inner_args) = extract_call(&args[0]);
-            assert_eq!(inner, "And");
+            assert_eq!(inner, "and");
             assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "a"));
             assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "b"));
             assert!(matches!(&args[1], Expr::Variable(n) if n == "c"));
@@ -1839,13 +1859,13 @@ mod tests {
 
         #[test]
         fn condition_chained_or_left_associative() {
-            // a || b || c parses as Or(Or(a, b), c)
+            // a || b || c parses as or(or(a, b), c)
             let expr = parse_condition("a || b || c").unwrap();
             let (outer, args) = extract_call(&expr);
-            assert_eq!(outer, "Or");
+            assert_eq!(outer, "or");
             assert_eq!(args.len(), 2);
             let (inner, _) = extract_call(&args[0]);
-            assert_eq!(inner, "Or");
+            assert_eq!(inner, "or");
         }
     }
 }

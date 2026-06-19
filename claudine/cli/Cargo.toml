@@ -9,7 +9,7 @@ description = "cross-agent abstraction and meta-agent harness"
 name = "claudine"
 path = "src/main.rs"
 
-# Test-only PTY harness used by `tests/validation_reporter_pty.rs` to observe
+# Test-only PTY harness used by `tests/level2_validation_reporter_pty.rs` to observe
 # the exact ANSI/OSC-8 output of the harness validation failure reporter
 # under a real PTY. Not intended for end-user invocation.
 [[bin]]
@@ -23,8 +23,8 @@ claudine = { path = "../lib" }
 playa = { path = "../../playa/lib", features = ["sound-effects"] }
 sniff = { path = "../../sniff/lib" }
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
-tui-chrome = { path = "../../biscuit-tui/lib" }
-clap = { version = "4.5", features = ["derive", "unstable-ext"] }
+biscuit-tui = { path = "../../biscuit-tui/lib" }
+clap = { version = "4.5", features = ["derive", "env", "unstable-ext"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros"] }
 tracing = "0.1"
@@ -44,6 +44,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "serd
 uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
 ignore = "0.4"
+globset = "0.4"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 [target.'cfg(unix)'.dependencies]
@@ -53,9 +54,16 @@ shellexpand = "3"
 url = "2"
 
 [dev-dependencies]
+# Enable darkmatter's test-only effect instrumentation for tests only. Cargo
+# applies dev-dependency features when building tests/benches but not the
+# release binary, so the `claudine` binary carries none of the counter state.
+darkmatter = { path = "../../darkmatter/lib", features = ["effects-instrumentation"] }
 assert_cmd = "2"
 predicates = "3"
 insta = { version = "1.34", features = ["json"] }
 expectrl = "0.8"
 proptest = "1.4"
 serial_test = "3"
+rstest = "0.25"
+test-toolkit = { path = "../../tools/test-toolkit" }
+biscuit-test-harness = { path = "../../biscuit-test-harness" }

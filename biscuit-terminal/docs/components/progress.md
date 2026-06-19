@@ -43,4 +43,24 @@ println!("{}", bar.display(&term));
 
 ## CLI
 
-Not directly exposed as a CLI command. Progress is a programmatic component used for building progress indicators in TUI applications and CLI output.
+`bt progress` renders a progress bar through the render tree
+(`render_terminal_node`), so the typed `ProgressStyle` slot colors are applied
+by the terminal tree renderer.
+
+```bash
+bt progress 60
+bt progress 60 --label Loading
+bt progress 75 --width 30 --fill-color green --bracket-color cyan
+```
+
+Options:
+
+- `<PERCENT>`: Completion percentage, `0`–`100` (positional, required)
+- `--label`: Text shown before the bar
+- `--width`: Width of the bar portion in characters
+- `--fill-color`: Color of the filled track (named or `#rrggbb`)
+- `--empty-color`: Color of the empty track (named or `#rrggbb`)
+- `--bracket-color`: Color of the bracket glyphs (named or `#rrggbb`)
+
+Progress is also used programmatically for building progress indicators in TUI
+applications and CLI output.

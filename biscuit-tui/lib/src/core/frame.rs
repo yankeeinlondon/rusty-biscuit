@@ -18,7 +18,7 @@
 //! ## Examples
 //!
 //! ```
-//! use tui_chrome::core::{BorderStyle, HeightSpec, Margin};
+//! use biscuit_tui::core::{BorderStyle, HeightSpec, Margin};
 //!
 //! let margin = Margin::uniform(2);
 //! assert_eq!(margin.top, 2);

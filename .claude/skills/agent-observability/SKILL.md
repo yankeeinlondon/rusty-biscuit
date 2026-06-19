@@ -1,6 +1,6 @@
 ---
 name: agent-observability
-description: Provides an overview of the top open source commercial offerings for Agentic CLI observability as well as discussing integration strategies with Claudine as a Agent wrapper or as a client in an ACP based interaction.
+description: Expert knowledge for agentic-CLI observability — leading open-source and commercial offerings and how they integrate with Claudine. Use when evaluating agent observability tooling, instrumenting agentic CLIs, or integrating observability with Claudine as an agent wrapper or as a client in an ACP-based interaction.
 ---
 
 # Agent Observability

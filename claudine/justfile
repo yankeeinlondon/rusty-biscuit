@@ -40,9 +40,10 @@ default:
     just --list | grep -v 'default'
     echo
 
-# Build the library and CLI
+# Build the library, contract adapter, and CLI
 build *args="":
     @just _build claudine "Claudine Library" {{ args }}
+    @just _build claudine-contract "Claudine Contract Library" {{ args }}
     @just _build claudine-cli "Claudine CLI" {{ args }}
 
 # Install the CLI
@@ -52,15 +53,93 @@ install *args="":
     @just build --release
     @just _install "./cli" "Claudine" {{ args }}
 
-# Test both library and CLI.
-test *args="":
-    @just _test claudine {{ args }}
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity claudine
+    @just _sanity claudine-contract
+    @just _sanity claudine-cli
+
+# test just the CLI in Claudine
+test-cli *args="":
     @just _test claudine-cli {{ args }}
 
-# Lint both the library and CLI
+# test just the Claudine Library
+test-library *args="":
+    @just _test claudine {{ args }}
+    
+# test the rendezvous core, daemon, and test-client crates
+test-rendezvous *args:
+    @just _test rendezvous-core {{args}}
+    @just _test rendezvous-daemon {{args}}
+    @just _test rendezvous-client {{args}}
+    
+# Test the library, contract adapter, and CLI.
+test *args="":
+    @just _test claudine {{ args }}
+    @just _test claudine-contract {{ args }}
+    @just _test claudine-cli {{ args }}
+
+# test just the contract adapter library
+test-contract *args="":
+    @just _test claudine-contract {{ args }}
+
+# Level-2 PTY tests. Gated by `require_level!(Level::L2, pty_available(), ...)`;
+# skip cleanly when /dev/ptmx is unavailable, hard-fail when
+# BISCUIT_TEST_LEVEL_REQUIRED=2 is set.
+test-l2 *args="":
+    @just _test_l2 claudine-cli {{ args }}
+
+# not applicable: claudine has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for claudine"
+
+# not applicable: claudine emits terminal/CLI output, not HTML
+test-browser:
+    @echo "test-browser: not applicable for claudine"
+
+# opt-in real_ tier: contract adapter against an installed+authenticated
+# provider. Gated by CLAUDINE_CONTRACT_REAL=1 and the provider binary on PATH.
+test-real *args="":
+    @CLAUDINE_CONTRACT_REAL=1 cargo test -p claudine-contract --test real_provider {{ args }}
+
+# Lint the library, contract adapter, and CLI
 lint:
     @just _lint claudine
+    @just _lint claudine-contract
     @just _lint claudine-cli
+
+# Criterion benches for the runtime hot paths.
+bench *args="":
+    @just _bench claudine {{ args }}
+
+# Per-package LCOV coverage for the library, contract adapter, and CLI.
+coverage *args="":
+    @just _coverage claudine {{ args }}
+    @just _coverage claudine-contract {{ args }}
+    @just _coverage claudine-cli {{ args }}
+
+# Doctests for the library, contract adapter, and CLI.
+doctest *args="":
+    @just _doctest claudine {{ args }}
+    @just _doctest claudine-contract {{ args }}
+    @just _doctest claudine-cli {{ args }}
+
+# not applicable: claudine has no cargo-fuzz targets (Phase 5 scope)
+fuzz:
+    @echo "fuzz: not applicable for claudine (planned Phase 5)"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
 
 # Lint (and fix) both the library and CLI
 lint-fix:
@@ -69,7 +148,7 @@ lint-fix:
 
 # Validate the source code without doing a full build
 check:
-    @cargo check -p claudine -p claudine-cli
+    @cargo check -p claudine -p claudine-contract -p claudine-cli
 
 # Run the latest debug build of the Claudine CLI
 cli *args="":

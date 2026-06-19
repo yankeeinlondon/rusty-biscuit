@@ -12,7 +12,7 @@ use biscuit_speaks::{
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::CompleteEnv;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
+use darkmatter::markdown::output::terminal::TerminalOptions;
 use inquire::{Confirm, Select};
 use owo_colors::OwoColorize;
 use sniff::programs::{
@@ -803,7 +803,7 @@ fn print_voices(provider: TtsProvider, voices: &[Voice], lang_filter: Option<&st
     }
 
     let markdown = Markdown::from(lines.join("\n"));
-    match for_terminal(&markdown, TerminalOptions::default()) {
+    match markdown.as_terminal(TerminalOptions::default()) {
         Ok(rendered) => print!("{}", rendered),
         Err(_) => println!("{}", markdown.content()),
     }

@@ -1116,7 +1116,6 @@ impl<'a> From<&'a LibraryInfo> for LibraryContext<'a> {
     }
 }
 
-
 /// Format VersionHistory as markdown for prompt injection.
 ///
 /// Converts version history into markdown tables and lists that can be
@@ -1378,7 +1377,14 @@ where
     // Record timing and outcome in the current span
     let span = Span::current();
     span.record("duration_ms", start_time.elapsed().as_millis() as u64);
-    span.record("outcome", if metrics.is_some() { "success" } else { "failed" });
+    span.record(
+        "outcome",
+        if metrics.is_some() {
+            "success"
+        } else {
+            "failed"
+        },
+    );
     if let Some(ref m) = metrics {
         span.record("input_tokens", m.input_tokens);
         span.record("output_tokens", m.output_tokens);
@@ -1781,7 +1787,14 @@ where
     // Record timing and outcome in the current span
     let span = Span::current();
     span.record("duration_ms", start_time.elapsed().as_millis() as u64);
-    span.record("outcome", if metrics.is_some() { "success" } else { "failed" });
+    span.record(
+        "outcome",
+        if metrics.is_some() {
+            "success"
+        } else {
+            "failed"
+        },
+    );
     if let Some(ref m) = metrics {
         span.record("input_tokens", m.input_tokens);
         span.record("output_tokens", m.output_tokens);
@@ -1942,7 +1955,14 @@ where
     // Record timing and outcome in the current span
     let span = Span::current();
     span.record("duration_ms", start_time.elapsed().as_millis() as u64);
-    span.record("outcome", if metrics.is_some() { "success" } else { "failed" });
+    span.record(
+        "outcome",
+        if metrics.is_some() {
+            "success"
+        } else {
+            "failed"
+        },
+    );
 
     PromptTaskResult { metrics }
 }
@@ -2094,7 +2114,14 @@ where
     // Record timing and outcome in the current span
     let span = Span::current();
     span.record("duration_ms", start_time.elapsed().as_millis() as u64);
-    span.record("outcome", if metrics.is_some() { "success" } else { "failed" });
+    span.record(
+        "outcome",
+        if metrics.is_some() {
+            "success"
+        } else {
+            "failed"
+        },
+    );
     if let Some(ref m) = metrics {
         span.record("input_tokens", m.input_tokens);
         span.record("output_tokens", m.output_tokens);

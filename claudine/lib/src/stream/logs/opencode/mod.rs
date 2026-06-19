@@ -8,7 +8,8 @@
 //! terminal-to-end-of-line.
 //!
 //! The parser is deliberately small and resilient: unknown tags are
-//! preserved in an open-ended [`BTreeMap`], missing tags are accepted,
+//! preserved in an open-ended [`BTreeMap`](std::collections::BTreeMap),
+//! missing tags are accepted,
 //! and any line that does not match the header falls through to
 //! [`ParsedOpenCodeStderrLine::RawText`]. Classification is a pure
 //! function over the parsed record plus a small raw-text fallback for

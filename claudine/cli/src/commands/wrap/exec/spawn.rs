@@ -17,12 +17,13 @@ use tracing::{Span, info_span};
 
 use std::sync::Mutex;
 
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 
 use super::super::section::SectionTracker;
 use super::super::stream_io::StreamOutput;
 use super::exit::exit_code_from_status;
+use super::stream_capture::StreamCapture;
 use super::subagent_watchdog::WatchdogState;
 use super::termination::{
     WatchdogTermination, apply_early_termination_to_summary, wait_with_signal_and_early_termination,
@@ -125,8 +126,9 @@ pub(crate) fn run_child(
 
     let spawned_at = Instant::now();
     let mut child = command.spawn()?;
+    let captured_pid = child.id();
     *child_spawned = true;
-    Span::current().record("child_pid", tracing::field::display(child.id()));
+    Span::current().record("child_pid", tracing::field::display(captured_pid));
 
     // Shared first-response trackers. Each channel stamps the first
     // non-filtered line it sees so we can compute best-effort latency
@@ -274,6 +276,7 @@ pub(crate) fn run_child(
             total_elapsed,
             first_response_latency: first_response,
         },
+        agent_pid: Some(captured_pid),
     })
 }
 
@@ -411,8 +414,9 @@ pub(crate) fn run_child_capture(
 
     let spawned_at = Instant::now();
     let mut child = command.spawn()?;
+    let captured_pid = child.id();
     *child_spawned = true;
-    Span::current().record("child_pid", tracing::field::display(child.id()));
+    Span::current().record("child_pid", tracing::field::display(captured_pid));
 
     // Shared first-response trackers (always piped in capture mode).
     let first_stdout_at = Arc::new(std::sync::Mutex::new(None));
@@ -530,6 +534,7 @@ pub(crate) fn run_child_capture(
             total_elapsed,
             first_response_latency: first_response,
         },
+        agent_pid: Some(captured_pid),
     })
 }
 
@@ -593,8 +598,9 @@ pub(crate) fn run_child_stream_semantic(
     }
 
     let mut child = command.spawn()?;
+    let captured_pid = child.id();
     *child_spawned = true;
-    Span::current().record("child_pid", tracing::field::display(child.id()));
+    Span::current().record("child_pid", tracing::field::display(captured_pid));
 
     // Terminal-local renderer for OutputText (stdout markdown). Wrapped
     // in Arc<Mutex<_>> so the builder closures can retain independent
@@ -611,7 +617,6 @@ pub(crate) fn run_child_stream_semantic(
         Arc::new(std::sync::Mutex::new(StreamTextRenderer::new()));
 
     let stdout_output = stream_output.clone();
-    let wait_loop_metrics = live_metrics.clone();
 
     // Dedicated 30-second ticker that flushes any buffered markdown the
     // provider has not terminated with a paragraph boundary. Independent
@@ -659,6 +664,10 @@ pub(crate) fn run_child_stream_semantic(
     let stdout_renderer = text_renderer.clone();
     let first_semantic_at_clone = Arc::clone(&first_semantic_at);
     let first_raw_stdout_at_clone = Arc::clone(&first_raw_stdout_at);
+    let stdout_byte_metrics = live_metrics.clone();
+    // Opt-in raw NDJSON capture for post-mortem analysis. Activated by
+    // `CLAUDINE_RAW_STREAM_DIR`; `None` (and zero overhead) otherwise.
+    let stream_capture_owned = StreamCapture::open(timeout_config.provider, child.id(), started_at);
     let stdout_handle = thread::spawn(move || {
         let _stream_guard = stream_span.enter();
         let _parse_span = info_span!("stream_parse").entered();
@@ -685,17 +694,35 @@ pub(crate) fn run_child_stream_semantic(
         };
         let reasoning_cb: ReasoningCallback = Box::new(|_chunk: &str| {});
 
-        let mut parser: Box<dyn SemanticStreamParser> = build_parser(output_cb, reasoning_cb);
+        let mut parser: Box<dyn SemanticStreamParser> =
+            build_parser(output_cb, reasoning_cb, Some(captured_pid));
         let mut fallback_mode = false;
+        let mut stream_capture = stream_capture_owned;
 
         for line in reader.lines() {
             let Ok(line) = line else { break };
 
+            let line_at = Instant::now();
             {
                 let mut g = first_raw_stdout_at_clone.lock().unwrap();
                 if g.is_none() {
-                    *g = Some(Instant::now());
+                    *g = Some(line_at);
                 }
+            }
+
+            // Provider-agnostic activity heartbeat: refresh the byte clock
+            // BEFORE feeding the line to the semantic parser, so even
+            // partially-buffered or post-completion-only providers (notably
+            // OpenCode, which emits no `tool_start` / `task_started`) keep
+            // the silence rule honest. Whitespace-only lines are ignored.
+            if let Ok(mut g) = stdout_byte_metrics.lock() {
+                g.record_byte_activity(&line, line_at);
+            }
+
+            // Mirror the raw line to the post-mortem capture file when
+            // `CLAUDINE_RAW_STREAM_DIR` is set. No-op otherwise.
+            if let Some(capture) = stream_capture.as_mut() {
+                capture.record_line(&line, line_at);
             }
 
             if fallback_mode {
@@ -750,12 +777,23 @@ pub(crate) fn run_child_stream_semantic(
     let has_bridge = bridge_for_thread.is_some();
     let capture_always = has_bridge;
     let first_stderr_at_clone = Arc::clone(&first_stderr_at);
+    let stderr_byte_metrics = live_metrics.clone();
     let stderr_handle = thread::spawn(move || {
         let _stderr_guard = stderr_span.enter();
         let reader = BufReader::new(pipe);
         let mut captured = String::new();
         for line in reader.lines() {
             let Ok(line) = line else { break };
+
+            // Refresh the byte heartbeat for every non-empty stderr line,
+            // including noise-prefixed and bridge-consumed lines — those are
+            // still bytes flowing from the wrapped child and prove it is
+            // making progress. Done before noise filtering for that reason.
+            let line_at = Instant::now();
+            if let Ok(mut g) = stderr_byte_metrics.lock() {
+                g.record_byte_activity(&line, line_at);
+            }
+
             if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
                 continue;
             }
@@ -763,7 +801,7 @@ pub(crate) fn run_child_stream_semantic(
             {
                 let mut g = first_stderr_at_clone.lock().unwrap();
                 if g.is_none() {
-                    *g = Some(Instant::now());
+                    *g = Some(line_at);
                 }
             }
 
@@ -812,10 +850,6 @@ pub(crate) fn run_child_stream_semantic(
         }
     }
 
-    // OpenCode hang recovery: `opencode_stop_threshold` is the post-"stop"
-    // grace window (120s). It does not drive a user-visible timing line.
-    let opencode_stop_threshold = Duration::from_secs(120);
-
     // Watchdog channel: the ticker sends termination requests; the wait
     // loop receives them and escalates SIGTERM → SIGKILL via the same
     // pathway used for stderr-bridge early termination.
@@ -857,8 +891,6 @@ pub(crate) fn run_child_stream_semantic(
             true,
             rx,
             wd_rx,
-            Some(wait_loop_metrics),
-            opencode_stop_threshold,
             timeout_config.kill_grace,
         )?
     } else {
@@ -867,9 +899,7 @@ pub(crate) fn run_child_stream_semantic(
     };
 
     if let Some(
-        EarlyTermination::CompletedButHung { message }
-        | EarlyTermination::Timeout { message }
-        | EarlyTermination::StepTimeout { message, .. },
+        EarlyTermination::Timeout { message } | EarlyTermination::StepTimeout { message, .. },
     ) = early_termination.as_ref()
     {
         let rendered = Status::new(message)
@@ -939,5 +969,228 @@ pub(crate) fn run_child_stream_semantic(
             total_elapsed: started_at.elapsed(),
             first_response_latency: first_response,
         },
+        agent_pid: Some(captured_pid),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Minimal env that satisfies the `PATH` / `HOME` debug-asserts inside
+    /// every spawn function. Test-owned so we never depend on the host
+    /// shell's environment.
+    fn minimal_env() -> HashMap<OsString, OsString> {
+        let mut env = HashMap::new();
+        env.insert(OsString::from("PATH"), OsString::from("/usr/bin:/bin"));
+        env.insert(OsString::from("HOME"), OsString::from("/tmp"));
+        env
+    }
+
+    /// Find a working `/bin/true`-equivalent on the test host. macOS ships
+    /// `/usr/bin/true`; Linux distros typically have both `/bin/true` and
+    /// `/usr/bin/true`. We prefer `/usr/bin/true` (always present on macOS)
+    /// and fall back to `/bin/true`.
+    fn true_binary() -> &'static Path {
+        if Path::new("/usr/bin/true").exists() {
+            Path::new("/usr/bin/true")
+        } else {
+            Path::new("/bin/true")
+        }
+    }
+
+    /// Spawn must populate `ProcessResult.agent_pid` immediately after
+    /// `command.spawn()?` returns. The captured PID must match a real
+    /// positive integer. This test exercises the legacy/interactive spawn
+    /// path used by direct wrappers and legacy composition runs.
+    #[test]
+    fn run_child_captures_agent_pid_after_successful_spawn() {
+        let env = minimal_env();
+        let cwd = Path::new("/tmp");
+        let mut child_spawned = false;
+
+        let result = run_child(
+            true_binary(),
+            &[],
+            &env,
+            cwd,
+            None,
+            ChildIoOptions {
+                stdout_noise_prefixes: &[],
+                stderr_noise_prefixes: &[],
+                stdin_seed: None,
+            },
+            &mut child_spawned,
+        )
+        .expect("spawning /usr/bin/true must succeed on the test host");
+
+        assert!(child_spawned, "child_spawned flag must flip on success");
+        let pid = result
+            .agent_pid
+            .expect("agent_pid must be Some after a successful spawn");
+        assert!(pid > 0, "spawned child PID must be a positive integer");
+    }
+
+    /// `run_child_capture` shares the same spawn path as `run_child` and
+    /// must also stamp `agent_pid`. This is the path used by legacy
+    /// composition runs and harness-orchestration capture fallbacks.
+    #[test]
+    fn run_child_capture_captures_agent_pid_after_successful_spawn() {
+        let env = minimal_env();
+        let cwd = Path::new("/tmp");
+        let mut child_spawned = false;
+
+        let result = run_child_capture(
+            Path::new("/bin/echo"),
+            &["ok".to_string()],
+            &env,
+            cwd,
+            None,
+            ChildIoOptions {
+                stdout_noise_prefixes: &[],
+                stderr_noise_prefixes: &[],
+                stdin_seed: None,
+            },
+            &mut child_spawned,
+        )
+        .expect("spawning /bin/echo must succeed on the test host");
+
+        assert!(child_spawned);
+        let pid = result
+            .agent_pid
+            .expect("agent_pid must be Some after a successful spawn");
+        assert!(pid > 0);
+    }
+
+    /// A failed spawn must return `Err` and leave the `child_spawned`
+    /// flag untouched. Crucially, no `ProcessResult` is constructed on
+    /// the failure path, so the caller cannot observe a fabricated
+    /// `agent_pid` value.
+    #[test]
+    fn run_child_failed_spawn_returns_err_without_agent_pid() {
+        let env = minimal_env();
+        let cwd = Path::new("/tmp");
+        let mut child_spawned = false;
+
+        let result = run_child_capture(
+            Path::new("/nonexistent/binary/that/does/not/exist"),
+            &[],
+            &env,
+            cwd,
+            None,
+            ChildIoOptions {
+                stdout_noise_prefixes: &[],
+                stderr_noise_prefixes: &[],
+                stdin_seed: None,
+            },
+            &mut child_spawned,
+        );
+
+        assert!(
+            result.is_err(),
+            "spawning a nonexistent binary must return Err"
+        );
+        assert!(
+            !child_spawned,
+            "child_spawned flag must stay false when spawn fails"
+        );
+    }
+
+    /// End-to-end proof that `CLAUDINE_PID`, injected by the env-plan
+    /// builder in `wrap/env.rs`, actually reaches the spawned child's
+    /// environment. Spawns `/usr/bin/env` and inspects the captured
+    /// stdout for the `CLAUDINE_PID=<claudine_pid>` line.
+    #[test]
+    fn run_child_capture_propagates_claudine_pid_to_child_environment() {
+        let mut env = minimal_env();
+        let claudine_pid = std::process::id();
+        env.insert(
+            OsString::from("CLAUDINE_PID"),
+            OsString::from(claudine_pid.to_string()),
+        );
+        let cwd = Path::new("/tmp");
+        let mut child_spawned = false;
+
+        let result = run_child_capture(
+            Path::new("/usr/bin/env"),
+            &[],
+            &env,
+            cwd,
+            None,
+            ChildIoOptions {
+                stdout_noise_prefixes: &[],
+                stderr_noise_prefixes: &[],
+                stdin_seed: None,
+            },
+            &mut child_spawned,
+        )
+        .expect("spawning /usr/bin/env must succeed on the test host");
+
+        assert!(child_spawned);
+        let expected_line = format!("CLAUDINE_PID={claudine_pid}");
+        assert!(
+            result.data.stdout.contains(&expected_line),
+            "child stdout must include {expected_line:?}; got: {:?}",
+            result.data.stdout,
+        );
+        let pid = result
+            .agent_pid
+            .expect("agent_pid must be Some after a successful spawn");
+        assert!(pid > 0);
+    }
+
+    /// Each spawn returns a fresh `ProcessResult` with its own
+    /// `agent_pid`. This is the per-attempt reset guarantee that
+    /// harness retries and composition iterations depend on —
+    /// no stale PID can leak from a previous attempt into the next.
+    #[test]
+    fn consecutive_spawns_produce_distinct_agent_pids() {
+        let env = minimal_env();
+        let cwd = Path::new("/tmp");
+
+        let mut child_spawned_a = false;
+        let result_a = run_child_capture(
+            Path::new("/bin/echo"),
+            &["first".to_string()],
+            &env,
+            cwd,
+            None,
+            ChildIoOptions {
+                stdout_noise_prefixes: &[],
+                stderr_noise_prefixes: &[],
+                stdin_seed: None,
+            },
+            &mut child_spawned_a,
+        )
+        .expect("first spawn must succeed");
+
+        let mut child_spawned_b = false;
+        let result_b = run_child_capture(
+            Path::new("/bin/echo"),
+            &["second".to_string()],
+            &env,
+            cwd,
+            None,
+            ChildIoOptions {
+                stdout_noise_prefixes: &[],
+                stderr_noise_prefixes: &[],
+                stdin_seed: None,
+            },
+            &mut child_spawned_b,
+        )
+        .expect("second spawn must succeed");
+
+        let pid_a = result_a
+            .agent_pid
+            .expect("first spawn must capture agent_pid");
+        let pid_b = result_b
+            .agent_pid
+            .expect("second spawn must capture agent_pid");
+        assert!(
+            pid_a != pid_b,
+            "consecutive spawns must produce distinct PIDs \
+             (got pid_a={pid_a}, pid_b={pid_b}); \
+             if they collide the per-attempt reset contract is broken"
+        );
+    }
 }

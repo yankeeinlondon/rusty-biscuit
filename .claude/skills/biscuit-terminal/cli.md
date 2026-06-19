@@ -22,6 +22,9 @@ cargo install --path biscuit-terminal/cli
 | `bt quote` | Block quote with left border |
 | `bt list` | Bulleted list with hanging indents |
 | `bt columns` | Two-column text layout |
+| `bt block` | Styled text block via the render tree (fg/bg/emphasis/fill/border `Style`) |
+| `bt progress` | Progress bar via the render tree (slot colors) |
+| `bt table` | Table via the render tree (column headers, rows, striping) |
 | `bt dir` | Directory tree with icons and gitignore awareness |
 | `bt flowchart` | Flowchart diagrams |
 | `bt quadrant` | Quadrant charts |
@@ -169,6 +172,72 @@ Options:
 - `--margin-top` (alias `--mt`): Top margin in blank lines
 - `--margin-bottom` (alias `--mb`): Bottom margin in blank lines
 
+## Block Command
+
+Render a text block through the render tree carrying a declared `Style`
+(foreground/background, emphasis, background, border) and an optional `Layout`
+box (padding/margin/width/alignment). `bt block` renders via
+`render_terminal_node`, so it exercises the render-tree `Style` and `Layout`
+primitives directly:
+
+```bash
+bt block "Plain styled text" --fg red
+bt block "Inverted notice" --fg white --bg blue --bold
+bt block "Bordered notice" --border all
+bt block "Rounded notice" --border all --border-radius 1
+bt block "Painted padding" --bg blue --padding 1
+bt block "Centered box" --width 20 --align center
+```
+
+Options:
+- `--fg` / `--bg`: Foreground / background color (named or `#rrggbb`)
+- `--bold` / `--italic` / `--underline` / `--strike`: Text emphasis
+- `--fill`: Paint a background tint behind the text — `subtle` or `pronounced`
+- `--border`: Draw a border — `all`, `left`, `right`, `top`, `bottom`
+- `--border-color`: Border color (named or `#rrggbb`)
+- `--border-radius`: Corner radius in columns; any non-zero value rounds corners
+- `--padding`: Padding reserved inside the box, in columns, on all four sides
+  (painted by `--bg`/`--fill`)
+- `--margin`: Transparent horizontal margin, in columns
+- `--width`: Content-box width — `auto`, `fit` (fit-content), or a column count
+- `--max-width`: Cap the resolved content-box width, in columns
+- `--align`: Place a sub-available box — `left`, `center`, `right`
+
+## Progress Command
+
+Render a progress bar through the render tree:
+
+```bash
+bt progress 60
+bt progress 60 --label Loading
+bt progress 75 --width 30 --fill-color green --bracket-color cyan
+```
+
+Options:
+- `<PERCENT>`: Completion percentage, `0`–`100` (positional, required)
+- `--label`: Text shown before the bar
+- `--width`: Width of the bar portion in characters
+- `--fill-color` / `--empty-color` / `--bracket-color`: Slot colors (named or `#rrggbb`)
+
+## Table Command
+
+Render a data table through the render tree:
+
+```bash
+bt table --columns "Name,Score" --row "Ann,90" --row "Bob,75"
+bt table --columns "Name,Score" --row "Ann,90" --row "Bob,75" --striped
+bt table --columns "Name,Score" --row "Ann,90" --row "Bob,75" --striped --stripe-bg blue
+bt table --columns "Name,Score" --row "Ann,90" --bold-header --body-color cyan
+```
+
+Options:
+- `--columns`: Comma-separated column headers (required)
+- `--row`: Comma-separated cell values (repeatable — one per data row)
+- `--striped`: Apply an alternating background stripe to even data rows
+- `--stripe-bg` / `--stripe-text`: Explicit stripe colors (named or `#rrggbb`)
+- `--bold-header`: Render every column header in bold
+- `--header-color` / `--body-color`: Header / body text colors (named or `#rrggbb`)
+
 ## Directory Tree Command
 
 Display a filesystem tree with Nerd Font icons and gitignore-aware dimming:
@@ -204,16 +273,19 @@ Options:
 
 ## Prose Command
 
-Render styled prose text with inline tokens:
+Render styled prose text with bracketed tags or a Markdown subset:
 
 ```bash
-# Atomic tokens
-bt prose "Hello {{bold}}world{{reset}}!"
-bt prose "{{red}}Error:{{reset}} Something went wrong"
-
 # Block tags
+bt prose "Hello <b>world</b>!"
+bt prose "<red>Error:</red> Something went wrong"
 bt prose "<b>Bold</b> and <i>italic</i> text"
 bt prose "<a href='https://example.com'>Click here</a>"
+
+# Cross-target output
+bt prose "<purple-800>Dark purple</purple-800>" --md-plus
+bt prose "<b>Bold</b>" --margin-left 4 --md
+bt prose "<b>Bold</b>" --margin-left 4 --html
 
 # With margins and alignment
 bt prose --margin-left 4 "Indented content"
@@ -229,10 +301,13 @@ Options:
 - `--margin-bottom` (alias `--mb`): Bottom margin in blank lines
 - `--alignment` (alias `--align`): Text alignment (`left`, `center`, `right`)
 - `--no-wrap`: Disable word wrapping
+- `--html`: Render an HTML fragment instead of terminal output
+- `--md`: Render portable Markdown instead of terminal output
+- `--md-plus`: Render MarkdownPlus instead of terminal output
 
-Supported tokens:
-- **Atomic**: `{{bold}}`, `{{italic}}`, `{{red}}`, `{{bg-blue}}`, `{{reset}}`
-- **Block**: `<b>`, `<i>`, `<u>`, `<uu>`, `<~>`, `<a href="...">`, `<red>`, `<rgb R,G,B>`, `<bg-rgb R,G,B>`, `<bg-coral>`, `<bg-red-800>`
+Supported syntax:
+- **Block tags**: `<b>`, `<i>`, `<u>`, `<uu>`, `<~>`, `<a href="...">`, `<red>`, `<rgb R,G,B>`, `<bg-rgb R,G,B>`, `<bg-coral>`, `<bg-red-800>`
+- **Markdown subset**: `[desc](url)`, `**bold**`, `_italic_`
 
 ## Content Analysis
 

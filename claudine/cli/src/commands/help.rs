@@ -1,5 +1,5 @@
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use color_eyre::eyre::Result;
 
 use crate::log;
@@ -97,6 +97,10 @@ fn groups() -> Vec<CommandGroup> {
                 cmd("providers", "Show provider capability matrix"),
                 cmd("logs", "Query and sync Claudine JSONL logs"),
                 cmd("completions", "Generate shell completions"),
+                cmd(
+                    "context",
+                    "Show Darkmatter runtime context, expression engine, and side effects",
+                ),
             ],
         },
     ]

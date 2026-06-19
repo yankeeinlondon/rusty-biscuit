@@ -1,0 +1,75 @@
+name: bench-nightly
+
+# Nightly benchmark run for darkmatter, pushing results to Bencher.dev.
+#
+# Prerequisites:
+#   1. Create a project in Bencher Cloud (https://bencher.dev).
+#   2. Create a project-scoped API key (starts with `bencher_run_`) and add
+#      it as the BENCHER_API_KEY repository secret. User API tokens (JWTs)
+#      are NOT accepted on the --key flag; use the matching --token flag if
+#      you switch back to a user token.
+#   3. Set the BENCHER_PROJECT variable (or hardcode the project slug below).
+#
+# The workflow runs benchmarks with Criterion and uploads the results using
+# the `rust_criterion` adapter so Bencher can track trends and alert on
+# regressions.
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - "darkmatter/**"
+      - "renderable/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/bench-nightly.yml"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: bench-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  darkmatter:
+    name: Darkmatter benchmarks → Bencher.dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      checks: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: bench-nightly-darkmatter
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Install Bencher CLI
+        uses: bencherdev/bencher@main
+
+      - name: Run benchmarks and push to Bencher.dev
+        run: |
+          bencher run \
+            --project "${{ vars.BENCHER_PROJECT || 'darkmatter' }}" \
+            --branch "${{ github.ref_name }}" \
+            --testbed "ubuntu-latest" \
+            --adapter rust_criterion \
+            --err \
+            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+            just bench
+        working-directory: darkmatter
+        env:
+          BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}

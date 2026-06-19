@@ -33,8 +33,9 @@ Note: the `unchained-ai` workspace includes `lib`, `cli`, and `gen`; `model_id` 
     - OpenCode delegation primitive
     - agent cap monitoring for Claude Code and Codex
     - rig tools for web search and scraping
+    - `Prompt::execute` via the `execution/` surface and capability-based model resolver
+    - `UnchainedInferenceAdapter` in `unchained-ai-contract` for `biscuit-contract`
 - Not fully implemented:
-    - `Prompt::execute` (currently returns fatal "LLM execution not yet implemented")
     - placeholder scaffolds (`UserContent`, `Transcribe`, `foreign_agent`, parts of functional grouping)
 
 ## Development

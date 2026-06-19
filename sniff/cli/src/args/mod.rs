@@ -39,7 +39,7 @@ pub struct FileListArgs {
     pub no_error: bool,
 
     /// Message to display when no results found
-    #[arg(long, value_name = "MESSAGE")]
+    #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
     pub on_error: Option<String>,
 
     /// Filter paths by substring match (OR logic)
@@ -239,14 +239,85 @@ fn all_program_candidates() -> Vec<clap_complete::engine::CompletionCandidate> {
     all
 }
 
+// ---------------------------------------------------------------------------
+// Software command tree
+// ---------------------------------------------------------------------------
+
+/// Subcommands under `sniff software`.
+///
+/// The bare command (`sniff software`) shows every installed-program category.
+/// Each category can also be invoked directly for a focused view and supports
+/// `install` / `install-plan` like the aggregate.
 #[derive(Subcommand, Debug, Clone)]
-pub enum AllProgramAction {
+pub enum SoftwareSubcommand {
     /// Install a program (interactive picker if no name given)
     Install(InstallCommandArgs),
 
     /// Show the install plan without executing anything
     #[command(name = "install-plan")]
     InstallPlan(InstallCommandArgs),
+
+    /// Show only installed editors
+    Editors {
+        #[command(subcommand)]
+        action: Option<EditorAction>,
+    },
+
+    /// Show only utilities
+    Utilities {
+        #[command(subcommand)]
+        action: Option<UtilityAction>,
+    },
+
+    /// Show only language package managers
+    #[command(name = "language-package-managers")]
+    LanguagePackageManagers {
+        #[command(subcommand)]
+        action: Option<LangPkgMgrAction>,
+    },
+
+    /// Show only OS package managers
+    #[command(name = "os-package-managers")]
+    OsPackageManagers {
+        #[command(subcommand)]
+        action: Option<OsPkgMgrAction>,
+    },
+
+    /// Show only TTS clients
+    #[command(name = "tts-clients")]
+    TtsClients {
+        #[command(subcommand)]
+        action: Option<TtsClientAction>,
+    },
+
+    /// Show only terminal apps
+    #[command(name = "terminal-apps")]
+    TerminalApps {
+        #[command(subcommand)]
+        action: Option<TerminalAppAction>,
+    },
+
+    /// Show only headless audio players
+    #[command(name = "audio-players")]
+    AudioPlayers {
+        #[command(subcommand)]
+        action: Option<AudioAction>,
+    },
+
+    /// Show only AI agent/CLI tools
+    Agents {
+        #[command(subcommand)]
+        action: Option<AgentAction>,
+    },
+
+    /// Show only desktop notification helpers
+    #[command(name = "notification-helpers")]
+    NotificationHelpers,
+
+    /// Show resolved test runners (host availability: installed, local,
+    /// via_parent, or not_found).
+    #[command(name = "test-runners")]
+    TestRunners,
 }
 
 // ---------------------------------------------------------------------------
@@ -297,14 +368,8 @@ pub enum Commands {
     /// Show only audio devices (inputs, outputs, sample rates)
     AudioDevices,
 
-    /// Show only repository/monorepo structure
+    /// Show repository info (repository name by default; `--json` emits the scope-complete aggregate)
     Repo {
-        /// Query package registries for latest dependency versions and report available updates
-        #[arg(long)]
-        latest_versions: bool,
-        /// Filter packages by name (or @area); prefix with ! to exclude
-        filter: Vec<String>,
-
         #[command(subcommand)]
         repo_subcommand: Option<RepoSubcommand>,
     },
@@ -338,66 +403,27 @@ pub enum Commands {
         #[arg(long)]
         blast_radius: bool,
 
+        /// Output only relative file paths (no metadata, fastest mode)
+        #[arg(long)]
+        paths_only: bool,
+
+        /// Filter to documents in a specific package area (repeatable, OR logic)
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Vec<String>,
+
+        /// Filter to documents in a specific package (repeatable, OR logic)
+        #[arg(long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
+        package: Vec<String>,
+
         /// Filter documents by substring match on filepath/filename
         filter: Vec<String>,
     },
 
-    /// Show all installed programs detection
-    Programs {
+    /// Show installed programs (software categories)
+    Software {
         #[command(subcommand)]
-        action: Option<AllProgramAction>,
+        subcommand: Option<SoftwareSubcommand>,
     },
-
-    /// Show only installed editors
-    Editors {
-        #[command(subcommand)]
-        action: Option<EditorAction>,
-    },
-
-    /// Show only installed utilities
-    Utilities {
-        #[command(subcommand)]
-        action: Option<UtilityAction>,
-    },
-
-    /// Show only language package managers
-    LanguagePackageManagers {
-        #[command(subcommand)]
-        action: Option<LangPkgMgrAction>,
-    },
-
-    /// Show only OS package managers
-    OsPackageManagers {
-        #[command(subcommand)]
-        action: Option<OsPkgMgrAction>,
-    },
-
-    /// Show only TTS clients
-    TtsClients {
-        #[command(subcommand)]
-        action: Option<TtsClientAction>,
-    },
-
-    /// Show only terminal apps
-    TerminalApps {
-        #[command(subcommand)]
-        action: Option<TerminalAppAction>,
-    },
-
-    /// Show only headless audio players
-    AudioPlayers {
-        #[command(subcommand)]
-        action: Option<AudioAction>,
-    },
-
-    /// Show only AI agent/CLI tools
-    Agents {
-        #[command(subcommand)]
-        action: Option<AgentAction>,
-    },
-
-    /// Show only desktop notification helpers
-    NotificationHelpers,
 
     /// Show only system services (init system and service list)
     Services {
@@ -437,7 +463,7 @@ pub enum Commands {
         no_error: bool,
 
         /// Message to display when no results found
-        #[arg(long, value_name = "MESSAGE")]
+        #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
         on_error: Option<String>,
     },
 
@@ -471,16 +497,26 @@ impl Commands {
             Commands::Repo { .. } => OutputFilter::Repo,
             Commands::Files { .. } => OutputFilter::Files,
             Commands::Docs { .. } => OutputFilter::Docs,
-            Commands::Programs { .. } => OutputFilter::Programs,
-            Commands::Editors { .. } => OutputFilter::Editors,
-            Commands::Utilities { .. } => OutputFilter::Utilities,
-            Commands::LanguagePackageManagers { .. } => OutputFilter::LanguagePackageManagers,
-            Commands::OsPackageManagers { .. } => OutputFilter::OsPackageManagers,
-            Commands::TtsClients { .. } => OutputFilter::TtsClients,
-            Commands::TerminalApps { .. } => OutputFilter::TerminalApps,
-            Commands::AudioPlayers { .. } => OutputFilter::HeadlessAudio,
-            Commands::Agents { .. } => OutputFilter::AiClients,
-            Commands::NotificationHelpers => OutputFilter::NotificationHelpers,
+            Commands::Software { subcommand } => match subcommand {
+                None => OutputFilter::Programs,
+                Some(SoftwareSubcommand::Editors { .. }) => OutputFilter::Editors,
+                Some(SoftwareSubcommand::Utilities { .. }) => OutputFilter::Utilities,
+                Some(SoftwareSubcommand::LanguagePackageManagers { .. }) => {
+                    OutputFilter::LanguagePackageManagers
+                }
+                Some(SoftwareSubcommand::OsPackageManagers { .. }) => {
+                    OutputFilter::OsPackageManagers
+                }
+                Some(SoftwareSubcommand::TtsClients { .. }) => OutputFilter::TtsClients,
+                Some(SoftwareSubcommand::TerminalApps { .. }) => OutputFilter::TerminalApps,
+                Some(SoftwareSubcommand::AudioPlayers { .. }) => OutputFilter::HeadlessAudio,
+                Some(SoftwareSubcommand::Agents { .. }) => OutputFilter::AiClients,
+                Some(SoftwareSubcommand::NotificationHelpers) => OutputFilter::NotificationHelpers,
+                Some(SoftwareSubcommand::TestRunners) => OutputFilter::TestRunners,
+                Some(SoftwareSubcommand::Install(_)) | Some(SoftwareSubcommand::InstallPlan(_)) => {
+                    OutputFilter::Programs
+                }
+            },
             Commands::Services { .. } => OutputFilter::Services,
             Commands::BlastRadius { .. } => OutputFilter::BlastRadius,
             Commands::Just { .. } => OutputFilter::Just,
@@ -489,18 +525,7 @@ impl Commands {
 
     /// Check if this is a programs-related command.
     pub fn is_programs_mode(&self) -> bool {
-        matches!(
-            self,
-            Commands::Programs { .. }
-                | Commands::Editors { .. }
-                | Commands::Utilities { .. }
-                | Commands::LanguagePackageManagers { .. }
-                | Commands::OsPackageManagers { .. }
-                | Commands::TtsClients { .. }
-                | Commands::TerminalApps { .. }
-                | Commands::AudioPlayers { .. }
-                | Commands::Agents { .. }
-        )
+        matches!(self, Commands::Software { .. })
     }
 
     /// Returns true if this command has a plain `install` action (not `install-plan`).
@@ -531,59 +556,107 @@ impl Commands {
     pub fn install_command_args(&self) -> Option<(InstallCommandKind, &InstallCommandArgs)> {
         use Commands::*;
         match self {
-            Programs {
-                action: Some(AllProgramAction::Install(args)),
+            Software {
+                subcommand: Some(SoftwareSubcommand::Install(args)),
             } => Some((InstallCommandKind::Install, args)),
-            Programs {
-                action: Some(AllProgramAction::InstallPlan(args)),
+            Software {
+                subcommand: Some(SoftwareSubcommand::InstallPlan(args)),
             } => Some((InstallCommandKind::InstallPlan, args)),
-            Editors {
-                action: Some(EditorAction::Install(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::Editors {
+                        action: Some(EditorAction::Install(args)),
+                    }),
             } => Some((InstallCommandKind::Install, args)),
-            Editors {
-                action: Some(EditorAction::InstallPlan(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::Editors {
+                        action: Some(EditorAction::InstallPlan(args)),
+                    }),
             } => Some((InstallCommandKind::InstallPlan, args)),
-            Utilities {
-                action: Some(UtilityAction::Install(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::Utilities {
+                        action: Some(UtilityAction::Install(args)),
+                    }),
             } => Some((InstallCommandKind::Install, args)),
-            Utilities {
-                action: Some(UtilityAction::InstallPlan(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::Utilities {
+                        action: Some(UtilityAction::InstallPlan(args)),
+                    }),
             } => Some((InstallCommandKind::InstallPlan, args)),
-            LanguagePackageManagers {
-                action: Some(LangPkgMgrAction::Install(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::LanguagePackageManagers {
+                        action: Some(LangPkgMgrAction::Install(args)),
+                    }),
             } => Some((InstallCommandKind::Install, args)),
-            LanguagePackageManagers {
-                action: Some(LangPkgMgrAction::InstallPlan(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::LanguagePackageManagers {
+                        action: Some(LangPkgMgrAction::InstallPlan(args)),
+                    }),
             } => Some((InstallCommandKind::InstallPlan, args)),
-            OsPackageManagers {
-                action: Some(OsPkgMgrAction::Install(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::OsPackageManagers {
+                        action: Some(OsPkgMgrAction::Install(args)),
+                    }),
             } => Some((InstallCommandKind::Install, args)),
-            OsPackageManagers {
-                action: Some(OsPkgMgrAction::InstallPlan(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::OsPackageManagers {
+                        action: Some(OsPkgMgrAction::InstallPlan(args)),
+                    }),
             } => Some((InstallCommandKind::InstallPlan, args)),
-            TtsClients {
-                action: Some(TtsClientAction::Install(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::TtsClients {
+                        action: Some(TtsClientAction::Install(args)),
+                    }),
             } => Some((InstallCommandKind::Install, args)),
-            TtsClients {
-                action: Some(TtsClientAction::InstallPlan(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::TtsClients {
+                        action: Some(TtsClientAction::InstallPlan(args)),
+                    }),
             } => Some((InstallCommandKind::InstallPlan, args)),
-            TerminalApps {
-                action: Some(TerminalAppAction::Install(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::TerminalApps {
+                        action: Some(TerminalAppAction::Install(args)),
+                    }),
             } => Some((InstallCommandKind::Install, args)),
-            TerminalApps {
-                action: Some(TerminalAppAction::InstallPlan(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::TerminalApps {
+                        action: Some(TerminalAppAction::InstallPlan(args)),
+                    }),
             } => Some((InstallCommandKind::InstallPlan, args)),
-            AudioPlayers {
-                action: Some(AudioAction::Install(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::AudioPlayers {
+                        action: Some(AudioAction::Install(args)),
+                    }),
             } => Some((InstallCommandKind::Install, args)),
-            AudioPlayers {
-                action: Some(AudioAction::InstallPlan(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::AudioPlayers {
+                        action: Some(AudioAction::InstallPlan(args)),
+                    }),
             } => Some((InstallCommandKind::InstallPlan, args)),
-            Agents {
-                action: Some(AgentAction::Install(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::Agents {
+                        action: Some(AgentAction::Install(args)),
+                    }),
             } => Some((InstallCommandKind::Install, args)),
-            Agents {
-                action: Some(AgentAction::InstallPlan(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::Agents {
+                        action: Some(AgentAction::InstallPlan(args)),
+                    }),
             } => Some((InstallCommandKind::InstallPlan, args)),
             _ => None,
         }
@@ -632,9 +705,6 @@ impl Commands {
             Commands::Filesystem {
                 latest_versions: true,
                 ..
-            } | Commands::Repo {
-                latest_versions: true,
-                ..
             }
         )
     }
@@ -648,13 +718,18 @@ impl Commands {
                 src,
                 has_prompt,
                 blast_radius,
+                package_area,
+                package,
                 filter,
+                ..
             } => DocsFilter {
                 readme: *readme,
                 plan: *plan,
                 src: *src,
                 has_prompt: *has_prompt,
                 blast_radius: *blast_radius,
+                package_area: package_area.clone(),
+                package: package.clone(),
                 filter: filter.clone(),
             },
             _ => DocsFilter::default(),
@@ -674,27 +749,15 @@ impl Commands {
     /// Normalize a Repo command into a RepoAction for dispatch.
     pub fn to_repo_action(&self) -> Option<RepoAction> {
         match self {
-            Commands::Repo {
-                latest_versions,
-                filter,
-                repo_subcommand,
-            } => Some(match repo_subcommand {
-                None => RepoAction::Structure {
-                    filter: filter.clone(),
-                    latest_versions: *latest_versions,
-                    package: None,
-                    package_area: None,
-                },
+            Commands::Repo { repo_subcommand } => Some(match repo_subcommand {
+                None => RepoAction::Default,
                 Some(RepoSubcommand::Structure {
-                    filter: sub_filter,
+                    filter,
+                    latest_versions,
                     package,
                     package_area,
                 }) => RepoAction::Structure {
-                    filter: if sub_filter.is_empty() {
-                        filter.clone()
-                    } else {
-                        sub_filter.clone()
-                    },
+                    filter: filter.clone(),
                     latest_versions: *latest_versions,
                     package: package.clone(),
                     package_area: package_area.clone(),
@@ -705,12 +768,16 @@ impl Commands {
                     compact,
                     package,
                     package_area,
+                    branch,
+                    worktree,
                 }) => RepoAction::GitStatus {
                     history: *history,
                     refresh_remotes: *refresh_remotes,
                     compact: *compact,
                     package: package.clone(),
                     package_area: package_area.clone(),
+                    branch: branch.clone(),
+                    worktree: worktree.clone(),
                 },
                 Some(RepoSubcommand::Hash { sha }) => RepoAction::Hash { sha: sha.clone() },
                 Some(RepoSubcommand::StagedFiles(args)) => RepoAction::StagedFiles(args.clone()),
@@ -731,20 +798,36 @@ impl Commands {
                 Some(RepoSubcommand::Remote { remote }) => RepoAction::Remote {
                     remote: remote.clone(),
                 },
-                Some(RepoSubcommand::Deps {
+                Some(RepoSubcommand::Branches { refresh_remotes }) => RepoAction::Branches {
+                    refresh_remotes: *refresh_remotes,
+                },
+                Some(RepoSubcommand::PackageDependencies {
                     ui,
+                    svg,
                     filter: sub_filter,
                     package,
                     package_area,
-                }) => RepoAction::Deps {
-                    filter: if sub_filter.is_empty() {
-                        filter.clone()
-                    } else {
-                        sub_filter.clone()
-                    },
+                    width,
+                    orientation,
+                }) => RepoAction::PackageDependencies {
+                    filter: sub_filter.clone(),
                     ui: *ui,
+                    svg: *svg,
                     package: package.clone(),
                     package_area: package_area.clone(),
+                    width: width.clone(),
+                    orientation: orientation.map(|o| o.as_str().to_string()),
+                },
+                Some(RepoSubcommand::Dependencies {
+                    dependencies,
+                    dev_dependencies,
+                    peer_dependencies,
+                    optional_dependencies,
+                }) => RepoAction::Dependencies {
+                    dependencies: *dependencies,
+                    dev_dependencies: *dev_dependencies,
+                    peer_dependencies: *peer_dependencies,
+                    optional_dependencies: *optional_dependencies,
                 },
                 Some(RepoSubcommand::Packages {
                     filter: sub_filter,
@@ -752,12 +835,10 @@ impl Commands {
                     package_area,
                     md,
                     list,
+                    no_error,
+                    on_error,
                 }) => RepoAction::Packages {
-                    filter: if sub_filter.is_empty() {
-                        filter.clone()
-                    } else {
-                        sub_filter.clone()
-                    },
+                    filter: sub_filter.clone(),
                     package: package.clone(),
                     package_area: package_area.clone(),
                     format: if *md {
@@ -767,6 +848,8 @@ impl Commands {
                     } else {
                         PackagesFormat::Csv
                     },
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
                 },
                 Some(RepoSubcommand::PackageAreas {
                     filter: sub_filter,
@@ -774,12 +857,10 @@ impl Commands {
                     package_area,
                     md,
                     list,
+                    no_error,
+                    on_error,
                 }) => RepoAction::PackageAreas {
-                    filter: if sub_filter.is_empty() {
-                        filter.clone()
-                    } else {
-                        sub_filter.clone()
-                    },
+                    filter: sub_filter.clone(),
                     package: package.clone(),
                     package_area: package_area.clone(),
                     format: if *md {
@@ -789,6 +870,8 @@ impl Commands {
                     } else {
                         PackagesFormat::Csv
                     },
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
                 },
                 Some(RepoSubcommand::Package { no_error, on_error }) => RepoAction::Package {
                     no_error: *no_error,
@@ -800,16 +883,16 @@ impl Commands {
                         on_error: on_error.clone(),
                     }
                 }
+                Some(RepoSubcommand::Area { no_error, on_error }) => RepoAction::Area {
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
+                },
                 Some(RepoSubcommand::DirtyPackages {
                     filter: sub_filter,
                     package,
                     package_area,
                 }) => RepoAction::DirtyPackages {
-                    filter: if sub_filter.is_empty() {
-                        filter.clone()
-                    } else {
-                        sub_filter.clone()
-                    },
+                    filter: sub_filter.clone(),
                     package: package.clone(),
                     package_area: package_area.clone(),
                 },
@@ -818,11 +901,7 @@ impl Commands {
                     package,
                     package_area,
                 }) => RepoAction::DirtyPackageAreas {
-                    filter: if sub_filter.is_empty() {
-                        filter.clone()
-                    } else {
-                        sub_filter.clone()
-                    },
+                    filter: sub_filter.clone(),
                     package: package.clone(),
                     package_area: package_area.clone(),
                 },
@@ -831,11 +910,7 @@ impl Commands {
                     package,
                     package_area,
                 }) => RepoAction::StagedPackages {
-                    filter: if sub_filter.is_empty() {
-                        filter.clone()
-                    } else {
-                        sub_filter.clone()
-                    },
+                    filter: sub_filter.clone(),
                     package: package.clone(),
                     package_area: package_area.clone(),
                 },
@@ -844,11 +919,7 @@ impl Commands {
                     package,
                     package_area,
                 }) => RepoAction::StagedPackageAreas {
-                    filter: if sub_filter.is_empty() {
-                        filter.clone()
-                    } else {
-                        sub_filter.clone()
-                    },
+                    filter: sub_filter.clone(),
                     package: package.clone(),
                     package_area: package_area.clone(),
                 },
@@ -857,11 +928,7 @@ impl Commands {
                     package,
                     package_area,
                 }) => RepoAction::UnstagedPackages {
-                    filter: if sub_filter.is_empty() {
-                        filter.clone()
-                    } else {
-                        sub_filter.clone()
-                    },
+                    filter: sub_filter.clone(),
                     package: package.clone(),
                     package_area: package_area.clone(),
                 },
@@ -870,11 +937,7 @@ impl Commands {
                     package,
                     package_area,
                 }) => RepoAction::UnstagedPackageAreas {
-                    filter: if sub_filter.is_empty() {
-                        filter.clone()
-                    } else {
-                        sub_filter.clone()
-                    },
+                    filter: sub_filter.clone(),
                     package: package.clone(),
                     package_area: package_area.clone(),
                 },
@@ -954,6 +1017,48 @@ impl Commands {
                     no_error: *no_error,
                     on_error: on_error.clone(),
                 },
+                Some(RepoSubcommand::Worktrees { md, list, csv }) => RepoAction::Worktrees {
+                    md: *md,
+                    list: *list,
+                    csv: *csv,
+                    verbose: false,
+                },
+                Some(RepoSubcommand::Name) => RepoAction::Name,
+                Some(RepoSubcommand::IsMonorepo { no_error }) => RepoAction::IsMonorepo {
+                    no_error: *no_error,
+                },
+                Some(RepoSubcommand::PackageCount) => RepoAction::PackageCount,
+                Some(RepoSubcommand::PackageManager { csv, list, md }) => {
+                    RepoAction::PackageManager {
+                        csv: *csv,
+                        list: *list,
+                        md: *md,
+                    }
+                }
+                Some(RepoSubcommand::Version {
+                    csv,
+                    list,
+                    md,
+                    all,
+                    package,
+                    package_area,
+                    no_error,
+                    on_error,
+                }) => RepoAction::Version {
+                    csv: *csv,
+                    list: *list,
+                    md: *md,
+                    all: *all,
+                    package: package.clone(),
+                    package_area: package_area.clone(),
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
+                },
+                Some(RepoSubcommand::TestRunner { csv, list, md }) => RepoAction::TestRunner {
+                    csv: *csv,
+                    list: *list,
+                    md: *md,
+                },
             }),
             _ => None,
         }
@@ -973,6 +1078,10 @@ pub struct DocsFilter {
     pub has_prompt: bool,
     /// Show only documents that have a blast_radius frontmatter key.
     pub blast_radius: bool,
+    /// Package areas to include (OR logic); empty means no filter.
+    pub package_area: Vec<String>,
+    /// Package names to include (OR logic); empty means no filter.
+    pub package: Vec<String>,
     /// Substring filter on filepath/filename (case-insensitive).
     pub filter: Vec<String>,
 }
@@ -1077,7 +1186,7 @@ Commands:
     sniff audio-devices   Show audio devices
 
   Repository & Filesystem:
-    sniff repo            Show repository structure (use --help for all repo commands)
+    sniff repo            Show repository name (--json for the scope-complete aggregate; --help for all repo commands)
     sniff filesystem      Show full filesystem report
     sniff language        Show language detection
     sniff files           Show file associations
@@ -1085,12 +1194,18 @@ Commands:
     sniff blast-radius    Find docs affected by changed source files
 
   Programs:
-    sniff programs                        Show all installed programs
-    sniff programs install-plan <name>    Explain how a program would be installed
-    sniff editors                         Show editors (supports 'install' and 'install-plan')
-    sniff utilities                       Show utilities
-    sniff agents                          Show AI agent CLI tools
-    sniff notification-helpers            Show desktop notification helpers
+    sniff software                                      Show all installed programs
+    sniff software install-plan <name>                  Explain how a program would be installed
+    sniff software editors                              Show editors (supports 'install' and 'install-plan')
+    sniff software utilities                            Show utilities
+    sniff software agents                               Show AI agent CLI tools
+    sniff software notification-helpers                 Show desktop notification helpers
+    sniff software language-package-managers            Show language package managers
+    sniff software os-package-managers                  Show OS package managers
+    sniff software tts-clients                          Show TTS clients
+    sniff software terminal-apps                        Show terminal apps
+    sniff software audio-players                        Show headless audio players
+    sniff software test-runners                         Show test runners
 
   Services:
     sniff services        Show running services
@@ -1110,9 +1225,27 @@ Output modes:
 ";
 
 pub const REPO_AFTER_HELP: &str = "\
+Identity:
+  sniff repo name                     Repository name (plain text)
+  sniff repo name -v                  Repository name only (verbose styling, no extra fields)
+  sniff repo -v                       Rich one-liner: name + version + language/package count
+  sniff repo is-monorepo              Monorepo label (e.g. `cargo`; `false` if not; exits non-zero when false)
+  sniff repo is-monorepo --json       { \"is_monorepo\": true, \"authority\": \"...\", \"orchestrators\": [...] }
+  sniff repo is-monorepo --no-error   Exit 0 while still printing `false` outside a monorepo
+  sniff repo package-count            Number of discovered packages (or { \"package-count\": N } with --json)
+  sniff repo package-count --json     { \"package-count\": 48 }
+  sniff repo package-manager          Package manager(s) for the current context
+  sniff repo version                  Declared version(s) for the current package/area/repo context
+  sniff repo version --json           { \"versions\": [ { \"version\": \"0.1.0\", \"packages\": [...], \"sources\": [...] } ] }
+  sniff repo version --all            All packages, regardless of CWD
+  sniff repo version --package <name> Scope to one package
+  sniff repo version --package-area <name>
+                                       Scope to one package area
+
 Structure:
-  sniff repo                          Show repository/monorepo structure
-  sniff repo biscuit darkmatter       Filter to packages matching \"biscuit\" or \"darkmatter\"
+  sniff repo structure                Show repository/monorepo structure
+  sniff repo structure biscuit darkmatter
+                                      Filter to packages matching \"biscuit\" or \"darkmatter\"
   sniff repo structure @sniff         Filter to packages in \"sniff\" area
 
 Git:
@@ -1148,9 +1281,10 @@ Languages:
   sniff repo language --json          Same, as { \"language\": \"Rust\" }
 
 Dependencies:
-  sniff repo deps                     Text dependency list
-  sniff repo deps --ui                Mermaid dependency diagram
-  sniff repo --latest-versions        Check registries for updates
+  sniff repo package-dependencies                     Text dependency list
+  sniff repo package-dependencies --ui                Mermaid dependency diagram
+  sniff repo structure --latest-versions
+                                      Check registries for updates
 ";
 
 pub const COMPLETIONS_HELP: &str = "\
@@ -1264,6 +1398,34 @@ mod tests {
         }
 
         #[test]
+        fn docs_package_area_and_package_flags_parse() {
+            let cli = parse_args(&[
+                "docs",
+                "--package-area",
+                "sniff",
+                "--package-area",
+                "claudine",
+                "--package",
+                "sniff-lib",
+            ])
+            .unwrap();
+            if let Some(Commands::Docs {
+                package_area,
+                package,
+                ..
+            }) = cli.command
+            {
+                assert_eq!(
+                    package_area,
+                    vec!["sniff".to_string(), "claudine".to_string()]
+                );
+                assert_eq!(package, vec!["sniff-lib".to_string()]);
+            } else {
+                panic!("Expected Docs command");
+            }
+        }
+
+        #[test]
         fn files_association_filter_parse() {
             let cli = parse_args(&["files", "--association", "documentation"]).unwrap();
             if let Some(Commands::Files {
@@ -1276,37 +1438,55 @@ mod tests {
         }
 
         #[test]
-        fn repo_flags_and_filter_parse() {
-            let cli = parse_args(&["repo", "--latest-versions", "@sniff"]).unwrap();
+        fn repo_structure_flags_and_filter_parse() {
+            let cli = parse_args(&["repo", "structure", "--latest-versions", "@sniff"]).unwrap();
             if let Some(Commands::Repo {
-                filter,
-                latest_versions,
-                ..
+                repo_subcommand:
+                    Some(RepoSubcommand::Structure {
+                        filter,
+                        latest_versions,
+                        ..
+                    }),
             }) = cli.command
             {
                 assert!(latest_versions);
                 assert_eq!(filter, vec!["@sniff".to_string()]);
             } else {
-                panic!("Expected Repo command");
+                panic!("Expected Repo structure command");
             }
         }
 
         #[test]
+        fn repo_unknown_positional_errors() {
+            let result = parse_args(&["repo", "dfd"]);
+            assert!(result.is_err(), "Expected error for unknown subcommand");
+        }
+
+        #[test]
+        fn repo_no_subcommand_is_default() {
+            let cli = parse_args(&["repo"]).unwrap();
+            let Some(cmd) = &cli.command else {
+                panic!("Expected Repo command")
+            };
+            assert!(matches!(cmd.to_repo_action(), Some(RepoAction::Default)));
+        }
+
+        #[test]
         fn repo_subcommands_parse() {
-            let cli = parse_args(&["repo", "deps"]).unwrap();
+            let cli = parse_args(&["repo", "package-dependencies"]).unwrap();
             assert!(matches!(
                 cli.command,
                 Some(Commands::Repo {
-                    repo_subcommand: Some(RepoSubcommand::Deps { ui: false, .. }),
+                    repo_subcommand: Some(RepoSubcommand::PackageDependencies { ui: false, .. }),
                     ..
                 })
             ));
 
-            let cli = parse_args(&["repo", "deps", "--ui"]).unwrap();
+            let cli = parse_args(&["repo", "package-dependencies", "--ui"]).unwrap();
             assert!(matches!(
                 cli.command,
                 Some(Commands::Repo {
-                    repo_subcommand: Some(RepoSubcommand::Deps { ui: true, .. }),
+                    repo_subcommand: Some(RepoSubcommand::PackageDependencies { ui: true, .. }),
                     ..
                 })
             ));
@@ -1543,65 +1723,92 @@ mod tests {
         }
 
         #[test]
-        fn editors_install_no_name_parses() {
-            let cli = parse_args(&["editors", "install"]).unwrap();
-            if let Some(Commands::Editors {
-                action: Some(EditorAction::Install(args)),
+        fn software_editors_install_no_name_parses() {
+            let cli = parse_args(&["software", "editors", "install"]).unwrap();
+            if let Some(Commands::Software {
+                subcommand:
+                    Some(SoftwareSubcommand::Editors {
+                        action: Some(EditorAction::Install(args)),
+                    }),
             }) = cli.command
             {
                 assert!(args.program.is_none());
             } else {
-                panic!("Expected Editors install with no program");
+                panic!("Expected software editors install with no program");
             }
         }
 
         #[test]
-        fn editors_install_with_name_parses() {
-            let cli = parse_args(&["editors", "install", "vim"]).unwrap();
-            if let Some(Commands::Editors {
-                action: Some(EditorAction::Install(args)),
+        fn software_editors_install_with_name_parses() {
+            let cli = parse_args(&["software", "editors", "install", "vim"]).unwrap();
+            if let Some(Commands::Software {
+                subcommand:
+                    Some(SoftwareSubcommand::Editors {
+                        action: Some(EditorAction::Install(args)),
+                    }),
             }) = cli.command
             {
                 assert_eq!(args.program.as_deref(), Some("vim"));
             } else {
-                panic!("Expected Editors install with program name");
+                panic!("Expected software editors install with program name");
             }
         }
 
         #[test]
-        fn editors_without_action_parses() {
-            let cli = parse_args(&["editors"]).unwrap();
-            if let Some(Commands::Editors { action }) = cli.command {
+        fn software_editors_without_action_parses() {
+            let cli = parse_args(&["software", "editors"]).unwrap();
+            if let Some(Commands::Software {
+                subcommand: Some(SoftwareSubcommand::Editors { action }),
+            }) = cli.command
+            {
                 assert!(action.is_none());
             } else {
-                panic!("Expected Editors with no action");
+                panic!("Expected software editors with no action");
             }
         }
 
         #[test]
-        fn programs_install_no_name_parses() {
-            let cli = parse_args(&["programs", "install"]).unwrap();
-            if let Some(Commands::Programs {
-                action: Some(AllProgramAction::Install(args)),
+        fn software_install_no_name_parses() {
+            let cli = parse_args(&["software", "install"]).unwrap();
+            if let Some(Commands::Software {
+                subcommand: Some(SoftwareSubcommand::Install(args)),
             }) = cli.command
             {
                 assert!(args.program.is_none());
             } else {
-                panic!("Expected Programs install with no program");
+                panic!("Expected software install with no program");
             }
         }
 
         #[test]
-        fn programs_install_with_name_parses() {
-            let cli = parse_args(&["programs", "install", "nvim"]).unwrap();
-            if let Some(Commands::Programs {
-                action: Some(AllProgramAction::Install(args)),
+        fn software_install_with_name_parses() {
+            let cli = parse_args(&["software", "install", "nvim"]).unwrap();
+            if let Some(Commands::Software {
+                subcommand: Some(SoftwareSubcommand::Install(args)),
             }) = cli.command
             {
                 assert_eq!(args.program.as_deref(), Some("nvim"));
             } else {
-                panic!("Expected Programs install with program name");
+                panic!("Expected software install with program name");
             }
+        }
+
+        #[test]
+        fn old_top_level_programs_command_rejected() {
+            let result = parse_args(&["programs"]);
+            assert!(result.is_err(), "old top-level 'programs' must be rejected");
+        }
+
+        #[test]
+        fn old_top_level_editors_command_rejected() {
+            let result = parse_args(&["editors"]);
+            assert!(result.is_err(), "old top-level 'editors' must be rejected");
+        }
+
+        #[test]
+        fn old_top_level_agents_command_rejected() {
+            let result = parse_args(&["agents"]);
+            assert!(result.is_err(), "old top-level 'agents' must be rejected");
         }
     }
 
@@ -1618,8 +1825,6 @@ mod tests {
             );
             assert_eq!(
                 Commands::Repo {
-                    latest_versions: false,
-                    filter: vec![],
                     repo_subcommand: None,
                 }
                 .to_output_filter(),
@@ -1630,8 +1835,15 @@ mod tests {
                 OutputFilter::Files
             );
             assert_eq!(
-                Commands::Programs { action: None }.to_output_filter(),
+                Commands::Software { subcommand: None }.to_output_filter(),
                 OutputFilter::Programs
+            );
+            assert_eq!(
+                Commands::Software {
+                    subcommand: Some(SoftwareSubcommand::Editors { action: None }),
+                }
+                .to_output_filter(),
+                OutputFilter::Editors
             );
             assert_eq!(
                 Commands::Services {
@@ -1644,7 +1856,12 @@ mod tests {
 
         #[test]
         fn programs_mode_accessors_work() {
-            let cmd = Commands::Programs { action: None };
+            let cmd = Commands::Software { subcommand: None };
+            assert!(cmd.is_programs_mode());
+
+            let cmd = Commands::Software {
+                subcommand: Some(SoftwareSubcommand::Editors { action: None }),
+            };
             assert!(cmd.is_programs_mode());
 
             let non_programs = Commands::Cpu;
@@ -1653,16 +1870,18 @@ mod tests {
 
         #[test]
         fn is_install_action_returns_true() {
-            let cmd = Commands::Editors {
-                action: Some(EditorAction::Install(InstallCommandArgs {
-                    program: None,
-                    ..Default::default()
-                })),
+            let cmd = Commands::Software {
+                subcommand: Some(SoftwareSubcommand::Editors {
+                    action: Some(EditorAction::Install(InstallCommandArgs {
+                        program: None,
+                        ..Default::default()
+                    })),
+                }),
             };
             assert!(cmd.is_install_action());
 
-            let cmd = Commands::Programs {
-                action: Some(AllProgramAction::Install(InstallCommandArgs {
+            let cmd = Commands::Software {
+                subcommand: Some(SoftwareSubcommand::Install(InstallCommandArgs {
                     program: Some("vim".to_string()),
                     ..Default::default()
                 })),
@@ -1672,7 +1891,9 @@ mod tests {
 
         #[test]
         fn is_install_action_returns_false() {
-            let cmd = Commands::Editors { action: None };
+            let cmd = Commands::Software {
+                subcommand: Some(SoftwareSubcommand::Editors { action: None }),
+            };
             assert!(!cmd.is_install_action());
 
             let cmd = Commands::Cpu;
@@ -1681,36 +1902,43 @@ mod tests {
 
         #[test]
         fn install_program_name_extracts_name() {
-            let cmd = Commands::Editors {
-                action: Some(EditorAction::Install(InstallCommandArgs {
-                    program: Some("vim".to_string()),
-                    ..Default::default()
-                })),
+            let cmd = Commands::Software {
+                subcommand: Some(SoftwareSubcommand::Editors {
+                    action: Some(EditorAction::Install(InstallCommandArgs {
+                        program: Some("vim".to_string()),
+                        ..Default::default()
+                    })),
+                }),
             };
             assert_eq!(cmd.install_program_name(), Some("vim"));
 
-            let cmd = Commands::Editors {
-                action: Some(EditorAction::Install(InstallCommandArgs {
-                    program: None,
-                    ..Default::default()
-                })),
+            let cmd = Commands::Software {
+                subcommand: Some(SoftwareSubcommand::Editors {
+                    action: Some(EditorAction::Install(InstallCommandArgs {
+                        program: None,
+                        ..Default::default()
+                    })),
+                }),
             };
             assert_eq!(cmd.install_program_name(), None);
 
-            let cmd = Commands::Editors { action: None };
+            let cmd = Commands::Software {
+                subcommand: Some(SoftwareSubcommand::Editors { action: None }),
+            };
             assert_eq!(cmd.install_program_name(), None);
         }
 
         #[test]
         fn repo_accessors_work() {
+            // Structure with filter and latest_versions
             let cmd = Commands::Repo {
-                latest_versions: true,
-                filter: vec!["biscuit".to_string()],
-                repo_subcommand: None,
+                repo_subcommand: Some(RepoSubcommand::Structure {
+                    filter: vec!["biscuit".to_string()],
+                    latest_versions: true,
+                    package: None,
+                    package_area: None,
+                }),
             };
-
-            assert!(cmd.latest_versions());
-            // Normalization captures filter
             if let Some(RepoAction::Structure {
                 filter,
                 latest_versions,
@@ -1723,44 +1951,26 @@ mod tests {
                 panic!("Expected Structure action");
             }
 
-            // Subcommand filter takes precedence
+            // Package-dependencies subcommand carries its own filter.
             let cmd = Commands::Repo {
-                latest_versions: false,
-                filter: vec!["top-level".to_string()],
-                repo_subcommand: Some(RepoSubcommand::Deps {
+                repo_subcommand: Some(RepoSubcommand::PackageDependencies {
                     ui: true,
+                    svg: false,
                     filter: vec!["sub-level".to_string()],
                     package: None,
                     package_area: None,
+                    width: None,
+                    orientation: None,
                 }),
             };
-            if let Some(RepoAction::Deps { filter, ui, .. }) = cmd.to_repo_action() {
+            if let Some(RepoAction::PackageDependencies { filter, ui, .. }) = cmd.to_repo_action() {
                 assert_eq!(filter, vec!["sub-level".to_string()]);
                 assert!(ui);
             } else {
-                panic!("Expected Deps action");
-            }
-
-            // Falls back to top-level filter when subcommand has none
-            let cmd = Commands::Repo {
-                latest_versions: false,
-                filter: vec!["top-level".to_string()],
-                repo_subcommand: Some(RepoSubcommand::Deps {
-                    ui: false,
-                    filter: vec![],
-                    package: None,
-                    package_area: None,
-                }),
-            };
-            if let Some(RepoAction::Deps { filter, .. }) = cmd.to_repo_action() {
-                assert_eq!(filter, vec!["top-level".to_string()]);
-            } else {
-                panic!("Expected Deps action");
+                panic!("Expected PackageDependencies action");
             }
 
             let cmd = Commands::Repo {
-                latest_versions: false,
-                filter: vec![],
                 repo_subcommand: Some(RepoSubcommand::RecentCommits {
                     period: Some("1w".to_string()),
                     actions: vec![RecentCommitActionArg::Feat, RecentCommitActionArg::Fix],
@@ -1792,12 +2002,17 @@ mod tests {
                 src: true,
                 has_prompt: false,
                 blast_radius: false,
+                paths_only: false,
+                package_area: vec!["sniff".to_string()],
+                package: vec!["sniff-lib".to_string()],
                 filter: vec!["homelab".to_string()],
             };
             let filter = docs.docs_filter();
             assert!(filter.readme);
             assert!(filter.src);
             assert!(!filter.blast_radius);
+            assert_eq!(filter.package_area, vec!["sniff".to_string()]);
+            assert_eq!(filter.package, vec!["sniff-lib".to_string()]);
             assert_eq!(filter.filter, vec!["homelab".to_string()]);
         }
 
@@ -1857,8 +2072,16 @@ mod tests {
             let git = parse_args(&["repo", "git-status", "--refresh-remotes"]).unwrap();
             assert!(git.command.as_ref().is_some_and(Commands::refresh_remotes));
 
-            let repo = parse_args(&["repo", "--latest-versions"]).unwrap();
-            assert!(repo.command.as_ref().is_some_and(Commands::latest_versions));
+            let repo = parse_args(&["repo", "structure", "--latest-versions"]).unwrap();
+            assert!(matches!(
+                repo.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::Structure {
+                        latest_versions: true,
+                        ..
+                    }),
+                })
+            ));
         }
     }
 
@@ -2023,7 +2246,7 @@ mod tests {
                 ..
             }) = cli.command
             {
-                assert_eq!(remote, "origin");
+                assert_eq!(remote, Some("origin".to_string()));
             } else {
                 panic!("Expected repo remote");
             }
@@ -2073,17 +2296,97 @@ mod tests {
                 panic!("Expected repo worktree --on-error");
             }
         }
+
+        #[test]
+        fn repo_worktrees_parses() {
+            let cli = parse_args(&["repo", "worktrees"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Worktrees { md, list, csv }),
+                ..
+            }) = cli.command
+            {
+                assert!(!md);
+                assert!(!list);
+                assert!(!csv);
+            } else {
+                panic!("Expected repo worktrees");
+            }
+        }
+
+        #[test]
+        fn repo_worktrees_md_parses() {
+            let cli = parse_args(&["repo", "worktrees", "--md"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Worktrees { md, list, csv }),
+                ..
+            }) = cli.command
+            {
+                assert!(md);
+                assert!(!list);
+                assert!(!csv);
+            } else {
+                panic!("Expected repo worktrees --md");
+            }
+        }
+
+        #[test]
+        fn repo_worktrees_list_parses() {
+            let cli = parse_args(&["repo", "worktrees", "--list"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Worktrees { md, list, csv }),
+                ..
+            }) = cli.command
+            {
+                assert!(!md);
+                assert!(list);
+                assert!(!csv);
+            } else {
+                panic!("Expected repo worktrees --list");
+            }
+        }
+
+        #[test]
+        fn repo_worktrees_csv_parses() {
+            let cli = parse_args(&["repo", "worktrees", "--csv"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Worktrees { md, list, csv }),
+                ..
+            }) = cli.command
+            {
+                assert!(!md);
+                assert!(!list);
+                assert!(csv);
+            } else {
+                panic!("Expected repo worktrees --csv");
+            }
+        }
+
+        #[test]
+        fn repo_worktrees_verbose_global_flag() {
+            let cli = parse_args(&["repo", "worktrees", "-v"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::Worktrees { .. }),
+                    ..
+                })
+            ));
+            assert_eq!(cli.verbose, 1);
+        }
     }
 
     mod repo_action_normalization {
         use super::*;
 
         #[test]
-        fn to_repo_action_structure_default() {
+        fn to_repo_action_structure() {
             let cmd = Commands::Repo {
-                latest_versions: true,
-                filter: vec!["biscuit".to_string()],
-                repo_subcommand: None,
+                repo_subcommand: Some(RepoSubcommand::Structure {
+                    filter: vec!["biscuit".to_string()],
+                    latest_versions: true,
+                    package: None,
+                    package_area: None,
+                }),
             };
             match cmd.to_repo_action() {
                 Some(RepoAction::Structure {
@@ -2099,16 +2402,32 @@ mod tests {
         }
 
         #[test]
+        fn to_repo_action_none_is_default() {
+            let cmd = Commands::Repo {
+                repo_subcommand: None,
+            };
+            assert!(matches!(cmd.to_repo_action(), Some(RepoAction::Default)));
+        }
+
+        #[test]
+        fn to_repo_action_name_is_name() {
+            let cmd = Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Name),
+            };
+            assert!(matches!(cmd.to_repo_action(), Some(RepoAction::Name)));
+        }
+
+        #[test]
         fn to_repo_action_git_status() {
             let cmd = Commands::Repo {
-                latest_versions: false,
-                filter: vec![],
                 repo_subcommand: Some(RepoSubcommand::GitStatus {
                     history: 25,
                     refresh_remotes: true,
                     compact: true,
                     package: Some("homelab".to_string()),
                     package_area: None,
+                    branch: None,
+                    worktree: None,
                 }),
             };
             match cmd.to_repo_action() {
@@ -2131,8 +2450,6 @@ mod tests {
         #[test]
         fn to_repo_action_pr() {
             let cmd = Commands::Repo {
-                latest_versions: false,
-                filter: vec![],
                 repo_subcommand: Some(RepoSubcommand::Pr {
                     status: sniff::remote::PullRequestState::Merged,
                 }),
@@ -2149,8 +2466,6 @@ mod tests {
         #[test]
         fn to_repo_action_worktree() {
             let cmd = Commands::Repo {
-                latest_versions: false,
-                filter: vec![],
                 repo_subcommand: Some(RepoSubcommand::Worktree {
                     no_error: true,
                     on_error: Some("msg".to_string()),
@@ -2162,6 +2477,90 @@ mod tests {
                     assert_eq!(on_error, Some("msg".to_string()));
                 }
                 _ => panic!("Expected Worktree action"),
+            }
+        }
+
+        #[test]
+        fn to_repo_action_worktrees() {
+            let cmd = Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Worktrees {
+                    md: false,
+                    list: true,
+                    csv: false,
+                }),
+            };
+            match cmd.to_repo_action() {
+                Some(RepoAction::Worktrees {
+                    md,
+                    list,
+                    csv,
+                    verbose,
+                }) => {
+                    assert!(!md);
+                    assert!(list);
+                    assert!(!csv);
+                    assert!(!verbose);
+                }
+                _ => panic!("Expected Worktrees action"),
+            }
+        }
+
+        #[test]
+        fn to_repo_action_is_monorepo() {
+            let cmd = Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::IsMonorepo { no_error: true }),
+            };
+            match cmd.to_repo_action() {
+                Some(RepoAction::IsMonorepo { no_error }) => assert!(no_error),
+                _ => panic!("Expected IsMonorepo action with no_error"),
+            }
+
+            let cmd = Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::IsMonorepo { no_error: false }),
+            };
+            match cmd.to_repo_action() {
+                Some(RepoAction::IsMonorepo { no_error }) => assert!(!no_error),
+                _ => panic!("Expected IsMonorepo action without no_error"),
+            }
+        }
+
+        #[test]
+        fn to_repo_action_package_count() {
+            let cmd = Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::PackageCount),
+            };
+            assert!(matches!(
+                cmd.to_repo_action(),
+                Some(RepoAction::PackageCount)
+            ));
+        }
+
+        #[test]
+        fn to_repo_action_version() {
+            let cmd = Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Version {
+                    csv: false,
+                    list: false,
+                    md: false,
+                    all: false,
+                    package: Some("app".to_string()),
+                    package_area: None,
+                    no_error: true,
+                    on_error: Some("msg".to_string()),
+                }),
+            };
+            match cmd.to_repo_action() {
+                Some(RepoAction::Version {
+                    no_error,
+                    on_error,
+                    package,
+                    ..
+                }) => {
+                    assert!(no_error);
+                    assert_eq!(on_error, Some("msg".to_string()));
+                    assert_eq!(package, Some("app".to_string()));
+                }
+                _ => panic!("Expected Version action"),
             }
         }
     }
@@ -2213,6 +2612,24 @@ mod tests {
         fn blast_radius_list_csv_conflict() {
             let result = parse_args(&["blast-radius", "--list", "--csv"]);
             assert!(result.is_err(), "--list and --csv should conflict");
+        }
+
+        #[test]
+        fn repo_worktrees_list_csv_conflict() {
+            let result = parse_args(&["repo", "worktrees", "--list", "--csv"]);
+            assert!(result.is_err(), "--list and --csv should conflict");
+        }
+
+        #[test]
+        fn repo_worktrees_md_format_conflicts() {
+            assert!(
+                parse_args(&["repo", "worktrees", "--md", "--list"]).is_err(),
+                "--md and --list should conflict"
+            );
+            assert!(
+                parse_args(&["repo", "worktrees", "--md", "--csv"]).is_err(),
+                "--md and --csv should conflict"
+            );
         }
 
         #[test]
@@ -2321,10 +2738,14 @@ mod tests {
         use super::*;
 
         #[test]
-        fn editors_install_parses_with_dry_run_and_yes() {
-            let cli = parse_args(&["editors", "install", "vim", "--dry-run", "-y"]).unwrap();
-            if let Some(Commands::Editors {
-                action: Some(EditorAction::Install(args)),
+        fn software_editors_install_parses_with_dry_run_and_yes() {
+            let cli =
+                parse_args(&["software", "editors", "install", "vim", "--dry-run", "-y"]).unwrap();
+            if let Some(Commands::Software {
+                subcommand:
+                    Some(SoftwareSubcommand::Editors {
+                        action: Some(EditorAction::Install(args)),
+                    }),
             }) = cli.command
             {
                 assert_eq!(args.program.as_deref(), Some("vim"));
@@ -2334,13 +2755,13 @@ mod tests {
                 assert!(!args.force);
                 assert!(args.via.is_none());
             } else {
-                panic!("Expected Editors install with InstallCommandArgs");
+                panic!("Expected software editors install with InstallCommandArgs");
             }
         }
 
         #[test]
-        fn editors_install_plan_parses() {
-            let cli = parse_args(&["editors", "install-plan", "vim"]).unwrap();
+        fn software_editors_install_plan_parses() {
+            let cli = parse_args(&["software", "editors", "install-plan", "vim"]).unwrap();
             assert!(cli.command.as_ref().unwrap().is_install_plan_action());
             assert_eq!(
                 cli.command.as_ref().unwrap().install_program_name(),
@@ -2349,8 +2770,9 @@ mod tests {
         }
 
         #[test]
-        fn editors_install_via_and_no_sudo_parse() {
+        fn software_editors_install_via_and_no_sudo_parse() {
             let cli = parse_args(&[
+                "software",
                 "editors",
                 "install",
                 "vim",
@@ -2360,15 +2782,18 @@ mod tests {
                 "--force",
             ])
             .unwrap();
-            if let Some(Commands::Editors {
-                action: Some(EditorAction::Install(args)),
+            if let Some(Commands::Software {
+                subcommand:
+                    Some(SoftwareSubcommand::Editors {
+                        action: Some(EditorAction::Install(args)),
+                    }),
             }) = cli.command
             {
                 assert_eq!(args.via.as_deref(), Some("brew"));
                 assert!(args.no_sudo);
                 assert!(args.force);
             } else {
-                panic!("Expected editors install with via+no_sudo+force");
+                panic!("Expected software editors install with via+no_sudo+force");
             }
         }
     }

@@ -532,6 +532,40 @@ fn validate_same_doc_fragment_with_interpolated_heading() {
     );
 }
 
+#[test]
+fn validate_file_links_skips_local_path_validation() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[
+            (
+                "root.md",
+                "::file-links docs/*.md\n\n::file-links --dir reports --depth 0\n",
+            ),
+            ("docs/readme.md", "# Readme\n"),
+            ("reports/q1.md", "# Q1\n"),
+        ],
+    );
+
+    let md = load_md(&dir, "root.md");
+    let options = ReferenceValidationOptions::default();
+    let report = md.validate_references(options).unwrap();
+
+    assert!(
+        report.is_valid(),
+        "file-links references should not trigger local-path validation errors, got issues: {:?}",
+        report.issues
+    );
+    assert_eq!(
+        report.references_scanned, 2,
+        "both file-links directives should be recorded as references"
+    );
+    assert_eq!(
+        report.references_valid, 2,
+        "both file-links references should be counted as valid"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  Graph-aware Phase 2 API tests (rec #9)
 // ═══════════════════════════════════════════════════════════════════
@@ -819,7 +853,7 @@ fn section_context_populated_in_graph() {
 
 #[test]
 fn file_tree_builds_from_real_document() {
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use darkmatter::markdown::reference::file_tree::FileTree;
 
     let dir = TempDir::new().unwrap();
@@ -857,7 +891,7 @@ fn file_tree_builds_from_real_document() {
 
 #[test]
 fn file_tree_follow_mode() {
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use darkmatter::markdown::reference::file_tree::FileTree;
 
     let dir = TempDir::new().unwrap();
@@ -889,7 +923,7 @@ fn file_tree_follow_mode() {
 
 #[test]
 fn file_tree_toc_linking_follow_mode() {
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use darkmatter::markdown::reference::file_tree::FileTree;
 
     let dir = TempDir::new().unwrap();
@@ -960,7 +994,7 @@ fn file_tree_toc_linking_follow_validate_catches_child_issues() {
 
 #[test]
 fn file_tree_epilogue_follow_mode() {
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use darkmatter::markdown::reference::file_tree::FileTree;
 
     let dir = TempDir::new().unwrap();
@@ -998,7 +1032,7 @@ fn file_tree_epilogue_follow_mode() {
 
 #[test]
 fn file_tree_multiple_prologues_follow_mode() {
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use darkmatter::markdown::reference::file_tree::FileTree;
 
     let dir = TempDir::new().unwrap();
@@ -1032,7 +1066,7 @@ fn file_tree_multiple_prologues_follow_mode() {
 
 #[test]
 fn file_tree_show_root_false_preserves_subtree() {
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use darkmatter::markdown::reference::file_tree::FileTree;
 
     let dir = TempDir::new().unwrap();

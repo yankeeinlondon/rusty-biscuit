@@ -1,9 +1,9 @@
 use color_eyre::eyre::{Result, WrapErr};
 
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
-use biscuit_terminal::utils::layout::{Alignment, Margin};
+use biscuit_terminal::utils::layout::{Alignment, Length, Edges};
 use clap::{Args, ValueEnum};
 use claudine::events::AgenticEvent;
 use claudine::linking::{LinkableResource, capabilities_for};
@@ -68,7 +68,7 @@ pub fn run(args: ProvidersArgs) -> Result<()> {
     ];
 
     let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
-    table.layout_mut().left_margin = Margin::Chars(1);
+    table.layout_mut().margin = Edges::x(Length::ch(1));
 
     for provider in PROVIDERS_DISPLAY_ORDER {
         let provider_cell: TableCellContent = if crate::log::is_plain()
@@ -120,7 +120,7 @@ fn run_describe(format: ProvidersFormat) -> Result<()> {
                 TableColumn::new("Skills").with_alignment(Alignment::Center),
             ];
             let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
-            table.layout_mut().left_margin = Margin::Chars(1);
+            table.layout_mut().margin = Edges::x(Length::ch(1));
 
             for provider in PROVIDERS_DISPLAY_ORDER {
                 let info = provider_info(provider);

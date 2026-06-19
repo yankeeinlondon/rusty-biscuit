@@ -19,6 +19,7 @@ impl WrapperProfile for ClaudeWrapper {
         prompt: &PreparedSystemPrompt,
         interactive: bool,
         _cwd: &Path,
+        _scoped_tmp: &Path,
     ) -> Result<crate::commands::wrap::system_prompt::SystemPromptApplication> {
         use crate::commands::wrap::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
         use std::io::Write as _;

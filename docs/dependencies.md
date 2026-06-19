@@ -1,18 +1,59 @@
 # Project Dependencies
 
+## Recent Dependency Notes
+
+- `worktree/lib` uses `biscuit-hash` for the SHA-pair cache file name. The cache
+  stores deterministic ahead/behind and clean-merge results under the user cache
+  directory, keyed by canonical repo-root xxHash plus branch tip SHAs.
+- `claudine/contract` (`claudine-contract`) implements
+  `biscuit_contract::inference::InferenceAdapter` over a Claudine
+  non-interactive, tool-free agentic-CLI session. It is the one crate that
+  depends on **both** `biscuit-contract` and `claudine` (lib); it must not
+  depend on `claudine-cli`. Beyond those two it adds `async-trait`, `tokio`,
+  `serde_json`, `jsonschema` (`0.42`, the workspace-wide pin, for adapter-owned
+  Draft 2020-12 validation), `tempfile` (isolated session CWD), `thiserror`,
+  and `tracing`. See
+  [`claudine/contract/docs/dependencies.md`](./claudine/contract/docs/dependencies.md).
+- `unchained-ai/contract` (`unchained-ai-contract`) implements
+  `biscuit_contract::inference::InferenceAdapter` over the `unchained-ai`
+  single-turn execution surface and capability-based model resolver. It is the
+  one crate that depends on **both** `biscuit-contract` and `unchained-ai`
+  (lib); it must not depend on `unchained-ai-cli`. Beyond those two it adds
+  `async-trait`, `tokio`, `serde_json`, `jsonschema` (`0.42`, the workspace-wide
+  pin, for adapter-owned Draft 2020-12 validation), `thiserror`, and `tracing`.
+  See
+  [`unchained-ai/contract/docs/dependencies.md`](./unchained-ai/contract/docs/dependencies.md).
+- `biscuit-contract/lib` is a provider-neutral inference contract crate. It
+  depends only on `async-trait` (object-safety for `Arc<dyn
+  InferenceAdapter>`), `serde_json` (JSON Schema + structured payloads), and
+  `thiserror` (error impl). `tokio` is permitted in `[dev-dependencies]` only
+  for `#[tokio::test]`. See
+  [`biscuit-contract/docs/dependencies.md`](./biscuit-contract/docs/dependencies.md)
+  for the full rationale and forbidden-class list.
+- `biscuit-file/lib` uses `url` for HTTP(S) file-reference classification and
+  gates `reqwest`, `bytes`, and `tokio` behind the off-by-default `fetch`
+  feature for policy-enforced HTTP access.
+- `darkmatter/lib` enables `biscuit-file/fetch` and uses `reqwest`, `tokio`,
+  and `url` for remote URL composition, persistent remote cache revalidation,
+  and side-effect `http_post` host-policy enforcement.
+
 ## Structure
 
 This is a Rust workspace with the following modules:
 
 - `Cargo.toml` - Root workspace configuration
+- `biscuit-contract/lib/Cargo.toml` - Shared provider-neutral inference contract (async-trait, serde_json, thiserror)
 - `biscuit-file/lib/Cargo.toml` - File format utilities (PDF, TOML, YAML)
 - `biscuit-file/cli/Cargo.toml` - File utilities CLI (`bf`)
 - `biscuit-hash/lib/Cargo.toml` - Hashing library (xxHash, BLAKE3, Argon2id)
 - `biscuit-hash/cli/Cargo.toml` - Hashing CLI (`bh`)
+- `biscuit-icon/lib/Cargo.toml` - Curated offline domain icons + on-demand Iconify lookup (renderable, biscuit-terminal, rusqlite bundled, reqwest, strum)
+- `biscuit-icon/cli/Cargo.toml` - Icon CLI (`icon`) (clap, clap_complete unstable-dynamic, color-eyre)
 - `biscuit-speaks/lib/Cargo.toml` - Cross-platform TTS library
 - `biscuit-terminal/lib/Cargo.toml` - Terminal detection, image rendering, diagrams
 - `biscuit-terminal/cli/Cargo.toml` - Terminal inspector CLI (`bt`)
 - `claudine/lib/Cargo.toml` - Universal hook/event handler for agentic CLIs
+- `claudine/contract/Cargo.toml` - InferenceAdapter over tool-free agentic-CLI sessions (biscuit-contract, claudine, jsonschema, tempfile)
 - `claudine/cli/Cargo.toml` - Hook manager CLI (`claudine`)
 - `darkmatter/lib/Cargo.toml` - Markdown parsing, rendering, syntax highlighting
 - `darkmatter/cli/Cargo.toml` - Markdown renderer CLI (`md`)
@@ -43,8 +84,19 @@ This is a Rust workspace with the following modules:
 - `unchained-ai/lib/Cargo.toml` - LLM pipeline primitives and provider integrations
 - `unchained-ai/gen/Cargo.toml` - Provider model enum generator (`gen-models`)
 - `unchained-ai/cli/Cargo.toml` - Future AI CLI (`unchained`)
+- `worktree/lib/Cargo.toml` - Git worktree business logic (git subprocess orchestration, SHA-pair status cache)
+- `worktree/cli/Cargo.toml` - Worktree CLI (`wt`)
+- `tools/test-toolkit/Cargo.toml` - Shared test lifecycle helpers
+- `biscuit-test-harness/Cargo.toml` - Real-terminal test harness (WezTerm, Kitty, tmux, Apple Terminal)
+- `biscuit-browser-harness/Cargo.toml` - Headless browser test harness (Chrome/Chromium)
 
 ## Workspace Packages
+
+- [biscuit-contract](./biscuit-contract) _v0.1.0_
+
+    _Shared provider-neutral contract for one text-inference operation. Defines the object-safe `InferenceAdapter` trait, request/response types, and `InferenceError` categories. Depends only on `async-trait`, `serde_json`, and `thiserror`; see [`biscuit-contract/docs/dependencies.md`](./biscuit-contract/docs/dependencies.md)._
+
+    _Tags: workspace, library, contract, ai, inference_
 
 - [biscuit-file](./biscuit-file) _v0.1.0_
 
@@ -94,15 +146,15 @@ This is a Rust workspace with the following modules:
 
     _Tags: workspace, library, visualization_
 
-- [tui-chrome](./biscuit-tui/lib) _v0.1.0_
+- [biscuit-tui](./biscuit-tui/lib) _v0.1.0_
 
     _TUI input components (text input, toggle, choice, text area, grid) built on Ratatui. Embeddable widgets and a standalone runner._
 
     _Tags: workspace, library, tui, inputs_
 
-- [tui-chrome-cli](./biscuit-tui/cli) _v0.1.0_
+- [biscuit-tui-cli](./biscuit-tui/cli) _v0.1.0_
 
-    _Interactive prompt CLI (`question`) exposing tui-chrome components as subcommands with raw/json/null output modes._
+    _Interactive prompt CLI (`question`) exposing biscuit-tui components as subcommands with raw/json/null output modes._
 
     _Tags: workspace, cli, tui, inputs_
 
@@ -117,6 +169,12 @@ This is a Rust workspace with the following modules:
     _Hook manager CLI for agentic tool integration._
 
     _Tags: workspace, cli, hooks_
+
+- [claudine-contract](./claudine/contract) _v0.1.0_
+
+    _`InferenceAdapter` backed by a Claudine non-interactive, tool-free, filesystem-isolated agentic-CLI session. Bridges `biscuit-contract` and `claudine` for deterministic consumers (Reaper, Darkmatter); see [`claudine/contract/docs/dependencies.md`](./claudine/contract/docs/dependencies.md)._
+
+    _Tags: workspace, library, inference, adapter_
 
 - [darkmatter](./darkmatter) _v0.1.0_
 
@@ -262,6 +320,12 @@ This is a Rust workspace with the following modules:
 
     _Tags: workspace, cli, codegen_
 
+- [unchained-ai-contract](./unchained-ai/contract) _v0.1.0_
+
+    _`InferenceAdapter` backed by the `unchained-ai` single-turn execution surface and capability-based model resolver. Bridges `biscuit-contract` and `unchained-ai` for deterministic consumers (Reaper, Darkmatter); see [`unchained-ai/contract/docs/dependencies.md`](./unchained-ai/contract/docs/dependencies.md)._
+
+    _Tags: workspace, library, inference, adapter_
+
 - [messenger](./messenger/lib) _v0.1.0_
 
     _Unified outbound messaging library for Rust (Discord, Slack, Signal, WhatsApp, Telegram, desktop OS notifications)._
@@ -274,11 +338,29 @@ This is a Rust workspace with the following modules:
 
     _Tags: workspace, cli, messaging, notifications_
 
+- [test-toolkit](./tools/test-toolkit) _v0.1.0_
+
+    _Shared test lifecycle helpers, including tracing phase spans and environment-variable guards. The optional `leak-sweep` feature adds a cross-platform post-run orphan-process detector binary (pulls `clap` + `sysinfo`, gated off by default so dev-dependency consumers do not inherit them)._
+
+    _Tags: workspace, library, testing_
+
+- [biscuit-test-harness](./biscuit-test-harness) _v0.1.0_
+
+    _Real-terminal test harness with backends for WezTerm, Kitty, tmux, and Apple Terminal. Provides `SharedHarness`, `TerminalHarness` trait, and capture utilities._
+
+    _Tags: workspace, library, testing, terminal_
+
+- [biscuit-browser-harness](./biscuit-browser-harness) _v0.1.0_
+
+    _Headless browser test harness wrapping `chromiumoxide`. Provides `BrowserHarness` trait, `ChromeHarness` implementation, and skip-clean contract for CI._
+
+    _Tags: workspace, library, testing, browser_
+
 ## Production Dependencies
 
 ### AI & LLM
 
-- [rig-core](https://github.com/0xplaygrounds/rig) _v0.29.0_ [📄](https://docs.rig.rs/)
+- [rig-core](https://github.com/0xplaygrounds/rig) _v0.31.0_ [📄](https://docs.rig.rs/)
 
     _Opinionated library for building modular and scalable LLM-powered applications with abstractions for completion models, embeddings, and RAG systems._
 
@@ -514,9 +596,9 @@ This is a Rust workspace with the following modules:
 
 ### Git
 
-- [git2](https://github.com/rust-lang/git2-rs) _v0.20.3_ [📄](https://docs.rs/git2)
+- [gix](https://github.com/GitoxideLabs/gitoxide) _v0.84.0_ [📄](https://docs.rs/gix)
 
-    _Threadsafe and memory-safe Rust bindings to libgit2 for interoperating with git repositories._
+    _Pure-Rust Git repository inspection library (status, diff, history, refs, remotes, config, worktrees)._
 
     _Tags: git, vcs, development-tools_
 
@@ -766,6 +848,12 @@ This is a Rust workspace with the following modules:
 
     _Tags: html, escaping, security_
 
+- [memchr](https://github.com/BurntSushi/memchr) _v2.7_ [📄](https://docs.rs/memchr)
+
+    _Fast substring and byte search routines (memmem, memchr, memrchr) with SIMD acceleration. Used by `tree-hugger` for zero-allocation newline counting during god-file candidate screening._
+
+    _Tags: text-processing, performance, search_
+
 - [regex](https://github.com/rust-lang/regex) _v1.11_ [📄](https://docs.rs/regex)
 
     _Fast regular expression engine with Unicode support and linear-time guarantees._
@@ -841,6 +929,12 @@ This is a Rust workspace with the following modules:
     _Format-preserving TOML parser and editor. Preserves comments, whitespace, and item order._
 
     _Tags: toml, parser, formatting_
+
+- [quick-xml](https://github.com/tafia/quick-xml) _v0.39_ [📄](https://docs.rs/quick-xml)
+
+    _Fast streaming XML reader/writer. Used by `darkmatter/lib` to allowlist-sanitize the promoted Mermaid static `<svg>` before it is emitted as raw HTML, stripping `<script>`/`<foreignObject>`/event-handler/external-ref payloads._
+
+    _Tags: xml, parsing, sanitization, security_
 
 ### SQL & Database
 
@@ -1050,6 +1144,18 @@ This is a Rust workspace with the following modules:
 
     _Tags: testing, cli, integration-tests_
 
+- [chromiumoxide](https://github.com/mattsse/chromiumoxide) _v0.7_ [📄](https://docs.rs/chromiumoxide)
+
+    _Headless-browser automation over the Chrome DevTools Protocol. Used by `darkmatter/lib` browser-render tests to assert on browser-computed styles of HTML/CSS output and to screenshot renders. Skips cleanly when no Chrome/Chromium is present._
+
+    _Tags: testing, browser, html, css_
+
+- [futures-util](https://github.com/rust-lang/futures-rs) _v0.3_ [📄](https://docs.rs/futures-util)
+
+    _Async stream/future combinators. Used in `darkmatter/lib` browser-render tests to pump the `chromiumoxide` CDP handler stream._
+
+    _Tags: testing, async, browser_
+
 - [insta](https://github.com/mitsuhiko/insta) _v1.41_ [📄](https://insta.rs)
 
     _Snapshot testing library with VS Code integration and beautiful diffs._
@@ -1073,6 +1179,12 @@ This is a Rust workspace with the following modules:
     _Property-based testing framework generating arbitrary inputs and shrinking failing cases._
 
     _Tags: testing, property-testing, fuzzing_
+
+- [rstest](https://github.com/la10736/rstest) _v0.25_
+
+    _Fixture-based and parameterized testing framework used for new and modified Claudine tests._
+
+    _Tags: testing, fixtures, parameterized-tests_
 
 - [serial_test](https://github.com/palfrey/serial_test) _v3.2_
 

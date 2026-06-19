@@ -16,6 +16,7 @@ use biscuit_terminal::errors::BlockError;
 
 use crate::editor::EditorError;
 use crate::markdown::MarkdownError;
+use crate::markdown::compose::FileLinksError;
 use crate::markdown::compose::ShellBlockError;
 use crate::markdown::compose::ShellExpansionError;
 use crate::markdown::compose::TocLinkingError;
@@ -27,10 +28,11 @@ use crate::markdown::compose::transclusion::DeferredSetError;
 use crate::markdown::normalize::NormalizationError;
 use crate::markdown::reference::ReferenceError;
 use crate::markdown::reference::file_tree::FileTreeError;
+use crate::markdown::schemas::SchemaError;
 use crate::mermaid::MermaidThemeError;
 use crate::render::image_ref::ImageRefError;
 use crate::render::link::LinkError;
-use crate::render::stylesheet::StylesheetError;
+use crate::render::stylesheet::StylesheetBlockError;
 
 /// Try to view `err` as a reference to one of darkmatter's known
 /// [`BlockError`] implementations.
@@ -76,6 +78,9 @@ pub fn as_block_error<'a>(
     if let Some(v) = err.downcast_ref::<TocLinkingError>() {
         return Some(v);
     }
+    if let Some(v) = err.downcast_ref::<FileLinksError>() {
+        return Some(v);
+    }
     if let Some(v) = err.downcast_ref::<ReferenceError>() {
         return Some(v);
     }
@@ -102,13 +107,16 @@ pub fn as_block_error<'a>(
     if let Some(v) = err.downcast_ref::<NormalizationError>() {
         return Some(v);
     }
-    if let Some(v) = err.downcast_ref::<StylesheetError>() {
+    if let Some(v) = err.downcast_ref::<StylesheetBlockError>() {
         return Some(v);
     }
     if let Some(v) = err.downcast_ref::<LinkError>() {
         return Some(v);
     }
     if let Some(v) = err.downcast_ref::<ImageRefError>() {
+        return Some(v);
+    }
+    if let Some(v) = err.downcast_ref::<SchemaError>() {
         return Some(v);
     }
     None
@@ -128,11 +136,7 @@ mod tests {
     }
 
     fn test_ctx() -> SourceContext {
-        SourceContext::new(
-            PathBuf::from("/test"),
-            PathBuf::from("test"),
-            String::new(),
-        )
+        SourceContext::new(PathBuf::from("/test"), PathBuf::from("test"), String::new())
     }
 
     #[test]
@@ -255,7 +259,7 @@ mod tests {
         assert!(out.contains("a &&& b"));
         assert!(out.contains("^"));
         assert!(out.contains("&&"));
-        assert!(out.contains("HasKey"));
+        assert!(out.contains("has_key"));
     }
 
     #[test]

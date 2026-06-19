@@ -1,7 +1,9 @@
 //! Loop condition expression evaluation.
 
+use std::path::Path;
+
 use darkmatter::markdown::compose::expression::{
-    EvaluationLookup, evaluate, is_truthy, parse_condition,
+    EvaluationLookup, ResolutionContext, evaluate, is_truthy, parse_condition,
 };
 use serde_json::{Map, Value};
 
@@ -46,13 +48,24 @@ impl LoopAmbient {
 ///
 /// Resolution order:
 ///
-/// 1. `env.NAME`
-/// 2. Ambient variables (`iteration`, `is_first`, `is_last`, `last_output`, `last_exit_code`)
-/// 3. Frontmatter properties, including nested object paths via `.`
+/// 1. Reserved `doc` namespace (bare `doc` → the whole frontmatter object;
+///    `doc.<path>` → dotted traversal into it). Intercepted first so a missing
+///    `doc.<path>` never collapses into a same-named ambient/env/frontmatter key.
+/// 2. `env.NAME`
+/// 3. Ambient variables (`_loop_count`, `_loop_is_first`, `_loop_is_last`,
+///    `_loop_last_output`, `_loop_last_exit_code`)
+/// 4. Frontmatter properties, including nested object paths via `.`
+///
+/// When constructed with a base directory ([`with_base_dir`](Self::with_base_dir)),
+/// the lookup exposes a [`ResolutionContext`] rooted at the prompt's parent so
+/// read-side expression functions (`file_exists`, `absolute`, `relative`, …)
+/// resolve against the document directory. The probe re-runs each iteration
+/// while the base directory stays fixed.
 #[derive(Debug, Clone, Copy)]
 pub struct LoopExpressionLookup<'a> {
     frontmatter: &'a Map<String, Value>,
     ambient: &'a LoopAmbient,
+    base_dir: Option<&'a Path>,
 }
 
 impl<'a> LoopExpressionLookup<'a> {
@@ -61,12 +74,25 @@ impl<'a> LoopExpressionLookup<'a> {
         Self {
             frontmatter,
             ambient,
+            base_dir: None,
         }
+    }
+
+    /// Root read-side expression functions at `base_dir` (typically the prompt
+    /// document's parent directory). `None` leaves the lookup context-free.
+    #[must_use]
+    pub fn with_base_dir(mut self, base_dir: Option<&'a Path>) -> Self {
+        self.base_dir = base_dir;
+        self
     }
 }
 
 impl EvaluationLookup for LoopExpressionLookup<'_> {
     fn get(&self, path: &str) -> Option<Value> {
+        if path == "doc" || path.starts_with("doc.") {
+            return resolve_doc(self.frontmatter, path);
+        }
+
         if let Some(env_key) = path.strip_prefix("env.") {
             return resolve_env(env_key);
         }
@@ -80,6 +106,11 @@ impl EvaluationLookup for LoopExpressionLookup<'_> {
         }
 
         resolve_frontmatter(self.frontmatter, path)
+    }
+
+    fn resolution_context(&self) -> Option<ResolutionContext> {
+        self.base_dir
+            .map(|dir| ResolutionContext::new(dir.to_path_buf()))
     }
 }
 
@@ -116,6 +147,27 @@ pub fn evaluate_condition(
     })
 }
 
+/// Resolve the reserved `doc` namespace against the loop frontmatter, which is
+/// the document's root object. Bare `doc` yields the whole object; `doc.<path>`
+/// traverses it. A `doc.<path>` that does not resolve returns `None` and must
+/// not fall back to another namespace.
+fn resolve_doc(frontmatter: &Map<String, Value>, path: &str) -> Option<Value> {
+    match path.strip_prefix("doc.") {
+        Some(rest) => {
+            let mut current = Value::Object(frontmatter.clone());
+            for segment in rest.split('.') {
+                current = match current {
+                    Value::Object(map) => map.get(segment).cloned()?,
+                    _ => return None,
+                };
+            }
+            Some(current)
+        }
+        // path == "doc": the whole frontmatter object.
+        None => Some(Value::Object(frontmatter.clone())),
+    }
+}
+
 fn resolve_env(name: &str) -> Option<Value> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
@@ -126,11 +178,11 @@ fn resolve_env(name: &str) -> Option<Value> {
 
 fn resolve_ambient(path: &str, ambient: &LoopAmbient) -> Option<Value> {
     match path {
-        "iteration" => Some(Value::Number(ambient.iteration.into())),
-        "is_first" => Some(Value::Bool(ambient.is_first)),
-        "is_last" => Some(Value::Bool(ambient.is_last)),
-        "last_output" => Some(Value::String(ambient.last_output.clone())),
-        "last_exit_code" => Some(Value::Number(ambient.last_exit_code.into())),
+        "_loop_count" => Some(Value::Number(ambient.iteration.into())),
+        "_loop_is_first" => Some(Value::Bool(ambient.is_first)),
+        "_loop_is_last" => Some(Value::Bool(ambient.is_last)),
+        "_loop_last_output" => Some(Value::String(ambient.last_output.clone())),
+        "_loop_last_exit_code" => Some(Value::Number(ambient.last_exit_code.into())),
         _ => None,
     }
 }
@@ -184,21 +236,26 @@ mod tests {
         let ambient = LoopAmbient::new(3, false, true, "done", 7);
         let lookup = LoopExpressionLookup::new(&fm, &ambient);
 
-        assert_eq!(lookup.get("iteration"), Some(json!(3)));
-        assert_eq!(lookup.get("is_first"), Some(json!(false)));
-        assert_eq!(lookup.get("is_last"), Some(json!(true)));
-        assert_eq!(lookup.get("last_output"), Some(json!("done")));
-        assert_eq!(lookup.get("last_exit_code"), Some(json!(7)));
+        assert_eq!(lookup.get("_loop_count"), Some(json!(3)));
+        assert_eq!(lookup.get("_loop_is_first"), Some(json!(false)));
+        assert_eq!(lookup.get("_loop_is_last"), Some(json!(true)));
+        assert_eq!(lookup.get("_loop_last_output"), Some(json!("done")));
+        assert_eq!(lookup.get("_loop_last_exit_code"), Some(json!(7)));
     }
 
     #[test]
-    fn ambient_variables_shadow_frontmatter() {
+    fn ambient_variables_do_not_shadow_user_frontmatter() {
+        // Loop ambients live under the `_loop_` namespace, so a user-defined
+        // frontmatter property called `iteration` is fully visible and is
+        // not silently overwritten by the loop counter.
         let fm = map(json!({"iteration": 99, "is_first": false}));
         let ambient = ambient();
         let lookup = LoopExpressionLookup::new(&fm, &ambient);
 
-        assert_eq!(lookup.get("iteration"), Some(json!(1)));
-        assert_eq!(lookup.get("is_first"), Some(json!(true)));
+        assert_eq!(lookup.get("iteration"), Some(json!(99)));
+        assert_eq!(lookup.get("is_first"), Some(json!(false)));
+        assert_eq!(lookup.get("_loop_count"), Some(json!(1)));
+        assert_eq!(lookup.get("_loop_is_first"), Some(json!(true)));
     }
 
     #[test]
@@ -259,14 +316,78 @@ mod tests {
         let lookup = LoopExpressionLookup::new(&fm, &ambient);
 
         assert!(
-            evaluate_condition(&LoopCondition::While("iteration == 1".into()), &lookup).unwrap()
+            evaluate_condition(&LoopCondition::While("_loop_count == 1".into()), &lookup).unwrap()
         );
         assert!(
-            evaluate_condition(&LoopCondition::While("is_first == true".into()), &lookup).unwrap()
+            evaluate_condition(
+                &LoopCondition::While("_loop_is_first == true".into()),
+                &lookup
+            )
+            .unwrap()
         );
         assert_eq!(
             evaluate_condition(&LoopCondition::While("env.PATH != \"\"".into()), &lookup).unwrap(),
             std::env::var("PATH").is_ok_and(|value| !value.is_empty())
+        );
+    }
+
+    #[test]
+    fn resolves_doc_namespace_against_frontmatter() {
+        let fm = map(json!({
+            "build": "from-frontmatter",
+            "config": {"retries": 3},
+            "doc": {"child": "literal-doc"},
+        }));
+        let ambient = ambient();
+        let lookup = LoopExpressionLookup::new(&fm, &ambient);
+
+        // doc.<path> traverses the frontmatter object.
+        assert_eq!(lookup.get("doc.build"), Some(json!("from-frontmatter")));
+        assert_eq!(lookup.get("doc.config.retries"), Some(json!(3)));
+
+        // bare doc returns the whole frontmatter object.
+        let obj = lookup.get("doc").expect("bare doc resolves");
+        assert!(obj.is_object());
+        assert_eq!(obj.get("build"), Some(&json!("from-frontmatter")));
+
+        // a literal property named `doc` is reached as doc.doc.
+        assert_eq!(lookup.get("doc.doc.child"), Some(json!("literal-doc")));
+
+        // missing doc.* values do not fall back to env/ambient.
+        assert_eq!(lookup.get("doc.missing"), None);
+    }
+
+    #[test]
+    fn read_side_functions_resolve_against_base_dir() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("artifact"), "ready").unwrap();
+        let fm = map(json!({}));
+        let ambient = ambient();
+
+        // Without a base dir, read-side functions have no resolution context.
+        let context_free = LoopExpressionLookup::new(&fm, &ambient);
+        assert!(context_free.resolution_context().is_none());
+
+        // With a base dir, `file_exists` resolves against it.
+        let lookup = LoopExpressionLookup::new(&fm, &ambient).with_base_dir(Some(dir.path()));
+        assert!(lookup.resolution_context().is_some());
+
+        // `until` continues while the expression is falsy. The artifact exists,
+        // so `file_exists` is truthy and the loop should stop (continue=false).
+        assert!(
+            !evaluate_condition(
+                &LoopCondition::Until("file_exists('artifact')".into()),
+                &lookup
+            )
+            .unwrap()
+        );
+        // A missing artifact is falsy, so the `until` loop keeps going.
+        assert!(
+            evaluate_condition(
+                &LoopCondition::Until("file_exists('missing')".into()),
+                &lookup
+            )
+            .unwrap()
         );
     }
 

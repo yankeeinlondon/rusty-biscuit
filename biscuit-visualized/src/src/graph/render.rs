@@ -402,10 +402,13 @@ impl GraphDiagram {
 
         let (final_content, final_format) = match request.format {
             OutputFormat::Svg => (svg_content.into_bytes(), OutputFormat::Svg),
-            OutputFormat::Png => (
-                raster::rasterize_svg_to_png_bytes(&svg_content, request.scale)?,
-                OutputFormat::Png,
-            ),
+            OutputFormat::Png => {
+                let png_bytes = match request.target_width {
+                    Some(width) => raster::rasterize_svg_to_png(&svg_content, width)?,
+                    None => raster::rasterize_svg_to_png_bytes(&svg_content, request.scale)?,
+                };
+                (png_bytes, OutputFormat::Png)
+            }
         };
 
         let path = cache.store(
@@ -440,6 +443,7 @@ impl GraphDiagram {
             "orientation": self.orientation.as_str(),
             "title": self.title,
             "scale": request.scale.max(1),
+            "target_width": request.target_width,
             "transparent_background": request.transparent_background,
             "color_theme": theme_key,
         }))

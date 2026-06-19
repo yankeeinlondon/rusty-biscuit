@@ -19,7 +19,7 @@ impl WrapperProfile for QwenWrapper {
         &self,
         args: &mut Vec<String>,
         _env_overrides: &mut Vec<(String, String)>,
-    ) -> Result<Option<String>> {
+    ) -> Result<super::YoloOutcome> {
         // Qwen's catalog records the direct `--yolo` flag, but the runtime
         // also accepts `--approval-mode yolo`. Keep this override to reject
         // conflicting approval modes before appending the catalog flag.
@@ -31,7 +31,7 @@ impl WrapperProfile for QwenWrapper {
         if !has_flag(args, "--yolo") {
             args.push("--yolo".to_string());
         }
-        Ok(None)
+        Ok(super::YoloOutcome::applied())
     }
 
     fn reject_direct_yolo(&self, args: &[String]) -> Result<()> {
@@ -64,34 +64,18 @@ impl WrapperProfile for QwenWrapper {
     fn apply_system_prompt(
         &self,
         prompt: &PreparedSystemPrompt,
-        _interactive: bool,
+        interactive: bool,
         _cwd: &Path,
+        scoped_tmp: &Path,
     ) -> Result<crate::commands::wrap::system_prompt::SystemPromptApplication> {
-        use crate::commands::wrap::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
-
-        let mut app = SystemPromptApplication::empty();
-        match prompt.mode {
-            SystemPromptMode::Append => {
-                let (tmp_home, _overlay_path) =
-                    crate::commands::wrap::system_prompt::create_ephemeral_overlay_home(
-                        ".qwen",
-                        "QWEN.md",
-                        &prompt.composed_markdown,
-                    )?;
-                app.env.push((
-                    std::ffi::OsString::from("HOME"),
-                    tmp_home.path().as_os_str().to_owned(),
-                ));
-                app.artifacts.push(SystemPromptArtifact::TempDir(tmp_home));
-            }
-            SystemPromptMode::Replace => {
-                app.warnings.push(
-                    "Qwen does not support replace-mode system prompts; this flag was skipped"
-                        .to_string(),
-                );
-            }
-        }
-        Ok(app)
+        crate::commands::wrap::system_prompt::apply_system_prompt_via_spec(
+            self.system_prompt_spec(),
+            prompt.mode,
+            interactive,
+            &prompt.composed_markdown,
+            None,
+            scoped_tmp,
+        )
     }
 
     fn apply_sandbox(&self, args: &mut Vec<String>) -> Option<String> {

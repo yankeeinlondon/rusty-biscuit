@@ -1,15 +1,18 @@
 ---
-area: "{{ctx.current_package_area}}"
+description: "Creates a multi-phase, high confidence plan from a _feature_ or _fix_"
 root: "{{ctx.repo_root}}"
-dir: "$(dirname '{{ spec || design }}')"
+area: "{{ctx.current_package_area == 'root' ? ctx.current_package || '' : ctx.current_package_area}}"
+dir: "$(dirname '{{ spec }}')"
 spec: ""
 design: ""
 plan: "plan.md"
+start:
+    message: "🖊️ creating a plan for the `{{spec}}` specification"
 success:
-    stderr: "The **{{area}}/{{dir}}/{{plan}}** _plan_ has been completed"
-    message: "✅ the **{{area}}/{{dir}}/{{plan}}** _plan_ has been completed _at_ {{ctx.time}}"
+    stderr: "The `{{area}}/{{dir}}/{{plan}}` _plan_ has been created"
+    message: "✅  the _plan_ for the spec `{{spec}}` was created _at_ {{ctx.time}}"
 failure:
-    message: "❌️ the **{{area}}/{{dir}}/{{plan}}** _plan_ has failed to complete!"
+    message: "❌️  the _plan_ for the spec `{{spec}}` failed to complete!"
 ---
 
 You are a planning agent. Convert the following documents into a high confidence execution plan:
@@ -17,10 +20,10 @@ You are a planning agent. Convert the following documents into a high confidence
 ::block when="spec"
 
 - Functional Specification: {{ctx.current_package_area}}/{{spec}}
-  ::end-block
-  ::block when="design"
+::end-block
+::block when="design"
 - Technical Design: {{ctx.current_package_area}}/{{design}}
-  ::end-block
+::end-block
 
 ## Requirements
 
@@ -35,8 +38,11 @@ You are a planning agent. Convert the following documents into a high confidence
 
 ## Closure
 
-- Save the plan as "{{ctx.repo_root}}/{{ctx.current_package_area}}/{{dir}}/{{plan}}" in the same directory as the design document(s).
+- Save the plan as "{{ctx.repo_root}}/{{area}}/{{dir}}/{{plan}}"
 - Add frontmatter to the plan document and set:
+    - `agent` set this to "{{env.AGENT}}"
     - `phases` property to the number of phases defined in this plan
     - `created` add the date in YYYY-MM-DD format
     - `start_phase` set this to the starting phase number; usually 1 but may be 0 sometimes
+    - `agent` set this to "{{ env.AGENT }}/{{ env.MODEL || default }}"
+    - `yolo` set this to "{{ env.YOLO }}"

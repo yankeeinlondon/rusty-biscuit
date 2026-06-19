@@ -1,0 +1,37 @@
+{
+  "file": "errors.md",
+  "references": [
+    {
+      "attributes": {
+        "display": "missing"
+      },
+      "id": "2e468ac064ef9e98:3:10",
+      "kind": "hyperlink",
+      "line": 3,
+      "syntax": "markdown_link",
+      "target": {
+        "raw": "./missing.md",
+        "type": "local_path"
+      }
+    }
+  ],
+  "source": "/tmp/dm-baseline/errors.md",
+  "transclusions": [],
+  "validation": {
+    "issues": [
+      {
+        "code": "MissingLocalTarget",
+        "kind": "hyperlink",
+        "line": 3,
+        "message": "Missing local target: ./missing.md",
+        "reference": "./missing.md",
+        "severity": "error",
+        "source": "/tmp/dm-baseline/errors.md"
+      }
+    ],
+    "references_scanned": 1,
+    "references_valid": 0,
+    "valid": false,
+    "warnings": []
+  }
+}

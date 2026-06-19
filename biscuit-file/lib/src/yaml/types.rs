@@ -1417,6 +1417,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_yaml_number_formats() {
         let yaml = Yaml::from_str(
             r#"

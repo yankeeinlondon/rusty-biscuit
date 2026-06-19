@@ -465,7 +465,7 @@ lazy_static! {
 pub fn mermaid_theme_for_syntect(_theme_pair: ThemePair, mode: ColorMode) -> &'static MermaidTheme {
     match mode {
         ColorMode::Light => &DEFAULT_LIGHT_THEME,
-        ColorMode::Dark => &DEFAULT_DARK_THEME,
+        ColorMode::Dark | ColorMode::Unknown => &DEFAULT_DARK_THEME,
     }
 }
 

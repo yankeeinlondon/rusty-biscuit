@@ -2,7 +2,11 @@
 source: darkmatter/lib/tests/error_snapshots/image_ref.rs
 expression: out
 ---
-⨫ ImageRefError: invalid referrer policy
+⤫ ImageRefError: invalid referrer policy
+┃ 
 ┃ Value: noreferer
 ┃ Did you mean: no-referrer?
-Accepted values: no-referrer, no-referrer-when-downgrade, origin, origin-when-cross-origin, same-origin, strict-origin, strict-origin-when-cross-origin, unsafe-url.
+┃ 
+┃ Accepted values: no-referrer, no-referrer-when-downgrade, origin, origin-
+┃ when-cross-origin, same-origin, strict-origin, strict-origin-when-cross-
+┃ origin, unsafe-url.

@@ -35,8 +35,8 @@ Configuration is handled via `InputTableState`.
 
 ### Basic Table with Blank Rows
 ```rust
-use tui_chrome::prelude::*;
-use tui_chrome::components::input_table::{
+use biscuit_tui::prelude::*;
+use biscuit_tui::components::input_table::{
     BooleanSwitchConfig, InputTable, InputTableColumn, InputTableState,
     TextInputConfig,
 };
@@ -52,7 +52,7 @@ let mut state = InputTableState::with_blank_rows(columns, 5);
 
 ### Initializing with Data
 ```rust
-use tui_chrome::components::input_table::{CellValue, InputTableState, Row, RowCell};
+use biscuit_tui::components::input_table::{CellValue, InputTableState, Row, RowCell};
 
 let columns = vec![/* ... column definitions ... */];
 let initial_rows = vec![
@@ -82,7 +82,7 @@ Each cell in a row is a `RowCell { column_id, value }`. The `column_id` must mat
 
 ### Standalone Runner
 ```rust
-use tui_chrome::{run_standalone, InputTable, InputTableState};
+use biscuit_tui::{run_standalone, InputTable, InputTableState};
 
 let columns = vec![/* ... */];
 let state = InputTableState::with_blank_rows(columns, 3);

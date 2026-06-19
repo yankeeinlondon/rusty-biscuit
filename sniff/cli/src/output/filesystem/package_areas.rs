@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::repo::{Package, RepoInfo};
 
@@ -230,12 +230,8 @@ pub(crate) fn select_dirty_package_area_names(
     let dirty_set: std::collections::HashSet<&str> =
         dirty_names.iter().map(|n| n.as_str()).collect();
 
-    let filtered = super::packages::select_repo_packages(
-        packages,
-        repo_filter,
-        package,
-        package_area,
-    );
+    let filtered =
+        super::packages::select_repo_packages(packages, repo_filter, package, package_area);
     let mut areas: Vec<String> = filtered
         .iter()
         .filter(|p| dirty_set.contains(p.name.as_str()))
@@ -258,8 +254,7 @@ pub fn render_dirty_package_areas(
 
     match repo {
         Some(repo) if repo.is_monorepo => {
-            select_dirty_package_area_names(result, repo_filter, package, package_area)
-                .join(", ")
+            select_dirty_package_area_names(result, repo_filter, package, package_area).join(", ")
         }
         _ => String::from(
             "- the \"--dirty-package-areas\" switch is only intended to be used in a monorepo",
@@ -287,12 +282,8 @@ pub(crate) fn select_staged_package_area_names(
     let staged_set: std::collections::HashSet<&str> =
         staged_names.iter().map(|n| n.as_str()).collect();
 
-    let filtered = super::packages::select_repo_packages(
-        packages,
-        repo_filter,
-        package,
-        package_area,
-    );
+    let filtered =
+        super::packages::select_repo_packages(packages, repo_filter, package, package_area);
     let mut areas: Vec<String> = filtered
         .iter()
         .filter(|p| staged_set.contains(p.name.as_str()))
@@ -315,8 +306,7 @@ pub fn render_staged_package_areas(
 
     match repo {
         Some(repo) if repo.is_monorepo => {
-            select_staged_package_area_names(result, repo_filter, package, package_area)
-                .join(", ")
+            select_staged_package_area_names(result, repo_filter, package, package_area).join(", ")
         }
         _ => String::from(
             "- the \"staged-package-areas\" subcommand is only intended to be used in a monorepo",
@@ -344,12 +334,8 @@ pub(crate) fn select_unstaged_package_area_names(
     let unstaged_set: std::collections::HashSet<&str> =
         unstaged_names.iter().map(|n| n.as_str()).collect();
 
-    let filtered = super::packages::select_repo_packages(
-        packages,
-        repo_filter,
-        package,
-        package_area,
-    );
+    let filtered =
+        super::packages::select_repo_packages(packages, repo_filter, package, package_area);
     let mut areas: Vec<String> = filtered
         .iter()
         .filter(|p| unstaged_set.contains(p.name.as_str()))
@@ -382,14 +368,35 @@ pub fn render_unstaged_package_areas(
 }
 /// Render the package area for the given directory.
 ///
-/// Returns empty string if not in a package area.
+/// Returns empty string if not in a package area. In a monorepo, a directory
+/// whose crates are not yet workspace members resolves via the directory
+/// structure (e.g. a freshly scaffolded area).
 pub fn render_repo_package_area(result: &sniff::SniffResult, base_dir: Option<&Path>) -> String {
     let dir = resolve_dir(base_dir);
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
-    repo.and_then(|r| r.package_area_for_dir(&dir))
+    repo.and_then(|r| r.package_area_label_for_dir(&dir))
         .unwrap_or_default()
         .to_string()
+}
+
+/// Render the area name for the given directory.
+///
+/// Returns the package name if `dir` is inside a package, otherwise the
+/// surrounding package-area string (with `"root"` as the final fallback for
+/// top-level locations). Returns an empty string only when the underlying
+/// repository is not a monorepo (callers handle that path separately).
+pub fn render_repo_area(result: &sniff::SniffResult, base_dir: Option<&Path>) -> String {
+    let dir = resolve_dir(base_dir);
+    let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
+
+    let Some(repo) = repo else {
+        return String::new();
+    };
+    if !repo.is_monorepo {
+        return String::new();
+    }
+    repo.area_for_dir(&dir).to_string()
 }
 
 /// Render the root directory of the package area containing the given directory.

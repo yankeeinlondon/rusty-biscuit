@@ -10,16 +10,15 @@ One of the biggest quality-of-life upgrades is how temporary values and lifetime
 
 ### Tail Expression Scopes
 
-**Problem in 2021:** Temporaries in return expressions were dropped too late, causing borrow checker errors.
+**Change:** In a block's tail expression, temporaries are now dropped **before** the block's local variables (in 2021 they were dropped after). This drop-order change resolves a class of borrow-checker errors where a temporary in the return expression outlived a local it conflicted with.
 
 ```rust
-// 2021: This might fail
-fn get_len(cell: &RefCell<Vec<i32>>) -> usize {
-    cell.borrow().len() // temporary borrow dropped too late
+fn last_len(cell: &RefCell<Vec<i32>>) -> usize {
+    // The temporary `Ref` from `borrow()` is released before any locals,
+    // so patterns that previously over-extended the borrow now compile.
+    cell.borrow().len()
 }
 ```
-
-**Solution in 2024:** Temporaries are dropped before local variables, making this "just work."
 
 ### if let Temporary Scopes
 
@@ -56,8 +55,9 @@ Rust 2024 is the foundation for "Async Rust 2.0."
 **New:** Native `async || { ... }` syntax with optimized internal handling.
 
 ```rust
-let fetch = async || {
-    let response = reqwest::get("https://api.example.com").await?;
+// Annotate the future's output type so `?` resolves.
+let fetch = async |url: &str| -> reqwest::Result<serde_json::Value> {
+    let response = reqwest::get(url).await?;
     response.json().await
 };
 ```
@@ -132,15 +132,18 @@ unsafe {
 
 ### gen Keyword Reserved
 
-**Change:** The `gen` keyword is reserved for future Generator syntax.
+**Change:** The `gen` keyword is reserved so future generator syntax won't break existing code. The feature itself is **not yet stabilized**; the shape below is illustrative.
 
 ```rust
-// Future (not yet available):
-gen fn fibonacci() -> impl Iterator<Item = u32> {
-    let (mut a, mut b) = (0, 1);
-    loop {
-        yield a;
-        (a, b) = (b, a + b);
+// Illustrative — `gen` blocks are not stable yet.
+// A `gen { }` block evaluates to an iterator; `yield` produces items.
+fn fibonacci() -> impl Iterator<Item = u32> {
+    gen {
+        let (mut a, mut b) = (0, 1);
+        loop {
+            yield a;
+            (a, b) = (b, a + b);
+        }
     }
 }
 ```

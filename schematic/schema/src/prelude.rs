@@ -69,12 +69,8 @@
 //! }
 //! ```
 pub use crate::anthropic::{Anthropic, AnthropicRequest};
-pub use crate::artificial_analysis::{
-    ArtificialAnalysisData, ArtificialAnalysisDataRequest,
-};
-pub use crate::artificial_analysis::{
-    ArtificialAnalysisCritPt, ArtificialAnalysisCritPtRequest,
-};
+pub use crate::artificial_analysis::{ArtificialAnalysisCritPt, ArtificialAnalysisCritPtRequest};
+pub use crate::artificial_analysis::{ArtificialAnalysisData, ArtificialAnalysisDataRequest};
 pub use crate::bitbucket::{Bitbucket, BitbucketRequest};
 pub use crate::elevenlabs::{ElevenLabs, ElevenLabsRequest};
 pub use crate::elevenlabs_ws::define_api as define_elevenlabs_ws_api_definition;

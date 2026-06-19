@@ -1,18 +1,36 @@
 ---
-dir: "$(pwd)"
+description: "Reviews a _feature specification_ to make sure that the specification has been fully implemented. This prompt is also aware of the likelihood of more than one review being necessary and therefore names the reviews `review-{iteration}.md` in the same folder where the feature was specified.\n\nThe caller can pass in the **iteration** number but it should be detected automatically."
+parameters:
+    spec: 
+        type: "optional(file)"
+        desc: "the file path to the specification file"
+    design:
+        type: "optional(file)"
+        desc: "the file path to the technical design file"
+    iteration:
+        type: "optional(number)"
+        desc: "the iteration count of the review"
+dir: "$(dirname '{{spec || design}}')"
 iteration: 1
-area: "{{ctx.current_package_area}}"
+area: "{{ctx.current_package_area == 'root' ? ctx.current_package || '' : ctx.current_package_area}}"
 start:
     message: "👓 starting the feature review of `{{dir}}` -- _in the **{{ctx.current_package_area}}** package area_ -- at {{ctx.now}}"
 success:
     stderr: "Feature review {{iteration}} in the {{ctx.current_package_area}} package area has completed"
     message: "✅ the Feature Review #{{iteration}} for `{{dir}}` in the **{{ctx.current_package_area}}** package area has completed. The review can be found at: {{area}}/{{dir}}/review-{{iteration}}.md"
+    effect: small-group-cheer
 failure:
-    stderr: "Feature review {{iteration}} in the {{ctx.current_package_area}} package area failed to complete!"
-    message: "❌ the Feature Review #{{iteration}} for `{{dir}}` in the **{{ctx.current_package_area}}** package area failed to complete!"
+    stderr: "Feature Review {{iteration}} in the {{ctx.current_package_area}} package area failed to complete!"
+    message: "Feature Review #{{iteration}} for `{{ctx.current_package_area}}/{{dir}}` failed to complete!"
 ---
+# Review of {{dir}}
+> Iteration #{{iteration}}
 
-We have just completed a feature defined in "{{area}}/{{dir}}":
+::file _senior-reviewer.md
+
+## Context
+
+You are performing a review of the functionality defined by the following document(s):
 
 ::block when="spec"
 - specification: "{{area}}/{{dir}}/{{spec}}"
@@ -34,7 +52,6 @@ Read both the specification document and then perform a review on the implementa
 ::block when="iteration != 1"
 > **Note:** this is _not_ the first review we've done on this functionality but the prior review's
 > suggestions have now all been implemented.
-
 ::end-block
 
 - look for gaps in functionality that were designed but not implemented
@@ -80,7 +97,7 @@ test is at the wrong level under "Findings" with severity at least "high".
 ## Closure
 
 - Save your review suggestions to "{{area}}/{{dir}}/review-{{iteration}}.md"
-- based on your review suggestions indicate whether you think this feature is ready for production by setting the `ready` frontmatter property on "{{area}}/{{dir}}/review-{{iteration}}.md"
+- based on your review suggestions indicate whether you think this feature is **ready for production** by setting the `ready` frontmatter property on "{{area}}/{{dir}}/review-{{iteration}}.md" to `true` or `false`
 - save the `agent` frontmatter property as "{{env.AGENT}}" in the "{{area}}/{{dir}}/review-{{iteration}}.md" file
 - save the `model` frontmatter property as "{{env.MODEL}}" in the "{{area}}/{{dir}}/review-{{iteration}}.md" file
 

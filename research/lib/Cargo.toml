@@ -55,3 +55,8 @@ tempfile = "3.15"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-test = "0.2"
 wiremock = "0.6"
+
+# Opt-out of benchmarking: this crate has no algorithmic hot paths.
+[package.metadata.benchmarks]
+required = false
+reason = "Research pipeline dominated by LLM provider HTTP calls; no measurable in-process hot paths."

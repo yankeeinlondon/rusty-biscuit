@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::terminal::Terminal;
 use messenger::provider::{
@@ -21,7 +21,8 @@ use messenger::provider::{
 };
 use messenger::target::SignalAddress;
 use messenger::{
-    DesktopConfig, DesktopNotificationProvider, Dispatch, Message, ProviderKind, Target,
+    DesktopConfig, DesktopNotificationProvider, Dispatch, Message, MessageBody, ProviderKind,
+    Target,
 };
 use secrecy::SecretString;
 use tracing::{debug, warn};
@@ -205,16 +206,17 @@ pub async fn test_webhook_connection(config: &MessagingRouteConfig) -> Result<()
     Ok(())
 }
 
-/// Fire a local desktop notification with the supplied title.
+/// Fire a local desktop notification with the supplied title and optional body.
 ///
 /// This helper is intentionally zero-config: it does not read Claudine
 /// messaging config, does not require an active route, and never returns an
 /// error to lifecycle code. Blank or whitespace-only titles are no-ops, and
 /// send failures are logged as operational warnings rather than propagated.
+/// Pass `None` for `body` to render a title-only notification.
 ///
 /// Driver selection, capability detection, and OS integration are owned by
 /// `messenger::DesktopNotificationProvider::new(DesktopConfig::default())`.
-pub fn execute_notification(title: &str) {
+pub fn execute_notification(title: &str, body: Option<&str>) {
     let trimmed = title.trim();
     if trimmed.is_empty() {
         return;
@@ -228,19 +230,20 @@ pub fn execute_notification(title: &str) {
         }
     };
 
-    let owned = trimmed.to_string();
+    let owned_title = trimmed.to_string();
+    let owned_body = body.map(str::to_string);
     handle.spawn(async move {
-        if let Err(e) = send_desktop_notification(&owned).await {
+        if let Err(e) = send_desktop_notification(&owned_title, owned_body.as_deref()).await {
             report_notification_failure(&e);
         }
     });
 }
 
-/// Build a title-only message suitable for desktop notifications.
-fn build_notification_message(title: &str) -> Message {
+/// Build a desktop notification message with a title and optional body.
+fn build_notification_message(title: &str, body: Option<&str>) -> Message {
     Message {
         title: Some(title.to_string()),
-        body: None,
+        body: body.map(|body| MessageBody::Plain(body.to_string())),
         attachments: Vec::new(),
         location: None,
         metadata: BTreeMap::new(),
@@ -248,13 +251,13 @@ fn build_notification_message(title: &str) -> Message {
 }
 
 /// Build a transient messenger, register the desktop provider, and dispatch
-/// a title-bearing notification to the current host OS.
-async fn send_desktop_notification(title: &str) -> Result<(), String> {
+/// a notification to the current host OS.
+async fn send_desktop_notification(title: &str, body: Option<&str>) -> Result<(), String> {
     let mut messenger = Messenger::new();
     let provider = DesktopNotificationProvider::new(DesktopConfig::default());
     messenger.register(Box::new(provider));
 
-    let message = build_notification_message(title);
+    let message = build_notification_message(title, body);
     let dispatch = Dispatch::to(Target::desktop());
 
     messenger
@@ -1104,23 +1107,35 @@ mod tests {
     #[test]
     fn execute_notification_blank_is_noop() {
         // Blank titles are no-ops and return immediately.
-        execute_notification("   ");
-        execute_notification("");
-        execute_notification("\n\t");
+        execute_notification("   ", None);
+        execute_notification("", None);
+        execute_notification("\n\t", None);
+        execute_notification("   ", Some("body should not matter"));
     }
 
     #[test]
     fn execute_notification_no_panic_without_runtime() {
         // Must not panic when called outside a Tokio runtime.
-        execute_notification("test title");
+        execute_notification("test title", None);
+        execute_notification("test title", Some("test body"));
     }
 
     #[test]
-    fn execute_notification_message_is_title_only() {
+    fn build_notification_message_title_only() {
         let title = "Deployment Successful";
-        let message = build_notification_message(title);
+        let message = build_notification_message(title, None);
         assert_eq!(message.title.as_deref(), Some(title));
         assert!(message.body.is_none());
+        assert!(message.attachments.is_empty());
+    }
+
+    #[test]
+    fn build_notification_message_with_body() {
+        let title = "Deployment Successful";
+        let body = "Released v1.2.3 to production";
+        let message = build_notification_message(title, Some(body));
+        assert_eq!(message.title.as_deref(), Some(title));
+        assert_eq!(message.body, Some(MessageBody::Plain(body.to_string())));
         assert!(message.attachments.is_empty());
     }
 

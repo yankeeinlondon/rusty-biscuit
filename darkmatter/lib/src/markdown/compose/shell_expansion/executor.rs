@@ -128,9 +128,11 @@ pub fn resolve_working_directory(
 ///     executable: "echo".to_string(),
 ///     args: vec!["hello".to_string()],
 ///     span: 0..10,
+///     indent: String::new(),
 ///     origin: ShellCommandOrigin::Body { line: 1 },
 ///     error_handling: ErrorHandling::default(),
 ///     timeout_override: None,
+///     no_cache: false,
 ///     pipeline: None,
 ///     ctx,
 /// };
@@ -243,10 +245,8 @@ pub(crate) fn execute_command_detailed(
         match child.try_wait() {
             Ok(Some(status)) => {
                 // Process completed
-                let stdout_bytes =
-                    join_output_thread_raw(stdout_thread, "stdout", &directive.ctx)?;
-                let stderr_bytes =
-                    join_output_thread_raw(stderr_thread, "stderr", &directive.ctx)?;
+                let stdout_bytes = join_output_thread_raw(stdout_thread, "stdout", &directive.ctx)?;
+                let stderr_bytes = join_output_thread_raw(stderr_thread, "stderr", &directive.ctx)?;
                 let stdout_str = String::from_utf8_lossy(&stdout_bytes).to_string();
                 let stderr_str = String::from_utf8_lossy(&stderr_bytes).to_string();
 
@@ -770,10 +770,12 @@ mod tests {
             executable: exe.to_string(),
             args: args.iter().map(|s| s.to_string()).collect(),
             span: 0..raw.len(),
+            indent: String::new(),
             origin: ShellCommandOrigin::Body { line },
             error_handling: ErrorHandling::default(),
             timeout_override: None,
             pipeline: None,
+            no_cache: false,
             ctx: test_ctx(),
         }
     }
@@ -920,10 +922,12 @@ mod tests {
                 "import sys; sys.stderr.write('oops'); sys.stdout.write('ok')".to_string(),
             ],
             span: 0..10,
+            indent: String::new(),
             origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: None,
             pipeline: None,
+            no_cache: false,
             ctx: test_ctx(),
         };
         let options = ShellExpansionOptions::default();
@@ -979,10 +983,12 @@ mod tests {
             executable: "echo".to_string(),
             args: vec!["hello world".to_string()],
             span: 0..18,
+            indent: String::new(),
             origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: None,
             pipeline: None,
+            no_cache: false,
             ctx: test_ctx(),
         };
         let options = ShellExpansionOptions::default();
@@ -1007,10 +1013,12 @@ mod tests {
                     .to_string(),
             ],
             span: 0..10,
+            indent: String::new(),
             origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: None,
             pipeline: None,
+            no_cache: false,
             ctx: test_ctx(),
         };
         let options = ShellExpansionOptions::default();
@@ -1052,10 +1060,12 @@ mod tests {
             executable: "echo".to_string(),
             args: vec!["\x1b[31mhello\x1b[0m".to_string()],
             span: 0..0,
+            indent: String::new(),
             origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: None,
             pipeline: None,
+            no_cache: false,
             ctx: test_ctx(),
         };
         let options = ShellExpansionOptions::default(); // strip_ansi: true by default
@@ -1072,10 +1082,12 @@ mod tests {
             executable: "echo".to_string(),
             args: vec!["\x1b[31mhello\x1b[0m".to_string()],
             span: 0..0,
+            indent: String::new(),
             origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: None,
             pipeline: None,
+            no_cache: false,
             ctx: test_ctx(),
         };
         let options = ShellExpansionOptions {
@@ -1095,10 +1107,12 @@ mod tests {
             executable: "env".to_string(),
             args: vec![],
             span: 0..0,
+            indent: String::new(),
             origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: None,
             pipeline: None,
+            no_cache: false,
             ctx: test_ctx(),
         };
         let options = ShellExpansionOptions::default(); // strip_ansi: true by default
@@ -1115,10 +1129,12 @@ mod tests {
             executable: "sleep".to_string(),
             args: vec!["10".to_string()],
             span: 0..0,
+            indent: String::new(),
             origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: Some(Duration::from_millis(100)),
             pipeline: None,
+            no_cache: false,
             ctx: test_ctx(),
         };
         let options = ShellExpansionOptions {
@@ -1144,10 +1160,12 @@ mod tests {
             executable: "sleep".to_string(),
             args: vec!["10".to_string()],
             span: 0..0,
+            indent: String::new(),
             origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: Some(Duration::from_millis(100)),
             pipeline: None,
+            no_cache: false,
             ctx: test_ctx(),
         };
         let options = ShellExpansionOptions {

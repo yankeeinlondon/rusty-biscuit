@@ -87,3 +87,22 @@ fn url_error_has_scheme_hint() {
     assert_contains_all(&out, &["ReferenceError", "URL parse failure", "https://"]);
     insta::assert_snapshot!("url_error", out);
 }
+
+#[test]
+fn file_reference_shows_hint() {
+    let err = ReferenceError::FileReference(biscuit_file::FileReferenceError::InvalidSyntax(
+        "unclosed brace".into(),
+    ));
+    let out = render(&err);
+    assert_contains_all(
+        &out,
+        &[
+            "ReferenceError",
+            "file reference failure",
+            "unclosed brace",
+            "@/",
+            "!",
+        ],
+    );
+    insta::assert_snapshot!("file_reference", out);
+}

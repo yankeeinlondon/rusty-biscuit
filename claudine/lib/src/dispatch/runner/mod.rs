@@ -474,6 +474,7 @@ mod tests {
             agent_type: None,
             notification_type: None,
             notification_message: None,
+            agent_pid: None,
             extra: HashMap::new(),
             env: EnvironmentContext::default(),
         }
@@ -491,6 +492,7 @@ mod tests {
             canonical_provider: None,
             models: HashMap::new(),
             default_sounds: Default::default(),
+            prompt_for_missing: true,
         }
     }
 
@@ -537,7 +539,9 @@ mod tests {
         });
         m.env.repo = Some(RepoContext {
             is_monorepo: true,
-            monorepo_tool: Some("cargo_workspace".to_string()),
+            monorepo_standard: Some("cargo-workspace".to_string()),
+            monorepo_orchestrators: vec!["nx".to_string()],
+            monorepo_tool: Some("cargo-workspace".to_string()),
             root: PathBuf::from("/tmp/project"),
             packages: vec!["lib".to_string(), "cli".to_string()],
         });

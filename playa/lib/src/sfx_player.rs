@@ -474,6 +474,23 @@ pub(crate) mod macos {
         get_device_cfstring_property(device_id, DEVICE_NAME_SELECTOR)
     }
 
+    /// Returns the human-readable name of the macOS system sound output
+    /// device — the device used for UI sound effects when configured to
+    /// differ from the default audio output.
+    ///
+    /// This performs only two CoreAudio property queries (device id and
+    /// device name), making it dramatically cheaper than enumerating cpal
+    /// devices and probing their supported configs.
+    ///
+    /// ## Returns
+    ///
+    /// `Some(name)` on success. `None` if the property query fails or the
+    /// returned name is unreadable.
+    pub fn get_system_sound_device_name() -> Option<String> {
+        let device_id = get_audio_device(SYSTEM_OUTPUT_DEVICE_SELECTOR).ok()?;
+        get_device_name(device_id)
+    }
+
     /// Query a CFStringRef property from a CoreAudio device.
     fn get_device_cfstring_property(device_id: AudioObjectID, selector: u32) -> Option<String> {
         unsafe {

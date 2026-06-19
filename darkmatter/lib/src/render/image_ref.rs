@@ -8,12 +8,14 @@ use std::env;
 use std::fmt;
 
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::errors::SourceContext;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::render::stylesheet::{CssSizing, CssSizingProp, Stylesheet, StylesheetError};
+use crate::render::stylesheet::{
+    CssSizing, CssSizingProp, CssStyle, StylesheetBlockError, StylesheetError,
+};
 
 /// BEL character used by OSC 8 hyperlinks.
 const BEL: &str = "\x07";
@@ -54,7 +56,7 @@ pub enum ImageRefError {
 
     /// A CSS style declaration failed to parse.
     #[error("invalid CSS style: {0}")]
-    InvalidStyle(#[from] StylesheetError),
+    InvalidStyle(StylesheetBlockError),
 
     /// Invalid `decoding` value.
     #[error("invalid image decoding value `{value}`")]
@@ -83,6 +85,14 @@ pub enum ImageRefError {
         /// Received value.
         value: String,
     },
+}
+
+/// Wraps a stylesheet parse failure so `?` propagates a [`StylesheetError`]
+/// straight into [`ImageRefError::InvalidStyle`].
+impl From<StylesheetError> for ImageRefError {
+    fn from(error: StylesheetError) -> Self {
+        Self::InvalidStyle(StylesheetBlockError(error))
+    }
 }
 
 impl biscuit_terminal::errors::BlockError for ImageRefError {
@@ -518,7 +528,7 @@ pub struct ImageRef {
     alt: String,
     src: Option<String>,
     srcset: Option<String>,
-    style: Option<Stylesheet>,
+    style: Option<CssStyle>,
     class: Option<String>,
     title: Option<String>,
     decoding: ImageDecoding,
@@ -593,7 +603,7 @@ impl ImageRef {
     }
 
     /// Returns `style` if set.
-    pub fn style(&self) -> Option<&Stylesheet> {
+    pub fn style(&self) -> Option<&CssStyle> {
         self.style.as_ref()
     }
 
@@ -693,7 +703,7 @@ impl ImageRef {
     }
 
     /// Sets inline style from a typed stylesheet.
-    pub fn with_style(mut self, style: Stylesheet) -> Self {
+    pub fn with_style(mut self, style: CssStyle) -> Self {
         if style.is_empty() {
             self.style = None;
         } else {
@@ -705,7 +715,7 @@ impl ImageRef {
     /// Sets inline style from CSS text.
     pub fn with_style_css(mut self, style: impl Into<String>) -> Result<Self, ImageRefError> {
         let style = style.into();
-        let parsed = Stylesheet::try_from(style.as_str())?;
+        let parsed = CssStyle::try_from(style.as_str())?;
         self.style = if parsed.is_empty() {
             None
         } else {
@@ -718,6 +728,49 @@ impl ImageRef {
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
         self.title = normalize_optional(title.into());
         self
+    }
+
+    /// Creates an image and parses the title segment as a title or structured
+    /// directive.
+    ///
+    /// Parallel to
+    /// [`Link::with_title_parsed`](crate::render::Link::with_title_parsed): a
+    /// `key='value'` title (e.g. `style='color: blue'`) populates typed
+    /// `style` / `class` / `title` / `data-*` attrs rather than being stored as
+    /// literal title text; an encoded metadata package is decoded; any other
+    /// title is kept verbatim.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`ImageRefError`] when the source URL is empty.
+    pub fn with_title_parsed(
+        src: impl Into<String>,
+        alt: impl Into<String>,
+        title: &str,
+    ) -> Result<Self, ImageRefError> {
+        let mut image = Self::new(src, alt)?;
+        image.apply_parsed_title(title.trim());
+        Ok(image)
+    }
+
+    /// Dispatches an (already unquoted) title to metadata decoding, structured
+    /// directive parsing, or plain title storage. Shared by the markdown parser
+    /// and [`Self::with_title_parsed`].
+    fn apply_parsed_title(&mut self, parsed_title: &str) {
+        if parsed_title.is_empty() {
+            return;
+        }
+        if let Some(metadata) = decode_markdown_metadata(parsed_title) {
+            self.apply_markdown_metadata(metadata);
+        } else if is_structured_image_title(parsed_title) {
+            // A `key='value'` title is a structured directive (parallel to
+            // `Link::with_title_parsed`): parse `style` / `class` / `title` /
+            // `data-*` into typed attrs instead of leaking the raw syntax as a
+            // literal `title`.
+            parse_structured_image_props(self, parsed_title);
+        } else {
+            self.title = normalize_optional(parsed_title.to_string());
+        }
     }
 
     /// Sets image decoding behavior.
@@ -1024,7 +1077,7 @@ impl ImageRef {
         self.title = metadata.title.and_then(normalize_optional);
 
         if let Some(style) = metadata.style.and_then(normalize_optional)
-            && let Ok(parsed) = Stylesheet::try_from(style.as_str())
+            && let Ok(parsed) = CssStyle::try_from(style.as_str())
             && !parsed.is_empty()
         {
             self.style = Some(parsed);
@@ -1272,7 +1325,7 @@ fn parse_html_image(input: &str) -> Result<ImageRef, ImageRefError> {
     }
 
     if let Some(style) = attrs.get("style")
-        && let Ok(parsed) = Stylesheet::try_from(style.as_str())
+        && let Ok(parsed) = CssStyle::try_from(style.as_str())
         && !parsed.is_empty()
     {
         image.style = Some(parsed);
@@ -1387,13 +1440,7 @@ fn parse_markdown_image(input: &str) -> Result<ImageRef, ImageRefError> {
     let trailing = trailing.trim();
     if !trailing.is_empty() {
         let parsed_title = parse_markdown_title_value(trailing);
-        if !parsed_title.is_empty() {
-            if let Some(metadata) = decode_markdown_metadata(&parsed_title) {
-                image.apply_markdown_metadata(metadata);
-            } else {
-                image.title = Some(parsed_title);
-            }
-        }
+        image.apply_parsed_title(&parsed_title);
     }
 
     if let Some(width) = width_hint {
@@ -1576,6 +1623,148 @@ fn extract_markdown_url(content: &str) -> (String, &str) {
     }
 
     (content[..idx].to_string(), &content[idx..])
+}
+
+/// Whether a markdown image title is a structured `key='value'` directive
+/// rather than plain title text.
+///
+/// Mirrors the hyperlink directive heuristic
+/// ([`Link::with_title_parsed`](crate::render::Link::with_title_parsed)): a bare
+/// `key=` token (the key being alphanumeric plus `-`/`_`) outside any quoted
+/// run marks structured mode.
+fn is_structured_image_title(content: &str) -> bool {
+    let content = content.trim();
+    let bytes = content.as_bytes();
+    let mut in_quotes = false;
+    let mut quote_char = '"';
+
+    for (i, &b) in bytes.iter().enumerate() {
+        if in_quotes {
+            if b == b'\\' {
+                continue;
+            }
+            if b == quote_char as u8 {
+                in_quotes = false;
+            }
+        } else {
+            match b {
+                b'"' | b'\'' => {
+                    in_quotes = true;
+                    quote_char = b as char;
+                }
+                b'=' => {
+                    let key_part = content[..i]
+                        .trim()
+                        .split(&[' ', ','][..])
+                        .next_back()
+                        .unwrap_or("");
+                    if !key_part.is_empty()
+                        && key_part
+                            .chars()
+                            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+                    {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    false
+}
+
+/// Parses a structured `key='value'` image title into typed [`ImageRef`] attrs.
+///
+/// Recognizes `style`, `class`, `title`, and `data-*` (the image-relevant subset
+/// of the hyperlink directive vocabulary). Unknown keys are ignored. The shared
+/// tokenizer matches `parse_structured_props` in [`Link`](crate::render::Link).
+fn parse_structured_image_props(image: &mut ImageRef, content: &str) {
+    let mut chars = content.chars().peekable();
+
+    while chars.peek().is_some() {
+        while chars.peek().is_some_and(|&c| c.is_whitespace() || c == ',') {
+            chars.next();
+        }
+        if chars.peek().is_none() {
+            break;
+        }
+
+        let mut key = String::new();
+        while let Some(&c) = chars.peek() {
+            if c == '=' || c.is_whitespace() || c == ',' {
+                break;
+            }
+            key.push(c);
+            chars.next();
+        }
+        if key.is_empty() {
+            break;
+        }
+
+        while chars.peek().is_some_and(|c| c.is_whitespace()) {
+            chars.next();
+        }
+        if chars.peek() != Some(&'=') {
+            continue;
+        }
+        chars.next();
+        while chars.peek().is_some_and(|c| c.is_whitespace()) {
+            chars.next();
+        }
+
+        let value = if chars.peek() == Some(&'"') || chars.peek() == Some(&'\'') {
+            let quote = chars.next().unwrap_or('"');
+            let mut value = String::new();
+            while let Some(c) = chars.next() {
+                if c == '\\' {
+                    if let Some(escaped) = chars.next() {
+                        value.push(escaped);
+                    }
+                } else if c == quote {
+                    break;
+                } else {
+                    value.push(c);
+                }
+            }
+            value
+        } else {
+            let mut value = String::new();
+            while let Some(&c) = chars.peek() {
+                if c.is_whitespace() || c == ',' {
+                    break;
+                }
+                value.push(c);
+                chars.next();
+            }
+            value
+        };
+
+        apply_structured_image_prop(image, key.trim(), value);
+    }
+}
+
+/// Applies a single structured image directive property.
+fn apply_structured_image_prop(image: &mut ImageRef, key: &str, value: String) {
+    let key = key.to_ascii_lowercase();
+    match key.as_str() {
+        "title" => image.title = normalize_optional(value),
+        "class" => image.class = normalize_optional(value),
+        "style" => {
+            if let Some(style) = normalize_optional(value)
+                && let Ok(parsed) = CssStyle::try_from(style.as_str())
+                && !parsed.is_empty()
+            {
+                image.style = Some(parsed);
+            }
+        }
+        k if k.starts_with("data-") => {
+            if let Some(normalized) = normalize_data_key(k.to_string()) {
+                image.data.insert(normalized, value);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn parse_markdown_title_value(value: &str) -> String {
@@ -1888,6 +2077,36 @@ mod tests {
     use super::*;
     use serial_test::serial;
 
+    #[test]
+    fn markdown_image_parses_structured_style_directive() {
+        // Review-1 finding 2: a structured `style='...'` title is parsed into a
+        // typed inline stylesheet (mirroring `Link::with_title_parsed`), not left
+        // as a literal `title` that leaks the raw directive into the HTML.
+        let image = ImageRef::try_from("![A](./local.png \"style='color: blue;'\")")
+            .expect("parse markdown image");
+        let css = image.style().expect("inline style parsed from title").to_css();
+        assert!(css.contains("color"), "style not parsed: {css}");
+        assert_eq!(image.title(), None, "raw directive must not remain as title");
+    }
+
+    #[test]
+    fn markdown_image_parses_structured_class_directive() {
+        let image = ImageRef::try_from("![A](./local.png \"class='hero' style='width: 20%'\")")
+            .expect("parse markdown image");
+        assert_eq!(image.class(), Some("hero"));
+        assert!(image.style().is_some(), "style not parsed alongside class");
+        assert_eq!(image.title(), None);
+    }
+
+    #[test]
+    fn markdown_image_plain_title_is_not_treated_as_directive() {
+        // A normal (non `key=value`) title is preserved verbatim.
+        let image = ImageRef::try_from("![A](./local.png \"A lovely photo\")")
+            .expect("parse markdown image");
+        assert_eq!(image.title(), Some("A lovely photo"));
+        assert!(image.style().is_none());
+    }
+
     struct ScopedEnv {
         key: String,
         original: Option<String>,
@@ -1999,7 +2218,7 @@ mod tests {
     fn markdown_policy_strip_drops_extended_metadata() {
         let _env = ScopedEnv::set("IMAGE_REF_METADATA", "strip");
 
-        let style = Stylesheet::new().add(CssSizingProp::Width, CssSizing::percent(50.0));
+        let style = CssStyle::new().add(CssSizingProp::Width, CssSizing::percent(50.0));
         let image = ImageRef::new("https://example.com/pic.png", "Pic")
             .expect("image should build")
             .with_style(style)
@@ -2027,7 +2246,7 @@ mod tests {
     fn markdown_default_policy_is_lossless_and_roundtrips() {
         let _env = ScopedEnv::remove("IMAGE_REF_METADATA");
 
-        let style = Stylesheet::new().add(CssSizingProp::Width, CssSizing::percent(40.0));
+        let style = CssStyle::new().add(CssSizingProp::Width, CssSizing::percent(40.0));
         let original = ImageRef::new("https://example.com/pic.png", "Pic")
             .expect("image should build")
             .with_class("hero")
@@ -2052,11 +2271,46 @@ mod tests {
     }
 
     #[test]
+    fn inline_style_round_trips_through_renderable_css_style() {
+        // Proves the migration to `renderable::stylesheet`: an inline `style`
+        // string parses into the shared `CssStyle` type, survives a markdown
+        // round-trip, and a malformed value surfaces a `StylesheetError`
+        // wrapped into `ImageRefError::InvalidStyle`.
+        let image = ImageRef::new("https://example.com/pic.png", "Pic")
+            .expect("image should build")
+            .with_style_css("width: 40%; height: 240px;")
+            .expect("valid inline style should parse");
+
+        let style = image.style().expect("style should be set");
+        assert_eq!(style.len(), 2);
+        assert_eq!(style.to_css(), "width: 40%;\nheight: 240px;");
+
+        // The typed `CssStyle` builder produces the same declaration block.
+        let typed = CssStyle::new()
+            .add(CssSizingProp::Width, CssSizing::percent(40.0))
+            .add(CssSizingProp::Height, CssSizing::px(240.0));
+        assert_eq!(style.to_css(), typed.to_css());
+
+        // An invalid value bubbles a `StylesheetError` via `?` into the
+        // wrapped `ImageRefError::InvalidStyle` variant.
+        let err = ImageRef::new("https://example.com/pic.png", "Pic")
+            .expect("image should build")
+            .with_style_css("z-index: not-a-number;")
+            .expect_err("invalid integer value should fail");
+        match err {
+            ImageRefError::InvalidStyle(StylesheetBlockError(inner)) => {
+                assert!(matches!(inner, StylesheetError::InvalidInteger { .. }));
+            }
+            other => panic!("expected InvalidStyle, got {other:?}"),
+        }
+    }
+
+    #[test]
     #[serial]
     fn markdown_default_policy_roundtrips_all_defined_metadata_fields() {
         let _env = ScopedEnv::remove("IMAGE_REF_METADATA");
 
-        let style = Stylesheet::new()
+        let style = CssStyle::new()
             .add(CssSizingProp::Width, CssSizing::percent(40.0))
             .add(CssSizingProp::Height, CssSizing::px(240.0));
         let original = ImageRef::new("https://example.com/pic.png", "Diagram")
@@ -2096,8 +2350,8 @@ mod tests {
         assert_eq!(reparsed.data().get("id"), Some(&"123".to_string()));
         assert_eq!(reparsed.data().get("role"), Some(&"diagram".to_string()));
         assert_eq!(
-            reparsed.style().map(Stylesheet::to_css),
-            original.style().map(Stylesheet::to_css)
+            reparsed.style().map(CssStyle::to_css),
+            original.style().map(CssStyle::to_css)
         );
     }
 

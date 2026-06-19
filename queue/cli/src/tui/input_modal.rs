@@ -202,17 +202,13 @@ impl InputModal {
     /// Handle backspace.
     pub fn handle_backspace(&mut self) {
         match self.active_field {
-            InputField::Command => {
-                if self.cursor_pos > 0 {
-                    self.cursor_pos -= 1;
-                    self.command.remove(self.cursor_pos);
-                }
+            InputField::Command if self.cursor_pos > 0 => {
+                self.cursor_pos -= 1;
+                self.command.remove(self.cursor_pos);
             }
-            InputField::ScheduleValue => {
-                if self.schedule_value_cursor_pos > 0 {
-                    self.schedule_value_cursor_pos -= 1;
-                    self.schedule_value.remove(self.schedule_value_cursor_pos);
-                }
+            InputField::ScheduleValue if self.schedule_value_cursor_pos > 0 => {
+                self.schedule_value_cursor_pos -= 1;
+                self.schedule_value.remove(self.schedule_value_cursor_pos);
             }
             _ => {}
         }
@@ -247,15 +243,11 @@ impl InputModal {
     /// Move cursor left in the active text field.
     pub fn move_cursor_left(&mut self) {
         match self.active_field {
-            InputField::Command => {
-                if self.cursor_pos > 0 {
-                    self.cursor_pos -= 1;
-                }
+            InputField::Command if self.cursor_pos > 0 => {
+                self.cursor_pos -= 1;
             }
-            InputField::ScheduleValue => {
-                if self.schedule_value_cursor_pos > 0 {
-                    self.schedule_value_cursor_pos -= 1;
-                }
+            InputField::ScheduleValue if self.schedule_value_cursor_pos > 0 => {
+                self.schedule_value_cursor_pos -= 1;
             }
             _ => {}
         }
@@ -264,15 +256,13 @@ impl InputModal {
     /// Move cursor right in the active text field.
     pub fn move_cursor_right(&mut self) {
         match self.active_field {
-            InputField::Command => {
-                if self.cursor_pos < self.command.len() {
-                    self.cursor_pos += 1;
-                }
+            InputField::Command if self.cursor_pos < self.command.len() => {
+                self.cursor_pos += 1;
             }
-            InputField::ScheduleValue => {
-                if self.schedule_value_cursor_pos < self.schedule_value.len() {
-                    self.schedule_value_cursor_pos += 1;
-                }
+            InputField::ScheduleValue
+                if self.schedule_value_cursor_pos < self.schedule_value.len() =>
+            {
+                self.schedule_value_cursor_pos += 1;
             }
             _ => {}
         }
@@ -1158,13 +1148,11 @@ mod tests {
             for x in 0..buffer.area.width {
                 let cell = &buffer[(x, y)];
                 // Check the content area (inside the border)
-                if y == 1 && x > 0 && x < 39 {
-                    if cell.symbol() == "|" {
-                        // Pipe found - but it could be part of the border, check if it's in the value area
-                        // The value starts after the left border (x >= 1)
-                        if x >= 1 && x <= 20 {
-                            found_pipe_in_value = true;
-                        }
+                if y == 1 && x > 0 && x < 39 && cell.symbol() == "|" {
+                    // Pipe found - but it could be part of the border, check if it's in the value area
+                    // The value starts after the left border (x >= 1)
+                    if (1..=20).contains(&x) {
+                        found_pipe_in_value = true;
                     }
                 }
             }
@@ -1373,7 +1361,7 @@ mod tests {
 
         // Label prefix: " Command   : " = 13 chars
         // Cursor at position 3 within value
-        let expected_x = 0 + 13 + 3; // area.x + label_prefix + cursor_offset
+        let expected_x = 13 + 3; // area.x + label_prefix + cursor_offset
         let expected_y = 0;
 
         terminal
@@ -1411,7 +1399,7 @@ mod tests {
 
         // First line has 67 chars, cursor at 68 is position 1 on second line
         // 68 - 67 = 1, so column 1 on line 1 (0-indexed)
-        let expected_x = 0 + 13 + 1; // area.x + label_prefix + column
+        let expected_x = 13 + 1; // area.x + label_prefix + column
         let expected_y = 1; // second line
 
         terminal

@@ -16,7 +16,7 @@ darkmatter_lib/
 │   ├── delta/              # Structural diff analysis
 │   ├── toc/                # Table of contents extraction
 │   ├── normalize/          # Heading normalization/releveling
-│   ├── compose/            # Inline Pre + Transclusion + Inline Post pipeline
+│   ├── compose/            # Inline Pre + Transclusion + Inline Post + Finalization pipeline
 │   └── dsl/                # Code block metadata parsing
 ├── diff/
 │   └── visual/             # Markdown-agnostic visual diff utilities
@@ -41,6 +41,12 @@ darkmatter_lib/
 | `biscuit-terminal` | Terminal detection, image rendering, mermaid diagrams, table rendering |
 | `biscuit-hash` | Content hashing (xxHash) for TOC, delta, and mermaid caching |
 | `serde` | Frontmatter serialization |
+
+### Dev-dependencies
+
+| Crate | Purpose |
+|-------|---------|
+| `chromiumoxide` + `futures-util` | Headless-Chrome browser-render tests (`tests/browser_render.rs`) + `examples/html_to_png.rs` screenshot helper; skip cleanly without a browser |
 
 ## Public Modules (`lib.rs`)
 

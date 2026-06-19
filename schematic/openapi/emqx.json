@@ -113,6 +113,183 @@
         }
       }
     },
+    "/listeners": {
+      "get": {
+        "summary": "List all configured listeners",
+        "description": "List all configured listeners",
+        "operationId": "ListListeners",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListListenersResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListListenersResponse"
+            }
+          }
+        }
+      }
+    },
+    "/listeners/{id}": {
+      "get": {
+        "summary": "Get details of a specific listener",
+        "description": "Get details of a specific listener",
+        "operationId": "GetListener",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListenerInfo"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListenerInfo"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/metrics": {
+      "get": {
+        "summary": "Get broker metrics for all nodes",
+        "description": "Get broker metrics for all nodes",
+        "operationId": "ListMetrics",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListMetricsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListMetricsResponse"
+            }
+          }
+        }
+      }
+    },
+    "/stats": {
+      "get": {
+        "summary": "Get broker statistics for all nodes",
+        "description": "Get broker statistics for all nodes",
+        "operationId": "ListStats",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListStatsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListStatsResponse"
+            }
+          }
+        }
+      }
+    },
+    "/prometheus/stats": {
+      "get": {
+        "summary": "Get metrics in Prometheus format",
+        "description": "Get metrics in Prometheus format",
+        "operationId": "GetPrometheus",
+        "responses": {
+          "200": {
+            "description": "Successful text response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": "Text"
+        }
+      }
+    },
+    "/alarms": {
+      "get": {
+        "summary": "List active alarms",
+        "description": "List active alarms",
+        "operationId": "ListAlarms",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListAlarmsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListAlarmsResponse"
+            }
+          }
+        }
+      }
+    },
     "/clients": {
       "get": {
         "summary": "List connected MQTT clients with pagination",
@@ -408,6 +585,138 @@
           "response": "Empty"
         }
       }
+    },
+    "/topics": {
+      "get": {
+        "summary": "List active topics in the broker",
+        "description": "List active topics in the broker",
+        "operationId": "ListTopics",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTopicsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListTopicsResponse"
+            }
+          }
+        }
+      }
+    },
+    "/retainer/messages": {
+      "get": {
+        "summary": "List retained messages with pagination",
+        "description": "List retained messages with pagination",
+        "operationId": "ListRetained",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListRetainedResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListRetainedResponse"
+            }
+          }
+        }
+      }
+    },
+    "/retainer/messages/{topic}": {
+      "get": {
+        "summary": "Get a specific retained message by topic",
+        "description": "Get a specific retained message by topic",
+        "operationId": "GetRetained",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetainedMessage"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "RetainedMessage"
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a retained message",
+        "description": "Delete a retained message",
+        "operationId": "DeleteRetained",
+        "responses": {
+          "204": {
+            "description": "No content"
+          }
+        },
+        "x-schematic": {
+          "response": "Empty"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "topic",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "topic",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "topic",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "topic",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
     },
     "/rules": {
       "get": {
@@ -932,315 +1241,6 @@
             "Json": {
               "module_path": null,
               "type_name": "ListAuthzSourcesResponse"
-            }
-          }
-        }
-      }
-    },
-    "/listeners": {
-      "get": {
-        "summary": "List all configured listeners",
-        "description": "List all configured listeners",
-        "operationId": "ListListeners",
-        "responses": {
-          "200": {
-            "description": "Successful JSON response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListListenersResponse"
-                }
-              }
-            }
-          }
-        },
-        "x-schematic": {
-          "response": {
-            "Json": {
-              "module_path": null,
-              "type_name": "ListListenersResponse"
-            }
-          }
-        }
-      }
-    },
-    "/listeners/{id}": {
-      "get": {
-        "summary": "Get details of a specific listener",
-        "description": "Get details of a specific listener",
-        "operationId": "GetListener",
-        "responses": {
-          "200": {
-            "description": "Successful JSON response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListenerInfo"
-                }
-              }
-            }
-          }
-        },
-        "x-schematic": {
-          "response": {
-            "Json": {
-              "module_path": null,
-              "type_name": "ListenerInfo"
-            }
-          }
-        }
-      },
-      "parameters": [
-        {
-          "in": "path",
-          "name": "id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        }
-      ]
-    },
-    "/metrics": {
-      "get": {
-        "summary": "Get broker metrics for all nodes",
-        "description": "Get broker metrics for all nodes",
-        "operationId": "ListMetrics",
-        "responses": {
-          "200": {
-            "description": "Successful JSON response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListMetricsResponse"
-                }
-              }
-            }
-          }
-        },
-        "x-schematic": {
-          "response": {
-            "Json": {
-              "module_path": null,
-              "type_name": "ListMetricsResponse"
-            }
-          }
-        }
-      }
-    },
-    "/stats": {
-      "get": {
-        "summary": "Get broker statistics for all nodes",
-        "description": "Get broker statistics for all nodes",
-        "operationId": "ListStats",
-        "responses": {
-          "200": {
-            "description": "Successful JSON response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListStatsResponse"
-                }
-              }
-            }
-          }
-        },
-        "x-schematic": {
-          "response": {
-            "Json": {
-              "module_path": null,
-              "type_name": "ListStatsResponse"
-            }
-          }
-        }
-      }
-    },
-    "/prometheus/stats": {
-      "get": {
-        "summary": "Get metrics in Prometheus format",
-        "description": "Get metrics in Prometheus format",
-        "operationId": "GetPrometheus",
-        "responses": {
-          "200": {
-            "description": "Successful text response",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          }
-        },
-        "x-schematic": {
-          "response": "Text"
-        }
-      }
-    },
-    "/topics": {
-      "get": {
-        "summary": "List active topics in the broker",
-        "description": "List active topics in the broker",
-        "operationId": "ListTopics",
-        "responses": {
-          "200": {
-            "description": "Successful JSON response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListTopicsResponse"
-                }
-              }
-            }
-          }
-        },
-        "x-schematic": {
-          "response": {
-            "Json": {
-              "module_path": null,
-              "type_name": "ListTopicsResponse"
-            }
-          }
-        }
-      }
-    },
-    "/retainer/messages": {
-      "get": {
-        "summary": "List retained messages with pagination",
-        "description": "List retained messages with pagination",
-        "operationId": "ListRetained",
-        "responses": {
-          "200": {
-            "description": "Successful JSON response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListRetainedResponse"
-                }
-              }
-            }
-          }
-        },
-        "x-schematic": {
-          "response": {
-            "Json": {
-              "module_path": null,
-              "type_name": "ListRetainedResponse"
-            }
-          }
-        }
-      }
-    },
-    "/retainer/messages/{topic}": {
-      "get": {
-        "summary": "Get a specific retained message by topic",
-        "description": "Get a specific retained message by topic",
-        "operationId": "GetRetained",
-        "responses": {
-          "200": {
-            "description": "Successful JSON response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RetainedMessage"
-                }
-              }
-            }
-          }
-        },
-        "x-schematic": {
-          "response": {
-            "Json": {
-              "module_path": null,
-              "type_name": "RetainedMessage"
-            }
-          }
-        }
-      },
-      "delete": {
-        "summary": "Delete a retained message",
-        "description": "Delete a retained message",
-        "operationId": "DeleteRetained",
-        "responses": {
-          "204": {
-            "description": "No content"
-          }
-        },
-        "x-schematic": {
-          "response": "Empty"
-        }
-      },
-      "parameters": [
-        {
-          "in": "path",
-          "name": "topic",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "topic",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "topic",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "topic",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        }
-      ]
-    },
-    "/alarms": {
-      "get": {
-        "summary": "List active alarms",
-        "description": "List active alarms",
-        "operationId": "ListAlarms",
-        "responses": {
-          "200": {
-            "description": "Successful JSON response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListAlarmsResponse"
-                }
-              }
-            }
-          }
-        },
-        "x-schematic": {
-          "response": {
-            "Json": {
-              "module_path": null,
-              "type_name": "ListAlarmsResponse"
             }
           }
         }

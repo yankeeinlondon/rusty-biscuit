@@ -24,10 +24,18 @@ use super::{
     SpawnVisibility, TerminalHarness, run_with_stdin_timeout, run_with_timeout, wait_for_prompt,
 };
 
+/// Environment variable read by [`KittyHarness::shared_or_spawn`] to
+/// attach to a window that was pre-spawned by an outer process (e.g.
+/// the `_test_l2` recipe via `biscuit-harness-broker`).
+pub const SHARED_WINDOW_ENV: &str = "BISCUIT_SHARED_KITTY_WINDOW_ID";
+
 /// Harness that drives a running kitty GUI via `kitty @`.
 pub struct KittyHarness {
     window_id: Option<String>,
     spawn_visibility: SpawnVisibility,
+    /// When `true`, [`Drop`] closes the kitty window. When `false`
+    /// (set by [`KittyHarness::attach`]) the window is left alone.
+    owned: bool,
 }
 
 impl KittyHarness {
@@ -36,14 +44,62 @@ impl KittyHarness {
         Self {
             window_id: None,
             spawn_visibility: SpawnVisibility::default(),
+            owned: true,
         }
+    }
+
+    /// Returns a harness that references an existing kitty window by id
+    /// without taking ownership of its lifecycle. [`Drop`] is a no-op.
+    pub fn attach(window_id: impl Into<String>) -> Self {
+        Self {
+            window_id: Some(window_id.into()),
+            spawn_visibility: SpawnVisibility::default(),
+            owned: false,
+        }
+    }
+
+    /// If [`SHARED_WINDOW_ENV`] is set, returns an
+    /// [`attach`](Self::attach)-style harness pointing at the
+    /// pre-spawned window. Otherwise spawns a fresh window (owned).
+    ///
+    /// ## Errors
+    ///
+    /// Propagates whatever [`spawn_shell`](TerminalHarness::spawn_shell)
+    /// returns when no shared window id is available.
+    pub fn shared_or_spawn() -> io::Result<Self> {
+        if let Ok(id) = env::var(SHARED_WINDOW_ENV) {
+            let trimmed = id.trim();
+            if !trimmed.is_empty() {
+                return Ok(Self::attach(trimmed));
+            }
+        }
+        let mut h = Self::new();
+        h.spawn_shell()?;
+        Ok(h)
     }
 
     /// Builder-style override of the default
     /// [`SpawnVisibility::Background`]. Use
     /// [`SpawnVisibility::Foreground`] for tests that need the kitty
     /// window to receive focus immediately on spawn.
+    ///
+    /// ## Invariant
+    ///
+    /// L2 (shared) tests MUST keep the default
+    /// [`SpawnVisibility::Background`] so test runs do not steal focus
+    /// from the developer's foreground app. Only L3 tests (which own
+    /// their own per-test harness and need OS keyboard injection)
+    /// should override to [`SpawnVisibility::Foreground`]. Attached
+    /// (shared-window) harnesses panic from this setter in debug
+    /// builds because the broker-spawned window was already created in
+    /// background mode and cannot be re-spawned with a different
+    /// visibility.
     pub fn with_spawn_visibility(mut self, visibility: SpawnVisibility) -> Self {
+        debug_assert!(
+            self.owned,
+            "with_spawn_visibility on an attached (shared) KittyHarness has no effect — \
+             the window was already spawned by biscuit-harness-broker in Background mode",
+        );
         self.spawn_visibility = visibility;
         self
     }
@@ -53,6 +109,12 @@ impl KittyHarness {
     /// `KITTY_LISTEN_ON` automatically when remote control is enabled.
     pub fn available() -> bool {
         which("kitty") && env::var_os("KITTY_LISTEN_ON").is_some()
+    }
+
+    /// Returns the active window id (panicking if the harness has not
+    /// spawned or attached yet).
+    pub fn window_id_str(&self) -> &str {
+        self.window_id()
     }
 
     fn window_id(&self) -> &str {
@@ -152,8 +214,22 @@ impl Default for KittyHarness {
 
 impl Drop for KittyHarness {
     fn drop(&mut self) {
-        self.close_window();
+        if self.owned {
+            self.close_window();
+        }
     }
+}
+
+/// Closes the kitty window with the given id by shelling out to
+/// `kitty @ close-window`. Used by `biscuit-harness-broker kill` to tear
+/// down shared windows whose `KittyHarness` was leaked in a different
+/// process. Best-effort: any error is swallowed.
+pub fn close_window_by_id(window_id: &str) {
+    let mut cmd = Command::new("kitty");
+    cmd.args(["@", "close-window", "--match", &format!("id:{window_id}")])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
 }
 
 impl TerminalHarness for KittyHarness {

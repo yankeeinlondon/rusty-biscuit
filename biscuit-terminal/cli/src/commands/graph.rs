@@ -3,7 +3,7 @@ use crate::commands::shared::*;
 use crate::commands::{CliContext, Run};
 use crate::output::RenderMeta;
 use biscuit_terminal::components::graph_expression::GraphExpression;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use clap::Args as ClapArgs;
 use std::io::Write;

@@ -86,6 +86,7 @@
 //!         ExecutableSource::MacOsAppBundle => println!("Found as macOS app: {}", path.display()),
 //!         ExecutableSource::WindowsAppPaths => println!("Found via App Paths: {}", path.display()),
 //!         ExecutableSource::WindowsInstallRoot => println!("Found under install root: {}", path.display()),
+//!         ExecutableSource::ProjectLocal => println!("Found in project-local bin: {}", path.display()),
 //!     }
 //! }
 //! ```
@@ -103,9 +104,12 @@ pub mod find_program;
 pub mod host_capability;
 pub mod install;
 pub mod inventory;
+pub mod local_bin;
 pub mod macos_bundle;
 pub mod notification_helpers;
 pub mod schema;
+pub mod test_runner;
+pub mod test_runner_spec;
 pub mod types;
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_apps;
@@ -124,7 +128,7 @@ pub use contract::{
 };
 pub use enums::{
     AiCli, CategoryEnum, Editor, HeadlessAudio, LanguagePackageManager, NotificationHelper,
-    OsPackageManager, TerminalApp, TtsClient, Utility,
+    OsPackageManager, TerminalApp, TestRunner, TtsClient, Utility,
 };
 pub use find_program::{
     find_program, find_program_with_source, find_programs_parallel,
@@ -144,16 +148,23 @@ pub use install::{
     get_install_command, get_versioned_install_command, run_install_interview,
 };
 pub use inventory::Program;
+pub use local_bin::LocalBinIndex;
 pub use macos_bundle::{find_macos_app_bundle, get_app_bundle_name};
 pub use notification_helpers::InstalledNotificationHelpers;
 pub use schema::{ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
+pub use test_runner::{
+    InstalledTestRunners, TestRunnerEntry, detect_test_runners, resolve_test_runner,
+};
+pub use test_runner_spec::{
+    Availability, InvocationClass, RunnerKind, TestRunnerEcosystem, TestRunnerSpec,
+};
 pub use types::ProgramDetector;
 
 /// Complete programs detection result.
 ///
 /// Contains detection results for all supported program categories:
 /// editors, utilities, package managers, TTS clients, terminal apps, headless audio players,
-/// and AI CLI tools.
+/// AI CLI tools, and test runners.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ProgramsInfo {
     /// Text editors and IDEs installed on the system.
@@ -182,20 +193,29 @@ pub struct ProgramsInfo {
 
     /// Desktop notification helper utilities installed on the system.
     pub notification_helpers: InstalledNotificationHelpers,
+
+    /// Test runners resolved against the host (PATH, project-local bins, and
+    /// parent binaries). Unlike the other categories, this field uses
+    /// [`Availability`] discriminators rather than a bare `installed: bool`
+    /// because test runners live in many places (see `test-runner-strategy.md`).
+    pub test_runners: InstalledTestRunners,
 }
 
 impl ProgramsInfo {
     /// Detect all installed programs across all categories.
     ///
     /// Builds a shared executable index once (scanning all PATH dirs and macOS app bundles),
-    /// then detects all 8 categories in parallel using Rayon's `join` API. Each category
+    /// then detects all 9 categories in parallel using Rayon's `join` API. Each category
     /// uses the shared index for O(1) lookups instead of repeated filesystem traversal.
+    /// The test-runner category additionally probes project-local bin directories via
+    /// [`LocalBinIndex`] (cwd-sensitive) before falling back to PATH and parent-binary
+    /// resolution.
     ///
     /// ## Performance
     ///
     /// The shared index eliminates redundant filesystem scans:
-    /// - PATH scan: once (instead of 8x per category)
-    /// - macOS bundle check: once (instead of 8x per category)
+    /// - PATH scan: once (instead of 9x per category)
+    /// - macOS bundle check: once (instead of 9x per category)
     /// - Subsequent lookups: O(1) HashMap access
     #[instrument(skip_all)]
     pub fn detect() -> Self {
@@ -230,7 +250,10 @@ impl ProgramsInfo {
             || InstalledAiClients::new_with_index(&index),
         );
 
-        let notification_helpers = InstalledNotificationHelpers::new_with_index(&index);
+        let (notification_helpers, test_runners) = rayon::join(
+            || InstalledNotificationHelpers::new_with_index(&index),
+            || detect_test_runners(Arc::clone(&index)),
+        );
 
         Self {
             editors,
@@ -242,6 +265,7 @@ impl ProgramsInfo {
             headless_audio,
             ai_clients,
             notification_helpers,
+            test_runners,
         }
     }
 

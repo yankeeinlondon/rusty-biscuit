@@ -125,33 +125,68 @@ Behavior:
 
 ## Provider Delivery
 
-After preparation, each provider mutates its launch plan with args, env vars, and temp artifacts. Temporary files and directories are held alive until the child process exits.
+After preparation, each provider mutates its launch plan with args, env vars, and temp artifacts. Temporary files are held alive until the wrap call returns (drop-based cleanup).
+
+Delivery is driven by the `SystemPromptSpec` declared in `ProviderInfo::system_prompt`. The wrap layer reads the spec and applies the correct mechanism per provider; profile code is a thin reader of that spec.
 
 | Provider | Append | Replace | Runtime strategy |
 |---|---|---|---|
 | Claude Code | Yes | Yes | Interactive uses native string flags; non-interactive writes temp files and uses `--append-system-prompt-file` or `--system-prompt-file` |
-| Codex | Yes | Yes | Append uses an ephemeral `HOME` with `.codex/AGENTS.override.md`; replace uses `-c model_instructions_file=<temp>` |
-| Gemini CLI | Yes | Yes | Append uses an ephemeral `HOME` with `.gemini/GEMINI.md`; replace sets `GEMINI_SYSTEM_MD=<temp>` |
+| Codex | Yes | Yes | Append pushes `-c developer_instructions="..."` (64 KB cap); replace writes scoped temp file and pushes `-c model_instructions_file=<path>` |
+| Gemini CLI | Yes | Yes | Both modes write a scoped temp file and set `GEMINI_SYSTEM_MD=<path>`. Append pre-composes the user's real `~/.gemini/GEMINI.md` with the overlay |
 | Kimi Code | No | Yes | Replace writes a temp prompt file plus a temp agent YAML and passes `--agent-file` |
-| Qwen Code | Yes | No | Append uses an ephemeral `HOME` with `.qwen/QWEN.md` |
+| Qwen Code | Yes | Yes | Append pushes `--append-system-prompt <content>`; replace pushes `--system-prompt <content>` |
 | OpenCode | Yes | Yes | Append sets `OPENCODE_CONFIG_CONTENT` with a temp instruction file; replace passes `--system <temp>` |
 | Goose | Yes | No | Append passes `--system <markdown>` directly |
 
 Unsupported modes are skipped with warnings rather than hard failures.
 
-## Overlay-Home Providers
+## Spec-Driven Dispatcher
 
-Codex, Gemini, and Qwen append-mode use an ephemeral overlay home instead of mutating the user's real home directory.
+The wrap layer uses `apply_system_prompt_via_spec` in `claudine/cli/src/commands/wrap/system_prompt.rs` to dispatch on `SystemPromptDelivery` variants:
 
-Current behavior:
+- `InlineFlag { flag }` — pushes `flag` then the prompt content as two argv tokens
+- `FileFlag { flag }` — writes content to a scoped temp file, then pushes `flag` and the file path
+- `EnvVarFile { env_var }` — writes content to a scoped temp file, then sets the env var to the file path
+- `ConfigKeyInline { flag, key }` — pushes `flag` then `key="<escaped_content>"` (used by Codex append)
+- `ConfigKeyFile { flag, key }` — writes content to a scoped temp file, then pushes `flag` then `key=<path>` (used by Codex replace)
+- `ShadowHomeFile { relative_path }` — legacy HOME-redirect path, retained for providers that require it
+- `Custom(tag)` / `Unsupported` — warning, no-op
 
-- a temp home is created
-- the provider subdirectory is created inside it
-- if the real overlay file already exists, Claudine copies its contents and appends the composed prompt
-- otherwise Claudine writes only the composed prompt
-- `HOME` is pointed at the temp home for the launched child process
+## Scoped Temporary Files
 
-This preserves the user's real config while still letting the provider load its normal memory-file mechanism.
+All transient overlay artifacts live inside the user's trust boundary:
+
+- inside a repo: `<repo_root>/.claudine/tmp/`
+- outside a repo: `<launch_cwd>/.claudine-tmp/`
+
+Files are created via `tempfile::Builder` with a `.md` suffix so the `Drop` impl deletes them when the wrap call returns. A best-effort `.gitignore` augmentation appends `.claudine/tmp/` idempotently when a repo-root `.gitignore` exists.
+
+### Gemini Append Composition
+
+Gemini has no native append flag for `GEMINI_SYSTEM_MD`, so Claudine pre-composes the user's persistent `GEMINI.md` with the overlay before writing the merged file:
+
+```rust
+let real_gemini_md = dirs::home_dir()
+    .map(|h| h.join(".gemini").join("GEMINI.md"))
+    .filter(|p| p.is_file());
+let merged = match real_gemini_md {
+    Some(path) => format!("{}\n\n{}", std::fs::read_to_string(&path)?.trim_end(), overlay),
+    None => overlay.to_string(),
+};
+```
+
+This preserves the user's persistent Gemini context but means Gemini's built-in default system prompt is silently dropped in append mode. Use `--replace-system-prompt` if you want full control.
+
+### Codex Append Argv Limit
+
+Codex append uses inline config (`-c developer_instructions="..."`), which is subject to the platform argv size limit. Claudine enforces a 64 KB hard cap:
+
+```rust
+const CODEX_INLINE_LIMIT_BYTES: usize = 64 * 1024;
+```
+
+If the composed prompt exceeds this, the wrap errors with a clear message telling the user to use `--replace-system-prompt` instead. There is no silent fallback to replace semantics.
 
 ## Harness Integration
 

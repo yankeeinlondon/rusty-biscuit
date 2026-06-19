@@ -1,0 +1,39 @@
+[package]
+name = "renderable"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+
+[lib]
+name = "renderable"
+path = "src/lib.rs"
+# Disable the default bench harness so `cargo bench` only runs Criterion targets.
+bench = false
+
+[features]
+clap = ["dep:clap"]
+# Test-only instrumentation: exposes the `NodeAttrs::data` hint-access counter
+# (`reset_hint_accesses`/`hint_accesses`) so a downstream crate's perf-gate test
+# can fold a corpus through renderable and assert zero renderable-owned bag
+# round-trips. Carries a thread-local counter and per-`set/get/remove_hint`
+# bookkeeping, so it must never be enabled in a release build — enable it only
+# from a `[dev-dependencies]` entry (see `biscuit-terminal`).
+hint-access-counter = []
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+tracing = "0.1"
+url = "2.5"
+
+# CLI argument parsing (optional, for ValueEnum derive)
+clap = { version = "4", features = ["derive"], optional = true }
+
+[dev-dependencies]
+proptest = "1.5"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "render"
+harness = false

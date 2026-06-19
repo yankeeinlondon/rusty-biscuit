@@ -1,6 +1,6 @@
 //! Type definitions for shell expansion.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -64,10 +64,19 @@ pub struct ShellDirective {
     pub executable: String,
     pub args: Vec<String>,
     pub span: std::ops::Range<usize>,
+    /// Leading whitespace of the directive's source line, captured verbatim so
+    /// multi-line output can be re-indented to stay nested under its container.
+    /// Empty for frontmatter, synthetic, or column-1 directives.
+    pub indent: String,
     pub origin: ShellCommandOrigin,
     pub error_handling: ErrorHandling,
     /// Per-command timeout override. When Some, takes precedence over the global timeout.
     pub timeout_override: Option<std::time::Duration>,
+    /// When `true`, this directive bypasses the per-compose command cache: it
+    /// neither reads a memoized result nor stores its own, executing fresh at
+    /// every occurrence. Set by `--no-cache` (body), `::no-cache` (frontmatter),
+    /// or `no_cache=true` (shell block).
+    pub no_cache: bool,
     /// Parsed pipeline (supports chaining with && and ||).
     pub pipeline: Option<ShellPipeline>,
     /// Source context used for diagnostic rendering when execution fails.
@@ -203,7 +212,7 @@ pub enum StdoutTarget {
 
 /// Renders a [`RedirectionConfig`] as the trailing redirection tokens that
 /// would appear after a command (with a leading space when non-empty).
-fn render_redirection(redir: &RedirectionConfig) -> String {
+pub(crate) fn render_redirection(redir: &RedirectionConfig) -> String {
     let mut out = String::new();
     match redir.stdout {
         StdoutTarget::Capture => {}
@@ -528,6 +537,18 @@ pub enum ShellExpansionError {
         source_desc: String,
     },
 
+    #[error(
+        "Command '{command}' at {origin} depends on frontmatter key '{key}', which is \
+         resolved by frontmatter shell expansion. A condition-blind pre-flight cannot \
+         approve a command whose shape is not yet known."
+    )]
+    DynamicCommandShape {
+        ctx: Box<SourceContext>,
+        command: String,
+        key: String,
+        origin: ShellCommandOrigin,
+    },
+
     #[error("Command timed out after {timeout:?}: '{command}' at {origin}")]
     Timeout {
         ctx: Box<SourceContext>,
@@ -551,6 +572,14 @@ pub enum ShellExpansionError {
         path: PathBuf,
         source: std::io::Error,
     },
+
+    /// A non-shell pre-flight failure (transform parse, ctx merge, schema
+    /// validation, remote fetch, …) surfaced while the pre-flight walk built
+    /// the command graph. Carries the original rich [`MarkdownError`] so the
+    /// approval lifecycle's caller renders it identically to the `compose_with`
+    /// path rather than flattening it into an opaque policy error.
+    #[error(transparent)]
+    Preflight(Box<crate::markdown::types::MarkdownError>),
 }
 
 impl biscuit_terminal::errors::BlockError for ShellExpansionError {
@@ -658,6 +687,27 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                 ])
                 .hint("This is a bug in the pre-flight scanner — please report it."),
 
+            ShellExpansionError::DynamicCommandShape {
+                ctx,
+                command,
+                key,
+                origin,
+            } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "ShellExpansionError",
+                    "dynamic command shape",
+                ))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Depends on:</dim> frontmatter.{key}"
+                    )),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
+                .hint(
+                    "Move the dynamic value into the frontmatter command and reference its output \
+                     as content, use a stable command shape, or split into two compose runs.",
+                ),
+
             ShellExpansionError::Timeout {
                 ctx,
                 command,
@@ -710,6 +760,10 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                     source.kind()
                 ))
                 .hint("Verify the policy file exists and the process can read it."),
+
+            // Delegate to the wrapped rich error so its styled block (excerpt,
+            // gutter, OSC8 header, schema problems, …) is preserved verbatim.
+            ShellExpansionError::Preflight(inner) => inner.status_block(_term),
         }
     }
 }
@@ -779,10 +833,20 @@ impl ShellRuleSet {
     }
 }
 
+/// How long a thread will block waiting for a concurrently-pending allow-once
+/// approval of the *same* command before falling back to treating it as a
+/// conflict. Mirrors the single-flight timeout in the compose cache so a wedged
+/// peer can never hang composition indefinitely.
+const RESERVATION_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Runtime state for shell expansion across recursive document composition.
 #[derive(Debug, Clone)]
 pub struct ShellExpansionRuntime {
     shared: Arc<std::sync::Mutex<SharedShellExpansionRuntime>>,
+    /// Signaled whenever a pending allow-once reservation is completed, so
+    /// threads blocked on the same command can re-evaluate. Shared (same `Arc`)
+    /// across child runtimes alongside `shared`.
+    reservation_done: Arc<std::sync::Condvar>,
     pub approvals_used: usize,
 }
 
@@ -793,6 +857,21 @@ struct SharedShellExpansionRuntime {
     whitelist: ShellRuleSet,
     user_blacklist: ShellRuleSet,
     policy_paths: Option<ShellPolicyPaths>,
+    /// Per-compose memoization of shell command output, keyed by the normalized
+    /// command string. Shared across recursive transclusion (same `Arc`), so an
+    /// identical command in a child document reuses the root's result — "execute
+    /// once per compose."
+    command_cache: HashMap<String, CachedCommandOutput>,
+    /// Normalized commands for which a volatile-command discoverability warning
+    /// has already been emitted, so the warning fires at most once per command.
+    volatile_warned: HashSet<String>,
+}
+
+/// Memoized stdout/stderr for one normalized command in [`SharedShellExpansionRuntime::command_cache`].
+#[derive(Debug, Clone)]
+struct CachedCommandOutput {
+    stdout: String,
+    stderr: String,
 }
 
 #[derive(Debug, Clone)]
@@ -825,6 +904,7 @@ impl ShellExpansionRuntime {
     pub fn new() -> Self {
         Self {
             shared: Arc::new(std::sync::Mutex::new(SharedShellExpansionRuntime::default())),
+            reservation_done: Arc::new(std::sync::Condvar::new()),
             approvals_used: 0,
         }
     }
@@ -834,6 +914,7 @@ impl ShellExpansionRuntime {
     pub fn clone_for_child(&self) -> Self {
         Self {
             shared: Arc::clone(&self.shared),
+            reservation_done: Arc::clone(&self.reservation_done),
             approvals_used: 0,
         }
     }
@@ -866,7 +947,15 @@ impl ShellExpansionRuntime {
         }
     }
 
-    /// Attempts to reserve a command for allow-once approval.
+    /// Reserves a command for allow-once approval.
+    ///
+    /// When `may_wait` is `true` and another thread is mid-approval of this
+    /// *exact* command, blocks (up to [`RESERVATION_WAIT_TIMEOUT`]) until that
+    /// approval resolves, then re-evaluates — so concurrent sibling
+    /// transclusions sharing one command reuse a single approval instead of
+    /// racing into a spurious "approval required" error. Callers pass
+    /// `may_wait = false` once they already hold a reservation in the current
+    /// chain, since blocking while holding one risks a hold-and-wait deadlock.
     ///
     /// ## Returns
     ///
@@ -877,30 +966,55 @@ impl ShellExpansionRuntime {
     ///   `allow_once` set; the caller need not prompt or release anything for
     ///   this command.
     /// - [`ReserveOutcome::Pending`] when another thread is currently approving
-    ///   this exact command. The caller MUST NOT implicitly approve other
+    ///   this exact command and the caller either passed `may_wait = false` or
+    ///   the wait timed out. The caller MUST NOT implicitly approve other
     ///   un-reserved commands in the same chain.
-    pub(crate) fn try_reserve_allow_once(&mut self, normalized: &str) -> ReserveOutcome {
+    pub(crate) fn reserve_allow_once(&mut self, normalized: &str, may_wait: bool) -> ReserveOutcome {
         let mut shared = self.shared.lock().unwrap();
-        if shared.allow_once.contains(normalized) {
-            return ReserveOutcome::AlreadyAllowed;
-        }
-        if shared.pending_allow_once.insert(normalized.to_string()) {
-            ReserveOutcome::Reserved
-        } else {
-            ReserveOutcome::Pending
+        loop {
+            if shared.allow_once.contains(normalized) {
+                return ReserveOutcome::AlreadyAllowed;
+            }
+            if shared.pending_allow_once.insert(normalized.to_string()) {
+                return ReserveOutcome::Reserved;
+            }
+            if !may_wait {
+                return ReserveOutcome::Pending;
+            }
+
+            // Another thread owns the pending reservation for this exact
+            // command. We hold no reservations of our own (the caller only
+            // waits before reserving anything), so blocking here cannot
+            // deadlock. Wake when the peer either approves it (now in
+            // `allow_once`) or releases it (no longer pending).
+            let (guard, timeout) = self
+                .reservation_done
+                .wait_timeout_while(shared, RESERVATION_WAIT_TIMEOUT, |state| {
+                    state.pending_allow_once.contains(normalized)
+                        && !state.allow_once.contains(normalized)
+                })
+                .unwrap();
+            shared = guard;
+            if timeout.timed_out() {
+                return ReserveOutcome::Pending;
+            }
         }
     }
 
     /// Completes an allow-once reservation.
     ///
     /// Removes the command from the pending set. If `approved` is `true`, also
-    /// inserts it into the allow-once set.
+    /// inserts it into the allow-once set. Wakes any thread blocked in
+    /// [`Self::reserve_allow_once`] waiting on this command.
     pub(crate) fn complete_allow_once(&mut self, normalized: &str, approved: bool) {
-        let mut shared = self.shared.lock().unwrap();
-        shared.pending_allow_once.remove(normalized);
-        if approved {
-            shared.allow_once.insert(normalized.to_string());
+        {
+            let mut shared = self.shared.lock().unwrap();
+            shared.pending_allow_once.remove(normalized);
+            if approved {
+                shared.allow_once.insert(normalized.to_string());
+            }
         }
+        self.reservation_done.notify_all();
     }
 
     pub(crate) fn persist_whitelist_exact(&mut self, normalized: String) {
@@ -925,6 +1039,41 @@ impl ShellExpansionRuntime {
             .user_blacklist
             .entries
             .push(ShellRuleEntry::Exact(normalized));
+    }
+
+    /// Returns the memoized `(stdout, stderr)` for `normalized`, if present.
+    ///
+    /// Takes `&self`: the cache lives behind the shared `Mutex`, so concurrent
+    /// frontmatter branches (executed via rayon) can consult it without a
+    /// mutable borrow of the runtime.
+    pub(crate) fn cache_lookup(&self, normalized: &str) -> Option<(String, String)> {
+        let shared = self.shared.lock().unwrap();
+        shared
+            .command_cache
+            .get(normalized)
+            .map(|c| (c.stdout.clone(), c.stderr.clone()))
+    }
+
+    /// Memoizes `stdout`/`stderr` for `normalized`, keeping the first result if a
+    /// concurrent peer already stored one.
+    pub(crate) fn cache_store(&self, normalized: &str, stdout: &str, stderr: &str) {
+        let mut shared = self.shared.lock().unwrap();
+        shared
+            .command_cache
+            .entry(normalized.to_string())
+            .or_insert_with(|| CachedCommandOutput {
+                stdout: stdout.to_string(),
+                stderr: stderr.to_string(),
+            });
+    }
+
+    /// Records that a volatile command was just served from cache.
+    ///
+    /// Returns `true` the first time for a given `normalized` command so the
+    /// caller emits the discoverability warning exactly once per command.
+    pub(crate) fn note_volatile_cache_hit(&self, normalized: &str) -> bool {
+        let mut shared = self.shared.lock().unwrap();
+        shared.volatile_warned.insert(normalized.to_string())
     }
 }
 
@@ -955,9 +1104,14 @@ pub(crate) struct PipelineRuntime {
     pub shell: ShellExpansionRuntime,
     pub cache: crate::markdown::compose::cache::RunLocalCache,
     dependencies: Vec<crate::markdown::compose::cache::types::DependencyRef>,
+    pub remote_fetch: crate::markdown::compose::remote_fetch::RemoteFetchRuntime,
 }
 
 impl PipelineRuntime {
+    /// Test-only constructor with a default (deny-all) remote-fetch runtime.
+    /// Production code uses [`Self::with_remote_fetch`] to inject the run's
+    /// shared fetch runtime.
+    #[cfg(test)]
     pub fn new(
         max_depth: usize,
         cache_access_mode: crate::markdown::compose::cache::CacheAccessMode,
@@ -967,6 +1121,11 @@ impl PipelineRuntime {
         if let Some(root) = cache_root {
             cache = cache.with_persistent(root);
         }
+        let remote_fetch = crate::markdown::compose::remote_fetch::RemoteFetchRuntime::with_store(
+            &crate::markdown::compose::remote::RemoteReadConfig::default(),
+            None,
+        );
+        cache = cache.with_remote_fetch(remote_fetch.clone());
         Self {
             transclusion: crate::markdown::compose::transclusion::TransclusionRuntime::new(
                 max_depth,
@@ -974,6 +1133,33 @@ impl PipelineRuntime {
             shell: ShellExpansionRuntime::new(),
             cache,
             dependencies: Vec::new(),
+            remote_fetch,
+        }
+    }
+
+    /// Creates a `PipelineRuntime` with the given remote fetch runtime.
+    pub fn with_remote_fetch(
+        max_depth: usize,
+        cache_access_mode: crate::markdown::compose::cache::CacheAccessMode,
+        cache_root: Option<std::path::PathBuf>,
+        remote_fetch: crate::markdown::compose::remote_fetch::RemoteFetchRuntime,
+    ) -> Self {
+        let mut cache = crate::markdown::compose::cache::RunLocalCache::new(cache_access_mode);
+        if let Some(root) = cache_root {
+            cache = cache.with_persistent(root);
+        }
+        // Share the run's fetch runtime with the cache so compose-manifest
+        // validation can revalidate RemoteUrl dependencies under the active
+        // RemoteReadConfig (e.g. --remote-refresh, expired TTL).
+        cache = cache.with_remote_fetch(remote_fetch.clone());
+        Self {
+            transclusion: crate::markdown::compose::transclusion::TransclusionRuntime::new(
+                max_depth,
+            ),
+            shell: ShellExpansionRuntime::new(),
+            cache,
+            dependencies: Vec::new(),
+            remote_fetch,
         }
     }
 
@@ -985,6 +1171,7 @@ impl PipelineRuntime {
             shell: self.shell.clone_for_child(),
             cache: self.cache.clone(),
             dependencies: Vec::new(),
+            remote_fetch: self.remote_fetch.clone(),
         }
     }
 

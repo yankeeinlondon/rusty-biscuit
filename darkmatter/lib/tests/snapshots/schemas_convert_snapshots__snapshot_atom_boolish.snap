@@ -1,0 +1,28 @@
+---
+source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+expression: "convert_atom(\"boolish\")"
+---
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "field": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "enum": [
+            "true",
+            "false",
+            "True",
+            "False",
+            "TRUE",
+            "FALSE"
+          ]
+        }
+      ]
+    }
+  },
+  "type": "object"
+}

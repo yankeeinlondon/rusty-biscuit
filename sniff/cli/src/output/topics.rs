@@ -1,7 +1,7 @@
 //! Topics table output formatting.
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
+use darkmatter::markdown::output::terminal::TerminalOptions;
 
 const TOPIC_COLUMNS: &[(&str, &[&str])] = &[
     (
@@ -10,7 +10,7 @@ const TOPIC_COLUMNS: &[(&str, &[&str])] = &[
     ),
     ("filesystem", &["git", "repo", "language"]),
     (
-        "programs",
+        "software",
         &[
             "editors",
             "utilities",
@@ -20,6 +20,8 @@ const TOPIC_COLUMNS: &[(&str, &[&str])] = &[
             "terminal-apps",
             "audio-players",
             "agents",
+            "notification-helpers",
+            "test-runners",
         ],
     ),
 ];
@@ -54,7 +56,7 @@ pub fn render_topics_table() -> String {
     }
 
     let markdown = Markdown::from(lines.join("\n"));
-    match for_terminal(&markdown, TerminalOptions::default()) {
+    match markdown.as_terminal(TerminalOptions::default()) {
         Ok(rendered) => rendered,
         Err(_) => format!("{}\n", markdown.content()),
     }

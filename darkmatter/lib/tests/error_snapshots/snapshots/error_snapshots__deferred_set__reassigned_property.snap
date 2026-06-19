@@ -2,6 +2,8 @@
 source: darkmatter/lib/tests/error_snapshots/deferred_set.rs
 expression: out
 ---
-⨫ DeferredSetError: reassigned set property
+⤫ DeferredSetError: reassigned set property
+┃ 
 ┃ Property: title
-Each set.NAME= clause must appear only once per directive line.
+┃ 
+┃ Each set.NAME= clause must appear only once per directive line.

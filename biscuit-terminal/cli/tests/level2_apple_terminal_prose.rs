@@ -6,11 +6,12 @@
 //!
 //! ## Skip-clean contract
 //!
-//! Every test checks `AppleTerminalHarness::available()` before
-//! spawning. When Terminal.app cannot be addressed (off-macOS, `CI=1`,
-//! or `osascript` unavailable) the test prints
-//! `skipping: requires Terminal.app` via [`skip_with_reason`] and
-//! returns OK. No `#[ignore]` markers are used.
+//! Every test gates on [`AppleTerminalHarness::available`] via
+//! [`test_toolkit::require_level!`]. When Terminal.app cannot be
+//! addressed (off-macOS, `CI=1`, or `osascript` unavailable) the test
+//! prints `skipping: requires Terminal.app` and returns OK. Setting
+//! `BISCUIT_TEST_LEVEL_REQUIRED=2` converts that skip into a panic.
+//! No `#[ignore]` markers are used.
 //!
 //! ## Capture limitation
 //!
@@ -33,11 +34,13 @@
 
 mod common;
 
+use biscuit_test_harness::TerminalHarness;
 use biscuit_test_harness::apple_terminal::AppleTerminalHarness;
-use biscuit_test_harness::{TerminalHarness, skip_with_reason};
+use biscuit_test_harness::shared::SharedHarness;
 use serial_test::serial;
 use std::process::{Command, Stdio};
 use std::time::Duration;
+use test_toolkit::{Level, require_level};
 
 /// Extra settle time after spawning a Terminal.app shell to absorb the
 /// AppleScript dispatch latency before sending commands. Apple Terminal's
@@ -46,6 +49,13 @@ use std::time::Duration;
 /// custom prompts), so we wait substantially longer than the WezTerm /
 /// Kitty defaults.
 const SHELL_READY_MS: u64 = 2500;
+
+/// Process-shared Apple Terminal window reused across the prose tests in
+/// this file. Initialized with `preserve_capabilities(true)` so `bt`
+/// runs through its real capability-detection path (no forced color
+/// overrides). The lifecycle test does NOT use this shared harness — it
+/// intentionally owns its own instance to exercise Drop cleanup.
+static SHARED_APPLE: SharedHarness<AppleTerminalHarness> = SharedHarness::new();
 
 // ------------------------------------------------------------------
 // AC-1 — OSC8 link fallback is visible in Apple Terminal
@@ -59,14 +69,26 @@ const SHELL_READY_MS: u64 = 2500;
 #[test]
 #[serial(level2_terminal)]
 fn level2_apple_terminal_link_fallback_visible() {
-    if !AppleTerminalHarness::available() {
-        skip_with_reason("Terminal.app");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        AppleTerminalHarness::available(),
+        "Terminal.app",
+    );
 
-    let mut harness = AppleTerminalHarness::new().preserve_capabilities(true);
-    harness.spawn_shell().expect("spawn_shell failed");
-    std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+    let mut guard = SHARED_APPLE.get_or_init(|| {
+        AppleTerminalHarness::shared_or_else(|| {
+            let mut h = AppleTerminalHarness::new().preserve_capabilities(true);
+            h.spawn_shell()?;
+            std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+            Ok(h)
+        })
+        .expect("attach/spawn Apple Terminal")
+    });
+    let harness = guard.as_mut().expect("shared Apple Terminal harness present");
+    // Reset the window so prior tests' rendered output cannot leak into
+    // this run's capture window.
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
     // Wrap the rendered output between sentinels so the assertion
     // window excludes shell prompts, command echoes, and other chrome
@@ -124,6 +146,88 @@ fn level2_apple_terminal_link_fallback_visible() {
     );
 }
 
+/// A link whose description carries inline styling **and** a Markdown
+/// bracket must degrade to a visible `[desc](url)` fallback with the
+/// bracket escaped — proving the shared terminal tree path keeps the
+/// bespoke Markdown destination/description escaping when OSC8 is
+/// unavailable.
+///
+/// Input `<a href="…"><b>x</b>[1]</a>` renders (bold stripped by
+/// Terminal.app's capture) to the fallback `[x[1\]](https://example.com)`:
+/// the inner `]` is escaped, the styled child text stays visible, and no
+/// OSC8 introducer leaks on screen.
+#[test]
+#[serial(level2_terminal)]
+fn level2_apple_terminal_styled_link_fallback_escapes_bracket() {
+    require_level!(
+        Level::L2,
+        AppleTerminalHarness::available(),
+        "Terminal.app",
+    );
+
+    let mut guard = SHARED_APPLE.get_or_init(|| {
+        AppleTerminalHarness::shared_or_else(|| {
+            let mut h = AppleTerminalHarness::new().preserve_capabilities(true);
+            h.spawn_shell()?;
+            std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+            Ok(h)
+        })
+        .expect("attach/spawn Apple Terminal")
+    });
+    let harness = guard.as_mut().expect("shared Apple Terminal harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
+
+    harness
+        .send_text(
+            b"printf '__BT_START__\\n'; bt prose '<a href=\"https://example.com\"><b>x</b>[1]</a>'; printf '\\n__BT_END__\\n'\n",
+        )
+        .expect("send_text failed");
+    harness.settle();
+    std::thread::sleep(Duration::from_millis(400));
+
+    let frame = harness.capture().expect("capture failed");
+    let bounded = frame
+        .plain
+        .split("__BT_START__\n")
+        .nth(1)
+        .and_then(|s| s.split("\n__BT_END__").next())
+        .unwrap_or("");
+
+    assert!(
+        !bounded.is_empty(),
+        "sentinel-bounded output is empty — bt prose likely crashed or emitted nothing.\n\
+         full capture:\n{}",
+        frame.plain,
+    );
+    // Styled child text remains visible (bold SGR is stripped by the
+    // Terminal.app capture, the text is not).
+    assert!(
+        bounded.contains("x[1"),
+        "expected visible styled link description `x[1`.\nbounded:\n{}",
+        bounded,
+    );
+    // The Markdown destination fallback is visible.
+    assert!(
+        bounded.contains("(https://example.com)"),
+        "expected markdown-style URL fallback `(https://example.com)`.\nbounded:\n{}",
+        bounded,
+    );
+    // The `]` in the description is escaped in the fallback.
+    assert!(
+        bounded.contains(r"x[1\]"),
+        "expected the description bracket to be escaped as `x[1\\]` in the \
+         fallback.\nbounded:\n{}",
+        bounded,
+    );
+    // No OSC8 introducer may leak onto the screen.
+    assert!(
+        !bounded.contains("\x1b]8;;") && !bounded.contains("8;;https://example.com"),
+        "OSC8 sequence leaked into the visible fallback capture.\nbounded:\n{}",
+        bounded,
+    );
+}
+
 // ------------------------------------------------------------------
 // AC-2 — `<double-underline>` degrades to plain visible text
 // ------------------------------------------------------------------
@@ -138,14 +242,26 @@ fn level2_apple_terminal_link_fallback_visible() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_apple_terminal_double_underline_plain_text_visible() {
-    if !AppleTerminalHarness::available() {
-        skip_with_reason("Terminal.app");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        AppleTerminalHarness::available(),
+        "Terminal.app",
+    );
 
-    let mut harness = AppleTerminalHarness::new().preserve_capabilities(true);
-    harness.spawn_shell().expect("spawn_shell failed");
-    std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+    let mut guard = SHARED_APPLE.get_or_init(|| {
+        AppleTerminalHarness::shared_or_else(|| {
+            let mut h = AppleTerminalHarness::new().preserve_capabilities(true);
+            h.spawn_shell()?;
+            std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+            Ok(h)
+        })
+        .expect("attach/spawn Apple Terminal")
+    });
+    let harness = guard.as_mut().expect("shared Apple Terminal harness present");
+    // Reset the window so prior tests' rendered output cannot leak into
+    // this run's capture window.
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
     // Wrap the rendered output between sentinels so the assertion
     // window excludes shell prompts, command echoes, and other chrome
@@ -214,11 +330,28 @@ fn level2_apple_terminal_double_underline_plain_text_visible() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_apple_terminal_harness_lifecycle() {
-    if !AppleTerminalHarness::available() {
-        // AC-6: clean skip path. No osascript invocations, no window
-        // ever opened. Test exits OK without touching the host
-        // application state.
-        skip_with_reason("Terminal.app");
+    // AC-6: clean skip path. No osascript invocations, no window
+    // ever opened. Test exits OK without touching the host
+    // application state.
+    require_level!(
+        Level::L2,
+        AppleTerminalHarness::available(),
+        "Terminal.app",
+    );
+
+    // Skip under a shared broker window. This is the only Apple-Terminal
+    // test that spawns its *own* window (to exercise Drop cleanup), and
+    // Terminal's `do script` can reuse the idle frontmost window — i.e. the
+    // shared window — which this test would then close, breaking every
+    // sibling test that attaches to it. The Drop/cleanup semantics are
+    // exercised in the non-broker run (no shared window to corrupt), so
+    // skipping here is loss-free. See
+    // `.claude/skills/rust-testing/apple-terminal-harness-pitfalls.md`.
+    if std::env::var(biscuit_test_harness::apple_terminal::SHARED_WINDOW_ENV).is_ok() {
+        eprintln!(
+            "skipping: level2_apple_terminal_harness_lifecycle spawns its own window, which \
+             conflicts with the shared broker window (BISCUIT_SHARED_APPLE_TERMINAL_WINDOW_ID)"
+        );
         return;
     }
 

@@ -35,6 +35,15 @@ pub struct EnvironmentContext {
     /// Monorepo package inferred by the wrapper, if available.
     #[serde(default)]
     pub package: Option<String>,
+
+    /// Claudine's own process ID, captured once at wrapper startup.
+    ///
+    /// Populated for every wrapper-emitted record by reading `CLAUDINE_PID`
+    /// from the environment (set in the child env by the wrapper, or set in
+    /// the wrapper's own env at startup). Older JSONL lines that pre-date
+    /// this field deserialize as `None` via `#[serde(default)]`.
+    #[serde(default)]
+    pub claudine_pid: Option<u32>,
 }
 
 /// Operating system identification.
@@ -165,9 +174,22 @@ pub struct RepoContext {
     #[serde(default)]
     pub is_monorepo: bool,
 
-    /// Monorepo tool if detected.
-    /// Values: "cargo_workspace", "npm_workspaces", "pnpm_workspaces",
-    /// "yarn_workspaces", "nx", "turborepo", "lerna".
+    /// Monorepo authority standard if detected.
+    /// Values: "cargo-workspace", "npm-workspaces", "pnpm-workspaces",
+    /// "yarn-workspaces", "nx", "turborepo", "lerna", etc.
+    #[serde(default)]
+    pub monorepo_standard: Option<String>,
+
+    /// Orchestrators riding on the primary monorepo layer.
+    /// Values: "nx", "turborepo", "lerna".
+    #[serde(default)]
+    pub monorepo_orchestrators: Vec<String>,
+
+    /// Deprecated alias for `monorepo_standard`.
+    ///
+    /// Kept for one release so existing templates using
+    /// `{{project.monorepo_tool}}` continue to resolve. New templates should
+    /// use `{{project.monorepo_standard}}`.
     #[serde(default)]
     pub monorepo_tool: Option<String>,
 
@@ -225,14 +247,15 @@ impl From<sniff::SniffResult> for EnvironmentContext {
             f.git.as_ref().map(|g| {
                 let head_commit = g.recent.first();
                 let primary_remote = g.remotes.first();
+                let status = g.status.as_ref();
 
                 GitContext {
                     repo_root: g.repo_root.clone(),
                     branch: g.current_branch.clone(),
-                    is_dirty: g.status.is_dirty,
-                    staged_count: g.status.staged_count,
-                    unstaged_count: g.status.unstaged_count,
-                    untracked_count: g.status.untracked_count,
+                    is_dirty: status.map(|s| s.is_dirty).unwrap_or(false),
+                    staged_count: status.map(|s| s.staged_count).unwrap_or(0),
+                    unstaged_count: status.map(|s| s.unstaged_count).unwrap_or(0),
+                    untracked_count: status.map(|s| s.untracked_count).unwrap_or(0),
                     head_sha: head_commit.map(|c| c.sha.clone()),
                     head_message: head_commit.map(|c| c.message.clone()),
                     user_name: g.config.user_name.clone(),
@@ -249,10 +272,18 @@ impl From<sniff::SniffResult> for EnvironmentContext {
 
         let repo = fs.as_ref().and_then(|f| {
             f.repo.as_ref().map(|r| {
-                let monorepo_tool = r
-                    .monorepo_tool
-                    .as_ref()
-                    .map(|t| format!("{:?}", t).to_lowercase());
+                let (monorepo_standard, monorepo_orchestrators) = r
+                    .primary_layer()
+                    .map(|layer| {
+                        let standard = layer.authority.spec().id.to_string();
+                        let orchestrators = layer
+                            .orchestrators
+                            .iter()
+                            .map(|o| o.spec().id.to_string())
+                            .collect();
+                        (Some(standard), orchestrators)
+                    })
+                    .unwrap_or_default();
 
                 let packages = r
                     .packages
@@ -262,7 +293,11 @@ impl From<sniff::SniffResult> for EnvironmentContext {
 
                 RepoContext {
                     is_monorepo: r.is_monorepo,
-                    monorepo_tool,
+                    monorepo_standard: monorepo_standard.clone(),
+                    monorepo_orchestrators,
+                    // `monorepo_tool` is a deprecated alias kept for one
+                    // release; derive it from the new topology field.
+                    monorepo_tool: monorepo_standard,
                     root: r.root.clone(),
                     packages,
                 }
@@ -283,6 +318,7 @@ impl From<sniff::SniffResult> for EnvironmentContext {
             primary_language,
             package_area: None,
             package: None,
+            claudine_pid: None,
         }
     }
 }
@@ -363,6 +399,18 @@ fn apply_wrapper_package_context(
     context.package = lookup("PACKAGE")
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
+
+    // `CLAUDINE_PID` is stamped onto the child environment by
+    // `wrap::env::build_child_env_with_launch` before the provider is
+    // spawned. When this code runs inside the wrapper process itself,
+    // the env var has not yet been set in our own process env — fall
+    // back to `std::process::id()` so wrapper-side detection produces
+    // the same value the child will see. Inside a hook handler (a
+    // descendant of the spawned provider) the env var is already
+    // present and we use it directly.
+    context.claudine_pid = lookup("CLAUDINE_PID")
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .or_else(|| Some(std::process::id()));
 }
 
 fn lookup_env_var(name: &str) -> Option<String> {
@@ -433,6 +481,8 @@ mod tests {
             },
             "repo": {
                 "is_monorepo": true,
+                "monorepo_standard": "cargo-workspace",
+                "monorepo_orchestrators": ["nx"],
                 "monorepo_tool": "cargoworkspace",
                 "root": "/tmp/repo",
                 "packages": ["lib", "cli"]
@@ -456,10 +506,99 @@ mod tests {
             Some("my-org")
         );
         assert!(ctx.repo.as_ref().unwrap().is_monorepo);
+        assert_eq!(
+            ctx.repo.as_ref().unwrap().monorepo_standard.as_deref(),
+            Some("cargo-workspace")
+        );
+        assert_eq!(
+            ctx.repo.as_ref().unwrap().monorepo_orchestrators,
+            vec!["nx"]
+        );
+        assert_eq!(
+            ctx.repo.as_ref().unwrap().monorepo_tool.as_deref(),
+            Some("cargoworkspace")
+        );
         assert_eq!(ctx.repo.as_ref().unwrap().packages.len(), 2);
         assert_eq!(ctx.primary_language.as_deref(), Some("Rust"));
         assert_eq!(ctx.package_area.as_deref(), Some("claudine"));
         assert_eq!(ctx.package.as_deref(), Some("claudine-cli"));
+    }
+
+    #[test]
+    fn from_sniff_result_populates_monorepo_topology() {
+        use sniff::filesystem::FilesystemInfo;
+        use sniff::filesystem::repo::Package;
+        use sniff::filesystem::repo::standard::{
+            MonorepoLayer, MonorepoStandard, PackageProvenance,
+        };
+
+        let repo = sniff::filesystem::repo::RepoInfo {
+            is_monorepo: true,
+            root: PathBuf::from("/repo"),
+            packages: Some(vec![Package {
+                path: PathBuf::from("/repo/lib"),
+                relative: "lib".to_string(),
+                package_area: "root".to_string(),
+                name: "lib".to_string(),
+                ..Package::default()
+            }]),
+            monorepo_standards: vec![],
+            monorepo_layers: vec![MonorepoLayer {
+                root: PathBuf::from("/repo"),
+                authority: MonorepoStandard::CargoWorkspace,
+                orchestrators: vec![MonorepoStandard::Nx],
+                provenance: PackageProvenance::Globbed,
+                lockfile_match: None,
+                root_is_package: true,
+                packages: vec![],
+            }],
+            ..sniff::filesystem::repo::RepoInfo::default()
+        };
+
+        let result = sniff::SniffResult {
+            filesystem: Some(FilesystemInfo {
+                repo: Some(repo),
+                ..FilesystemInfo::default()
+            }),
+            ..sniff::SniffResult::default()
+        };
+
+        let ctx = EnvironmentContext::from(result);
+        let repo_ctx = ctx.repo.unwrap();
+        assert_eq!(
+            repo_ctx.monorepo_standard.as_deref(),
+            Some("cargo-workspace")
+        );
+        assert_eq!(repo_ctx.monorepo_orchestrators, vec!["nx"]);
+        assert_eq!(repo_ctx.monorepo_tool.as_deref(), Some("cargo-workspace"));
+    }
+
+    #[test]
+    fn detect_environment_fast_on_rusty_biscuit_preserves_template_values() {
+        // Regression: template consumers rely on these values staying stable
+        // on the rusty-biscuit repository after topology changes.
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
+        let ctx = detect_environment_fast(repo_root);
+
+        let repo_ctx = ctx.repo.expect("rusty-biscuit should produce repo context");
+        assert!(repo_ctx.is_monorepo);
+        assert_eq!(
+            repo_ctx.monorepo_standard.as_deref(),
+            Some("cargo-workspace"),
+            "monorepo_standard must be cargo-workspace on rusty-biscuit"
+        );
+        assert_eq!(
+            repo_ctx.monorepo_orchestrators,
+            Vec::<String>::new(),
+            "rusty-biscuit has no orchestrators"
+        );
+        assert_eq!(
+            repo_ctx.monorepo_tool.as_deref(),
+            Some("cargo-workspace"),
+            "deprecated monorepo_tool alias must equal monorepo_standard"
+        );
+        assert!(!repo_ctx.packages.is_empty(), "rusty-biscuit has packages");
     }
 
     #[test]
@@ -498,5 +637,51 @@ mod tests {
 
         assert!(ctx.package_area.is_none());
         assert!(ctx.package.is_none());
+    }
+
+    /// Phase 3 — `CLAUDINE_PID` env var is honored when present.
+    #[test]
+    fn wrapper_package_context_reads_claudine_pid_from_env() {
+        let mut ctx = EnvironmentContext::default();
+        apply_wrapper_package_context(&mut ctx, &|name| match name {
+            "CLAUDINE_PID" => Some("12345".to_string()),
+            _ => None,
+        });
+
+        assert_eq!(ctx.claudine_pid, Some(12345));
+    }
+
+    /// Phase 3 — when `CLAUDINE_PID` is unset, the helper falls back to
+    /// `std::process::id()` so wrapper-side detection still produces a PID.
+    #[test]
+    fn wrapper_package_context_falls_back_to_process_id() {
+        let mut ctx = EnvironmentContext::default();
+        apply_wrapper_package_context(&mut ctx, &|_| None);
+
+        assert_eq!(ctx.claudine_pid, Some(std::process::id()));
+    }
+
+    /// Phase 3 — `claudine_pid` MUST round-trip through serde.
+    #[test]
+    fn claudine_pid_round_trips_json() {
+        let ctx = EnvironmentContext {
+            claudine_pid: Some(99_876),
+            ..EnvironmentContext::default()
+        };
+        let json = serde_json::to_value(&ctx).unwrap();
+        assert_eq!(json["claudine_pid"], 99_876);
+
+        let back: EnvironmentContext = serde_json::from_value(json).unwrap();
+        assert_eq!(back.claudine_pid, Some(99_876));
+    }
+
+    /// Phase 3 — legacy JSONL without `claudine_pid` MUST deserialize as `None`.
+    #[test]
+    fn claudine_pid_defaults_to_none_on_deserialize() {
+        let json = serde_json::json!({
+            "os": { "os_type": "macos" }
+        });
+        let ctx: EnvironmentContext = serde_json::from_value(json).unwrap();
+        assert!(ctx.claudine_pid.is_none());
     }
 }

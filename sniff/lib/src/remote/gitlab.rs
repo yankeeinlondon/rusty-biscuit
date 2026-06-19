@@ -12,9 +12,8 @@
 
 use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
-use schematic_define::{AuthStrategy, UpdateStrategy};
 use schematic_schema::gitlab::*;
-use schematic_schema::shared::SchematicError;
+use schematic_schema::shared::{AuthStrategy, SchematicError, UpdateStrategy};
 
 use super::{
     provider::RemoteRepoProvider,
@@ -560,6 +559,8 @@ impl RemoteRepoProvider for GitLabRemote {
                 conclusion: None,
                 html_url: Some(format!("{}/{}/{}/-/pipelines", self.base_url, owner, repo)),
                 started_at: None,
+                head_branch: None,
+                event: None,
             }))
         } else {
             Ok(None)

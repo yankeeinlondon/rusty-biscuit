@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::{Table as TerminalTable, TableCellContent, TableColumn};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::Alignment;

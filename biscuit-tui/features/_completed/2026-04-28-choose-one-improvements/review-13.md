@@ -11,7 +11,7 @@ model: ""
 The implementation is very close. I verified the current working tree, including the local fixes after Review 12, with:
 
 ```text
-cargo test -p tui-chrome -p tui-chrome-cli
+cargo test -p biscuit-tui -p biscuit-tui-cli
 ```
 
 That passed on this host. The previous `Ctrl+C` findings appear addressed: `ChooseOne::handle_event` now cancels before Ctrl-hotkey dispatch, and the real-terminal suite includes a Level 2 tmux assertion for `Ctrl+C` exiting `130`.
@@ -62,7 +62,7 @@ Recommendation: add at least one Level 2 test that spawns `question choose-one "
 
 ## Verification Notes
 
-- `cargo test -p tui-chrome -p tui-chrome-cli` passed.
+- `cargo test -p biscuit-tui -p biscuit-tui-cli` passed.
 - Completion behavior has Level 1 script tests plus PTY-driven zsh/bash tests.
 - Bare modifier badge visibility has Level 2 WezTerm raw-kitty-byte coverage and Level 3 cliclick coverage on this host.
 - Hotkey chord activation has Level 3 coverage for `Ctrl+R`.

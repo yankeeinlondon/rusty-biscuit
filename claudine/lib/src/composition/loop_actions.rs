@@ -1,5 +1,8 @@
 //! Loop frontmatter action engine.
 
+use darkmatter::markdown::compose::expression::{
+    EvaluationLookup, ExpressionFinder, evaluate, parse, scalar_string,
+};
 use serde_json::{Map, Number, Value};
 
 use super::error::CompositionError;
@@ -25,6 +28,15 @@ impl ActionStaging {
 
     /// Apply one action to the staged copy.
     ///
+    /// When `lookup` is `Some`, any `{{ ... }}` templates inside value-bearing
+    /// actions (`set`, `append`, `prepend`, `merge`) are rendered against the
+    /// provided evaluation lookup before the mutation is applied. The rendered
+    /// output is re-parsed as JSON so that numeric, boolean, and `null` results
+    /// land as their proper JSON types; non-JSON output falls back to a string.
+    ///
+    /// When `lookup` is `None`, action values are stored verbatim — preserving
+    /// pre-template-rendering behavior for callers that lack iteration state.
+    ///
     /// ## Errors
     ///
     /// Returns a contextual loop action error when the mutation is invalid.
@@ -32,13 +44,14 @@ impl ActionStaging {
         &mut self,
         action: &LoopAction,
         action_index: usize,
+        lookup: Option<&dyn EvaluationLookup>,
     ) -> Result<(), CompositionError> {
         let context = ActionContext {
             iteration: self.iteration,
             action_index,
             total_actions: self.total_actions,
         };
-        apply_action_with_context(&mut self.frontmatter, action, context)
+        apply_action_with_context(&mut self.frontmatter, action, context, lookup)
     }
 
     /// Commit the staged frontmatter copy.
@@ -46,7 +59,6 @@ impl ActionStaging {
         Value::Object(self.frontmatter)
     }
 
-    /// Commit the staged frontmatter copy as a map.
     pub fn commit_map(self) -> Map<String, Value> {
         self.frontmatter
     }
@@ -72,12 +84,13 @@ impl Default for ActionContext {
 /// Apply a single loop action without staging.
 ///
 /// Most callers should prefer [`ActionStaging`] so a multi-action iteration is
-/// all-or-nothing.
+/// all-or-nothing. This entrypoint does not perform template rendering; values
+/// containing `{{ ... }}` placeholders are stored verbatim.
 pub fn apply_action(
     fm: &mut Map<String, Value>,
     action: &LoopAction,
 ) -> Result<(), CompositionError> {
-    apply_action_with_context(fm, action, ActionContext::default())
+    apply_action_with_context(fm, action, ActionContext::default(), None)
 }
 
 /// Increment a frontmatter property by one.
@@ -100,14 +113,138 @@ fn apply_action_with_context(
     fm: &mut Map<String, Value>,
     action: &LoopAction,
     context: ActionContext,
+    lookup: Option<&dyn EvaluationLookup>,
 ) -> Result<(), CompositionError> {
     match action {
         LoopAction::Increment(prop) => apply_increment_with_context(fm, prop, context),
         LoopAction::Decrement(prop) => apply_decrement_with_context(fm, prop, context),
-        LoopAction::Set { prop, value } => apply_set(fm, prop, value, context),
-        LoopAction::Append { prop, value } => apply_append(fm, prop, value),
-        LoopAction::Prepend { prop, value } => apply_prepend(fm, prop, value),
-        LoopAction::Merge { prop, value } => apply_merge(fm, prop, value, context),
+        LoopAction::Set { prop, value } => {
+            let rendered = render_action_value(value, lookup, context)?;
+            apply_set(fm, prop, &rendered, context)
+        }
+        LoopAction::Append { prop, value } => {
+            let rendered = render_action_value(value, lookup, context)?;
+            apply_append(fm, prop, &rendered)
+        }
+        LoopAction::Prepend { prop, value } => {
+            let rendered = render_action_value(value, lookup, context)?;
+            apply_prepend(fm, prop, &rendered)
+        }
+        LoopAction::Merge { prop, value } => {
+            let rendered = render_action_value(value, lookup, context)?;
+            apply_merge(fm, prop, &rendered, context)
+        }
+    }
+}
+
+/// Recursively render `{{ ... }}` templates in a `serde_json::Value`.
+///
+/// When `lookup` is `None`, returns a clone of the input unchanged.
+///
+/// String leaves containing templates are rendered through Darkmatter's
+/// expression engine using the provided lookup, then re-parsed as JSON when
+/// possible so numeric, boolean, and `null` template results land as their
+/// proper JSON types. Strings without templates and non-string scalars are
+/// passed through. Arrays and objects are walked recursively.
+fn render_action_value(
+    value: &Value,
+    lookup: Option<&dyn EvaluationLookup>,
+    context: ActionContext,
+) -> Result<Value, CompositionError> {
+    let Some(lookup) = lookup else {
+        return Ok(value.clone());
+    };
+    render_value_with_lookup(value, lookup, context)
+}
+
+fn render_value_with_lookup(
+    value: &Value,
+    lookup: &dyn EvaluationLookup,
+    context: ActionContext,
+) -> Result<Value, CompositionError> {
+    match value {
+        Value::String(raw) => render_string_with_lookup(raw, lookup, context),
+        Value::Array(arr) => arr
+            .iter()
+            .map(|v| render_value_with_lookup(v, lookup, context))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Array),
+        Value::Object(obj) => {
+            let mut new = Map::with_capacity(obj.len());
+            for (key, val) in obj {
+                new.insert(key.clone(), render_value_with_lookup(val, lookup, context)?);
+            }
+            Ok(Value::Object(new))
+        }
+        other => Ok(other.clone()),
+    }
+}
+
+fn render_string_with_lookup(
+    raw: &str,
+    lookup: &dyn EvaluationLookup,
+    context: ActionContext,
+) -> Result<Value, CompositionError> {
+    let locations = ExpressionFinder::find_all_plain(raw);
+    if locations.is_empty() {
+        return Ok(Value::String(raw.to_string()));
+    }
+
+    // When a single template span fills the entire string (e.g. `{{count}}`),
+    // preserve the typed evaluation result directly.
+    let single_span =
+        locations.len() == 1 && locations[0].start == 0 && locations[0].end == raw.len();
+
+    // `evaluate` is generic over a `Sized` lookup, so wrap the trait object in
+    // a thin newtype that re-implements the trait by delegation.
+    let sized_lookup = SizedLookup(lookup);
+
+    let mut output = String::with_capacity(raw.len());
+    let mut cursor = 0usize;
+    let mut typed_single: Option<Value> = None;
+
+    for loc in &locations {
+        output.push_str(&raw[cursor..loc.start]);
+        let expr_text = loc.expression.trim();
+        let expr = parse(expr_text).map_err(|e| {
+            invalid_action(
+                context,
+                format!("invalid template `{{{{{expr_text}}}}}` in loop action: {e}"),
+            )
+        })?;
+        let value = evaluate(&expr, &sized_lookup).map_err(|e| {
+            invalid_action(
+                context,
+                format!("failed to evaluate template `{{{{{expr_text}}}}}`: {e}"),
+            )
+        })?;
+        if single_span {
+            typed_single = Some(value);
+        } else {
+            output.push_str(&scalar_string(&value));
+        }
+        cursor = loc.end;
+    }
+
+    if let Some(value) = typed_single {
+        return Ok(value);
+    }
+
+    output.push_str(&raw[cursor..]);
+    Ok(serde_json::from_str(&output).unwrap_or(Value::String(output)))
+}
+
+/// Sized newtype around a borrowed `&dyn EvaluationLookup` so it can be passed
+/// to `evaluate`, whose generic parameter requires `Sized`.
+struct SizedLookup<'a>(&'a dyn EvaluationLookup);
+
+impl<'a> EvaluationLookup for SizedLookup<'a> {
+    fn get(&self, path: &str) -> Option<Value> {
+        self.0.get(path)
+    }
+
+    fn get_string(&self, path: &str) -> String {
+        self.0.get_string(path)
     }
 }
 
@@ -358,6 +495,195 @@ mod tests {
         value.as_object().unwrap().clone()
     }
 
+    /// Minimal lookup that resolves a flat string→Value map. Used to drive the
+    /// template-rendering tests without spinning up a full LoopExpressionLookup.
+    struct MapLookup(Map<String, Value>);
+
+    impl EvaluationLookup for MapLookup {
+        fn get(&self, path: &str) -> Option<Value> {
+            self.0.get(path).cloned()
+        }
+    }
+
+    fn ctx() -> ActionContext {
+        ActionContext::default()
+    }
+
+    // ── template rendering ────────────────────────────────────────────
+
+    #[test]
+    fn render_single_template_preserves_number_type() {
+        let lookup = MapLookup(object(json!({"count": 3})));
+        let value = Value::String("{{count}}".into());
+        let rendered = render_action_value(&value, Some(&lookup), ctx()).unwrap();
+        assert_eq!(rendered, json!(3));
+    }
+
+    #[test]
+    fn render_single_template_preserves_bool_type() {
+        let lookup = MapLookup(object(json!({"flag": true})));
+        let value = Value::String("{{flag}}".into());
+        let rendered = render_action_value(&value, Some(&lookup), ctx()).unwrap();
+        assert_eq!(rendered, json!(true));
+    }
+
+    #[test]
+    fn render_single_template_preserves_string_type() {
+        let lookup = MapLookup(object(json!({"name": "alice"})));
+        let value = Value::String("{{name}}".into());
+        let rendered = render_action_value(&value, Some(&lookup), ctx()).unwrap();
+        assert_eq!(rendered, json!("alice"));
+    }
+
+    #[test]
+    fn render_template_inside_string_concatenates_to_string() {
+        let lookup = MapLookup(object(json!({"count": 3})));
+        let value = Value::String("iter-{{count}}".into());
+        let rendered = render_action_value(&value, Some(&lookup), ctx()).unwrap();
+        assert_eq!(rendered, json!("iter-3"));
+    }
+
+    #[test]
+    fn render_multiple_templates_join_with_text_to_string() {
+        let lookup = MapLookup(object(json!({"a": 1, "b": 2})));
+        let value = Value::String("{{a}}+{{b}}".into());
+        let rendered = render_action_value(&value, Some(&lookup), ctx()).unwrap();
+        assert_eq!(rendered, json!("1+2"));
+    }
+
+    #[test]
+    fn render_with_no_lookup_returns_input_unchanged() {
+        let value = Value::String("{{count}}".into());
+        let rendered = render_action_value(&value, None, ctx()).unwrap();
+        assert_eq!(rendered, json!("{{count}}"));
+    }
+
+    #[test]
+    fn render_string_without_templates_passes_through() {
+        let lookup = MapLookup(object(json!({})));
+        let value = Value::String("plain literal".into());
+        let rendered = render_action_value(&value, Some(&lookup), ctx()).unwrap();
+        assert_eq!(rendered, json!("plain literal"));
+    }
+
+    #[test]
+    fn render_object_walks_into_string_leaves() {
+        let lookup = MapLookup(object(json!({"count": 7, "stage": "review"})));
+        let value = json!({
+            "phase": "{{stage}}",
+            "remaining": "{{count}}",
+            "literal": 42
+        });
+        let rendered = render_action_value(&value, Some(&lookup), ctx()).unwrap();
+        assert_eq!(
+            rendered,
+            json!({
+                "phase": "review",
+                "remaining": 7,
+                "literal": 42
+            })
+        );
+    }
+
+    #[test]
+    fn render_array_walks_into_string_leaves() {
+        let lookup = MapLookup(object(json!({"x": 1, "y": 2})));
+        let value = json!(["{{x}}", "{{y}}", "static"]);
+        let rendered = render_action_value(&value, Some(&lookup), ctx()).unwrap();
+        assert_eq!(rendered, json!([1, 2, "static"]));
+    }
+
+    #[test]
+    fn render_invalid_template_returns_invalid_action_error() {
+        let lookup = MapLookup(object(json!({})));
+        let value = Value::String("{{ a &&& b }}".into());
+        let err = render_action_value(&value, Some(&lookup), ctx()).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::InvalidAction { ref message, .. } if message.contains("invalid template")),
+            "got {err}"
+        );
+    }
+
+    // ── set/append integration with rendering ─────────────────────────
+
+    #[test]
+    fn set_with_lookup_stores_typed_number() {
+        let lookup = MapLookup(object(json!({"count": 4})));
+        let mut fm = Map::new();
+        let mut stage = ActionStaging::new(&fm.clone(), 1, 1);
+        stage
+            .apply_action(
+                &LoopAction::Set {
+                    prop: "stamp".into(),
+                    value: Value::String("{{count}}".into()),
+                },
+                1,
+                Some(&lookup),
+            )
+            .unwrap();
+        fm = stage.commit_map();
+        assert_eq!(fm.get("stamp"), Some(&json!(4)));
+    }
+
+    #[test]
+    fn set_without_lookup_stores_raw_template_string() {
+        let mut fm = Map::new();
+        let mut stage = ActionStaging::new(&fm.clone(), 1, 1);
+        stage
+            .apply_action(
+                &LoopAction::Set {
+                    prop: "stamp".into(),
+                    value: Value::String("{{count}}".into()),
+                },
+                1,
+                None,
+            )
+            .unwrap();
+        fm = stage.commit_map();
+        assert_eq!(fm.get("stamp"), Some(&json!("{{count}}")));
+    }
+
+    #[test]
+    fn append_with_lookup_renders_template_into_string() {
+        let lookup = MapLookup(object(json!({"count": 2, "out": "ran-2"})));
+        let mut fm = object(json!({"log": ""}));
+        let mut stage = ActionStaging::new(&fm.clone(), 2, 1);
+        stage
+            .apply_action(
+                &LoopAction::Append {
+                    prop: "log".into(),
+                    value: Value::String("iter {{count}}: {{out}}\n".into()),
+                },
+                1,
+                Some(&lookup),
+            )
+            .unwrap();
+        fm = stage.commit_map();
+        assert_eq!(fm.get("log"), Some(&json!("iter 2: ran-2\n")));
+    }
+
+    #[test]
+    fn merge_with_lookup_renders_inside_object_value() {
+        let lookup = MapLookup(object(json!({"count": 5})));
+        let mut fm = object(json!({"state": {"phase": "draft"}}));
+        let mut stage = ActionStaging::new(&fm.clone(), 5, 1);
+        stage
+            .apply_action(
+                &LoopAction::Merge {
+                    prop: "state".into(),
+                    value: json!({"iteration": "{{count}}", "phase": "review"}),
+                },
+                1,
+                Some(&lookup),
+            )
+            .unwrap();
+        fm = stage.commit_map();
+        assert_eq!(
+            fm.get("state"),
+            Some(&json!({"phase": "review", "iteration": 5}))
+        );
+    }
+
     #[test]
     fn increment_sets_missing_and_null_to_one() {
         let mut fm = Map::new();
@@ -409,7 +735,7 @@ mod tests {
 
     #[test]
     fn set_rejects_reserved_properties() {
-        for prop in ["loop", "replace", "iteration"] {
+        for prop in ["loop", "replace", "_loop_count", "_loop_is_first"] {
             let mut fm = Map::new();
             let err = apply_action(
                 &mut fm,
@@ -570,8 +896,8 @@ mod tests {
         ];
 
         let mut stage = ActionStaging::new(&fm, 7, actions.len());
-        stage.apply_action(&actions[0], 1).unwrap();
-        let err = stage.apply_action(&actions[1], 2).unwrap_err();
+        stage.apply_action(&actions[0], 1, None).unwrap();
+        let err = stage.apply_action(&actions[1], 2, None).unwrap_err();
 
         assert!(matches!(
             err,
@@ -598,7 +924,7 @@ mod tests {
 
         let mut stage = ActionStaging::new(&fm, 1, actions.len());
         for (index, action) in actions.iter().enumerate() {
-            stage.apply_action(action, index + 1).unwrap();
+            stage.apply_action(action, index + 1, None).unwrap();
         }
 
         assert_eq!(stage.commit(), json!({"counter": 2, "stage": "done"}));

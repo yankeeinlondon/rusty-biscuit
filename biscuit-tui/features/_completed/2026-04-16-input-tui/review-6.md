@@ -6,7 +6,7 @@ ready: true
 
 ## Overview
 
-The implementation of the `tui-chrome` library and the `question` CLI successfully delivers all functional requirements defined in the specification and technical design. The code is well-structured, follows established patterns, and includes a comprehensive test suite.
+The implementation of the `biscuit-tui` library and the `question` CLI successfully delivers all functional requirements defined in the specification and technical design. The code is well-structured, follows established patterns, and includes a comprehensive test suite.
 
 ## Functionality Gaps & Improvements
 

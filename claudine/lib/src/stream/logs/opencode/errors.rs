@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use regex::Regex;
 
-use crate::stream::logs::opencode::events::{AssetType, LogClassification, OpenCodeLogRecord};
+use crate::stream::logs::opencode::events::{AssetType, LogClassification, OpenCodeLogRecord, ProviderLimitKind};
 use crate::stream::summary::RateLimitInfo;
 
 static RESET_AT_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -37,6 +37,10 @@ pub fn classify(record: &OpenCodeLogRecord) -> LogClassification {
     if (service == "llm" || service == "provider")
         && let Some(classification) = classify_llm_failure(record, service)
     {
+        return classification;
+    }
+
+    if let Some(classification) = classify_lifecycle(record) {
         return classification;
     }
 
@@ -286,24 +290,23 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
     }
 
     let status_code = extract_status_code(haystack);
-    let is_fatal = haystack.contains("AI_RetryError") || haystack.contains("maxRetriesExceeded");
-
-    // It's a rate limit if it has explicit 429/1308 or known substrings,
-    // OR if it's a fatal retry failure specifically for a 429.
-    let is_rate_limit = status_code == Some(429)
-        || haystack.contains("\"code\":\"1308\"")
+    let is_retry_exhausted =
+        haystack.contains("AI_RetryError") || haystack.contains("maxRetriesExceeded");
+    // Kimi reports its billing-cycle cap as HTTP 403 / `permission_error`
+    // with "reached your usage limit for this billing cycle" — a dialect the
+    // ZAI-style needles above do not cover.
+    let has_cap = haystack.contains("\"code\":\"1308\"")
+        || haystack.contains("exceeded_current_quota_error")
         || haystack.contains("Usage limit reached")
-        || (is_fatal && status_code == Some(429));
+        || haystack.contains("reached your usage limit")
+        || haystack.contains("billing cycle");
+    let is_overload = contains_any_ci(haystack, &["overload", "engine_overloaded_error"]);
+    let has_error_context = record.tags.contains_key("error");
 
-    if is_rate_limit {
+    // Resolution order is critical — cap-with-context wins over retries-exhausted.
+    // 1. Cap signal present with error tag → terminal usage cap.
+    if has_cap && has_error_context {
         let status_code = status_code.unwrap_or(429);
-        let error_name = if is_fatal {
-            "AI_RetryError"
-        } else {
-            "AI_APICallError"
-        }
-        .to_string();
-
         let reset_at = extract_reset_at(haystack);
         let provider_id = record.tags.get("providerID").cloned();
         let model_id = record.tags.get("modelID").cloned();
@@ -313,22 +316,104 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
             .cloned()
             .unwrap_or_else(|| haystack.to_string());
 
-        return Some(LogClassification::RateLimit {
+        return Some(LogClassification::ProviderLimit {
             status_code,
-            error_name,
+            kind: ProviderLimitKind::UsageCap,
             reset_at,
             provider_id,
             model_id,
             provider_error,
-            is_fatal,
         });
     }
 
-    if haystack.contains("AI_APICallError") || is_fatal {
+    // 2. Retry exhaustion wrapping a 429 → terminal retries exhausted.
+    if status_code == Some(429) && is_retry_exhausted {
+        let reset_at = extract_reset_at(haystack);
+        let provider_id = record.tags.get("providerID").cloned();
+        let model_id = record.tags.get("modelID").cloned();
+        let provider_error = record
+            .tags
+            .get("error")
+            .cloned()
+            .unwrap_or_else(|| haystack.to_string());
+
+        return Some(LogClassification::ProviderLimit {
+            status_code: 429,
+            kind: ProviderLimitKind::RetriesExhausted,
+            reset_at,
+            provider_id,
+            model_id,
+            provider_error,
+        });
+    }
+
+    // 3. Cap signal without error tag → advisory non-fatal ApiFailure.
+    if has_cap && !has_error_context {
+        let mut message = None;
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&record.message) {
+            message = extract_provider_message(&val);
+        }
+        if message.is_none() && !record.message.is_empty() {
+            message = Some(record.message.clone());
+        }
+        let message = message.unwrap_or_default();
+
+        return Some(LogClassification::ApiFailure {
+            status_code,
+            error_name: "AI_APICallError".to_string(),
+            message,
+            is_fatal: false,
+        });
+    }
+
+    // 4. Plain 429 overload → transient overloaded.
+    if status_code == Some(429) && is_overload {
+        let reset_at = extract_reset_at(haystack);
+        let provider_id = record.tags.get("providerID").cloned();
+        let model_id = record.tags.get("modelID").cloned();
+        let provider_error = record
+            .tags
+            .get("error")
+            .cloned()
+            .unwrap_or_else(|| haystack.to_string());
+
+        return Some(LogClassification::ProviderLimit {
+            status_code: 429,
+            kind: ProviderLimitKind::Overloaded,
+            reset_at,
+            provider_id,
+            model_id,
+            provider_error,
+        });
+    }
+
+    // 5. Plain 429 → transient rate-limited.
+    if status_code == Some(429) {
+        let reset_at = extract_reset_at(haystack);
+        let provider_id = record.tags.get("providerID").cloned();
+        let model_id = record.tags.get("modelID").cloned();
+        let provider_error = record
+            .tags
+            .get("error")
+            .cloned()
+            .unwrap_or_else(|| haystack.to_string());
+
+        return Some(LogClassification::ProviderLimit {
+            status_code: 429,
+            kind: ProviderLimitKind::RateLimited,
+            reset_at,
+            provider_id,
+            model_id,
+            provider_error,
+        });
+    }
+
+    // Anything else that looks like an API or retry failure.
+    if haystack.contains("AI_APICallError") || is_retry_exhausted {
         let mut message = summarize_error_json(record);
         if message.is_empty() {
             // Try to find a tag that contains the error name.
-            let name_to_find = if is_fatal {
+            let name_to_find = if is_retry_exhausted {
                 "AI_RetryError"
             } else {
                 "AI_APICallError"
@@ -350,18 +435,222 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
 
         return Some(LogClassification::ApiFailure {
             status_code,
-            error_name: if is_fatal {
+            error_name: if is_retry_exhausted {
                 "AI_RetryError"
             } else {
                 "AI_APICallError"
             }
             .to_string(),
             message,
-            is_fatal,
+            is_fatal: is_retry_exhausted,
         });
     }
 
     None
+}
+
+fn classify_lifecycle(record: &OpenCodeLogRecord) -> Option<LogClassification> {
+    let service = record.tags.get("service").map(|s| s.as_str()).unwrap_or("");
+    let inferred_service = if service.is_empty() {
+        infer_service_from_message(record)
+    } else {
+        service
+    };
+    let message = record.message.as_str();
+
+    match inferred_service {
+        "default" => classify_default_service(record, message),
+        "session" => classify_session(record, message),
+        "llm" => classify_llm_call(record, message),
+        "session.prompt" => classify_session_prompt(record, message),
+        "permission" => classify_permission(record, message),
+        "snapshot" => Some(LogClassification::Snapshot {
+            message: message.to_string(),
+            level: record.level,
+        }),
+        _ => None,
+    }
+}
+
+/// Infer the `service` tag value from the `message` tag and required sibling
+/// tags when `service` is absent.
+///
+/// OpenCode's new stderr format omits `service=` for many lifecycle records.
+/// The `message` tag still carries the trailing keyword that identifies the
+/// lifecycle class (`loop`, `stream`, `evaluated`, `created`, `opencode`,
+/// `Sent HTTP response`, `exiting loop`), and the required context tags
+/// (`session.id`, `step`, `providerID`, `modelID`, `permission`, `id`,
+/// `version`) are present.  This helper maps those observed shapes back to
+/// the service values the dedicated classifiers expect.
+fn infer_service_from_message(record: &OpenCodeLogRecord) -> &'static str {
+    let msg = record
+        .tags
+        .get("message")
+        .map(|s| s.trim_matches('"'))
+        .unwrap_or("");
+
+    match msg {
+        "loop" | "exiting loop"
+            if record.tags.contains_key("session.id")
+                && record.tags.contains_key("step") =>
+        {
+            "session.prompt"
+        }
+        "exiting loop" if record.tags.contains_key("session.id") => "session.prompt",
+        "stream"
+            if record.tags.contains_key("providerID")
+                && record.tags.contains_key("modelID") =>
+        {
+            "llm"
+        }
+        "evaluated" if record.tags.contains_key("permission") => "permission",
+        "created" if record.tags.contains_key("id") => "session",
+        "opencode" if record.tags.contains_key("version") => "default",
+        "Sent HTTP response" if record.tags.contains_key("http.method") => "default",
+        _ => "",
+    }
+}
+
+/// True if `record.message` equals `keyword` exactly, or any tag value ends
+/// with `" {keyword}"`.
+///
+/// The OpenCode stderr body parser greedily extracts bare values up to the
+/// next `key=` boundary; when the last `key=value` pair is followed by a
+/// trailing bare-word log message, those words are absorbed into the last
+/// tag's value instead of becoming `record.message`. This helper papers
+/// over that quirk for lifecycle classifications keyed off the trailing
+/// log-message keyword.
+fn has_trailing_keyword(record: &OpenCodeLogRecord, keyword: &str) -> bool {
+    if record.message == keyword {
+        return true;
+    }
+    if record
+        .tags
+        .get("message")
+        .map(|value| value.trim_matches('"') == keyword)
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    let suffix = format!(" {keyword}");
+    record.tags.values().any(|v| v.ends_with(&suffix))
+}
+
+/// Fetch a tag value with any trailing ` keyword` suffix stripped.
+///
+/// Mirror of [`has_trailing_keyword`]: when the body parser absorbed the
+/// trailing log-message keyword into a tag value, downstream classifiers
+/// need the clean value (e.g. `mode=primary` rather than `mode=primary stream`).
+fn tag_value_stripped(record: &OpenCodeLogRecord, key: &str, keyword: &str) -> Option<String> {
+    let value = record.tags.get(key)?;
+    let suffix = format!(" {keyword}");
+    Some(value.strip_suffix(&suffix).unwrap_or(value).to_string())
+}
+
+fn classify_default_service(
+    record: &OpenCodeLogRecord,
+    _message: &str,
+) -> Option<LogClassification> {
+    // Boot banner: trailing message is exactly "opencode" and has a version tag.
+    if has_trailing_keyword(record, "opencode")
+        && let Some(version) = record.tags.get("version").cloned()
+    {
+        return Some(LogClassification::BootBanner { version });
+    }
+
+    // HTTP response: trailing message is "Sent HTTP response" with http.* tags.
+    if has_trailing_keyword(record, "Sent HTTP response") {
+        let method = record.tags.get("http.method").cloned().unwrap_or_default();
+        let url = record.tags.get("http.url").cloned().unwrap_or_default();
+        let status = tag_value_stripped(record, "http.status", "Sent HTTP response")
+            .and_then(|s| s.parse::<u16>().ok())
+            .unwrap_or(0);
+        // Duration is in a tag like logSpan.http.span.4=<Nms>; find the first one.
+        let duration_ms = record
+            .tags
+            .iter()
+            .find_map(|(k, v)| {
+                if k.starts_with("logSpan.http.span.") {
+                    let cleaned = v.strip_suffix(" Sent HTTP response").unwrap_or(v);
+                    cleaned.trim_end_matches("ms").parse::<u64>().ok()
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0);
+        return Some(LogClassification::HttpResponse {
+            method,
+            url,
+            status,
+            duration_ms,
+        });
+    }
+
+    None
+}
+
+fn classify_session(record: &OpenCodeLogRecord, _message: &str) -> Option<LogClassification> {
+    if !has_trailing_keyword(record, "created") {
+        return None;
+    }
+    let id = record.tags.get("id").cloned()?;
+    let parent_id = record.tags.get("parentID").cloned();
+    Some(LogClassification::SessionCreated { id, parent_id })
+}
+
+fn classify_llm_call(record: &OpenCodeLogRecord, _message: &str) -> Option<LogClassification> {
+    // Only match successful stream starts, not errors ("stream error" is handled
+    // by the existing classify_llm_failure path).
+    if !has_trailing_keyword(record, "stream") {
+        return None;
+    }
+    let provider_id = record.tags.get("providerID").cloned()?;
+    let model_id = record.tags.get("modelID").cloned()?;
+    let mode = tag_value_stripped(record, "mode", "stream").unwrap_or_default();
+    Some(LogClassification::LlmCall {
+        provider_id,
+        model_id,
+        mode,
+        is_stream: true,
+    })
+}
+
+fn classify_session_prompt(
+    record: &OpenCodeLogRecord,
+    _message: &str,
+) -> Option<LogClassification> {
+    let session_id = record.tags.get("session.id").cloned()?;
+
+    // Check the longer keyword first; "exiting loop" ends with " loop"
+    // and would otherwise match the shorter StepLoop branch.
+    if has_trailing_keyword(record, "exiting loop") {
+        return Some(LogClassification::StepExit { session_id });
+    }
+
+    if has_trailing_keyword(record, "loop") {
+        let step = record
+            .tags
+            .get("step")
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(0);
+        return Some(LogClassification::StepLoop { session_id, step });
+    }
+
+    None
+}
+
+fn classify_permission(record: &OpenCodeLogRecord, _message: &str) -> Option<LogClassification> {
+    if !has_trailing_keyword(record, "evaluated") {
+        return None;
+    }
+    let permission = record.tags.get("permission").cloned().unwrap_or_default();
+    let pattern = record.tags.get("pattern").cloned().unwrap_or_default();
+    let action = record.tags.get("action").cloned().unwrap_or_default();
+    Some(LogClassification::PermissionEvaluated {
+        permission,
+        pattern,
+        action,
+    })
 }
 
 fn contains_any_ci(haystack: &str, needles: &[&str]) -> bool {
@@ -540,27 +829,27 @@ mod tests {
     }
 
     #[test]
-    fn classifies_rate_limit_with_reset_time() {
+    fn classifies_usage_cap_with_reset_time() {
         let line = r#"ERROR 2026-04-15T19:26:02 +3054ms service=llm providerID=zai-coding-plan modelID=glm-5.1 error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"code\":\"1308\",\"message\":\"Usage limit reached. Your limit will reset at 2026-04-16 04:18:56\"}}"}]}}"#;
         let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
             panic!("expected Structured");
         };
         match classify(&record) {
-            LogClassification::RateLimit {
+            LogClassification::ProviderLimit {
                 status_code,
-                error_name,
+                kind,
                 reset_at,
                 ..
             } => {
                 assert_eq!(status_code, 429);
-                assert_eq!(error_name, "AI_RetryError");
+                assert_eq!(kind, ProviderLimitKind::UsageCap);
                 let reset = reset_at.expect("reset_at should be parsed");
                 assert_eq!(
                     reset.format("%Y-%m-%d %H:%M:%S").to_string(),
                     "2026-04-16 04:18:56"
                 );
             }
-            other => panic!("expected RateLimit, got {other:?}"),
+            other => panic!("expected ProviderLimit, got {other:?}"),
         }
     }
 
@@ -676,6 +965,261 @@ mod tests {
         );
     }
 
+    fn parse_new_format_record(line: &str) -> OpenCodeLogRecord {
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured for {line}");
+        };
+        record
+    }
+
+    #[test]
+    fn new_format_classifies_session_created() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:27.352Z level=INFO service=session id=ses_primary title=Primary session created",
+        );
+
+        match classify(&record) {
+            LogClassification::SessionCreated { id, parent_id } => {
+                assert_eq!(id, "ses_primary");
+                assert_eq!(parent_id, None);
+            }
+            other => panic!("expected SessionCreated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_classifies_session_created_subagent() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:28.000Z level=INFO service=session id=ses_child parentID=ses_parent title=Child task created",
+        );
+
+        match classify(&record) {
+            LogClassification::SessionCreated { id, parent_id } => {
+                assert_eq!(id, "ses_child");
+                assert_eq!(parent_id.as_deref(), Some("ses_parent"));
+            }
+            other => panic!("expected SessionCreated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_classifies_llm_call() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:29.000Z level=INFO service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_primary small=false agent=build mode=primary stream",
+        );
+
+        match classify(&record) {
+            LogClassification::LlmCall {
+                provider_id,
+                model_id,
+                mode,
+                is_stream,
+            } => {
+                assert_eq!(provider_id, "kimi-for-coding");
+                assert_eq!(model_id, "k2p6");
+                assert_eq!(mode, "primary");
+                assert!(is_stream);
+            }
+            other => panic!("expected LlmCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_classifies_step_loop() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:30.000Z level=INFO service=session.prompt session.id=ses_primary step=2 logSpan.http.span.4=55ms message=loop",
+        );
+
+        match classify(&record) {
+            LogClassification::StepLoop { session_id, step } => {
+                assert_eq!(session_id, "ses_primary");
+                assert_eq!(step, 2);
+            }
+            other => panic!("expected StepLoop, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_classifies_step_exit() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:31.000Z level=INFO service=session.prompt session.id=ses_primary logSpan.http.span.4=7437ms message=\"exiting loop\"",
+        );
+
+        match classify(&record) {
+            LogClassification::StepExit { session_id } => {
+                assert_eq!(session_id, "ses_primary");
+            }
+            other => panic!("expected StepExit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_classifies_permission_evaluated() {
+        let record = parse_new_format_record(
+            r#"timestamp=2026-06-10T16:11:32.000Z level=INFO service=permission permission=task pattern=general action={"permission":"*","action":"allow","pattern":"*"} message=evaluated"#,
+        );
+
+        match classify(&record) {
+            LogClassification::PermissionEvaluated {
+                permission,
+                pattern,
+                action,
+            } => {
+                assert_eq!(permission, "task");
+                assert_eq!(pattern, "general");
+                assert_eq!(
+                    action,
+                    r#"{"permission":"*","action":"allow","pattern":"*"}"#
+                );
+            }
+            other => panic!("expected PermissionEvaluated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_serviceless_classifies_step_loop() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:27.460Z level=INFO run=df5a9474 message=loop session.id=ses_14db step=1",
+        );
+
+        match classify(&record) {
+            LogClassification::StepLoop { session_id, step } => {
+                assert_eq!(session_id, "ses_14db");
+                assert_eq!(step, 1);
+            }
+            other => panic!("expected StepLoop, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_serviceless_classifies_llm_call() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:27.574Z level=INFO run=df5a9474 message=stream providerID=zai-coding-plan modelID=glm-5.1",
+        );
+
+        match classify(&record) {
+            LogClassification::LlmCall {
+                provider_id,
+                model_id,
+                mode,
+                is_stream,
+            } => {
+                assert_eq!(provider_id, "zai-coding-plan");
+                assert_eq!(model_id, "glm-5.1");
+                assert_eq!(mode, "");
+                assert!(is_stream);
+            }
+            other => panic!("expected LlmCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_serviceless_classifies_permission_evaluated() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:31.461Z level=INFO run=df5a9474 message=evaluated permission=glob pattern=general action=allow",
+        );
+
+        match classify(&record) {
+            LogClassification::PermissionEvaluated {
+                permission,
+                pattern,
+                action,
+            } => {
+                assert_eq!(permission, "glob");
+                assert_eq!(pattern, "general");
+                assert_eq!(action, "allow");
+            }
+            other => panic!("expected PermissionEvaluated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_serviceless_classifies_session_created() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:28.000Z level=INFO run=df5a9474 message=created id=ses_primary title=Primary session",
+        );
+
+        match classify(&record) {
+            LogClassification::SessionCreated { id, parent_id } => {
+                assert_eq!(id, "ses_primary");
+                assert_eq!(parent_id, None);
+            }
+            other => panic!("expected SessionCreated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_serviceless_classifies_boot_banner() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:27.352Z level=INFO run=df5a9474 version=1.14.48 message=opencode",
+        );
+
+        match classify(&record) {
+            LogClassification::BootBanner { version } => {
+                assert_eq!(version, "1.14.48");
+            }
+            other => panic!("expected BootBanner, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_serviceless_classifies_step_exit() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:31.462Z level=INFO run=df5a9474 message=\"exiting loop\" session.id=ses_primary",
+        );
+
+        match classify(&record) {
+            LogClassification::StepExit { session_id } => {
+                assert_eq!(session_id, "ses_primary");
+            }
+            other => panic!("expected StepExit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_classifies_tracking_as_unclassified() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:33.000Z level=INFO service=session message=tracking hash=abc123",
+        );
+
+        assert_eq!(classify(&record), LogClassification::Unclassified);
+    }
+
+    #[test]
+    fn new_format_quoted_message_value() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:34.000Z level=INFO service=llm message=\"llm runtime selected\" providerID=kimi-for-coding modelID=k2p6",
+        );
+
+        assert_eq!(
+            record.tags.get("message").map(String::as_str),
+            Some("\"llm runtime selected\""),
+        );
+        assert_eq!(classify(&record), LogClassification::Unclassified);
+    }
+
+    #[test]
+    fn new_format_error_with_inline_json() {
+        let record = parse_new_format_record(
+            r#"timestamp=2026-06-10T16:11:35.000Z level=ERROR service=llm providerID=kimi-for-coding modelID=k2p6 error={"error":{"name":"AI_APICallError","message":"upstream boom","statusCode":500}}"#,
+        );
+
+        match classify(&record) {
+            LogClassification::ApiFailure {
+                status_code,
+                error_name,
+                message,
+                is_fatal,
+            } => {
+                assert_eq!(status_code, Some(500));
+                assert_eq!(error_name, "AI_APICallError");
+                assert_eq!(message, "AI_APICallError (500: Internal Server Error): upstream boom");
+                assert!(!is_fatal);
+            }
+            other => panic!("expected ApiFailure, got {other:?}"),
+        }
+    }
+
     /// Trailing bare tokens after the last tag become part of that tag's
     /// value rather than a separate `message`. The classifier still picks
     /// up the `fatal` keyword either way.
@@ -740,7 +1284,7 @@ mod tests {
     }
 
     #[test]
-    fn fixture_rate_limit_classifies() {
+    fn fixture_usage_cap_classifies() {
         let fixture = include_str!("../../../../tests/fixtures/logs/opencode-rate-limit.txt");
         let line = fixture
             .lines()
@@ -750,14 +1294,175 @@ mod tests {
             panic!("rate limit fixture failed to parse");
         };
         match classify(&record) {
-            LogClassification::RateLimit { reset_at, .. } => {
+            LogClassification::ProviderLimit { kind, reset_at, .. } => {
+                assert_eq!(kind, ProviderLimitKind::UsageCap);
                 let reset = reset_at.expect("reset_at should be parsed from fixture");
                 assert_eq!(
                     reset.format("%Y-%m-%d %H:%M:%S").to_string(),
                     "2026-04-16 04:18:56",
                 );
             }
-            other => panic!("expected RateLimit, got {other:?}"),
+            other => panic!("expected ProviderLimit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fixture_429_overload_classifies() {
+        let fixture = include_str!("../../../../tests/fixtures/logs/opencode-429-overload.txt");
+        let line = fixture
+            .lines()
+            .next()
+            .expect("overload fixture has at least one line");
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("overload fixture failed to parse");
+        };
+        match classify(&record) {
+            LogClassification::ProviderLimit { kind, status_code, .. } => {
+                assert_eq!(status_code, 429);
+                assert_eq!(kind, ProviderLimitKind::Overloaded);
+            }
+            other => panic!("expected ProviderLimit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_429_overload_as_overloaded() {
+        let line = r#"ERROR 2026-05-15T19:26:02 +3054ms service=llm providerID=kimi-for-coding modelID=k2p6 error={"error":{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"type\":\"rate_limit_error\",\"message\":\"The engine is currently overloaded, please try again later\"}}","isRetryable":true}}"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ProviderLimit {
+                status_code,
+                kind,
+                ..
+            } => {
+                assert_eq!(status_code, 429);
+                assert_eq!(kind, ProviderLimitKind::Overloaded);
+            }
+            other => panic!("expected ProviderLimit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_429_throttled_as_rate_limited() {
+        let line = r#"ERROR 2026-05-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_APICallError","statusCode":429,"message":"Too many requests"}}"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ProviderLimit {
+                status_code,
+                kind,
+                ..
+            } => {
+                assert_eq!(status_code, 429);
+                assert_eq!(kind, ProviderLimitKind::RateLimited);
+            }
+            other => panic!("expected ProviderLimit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_max_retries_exhausted_as_retries_exhausted() {
+        let line = r#"ERROR 2026-05-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[{"name":"AI_APICallError","statusCode":429}]}}"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ProviderLimit {
+                status_code,
+                kind,
+                ..
+            } => {
+                assert_eq!(status_code, 429);
+                assert_eq!(kind, ProviderLimitKind::RetriesExhausted);
+            }
+            other => panic!("expected ProviderLimit, got {other:?}"),
+        }
+    }
+
+    /// Kimi reports its billing-cycle usage cap as HTTP 403 with
+    /// `type: permission_error` and the phrase "reached your usage limit
+    /// for this billing cycle" — a dialect none of the ZAI-style cap needles
+    /// (`code 1308`, `exceeded_current_quota_error`, `Usage limit reached`)
+    /// match. It must still classify as a terminal usage cap, not a raw
+    /// `AI_APICallError` dump.
+    #[test]
+    fn classifies_kimi_403_billing_cycle_cap_as_usage_cap() {
+        let line = r#"ERROR 2026-06-09T18:21:00 +4200ms service=llm providerID=kimi-for-coding modelID=k2p6 error={"error":{"name":"AI_APICallError","statusCode":403,"responseBody":"{\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your usage limit for this billing cycle. Your quota will be refreshed in the next cycle. Upgrade to get more: https://www.kimi.com/code/console?from=quota-upgrade\"}}","isRetryable":false}}"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ProviderLimit {
+                status_code,
+                kind,
+                ..
+            } => {
+                assert_eq!(status_code, 403);
+                assert_eq!(kind, ProviderLimitKind::UsageCap);
+            }
+            other => panic!("expected ProviderLimit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_exceeded_quota_as_usage_cap() {
+        let line = r#"ERROR 2026-05-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"type\":\"exceeded_current_quota_error\",\"message\":\"Quota exceeded\"}}"}}"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ProviderLimit {
+                status_code,
+                kind,
+                ..
+            } => {
+                assert_eq!(status_code, 429);
+                assert_eq!(kind, ProviderLimitKind::UsageCap);
+            }
+            other => panic!("expected ProviderLimit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cap_phrase_without_error_tag_is_advisory_api_failure() {
+        let line = "ERROR 2026-05-15T19:26:02 +100ms service=llm dummy={} Usage limit reached for k2p6";
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ApiFailure {
+                status_code,
+                message,
+                is_fatal,
+                ..
+            } => {
+                assert_eq!(status_code, None);
+                assert_eq!(message, "Usage limit reached for k2p6");
+                assert!(!is_fatal);
+            }
+            other => panic!("expected ApiFailure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cap_wins_over_retries_exhausted() {
+        let line = r#"ERROR 2026-05-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"code\":\"1308\",\"message\":\"Usage limit reached\"}}"}]}}"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ProviderLimit {
+                status_code,
+                kind,
+                ..
+            } => {
+                assert_eq!(status_code, 429);
+                assert_eq!(kind, ProviderLimitKind::UsageCap);
+            }
+            other => panic!("expected ProviderLimit, got {other:?}"),
         }
     }
 
@@ -788,7 +1493,7 @@ mod tests {
         for line in fixture.lines() {
             match parse_line(line) {
                 ParsedOpenCodeStderrLine::Structured(record) => match classify(&record) {
-                    LogClassification::RateLimit { .. } => rate_limit_seen = true,
+                    LogClassification::ProviderLimit { .. } => rate_limit_seen = true,
                     LogClassification::MalformedAsset { .. } => malformed_seen = true,
                     _ => {}
                 },
@@ -932,5 +1637,201 @@ mod tests {
         assert_eq!(extract_status_code("statusCode=99"), None); // too short
         assert_eq!(extract_status_code("statusCode=9999"), Some(999)); // matches first 3 digits
         assert_eq!(extract_status_code("other=500"), None); // wrong key
+    }
+
+    // ------------------------------------------------------------------
+    // Phase-2 lifecycle classifications
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn classifies_boot_banner() {
+        let line = "INFO  2026-05-12T20:00:11 +97ms service=default version=1.14.48 args=[\"run\",\"--format\",\"json\"] process_role=main run_id=48277674-19e5-40b6-b2b5-efa7577f08ea opencode";
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::BootBanner { version } => {
+                assert_eq!(version, "1.14.48");
+            }
+            other => panic!("expected BootBanner, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_session_created_primary() {
+        let line = "INFO  2026-05-12T20:00:12 +20ms service=session id=ses_1e23972b3ffe8QLhzuFpWS5bzd slug=happy-panda version=1.14.48 projectID=global directory=/private/tmp/oc-test path=private/tmp/oc-test title=New session created";
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::SessionCreated { id, parent_id } => {
+                assert_eq!(id, "ses_1e23972b3ffe8QLhzuFpWS5bzd");
+                assert_eq!(parent_id, None);
+            }
+            other => panic!("expected SessionCreated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_session_created_subagent() {
+        let line = "INFO  2026-05-12T20:05:26 +1ms service=session id=ses_1e234a70dffeOCARJZRL9dhpHT slug=lucky-orchid version=1.14.48 projectID=global directory=/private/tmp/oc-test path=private/tmp/oc-test parentID=ses_1e234af48ffeViMPs5pMk6UhYk title=Count letters in 'banana' created";
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::SessionCreated { id, parent_id } => {
+                assert_eq!(id, "ses_1e234a70dffeOCARJZRL9dhpHT");
+                assert_eq!(parent_id, Some("ses_1e234af48ffeViMPs5pMk6UhYk".into()));
+            }
+            other => panic!("expected SessionCreated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_llm_call_primary() {
+        let line = "INFO  2026-05-12T20:00:12 +0ms service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_1e23972b3ffe8QLhzuFpWS5bzd small=false agent=build mode=primary stream";
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::LlmCall {
+                provider_id,
+                model_id,
+                mode,
+                is_stream,
+            } => {
+                assert_eq!(provider_id, "kimi-for-coding");
+                assert_eq!(model_id, "k2p6");
+                assert_eq!(mode, "primary");
+                assert!(is_stream);
+            }
+            other => panic!("expected LlmCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_llm_call_subagent() {
+        let line = "INFO  2026-05-12T20:05:26 +1ms service=llm providerID=opencode modelID=claude-haiku-4-5 session.id=ses_1e234a70dffeOCARJZRL9dhpHT small=false agent=general mode=subagent stream";
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::LlmCall { mode, .. } => {
+                assert_eq!(mode, "subagent");
+            }
+            other => panic!("expected LlmCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn llm_stream_error_still_classifies_as_api_failure() {
+        // "stream error" must NOT be classified as LlmCall; the existing
+        // LLM-failure path must win.
+        let line = r#"ERROR 2026-05-12T20:02:20 +1967ms service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_1e237a304ffeqwr10bXJSRYGHJ small=false agent=build mode=primary error={"error":{"name":"AI_APICallError","statusCode":429}} stream error"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ProviderLimit { .. } | LogClassification::ApiFailure { .. } => {}
+            other => panic!("expected ApiFailure/ProviderLimit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_step_loop() {
+        let line = "INFO  2026-05-12T20:00:12 +0ms service=session.prompt session.id=ses_1e23972b3ffe8QLhzuFpWS5bzd step=0 logSpan.http.span.4=55ms loop";
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::StepLoop { session_id, step } => {
+                assert_eq!(session_id, "ses_1e23972b3ffe8QLhzuFpWS5bzd");
+                assert_eq!(step, 0);
+            }
+            other => panic!("expected StepLoop, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_step_exit() {
+        let line = "INFO  2026-05-12T20:00:19 +1ms service=session.prompt session.id=ses_1e23972b3ffe8QLhzuFpWS5bzd logSpan.http.span.4=7437ms exiting loop";
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::StepExit { session_id } => {
+                assert_eq!(session_id, "ses_1e23972b3ffe8QLhzuFpWS5bzd");
+            }
+            other => panic!("expected StepExit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_permission_evaluated() {
+        let line = r#"INFO  2026-05-12T20:05:26 +160ms service=permission permission=task pattern=general action={"permission":"*","action":"allow","pattern":"*"} evaluated"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::PermissionEvaluated {
+                permission,
+                pattern,
+                action,
+            } => {
+                assert_eq!(permission, "task");
+                assert_eq!(pattern, "general");
+                assert_eq!(
+                    action,
+                    r#"{"permission":"*","action":"allow","pattern":"*"}"#
+                );
+            }
+            other => panic!("expected PermissionEvaluated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_http_response() {
+        let line = "INFO  2026-05-12T20:05:54 +0ms service=default http.method=POST http.url=/session/ses_1e2343b5cffeGOb3bcdTjvh1wZ/message http.status=500 logSpan.http.span.4=99ms Sent HTTP response";
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::HttpResponse {
+                method,
+                url,
+                status,
+                duration_ms,
+            } => {
+                assert_eq!(method, "POST");
+                assert_eq!(url, "/session/ses_1e2343b5cffeGOb3bcdTjvh1wZ/message");
+                assert_eq!(status, 500);
+                assert_eq!(duration_ms, 99);
+            }
+            other => panic!("expected HttpResponse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn http_response_without_span_tag_zeroes_duration() {
+        let line = "INFO  2026-05-12T20:05:54 +0ms service=default http.method=GET http.url=/health http.status=200 Sent HTTP response";
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::HttpResponse { duration_ms, .. } => {
+                assert_eq!(duration_ms, 0);
+            }
+            other => panic!("expected HttpResponse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_default_service_is_unclassified() {
+        // A service=default line that is neither boot banner nor HTTP response
+        let line = "INFO  2026-05-12T20:00:11 +0ms service=default foo=bar some other text";
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        assert_eq!(classify(&record), LogClassification::Unclassified);
     }
 }

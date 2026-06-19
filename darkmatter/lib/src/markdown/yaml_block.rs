@@ -1,27 +1,35 @@
 //! YAML block component for validated, renderable YAML content.
 //!
-//! [`YamlBlock`] is a typed wrapper around a validated YAML string that
-//! renders through the same terminal and browser code-block highlighting
-//! paths used by normal Markdown `yaml` fences.
+//! [`YamlBlock`] is a thin compatibility wrapper around a validated YAML
+//! string. Its constructors validate the YAML payload; its render methods
+//! delegate to [`CodeBlock::yaml`](crate::markdown::code_block::CodeBlock::yaml)
+//! so the terminal and browser output stay byte-for-byte equal to a Markdown
+//! ` ```yaml ` fence for the same payload. New code should construct a
+//! [`CodeBlock`](crate::markdown::code_block::CodeBlock) directly; this
+//! type remains for callers that need YAML validation up front.
+#![allow(deprecated)]
 
 use std::any::Any;
 use std::path::Path;
 
-use biscuit_terminal::components::renderable::{BrowserRenderable, Renderable};
+use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::Layout;
+use renderable::browser::fragment::{BrowserFragment, Ready};
+use renderable::tree::TreeRenderable;
 use thiserror::Error;
 
-use crate::markdown::{
-    Markdown, MarkdownError,
-    dsl::CodeBlockMeta,
-    highlighting::{CodeHighlighter, detect_color_mode},
-    output::code_block::{render_html_code_block, render_terminal_code_block},
-    output::html::HtmlOptions,
-    output::terminal::{TerminalOptions, format_header_row},
-};
+use crate::markdown::Markdown;
+use crate::markdown::code_block::CodeBlock;
 
 /// Errors that can occur when constructing or working with a [`YamlBlock`].
+#[deprecated(
+    since = "0.0.0",
+    note = "YamlBlock is a thin compatibility wrapper around CodeBlock::yaml. \
+            New code should construct a CodeBlock directly. The YAML validation \
+            constructors remain on YamlBlock for callers that need upfront YAML \
+            validation; if you need them, suppress this warning locally."
+)]
 #[derive(Debug, Error)]
 pub enum YamlBlockError {
     /// Failed to read YAML source from disk.
@@ -34,7 +42,7 @@ pub enum YamlBlockError {
 
     /// Failed to parse markdown frontmatter.
     #[error("Failed to parse markdown frontmatter: {0}")]
-    MarkdownParse(#[from] MarkdownError),
+    MarkdownParse(#[from] crate::markdown::MarkdownError),
 }
 
 /// A validated YAML payload that renders as a syntax-highlighted code block.
@@ -42,6 +50,24 @@ pub enum YamlBlockError {
 /// `YamlBlock` stores the raw YAML text after validation. It does not retain
 /// the parsed `serde_yaml_ng::Value`, keeping the public API small and
 /// avoiding dependency leakage.
+///
+/// ## Migration
+///
+/// This type is a thin compatibility wrapper. Terminal and browser rendering
+/// now delegate to [`CodeBlock::yaml`](crate::markdown::code_block::CodeBlock::yaml);
+/// the two surfaces are byte-for-byte equal for the same payload. New code
+/// should construct a [`CodeBlock`](crate::markdown::code_block::CodeBlock)
+/// directly.
+#[deprecated(
+    since = "0.0.0",
+    note = "YamlBlock is a thin compatibility wrapper around CodeBlock::yaml. \
+            New code should construct a CodeBlock directly via \
+            `CodeBlock::yaml(payload)`, `CodeBlock::rust(payload)`, \
+            `CodeBlock::json(payload)`, `CodeBlock::toml(payload)`, or \
+            `CodeBlock::new(code).with_fence_language(language)`. The YAML validation \
+            constructors remain on YamlBlock for callers that need upfront \
+            YAML validation; if you need them, suppress this warning locally."
+)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct YamlBlock {
     yaml: String,
@@ -155,6 +181,13 @@ impl YamlBlock {
     pub fn into_yaml(self) -> String {
         self.yaml
     }
+
+    /// Builds the [`CodeBlock`] this `YamlBlock` delegates rendering to.
+    fn code_block(&self) -> CodeBlock {
+        let mut block = CodeBlock::yaml(self.yaml.clone());
+        block.layout_mut().clone_from(&self.layout);
+        block
+    }
 }
 
 /// Validates YAML by attempting to parse it as `serde_yaml_ng::Value`.
@@ -163,61 +196,27 @@ fn validate_yaml(yaml: &str) -> Result<(), serde_yaml_ng::Error> {
     Ok(())
 }
 
-/// Emits the same ANSI-highlighted `yaml` code block that a Markdown
-/// ` ```yaml ` fence produces (header row + highlighted body) and applies the
-/// stored [`Layout`] (margins, alignment, word-wrap) to the result.
-impl Renderable for YamlBlock {
+impl TreeRenderable for YamlBlock {
+    /// Projects the block into a root-wrapped `yaml` code node, identical to
+    /// the projection [`CodeBlock::yaml`](crate::markdown::code_block::CodeBlock::yaml)
+    /// produces for the same payload.
+    fn render_tree(&self) -> renderable::tree::RenderNode {
+        self.code_block().render_tree()
+    }
+}
+
+/// Renders the YAML payload through [`CodeBlock::yaml`] so output stays
+/// byte-for-byte equal to a Markdown ` ```yaml ` fence for the same payload.
+///
+/// Validation still lives on this type, but rendering is fully delegated; fixes
+/// to the code-block path land in one place.
+impl TerminalRenderable for YamlBlock {
     fn render(&self, term: &Terminal) -> String {
-        // Detect color mode fresh so env-var changes between renders are
-        // honoured (e.g. dark/light tests that flip COLORFGBG).
-        let color_mode = detect_color_mode();
-        let options = TerminalOptions::default();
-        let highlighter = CodeHighlighter::new(options.code_theme, color_mode);
-        let meta = CodeBlockMeta::default();
-        let terminal_width = term.width();
-
-        // Emit the same header row Markdown's ``` yaml ``` fence emits, so
-        // YamlBlock and Markdown stay byte-identical in the body region.
-        let bg_color = highlighter
-            .theme()
-            .settings
-            .background
-            .unwrap_or(syntect::highlighting::Color::BLACK);
-        let header = format_header_row(
-            meta.title.as_deref(),
-            "yaml",
-            bg_color,
-            color_mode,
-            terminal_width as u16,
-        );
-
-        let body = render_terminal_code_block(
-            self.yaml(),
-            "yaml",
-            &highlighter,
-            &options,
-            &meta,
-            color_mode,
-        )
-        .unwrap_or_else(|_| {
-            // Fallback: plain text with minimal escaping
-            format!("\n{}\n", self.yaml())
-        });
-
-        let raw = format!("{header}\n{body}");
-
-        // Apply stored layout (margins, alignment, word-wrap, row-fill).
-        self.layout.apply_layout(&raw, terminal_width)
+        self.code_block().render(term)
     }
 
-    /// Renders without environment detection by delegating to [`Renderable::render`]
-    /// with a default [`Terminal`]. Once `render` honours the stored layout this
-    /// override is behaviourally equivalent to the trait default for a width of
-    /// `None`; we keep it explicit so future divergence is intentional.
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
-        let width = term_width.unwrap_or(80);
-        let term = Terminal::new_optimistic(width);
-        self.render(&term)
+        self.code_block().render_optimistic(term_width)
     }
 
     fn layout(&self) -> &Layout {
@@ -235,29 +234,23 @@ impl Renderable for YamlBlock {
     fn is_block_level(&self) -> bool {
         true
     }
+
+    /// Exposes the bare code-node projection through the canonical
+    /// [`TerminalRenderable::render_tree_node`] hook so a parent component
+    /// that embeds a `YamlBlock` consumes it structurally.
+    fn render_tree_node(&self) -> Option<renderable::tree::RenderNode> {
+        self.code_block().render_tree_node()
+    }
 }
 
-/// Emits `<pre><code class="language-yaml">…</code></pre>` inside the standard
-/// darkmatter `<div class="code-block">` wrapper, using the same shared
-/// `render_html_code_block` helper that Markdown ` ```yaml ` fences use.
-/// `BrowserRenderable` does not have layout state to apply; layout for HTML
+/// Renders `<pre><code class="language-yaml">…</code></pre>` by delegating
+/// to [`CodeBlock::yaml`](crate::markdown::code_block::CodeBlock::yaml), which
+/// uses the same `render_html_code_block` path Markdown ` ```yaml ` fences
+/// use. `BrowserRenderable` has no layout state to apply; layout for HTML
 /// output is handled by surrounding CSS.
 impl BrowserRenderable for YamlBlock {
-    fn render_to_browser(&self) -> String {
-        // Route through HtmlOptions::default() for symmetry with the terminal
-        // path. Reuse the resolved color mode and theme rather than re-detecting.
-        let options = HtmlOptions::default();
-        let highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
-        let meta = CodeBlockMeta::default();
-
-        render_html_code_block(self.yaml(), "yaml", &meta, &highlighter, &options).unwrap_or_else(
-            |_| {
-                format!(
-                    "<pre><code class=\"language-yaml\">{}</code></pre>",
-                    html_escape::encode_text(self.yaml())
-                )
-            },
-        )
+    fn render_html_fragment(&self) -> BrowserFragment<Ready> {
+        self.code_block().render_html_fragment()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -269,7 +262,9 @@ impl BrowserRenderable for YamlBlock {
 mod tests {
     use super::*;
     use crate::markdown::highlighting::{ColorMode, detect_color_mode};
-    use biscuit_terminal::utils::layout::Margin;
+    use crate::markdown::output::html::HtmlOptions;
+    use crate::markdown::output::terminal::{ColorDepth, TerminalOptions};
+    use biscuit_terminal::utils::layout::{Length, TargetValue};
     use serial_test::serial;
     use std::io::Write;
     use tempfile::NamedTempFile;
@@ -409,7 +404,7 @@ mod tests {
         let block = YamlBlock::new("foo: 1").unwrap();
         assert!(block.is_block_level());
         // as_any should return the YamlBlock
-        let any_ref = Renderable::as_any(&block);
+        let any_ref = TerminalRenderable::as_any(&block);
         assert!(any_ref.downcast_ref::<YamlBlock>().is_some());
     }
 
@@ -423,8 +418,8 @@ mod tests {
     #[test]
     fn test_terminal_render_contains_ansi_and_content() {
         let block = YamlBlock::new("foo: 1\nbar: 2").unwrap();
-        let term = Terminal::new();
-        let output = Renderable::render(&block, &term);
+        let term = Terminal::new_optimistic(80);
+        let output = TerminalRenderable::render(&block, &term);
 
         // Should contain ANSI escape codes for syntax highlighting
         assert!(
@@ -458,13 +453,17 @@ mod tests {
 
         // Render via YamlBlock
         let block = YamlBlock::new(yaml_content).unwrap();
-        let term = Terminal::new();
-        let block_output = Renderable::render(&block, &term);
+        let term = Terminal::new_optimistic(80);
+        let block_output = TerminalRenderable::render(&block, &term);
 
         // Render via Markdown YAML fence
         let md_content = format!("```yaml\n{}\n```", yaml_content);
         let md: Markdown = md_content.into();
-        let md_output = md.as_terminal(TerminalOptions::default()).unwrap();
+        let opts = TerminalOptions {
+            color_depth: Some(ColorDepth::TrueColor),
+            ..Default::default()
+        };
+        let md_output = md.as_terminal(opts).unwrap();
 
         // Header parity: both must contain the " yaml " language label.
         assert!(
@@ -480,8 +479,20 @@ mod tests {
         // body lines (the lines that contain the actual YAML payload). We
         // tolerate wrapper differences (extra trailing newlines, surrounding
         // blank lines) but reject structural drift in the body.
-        let block_plain = crate::testing::strip_ansi_codes(&block_output);
-        let md_plain = crate::testing::strip_ansi_codes(&md_output);
+        //
+        // Trailing whitespace is trimmed per line before comparison: `YamlBlock`
+        // pads each line to the available width, whereas the Markdown fence
+        // clears to the terminal edge with `\x1b[K` (no trailing spaces once
+        // stripped). The padding spaces are invisible formatting, not a body
+        // difference, so they are not part of the parity contract.
+        let trim_trailing = |s: &str| {
+            s.lines()
+                .map(|l| l.trim_end())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let block_plain = trim_trailing(&crate::testing::strip_ansi_codes(&block_output));
+        let md_plain = trim_trailing(&crate::testing::strip_ansi_codes(&md_output));
 
         for needle in ["foo: 1", "bar: 2"] {
             assert!(
@@ -515,7 +526,7 @@ mod tests {
     #[test]
     fn test_browser_render_contains_language_yaml() {
         let block = YamlBlock::new("foo: 1").unwrap();
-        let html = BrowserRenderable::render_to_browser(&block);
+        let html = BrowserRenderable::render_html_fragment(&block).render();
 
         // Should contain language-yaml class
         assert!(
@@ -528,7 +539,7 @@ mod tests {
     #[test]
     fn test_browser_render_escapes_html_in_yaml() {
         let block = YamlBlock::new("script: \"<script>alert('xss')</script>\"").unwrap();
-        let html = BrowserRenderable::render_to_browser(&block);
+        let html = BrowserRenderable::render_html_fragment(&block).render();
 
         // Should escape HTML special characters
         assert!(
@@ -540,8 +551,8 @@ mod tests {
 
     /// §3.1 — Strict body-substring parity test (browser).
     ///
-    /// Both `YamlBlock::render_to_browser` and the Markdown YAML fence route
-    /// through `render_html_code_block`, so they must emit byte-identical
+    /// Both `YamlBlock`'s render-tree browser path and the Markdown YAML fence
+    /// route through `render_html_code_block`, so they must emit byte-identical
     /// highlighted span sequences for the YAML payload. We extract the
     /// `<pre><code class="language-yaml">` opener through the final-key span
     /// (the longest contiguous prefix shared between both renderings, before
@@ -557,7 +568,7 @@ mod tests {
 
         // Render via YamlBlock
         let block = YamlBlock::new(yaml_content).unwrap();
-        let block_html = BrowserRenderable::render_to_browser(&block);
+        let block_html = BrowserRenderable::render_html_fragment(&block).render();
 
         // Render via Markdown YAML fence
         let md_content = format!("```yaml\n{}\n```", yaml_content);
@@ -618,7 +629,9 @@ mod tests {
         assert_eq!(detect_color_mode(), ColorMode::Dark);
 
         let block = YamlBlock::new("key: value").unwrap();
-        let dark_out = Renderable::render(&block, &Terminal::default());
+        let mut term = Terminal::new_optimistic(80);
+        term.color_mode = biscuit_terminal::discovery::detection::ColorMode::Dark;
+        let dark_out = TerminalRenderable::render(&block, &term);
         assert!(
             dark_out.contains("\x1b["),
             "Dark-mode render should still emit ANSI escape sequences"
@@ -641,7 +654,9 @@ mod tests {
         assert_eq!(detect_color_mode(), ColorMode::Light);
 
         let block = YamlBlock::new("key: value").unwrap();
-        let light_out = Renderable::render(&block, &Terminal::default());
+        let mut term = Terminal::new_optimistic(80);
+        term.color_mode = biscuit_terminal::discovery::detection::ColorMode::Light;
+        let light_out = TerminalRenderable::render(&block, &term);
         assert!(
             light_out.contains("\x1b["),
             "Light-mode render should still emit ANSI escape sequences"
@@ -652,24 +667,36 @@ mod tests {
     ///
     /// Different background colors flow through `CodeHighlighter::new`, so the
     /// emitted SGR background sequences (`\x1b[48;2;…m`) should differ. This
-    /// confirms that `Renderable::render` actually exercises the color-mode
-    /// branch and isn't ignoring the env var.
+    /// confirms the render-tree terminal path threads the `Terminal`'s color
+    /// mode through to the code renderer instead of ignoring it.
+    ///
+    /// The render-tree path resolves color mode from the `Terminal` snapshot
+    /// (not an ambient env probe), so the test sets `color_mode` directly on two
+    /// optimistic terminals. A *paired* code theme (`github`) is pinned via
+    /// `CODE_THEME` so the property holds: a code block inverts the requested
+    /// mode for page contrast, so the two terminals resolve to opposite concrete
+    /// variants and thus different backgrounds. Single-variant themes (the
+    /// `monokai` default) render identically under both modes and cannot
+    /// demonstrate this.
     #[test]
     #[serial]
     fn test_dark_and_light_render_differ() {
-        let _no_color_guard = EnvVarGuard::capture("NO_COLOR");
-        let _colorfgbg_guard = EnvVarGuard::capture("COLORFGBG");
+        use biscuit_terminal::discovery::detection::ColorMode as TermColorMode;
 
+        let _no_color_guard = EnvVarGuard::capture("NO_COLOR");
+        let _code_theme_guard = EnvVarGuard::capture("CODE_THEME");
         unsafe { std::env::remove_var("NO_COLOR") };
+        unsafe { std::env::set_var("CODE_THEME", "github") };
 
         let block = YamlBlock::new("foo: 1\nbar: 2").unwrap();
-        let term = Terminal::default();
 
-        unsafe { std::env::set_var("COLORFGBG", "15;0") };
-        let dark_out = Renderable::render(&block, &term);
+        let mut dark_term = Terminal::new_optimistic(80);
+        dark_term.color_mode = TermColorMode::Dark;
+        let dark_out = TerminalRenderable::render(&block, &dark_term);
 
-        unsafe { std::env::set_var("COLORFGBG", "0;15") };
-        let light_out = Renderable::render(&block, &term);
+        let mut light_term = Terminal::new_optimistic(80);
+        light_term.color_mode = TermColorMode::Light;
+        let light_out = TerminalRenderable::render(&block, &light_term);
 
         assert_ne!(
             dark_out, light_out,
@@ -677,24 +704,95 @@ mod tests {
         );
     }
 
-    /// §3.2 — Layout `left_margin` must be applied to the rendered output.
+    /// §3.2 — Layout left margin must be applied to the rendered output.
     ///
-    /// Sets `Margin::Chars(4)` on the block's layout and asserts every
+    /// Sets a 4-cell left margin on the block's layout and asserts every
     /// non-empty rendered line begins with the expected indent. This is the
     /// behavioural test for Phase 1 §1.1 (rewriting `render` to honour the
     /// stored layout).
     #[test]
     fn test_left_margin_is_applied() {
         let mut block = YamlBlock::new("foo: 1\nbar: 2").unwrap();
-        block.layout_mut().left_margin = Margin::Chars(4);
+        block.layout_mut().margin.left = TargetValue::universal(Length::ch(4));
 
-        let out = Renderable::render(&block, &Terminal::default());
+        let out = TerminalRenderable::render(&block, &Terminal::default());
         let plain = crate::testing::strip_ansi_codes(&out);
 
         for line in plain.lines().filter(|l| !l.trim().is_empty()) {
             assert!(
                 line.starts_with("    "),
                 "expected 4-space left margin on every non-empty line, got: {line:?}"
+            );
+        }
+    }
+
+    /// The code block must honour the available terminal width instead of
+    /// clearing to the physical terminal edge with `\x1b[K`. Every rendered
+    /// line (header, body, padding rows) must be exactly the available width,
+    /// which keeps the right-aligned language pill flush with the block's
+    /// right edge regardless of the physical terminal size.
+    #[test]
+    fn test_render_pads_to_available_width_not_clear_to_eol() {
+        let block = YamlBlock::new("foo: 1\nbar: 2").unwrap();
+        let term = Terminal::new_optimistic(40);
+        let out = TerminalRenderable::render(&block, &term);
+
+        assert!(
+            !out.contains("\x1b[K"),
+            "code block must not flood to the physical edge with clear-to-EOL: {out:?}"
+        );
+
+        let plain = crate::testing::strip_ansi_codes(&out);
+        for line in plain.lines().filter(|l| !l.is_empty()) {
+            assert_eq!(
+                line.chars().count(),
+                40,
+                "every non-empty line must pad to the available width (40): {line:?}"
+            );
+        }
+    }
+
+    /// A right margin must shrink both the code-block background and the
+    /// right-aligned language pill, moving them leftward off the right edge.
+    #[test]
+    fn test_right_margin_shrinks_block_and_pill() {
+        let mut block = YamlBlock::new("foo: 1\nbar: 2").unwrap();
+        block.layout_mut().margin.right = TargetValue::universal(Length::ch(10));
+
+        let term = Terminal::new_optimistic(40);
+        let out = TerminalRenderable::render(&block, &term);
+        let plain = crate::testing::strip_ansi_codes(&out);
+
+        // available = 40 - 10 = 30; with no left margin every non-empty line
+        // is exactly 30 columns wide, so the block (and the pill above it) end
+        // 10 cells short of the physical right edge.
+        for line in plain.lines().filter(|l| !l.is_empty()) {
+            assert_eq!(
+                line.chars().count(),
+                30,
+                "right margin must shrink the block to the available width (30): {line:?}"
+            );
+        }
+    }
+
+    /// A `max_width` cap must bound the block (and its pill) to the capped
+    /// width, matching the render-tree path which applies the cap in
+    /// `render_with_layout`.
+    #[test]
+    fn test_max_width_caps_block() {
+        let mut block = YamlBlock::new("foo: 1\nbar: 2").unwrap();
+        block.layout_mut().max_width = Some(TargetValue::universal(Length::Percent(50.0)));
+
+        let term = Terminal::new_optimistic(80);
+        let out = TerminalRenderable::render(&block, &term);
+        let plain = crate::testing::strip_ansi_codes(&out);
+
+        // 50% of 80 = 40; every non-empty line is exactly 40 columns wide.
+        for line in plain.lines().filter(|l| !l.is_empty()) {
+            assert_eq!(
+                line.chars().count(),
+                40,
+                "max_width 50% must cap the block to 40 columns: {line:?}"
             );
         }
     }
@@ -707,7 +805,7 @@ mod tests {
     #[test]
     fn test_render_optimistic_smoke() {
         let block = YamlBlock::new("foo: 1").unwrap();
-        let out = Renderable::render_optimistic(&block, None);
+        let out = TerminalRenderable::render_optimistic(&block, None);
         assert!(out.contains("\x1b["), "optimistic render should emit ANSI");
         assert!(
             crate::testing::strip_ansi_codes(&out).contains("foo: 1"),
@@ -719,12 +817,12 @@ mod tests {
     ///
     /// Constructs an optimistic terminal at width 40 and asserts the rendered
     /// output is non-empty and ANSI-bearing. The trait-default `render_in_width`
-    /// (provided by `Renderable`) delegates to `render` with this terminal.
+    /// (provided by `TerminalRenderable`) delegates to `render` with this terminal.
     #[test]
     fn test_render_in_width_smoke() {
         let block = YamlBlock::new("foo: 1\nbar: 2").unwrap();
         let term = Terminal::new_optimistic(40);
-        let out = Renderable::render(&block, &term);
+        let out = TerminalRenderable::render(&block, &term);
 
         assert!(
             !out.is_empty(),
@@ -806,7 +904,7 @@ mod tests {
     #[test]
     fn test_browser_render_structure() {
         let block = YamlBlock::new("nested:\n  key: value").unwrap();
-        let html = BrowserRenderable::render_to_browser(&block);
+        let html = BrowserRenderable::render_html_fragment(&block).render();
 
         // Should contain pre and code tags
         assert!(
@@ -848,7 +946,7 @@ mod tests {
     fn test_yaml_block_render_is_block_level() {
         let block = YamlBlock::new("foo: 1").unwrap();
         assert!(
-            Renderable::is_block_level(&block),
+            TerminalRenderable::is_block_level(&block),
             "YamlBlock should be block-level"
         );
     }
@@ -856,8 +954,8 @@ mod tests {
     #[test]
     fn test_terminal_render_empty_yaml() {
         let block = YamlBlock::new("").unwrap();
-        let term = Terminal::new();
-        let output = Renderable::render(&block, &term);
+        let term = Terminal::new_optimistic(80);
+        let output = TerminalRenderable::render(&block, &term);
 
         // Should still produce valid output (padding rows at minimum)
         assert!(
@@ -869,7 +967,7 @@ mod tests {
     #[test]
     fn test_browser_render_empty_yaml() {
         let block = YamlBlock::new("").unwrap();
-        let html = BrowserRenderable::render_to_browser(&block);
+        let html = BrowserRenderable::render_html_fragment(&block).render();
 
         // Should contain the code block structure even for empty YAML
         assert!(
@@ -883,6 +981,132 @@ mod tests {
         assert!(
             html.contains("<code"),
             "Empty YAML should still have <code> tag"
+        );
+    }
+
+    /// Phase 1 §1.5 — `YamlBlock::render` must equal `CodeBlock::yaml(...).render`
+    /// byte-for-byte for any shared payload, because the migration to
+    /// `CodeBlock` is the only code path. Drift here would mean the
+    /// delegation wiring broke (or someone reintroduced a private code
+    /// path on `YamlBlock`).
+    #[test]
+    #[serial]
+    fn test_terminal_render_equals_code_block_yaml() {
+        // Both sides render a direct `CodeBlock`, which reads `CODE_THEME` /
+        // `THEME` at render time. Serialize + clear so a concurrent serial test
+        // mutating `CODE_THEME` between the two renders cannot make the surfaces
+        // resolve different default themes.
+        let _code_theme = EnvVarGuard::capture("CODE_THEME");
+        let _theme = EnvVarGuard::capture("THEME");
+        unsafe {
+            std::env::remove_var("CODE_THEME");
+            std::env::remove_var("THEME");
+        }
+
+        let payload = "foo: 1\nbar: 2\nbaz: 3";
+        let yaml_block = YamlBlock::new(payload).unwrap();
+        let code_block = CodeBlock::yaml(payload);
+
+        let term = Terminal::new_optimistic(80);
+        let yaml_out = TerminalRenderable::render(&yaml_block, &term);
+        let code_out = TerminalRenderable::render(&code_block, &term);
+
+        assert_eq!(
+            yaml_out, code_out,
+            "YamlBlock::render must equal CodeBlock::yaml(...).render"
+        );
+    }
+
+    /// Phase 1 §1.5 — `YamlBlock::render_html_fragment` must equal
+    /// `CodeBlock::yaml(...).render_html_fragment` for the same payload.
+    /// Browser parity is the second half of the byte-for-byte
+    /// characterization contract.
+    #[test]
+    #[serial]
+    fn test_browser_render_equals_code_block_yaml() {
+        // See `test_terminal_render_equals_code_block_yaml`: the direct browser
+        // path reads `CODE_THEME` / `THEME` at render time, so isolate env.
+        let _code_theme = EnvVarGuard::capture("CODE_THEME");
+        let _theme = EnvVarGuard::capture("THEME");
+        unsafe {
+            std::env::remove_var("CODE_THEME");
+            std::env::remove_var("THEME");
+        }
+
+        let payload = "foo: 1\nbar: 2\nbaz: 3";
+        let yaml_block = YamlBlock::new(payload).unwrap();
+        let code_block = CodeBlock::yaml(payload);
+
+        let yaml_html = BrowserRenderable::render_html_fragment(&yaml_block).render();
+        let code_html = BrowserRenderable::render_html_fragment(&code_block).render();
+
+        assert_eq!(
+            yaml_html, code_html,
+            "YamlBlock::render_html_fragment must equal CodeBlock::yaml(...).render_html_fragment"
+        );
+    }
+
+    /// Phase 1 §1.5 — Layout state on `YamlBlock` must reach `CodeBlock::yaml`
+    /// so the `Layout` (margin, max-width, alignment) survives the
+    /// delegation. This is the regression test for a future caller that
+    /// might forget to copy layout.
+    #[test]
+    #[serial]
+    fn test_terminal_render_with_layout_equals_code_block() {
+        use biscuit_terminal::utils::layout::{Length, TargetValue};
+
+        // See `test_terminal_render_equals_code_block_yaml`: the direct render
+        // path reads `CODE_THEME` / `THEME` at render time, so isolate env.
+        let _code_theme = EnvVarGuard::capture("CODE_THEME");
+        let _theme = EnvVarGuard::capture("THEME");
+        unsafe {
+            std::env::remove_var("CODE_THEME");
+            std::env::remove_var("THEME");
+        }
+
+        let payload = "foo: 1\nbar: 2";
+
+        let mut yaml_block = YamlBlock::new(payload).unwrap();
+        yaml_block.layout_mut().margin.left = TargetValue::universal(Length::ch(4));
+        let mut code_block = CodeBlock::yaml(payload);
+        code_block.layout_mut().margin.left = TargetValue::universal(Length::ch(4));
+
+        let term = Terminal::new_optimistic(80);
+        let yaml_out = TerminalRenderable::render(&yaml_block, &term);
+        let code_out = TerminalRenderable::render(&code_block, &term);
+
+        assert_eq!(
+            yaml_out, code_out,
+            "YamlBlock with layout must equal CodeBlock::yaml with the same layout"
+        );
+    }
+
+    /// Phase 1 §1.5 — A dark terminal must produce identical output for
+    /// `YamlBlock` and `CodeBlock::yaml` so the dark-mode contrast fix (a
+    /// later phase) lands in one place. Pairs with
+    /// `test_dark_and_light_render_differ` to confirm both invariants
+    /// hold simultaneously: dark ≠ light, and YamlBlock ≡ CodeBlock::yaml.
+    #[test]
+    #[serial]
+    fn test_dark_terminal_equals_code_block_yaml() {
+        let _no_color = EnvVarGuard::capture("NO_COLOR");
+        let _code_theme = EnvVarGuard::capture("CODE_THEME");
+        unsafe { std::env::remove_var("NO_COLOR") };
+        unsafe { std::env::set_var("CODE_THEME", "github") };
+
+        let payload = "foo: 1\nbar: 2";
+        let yaml_block = YamlBlock::new(payload).unwrap();
+        let code_block = CodeBlock::yaml(payload);
+
+        let mut dark = Terminal::new_optimistic(80);
+        dark.color_mode = biscuit_terminal::discovery::detection::ColorMode::Dark;
+
+        let yaml_out = TerminalRenderable::render(&yaml_block, &dark);
+        let code_out = TerminalRenderable::render(&code_block, &dark);
+
+        assert_eq!(
+            yaml_out, code_out,
+            "dark-terminal YamlBlock must equal CodeBlock::yaml"
         );
     }
 }

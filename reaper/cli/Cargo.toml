@@ -1,0 +1,13 @@
+[package]
+name = "reaper-cli"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Reaper CLI (placeholder; see reaper/features)"
+
+[[bin]]
+name = "reaper"
+path = "src/main.rs"
+
+[dependencies]
+reaper = { path = "../lib" }

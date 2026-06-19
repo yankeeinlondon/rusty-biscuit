@@ -9,7 +9,6 @@ use std::collections::HashSet;
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeOptions;
-use darkmatter::markdown::compose::shell_expansion::discovery::collect_shell_commands;
 use darkmatter::markdown::compose::shell_expansion::policy::normalize_command;
 
 use crate::composition::error::CompositionError;
@@ -52,10 +51,14 @@ pub fn resolve_shell_approvals(
     let mut all_commands: Vec<(String, std::path::PathBuf, usize)> = Vec::new();
 
     // -- Source 1: Template ::shell directives ---------------------------------
+    // Darkmatter discovers condition-blind: every command that could run under
+    // any document state (including dead branches). Claudine authorizes the
+    // union of these plus harness commands below.
     if let (Some(md), Some(opts)) = (markdown, compose_options) {
-        let entries =
-            collect_shell_commands(md, opts).map_err(CompositionError::PreFlightDiscoveryFailed)?;
-        for entry in &entries {
+        let preflight = md
+            .compose_preflight(opts)
+            .map_err(CompositionError::PreFlightDiscoveryFailed)?;
+        for entry in &preflight.entries {
             all_commands.push((
                 entry.normalized.clone(),
                 entry.source_file.clone(),
@@ -120,7 +123,16 @@ pub fn resolve_shell_approvals(
                         line: *line,
                     });
                 }
-                // No handler -- cannot get approval
+                // No handler -- cannot get approval. Under `--dry-run` the
+                // CI/non-TTY gate names the offending command and points at
+                // the two ways to proceed (spec: Non-TTY Behavior).
+                if approval_options.dry_run {
+                    return Err(CompositionError::PreFlightFailed(format!(
+                        "Cannot dry-run: shell command '{command}' requires interactive approval. \
+                         Run with --yolo to auto-approve, or pre-approve the command in your \
+                         configuration."
+                    )));
+                }
                 let location = if *line > 0 {
                     format!("{}:{}", source_file.display(), line)
                 } else {
@@ -277,6 +289,53 @@ mod tests {
         assert_eq!(result.total_discovered, 0);
         assert_eq!(result.already_whitelisted, 0);
         assert_eq!(result.user_approved, 0);
+    }
+
+    #[test]
+    fn dry_run_no_handler_emits_cannot_dry_run_message() {
+        // Non-TTY dry-run gate: an unapproved command with no approval
+        // handler surfaces the spec's `Cannot dry-run: …` message naming
+        // the offending command and pointing at `--yolo` / pre-approval.
+        let md: Markdown = "# Test\n::shell curl https://example.com\n".into();
+        let compose_options = ComposeOptions::new();
+        let dir = tempfile::TempDir::new().unwrap();
+        let options = ShellApprovalOptions {
+            policy_root: Some(dir.path().to_path_buf()),
+            approval_handler: None,
+            dry_run: true,
+            ..Default::default()
+        };
+
+        let err = resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options)
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Cannot dry-run: shell command 'curl https://example.com' requires \
+                          interactive approval."),
+            "expected dry-run gate message naming the command; got: {msg}"
+        );
+        assert!(msg.contains("--yolo"), "message should mention --yolo; got: {msg}");
+    }
+
+    #[test]
+    fn non_dry_run_no_handler_keeps_generic_message() {
+        // Without `--dry-run` the no-handler path keeps the generic
+        // provenance-bearing message (unchanged behavior).
+        let md: Markdown = "# Test\n::shell curl https://example.com\n".into();
+        let compose_options = ComposeOptions::new();
+        let (_dir, options) = approval_options_with_whitelist(&[]);
+
+        let err = resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options)
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("no approval handler"),
+            "expected generic no-handler message; got: {msg}"
+        );
+        assert!(
+            !msg.contains("Cannot dry-run"),
+            "non-dry-run path must not use the dry-run framing; got: {msg}"
+        );
     }
 
     #[test]
@@ -581,6 +640,7 @@ mod tests {
             policy_root: Some(dir.path().to_path_buf()),
             approval_handler: Some(handler),
             approval_cache: cache,
+            ..Default::default()
         }
     }
 

@@ -9,25 +9,28 @@ block-beta
 
     block:pre
         columns 1
-        preTitle["<b>Inline Pre</b> (<i>serial</i>)"]
+        preTitle["<b>1. Inline Pre</b> (<i>serial</i>)"]
         preFlightChecks("<a href='./inline/preflight-checks.md'>0. Pre-flight checks 🏁</a>")
-        fmInterpolate("<a href='./inline/fm-interpolation.md'>1. Frontmatter Interpolation 🏁</a>")
-        shellExp("<a href='./inline/fm-shell-expansion.md'>2. Frontmatter Shell Expansion 🏁</a>")
-        textReplacement("<a href='./inline/text-replacement.md'>3. Text Replacement 🏁</a>")
-        pageBlocks("<a href='./inline/page-blocks.md'>4. Page Blocks 🏁</a>")
-        interpolation("<a href='./inline/interpolation.md'>5. Interpolation 🏁</a>")
-        shellExpansion("<a href='./inline/shell-expansion.md'>6. Shell Expansion 🏁</a>")
-        shellBlocks("<a href='./inline/shell-blocks.md'>7. Shell Blocks 🏁</a>")
-        linkResolve("<a href='./operations/link-resolve.md'>8. Link Resolve (abs) 🏁</a>")
+        fmInterpolate("<a href='./inline/fm-interpolation.md'>1. Frontmatter Interpolation — pass 1 🏁</a>")
+        schemaValidation("<a href='./inline/schema-validation.md'>2. Schema Validation 🏁</a>")
+        shellExp("<a href='./inline/fm-shell-expansion.md'>3. Frontmatter Shell Expansion 🏁</a>")
+        fmInterpolate2("<a href='./inline/fm-interpolation.md'>3b. Frontmatter Interpolation — pass 2 (post-shell) 🏁</a>")
+        textReplacement("<a href='./inline/text-replacement.md'>4. Text Replacement 🏁</a>")
+        pageBlocks("<a href='./inline/page-blocks.md'>5. Page Blocks 🏁</a>")
+        interpolation("<a href='./inline/interpolation.md'>6. Interpolation 🏁</a>")
+        shellExpansion("<a href='./inline/shell-expansion.md'>7. Shell Expansion 🏁</a>")
+        shellBlocks("<a href='./inline/shell-blocks.md'>8. Shell Blocks 🏁</a>")
+        linkResolve("<a href='./operations/link-resolve.md'>9. Link Resolve (abs) 🏁</a>")
     end
 
     block:transclusion
         columns 1
-        transTitle["<b>Transclusion</b> (<i>parallel</i>)"]
+        transTitle["<b>2. Transclusion</b> (<i>parallel</i>)"]
         blockTransclusion("<a href='./transclusion/block-transclusion.md'>Block Transclusion 🏁</a>")
         fmTransclusion("<a href='./transclusion/fm-transclusion.md'>Frontmatter Transclusion 🏁</a>")
         codeBlockTransclusion("<a href='./transclusion/code-transclusion.md'>Code Block Transclusion 🏁</a>")
         tocLinking("<a href='./inline/toc-linking.md'>TOC Linking 🏁</a>")
+        fileLinks("<a href='./inline/file-links.md'>File Links 🏁</a>")
         promptExpansion("<a href='./transclusion/prompt-expansion.md'>🧠 Prompt Expansion</a>")
         summarization("<a href='./transclusion/summarization.md'>🧠 Summarization</a>")
         consolidation("<a href='./transclusion/consolidation.md'>🧠 Consolidation</a>")
@@ -38,7 +41,7 @@ block-beta
 
     block:post
         columns 1
-        postTitle["<b>Inline Post</b> (<dim><i>serial</i></dim>)"]
+        postTitle["<b>3. Inline Post</b> (<dim><i>serial</i></dim>)"]
         cleaning("<a href='./inline/cleaning.md'>1. Cleaning 🏁</a>")
         structural("<a href='./inline/structural-normalization.md'>2. Structural Normalization 🏁</a>")
 
@@ -53,7 +56,7 @@ block-beta
 
     block:final
         columns 1
-        finalTitle["<b>Finalization</b> (<dim><i>serial</i></dim>)"]
+        finalTitle["<b>4. Finalization</b> (<dim><i>serial</i></dim>)"]
         links("<a href='./operations/link-normalization.md'>Link Normalization 🏁</a>")
 
         fs1[" "]
@@ -94,10 +97,10 @@ The **Pre Transclusion** group are a set operations run in a serial process, one
 Being run serial is important so that one operation can _setup_ or _effect_ the next operation. Rather then be a side effect, this is intentional and often adds useful power to the pipeline. It does mean, however, that the ordering of these operations must be considered and organized in a way to provide maximum value.
 
 > **Example:** if a conditional page block is evaluated to _false_ (aka, do not render this page), then identifying this first means any
-shell expansion commands (or any other inline mutation) contained within the block will now be ignored because this part of the page has
+shell expansion commands (or any other inline mutation) contained within the block will not be **executed** because this part of the page has
 been removed.
 >
-> **Note:** in this example, even though we will not execute the shell expansion, when we do the pre-flight checks we will require that ALL shell commands are whitelisted before starting the 
+> **Note:** approval and execution are deliberately separate. Pre-flight builds the **approval set** _condition-blind_ — it walks every branch (false page blocks, false-condition transclusions, both sides of a `$(...)` ternary) and approves every command that **could** run under any state, exactly once, up front. **Execution** is _condition-aware_: a command runs only when its branch is actually reached. So in the example above the dead-branch command is still approved (vetted once), but never executes while the condition is false. The governing invariant is `execution_set ⊆ approval_set`, which makes the execution-time gate a pure membership check that never prompts — see [pre-flight checks](./inline/preflight-checks.md).
 
 ### 2. Transclusion
 
