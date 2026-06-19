@@ -5,7 +5,39 @@ created: 2026-06-18
 start_phase: 1
 yolo: "true"
 spec: claudine/fixes/2026-06-18-unordered-list/spec.md
-status: ready for implementation
+status: phase 4 complete
+source_files_during_phase_1:
+  - darkmatter/lib/src/markdown/cleanup.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/cleanup.rs
+docs_updated_during_phase_2:
+  - claudine/fixes/2026-06-18-unordered-list/plan.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/lib/src/composition/prepare.rs
+docs_updated_during_phase_3:
+  - claudine/fixes/2026-06-18-unordered-list/plan.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+  - claudine/fixes/2026-06-18-unordered-list/plan.md
+  - claudine/fixes/2026-06-18-unordered-list/spec.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_code:
+  - darkmatter/lib/src/markdown/cleanup.rs
+  - claudine/lib/src/composition/prepare.rs
+documentation:
+  - claudine/fixes/2026-06-18-unordered-list/plan.md
+  - claudine/fixes/2026-06-18-unordered-list/spec.md
+packages:
+  - darkmatter
+  - claudine
 ---
 
 # Plan — Tight nested lists must stay tight through cleanup
@@ -55,14 +87,14 @@ currently encodes the bug. This phase is atomic — the predicate change and the
 `normal_blank_lines_around_level_transition` rewrite **must land together** or
 the suite goes red.
 
-- [ ] **1.1 Confirm baseline reproduction.** Create `/tmp/l.md` with
+- [x] **1.1 Confirm baseline reproduction.** Create `/tmp/l.md` with
   `- Level 1\n    - Level 2\n        - Level 3\n` and run `md clean /tmp/l.md`.
   Record the **before** output: it currently emits a blank line between every
   level. (Requires the `md` CLI built/installed: `cargo build -p darkmatter-cli`
   if `command -v md` is empty.) This is the observable baseline the fix is
   judged against.
 
-- [ ] **1.2 Apply the one-line predicate fix.** In
+- [x] **1.2 Apply the one-line predicate fix.** In
   `darkmatter/lib/src/markdown/cleanup.rs`, inside `normalize_list_spacing`'s
   Phase 2 `match mode` arm, change the `ListSpacingMode::Normal` branch
   predicate from
@@ -83,7 +115,7 @@ the suite goes red.
   `had_continuation`, `prev_was_blank`) is touched. Source anchor:
   `cleanup.rs:1279`.
 
-- [ ] **1.3 Correct the `normalize_list_spacing` doc comment.** At
+- [x] **1.3 Correct the `normalize_list_spacing` doc comment.** At
   `cleanup.rs:1213-1221`, the bullet currently reads "_Normal_: blank lines at
   indentation level transitions and after sub-lists return to prose". Rewrite
   it to describe the fixed behavior, e.g. "_Normal_: blank lines when returning
@@ -91,7 +123,7 @@ the suite goes red.
   prose that follows a list". This satisfies the acceptance criterion that the
   doc no longer says "level transitions".
 
-- [ ] **1.4 Rewrite `normal_blank_lines_around_level_transition`.** This test
+- [x] **1.4 Rewrite `normal_blank_lines_around_level_transition`.** This test
   (at `cleanup.rs:2810`) currently asserts `lessons:\n\n    - @docs`, which is
   exactly the bug. Update it so the **descent** assertion becomes
   `lessons:\n    - @docs` (single newline, no blank). Keep the **shallower
@@ -115,7 +147,7 @@ Goal: add the negative assertions that would have caught this regression and
 the new structural guards from spec §Testing Requirements. **Parallelizable
 with Phase 3** once Phase 1 is complete (independent files).
 
-- [ ] **2.1 Strengthen the nested-indent tests with negative assertions.** In
+- [x] **2.1 Strengthen the nested-indent tests with negative assertions.** In
   `test_nested_list_preserves_4_space_indentation` and the
   `test_cleanup_with_indent_forces_*` variants, add (in addition to the
   existing positive indent assertion) the **absence** assertion that would have
@@ -132,7 +164,7 @@ with Phase 3** once Phase 1 is complete (independent files).
   Apply the analogous `\n\n        - Level 3` negative assertion at the deeper
   level.
 
-- [ ] **2.2 Add `tight_nested_list_stays_tight_after_cleanup`.** Model it on
+- [x] **2.2 Add `tight_nested_list_stays_tight_after_cleanup`.** Model it on
   the `## Closure` payload: a heading, two top-level `- ` siblings where only
   the second has a tight 4-space-indented sub-list of four children (one child
   containing inline code + bold), followed by a blank line and a `**bold:**`
@@ -141,13 +173,13 @@ with Phase 3** once Phase 1 is complete (independent files).
   no blank line) **and** that the children remain at the configured indent
   width.
 
-- [ ] **2.3 Add `tight_siblings_stay_tight`.** Guard the `indent == prev` case:
+- [x] **2.3 Add `tight_siblings_stay_tight`.** Guard the `indent == prev` case:
   same-indent siblings without continuation content remain blank-free. This
   proves the `!=` → `<` change is not a behavior change for siblings. (Existing
   `tight_list_stays_tight_in_normal_mode` covers the ordered-list flavor; add
   an unordered + nested-sibling variant.)
 
-- [ ] **2.4 Add `closing_a_sublist_inserts_blank`.** Guard the `indent < prev`
+- [x] **2.4 Add `closing_a_sublist_inserts_blank`.** Guard the `indent < prev`
   case: returning to a strictly shallower indent still inserts a blank line.
   Use the shape
 
@@ -160,7 +192,7 @@ with Phase 3** once Phase 1 is complete (independent files).
 
   so the fix is provably scoped to the descent direction only.
 
-- [ ] **2.5 Confirm loose-list guard.** Verify
+- [x] **2.5 Confirm loose-list guard.** Verify
   `normal_loose_list_preserves_blank_lines_between_items` still passes
   unchanged (it exercises the `had_continuation` path). If clearer coverage is
   wanted, add a focused `loose_list_keeps_blank_lines_in_normal_mode` guard so
@@ -183,7 +215,7 @@ failure mode (`claudine compose … --dry-run` corrupting the `## Closure`
 section) can never silently regress. Claudine gets a **test only** — no
 production source edits. **Parallelizable with Phase 2** (different file).
 
-- [ ] **3.1 Add `direct_composition_preserves_tight_nested_list`.** In
+- [x] **3.1 Add `direct_composition_preserves_tight_nested_list`.** In
   `claudine/lib/src/composition/prepare.rs` `#[cfg(test)] mod tests`, reuse the
   existing `make_source(&dir, frontmatter, content)` helper. Build a source
   document with frontmatter and a body containing a tight nested unordered list
@@ -207,23 +239,23 @@ production source edits. **Parallelizable with Phase 2** (different file).
 Goal: run the complete behavioral matrix from spec §Verification and walk the
 spec §Acceptance Criteria checklist. Requires Phases 1–3 complete.
 
-- [ ] **4.1 Darkmatter cleanup suite.**
+- [x] **4.1 Darkmatter cleanup suite.**
   `cargo nextest run -p darkmatter --lib markdown::cleanup` — all green.
 
-- [ ] **4.2 Claudine composition suite.**
+- [x] **4.2 Claudine composition suite.**
   `cargo nextest run -p claudine --lib composition::prepare` — all green
   (or `just test-library` from the `claudine/` area).
 
-- [ ] **4.3 Behavioral — three-level tight list.**
+- [x] **4.3 Behavioral — three-level tight list.**
   `printf -- '- Level 1\n    - Level 2\n        - Level 3\n' > /tmp/tight.md`
   then `md clean /tmp/tight.md` emits **no** blank lines between levels.
 
-- [ ] **4.4 Behavioral — `## Closure`-shaped payload.**
+- [x] **4.4 Behavioral — `## Closure`-shaped payload.**
   `md clean` on the closure payload yields
   `…properties on "…":\n    - based on…` (single newline between parent and
   first child).
 
-- [ ] **4.5 End-to-end — incident prompt composes cleanly.**
+- [x] **4.5 End-to-end — incident prompt composes cleanly.**
   `claudine compose prompts/review-feature.md -y … --dry-run` piped through a
   `grep -A2 'Save the following'` shows the children on the immediately
   following lines, not a blank line. The `## Closure` section renders as a
@@ -232,12 +264,12 @@ spec §Acceptance Criteria checklist. Requires Phases 1–3 complete.
   non-interactive session, the Phase 3 unit test is the authoritative proxy —
   note any skip in the closeout.)
 
-- [ ] **4.6 Mode isolation.** Confirm `Compact` and `Loose` outputs are
+- [x] **4.6 Mode isolation.** Confirm `Compact` and `Loose` outputs are
   byte-identical to pre-fix (`compact_with_nested_list`,
   `loose_with_nested_list`, `loose_adds_blank_lines_between_all_items` all
   green) — the fix touched only `Normal`.
 
-- [ ] **4.7 Walk spec §Acceptance Criteria.** Tick every box in the spec's
+- [x] **4.7 Walk spec §Acceptance Criteria.** Tick every box in the spec's
   acceptance-criteria checklist against the work above. Any unticked item is a
   blocker for closeout.
 

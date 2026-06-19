@@ -357,31 +357,31 @@ claudine compose prompts/review-feature.md -y \
 
 ## Acceptance Criteria
 
-- [ ] `normalize_list_spacing`'s `Normal`-mode predicate inserts a blank line
+- [x] `normalize_list_spacing`'s `Normal`-mode predicate inserts a blank line
       before a list item iff `had_continuation || indent < prev` (equivalently,
       a parent→child descent never inserts a blank).
-- [ ] `md clean` on `- Level 1\n    - Level 2\n        - Level 3` produces
+- [x] `md clean` on `- Level 1\n    - Level 2\n        - Level 3` produces
       `- Level 1\n    - Level 2\n        - Level 3` with **no** blank lines
       between levels.
-- [ ] `md clean` on the `## Closure`-shaped payload produces
+- [x] `md clean` on the `## Closure`-shaped payload produces
       `…properties on "…":\n    - based on…` (single newline between parent and
       first child).
-- [ ] The `## Closure` section of `claudine compose prompts/review-feature.md …
+- [x] The `## Closure` section of `claudine compose prompts/review-feature.md …
       --dry-run` renders as a nested list (no code block) in a renderer that
       previously showed a code block.
-- [ ] Existing loose-list tests
+- [x] Existing loose-list tests
       (`normal_loose_list_preserves_blank_lines_between_items`,
       `loose_with_nested_list`, `compact_with_nested_list`) pass unchanged.
-- [ ] Existing tight-sibling tests (`tight_list_stays_tight_in_normal_mode`)
+- [x] Existing tight-sibling tests (`tight_list_stays_tight_in_normal_mode`)
       pass unchanged.
-- [ ] `normal_blank_lines_around_level_transition` no longer expects a blank
+- [x] `normal_blank_lines_around_level_transition` no longer expects a blank
       line before an indented child list; it either gets renamed to describe only
       the shallower-return case or is split into descent and ascent tests.
-- [ ] Strengthened nested-list tests assert the _absence_ of a blank line before
+- [x] Strengthened nested-list tests assert the _absence_ of a blank line before
       children (negative assertions), not merely the indent width.
-- [ ] New claudine end-to-end test
+- [x] New claudine end-to-end test
       `direct_composition_preserves_tight_nested_list` passes.
-- [ ] The `normalize_list_spacing` doc comment describes the fixed behavior
+- [x] The `normalize_list_spacing` doc comment describes the fixed behavior
       (blanks on shallower returns / loose lists), not "level transitions".
 
 ## Related Finding (Out of Scope — Separate Bug)
