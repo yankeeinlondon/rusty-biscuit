@@ -2,10 +2,10 @@
 source: messenger/cli/src/info.rs
 expression: text
 ---
-[1mHost OS:[22m Linux[0m
-[1mActive daemon:[22m dunst [2m(knopwob)[22m v1.9.2[0m
+[1mHost OS:[0m Linux
+[1mActive daemon:[0m dunst [2m(knopwob)[0m v1.9.2
 
-[1mNotification helpers[22m[0m
+[1mNotification helpers[0m
 ┌─────────────┬───────────┬─────────┬────────────────────────────────┐
 │ Helper      │ Installed │ Version │ Install hint                   │
 ├─────────────┼───────────┼─────────┼────────────────────────────────┤
@@ -13,10 +13,10 @@ expression: text
 │ notify-send │     —     │         │ sudo apt install libnotify-bin │
 └─────────────┴───────────┴─────────┴────────────────────────────────┘
 
-[1mElection order on this host[22m[0m
-  [2m1.[22m dunstify[0m
-  [2m2.[22m notify-send[0m
+[1mElection order on this host[0m
+  [2m1.[0m dunstify
+  [2m2.[0m notify-send
 
-[1mConfigured routes[22m[0m
-  [1mdesktop[22m [2m→[22m Desktop [32m★[39m[0m
-  [1mops.slack[22m [2m→[22m Slack[0m
+[1mConfigured routes[0m
+  [1mdesktop[0m [2m→[0m Desktop [32m★[0m
+  [1mops.slack[0m [2m→[0m Slack

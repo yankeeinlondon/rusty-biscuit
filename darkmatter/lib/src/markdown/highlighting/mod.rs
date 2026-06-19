@@ -3,28 +3,25 @@
 //! This module provides theme enumeration, theme pairing (light/dark),
 //! and grammar loading utilities for syntax highlighting using syntect.
 
-mod grammars;
+pub(crate) mod grammars;
 pub mod prose;
+pub(crate) mod resolve;
 pub(crate) mod scope_cache;
 pub(crate) mod themes;
 
 pub use themes::{
-    ColorMode, InvalidThemeName, ThemePair, detect_code_theme, detect_color_mode,
-    detect_prose_theme, get_code_theme_for_prose,
+    CodeBlockMode, ColorMode, InvalidCodeBlockMode, InvalidThemeName, ThemePair, detect_code_theme,
+    detect_color_mode, detect_prose_theme, get_code_theme_for_prose,
 };
 
-use biscuit_terminal::terminal::Terminal;
+pub(crate) use resolve::Surface;
+
+use crate::markdown::language_grammar::LanguageGrammar;
+
 use syntect::easy::HighlightLines;
 use syntect::highlighting::Theme as SyntectTheme;
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
-
-pub enum ColorModeOptions<'a> {
-    Terminal(Terminal),
-    TerminalRef(&'a Terminal),
-    ColorMode(ColorMode),
-    ColorModeRef(&'a ColorMode),
-}
 
 /// Primary API for syntax highlighting with theme support.
 ///
@@ -63,47 +60,16 @@ impl CodeHighlighter {
         }
     }
 
-    pub(crate) fn for_code_block_mode(
-        default_theme: ThemePair,
-        terminal_mode: ColorMode,
-        theme: Option<ThemePair>,
-    ) -> Self {
-        let theme_pair = default_theme.selected(theme);
-        Self::from_resolved(
-            terminal_mode.inverted(),
-            theme_pair.for_code_block_mode(terminal_mode, None),
-        )
-    }
-
-    /// Creates a highlighter for a code block using the terminal's inverse color mode.
-    pub fn for_code_block(
-        default_theme: ThemePair,
-        term: &Terminal,
-        theme: Option<ThemePair>,
-    ) -> Self {
-        let theme_pair = default_theme.selected(theme);
-        Self::from_resolved(
-            term.color_mode().inverted(),
-            theme_pair.for_code_block(term, None),
-        )
-    }
-
-    /// Creates a highlighter for page/prose content using the terminal's color mode.
-    pub fn for_page(default_theme: ThemePair, term: &Terminal, theme: Option<ThemePair>) -> Self {
-        let theme_pair = default_theme.selected(theme);
-        Self::from_resolved(term.color_mode(), theme_pair.for_page(term, None))
-    }
-
-    pub(crate) fn for_page_mode(
-        default_theme: ThemePair,
-        terminal_mode: ColorMode,
-        theme: Option<ThemePair>,
-    ) -> Self {
-        let theme_pair = default_theme.selected(theme);
-        Self::from_resolved(terminal_mode, theme_pair.for_page_mode(terminal_mode, None))
-    }
-
-    fn from_resolved(color_mode: ColorMode, theme: themes::Theme) -> Self {
+    /// Creates a [`CodeHighlighter`] from a fully-resolved
+    /// [`themes::Theme`](super::highlighting::themes::Theme) variant and
+    /// color mode.
+    ///
+    /// This is the single constructor used in production: callers feed
+    /// `theme` and `color_mode` from a prior
+    /// [`ThemePair::resolve_for_surface`](super::highlighting::themes::ThemePair::resolve_for_surface)
+    /// call (the boundary resolver), so the page surface and the code panel
+    /// share the same source of truth.
+    pub(crate) fn from_theme(theme: themes::Theme, color_mode: ColorMode) -> Self {
         let syntax_set = grammars::load_syntax_set();
         let theme = themes::load_resolved_theme(theme);
 
@@ -185,12 +151,15 @@ pub fn highlight_yaml_lines_with_theme(
     theme_pair: ThemePair,
     color_mode: ColorMode,
 ) -> Vec<String> {
-    let highlighter = CodeHighlighter::for_page_mode(theme_pair, color_mode, Some(theme_pair));
-    let syntax = highlighter
-        .syntax_set()
-        .find_syntax_by_extension("yaml")
-        .or_else(|| highlighter.syntax_set().find_syntax_by_name("YAML"))
-        .unwrap_or_else(|| highlighter.syntax_set().find_syntax_plain_text());
+    let resolved = theme_pair.resolve_for_surface(
+        Surface::Mode(color_mode),
+        Some(theme_pair),
+        CodeBlockMode::Same,
+    );
+    let highlighter = CodeHighlighter::from_theme(resolved.theme, resolved.color_mode);
+    let syntax = LanguageGrammar::yaml()
+        .resolve(highlighter.syntax_set())
+        .unwrap_or_else(|_| highlighter.syntax_set().find_syntax_plain_text());
     let mut hl = HighlightLines::new(syntax, highlighter.theme());
 
     // `LinesWithEndings::from("")` yields nothing; emit one empty line in

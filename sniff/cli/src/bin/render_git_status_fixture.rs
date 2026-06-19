@@ -18,7 +18,13 @@ use std::path::PathBuf;
 use sniff::filesystem::git::{GitConfig, GitInfo, RepoStatus, WorktreeInfo};
 use sniff_cli::output::render_git_section;
 
-fn worktree(branch: &str, path: &str, ahead: usize, behind: usize, is_current: bool) -> WorktreeInfo {
+fn worktree(
+    branch: &str,
+    path: &str,
+    ahead: usize,
+    behind: usize,
+    is_current: bool,
+) -> WorktreeInfo {
     WorktreeInfo {
         branch: branch.to_string(),
         filepath: PathBuf::from(path),
@@ -50,11 +56,12 @@ fn main() {
         org: None,
         repo: None,
         current_branch: Some("feature/login".to_string()),
+        head_id: None,
         branches: vec![],
         in_worktree: true,
         base_repo_root: Some(PathBuf::from("/tmp/demo/project")),
         recent: vec![],
-        status: RepoStatus::default(),
+        status: Some(RepoStatus::default()),
         remotes: vec![],
         worktrees,
         config: GitConfig::default(),

@@ -309,13 +309,6 @@ pub(crate) fn emit_stream_summary(
     );
 }
 
-pub(crate) fn emit_stream_summary_with_context(
-    ctx: StreamSummaryContext<'_>,
-    context_extra: &HashMap<String, serde_json::Value>,
-) {
-    emit_stream_summary_inner(ctx, Some(context_extra));
-}
-
 fn emit_stream_summary_inner(
     ctx: StreamSummaryContext<'_>,
     context_extra: Option<&HashMap<String, serde_json::Value>>,

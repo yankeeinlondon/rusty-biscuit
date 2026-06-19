@@ -10,7 +10,7 @@ use crate::models::model_metadata::{Modality, ProviderModelMetadata};
 use crate::rigging::providers::models::{
     anthropic::ProviderModelAnthropic, deepseek::ProviderModelDeepseek,
     gemini::ProviderModelGemini, groq::ProviderModelGroq, mistral::ProviderModelMistral,
-    moonshotai::ProviderModelMoonshotAi, openai::ProviderModelOpenAi,
+    moonshotai::ProviderModelMoonshotAi, ollama::ProviderModelOllama, openai::ProviderModelOpenAi,
     openrouter::ProviderModelOpenRouter, xai::ProviderModelXai, zai::ProviderModelZai,
     zenmux::ProviderModelZenMux,
 };
@@ -21,6 +21,7 @@ pub mod gemini;
 pub mod groq;
 pub mod mistral;
 pub mod moonshotai;
+pub mod ollama;
 pub mod openai;
 pub mod openrouter;
 pub mod xai;
@@ -48,6 +49,8 @@ pub enum ProviderModel {
     Mistral(ProviderModelMistral),
     /// Moonshot AI (Kimi) models
     MoonshotAi(ProviderModelMoonshotAi),
+    /// Local Ollama models
+    Ollama(ProviderModelOllama),
     /// OpenAI models
     OpenAi(ProviderModelOpenAi),
     /// OpenRouter aggregator models
@@ -100,6 +103,7 @@ impl ProviderModel {
             Self::Groq(_) => Provider::Groq,
             Self::Mistral(_) => Provider::Mistral,
             Self::MoonshotAi(_) => Provider::MoonshotAi,
+            Self::Ollama(_) => Provider::Ollama,
             Self::OpenAi(_) => Provider::OpenAi,
             Self::OpenRouter(_) => Provider::OpenRouter,
             Self::Xai(_) => Provider::Xai,
@@ -129,6 +133,7 @@ impl ProviderModel {
             "groq" => Provider::Groq,
             "mistral" => Provider::Mistral,
             "moonshotai" | "moonshot" => Provider::MoonshotAi,
+            "ollama" => Provider::Ollama,
             "openai" => Provider::OpenAi,
             "openrouter" => Provider::OpenRouter,
             "xai" => Provider::Xai,
@@ -186,6 +191,12 @@ impl ProviderModel {
                     provider,
                     model: model_id.to_string(),
                 }),
+            Provider::Ollama => ProviderModelOllama::from_str(model_id)
+                .map(Self::Ollama)
+                .map_err(|_| ProviderModelParseError::UnknownModel {
+                    provider,
+                    model: model_id.to_string(),
+                }),
             Provider::OpenAi => ProviderModelOpenAi::from_str(model_id)
                 .map(Self::OpenAi)
                 .map_err(|_| ProviderModelParseError::UnknownModel {
@@ -234,6 +245,7 @@ impl ProviderModel {
             Self::Groq(m) => m.model_id(),
             Self::Mistral(m) => m.model_id(),
             Self::MoonshotAi(m) => m.model_id(),
+            Self::Ollama(m) => m.model_id(),
             Self::OpenAi(m) => m.model_id(),
             Self::OpenRouter(m) => m.model_id(),
             Self::Xai(m) => m.model_id(),
@@ -256,6 +268,7 @@ impl ProviderModel {
             Self::Groq(m) => m.metadata(),
             Self::Mistral(m) => m.metadata(),
             Self::MoonshotAi(m) => m.metadata(),
+            Self::Ollama(m) => m.metadata(),
             Self::OpenAi(m) => m.metadata(),
             Self::OpenRouter(m) => m.metadata(),
             Self::Xai(m) => m.metadata(),
@@ -309,6 +322,13 @@ impl ProviderModel {
         for model in ProviderModelMoonshotAi::ALL {
             ids.push(&*Box::leak(
                 ProviderModel::MoonshotAi(model.clone())
+                    .wire_id()
+                    .into_boxed_str(),
+            ));
+        }
+        for model in ProviderModelOllama::ALL {
+            ids.push(&*Box::leak(
+                ProviderModel::Ollama(model.clone())
                     .wire_id()
                     .into_boxed_str(),
             ));
@@ -414,12 +434,13 @@ fn provider_slug(provider: Provider) -> &'static str {
         Provider::Groq => "groq",
         Provider::Mistral => "mistral",
         Provider::MoonshotAi => "moonshotai",
+        Provider::Ollama => "ollama",
         Provider::OpenAi => "openai",
         Provider::OpenRouter => "openrouter",
         Provider::Xai => "xai",
         Provider::Zai => "zai",
         Provider::ZenMux => "zenmux",
-        Provider::HuggingFace | Provider::Ollama => "unsupported",
+        Provider::HuggingFace => "unsupported",
     }
 }
 
@@ -478,6 +499,7 @@ mod tests {
         let _mistral =
             ProviderModel::Mistral(ProviderModelMistral::Bespoke("mistral-large".to_string()));
         let _moonshot = ProviderModel::MoonshotAi(ProviderModelMoonshotAi::Kimi__K2_5);
+        let _ollama = ProviderModel::Ollama(ProviderModelOllama::Llama__3_1);
         let _openai = ProviderModel::OpenAi(ProviderModelOpenAi::O3);
         let _openrouter =
             ProviderModel::OpenRouter(ProviderModelOpenRouter::Bespoke("test".to_string()));

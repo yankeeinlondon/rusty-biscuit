@@ -7,7 +7,37 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::color::Color;
+use crate::color::{BasicColor, Color, RgbColor, Tailwind};
+
+/// Error parsing a CSS color string.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseColorError {
+    /// The input that could not be parsed.
+    pub input: String,
+    /// A concise reason for the failure.
+    pub reason: String,
+}
+
+impl std::fmt::Display for ParseColorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "invalid color '{}': {}",
+            self.input, self.reason
+        )
+    }
+}
+
+impl std::error::Error for ParseColorError {}
+
+impl ParseColorError {
+    fn new(input: &str, reason: impl Into<String>) -> Self {
+        Self {
+            input: input.to_string(),
+            reason: reason.into(),
+        }
+    }
+}
 
 /// An 8-bit alpha channel, stored as a raw `0..=255` byte.
 ///
@@ -98,6 +128,123 @@ impl PaintColor {
         self.opacity = opacity;
         self
     }
+
+    /// Parses a CSS color string into a [`PaintColor`].
+    ///
+    /// Accepts:
+    /// - `#RGB` / `#RRGGBB` hex strings (e.g. `#1e1e23`).
+    /// - Comma-separated `R,G,B` triples in the 0-255 range (e.g. `30,30,35`).
+    /// - Tailwind palette names (e.g. `red-500`, `slate-50`).
+    /// - CSS special keywords: `transparent`, `currentColor`, `inherit`.
+    pub fn from_css_str(s: &str) -> Result<PaintColor, ParseColorError> {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return Err(ParseColorError::new(s, "color must not be empty"));
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+        match lower.as_str() {
+            "transparent" => {
+                return Ok(PaintColor::new(Color::Tailwind(Tailwind::Transparent)));
+            }
+            "currentcolor" => {
+                return Ok(PaintColor::new(Color::Tailwind(Tailwind::Current)));
+            }
+            "inherit" => {
+                return Ok(PaintColor::new(Color::Tailwind(Tailwind::Inherit)));
+            }
+            _ => {}
+        }
+
+        if let Some(hex) = trimmed.strip_prefix('#') {
+            return parse_hex_color(hex).map_err(|reason| ParseColorError::new(s, reason));
+        }
+
+        if trimmed.contains(',') {
+            return parse_rgb_triple(trimmed).map_err(|reason| ParseColorError::new(s, reason));
+        }
+
+        if let Some(tw) = Tailwind::from_kebab_name(&lower) {
+            return Ok(PaintColor::new(Color::Tailwind(tw)));
+        }
+
+        Err(ParseColorError::new(
+            s,
+            "expected #RGB / #RRGGBB hex, R,G,B triple, Tailwind name (e.g. red-500), \
+             or one of transparent / currentColor / inherit",
+        ))
+    }
+}
+
+fn parse_hex_color(hex: &str) -> Result<PaintColor, String> {
+    let bytes = hex.as_bytes();
+
+    let nibble = |c: u8| -> Option<u8> {
+        match c {
+            b'0'..=b'9' => Some(c - b'0'),
+            b'a'..=b'f' => Some(c - b'a' + 10),
+            b'A'..=b'F' => Some(c - b'A' + 10),
+            _ => None,
+        }
+    };
+    let pair = |chunk: &[u8]| -> Result<u8, String> {
+        if chunk.len() != 2 {
+            return Err(format!(
+                "hex component must be 2 chars, got '{}'",
+                std::str::from_utf8(chunk).unwrap_or("")
+            ));
+        }
+        let hi = nibble(chunk[0])
+            .ok_or_else(|| format!("invalid hex char '{}'", chunk[0] as char))?;
+        let lo = nibble(chunk[1])
+            .ok_or_else(|| format!("invalid hex char '{}'", chunk[1] as char))?;
+        Ok((hi << 4) | lo)
+    };
+
+    let (r, g, b) = match bytes.len() {
+        3 => {
+            let r = nibble(bytes[0])
+                .ok_or_else(|| format!("invalid hex char '{}'", bytes[0] as char))?;
+            let g = nibble(bytes[1])
+                .ok_or_else(|| format!("invalid hex char '{}'", bytes[1] as char))?;
+            let b = nibble(bytes[2])
+                .ok_or_else(|| format!("invalid hex char '{}'", bytes[2] as char))?;
+            ((r << 4) | r, (g << 4) | g, (b << 4) | b)
+        }
+        6 => (pair(&bytes[0..2])?, pair(&bytes[2..4])?, pair(&bytes[4..6])?),
+        _ => {
+            return Err(format!(
+                "hex color must be #RGB or #RRGGBB, got '#{hex}'"
+            ));
+        }
+    };
+    Ok(PaintColor::new(Color::Rgb(RgbColor::new(
+        r, g, b, BasicColor::Black,
+    ))))
+}
+
+fn parse_rgb_triple(s: &str) -> Result<PaintColor, String> {
+    let parts: Vec<&str> = s.split(',').map(str::trim).collect();
+    if parts.len() != 3 {
+        return Err(format!(
+            "R,G,B triple must have exactly three comma-separated values, got '{s}'"
+        ));
+    }
+    let parse_component = |p: &str, name: &str| -> Result<u8, String> {
+        let n: u16 = p
+            .parse()
+            .map_err(|_| format!("{name} component '{p}' is not a valid 0-255 integer"))?;
+        if n > 255 {
+            return Err(format!("{name} component '{p}' is out of range (0-255)"));
+        }
+        Ok(n as u8)
+    };
+    let r = parse_component(parts[0], "red")?;
+    let g = parse_component(parts[1], "green")?;
+    let b = parse_component(parts[2], "blue")?;
+    Ok(PaintColor::new(Color::Rgb(RgbColor::new(
+        r, g, b, BasicColor::Black,
+    ))))
 }
 
 /// An opaque [`PaintColor`] wrapping `color`.
@@ -203,5 +350,71 @@ mod tests {
         let json = serde_json::to_string(&paint).unwrap();
         let back: PaintColor = serde_json::from_str(&json).unwrap();
         assert_eq!(paint, back);
+    }
+
+    #[test]
+    fn paint_color_from_css_hex_six() {
+        let paint = PaintColor::from_css_str("#1e1e23").unwrap();
+        assert_eq!(
+            paint.color,
+            Color::Rgb(RgbColor::new(0x1e, 0x1e, 0x23, BasicColor::Black))
+        );
+    }
+
+    #[test]
+    fn paint_color_from_css_hex_three() {
+        let paint = PaintColor::from_css_str("#abc").unwrap();
+        assert_eq!(
+            paint.color,
+            Color::Rgb(RgbColor::new(0xaa, 0xbb, 0xcc, BasicColor::Black))
+        );
+    }
+
+    #[test]
+    fn paint_color_from_css_rgb_triple() {
+        let paint = PaintColor::from_css_str("30,30,35").unwrap();
+        assert_eq!(
+            paint.color,
+            Color::Rgb(RgbColor::new(30, 30, 35, BasicColor::Black))
+        );
+    }
+
+    #[test]
+    fn paint_color_from_css_tailwind() {
+        let paint = PaintColor::from_css_str("red-500").unwrap();
+        assert_eq!(paint.color, Color::Tailwind(Tailwind::Red500));
+    }
+
+    #[test]
+    fn paint_color_from_css_uppercase_tailwind() {
+        let paint = PaintColor::from_css_str("RED-500").unwrap();
+        assert_eq!(paint.color, Color::Tailwind(Tailwind::Red500));
+    }
+
+    #[test]
+    fn paint_color_from_css_special_keywords() {
+        assert_eq!(
+            PaintColor::from_css_str("transparent").unwrap().color,
+            Color::Tailwind(Tailwind::Transparent)
+        );
+        assert_eq!(
+            PaintColor::from_css_str("currentColor").unwrap().color,
+            Color::Tailwind(Tailwind::Current)
+        );
+        assert_eq!(
+            PaintColor::from_css_str("inherit").unwrap().color,
+            Color::Tailwind(Tailwind::Inherit)
+        );
+    }
+
+    #[test]
+    fn paint_color_from_css_rejects_invalid() {
+        assert!(PaintColor::from_css_str("").is_err());
+        assert!(PaintColor::from_css_str("not-a-color").is_err());
+        assert!(PaintColor::from_css_str("#zzz").is_err());
+        assert!(PaintColor::from_css_str("256,0,0").is_err());
+        assert!(PaintColor::from_css_str("1,2").is_err());
+        assert!(PaintColor::from_css_str("red").is_err());
+        assert!(PaintColor::from_css_str("red-9999").is_err());
     }
 }

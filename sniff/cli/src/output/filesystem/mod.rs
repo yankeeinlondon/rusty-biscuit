@@ -106,7 +106,10 @@ pub(crate) use packages::{
     select_dirty_package_names, select_repo_packages, select_staged_package_names,
     select_unstaged_package_names,
 };
-pub use repo::{render_filesystem_section, render_repo_name, render_repo_section};
+pub(crate) use repo::format_monorepo_label;
+pub use repo::{
+    render_filesystem_section, render_repo_default_verbose, render_repo_name, render_repo_section,
+};
 
 /// Format a commit datetime to a relative date string and 12hr time string.
 ///
@@ -335,8 +338,8 @@ fn format_commit_line(
             first_line.to_string()
         };
         format!(
-            "[{}] <dim>{}</dim> {}<blue><b>{}</b></blue>{}{}",
-            sha_display, truncated, date_prefix, date_str, refs_part, user_part,
+            "[{}] <dim>{}</dim> <i>at</i> <blue><b>{}</b></blue> {}<blue><b>{}</b></blue>{}{}",
+            sha_display, truncated, time_str, date_prefix, date_str, refs_part, user_part,
         )
     }
 }
@@ -556,13 +559,112 @@ fn worktree_path_link(path: &std::path::Path, current_worktree: &std::path::Path
     format!("<blue><a href=\"{absolute}\">{label}</a></blue>")
 }
 
+/// Formats a worktree directory path as a blue OSC8 hyperlink whose href is the
+/// full absolute path and whose visible label is an aliased, compact form (see
+/// [`alias_path`]).
+///
+/// Used for the current worktree's own "located at" line, where a label
+/// relative to itself would degenerate to `.` and tell the reader nothing.
+fn worktree_path_link_absolute(path: &std::path::Path) -> String {
+    let absolute = path.display().to_string();
+    let label = alias_path(path);
+    format!("<blue><a href=\"{absolute}\">{label}</a></blue>")
+}
+
+/// Computes a compact display label for an absolute path by offsetting it
+/// against an environment variable or the home directory.
+///
+/// Resolution ladder (first match wins):
+/// 1. The environment variable whose value is the longest path-prefix of
+///    `path` renders as `${VAR}/<rest>`. Ties on prefix length are broken by
+///    the lexicographically-first variable name so output is deterministic.
+/// 2. A path under `$HOME` renders as `~/<rest>`.
+/// 3. Anything else renders as its absolute path.
+///
+/// An env-var offset wins only when it is a strictly longer prefix than
+/// `$HOME`; otherwise the `~` form is preferred, since it reads better for the
+/// home directory itself.
+fn alias_path(path: &Path) -> String {
+    let vars: Vec<(std::ffi::OsString, std::ffi::OsString)> = std::env::vars_os().collect();
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    alias_path_with(path, &vars, home.as_deref())
+}
+
+/// Environment variables whose values are absolute paths but denote *transient
+/// shell position* (the current / previous directory) rather than a stable
+/// named root. Offsetting against them yields a label that changes on every
+/// `cd`, so they are skipped. Variables whose values are not absolute paths
+/// (`TERM`, `LANG`, `SHLVL`, ...) are already filtered by the `is_absolute`
+/// check below and need no entry here.
+const POSITIONAL_PATH_VARS: &[&str] = &["PWD", "OLDPWD"];
+
+/// Pure core of [`alias_path`], with the environment supplied explicitly so it
+/// can be tested without mutating global process state.
+fn alias_path_with(
+    path: &Path,
+    vars: &[(std::ffi::OsString, std::ffi::OsString)],
+    home: Option<&Path>,
+) -> String {
+    // "Longest prefix" is measured in path components, not bytes, so a trailing
+    // slash in an env value can't spuriously outrank a real ancestor.
+    let home_components = home.map(|h| h.components().count()).unwrap_or(0);
+
+    let mut best: Option<(String, PathBuf, usize)> = None;
+    for (name, value) in vars {
+        let name = name.to_string_lossy();
+        if POSITIONAL_PATH_VARS.contains(&name.as_ref()) {
+            continue;
+        }
+        let value = PathBuf::from(value);
+        if !value.is_absolute() || !path.starts_with(&value) {
+            continue;
+        }
+        let components = value.components().count();
+        let better = match &best {
+            None => true,
+            Some((best_name, _, best_components)) => {
+                components > *best_components
+                    || (components == *best_components && name.as_ref() < best_name.as_str())
+            }
+        };
+        if better {
+            best = Some((name.into_owned(), value, components));
+        }
+    }
+
+    if let Some((name, value, components)) = best
+        && components > home_components
+        && let Ok(rel) = path.strip_prefix(&value)
+    {
+        return join_alias(&format!("${{{name}}}"), rel);
+    }
+
+    if let Some(home) = home
+        && let Ok(rel) = path.strip_prefix(home)
+    {
+        return join_alias("~", rel);
+    }
+
+    path.display().to_string()
+}
+
+/// Joins an alias prefix (`~` or `${VAR}`) with the remaining relative path,
+/// collapsing to the bare prefix when the path is an exact match.
+fn join_alias(prefix: &str, rel: &Path) -> String {
+    if rel.as_os_str().is_empty() {
+        prefix.to_string()
+    } else {
+        format!("{prefix}/{}", rel.display())
+    }
+}
+
 /// Computes a relative path from `base` to `target`.
 ///
 /// Returns `.` when the two paths are the same, otherwise a sequence of `..`
 /// segments and/or the remaining target components. Falls back to the target's
 /// absolute display when the paths do not share a common prefix.
 fn relative_path_between(base: &std::path::Path, target: &std::path::Path) -> String {
-    use std::path::MAIN_SEPARATOR_STR;
+    use std::path::{Component, MAIN_SEPARATOR_STR};
 
     if let Ok(rel) = target.strip_prefix(base) {
         return if rel.as_os_str().is_empty() {
@@ -587,7 +689,16 @@ fn relative_path_between(base: &std::path::Path, target: &std::path::Path) -> St
         .take_while(|(a, b)| a == b)
         .count();
 
-    if common == 0 {
+    // When the paths diverge at (or before) the filesystem root — e.g. a
+    // worktree under `/Users/...` next to one under `/Volumes/...` — the only
+    // shared component is the root, and a relative label degenerates into a
+    // long `../` chain back to root. The absolute path is shorter and clearer.
+    let common_is_root_only = common <= 1
+        && base_components
+            .first()
+            .is_some_and(|c| matches!(c, Component::RootDir | Component::Prefix(_)));
+
+    if common == 0 || common_is_root_only {
         return target.display().to_string();
     }
 
@@ -686,7 +797,7 @@ pub fn render_git_section(
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("worktree");
-            let current_path = worktree_path_link(&git.repo_root, &git.repo_root);
+            let current_path = worktree_path_link_absolute(&git.repo_root);
             wt_list.add(Prose::new("<b>Current Worktree:</b>".to_string()));
 
             let mut current_list = UnorderedList::empty();
@@ -720,7 +831,7 @@ pub fn render_git_section(
         } else {
             // Case B: running inside the main worktree. The main worktree never
             // appears in the linked-worktree map, so every entry is "other".
-            let main_path = worktree_path_link(&git.repo_root, &git.repo_root);
+            let main_path = worktree_path_link_absolute(&git.repo_root);
             wt_list.add(Prose::new("<b>Current Worktree:</b>".to_string()));
 
             let mut current_list = UnorderedList::empty();
@@ -755,7 +866,9 @@ pub fn render_git_section(
             // Verbose: nested list with current branch + other branches
             let mut local_list = UnorderedList::empty();
 
-            let dirty = if git.status.is_dirty {
+            // Identity-only `GitInfo` carries no status; render no dirty marker
+            // rather than asserting cleanliness (or panicking) on absent status.
+            let dirty = if git.status.as_ref().is_some_and(|s| s.is_dirty) {
                 "<red>+</red>"
             } else {
                 ""
@@ -1072,13 +1185,15 @@ pub(crate) fn current_package_area_is_dirty(
 
     let area_prefix = if area == "root" { "" } else { area };
 
-    let has_dirty = git
-        .status
+    // Without computed status (identity-only request) dirtiness is
+    // indeterminate, so return `None` like the other missing-data early exits.
+    let status = git.status.as_ref()?;
+    let has_dirty = status
         .dirty
         .iter()
         .map(|d| d.filepath.to_str().unwrap_or(""))
         .chain(
-            git.status
+            status
                 .untracked
                 .iter()
                 .map(|u| u.filepath.to_str().unwrap_or("")),
@@ -1147,13 +1262,16 @@ pub(crate) fn package_area_source_code_change_count(
 
     let area_prefix = if area == "root" { "" } else { area };
 
-    let count = git
-        .status
+    // Without computed status (identity-only request) the change count is
+    // indeterminate, so return `None` like the other missing-data early exits.
+    let status = git.status.as_ref()?;
+
+    let count = status
         .dirty
         .iter()
         .map(|d| d.filepath.to_str().unwrap_or(""))
         .chain(
-            git.status
+            status
                 .untracked
                 .iter()
                 .map(|u| u.filepath.to_str().unwrap_or("")),
@@ -1240,7 +1358,8 @@ mod tests {
             package_area: area.to_string(),
             name: name.to_string(),
             ecosystem: sniff::filesystem::repo::PackageEcosystem::Unknown,
-            discovery_sources: vec![],
+            standard: sniff::filesystem::repo::MonorepoStandard::Unknown,
+            provenance: sniff::filesystem::repo::PackageProvenance::ManifestScan,
             nested_packages: vec![],
             primary_language: None,
             secondary_languages: vec![],
@@ -1252,6 +1371,7 @@ mod tests {
             editor_config: None,
             command_runner: vec![],
             package_managers: vec![],
+            test_runners: vec![],
             version: None,
             features: vec![],
             depends_on: depends_on.iter().map(|s| s.to_string()).collect(),
@@ -1285,6 +1405,7 @@ mod tests {
             org: None,
             repo: None,
             current_branch: Some("main".to_string()),
+            head_id: None,
             branches: vec![],
             in_worktree: false,
             base_repo_root: None,
@@ -1296,7 +1417,7 @@ mod tests {
                 remotes: None,
                 refs: vec![],
             }],
-            status: RepoStatus {
+            status: Some(RepoStatus {
                 is_dirty: !file_changes.is_empty(),
                 staged_count,
                 unstaged_count,
@@ -1304,7 +1425,7 @@ mod tests {
                 dirty: vec![],
                 untracked: vec![],
                 is_behind: None,
-            },
+            }),
             remotes: vec![],
             worktrees: HashMap::new(),
             config: GitConfig::default(),
@@ -1683,14 +1804,17 @@ mod tests {
                 "current branch must still be shown: {output}"
             );
             // Main worktree is a sibling directory, so its visible label is
-            // `../project`. The current worktree label relative to itself is `.`.
+            // `../project`. The current worktree shows its own absolute path —
+            // a label relative to itself (`.`) would tell the reader nothing.
             assert!(
                 output.contains("[../project](file://"),
                 "main worktree label must be relative to the current directory: {output}"
             );
+            // The visible absolute label may word-wrap at the terminal width,
+            // so assert on the OSC8 href, which is emitted intact.
             assert!(
-                output.contains("[.](file://"),
-                "current worktree label must be `.` (relative to itself): {output}"
+                output.contains("(file:///tmp/demo/login-fix)"),
+                "current worktree must link to its absolute path: {output}"
             );
         }
 
@@ -1718,13 +1842,108 @@ mod tests {
                 relative_path_between(&PathBuf::from("/repo"), &PathBuf::from("/repo/feature")),
                 "feature"
             );
-            // Paths that share only the root still produce a relative path.
+            // Paths that share only the filesystem root fall back to the
+            // absolute target — a `../` chain back to root reads worse than the
+            // plain absolute path (e.g. a `/Users/...` worktree next to a
+            // `/Volumes/...` checkout).
             assert_eq!(
                 relative_path_between(
                     &PathBuf::from("/repo/feature"),
                     &PathBuf::from("/other/project")
                 ),
-                "../../other/project"
+                "/other/project"
+            );
+        }
+
+        /// Builds an owned env-var list for `alias_path_with` from string pairs.
+        fn env(pairs: &[(&str, &str)]) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
+            pairs
+                .iter()
+                .map(|(k, v)| (std::ffi::OsString::from(k), std::ffi::OsString::from(v)))
+                .collect()
+        }
+
+        #[test]
+        fn alias_path_offsets_against_env_var() {
+            let path = PathBuf::from("/Users/ken/.claudine/worktrees/rusty-biscuit/sniff");
+            let vars = env(&[("CLAUDINE_WT", "/Users/ken/.claudine/worktrees")]);
+            assert_eq!(
+                alias_path_with(&path, &vars, Some(Path::new("/Users/ken"))),
+                "${CLAUDINE_WT}/rusty-biscuit/sniff"
+            );
+        }
+
+        #[test]
+        fn alias_path_falls_back_to_home_tilde() {
+            let path = PathBuf::from("/Users/ken/.claudine/worktrees/rusty-biscuit/sniff");
+            assert_eq!(
+                alias_path_with(&path, &[], Some(Path::new("/Users/ken"))),
+                "~/.claudine/worktrees/rusty-biscuit/sniff"
+            );
+        }
+
+        #[test]
+        fn alias_path_prefers_tilde_over_shorter_env_offset() {
+            // An env var that is a *shorter* prefix than $HOME must yield to the
+            // `~` form, which reads better for paths inside the home directory.
+            let path = PathBuf::from("/Users/ken/project/src");
+            let vars = env(&[("ROOT", "/Users")]);
+            assert_eq!(
+                alias_path_with(&path, &vars, Some(Path::new("/Users/ken"))),
+                "~/project/src"
+            );
+        }
+
+        #[test]
+        fn alias_path_picks_longest_prefix_then_name_for_ties() {
+            let path = PathBuf::from("/a/b/c/d");
+            // `DEEP` is the longer prefix and wins over `SHALLOW`.
+            let vars = env(&[("SHALLOW", "/a"), ("DEEP", "/a/b/c")]);
+            assert_eq!(alias_path_with(&path, &vars, None), "${DEEP}/d");
+
+            // Equal-length prefixes tie-break on the lexicographically-first name.
+            let vars = env(&[("ZED", "/a/b"), ("ACE", "/a/b")]);
+            assert_eq!(alias_path_with(&path, &vars, None), "${ACE}/c/d");
+        }
+
+        #[test]
+        fn alias_path_collapses_exact_match_to_bare_prefix() {
+            let path = PathBuf::from("/srv/data");
+            let vars = env(&[("DATA", "/srv/data")]);
+            assert_eq!(alias_path_with(&path, &vars, None), "${DATA}");
+
+            assert_eq!(
+                alias_path_with(Path::new("/Users/ken"), &[], Some(Path::new("/Users/ken"))),
+                "~"
+            );
+        }
+
+        #[test]
+        fn alias_path_skips_positional_shell_vars() {
+            // PWD/OLDPWD often equal (an exact prefix of) the target, but alias
+            // to a transient label — they must be ignored in favor of `~`.
+            let path = PathBuf::from("/Users/ken/.claudine/worktrees/rusty-biscuit/sniff");
+            let vars = env(&[
+                (
+                    "OLDPWD",
+                    "/Users/ken/.claudine/worktrees/rusty-biscuit/sniff",
+                ),
+                ("PWD", "/Users/ken/.claudine/worktrees/rusty-biscuit/sniff"),
+            ]);
+            assert_eq!(
+                alias_path_with(&path, &vars, Some(Path::new("/Users/ken"))),
+                "~/.claudine/worktrees/rusty-biscuit/sniff"
+            );
+        }
+
+        #[test]
+        fn alias_path_ignores_non_absolute_and_falls_back_to_absolute() {
+            let path = PathBuf::from("/opt/tool/bin");
+            // Relative and empty env values must never match.
+            let vars = env(&[("REL", "opt/tool"), ("EMPTY", "")]);
+            assert_eq!(
+                alias_path_with(&path, &vars, Some(Path::new("/home/other"))),
+                "/opt/tool/bin"
             );
         }
 
@@ -1846,6 +2065,34 @@ mod tests {
             assert!(
                 output.contains("1 other active worktrees in this repo"),
                 "Single worktree should be counted correctly"
+            );
+        }
+
+        #[test]
+        fn merge_commit_line_includes_time_segment() {
+            // Merge subjects do not parse as conventional commits, so they take
+            // the non-conventional branch of `format_commit_line`. That branch
+            // must still render the `at <time>` segment.
+            let commit = CommitInfo {
+                sha: "3e2ca7f1234567".to_string(),
+                message: "Merge branch 'claudine'".to_string(),
+                author: "Test User".to_string(),
+                timestamp: Utc::now(),
+                remotes: None,
+                refs: vec![],
+            };
+
+            let line = format_commit_line(&commit, 0, None);
+
+            // Derive the expected time string the same way the formatter does to
+            // avoid timezone/relative-day flakiness across machines.
+            let (_, time_str, _) = format_commit_datetime(&commit.timestamp);
+
+            assert!(line.contains("<i>at</i>"), "missing `at` segment: {line}");
+            assert!(line.contains(&time_str), "missing time string: {line}");
+            assert!(
+                line.contains("Merge branch 'claudine'"),
+                "missing merge subject: {line}"
             );
         }
     }
@@ -2099,13 +2346,13 @@ mod tests {
         fn make_repo(packages: Vec<Package>, is_monorepo: bool) -> RepoInfo {
             RepoInfo {
                 is_monorepo,
-                monorepo_tool: None,
-                workspace_tools: Vec::new(),
                 root: PathBuf::from("/repo"),
                 dependencies: None,
                 dev_dependencies: None,
                 peer_dependencies: None,
                 optional_dependencies: None,
+                monorepo_standards: Vec::new(),
+                monorepo_layers: Vec::new(),
                 packages: if packages.is_empty() {
                     None
                 } else {
@@ -2135,7 +2382,7 @@ mod tests {
             let packages = vec![make_package("alpha", "alpha", &[])];
             let repo = make_repo(packages, false);
             let mut git = make_git_info(vec![]);
-            git.status.dirty = vec![make_dirty_file("alpha/src/main.rs")];
+            git.status.as_mut().unwrap().dirty = vec![make_dirty_file("alpha/src/main.rs")];
             let result = build_result(repo, git);
 
             let names = select_dirty_package_names(&result, &[], None, None);
@@ -2158,7 +2405,7 @@ mod tests {
 
             let repo = make_repo(packages, true);
             let mut git = make_git_info(vec![]);
-            git.status.dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
+            git.status.as_mut().unwrap().dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
             let result = build_result(repo, git);
 
             let names = select_dirty_package_names(&result, &[], None, None);
@@ -2176,7 +2423,7 @@ mod tests {
 
             let repo = make_repo(packages, true);
             let mut git = make_git_info(vec![]);
-            git.status.dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
+            git.status.as_mut().unwrap().dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
             let result = build_result(repo, git);
 
             let areas = select_dirty_package_area_names(&result, &[], None, None);
@@ -2194,7 +2441,7 @@ mod tests {
 
             let repo = make_repo(packages, true);
             let mut git = make_git_info(vec![]);
-            git.status.dirty = vec![
+            git.status.as_mut().unwrap().dirty = vec![
                 make_dirty_file("area-a/alpha/src/main.rs"),
                 make_dirty_file("area-b/beta/src/lib.rs"),
             ];
@@ -2287,13 +2534,13 @@ mod tests {
         fn make_repo(packages: Vec<Package>) -> RepoInfo {
             RepoInfo {
                 is_monorepo: true,
-                monorepo_tool: None,
-                workspace_tools: Vec::new(),
                 root: PathBuf::from("/repo"),
                 dependencies: None,
                 dev_dependencies: None,
                 peer_dependencies: None,
                 optional_dependencies: None,
+                monorepo_standards: Vec::new(),
+                monorepo_layers: Vec::new(),
                 packages: if packages.is_empty() {
                     None
                 } else {
@@ -2315,7 +2562,8 @@ mod tests {
         fn build_result(repo: RepoInfo, dirty_paths: &[&str]) -> SniffResult {
             let mut git = make_git_info(vec![]);
             git.repo_root = repo.root.clone();
-            git.status.dirty = dirty_paths.iter().map(|p| dirty_file(p)).collect();
+            git.status.as_mut().unwrap().dirty =
+                dirty_paths.iter().map(|p| dirty_file(p)).collect();
             let filesystem = FilesystemInfo {
                 repo: Some(repo),
                 git: Some(git),
@@ -2328,6 +2576,56 @@ mod tests {
                 filesystem: Some(filesystem),
                 performance: None,
             }
+        }
+
+        /// Build a `SniffResult` whose `GitInfo` is identity-only: `status`
+        /// is `None` (as produced by `GitRequest::identity()`), mirroring a
+        /// valid library state the CLI helpers must tolerate without panicking.
+        fn build_identity_only_result(repo: RepoInfo) -> SniffResult {
+            let mut git = make_git_info(vec![]);
+            git.repo_root = repo.root.clone();
+            git.status = None;
+            git.head_id = Some("1234567890abcdef".to_string());
+            let filesystem = FilesystemInfo {
+                repo: Some(repo),
+                git: Some(git),
+                ..Default::default()
+            };
+            SniffResult {
+                os: None,
+                hardware: None,
+                network: None,
+                filesystem: Some(filesystem),
+                performance: None,
+            }
+        }
+
+        #[test]
+        fn identity_only_git_info_yields_indeterminate_not_panic() {
+            let mut packages = vec![make_package("alpha", "area-a", &[])];
+            packages[0].relative = "area-a/alpha".to_string();
+            let repo = make_repo(packages);
+            let result = build_identity_only_result(repo);
+            let area_dir = PathBuf::from("/repo/area-a/alpha");
+
+            // Selection helpers report "indeterminate" (None / empty) rather
+            // than silently claiming clean — and never panic on absent status.
+            assert_eq!(
+                current_package_area_is_dirty(&result, Some(&area_dir)),
+                None
+            );
+            assert_eq!(
+                package_area_source_code_change_count(&result, Some(&area_dir)),
+                None
+            );
+
+            let fs = result.filesystem.as_ref().unwrap();
+            let git = fs.git.as_ref().unwrap();
+            assert!(super::packages::dirty_package_names(&result).is_empty());
+
+            // Status-oriented renderers must produce output without panicking.
+            let _ = render_git_section(git, 10, 1, false, None, None);
+            let _ = super::repo::render_filesystem_section(fs, 1, Some(&git.repo_root), false);
         }
 
         #[test]
@@ -2431,8 +2729,8 @@ mod tests {
             git.repo_root = repo.root.clone();
             // Force status.dirty / status.untracked empty so the test
             // exclusively exercises the file_changes branch.
-            git.status.dirty = Vec::new();
-            git.status.untracked = Vec::new();
+            git.status.as_mut().unwrap().dirty = Vec::new();
+            git.status.as_mut().unwrap().untracked = Vec::new();
             let filesystem = FilesystemInfo {
                 repo: Some(repo),
                 git: Some(git),
@@ -2776,6 +3074,37 @@ mod tests {
                 !result.contains("n1 -> n2;"),
                 "external-only edge should not be drawn"
             );
+        }
+    }
+
+    mod monorepo_label {
+        use super::*;
+        use sniff::filesystem::repo::MonorepoStandard;
+
+        #[test]
+        fn label_is_authority_alone_with_no_orchestrators() {
+            let label = format_monorepo_label(MonorepoStandard::PnpmWorkspaces, &[]);
+            assert_eq!(label, "pnpm workspaces");
+        }
+
+        #[test]
+        fn label_wraps_single_orchestrator_with_authority() {
+            let label =
+                format_monorepo_label(MonorepoStandard::PnpmWorkspaces, &[MonorepoStandard::Nx]);
+            assert_eq!(label, "Nx (using pnpm workspaces)");
+        }
+
+        #[test]
+        fn label_joins_every_orchestrator_in_layer_order() {
+            // A layer may carry multiple orchestrators (e.g. Nx + Lerna over a
+            // pnpm workspace). Every orchestrator must surface in the text,
+            // joined deterministically in the order the topology layer carries
+            // them (the same order the JSON `orchestrators` array emits).
+            let label = format_monorepo_label(
+                MonorepoStandard::PnpmWorkspaces,
+                &[MonorepoStandard::Nx, MonorepoStandard::Lerna],
+            );
+            assert_eq!(label, "Nx + Lerna (using pnpm workspaces)");
         }
     }
 }

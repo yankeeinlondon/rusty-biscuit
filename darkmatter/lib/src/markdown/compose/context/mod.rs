@@ -7,8 +7,12 @@
 pub mod catalog;
 pub(crate) mod capture;
 pub(crate) mod diagnostics;
+pub(crate) mod effective_state;
 pub(crate) mod format;
 pub mod merge;
+pub(crate) mod options;
+pub(crate) mod report;
+pub(crate) mod runtime;
 
 pub use catalog::{
     context_variable_descriptors, ContextValueType, ContextVariableDescriptor,

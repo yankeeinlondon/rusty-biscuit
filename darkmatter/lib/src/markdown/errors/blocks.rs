@@ -231,6 +231,20 @@ pub(crate) fn malformed_stored_hash_block(property: &str, reason: &str) -> Statu
         .hint("Fix or remove the `hash` frontmatter property, or rerun `md hash --save` to rewrite it.")
 }
 
+/// Build the [`StatusBlock`] for [`MarkdownError::MalformedDisclosure`].
+pub(crate) fn malformed_disclosure_block(reason: &str, range: &std::ops::Range<usize>) -> StatusBlock {
+    let body = format!(
+        "<dim>Reason:</dim> {}\n<dim>Range:</dim> {}..{}",
+        Prose::escape_text(reason),
+        range.start,
+        range.end
+    );
+    StatusBlock::new(StatusState::Error)
+        .error_header(ErrorHeader::new("MarkdownError", "malformed disclosure block"))
+        .body(body)
+        .hint("Disclosure blocks need `::disclosure`, `::details`, and `::end-disclosure`; the summary must contain only phrasing content.")
+}
+
 /// Build the [`StatusBlock`] for [`MarkdownError::SchemaValidationFailed`].
 ///
 /// When `problems` is empty the failure represents a schema *preparation*

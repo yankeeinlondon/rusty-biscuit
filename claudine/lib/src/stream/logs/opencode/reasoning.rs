@@ -1198,6 +1198,7 @@ mod tests {
                 assert_eq!(*kind, SemanticErrorKind::ApiRemote);
                 assert!(message.to_lowercase().contains("usage limit"));
                 assert_string(extra, "classification", "rate_limit");
+                assert_string(extra, "kind", "UsageCap");
             }
             other => panic!("expected Error, got {other:?}"),
         }

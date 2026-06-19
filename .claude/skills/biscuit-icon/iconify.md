@@ -222,6 +222,172 @@ which `biscuit-icon` directly addresses:
 `<svg>` from `Icon::svg()`. CSS and SVG+CSS are caller concerns
 that layer on top.
 
+## Iconify Platform Metadata
+
+The Iconify platform exposes rich metadata at both the **icon set** level and the **individual icon** level. This metadata is available through the API and is cached locally in the SQLite database.
+
+### Icon Set Metadata (IconifyInfo)
+
+Each icon set has associated metadata exposed via `/collections` and included in search responses:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Human-readable icon set name |
+| `author.name` | string | Author's name |
+| `author.url` | string | Link to the icon set's website/repository (optional) |
+| `license.title` | string | Human-readable license name |
+| `license.spdx` | string | SPDX license identifier |
+| `license.url` | string | Link to license file (optional) |
+| `total` | number | Total icon count in the set |
+| `version` | string | Version string of the icon set |
+| `samples` | string[] | Sample icon names to display as previews |
+| `height` | number \| number[] | Icon grid height; can be an array for mixed heights |
+| `displayHeight` | number | Height to use when showing samples (16–24) |
+| `category` | string | Category for filtering sets (e.g., "General", "Emoji", "Logos") |
+| `tags` | string[] | Tags for filtering icon sets |
+| `palette` | boolean | `true` if icons use hardcoded colors; `false` if they use `currentColor` |
+
+Example from `/collections`:
+
+```json
+{
+  "mdi": {
+    "name": "Material Design Icons",
+    "total": 5000,
+    "license": {
+      "title": "Apache License 2.0",
+      "spdx": "Apache-2.0",
+      "url": "https://github.com/Templarian/MaterialDesign/blob/master/LICENSE"
+    }
+  }
+}
+```
+
+### Icon-Level Metadata
+
+#### Categories
+
+Each icon can belong to one or more categories. Categories are stored in the `categories` object within an icon set, mapping category names to arrays of icon names:
+
+```json
+{
+  "categories": {
+    "Accessibility": ["accessible-icon"],
+    "Audio & Video": ["youtube"],
+    "Communication": ["bluetooth", "bluetooth-b"],
+    "Currency": ["bitcoin", "btc", "ethereum"]
+  }
+}
+```
+
+Not all icon sets include category data. The Iconify browse UI (`icon-sets.iconify.design`) exposes filters for `?category=` and `?tag=` on per-set galleries.
+
+#### Themes: Prefixes and Suffixes
+
+Themes organize icon variations that share a common prefix or suffix. This is common in icon sets like Material Design Icons (baseline-, outline-, round-, sharp-, twotone-) or Ant Design (filled, outlined, twotone).
+
+**Prefixes** — the prefix appears at the start of the icon name:
+
+```json
+{
+  "prefixes": {
+    "baseline": "Baseline",
+    "outline": "Outline",
+    "round": "Round",
+    "sharp": "Sharp",
+    "twotone": "Two-Tone"
+  }
+}
+```
+
+Icons like `baseline-home` belong to "Baseline"; `outline-home` belongs to "Outline".
+
+**Suffixes** — the suffix appears at the end of the icon name:
+
+```json
+{
+  "suffixes": {
+    "filled": "Filled",
+    "outlined": "Outlined",
+    "twotone": "TwoTone"
+  }
+}
+```
+
+Icons like `home-filled` belong to "Filled"; `home-outlined` belongs to "Outlined".
+
+A default theme with an empty string key catches icons that don't match other themes:
+
+```json
+{
+  "suffixes": {
+    "": "Filled",
+    "outline": "Outline",
+    "negative": "Negative"
+  }
+}
+```
+
+#### Characters Map (Icon Fonts)
+
+The `chars` map links Unicode code points (in hex) to icon names, used for icons imported from icon fonts:
+
+```json
+{
+  "chars": {
+    "e007": "firefox-browser",
+    "e013": "ideal",
+    "e01a": "microblog"
+  }
+}
+```
+
+### Search and Keywords API
+
+#### `/search` — Full-Text Icon Search
+
+Searches icons across the catalog. Returns matching icon names (with prefix), total count, and `collections` info for the sets in the results.
+
+```json
+{
+  "icons": ["mdi:home", "lucide:home", "..."],
+  "total": 64,
+  "limit": 64,
+  "start": 0,
+  "collections": {
+    "mdi": { "name": "Material Design Icons", "total": 5000, "category": "General", ... }
+  }
+}
+```
+
+Query parameters: `query` (required), `limit` (32–999, default 64), `start`, `prefix`, `prefixes`, `category`.
+
+#### `/keywords` — Autocomplete Suggestions
+
+Returns keyword matches for building autocomplete UIs. Two modes:
+
+- `prefix` — matches keywords that **start with** the input (e.g., `hom` → `home`, `home2`, `homebrew`)
+- `keyword` — matches keywords that **start or end with** the input (e.g., `home` → `home`, `esphome`, `petsathome`)
+
+```json
+{
+  "prefix": "hom",
+  "exists": false,
+  "matches": ["home", "home2", "home3", "homebrew", "homebridge", ...]
+}
+```
+
+Keyword requirements: letters a–z, numbers, and `-` only; at least 2 characters; `-` splits on the last segment only.
+
+### Cached Metadata in SQLite
+
+The local SQLite cache (`~/.cache/biscuit-icon/icons.db`) stores icon set metadata including:
+
+- `icon_sets` table — set prefix, title, license, total count, category, palette flag
+- `icons` table — per-icon entries with name, width, height, body, and parent set
+
+Icon-level categories, themes (prefixes/suffixes), and the characters map are available from the full Iconify JSON API responses but are **not currently cached** in `biscuit-icon`'s SQLite schema — only the icon body and basic set metadata are persisted locally.
+
 ## Iconify Documentation Quick Links
 
 - API overview — <https://iconify.design/docs/api/queries.html>
@@ -232,3 +398,7 @@ that layer on top.
 - Icon sets directory — <https://icon-sets.iconify.design>
 - Per-set galleries — `https://icon-sets.iconify.design/{prefix}/`
 - Browse alternative — <https://icones.js.org/>
+- IconifyInfo type — <https://iconify.design/docs/types/iconify-info.html>
+- IconifyJSON metadata — <https://iconify.design/docs/types/iconify-json-metadata.html>
+- Search API — <https://iconify.design/docs/api/search.html>
+- Keywords API — <https://iconify.design/docs/api/keywords.html>

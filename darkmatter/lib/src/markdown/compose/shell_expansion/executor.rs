@@ -132,6 +132,7 @@ pub fn resolve_working_directory(
 ///     origin: ShellCommandOrigin::Body { line: 1 },
 ///     error_handling: ErrorHandling::default(),
 ///     timeout_override: None,
+///     no_cache: false,
 ///     pipeline: None,
 ///     ctx,
 /// };
@@ -774,6 +775,7 @@ mod tests {
             error_handling: ErrorHandling::default(),
             timeout_override: None,
             pipeline: None,
+            no_cache: false,
             ctx: test_ctx(),
         }
     }
@@ -925,6 +927,7 @@ mod tests {
             error_handling: ErrorHandling::default(),
             timeout_override: None,
             pipeline: None,
+            no_cache: false,
             ctx: test_ctx(),
         };
         let options = ShellExpansionOptions::default();
@@ -985,6 +988,7 @@ mod tests {
             error_handling: ErrorHandling::default(),
             timeout_override: None,
             pipeline: None,
+            no_cache: false,
             ctx: test_ctx(),
         };
         let options = ShellExpansionOptions::default();
@@ -1014,6 +1018,7 @@ mod tests {
             error_handling: ErrorHandling::default(),
             timeout_override: None,
             pipeline: None,
+            no_cache: false,
             ctx: test_ctx(),
         };
         let options = ShellExpansionOptions::default();
@@ -1060,6 +1065,7 @@ mod tests {
             error_handling: ErrorHandling::default(),
             timeout_override: None,
             pipeline: None,
+            no_cache: false,
             ctx: test_ctx(),
         };
         let options = ShellExpansionOptions::default(); // strip_ansi: true by default
@@ -1081,6 +1087,7 @@ mod tests {
             error_handling: ErrorHandling::default(),
             timeout_override: None,
             pipeline: None,
+            no_cache: false,
             ctx: test_ctx(),
         };
         let options = ShellExpansionOptions {
@@ -1105,6 +1112,7 @@ mod tests {
             error_handling: ErrorHandling::default(),
             timeout_override: None,
             pipeline: None,
+            no_cache: false,
             ctx: test_ctx(),
         };
         let options = ShellExpansionOptions::default(); // strip_ansi: true by default
@@ -1126,6 +1134,7 @@ mod tests {
             error_handling: ErrorHandling::default(),
             timeout_override: Some(Duration::from_millis(100)),
             pipeline: None,
+            no_cache: false,
             ctx: test_ctx(),
         };
         let options = ShellExpansionOptions {
@@ -1156,6 +1165,7 @@ mod tests {
             error_handling: ErrorHandling::default(),
             timeout_override: Some(Duration::from_millis(100)),
             pipeline: None,
+            no_cache: false,
             ctx: test_ctx(),
         };
         let options = ShellExpansionOptions {

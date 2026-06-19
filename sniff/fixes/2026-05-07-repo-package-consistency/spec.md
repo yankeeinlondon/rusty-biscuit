@@ -31,7 +31,7 @@ These commands have no named `--package` or `--package-area` flags. The position
 | Command | Current Filter | Needs Added |
 |---------|----------------|-------------|
 | `repo structure` | positional `filter` | `--package`, `--package-area` |
-| `repo deps` | positional `filter` | `--package`, `--package-area` |
+| `repo package-dependencies` | positional `filter` | `--package`, `--package-area` |
 | `repo dirty-packages` | positional `filter` | `--package`, `--package-area` |
 | `repo staged-packages` | positional `filter` | `--package`, `--package-area` |
 | `repo unstaged-packages` | positional `filter` | `--package`, `--package-area` |

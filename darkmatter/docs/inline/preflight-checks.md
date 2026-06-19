@@ -12,6 +12,37 @@ Shell commands can appear in three places during Darkmatter composition:
 
 Without pre-flight approval, an unguarded shell directive could execute destructive or unintended commands during what should be a safe document composition.
 
+## Approval vs Execution
+
+Pre-flight separates two concerns that used to be conflated:
+
+- **The approval set is condition-blind.** Collection walks frontmatter, body
+  `::shell`/`::shell-block`, and the transclusion graph **without** evaluating
+  any `when=` or page-block condition. Both sides of every `$(...)` ternary,
+  every `::block` (even `when=`-false ones), and every conditionally-transcluded
+  document contribute their commands. The set is deduped by normalized command
+  string and approved **once, up front**, in a single batched prompt.
+- **The execution set is condition-aware.** Each shell stage runs only the
+  commands whose branch is actually reached given the document's final state
+  (after page blocks have pruned dead regions and frontmatter is resolved).
+
+The governing invariant is:
+
+```
+execution_set ⊆ approval_set      (always)
+```
+
+Because approval is a superset of anything reachable under any state, the
+execution-time gate degrades to a pure membership check: the command is already
+approved, so it runs with no prompt — this run or any later loop iteration with
+flipped conditions. A dead-branch command is **approved but never executed**.
+
+A miss surfaces as `NotPreApproved`, which after collection is purely a bug
+sentinel. A user-authored command whose shape depends on a frontmatter value
+still pending frontmatter-shell expansion (the chicken-and-egg case) is rejected
+up front as `DynamicCommandShape` rather than surfacing as a late
+`NotPreApproved`.
+
 ## Security Policy
 
 Darkmatter uses a two-stage security design:
@@ -91,9 +122,9 @@ When Darkmatter is used through an external orchestrator (such as Claudine), the
 
 ### Claudine/Darkmatter Boundary
 
-**Darkmatter's role is discovery.** It walks the document graph — following transclusions, resolving interpolation, parsing `::shell` directives, and scanning frontmatter for `$(...)` expressions. The `collect_shell_commands` function returns every shell command in the document tree without checking policy files or making approval decisions.
+**Darkmatter's role is discovery.** It walks the document graph condition-blind — following transclusions, resolving interpolation, parsing `::shell`/`::shell-block` directives, and scanning frontmatter for `$(...)` expressions. `Markdown::compose_preflight(options)` returns a `ComposePreflightReport` whose `approval_set()` is every command that could run under any state, without checking policy files or making approval decisions. (`collect_shell_commands` remains as the lower-level entry point that returns the raw entries.)
 
-**Claudine's role is authorization.** It takes the list from Darkmatter, combines it with commands from its harness, checks everything against the whitelist, and prompts the user for anything missing.
+**Claudine's role is authorization.** It takes the approval set from Darkmatter, merges in commands from its harness, checks everything against the whitelist, and prompts the user once for anything missing. The merged, authorized set is handed back to the pipeline as the execution membership source.
 
 **During composition**, Darkmatter receives the pre-approved set via `pre_approved_commands` on `ComposeOptions` and trusts it completely, bypassing its own approval flow.
 

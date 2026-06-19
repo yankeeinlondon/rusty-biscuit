@@ -132,7 +132,7 @@ Each entry point destructures its clap args struct, then calls the shared `parse
 | Positional tokens         | Classified as file ref or `key=value` setter; errors on multiple file refs or empty setter keys |
 | `--set JSON`              | Parsed as JSON5 object; forms the base override map                                             |
 | `key=value` setters       | Override matching keys from `--set` on conflict                                                 |
-| `--step-timeout DURATION` | Validated against the `parse_timeout()` grammar; rejected when combined with `--interactive`    |
+| `--step-timeout DURATION` | Validated against the `parse_timeout()` grammar; rejected when the session resolves to interactive (`--interactive` or `interactive: true` frontmatter) |
 
 #### Step 2: Source Resolution
 
@@ -354,6 +354,7 @@ Applies provider-specific flags to child args:
 |------------------------|-----------------------------------------------------------|
 | `--yolo` / `-y`        | Enables provider-specific auto-approval mode              |
 | `--interactive` / `-i` | Switches from non-interactive to interactive session mode |
+| `--no-interactive`     | Forces non-interactive mode, overriding `interactive: true` frontmatter |
 | `--output` / `-o`      | Sets output format (json, text, stream)                   |
 | `--sandbox`            | Enables provider-specific sandboxing                      |
 | `--model`              | Applied to provider-specific flags                        |
@@ -395,18 +396,13 @@ If `--dry-run`: prints what would be executed and exits with code 0.
 
 2. Detects harness from effective frontmatter via `has_harness_properties()`
 3. Builds lifecycle context and creates `LifecycleRunGuard`
-4. **If harness enabled**: parses harness plan, prepends inline writability pre-check (if inline), resolves shell approvals for harness commands
-5. **If not harness and not inline**: no additional checks
+4. Parses the harness plan from the effective frontmatter; for bare documents (no harness properties) this yields the empty/bare plan. Prepend the inline writability pre-check if the mode is inline.
+5. Resolves shell approvals for harness commands (and any system-owned inline writability check) via `resolve_shell_approvals`
 6. Emits preflight-complete status
 
 ##### 6k. Execution
 
-**If harness enabled**: runs through `run_harness_loop()` with `HarnessPromptMode::Compose`. The harness loop manages retries, pre/post checks, timeout enforcement, and lifecycle signals.
-
-**If no harness**: calls `execute_without_harness()` with `CompositionExecutionMode::Direct`:
-
-- **Structured stream path** (most providers): runs child with semantic streaming via `run_structured_composition()`, renders assistant text through section stream, emits summary immediately
-- **Legacy path** (Goose): calls `exec::run_child()` directly, emits minimal summary
+All non-dry-run composition runs flow through `run_harness_loop()` with `HarnessPromptMode::Compose` or `HarnessPromptMode::Inline`. The loop re-parses the plan each attempt, runs pre-checks (including the system-owned inline writability rule), spawns the provider, streams the response, runs post-checks, and invokes handler-driven recovery on failure.
 
 ##### 6l. Post-Execution
 
@@ -492,7 +488,7 @@ Runs the same pipeline as compose Step 6, with these differences:
 
 - Header shows `ComposeDisplay::InlineCompose` instead of `Compose`
 - Inline + interactive check: rejects providers that don't support interactive inline closure recovery
-- When no harness, calls `execute_without_harness()` with `CompositionExecutionMode::Inline` instead of `Direct`
+- All non-dry-run runs call `run_harness_loop()` with `HarnessPromptMode::Inline`
 
 **Affected by:**
 
@@ -764,11 +760,11 @@ Roo Code is excluded from composition provider selection because it is a VS Code
 
 The shorthand booleans and the `--provider` value both accept fuzzy input (`cl` → `claude`, `gem` → `gemini`, `oc` → `opencode`). The [argv normalizer](argv-normalization.md) rewrites every shorthand into a canonical `--provider <slug>` pair before clap runs, so runtime provider selection only ever reads the single `--provider` field.
 
-### The `--interactive` Flag
+### The `--interactive` and `--no-interactive` Flags
 
-`-i` / `--interactive` controls the **provider session mode**, not provider selection. The composed prompt is still prepared first, then passed as the initial message for an interactive session.
+`-i` / `--interactive` and `--no-interactive` control the **provider session mode**, not provider selection. The composed prompt is still prepared first, then passed as the initial message for the session. The resolved mode follows a fixed precedence: `--no-interactive` > `-i` / `--interactive` > `interactive` frontmatter property > default (non-interactive). The two flags are mutually exclusive. `compose` and `inline-compose` honor the `interactive` frontmatter property; `sequence` rejects `interactive: true`. See [Composition](composition.md#the---interactive-and---no-interactive-flags) for the full contract.
 
-> **Note:** `inline-compose -i` is provider-gated. Claudine allows it only when the selected provider can recover the final assistant message for the inline rewrite path.
+> **Note:** `inline-compose -i` is provider-gated. Claudine allows it only when the selected provider can recover the final assistant message for the inline rewrite path. When the interactive intent comes from `interactive: true` frontmatter, the diagnostic names `frontmatter` as the source.
 
 ### The `--exclude` Flag
 

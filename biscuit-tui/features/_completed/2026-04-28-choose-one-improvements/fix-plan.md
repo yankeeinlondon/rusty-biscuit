@@ -325,7 +325,7 @@ chord press.
 
 Per the spec's verification gate (Phase 1.4):
 
-6.1 Run the new PTY tests (`RUN_SHELL_TESTS=1 cargo test -p tui-chrome-cli`)
+6.1 Run the new PTY tests (`RUN_SHELL_TESTS=1 cargo test -p biscuit-tui-cli`)
     and capture transcripts in the PR.
 6.2 Manually verify in iTerm2 (user's environment): all six bug scenarios
     from the report, plus a regression sweep against the existing spec.

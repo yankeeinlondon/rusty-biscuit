@@ -29,6 +29,8 @@ pub const CI_BENCH_IDS: &[&str] = &[
     "git_ops/discover",
     "git_ops/status_dirty_flag/100",
     "git_ops/status_file_changes/100",
+    "git_ops/request_levels/identity",
+    "git_ops/request_levels/summary",
     "git_ops/config_read",
     // Migration-critical git_ops IDs (spec §5.5).
     "git_ops/revwalk_recent_gated/nograph",

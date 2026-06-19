@@ -3,6 +3,32 @@
 //! This library provides markdown document manipulation with frontmatter support,
 //! syntax highlighting, terminal and HTML rendering, and Mermaid diagram theming.
 //!
+//! ## Rendering
+//!
+//! The simplified-rendering model exposes **two primary components** for turning
+//! a Darkmatter document into terminal or browser output:
+//!
+//! - [`markdown::code_block::CodeBlock`] — the atomic renderer for one
+//!   syntax-highlighted code block. It implements `TerminalRenderable` and
+//!   `BrowserRenderable` directly, so a snippet, a Markdown fence, and a
+//!   schema example all flow through the same code-block implementation.
+//! - [`layout::DarkmatterPage`] — the page assembler that renders a full
+//!   Markdown document. It owns page-frame layout (margins, padding,
+//!   max-width, page background) and delegates nested fenced code blocks to
+//!   `CodeBlock` so a fence inside a `DarkmatterPage` renders byte-for-byte
+//!   equal to a direct `CodeBlock` call for the same code, language, and
+//!   metadata.
+//!
+//! Both components share a single theme-resolution boundary
+//! ([`markdown::highlighting::themes::ThemePair::resolve_for_surface`]) so
+//! the page surface and the code panel never drift: the same
+//! `Terminal::color_mode` feeds both, eliminating the dual-color-mode defect
+//! the `with_color_mode` option used to introduce.
+//!
+//! The legacy `YamlBlock` is a thin delegating wrapper around
+//! `CodeBlock::yaml(...)` and is deprecated; new code should use
+//! `CodeBlock` directly.
+//!
 //! ## Public Metadata Catalogs
 //!
 //! Darkmatter exposes three static, typed descriptor catalogs that describe its
@@ -31,15 +57,17 @@
 //!
 //! ## Modules
 //!
-//! - [`markdown`] - Markdown document manipulation with frontmatter support
+//! - [`markdown`] - Markdown document manipulation, [`CodeBlock`], and the
+//!   parsing/composition/frontmatter/hashing surface
 //! - [`diff`] - Reusable diff utilities
 //! - [`effects`] - Mutating side-effect engine (library surface only)
-//! - [`layout`] - Page-level layout primitive (`DarkmatterPage`)
+//! - [`layout`] - Page-level layout primitive ([`DarkmatterPage`])
 //! - [`mermaid`] - Mermaid diagram theming and rendering
 //! - [`render`] - Hyperlink rendering utilities
 //! - [`terminal`] - Terminal color detection utilities
 //! - [`testing`] - Testing utilities for terminal output verification
 
+pub mod catalog;
 pub mod diff;
 pub mod editor;
 pub mod effects;

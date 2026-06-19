@@ -33,7 +33,7 @@ The Golden Exception:
 
 ## Example
 
-Given a parent node `repo` with child subcommands `name`, `packages`, and `areas`:
+Given the `repo` parent node:
 
 ```sh
 sniff repo name --json
@@ -43,11 +43,38 @@ sniff repo name --json
 sniff repo --json
 # {
 #   "name": "rusty-biscuit",
-#   "packages": [ ... ],
-#   "areas": [ ... ]
+#   "version": "1.2.3",
+#   "language": "Rust",
+#   "is_monorepo": true,
+#   "package_count": 8,
+#   "root": "/path/to/repo",
+#   "context": {
+#     "package": "sniff-cli",
+#     "package_area": "sniff",
+#     "package_root": "/path/to/repo/sniff/cli",
+#     "package_area_root": "/path/to/repo/sniff",
+#     "worktree": null,
+#     "is_current_package_area_dirty": true,
+#     "package_area_has_source_code_changes": true
+#   },
+#   "packages": [ "pkg-a", "pkg-b", ... ],
+#   "package_areas": [ "area-a", "area-b", ... ],
+#   "branches": [ { "name": "main", "current": true, ... } ],
+#   "worktrees": [ { "name": "feature", "branch": "feature", ... } ],
+#   "git_status": { "current_branch": "main", "is_dirty": true, ... },
+#   "dirty": { "files": [], "source_code": [], "documentation": [], "packages": [], "package_areas": [] },
+#   "staged": { "files": [], "source_code": [], "documentation": [], "packages": [], "package_areas": [] },
+#   "unstaged": { "files": [], "source_code": [], "documentation": [], "packages": [], "package_areas": [] },
+#   "untracked": { "files": [], "source_code": [], "documentation": [], "packages": [], "package_areas": [] },
+#   "recent_commits": { "commits": [], "period": { ... }, ... },
+#   ...
 # }
-# aggregate of every child scope, keyed by subcommand name
-# the keys (`name`, `packages`, `areas`) match the subcommands you could invoke directly
+# consolidated aggregate with snake_case keys. Focused child commands keep
+# their own richer shapes, while this aggregate avoids duplicated full package
+# catalogs and groups change data into ScopeBucket objects.
+#
+# Note: the focused `sniff repo is-monorepo --json` leaf uses a different
+# snake_case object shape (`{ "is_monorepo": ... }`); see its subcommand docs.
 
 sniff repo
 # (with no --json: dispatches to the default subcommand `name` and prints the name)

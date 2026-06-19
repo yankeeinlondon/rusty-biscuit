@@ -1,5 +1,6 @@
 use crate::Result;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tracing::instrument;
@@ -9,31 +10,24 @@ use crate::filesystem::file_types::{
     ProgrammingLanguageStats,
 };
 use crate::filesystem::repo::detection::canonicalize_path;
+use crate::filesystem::repo::standard::{
+    DetectedStandard, MonorepoLayer, MonorepoStandard, PackageProvenance,
+};
 use crate::package::DependencyEntry;
 
-/// Supported monorepo tools and package managers
-#[non_exhaustive]
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum MonorepoTool {
-    /// Rust Cargo workspace
-    CargoWorkspace,
-    /// npm workspaces
-    NpmWorkspaces,
-    /// pnpm workspaces
-    PnpmWorkspaces,
-    /// Yarn workspaces
-    YarnWorkspaces,
-    /// Nx monorepo tool
-    Nx,
-    /// Turborepo
-    Turborepo,
-    /// Lerna
-    Lerna,
-    /// Unknown monorepo tool
-    Unknown,
-}
-
 /// The primary ecosystem associated with a package boundary.
+///
+/// This is a property of the individual package, inferred from its own
+/// manifest in both `structure()` and `full()` modes. It is distinct from
+/// [`MonorepoStandard::spec`]`().primary_language` (a property of the *standard*
+/// that owns the package) and from [`Package::primary_language`] (a rich-mode
+/// file-scan result).
+///
+/// ## Notes
+///
+/// A Cargo workspace's standard has `primary_language = Rust`, but a member
+/// package with a `package.json` may report `ecosystem = Node`. Conversely, a
+/// Rust-only member still has no `primary_language` in `structure()` mode.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
@@ -51,40 +45,80 @@ pub enum PackageEcosystem {
     Unknown,
 }
 
-/// Describes how a package boundary was discovered.
-#[non_exhaustive]
+/// External dependency entry annotated with the package that declared it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ExternalDependency {
+    /// Package name that declares this dependency.
+    pub package: String,
+    /// Dependency family from the manifest.
+    pub family: ExternalDependencyFamily,
+    /// Dependency details parsed from the package manifest.
+    #[serde(flatten)]
+    pub dependency: DependencyEntry,
+}
+
+/// Dependency families exposed by `sniff repo dependencies`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
-pub enum PackageDiscoverySource {
-    /// Cargo workspace member
-    CargoWorkspace,
-    /// pnpm workspace package
-    PnpmWorkspace,
-    /// npm workspace package
-    NpmWorkspace,
-    /// Yarn workspace package
-    YarnWorkspace,
-    /// Nx-discovered package
-    Nx,
-    /// Turborepo-discovered package
-    Turborepo,
-    /// Lerna-discovered package
-    Lerna,
-    /// Directly discovered from a package manifest
-    ManifestScan,
+pub enum ExternalDependencyFamily {
+    /// Runtime dependencies.
+    Dependencies,
+    /// Development dependencies.
+    DevDependencies,
+    /// Peer dependencies.
+    PeerDependencies,
+    /// Optional dependencies.
+    OptionalDependencies,
+}
+
+/// Filters selecting which dependency families to include.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExternalDependencyFilter {
+    pub dependencies: bool,
+    pub dev_dependencies: bool,
+    pub peer_dependencies: bool,
+    pub optional_dependencies: bool,
+}
+
+impl ExternalDependencyFilter {
+    /// All dependency families.
+    pub const fn all() -> Self {
+        Self {
+            dependencies: true,
+            dev_dependencies: true,
+            peer_dependencies: true,
+            optional_dependencies: true,
+        }
+    }
+
+    /// Use all families when no explicit family flag was selected.
+    pub const fn normalize(self) -> Self {
+        if self.dependencies
+            || self.dev_dependencies
+            || self.peer_dependencies
+            || self.optional_dependencies
+        {
+            self
+        } else {
+            Self::all()
+        }
+    }
+
+    pub const fn includes(self, family: ExternalDependencyFamily) -> bool {
+        match family {
+            ExternalDependencyFamily::Dependencies => self.dependencies,
+            ExternalDependencyFamily::DevDependencies => self.dev_dependencies,
+            ExternalDependencyFamily::PeerDependencies => self.peer_dependencies,
+            ExternalDependencyFamily::OptionalDependencies => self.optional_dependencies,
+        }
+    }
 }
 
 /// Information about a detected repository
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RepoInfo {
     /// Whether this is a monorepo
     pub is_monorepo: bool,
-    /// The tool managing the monorepo (if is_monorepo is true)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub monorepo_tool: Option<MonorepoTool>,
-    /// All workspace tools detected at the repo root.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub workspace_tools: Vec<MonorepoTool>,
     /// Root directory of the repository
     pub root: PathBuf,
     /// Dependencies (for non-monorepo projects only)
@@ -102,6 +136,14 @@ pub struct RepoInfo {
     /// Packages within the monorepo (only present when is_monorepo is true)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub packages: Option<Vec<Package>>,
+    /// Standards detected at the repo root, each with its acting binary and
+    /// detection confidence.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub monorepo_standards: Vec<DetectedStandard>,
+    /// Membership layers: each authority that declares packages plus any
+    /// orchestrators riding on top. A forest, even for single-root repos.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub monorepo_layers: Vec<MonorepoLayer>,
 }
 
 /// A package within a monorepo.
@@ -119,9 +161,12 @@ pub struct Package {
     /// The package ecosystem inferred from its manifests.
     #[serde(default)]
     pub ecosystem: PackageEcosystem,
-    /// How this package boundary was discovered.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub discovery_sources: Vec<PackageDiscoverySource>,
+    /// The monorepo standard that owns this package.
+    #[serde(default)]
+    pub standard: MonorepoStandard,
+    /// How this package boundary was derived.
+    #[serde(default)]
+    pub provenance: PackageProvenance,
     /// Nested package names detected beneath this package root.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub nested_packages: Vec<String>,
@@ -153,6 +198,11 @@ pub struct Package {
     pub command_runner: Vec<PathBuf>,
     /// Detected package managers (e.g., "cargo", "npm", "pnpm")
     pub package_managers: Vec<String>,
+    /// Test runners declared by this package, with the evidence source for
+    /// each detection. Populated by
+    /// [`detect_test_runners`](super::test_runner_usage::detect_test_runners).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub test_runners: Vec<crate::filesystem::repo::test_runner_usage::TestRunnerUsage>,
     /// Package version from manifest (Cargo.toml `[package]`.version or package.json version)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
@@ -189,6 +239,34 @@ pub struct Package {
 }
 
 impl RepoInfo {
+    /// The layer that best represents the repository as a whole.
+    ///
+    /// ## Returns
+    ///
+    /// Selection rule:
+    /// 1. The layer whose `root` equals the repo root, if one exists.
+    /// 2. Otherwise the layer with the shallowest root (fewest path
+    ///    components).
+    /// 3. Ties are broken by `MonorepoStandard` enum-declaration order
+    ///    (Cargo first … Unknown last) — **not** detector push-order, so
+    ///    reordering detectors cannot silently change the primary layer.
+    ///
+    /// For the canonical Cargo + uv-at-repo-root case this selects Cargo,
+    /// matching today's `.first()` output.
+    pub fn primary_layer(&self) -> Option<&MonorepoLayer> {
+        if self.monorepo_layers.is_empty() {
+            return None;
+        }
+        let root = canonicalize_path(&self.root);
+        self.monorepo_layers.iter().min_by_key(|layer| {
+            let layer_root = canonicalize_path(&layer.root);
+            let root_match = layer_root == root;
+            let depth = layer_root.components().count();
+            let authority_order = layer.authority;
+            (!root_match, depth, authority_order)
+        })
+    }
+
     /// Find the package whose directory tree contains `dir`.
     ///
     /// Returns `None` when `dir` is not inside any package.
@@ -206,9 +284,11 @@ impl RepoInfo {
     /// a single value useful inside a monorepo.
     ///
     /// The rule: if `dir` is inside a package, the area is that package's name;
-    /// otherwise the area is the surrounding package-area string (the literal
-    /// `"root"` for top-level locations). Falls back to `"root"` when neither
-    /// helper resolves a value (e.g. CWD at repo root with no top-level package).
+    /// otherwise the area is the surrounding package-area string. When no
+    /// discovered package names the area — e.g. a freshly scaffolded area whose
+    /// crates are not yet listed in `[workspace] members` — the area is taken
+    /// from the directory structure (see [`directory_area_fallback`]). Falls
+    /// back to `"root"` only at the repo root.
     ///
     /// ## Examples
     ///
@@ -217,12 +297,57 @@ impl RepoInfo {
     ///
     /// - CWD inside `sniff/lib/src` → `"sniff-lib"` (the package name)
     /// - CWD at `sniff/` but outside any package → `"sniff"`
-    /// - CWD at repo root with no top-level package → `"root"`
-    pub fn area_for_dir(&self, dir: &Path) -> &str {
+    /// - CWD in `reaper/lib` while `reaper/*` is not yet a workspace member →
+    ///   `"reaper"` (directory-structure fallback)
+    /// - CWD at repo root → `"root"`
+    ///
+    /// [`directory_area_fallback`]: Self::directory_area_fallback
+    pub fn area_for_dir(&self, dir: &Path) -> Cow<'_, str> {
         if let Some(pkg) = self.package_for_dir(dir) {
-            return &pkg.name;
+            return Cow::Borrowed(&pkg.name);
         }
-        self.package_area_for_dir(dir).unwrap_or("root")
+        if let Some(area) = self.package_area_for_dir(dir) {
+            return Cow::Borrowed(area);
+        }
+        self.directory_area_fallback(dir)
+            .map_or(Cow::Borrowed("root"), Cow::Owned)
+    }
+
+    /// Resolve the package-area label for `dir`, falling back to the directory
+    /// structure when no discovered package names the area.
+    ///
+    /// Behaves like [`package_area_for_dir`](Self::package_area_for_dir) but, in
+    /// a monorepo, also resolves the area of a directory that holds no workspace
+    /// member yet — e.g. a freshly scaffolded area not listed in
+    /// `[workspace] members`. Returns `None` at the repo root or outside the repo.
+    pub fn package_area_label_for_dir(&self, dir: &Path) -> Option<Cow<'_, str>> {
+        if let Some(area) = self.package_area_for_dir(dir) {
+            return Some(Cow::Borrowed(area));
+        }
+        self.directory_area_fallback(dir).map(Cow::Owned)
+    }
+
+    /// Derive an area name for `dir` from the directory structure alone.
+    ///
+    /// Used as the last resort when no discovered package identifies the area,
+    /// so that a scaffolded area resolves before its crates are wired into the
+    /// workspace `members`. The area is the first path component of `dir`
+    /// relative to the repo root.
+    ///
+    /// Returns `None` outside a monorepo, at the repo root, or when `dir` is not
+    /// under the root — the area concept is monorepo-only, mirroring the
+    /// `is_monorepo` gate the reporting commands already apply.
+    fn directory_area_fallback(&self, dir: &Path) -> Option<String> {
+        if !self.is_monorepo {
+            return None;
+        }
+        let dir = canonicalize_path(dir);
+        let root = canonicalize_path(&self.root);
+        let rel = dir.strip_prefix(&root).ok()?;
+        match rel.components().next()? {
+            std::path::Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
+            _ => None,
+        }
     }
 
     /// Find the package area that contains `dir`.
@@ -294,9 +419,9 @@ pub(crate) struct PackageScanResult {
 /// let root = Path::new("/path/to/project");
 /// if let Some(info) = detect_repo(root).unwrap() {
 ///     if info.is_monorepo {
-///         println!("Monorepo tool: {:?}", info.monorepo_tool);
-///         if let Some(ref packages) = info.packages {
-///             println!("Packages: {}", packages.len());
+///         println!("Packages: {}", info.packages.as_ref().map(|p| p.len()).unwrap_or(0));
+///         if let Some(layer) = info.primary_layer() {
+///             println!("Authority: {:?}", layer.authority);
 ///         }
 ///     }
 /// }
@@ -319,6 +444,29 @@ pub fn detect_repo(root: &Path) -> Result<Option<RepoInfo>> {
 #[instrument(skip_all, fields(root = %root.display()))]
 pub fn detect_repo_structure(root: &Path) -> Result<Option<RepoInfo>> {
     super::detection::detect_repo_inner(root, true).map(|(info, _inventory)| info)
+}
+
+/// Like [`detect_repo_structure`], but synthesizes a single-package `RepoInfo`
+/// from the root manifest when no workspace structure is detected.
+///
+/// [`detect_repo_structure`] returns `Ok(None)` for an ordinary single-package
+/// project (a `Cargo.toml` with `[package]` but no `[workspace]`, or a lone
+/// `package.json`, `pyproject.toml`, or `go.mod`). Reporting paths such as
+/// `sniff repo package-manager`, `sniff repo dependencies`, and the bare
+/// `sniff repo --json` aggregate still need that root package's facts, so this
+/// fills the gap with a one-package, non-monorepo `RepoInfo`.
+///
+/// ## Returns
+///
+/// - The workspace `RepoInfo` from [`detect_repo_structure`] when one is found.
+/// - A single-package, non-monorepo `RepoInfo` when only a root manifest exists.
+/// - `Ok(None)` when `root` has no recognizable package manifest.
+#[instrument(skip_all, fields(root = %root.display()))]
+pub fn detect_repo_structure_or_root_package(root: &Path) -> Result<Option<RepoInfo>> {
+    if let Some(info) = detect_repo_structure(root)? {
+        return Ok(Some(info));
+    }
+    Ok(super::detection::synthesize_root_package_repo(root))
 }
 
 /// Full repo detection that also returns the shared file inventory.
@@ -355,13 +503,13 @@ mod tests {
     fn repo_info_package_for_dir_finds_deepest_match() {
         let repo = RepoInfo {
             is_monorepo: true,
-            monorepo_tool: None,
-            workspace_tools: Vec::new(),
             root: PathBuf::from("/repo"),
             dependencies: None,
             dev_dependencies: None,
             peer_dependencies: None,
             optional_dependencies: None,
+            monorepo_standards: Vec::new(),
+            monorepo_layers: Vec::new(),
             packages: Some(vec![
                 Package {
                     path: PathBuf::from("/repo/crates"),
@@ -369,29 +517,7 @@ mod tests {
                     package_area: "root".to_string(),
                     name: "crates".to_string(),
                     ecosystem: PackageEcosystem::Cargo,
-                    discovery_sources: Vec::new(),
-                    nested_packages: Vec::new(),
-                    primary_language: None,
-                    secondary_languages: Vec::new(),
-                    languages: Vec::new(),
-                    frameworks: Vec::new(),
-                    file_associations: Vec::new(),
-                    configuration: Vec::new(),
-                    documentation: Vec::new(),
-                    editor_config: None,
-                    command_runner: Vec::new(),
-                    package_managers: Vec::new(),
-                    version: None,
-                    features: Vec::new(),
-                    depends_on: Vec::new(),
-                    used_by: Vec::new(),
-                    dependencies: None,
-                    dev_dependencies: None,
-                    peer_dependencies: None,
-                    optional_dependencies: None,
-                    is_updatable: None,
-                    has_major_update: None,
-                    is_excluded: false,
+                    ..Package::default()
                 },
                 Package {
                     path: PathBuf::from("/repo/crates/pkg-a"),
@@ -399,29 +525,7 @@ mod tests {
                     package_area: "crates".to_string(),
                     name: "pkg-a".to_string(),
                     ecosystem: PackageEcosystem::Cargo,
-                    discovery_sources: Vec::new(),
-                    nested_packages: Vec::new(),
-                    primary_language: None,
-                    secondary_languages: Vec::new(),
-                    languages: Vec::new(),
-                    frameworks: Vec::new(),
-                    file_associations: Vec::new(),
-                    configuration: Vec::new(),
-                    documentation: Vec::new(),
-                    editor_config: None,
-                    command_runner: Vec::new(),
-                    package_managers: Vec::new(),
-                    version: None,
-                    features: Vec::new(),
-                    depends_on: Vec::new(),
-                    used_by: Vec::new(),
-                    dependencies: None,
-                    dev_dependencies: None,
-                    peer_dependencies: None,
-                    optional_dependencies: None,
-                    is_updatable: None,
-                    has_major_update: None,
-                    is_excluded: false,
+                    ..Package::default()
                 },
             ]),
         };
@@ -440,13 +544,13 @@ mod tests {
     fn monorepo_with_areas() -> RepoInfo {
         RepoInfo {
             is_monorepo: true,
-            monorepo_tool: None,
-            workspace_tools: Vec::new(),
             root: PathBuf::from("/repo"),
             dependencies: None,
             dev_dependencies: None,
             peer_dependencies: None,
             optional_dependencies: None,
+            monorepo_standards: Vec::new(),
+            monorepo_layers: Vec::new(),
             packages: Some(vec![
                 Package {
                     path: PathBuf::from("/repo/sniff/lib"),
@@ -499,5 +603,179 @@ mod tests {
     fn area_for_dir_returns_root_at_repo_root() {
         let repo = monorepo_with_areas();
         assert_eq!(repo.area_for_dir(Path::new("/repo")), "root");
+    }
+
+    #[test]
+    fn area_for_dir_falls_back_to_directory_name_for_unwired_area() {
+        // `reaper/lib` exists on disk but is not yet a workspace member, so no
+        // package carries the "reaper" area. The area still resolves from the
+        // directory structure.
+        let repo = monorepo_with_areas();
+        assert_eq!(
+            repo.area_for_dir(Path::new("/repo/reaper/lib/src")),
+            "reaper"
+        );
+        assert_eq!(repo.area_for_dir(Path::new("/repo/reaper")), "reaper");
+    }
+
+    #[test]
+    fn package_area_label_falls_back_to_directory_name_for_unwired_area() {
+        let repo = monorepo_with_areas();
+        assert_eq!(
+            repo.package_area_label_for_dir(Path::new("/repo/reaper/lib"))
+                .as_deref(),
+            Some("reaper")
+        );
+        // Member-discovered areas still resolve exactly as before.
+        assert_eq!(
+            repo.package_area_label_for_dir(Path::new("/repo/sniff"))
+                .as_deref(),
+            Some("sniff")
+        );
+        // Repo root has no area.
+        assert_eq!(repo.package_area_label_for_dir(Path::new("/repo")), None);
+    }
+
+    #[test]
+    fn directory_fallback_disabled_outside_monorepo() {
+        let mut repo = monorepo_with_areas();
+        repo.is_monorepo = false;
+        // Without a monorepo the area concept does not apply: no directory-name
+        // fallback, so an unwired path resolves to the "root" sentinel.
+        assert_eq!(repo.area_for_dir(Path::new("/repo/reaper/lib")), "root");
+        assert_eq!(
+            repo.package_area_label_for_dir(Path::new("/repo/reaper/lib")),
+            None
+        );
+    }
+
+    // ============================================================================
+    // primary_layer tests
+    // ============================================================================
+
+    fn layer_at(root: &str, authority: MonorepoStandard) -> MonorepoLayer {
+        MonorepoLayer {
+            root: PathBuf::from(root),
+            authority,
+            orchestrators: Vec::new(),
+            provenance: crate::filesystem::repo::standard::PackageProvenance::Globbed,
+            lockfile_match: None,
+            root_is_package: false,
+            packages: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn primary_layer_returns_none_when_no_layers() {
+        let repo = RepoInfo {
+            root: PathBuf::from("/repo"),
+            ..RepoInfo::default()
+        };
+        assert!(repo.primary_layer().is_none());
+    }
+
+    #[test]
+    fn primary_layer_selects_single_root_layer() {
+        let repo = RepoInfo {
+            root: PathBuf::from("/repo"),
+            monorepo_layers: vec![layer_at("/repo", MonorepoStandard::CargoWorkspace)],
+            ..RepoInfo::default()
+        };
+        let layer = repo.primary_layer().unwrap();
+        assert_eq!(layer.authority, MonorepoStandard::CargoWorkspace);
+    }
+
+    #[test]
+    fn primary_layer_selects_cargo_over_uv_at_shared_root() {
+        // The canonical shared-root case: Cargo + uv both at the repo root.
+        // Enum-declaration order must break the tie in favor of Cargo.
+        let repo = RepoInfo {
+            root: PathBuf::from("/repo"),
+            monorepo_layers: vec![
+                layer_at("/repo", MonorepoStandard::UvWorkspace),
+                layer_at("/repo", MonorepoStandard::CargoWorkspace),
+            ],
+            ..RepoInfo::default()
+        };
+        let layer = repo.primary_layer().unwrap();
+        assert_eq!(layer.authority, MonorepoStandard::CargoWorkspace);
+    }
+
+    #[test]
+    fn primary_layer_selects_shallowest_root() {
+        let repo = RepoInfo {
+            root: PathBuf::from("/repo"),
+            monorepo_layers: vec![
+                layer_at("/repo/nested", MonorepoStandard::PnpmWorkspaces),
+                layer_at("/repo", MonorepoStandard::CargoWorkspace),
+            ],
+            ..RepoInfo::default()
+        };
+        let layer = repo.primary_layer().unwrap();
+        assert_eq!(layer.authority, MonorepoStandard::CargoWorkspace);
+        assert_eq!(layer.root, PathBuf::from("/repo"));
+    }
+
+    #[test]
+    fn primary_layer_selects_shallowest_nested_layer_when_none_at_repo_root() {
+        // No layer is rooted at the repo root, so selection rule 2 (shallowest
+        // root) applies. `/repo/apps` (2 components) is shallower than
+        // `/repo/tools/nested` (3 components) and must win — even though the
+        // deeper layer's authority (Cargo) has higher enum priority than pnpm.
+        let repo = RepoInfo {
+            root: PathBuf::from("/repo"),
+            monorepo_layers: vec![
+                layer_at("/repo/tools/nested", MonorepoStandard::CargoWorkspace),
+                layer_at("/repo/apps", MonorepoStandard::PnpmWorkspaces),
+            ],
+            ..RepoInfo::default()
+        };
+        let layer = repo.primary_layer().unwrap();
+        assert_eq!(layer.authority, MonorepoStandard::PnpmWorkspaces);
+        assert_eq!(layer.root, PathBuf::from("/repo/apps"));
+    }
+
+    #[test]
+    fn primary_layer_breaks_nested_ties_by_enum_order() {
+        // Two nested layers at the same depth (2 components each), neither at
+        // the repo root. Listed opposite the expected enum order (pnpm before
+        // cargo) so the tie-break by `MonorepoStandard` declaration order — not
+        // iteration/push order — is what selects Cargo.
+        let repo = RepoInfo {
+            root: PathBuf::from("/repo"),
+            monorepo_layers: vec![
+                layer_at("/repo/apps", MonorepoStandard::PnpmWorkspaces),
+                layer_at("/repo/tools", MonorepoStandard::CargoWorkspace),
+            ],
+            ..RepoInfo::default()
+        };
+        let layer = repo.primary_layer().unwrap();
+        assert_eq!(layer.authority, MonorepoStandard::CargoWorkspace);
+        assert_eq!(layer.root, PathBuf::from("/repo/tools"));
+    }
+
+    #[test]
+    fn primary_layer_reproduces_first_on_rusty_biscuit_repo() {
+        // Regression: on the rusty-biscuit repo, `primary_layer()` must agree
+        // with the first layer — and select Cargo over the pnpm workspace that
+        // also lives at the repo root.
+        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
+        let info = detect_repo_structure(repo_root)
+            .expect("detect_repo_structure should succeed")
+            .expect("rusty-biscuit should be a repo");
+        assert!(info.is_monorepo, "rusty-biscuit should be a monorepo");
+
+        let primary = info
+            .primary_layer()
+            .expect("primary_layer must resolve on rusty-biscuit");
+        let first = info
+            .monorepo_layers
+            .first()
+            .expect("rusty-biscuit has at least one layer");
+
+        assert_eq!(primary.authority, first.authority);
+        assert_eq!(primary.authority, MonorepoStandard::CargoWorkspace);
+        assert_eq!(primary.orchestrators, first.orchestrators);
     }
 }

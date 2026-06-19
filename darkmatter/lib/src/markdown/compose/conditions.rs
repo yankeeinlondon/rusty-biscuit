@@ -11,7 +11,12 @@
 //! [Darkmatter Expressions](../../../../docs/topics/darkmatter-expressions.md)
 //! topic for the full grammar.
 
-use super::expression::{CtxLookup, EvaluationLookup, evaluate, is_truthy, parse_condition};
+use super::expression::{
+    CtxLookup, EvaluationLookup, ResolutionContext, doc_namespace, evaluate, is_truthy,
+    parse_condition,
+};
+use super::interpolation::Evaluator;
+use crate::markdown::compose::ComposeWarning;
 use biscuit_terminal::errors::SourceContext;
 use serde_json::Value;
 use std::ops::Range;
@@ -153,6 +158,30 @@ pub fn evaluate_condition<L: EvaluationLookup>(
     Ok(result)
 }
 
+/// Collects context-typo warnings for a `when=` condition expression.
+///
+/// Parses `expr` in condition mode and walks the resulting AST for `ctx.*`
+/// references that do not resolve to a known runtime context variable, reusing
+/// the same AST-based check as `{{ ... }}` interpolation. Because the walk is
+/// parser-aware, a string literal such as `state == "ctx.toady"` never triggers
+/// a warning — only genuine `ctx.*` variable references do.
+///
+/// Parse failures yield no warnings here: a malformed condition is surfaced as
+/// a fatal [`ConditionError::Parse`] by [`evaluate_condition`] at evaluation
+/// time, so this additive diagnostic stays silent rather than double-reporting.
+///
+/// `warning_stage` labels the produced [`ComposeWarning`]s (e.g. `"condition"`).
+pub fn collect_condition_context_warnings<L: EvaluationLookup>(
+    expr: &str,
+    state: &L,
+    warning_stage: &'static str,
+) -> Vec<ComposeWarning> {
+    let Ok(parsed) = parse_condition(expr) else {
+        return Vec::new();
+    };
+    Evaluator::new(state).collect_context_warnings(&parsed, warning_stage)
+}
+
 fn parse_error_span(expr: &str, position: usize) -> Range<usize> {
     if expr.is_empty() {
         return 0..0;
@@ -270,6 +299,9 @@ struct ShortcutLookup<'a> {
     data: &'a Value,
     /// Lazy-capturing `ctx.*` resolver.
     ctx: CtxLookup<'a>,
+    /// Optional document-relative context enabling read-side functions. `None`
+    /// leaves the lookup context-free.
+    resolution_context: Option<ResolutionContext>,
 }
 
 impl<'a> ShortcutLookup<'a> {
@@ -277,6 +309,11 @@ impl<'a> ShortcutLookup<'a> {
         Self {
             data,
             ctx: CtxLookup::new(work_dir),
+            // The shortcut API resolves read-side functions against `work_dir`
+            // (local-only: `absolute`/`relative`/`file_exists`/… need a base
+            // directory but no remote runtime). This is a public-API capability
+            // addition for external callers of `evaluate_condition_against`.
+            resolution_context: Some(ResolutionContext::new(work_dir.to_path_buf())),
         }
     }
 
@@ -307,6 +344,12 @@ impl<'a> ShortcutLookup<'a> {
 
 impl EvaluationLookup for ShortcutLookup<'_> {
     fn get(&self, path: &str) -> Option<Value> {
+        // Reserved `doc` namespace, intercepted before the bare-name `ctx.*`
+        // fallback so a missing `doc.*` never collapses into `ctx.*`.
+        if doc_namespace::is_doc_namespace(path) {
+            return doc_namespace::resolve_doc_namespace(path, self.data);
+        }
+
         // Handle ctx.* prefixes with lazy capture
         if path == "ctx" || path.starts_with("ctx.") {
             return self.ctx.resolve_ctx(path);
@@ -324,6 +367,10 @@ impl EvaluationLookup for ShortcutLookup<'_> {
 
         // Fall back to ctx.* (same behavior as EffectiveState)
         self.get(&format!("ctx.{path}"))
+    }
+
+    fn resolution_context(&self) -> Option<ResolutionContext> {
+        self.resolution_context.clone()
     }
 }
 
@@ -748,6 +795,52 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[test]
+    fn shortcut_doc_namespace_resolves_against_data_only() {
+        let data = json!({
+            "build": "from-data",
+            "doc": { "child": "literal-doc" },
+        });
+        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+
+        // doc.<path> resolves a data property.
+        assert_eq!(lookup.get("doc.build"), Some(json!("from-data")));
+
+        // bare doc returns the whole data object.
+        let obj = lookup.get("doc").expect("bare doc resolves");
+        assert!(obj.is_object());
+        assert_eq!(obj.get("build"), Some(&json!("from-data")));
+
+        // a literal property named `doc` is reached as doc.doc.
+        assert_eq!(lookup.get("doc.doc.child"), Some(json!("literal-doc")));
+
+        // missing doc.* values do not fall back to ctx.*.
+        assert_eq!(lookup.get("doc.year"), None);
+        // The shortcut lookup now carries a work-dir-rooted resolution context
+        // so read-side functions resolve for external callers.
+        assert!(lookup.resolution_context().is_some());
+    }
+
+    #[test]
+    fn shortcut_read_side_functions_resolve_against_work_dir() {
+        // `evaluate_condition_against` now supplies a `work_dir`-rooted
+        // resolution context, so read-side functions resolve for external
+        // callers.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("spec.md"), "# Spec").unwrap();
+        let data = json!({});
+
+        assert!(evaluate_condition_against("file_exists('spec.md')", &data, dir.path()).unwrap());
+        assert!(!evaluate_condition_against("file_exists('nope.md')", &data, dir.path()).unwrap());
+        assert!(
+            evaluate_condition_against("absolute('spec.md') != ''", &data, dir.path()).unwrap()
+        );
+        assert!(
+            evaluate_condition_against("relative('spec.md') == 'spec.md'", &data, dir.path())
+                .unwrap()
+        );
+    }
+
     // ── Lazy Context Resolution ─────────────────────────────────────────
 
     #[test]
@@ -894,6 +987,56 @@ mod tests {
             "Repo context should NOT be captured when ternary short-circuits else-branch: captured {:?}",
             captured
         );
+    }
+
+    // ── Condition context-typo diagnostics ───────────────────────────────
+    //
+    // `collect_condition_context_warnings` surfaces the same AST-based ctx-typo
+    // check used by interpolation, so `when=` conditions (transclusion /
+    // page-block / loop) warn on unknown `ctx.*` references without changing
+    // evaluation results.
+
+    #[test]
+    fn condition_ctx_typo_emits_warning_with_suggestion() {
+        let state = test_state(json!({}));
+        let warnings = collect_condition_context_warnings("ctx.toady", &state, "condition");
+        assert!(warnings.iter().any(|w| {
+            w.message.contains("unknown context variable") && w.message.contains("today")
+        }));
+    }
+
+    #[test]
+    fn condition_ctx_typo_does_not_change_evaluation() {
+        // The warning is additive: the typo'd `ctx.toady` still evaluates to a
+        // falsy null, exactly as before, without erroring.
+        let state = test_state(json!({}));
+        assert!(!evaluate_condition("ctx.toady", &state, 1, dummy_ctx()).unwrap());
+    }
+
+    #[test]
+    fn condition_string_literal_does_not_warn() {
+        // Comparing against the literal string "ctx.toady" must not warn —
+        // the check walks the AST, so a string literal is never a ctx ref.
+        let state = test_state(json!({ "name": "x" }));
+        let warnings =
+            collect_condition_context_warnings(r#"name == "ctx.toady""#, &state, "condition");
+        assert!(!warnings.iter().any(|w| w.message.contains("unknown context variable")));
+    }
+
+    #[test]
+    fn condition_valid_ctx_does_not_warn() {
+        let state = test_state(json!({}));
+        let warnings = collect_condition_context_warnings("ctx.repo", &state, "condition");
+        assert!(!warnings.iter().any(|w| w.message.contains("unknown context variable")));
+    }
+
+    #[test]
+    fn condition_parse_failure_yields_no_warnings() {
+        // A malformed condition is reported fatally by `evaluate_condition`;
+        // the additive diagnostic stays silent rather than double-reporting.
+        let state = test_state(json!({}));
+        let warnings = collect_condition_context_warnings("&& invalid", &state, "condition");
+        assert!(warnings.is_empty());
     }
 
     /// Integration coverage for the operators, access forms, and helpers

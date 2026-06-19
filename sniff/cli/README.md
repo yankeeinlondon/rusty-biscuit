@@ -123,6 +123,18 @@ sniff repo unstaged-files        # Unstaged modified files
 sniff repo untracked-files       # Untracked files
 ```
 
+**Repository Identity:**
+
+```bash
+sniff repo                 # Repository name (default text dispatch; --json returns the aggregate)
+sniff repo name            # Repository name only
+sniff repo name -v         # Repository name only (verbose styling; no foreign fields)
+sniff repo is-monorepo     # Monorepo label (e.g. `cargo`; `false` if not). Exits non-zero when false unless `--no-error`. `--json` emits `{ "is_monorepo": true, "authority": "...", "orchestrators": [...] }` / `{ "is_monorepo": false }`
+sniff repo package-count   # Number of discovered packages
+sniff repo version         # Declared version(s) for the current package/area/repo context — scoped like `repo test-runner`; `--all`/`--package`/`--package-area` override the CWD scope; `--csv`/`--list`/`--md`/`--json`/`--verbose`
+sniff repo language        # Primary programming language for the repository
+```
+
 **Repository Queries:**
 
 ```bash
@@ -135,8 +147,12 @@ sniff repo pr                        # List open pull requests
 sniff repo pr --status merged        # List merged pull requests
 sniff repo pr --status draft --json  # Draft PRs as JSON
 sniff repo pr -v                     # Verbose PR block output
-sniff repo deps                      # Text dependency list
-sniff repo deps --ui                 # Mermaid dependency diagram
+sniff repo branches                  # Local branches from known refs
+sniff repo branches --refresh-remotes # Refresh remotes before branch projection
+sniff repo package-dependencies      # Internal workspace dependency list
+sniff repo package-dependencies --ui # Mermaid dependency diagram
+sniff repo dependencies              # External dependency list
+sniff repo dependencies --dev-dependencies # External dev dependencies only
 sniff repo packages                  # List all package names (CSV)
 sniff repo packages --md             # Markdown unordered list
 sniff repo packages --list           # Raw list (one per line)
@@ -192,18 +208,20 @@ File-listing commands (`dirty-source-code`, `staged-files`, `blast-radius`, etc.
 --package-area A # Scope to a specific package area
 ```
 
-**Programs Subcommands:**
+**Software Subcommands:**
 
 ```bash
-sniff programs                   # All installed programs
-sniff editors                    # Editors (vim, VS Code, etc.)
-sniff utilities                  # CLI utilities (ripgrep, fzf, etc.)
-sniff language-package-managers  # Language package managers (cargo, npm, pip)
-sniff os-package-managers        # OS package managers (homebrew, apt, etc.)
-sniff tts-clients                # TTS clients (say, espeak, piper, etc.)
-sniff terminal-apps              # Terminal apps (alacritty, wezterm, etc.)
-sniff audio                      # Headless audio players (afplay, pacat, etc.)
-sniff agents                     # AI agent/CLI tools (claude, kimi, etc.)
+sniff software                            # All installed software
+sniff software editors                    # Editors (vim, VS Code, etc.)
+sniff software utilities                  # CLI utilities (ripgrep, fzf, etc.)
+sniff software language-package-managers  # Language package managers (cargo, npm, pip)
+sniff software os-package-managers        # OS package managers (homebrew, apt, etc.)
+sniff software tts-clients                # TTS clients (say, espeak, piper, etc.)
+sniff software terminal-apps              # Terminal apps (alacritty, wezterm, etc.)
+sniff software audio-players              # Headless audio players (afplay, pacat, etc.)
+sniff software notification-helpers       # Desktop notification helpers
+sniff software agents                     # AI agent/CLI tools (claude, kimi, etc.)
+sniff software test-runners               # Test runners with availability details
 ```
 
 **Program Installation:**
@@ -211,18 +229,18 @@ sniff agents                     # AI agent/CLI tools (claude, kimi, etc.)
 Each program category supports an `install` subcommand:
 
 ```bash
-sniff editors install          # Interactive picker
-sniff editors install nvim     # Install a specific program
-sniff programs install         # Pick from all categories
+sniff software editors install          # Interactive picker
+sniff software editors install nvim     # Install a specific program
+sniff software install                  # Pick from all categories
 ```
 
-**Programs Output:**
+**Software Output:**
 
 ```bash
 # Text output (default)
-sniff programs
+sniff software
 # JSON output with full metadata
-sniff programs --json
+sniff software --json
 ```
 
 **Services Subcommand:**
@@ -269,7 +287,7 @@ The `--perf` flag appends structured performance timings to any command:
 
 ```bash
 # Rich terminal output: perf appended to stdout
-sniff programs --perf
+sniff software --perf
 sniff repo --perf
 
 # Scriptable text output: perf emitted to stderr (stdout stays clean)
@@ -348,11 +366,11 @@ Git Repository:
   Status: dirty (3 staged, 2 unstaged, 1 untracked)
   Remote origin: GitHub (15 branches)
 
-Monorepo: CargoWorkspace
+Monorepo: cargo
   Packages: 8
-    sniff/cli (Rust)
-    sniff/lib (Rust)
-    research/cli (Rust)
+    sniff-cli v0.1.0 (sniff/cli) [Rust]
+    sniff v0.1.0 (sniff/lib) [Rust]
+    research-cli v0.1.0 (research/cli) [Rust]
     ...
 ```
 
@@ -394,10 +412,10 @@ Returns a structured JSON object with all detection results:
 }
 ```
 
-### Programs Output
+### Software Output
 
 ```bash
-sniff programs --json | jq .
+sniff software --json | jq .
 ```
 
 Returns rich program entries (including metadata and detection status):
@@ -443,9 +461,17 @@ table summarises the contract; see the per-subcommand docs under
 
 | Subcommand | JSON shape |
 |---|---|
-| `repo` / `repo structure` | Full `RepoInfo` blob (`is_monorepo`, `packages`, `dependencies`, ...) |
+| `repo` (bare, `--json`) | Consolidated `SniffRepo` aggregate with snake_case keys, grouped `context`, top-level `branches`/`worktrees`, and `dirty`/`staged`/`unstaged`/`untracked` scope buckets; see [`sniff/docs/topics/json-output.md`](../../docs/topics/json-output.md) |
+| `repo structure` | Full `RepoInfo` blob (`is_monorepo`, `packages`, `dependencies`, ...). Includes `monorepo_standards` and `monorepo_layers` when the repo is a monorepo. |
+| `repo name` | `{ "name": "..." }` |
+| `repo language` | `{ "language": "..." \| null }` (or full language breakdown with `--breakdown`) |
+| `repo is-monorepo` | `{ "is_monorepo": true, "authority": "...", "orchestrators": [...] }` / `{ "is_monorepo": false }` |
+| `repo package-count` | `{ "package-count": N }` |
+| `repo version` | `{ "versions": [ { version, packages, sources: [ { manifest, path, href, inherited, packages } ] } ] }` |
 | `repo git-status` | `GitInfo` object directly (`repo_root`, `status`, `recent`, `branches`, ...) |
-| `repo deps` | `{ packages: [{ name, depends_on, used_by, dependencies, dev_dependencies, ... }] }` |
+| `repo package-dependencies` | `{ packages: [{ name, depends_on, used_by, dependencies, dev_dependencies, ... }] }` |
+| `repo dependencies` | `{ dependencies: [{ package, family, name, targeted_version, actual_version }] }` |
+| `repo branches` | `[{ name, current, sha, remote_represented, upstream, ahead, behind }]` |
 | `repo dirty-packages` | `{ scope: "dirty", kind: "packages", names: [...] }` |
 | `repo dirty-package-areas` | `{ scope: "dirty", kind: "package_areas", names: [...] }` |
 | `repo staged-packages` | `{ scope: "staged", kind: "packages", names: [...] }` |
@@ -528,7 +554,9 @@ The library provides modular detection across six domains:
    - Optional remote refresh: branch inventory, default branch, behind status, commit containment
 
 2. **Repository Detection** (`filesystem/repo/`):
-   - Monorepo tool detection (Cargo workspaces, pnpm, npm, yarn, Nx, Turborepo, Lerna)
+   - Monorepo standard detection (Cargo, pnpm/npm/Yarn/Bun workspaces, uv, Go, Gradle, Maven, .NET, Bazel, Pants, Buck2, Rush Stack, Nx, Turborepo, Lerna)
+   - Authority-vs-orchestrator topology via `monorepo_standards` and `monorepo_layers`
+   - Resolved acting binary (`Path`, `Wrapper`, or missing) and version satisfaction
    - Package enumeration with glob pattern expansion
    - Per-package language detection
    - Per-package dependency manager detection (cargo, npm, pnpm, yarn, pip, go)
@@ -558,7 +586,7 @@ The library provides modular detection across six domains:
 
 **Programs Module:**
 
-Detects installed programs across 8 categories with parallel execution:
+Detects installed programs across 9 categories with parallel execution:
 
 - **Editors**: vim, VS Code, Cursor, IntelliJ, Sublime, etc.
 - **Utilities**: ripgrep, fzf, bat, jq, fd, delta, etc.
@@ -568,6 +596,7 @@ Detects installed programs across 8 categories with parallel execution:
 - **Terminal Apps**: alacritty, wezterm, kitty, iTerm2, etc.
 - **Headless Audio**: afplay, pacat, aplay, etc.
 - **AI CLI Tools**: claude, aider, goose, etc.
+- **Test Runners**: cargo test, vitest, pytest, go test, etc.
 
 Features:
 - macOS app bundle detection (checks `/Applications` when PATH fails)
@@ -806,7 +835,7 @@ sniff/
 │   │   │   ├── file_types/   # Broad file type classification
 │   │   │   └── ...           # languages, docs, formatting, blast_radius, just
 │   │   ├── package/          # Package manager abstraction (110+)
-│   │   ├── programs/         # Program detection and install (8 categories)
+│   │   ├── programs/         # Program detection and install (9 categories)
 │   │   ├── remote/           # Remote repo inspection (GitHub, GitLab, Gitea, Bitbucket)
 │   │   └── services/         # Init system and service detection
 │   └── Cargo.toml
@@ -846,8 +875,13 @@ cargo test -p sniff-cli cli_parsing
 sniff --json > build-context.json
 
 # Check if running in a monorepo
+if sniff repo is-monorepo --no-error | grep -q '^cargo$'; then
+    echo "Detected cargo monorepo"
+fi
+
+# The bare aggregate uses the new snake_case key
 if sniff repo --json | jq -e '.is_monorepo'; then
-    echo "Detected monorepo"
+    echo "Detected monorepo via aggregate"
 fi
 ```
 

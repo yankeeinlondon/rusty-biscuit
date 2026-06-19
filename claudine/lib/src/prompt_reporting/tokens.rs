@@ -26,40 +26,15 @@
 /// Estimated characters per token for plain text / markdown content.
 const CHARS_PER_TOKEN_TEXT: f64 = 4.0;
 
-/// Estimated characters per token for dense structured content.
-const CHARS_PER_TOKEN_DENSE: f64 = 2.5;
-
 /// Estimate the token count of a composed prompt string.
 ///
 /// The heuristic treats the input as plain-text/markdown by default
-/// (≈ 4 chars / token).  Callers that know the content is JSON/YAML/TOML
-/// can use [`estimate_tokens_dense`] instead.
-///
-/// ## Examples
-///
-/// ```
-/// use claudine::prompt_reporting::estimate_tokens;
-///
-/// let text = "This is a short system prompt.";
-/// let tokens = estimate_tokens(text);
-/// assert!(tokens > 0);
-/// ```
+/// (≈ 4 chars / token).
 pub fn estimate_tokens(text: &str) -> u64 {
     if text.is_empty() {
         return 0;
     }
     (text.len() as f64 / CHARS_PER_TOKEN_TEXT) as u64
-}
-
-/// Estimate tokens for dense structured text (JSON, YAML, TOML, etc.).
-///
-/// Uses a more aggressive ratio (≈ 2.5 chars / token) because these
-/// formats have more punctuation and whitespace per semantic unit.
-pub fn estimate_tokens_dense(text: &str) -> u64 {
-    if text.is_empty() {
-        return 0;
-    }
-    (text.len() as f64 / CHARS_PER_TOKEN_DENSE) as u64
 }
 
 /// Estimate tokens for a composed system prompt, optionally including the
@@ -82,7 +57,6 @@ mod tests {
     #[test]
     fn empty_string_is_zero() {
         assert_eq!(estimate_tokens(""), 0);
-        assert_eq!(estimate_tokens_dense(""), 0);
     }
 
     #[test]
@@ -90,13 +64,6 @@ mod tests {
         // 28 chars / 4 = 7 tokens
         let text = "This is a short system prompt.";
         assert_eq!(estimate_tokens(text), 7);
-    }
-
-    #[test]
-    fn dense_format_estimate() {
-        let json = r#"{"key": "value", "num": 42}"#;
-        // 26 chars / 2.5 = 10.4 → 10
-        assert_eq!(estimate_tokens_dense(json), 10);
     }
 
     #[test]

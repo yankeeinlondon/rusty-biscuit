@@ -7,13 +7,17 @@ use tracing::debug;
 use crate::Result;
 
 use super::detection::{
-    collect_default_workspace_patterns, dedupe_packages, dedupe_patterns,
-    discover_packages_with_optional_index, expand_glob_patterns_with_deps, resolve_internal_deps,
+    DetectorOutcome, collect_default_workspace_patterns, dedupe_packages, dedupe_patterns,
+    discover_packages_with_optional_index, resolve_internal_deps,
 };
+use super::glob::expand_membership_globs;
 use super::manifest_index::ManifestIndex;
-use super::types::{MonorepoTool, PackageDiscoverySource, RepoInfo};
+use super::standard::{GlobDialect, MonorepoStandard, PackageProvenance};
 
-pub(super) fn detect_nx(root: &Path, index: Option<&ManifestIndex>) -> Result<Option<RepoInfo>> {
+pub(super) fn detect_nx(
+    root: &Path,
+    index: Option<&ManifestIndex>,
+) -> Result<Option<DetectorOutcome>> {
     let nx_json = root.join("nx.json");
     if !nx_json.exists() {
         return Ok(None);
@@ -27,43 +31,47 @@ pub(super) fn detect_nx(root: &Path, index: Option<&ManifestIndex>) -> Result<Op
     let mut packages = if patterns.is_empty() {
         discover_packages_with_optional_index(
             root,
-            MonorepoTool::Nx,
+            MonorepoStandard::Nx,
+            PackageProvenance::LeafMarkers,
             &lock_versions,
-            PackageDiscoverySource::Nx,
             index,
         )
     } else {
-        expand_glob_patterns_with_deps(root, &patterns, MonorepoTool::Nx, &lock_versions)
+        let dialect = MonorepoStandard::Nx
+            .glob_dialect()
+            .unwrap_or(GlobDialect::Minimatch);
+        expand_membership_globs(
+            root,
+            &patterns,
+            dialect,
+            MonorepoStandard::Nx,
+            None,
+            &lock_versions,
+        )
     };
     if packages.is_empty() {
         packages = discover_packages_with_optional_index(
             root,
-            MonorepoTool::Nx,
+            MonorepoStandard::Nx,
+            PackageProvenance::LeafMarkers,
             &lock_versions,
-            PackageDiscoverySource::Nx,
             index,
         );
     }
     packages = dedupe_packages(packages);
     resolve_internal_deps(&mut packages);
 
-    Ok(Some(RepoInfo {
-        is_monorepo: true,
-        monorepo_tool: Some(MonorepoTool::Nx),
-        workspace_tools: vec![MonorepoTool::Nx],
+    Ok(Some(DetectorOutcome {
+        standard: MonorepoStandard::Nx,
         root: root.to_path_buf(),
-        dependencies: None,
-        dev_dependencies: None,
-        peer_dependencies: None,
-        optional_dependencies: None,
-        packages: Some(packages),
+        packages,
     }))
 }
 
 pub(super) fn detect_turborepo(
     root: &Path,
     index: Option<&ManifestIndex>,
-) -> Result<Option<RepoInfo>> {
+) -> Result<Option<DetectorOutcome>> {
     let turbo_json = root.join("turbo.json");
     if !turbo_json.exists() {
         return Ok(None);
@@ -74,40 +82,47 @@ pub(super) fn detect_turborepo(
     let mut packages = if patterns.is_empty() {
         discover_packages_with_optional_index(
             root,
-            MonorepoTool::Turborepo,
+            MonorepoStandard::Turborepo,
+            PackageProvenance::Globbed,
             &lock_versions,
-            PackageDiscoverySource::Turborepo,
             index,
         )
     } else {
-        expand_glob_patterns_with_deps(root, &patterns, MonorepoTool::Turborepo, &lock_versions)
+        let dialect = MonorepoStandard::Turborepo
+            .glob_dialect()
+            .unwrap_or(GlobDialect::Minimatch);
+        expand_membership_globs(
+            root,
+            &patterns,
+            dialect,
+            MonorepoStandard::Turborepo,
+            None,
+            &lock_versions,
+        )
     };
     if packages.is_empty() {
         packages = discover_packages_with_optional_index(
             root,
-            MonorepoTool::Turborepo,
+            MonorepoStandard::Turborepo,
+            PackageProvenance::Globbed,
             &lock_versions,
-            PackageDiscoverySource::Turborepo,
             index,
         );
     }
     packages = dedupe_packages(packages);
     resolve_internal_deps(&mut packages);
 
-    Ok(Some(RepoInfo {
-        is_monorepo: true,
-        monorepo_tool: Some(MonorepoTool::Turborepo),
-        workspace_tools: vec![MonorepoTool::Turborepo],
+    Ok(Some(DetectorOutcome {
+        standard: MonorepoStandard::Turborepo,
         root: root.to_path_buf(),
-        dependencies: None,
-        dev_dependencies: None,
-        peer_dependencies: None,
-        optional_dependencies: None,
-        packages: Some(packages),
+        packages,
     }))
 }
 
-pub(super) fn detect_lerna(root: &Path, index: Option<&ManifestIndex>) -> Result<Option<RepoInfo>> {
+pub(super) fn detect_lerna(
+    root: &Path,
+    index: Option<&ManifestIndex>,
+) -> Result<Option<DetectorOutcome>> {
     let lerna_json = root.join("lerna.json");
     if !lerna_json.exists() {
         return Ok(None);
@@ -121,36 +136,40 @@ pub(super) fn detect_lerna(root: &Path, index: Option<&ManifestIndex>) -> Result
     let mut packages = if patterns.is_empty() {
         discover_packages_with_optional_index(
             root,
-            MonorepoTool::Lerna,
+            MonorepoStandard::Lerna,
+            PackageProvenance::Globbed,
             &lock_versions,
-            PackageDiscoverySource::Lerna,
             index,
         )
     } else {
-        expand_glob_patterns_with_deps(root, &patterns, MonorepoTool::Lerna, &lock_versions)
+        let dialect = MonorepoStandard::Lerna
+            .glob_dialect()
+            .unwrap_or(GlobDialect::Minimatch);
+        expand_membership_globs(
+            root,
+            &patterns,
+            dialect,
+            MonorepoStandard::Lerna,
+            None,
+            &lock_versions,
+        )
     };
     if packages.is_empty() {
         packages = discover_packages_with_optional_index(
             root,
-            MonorepoTool::Lerna,
+            MonorepoStandard::Lerna,
+            PackageProvenance::Globbed,
             &lock_versions,
-            PackageDiscoverySource::Lerna,
             index,
         );
     }
     packages = dedupe_packages(packages);
     resolve_internal_deps(&mut packages);
 
-    Ok(Some(RepoInfo {
-        is_monorepo: true,
-        monorepo_tool: Some(MonorepoTool::Lerna),
-        workspace_tools: vec![MonorepoTool::Lerna],
+    Ok(Some(DetectorOutcome {
+        standard: MonorepoStandard::Lerna,
         root: root.to_path_buf(),
-        dependencies: None,
-        dev_dependencies: None,
-        peer_dependencies: None,
-        optional_dependencies: None,
-        packages: Some(packages),
+        packages,
     }))
 }
 

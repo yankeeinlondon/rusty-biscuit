@@ -80,4 +80,4 @@ pub use super::expression::{
 pub use super::expression::EvaluationLookup as InterpolationLookup;
 
 pub use evaluator::{EvalResult, EvalValue, Evaluator};
-pub(crate) use rewrite::{ScanMode, interpolate_text};
+pub(crate) use rewrite::{ScanMode, interpolate_text, interpolate_value};

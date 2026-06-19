@@ -259,7 +259,7 @@ fn build_styled_document() -> Document {
     let page = styled_page(&md);
     let hr_owned = resolve_hr_defaults(&md, &page.hr_defaults());
     let ctx = build_context(&page, &hr_owned);
-    let (doc, diags) = to_render_document_with_context(&md, &ctx);
+    let (doc, diags) = to_render_document_with_context(&md, &ctx).expect("fold must succeed");
     assert!(diags.is_empty(), "styled corpus must fold cleanly: {diags:?}");
     doc
 }

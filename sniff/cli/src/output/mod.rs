@@ -17,7 +17,10 @@ mod remote;
 mod render;
 pub(crate) mod repo_json;
 mod services;
+pub(crate) mod test_runner_report;
+mod test_runners;
 mod topics;
+pub(crate) mod version_report;
 
 use sniff::{PerformanceReport, SniffResult};
 
@@ -42,17 +45,22 @@ pub use remote::{
     render_pull_requests_verbose, render_remote_text,
 };
 pub use services::{print_services_json, render_services_text};
+pub use test_runners::{
+    HintMode, build_test_runners_json, render_test_runners_markdown, test_runners_search_hint,
+};
 pub use topics::render_topics_table;
 
 // Re-export types needed by submodules
+pub(crate) use filesystem::format_monorepo_label;
 pub(crate) use filesystem::{
     collect_repo_package_area_names, collect_repo_package_names, print_current_package_area_dirty,
     print_package_area_has_source_code_changes, render_dirty_package_areas, render_dirty_packages,
     render_files_section, render_filesystem_section, render_language_section, render_repo_area,
-    render_repo_deps_svg, render_repo_deps_text, render_repo_deps_visual, render_repo_language,
-    render_repo_name, render_repo_package, render_repo_package_area, render_repo_package_area_root,
-    render_repo_package_areas_formatted, render_repo_package_root, render_repo_packages_formatted,
-    render_repo_root, render_repo_section, render_staged_package_areas, render_staged_packages,
+    render_repo_default_verbose, render_repo_deps_svg, render_repo_deps_text,
+    render_repo_deps_visual, render_repo_language, render_repo_name, render_repo_package,
+    render_repo_package_area, render_repo_package_area_root, render_repo_package_areas_formatted,
+    render_repo_package_root, render_repo_packages_formatted, render_repo_root,
+    render_repo_section, render_staged_package_areas, render_staged_packages,
     render_unstaged_package_areas, render_unstaged_packages,
 };
 pub(crate) use hardware::{
@@ -116,6 +124,10 @@ pub enum OutputFilter {
     AiClients,
     /// Show only desktop notification helpers (programs subsection)
     NotificationHelpers,
+    /// Show resolved test runners with availability discriminators
+    /// (programs subsection). Distinct from the other categories because
+    /// runners live in many places (PATH, project-local bin, parent binary).
+    TestRunners,
     /// Show only system services (init system and service list)
     Services,
     /// Show justfiles and their recipes
@@ -454,7 +466,7 @@ pub fn render_text(
                     out.push_str(&rendered);
                     out.push('\n');
                 }
-                Some(RepoAction::Deps {
+                Some(RepoAction::PackageDependencies {
                     ui,
                     svg,
                     filter,
@@ -646,6 +658,7 @@ pub fn render_text(
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
         | OutputFilter::NotificationHelpers
+        | OutputFilter::TestRunners
         | OutputFilter::Services
         | OutputFilter::Just
         | OutputFilter::BlastRadius => {
@@ -797,6 +810,7 @@ fn apply_filter_to_json(
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
         | OutputFilter::NotificationHelpers
+        | OutputFilter::TestRunners
         | OutputFilter::Services
         | OutputFilter::Just
         | OutputFilter::BlastRadius => {

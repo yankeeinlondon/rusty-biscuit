@@ -41,8 +41,9 @@ pub use git::{
 pub use just::{JustRecipe, JustRecipeParam, JustfileInfo, detect_justfiles};
 pub use languages::{LanguageBreakdown, LanguageStats, detect_languages};
 pub use repo::{
-    DependencyEntry, DependencyKind, MonorepoTool, Package, PackageDiscoverySource,
-    PackageEcosystem, RepoInfo, detect_repo, detect_repo_structure,
+    DependencyEntry, DependencyKind, DetectedStandard, DetectionConfidence, MonorepoLayer,
+    MonorepoStandard, MonorepoStandardSpec, Package, PackageEcosystem, PackageProvenance, RepoInfo,
+    detect_repo, detect_repo_structure,
 };
 
 #[deprecated(note = "Use `Package` instead")]
@@ -375,7 +376,84 @@ fn filter_inventory(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::request::RepoRequest;
+    use crate::request::{DetectionPlan, GitRequest, RepoRequest};
+
+    /// Creates a temporary git repo with a committed file and an uncommitted
+    /// modification plus an untracked file, suitable for testing status-walk
+    /// behavior.
+    fn create_dirty_git_repo() -> (tempfile::TempDir, PathBuf) {
+        use git2::{Repository, Signature};
+        use std::fs;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+
+        let file_path = dir.path().join("hello.txt");
+        fs::write(&file_path, "hello world\n").unwrap();
+
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("hello.txt")).unwrap();
+        index.write().unwrap();
+
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = Signature::now("Test", "test@test.com").unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "initial commit", &tree, &[])
+            .unwrap();
+
+        fs::write(&file_path, "hello world\nmodified line\n").unwrap();
+        fs::write(dir.path().join("untracked.txt"), "new file\n").unwrap();
+
+        let path = dir.path().to_path_buf();
+        (dir, path)
+    }
+
+    #[test]
+    fn identity_plan_does_not_walk_status_end_to_end() {
+        let (_dir, path) = create_dirty_git_repo();
+
+        // Measure walks for this repo's path as a before/after delta. The plan's
+        // git stage runs on a scoped thread, but walks are recorded per repo path
+        // regardless of thread, so no cross-thread counter propagation is needed.
+        let before = crate::filesystem::git::status::status_walk_count(&path);
+
+        let plan = DetectionPlan::new()
+            .base_dir(path.clone())
+            .without_os()
+            .without_hardware()
+            .without_network()
+            .filesystem(
+                FilesystemRequest::new()
+                    .git(GitRequest::identity())
+                    .repo(RepoRequest::structure())
+                    .without_file_inventory()
+                    .without_formatting()
+                    .without_docs(),
+            );
+
+        let result = crate::detect_with_plan(plan).unwrap();
+        let fs = result.filesystem.expect("filesystem should be present");
+        let git = fs.git.expect("git should be present");
+
+        assert_eq!(
+            crate::filesystem::git::status::status_walk_count(&path),
+            before,
+            "identity plan must not trigger a working-tree status walk"
+        );
+        assert!(
+            git.status.is_none(),
+            "identity plan must yield status == None"
+        );
+        assert_eq!(
+            git.repo_root.canonicalize().unwrap(),
+            path.canonicalize().unwrap(),
+            "repo_root should match the fixture directory"
+        );
+        assert!(
+            git.current_branch.is_some(),
+            "current_branch should be set on a branch"
+        );
+    }
 
     #[test]
     fn need_shared_view_includes_formatting() {

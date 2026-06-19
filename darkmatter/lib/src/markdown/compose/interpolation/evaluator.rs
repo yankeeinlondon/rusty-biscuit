@@ -71,7 +71,10 @@
 //! }
 //! ```
 
+use crate::catalog::{describe_for_error, suggest};
+use crate::markdown::compose::context::catalog::CONTEXT_VARIABLE_DESCRIPTORS;
 use crate::markdown::compose::expression::{EvaluationLookup, Expr, evaluate, scalar_string};
+use crate::markdown::compose::ComposeWarning;
 use serde_json::Value;
 use tracing::{debug, trace};
 
@@ -270,6 +273,88 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
             Err(_) => EvalValue::Null,
         }
     }
+
+    /// Evaluates an expression to its raw JSON `Value`, preserving type.
+    ///
+    /// Unlike [`Self::eval`], which stringifies the result via `scalar_string`,
+    /// this returns the typed `serde_json::Value` (so `false` stays a boolean,
+    /// `2` stays a number, `null` stays null). Whole-value frontmatter
+    /// interpolation uses it to keep a single `{{ expr }}` value typed instead
+    /// of collapsing it to a string. The `Err` is the evaluator's message, so
+    /// callers can fall back to the string path on failure.
+    pub fn eval_json(&self, expr: &Expr) -> Result<Value, String> {
+        evaluate(expr, self.state)
+    }
+
+    /// Collects warnings for `ctx.*` references that don't resolve to a known
+    /// runtime context variable.
+    ///
+    /// The check is parser-aware: it walks the AST so typo detection works even
+    /// when the surrounding expression would otherwise evaluate to an empty
+    /// string (the default for unresolved variables).
+    pub fn collect_context_warnings(&self,
+        expr: &Expr,
+        warning_stage: &'static str,
+    ) -> Vec<ComposeWarning> {
+        let mut warnings = Vec::new();
+        self.walk_context_variables(expr, &mut |name, raw| {
+            if self.state.is_valid_context_variable(name) {
+                return;
+            }
+            let mut message = format!("unknown context variable '{}'", raw);
+            if let Some(descriptor) = suggest(CONTEXT_VARIABLE_DESCRIPTORS, name, 1).first() {
+                message.push_str("\n  did you mean: ");
+                message.push_str(&describe_for_error(*descriptor));
+            }
+            warnings.push(ComposeWarning::new(warning_stage, message));
+        });
+        warnings
+    }
+
+    fn walk_context_variables(&self,
+        expr: &Expr,
+        visitor: &mut dyn FnMut(&str, &str),
+    ) {
+        match expr {
+            Expr::Variable(path) => {
+                if let Some(name) = path.strip_prefix("ctx.") {
+                    let first = name.split('.').next().unwrap_or(name);
+                    if !first.is_empty() {
+                        visitor(first, path);
+                    }
+                }
+            }
+            Expr::Paren(inner)
+            | Expr::UnaryNot(inner)
+            | Expr::UnaryMinus(inner) => self.walk_context_variables(inner, visitor),
+            Expr::Binary { left, right, .. }
+            | Expr::Comparison { left, right, .. }
+            | Expr::Fallback { primary: left, fallback: right } => {
+                self.walk_context_variables(left, visitor);
+                self.walk_context_variables(right, visitor);
+            }
+            Expr::Ternary {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                self.walk_context_variables(condition, visitor);
+                self.walk_context_variables(then_branch, visitor);
+                self.walk_context_variables(else_branch, visitor);
+            }
+            Expr::Index { base, index } => {
+                self.walk_context_variables(base, visitor);
+                self.walk_context_variables(index, visitor);
+            }
+            Expr::MemberAccess { base, .. } => self.walk_context_variables(base, visitor),
+            Expr::FunctionCall { args, .. } => {
+                for arg in args {
+                    self.walk_context_variables(arg, visitor);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 #[cfg(test)]
@@ -277,8 +362,8 @@ mod tests {
     use super::*;
     use crate::markdown::compose::EffectiveState;
     use crate::markdown::compose::interpolation::parse;
-    use crate::markdown::compose::state::EffectiveStateBuilder;
-    use crate::markdown::compose::types::ComposeContext;
+    use crate::markdown::compose::EffectiveStateBuilder;
+    use crate::markdown::compose::ComposeContext;
     use serde_json::json;
     use std::collections::HashMap;
 

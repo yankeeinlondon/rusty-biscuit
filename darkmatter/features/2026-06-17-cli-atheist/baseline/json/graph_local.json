@@ -1,0 +1,42 @@
+{
+  "file": "local.md",
+  "references": [
+    {
+      "attributes": {
+        "display": "local link"
+      },
+      "id": "14a3c3213bfc8b6c:3:14",
+      "kind": "hyperlink",
+      "line": 3,
+      "syntax": "markdown_link",
+      "target": {
+        "raw": "./other.md",
+        "type": "local_path"
+      }
+    },
+    {
+      "attributes": {
+        "alt": "local image"
+      },
+      "id": "14a3c3213bfc8b6c:4:39",
+      "kind": "image",
+      "line": 4,
+      "syntax": "markdown_image",
+      "target": {
+        "raw": "./img.png",
+        "type": "local_path"
+      }
+    }
+  ],
+  "source": "/tmp/dm-baseline/local.md",
+  "transclusions": [
+    {
+      "followable": true,
+      "kind": "file",
+      "line": 5,
+      "section": "Local Test",
+      "section_level": 1,
+      "target": "/private/tmp/dm-baseline/other.md"
+    }
+  ]
+}

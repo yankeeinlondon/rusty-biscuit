@@ -85,7 +85,7 @@ fn end_to_end_example_snapshot() {
 fn zero_config_prose_snapshot() {
     let _env = ColorSnapshotEnv::force_color();
     let term = Terminal::new_optimistic(120);
-    let page = DarkmatterPage::new(&term).with_color_depth(ColorDepth::TrueColor);
+    let page = DarkmatterPage::new(&term);
     let md: Markdown = "# Hello World\n\nSome prose here.\n".into();
 
     let page_out = page.render(&md).unwrap();

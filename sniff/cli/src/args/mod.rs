@@ -239,14 +239,85 @@ fn all_program_candidates() -> Vec<clap_complete::engine::CompletionCandidate> {
     all
 }
 
+// ---------------------------------------------------------------------------
+// Software command tree
+// ---------------------------------------------------------------------------
+
+/// Subcommands under `sniff software`.
+///
+/// The bare command (`sniff software`) shows every installed-program category.
+/// Each category can also be invoked directly for a focused view and supports
+/// `install` / `install-plan` like the aggregate.
 #[derive(Subcommand, Debug, Clone)]
-pub enum AllProgramAction {
+pub enum SoftwareSubcommand {
     /// Install a program (interactive picker if no name given)
     Install(InstallCommandArgs),
 
     /// Show the install plan without executing anything
     #[command(name = "install-plan")]
     InstallPlan(InstallCommandArgs),
+
+    /// Show only installed editors
+    Editors {
+        #[command(subcommand)]
+        action: Option<EditorAction>,
+    },
+
+    /// Show only utilities
+    Utilities {
+        #[command(subcommand)]
+        action: Option<UtilityAction>,
+    },
+
+    /// Show only language package managers
+    #[command(name = "language-package-managers")]
+    LanguagePackageManagers {
+        #[command(subcommand)]
+        action: Option<LangPkgMgrAction>,
+    },
+
+    /// Show only OS package managers
+    #[command(name = "os-package-managers")]
+    OsPackageManagers {
+        #[command(subcommand)]
+        action: Option<OsPkgMgrAction>,
+    },
+
+    /// Show only TTS clients
+    #[command(name = "tts-clients")]
+    TtsClients {
+        #[command(subcommand)]
+        action: Option<TtsClientAction>,
+    },
+
+    /// Show only terminal apps
+    #[command(name = "terminal-apps")]
+    TerminalApps {
+        #[command(subcommand)]
+        action: Option<TerminalAppAction>,
+    },
+
+    /// Show only headless audio players
+    #[command(name = "audio-players")]
+    AudioPlayers {
+        #[command(subcommand)]
+        action: Option<AudioAction>,
+    },
+
+    /// Show only AI agent/CLI tools
+    Agents {
+        #[command(subcommand)]
+        action: Option<AgentAction>,
+    },
+
+    /// Show only desktop notification helpers
+    #[command(name = "notification-helpers")]
+    NotificationHelpers,
+
+    /// Show resolved test runners (host availability: installed, local,
+    /// via_parent, or not_found).
+    #[command(name = "test-runners")]
+    TestRunners,
 }
 
 // ---------------------------------------------------------------------------
@@ -297,7 +368,7 @@ pub enum Commands {
     /// Show only audio devices (inputs, outputs, sample rates)
     AudioDevices,
 
-    /// Show only repository/monorepo structure
+    /// Show repository info (repository name by default; `--json` emits the scope-complete aggregate)
     Repo {
         #[command(subcommand)]
         repo_subcommand: Option<RepoSubcommand>,
@@ -348,62 +419,11 @@ pub enum Commands {
         filter: Vec<String>,
     },
 
-    /// Show all installed programs detection
-    Programs {
+    /// Show installed programs (software categories)
+    Software {
         #[command(subcommand)]
-        action: Option<AllProgramAction>,
+        subcommand: Option<SoftwareSubcommand>,
     },
-
-    /// Show only installed editors
-    Editors {
-        #[command(subcommand)]
-        action: Option<EditorAction>,
-    },
-
-    /// Show only installed utilities
-    Utilities {
-        #[command(subcommand)]
-        action: Option<UtilityAction>,
-    },
-
-    /// Show only language package managers
-    LanguagePackageManagers {
-        #[command(subcommand)]
-        action: Option<LangPkgMgrAction>,
-    },
-
-    /// Show only OS package managers
-    OsPackageManagers {
-        #[command(subcommand)]
-        action: Option<OsPkgMgrAction>,
-    },
-
-    /// Show only TTS clients
-    TtsClients {
-        #[command(subcommand)]
-        action: Option<TtsClientAction>,
-    },
-
-    /// Show only terminal apps
-    TerminalApps {
-        #[command(subcommand)]
-        action: Option<TerminalAppAction>,
-    },
-
-    /// Show only headless audio players
-    AudioPlayers {
-        #[command(subcommand)]
-        action: Option<AudioAction>,
-    },
-
-    /// Show only AI agent/CLI tools
-    Agents {
-        #[command(subcommand)]
-        action: Option<AgentAction>,
-    },
-
-    /// Show only desktop notification helpers
-    NotificationHelpers,
 
     /// Show only system services (init system and service list)
     Services {
@@ -477,16 +497,26 @@ impl Commands {
             Commands::Repo { .. } => OutputFilter::Repo,
             Commands::Files { .. } => OutputFilter::Files,
             Commands::Docs { .. } => OutputFilter::Docs,
-            Commands::Programs { .. } => OutputFilter::Programs,
-            Commands::Editors { .. } => OutputFilter::Editors,
-            Commands::Utilities { .. } => OutputFilter::Utilities,
-            Commands::LanguagePackageManagers { .. } => OutputFilter::LanguagePackageManagers,
-            Commands::OsPackageManagers { .. } => OutputFilter::OsPackageManagers,
-            Commands::TtsClients { .. } => OutputFilter::TtsClients,
-            Commands::TerminalApps { .. } => OutputFilter::TerminalApps,
-            Commands::AudioPlayers { .. } => OutputFilter::HeadlessAudio,
-            Commands::Agents { .. } => OutputFilter::AiClients,
-            Commands::NotificationHelpers => OutputFilter::NotificationHelpers,
+            Commands::Software { subcommand } => match subcommand {
+                None => OutputFilter::Programs,
+                Some(SoftwareSubcommand::Editors { .. }) => OutputFilter::Editors,
+                Some(SoftwareSubcommand::Utilities { .. }) => OutputFilter::Utilities,
+                Some(SoftwareSubcommand::LanguagePackageManagers { .. }) => {
+                    OutputFilter::LanguagePackageManagers
+                }
+                Some(SoftwareSubcommand::OsPackageManagers { .. }) => {
+                    OutputFilter::OsPackageManagers
+                }
+                Some(SoftwareSubcommand::TtsClients { .. }) => OutputFilter::TtsClients,
+                Some(SoftwareSubcommand::TerminalApps { .. }) => OutputFilter::TerminalApps,
+                Some(SoftwareSubcommand::AudioPlayers { .. }) => OutputFilter::HeadlessAudio,
+                Some(SoftwareSubcommand::Agents { .. }) => OutputFilter::AiClients,
+                Some(SoftwareSubcommand::NotificationHelpers) => OutputFilter::NotificationHelpers,
+                Some(SoftwareSubcommand::TestRunners) => OutputFilter::TestRunners,
+                Some(SoftwareSubcommand::Install(_)) | Some(SoftwareSubcommand::InstallPlan(_)) => {
+                    OutputFilter::Programs
+                }
+            },
             Commands::Services { .. } => OutputFilter::Services,
             Commands::BlastRadius { .. } => OutputFilter::BlastRadius,
             Commands::Just { .. } => OutputFilter::Just,
@@ -495,18 +525,7 @@ impl Commands {
 
     /// Check if this is a programs-related command.
     pub fn is_programs_mode(&self) -> bool {
-        matches!(
-            self,
-            Commands::Programs { .. }
-                | Commands::Editors { .. }
-                | Commands::Utilities { .. }
-                | Commands::LanguagePackageManagers { .. }
-                | Commands::OsPackageManagers { .. }
-                | Commands::TtsClients { .. }
-                | Commands::TerminalApps { .. }
-                | Commands::AudioPlayers { .. }
-                | Commands::Agents { .. }
-        )
+        matches!(self, Commands::Software { .. })
     }
 
     /// Returns true if this command has a plain `install` action (not `install-plan`).
@@ -537,59 +556,107 @@ impl Commands {
     pub fn install_command_args(&self) -> Option<(InstallCommandKind, &InstallCommandArgs)> {
         use Commands::*;
         match self {
-            Programs {
-                action: Some(AllProgramAction::Install(args)),
+            Software {
+                subcommand: Some(SoftwareSubcommand::Install(args)),
             } => Some((InstallCommandKind::Install, args)),
-            Programs {
-                action: Some(AllProgramAction::InstallPlan(args)),
+            Software {
+                subcommand: Some(SoftwareSubcommand::InstallPlan(args)),
             } => Some((InstallCommandKind::InstallPlan, args)),
-            Editors {
-                action: Some(EditorAction::Install(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::Editors {
+                        action: Some(EditorAction::Install(args)),
+                    }),
             } => Some((InstallCommandKind::Install, args)),
-            Editors {
-                action: Some(EditorAction::InstallPlan(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::Editors {
+                        action: Some(EditorAction::InstallPlan(args)),
+                    }),
             } => Some((InstallCommandKind::InstallPlan, args)),
-            Utilities {
-                action: Some(UtilityAction::Install(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::Utilities {
+                        action: Some(UtilityAction::Install(args)),
+                    }),
             } => Some((InstallCommandKind::Install, args)),
-            Utilities {
-                action: Some(UtilityAction::InstallPlan(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::Utilities {
+                        action: Some(UtilityAction::InstallPlan(args)),
+                    }),
             } => Some((InstallCommandKind::InstallPlan, args)),
-            LanguagePackageManagers {
-                action: Some(LangPkgMgrAction::Install(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::LanguagePackageManagers {
+                        action: Some(LangPkgMgrAction::Install(args)),
+                    }),
             } => Some((InstallCommandKind::Install, args)),
-            LanguagePackageManagers {
-                action: Some(LangPkgMgrAction::InstallPlan(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::LanguagePackageManagers {
+                        action: Some(LangPkgMgrAction::InstallPlan(args)),
+                    }),
             } => Some((InstallCommandKind::InstallPlan, args)),
-            OsPackageManagers {
-                action: Some(OsPkgMgrAction::Install(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::OsPackageManagers {
+                        action: Some(OsPkgMgrAction::Install(args)),
+                    }),
             } => Some((InstallCommandKind::Install, args)),
-            OsPackageManagers {
-                action: Some(OsPkgMgrAction::InstallPlan(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::OsPackageManagers {
+                        action: Some(OsPkgMgrAction::InstallPlan(args)),
+                    }),
             } => Some((InstallCommandKind::InstallPlan, args)),
-            TtsClients {
-                action: Some(TtsClientAction::Install(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::TtsClients {
+                        action: Some(TtsClientAction::Install(args)),
+                    }),
             } => Some((InstallCommandKind::Install, args)),
-            TtsClients {
-                action: Some(TtsClientAction::InstallPlan(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::TtsClients {
+                        action: Some(TtsClientAction::InstallPlan(args)),
+                    }),
             } => Some((InstallCommandKind::InstallPlan, args)),
-            TerminalApps {
-                action: Some(TerminalAppAction::Install(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::TerminalApps {
+                        action: Some(TerminalAppAction::Install(args)),
+                    }),
             } => Some((InstallCommandKind::Install, args)),
-            TerminalApps {
-                action: Some(TerminalAppAction::InstallPlan(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::TerminalApps {
+                        action: Some(TerminalAppAction::InstallPlan(args)),
+                    }),
             } => Some((InstallCommandKind::InstallPlan, args)),
-            AudioPlayers {
-                action: Some(AudioAction::Install(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::AudioPlayers {
+                        action: Some(AudioAction::Install(args)),
+                    }),
             } => Some((InstallCommandKind::Install, args)),
-            AudioPlayers {
-                action: Some(AudioAction::InstallPlan(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::AudioPlayers {
+                        action: Some(AudioAction::InstallPlan(args)),
+                    }),
             } => Some((InstallCommandKind::InstallPlan, args)),
-            Agents {
-                action: Some(AgentAction::Install(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::Agents {
+                        action: Some(AgentAction::Install(args)),
+                    }),
             } => Some((InstallCommandKind::Install, args)),
-            Agents {
-                action: Some(AgentAction::InstallPlan(args)),
+            Software {
+                subcommand:
+                    Some(SoftwareSubcommand::Agents {
+                        action: Some(AgentAction::InstallPlan(args)),
+                    }),
             } => Some((InstallCommandKind::InstallPlan, args)),
             _ => None,
         }
@@ -683,7 +750,7 @@ impl Commands {
     pub fn to_repo_action(&self) -> Option<RepoAction> {
         match self {
             Commands::Repo { repo_subcommand } => Some(match repo_subcommand {
-                None => RepoAction::Name,
+                None => RepoAction::Default,
                 Some(RepoSubcommand::Structure {
                     filter,
                     latest_versions,
@@ -731,7 +798,10 @@ impl Commands {
                 Some(RepoSubcommand::Remote { remote }) => RepoAction::Remote {
                     remote: remote.clone(),
                 },
-                Some(RepoSubcommand::Deps {
+                Some(RepoSubcommand::Branches { refresh_remotes }) => RepoAction::Branches {
+                    refresh_remotes: *refresh_remotes,
+                },
+                Some(RepoSubcommand::PackageDependencies {
                     ui,
                     svg,
                     filter: sub_filter,
@@ -739,7 +809,7 @@ impl Commands {
                     package_area,
                     width,
                     orientation,
-                }) => RepoAction::Deps {
+                }) => RepoAction::PackageDependencies {
                     filter: sub_filter.clone(),
                     ui: *ui,
                     svg: *svg,
@@ -747,6 +817,17 @@ impl Commands {
                     package_area: package_area.clone(),
                     width: width.clone(),
                     orientation: orientation.map(|o| o.as_str().to_string()),
+                },
+                Some(RepoSubcommand::Dependencies {
+                    dependencies,
+                    dev_dependencies,
+                    peer_dependencies,
+                    optional_dependencies,
+                }) => RepoAction::Dependencies {
+                    dependencies: *dependencies,
+                    dev_dependencies: *dev_dependencies,
+                    peer_dependencies: *peer_dependencies,
+                    optional_dependencies: *optional_dependencies,
                 },
                 Some(RepoSubcommand::Packages {
                     filter: sub_filter,
@@ -943,6 +1024,41 @@ impl Commands {
                     verbose: false,
                 },
                 Some(RepoSubcommand::Name) => RepoAction::Name,
+                Some(RepoSubcommand::IsMonorepo { no_error }) => RepoAction::IsMonorepo {
+                    no_error: *no_error,
+                },
+                Some(RepoSubcommand::PackageCount) => RepoAction::PackageCount,
+                Some(RepoSubcommand::PackageManager { csv, list, md }) => {
+                    RepoAction::PackageManager {
+                        csv: *csv,
+                        list: *list,
+                        md: *md,
+                    }
+                }
+                Some(RepoSubcommand::Version {
+                    csv,
+                    list,
+                    md,
+                    all,
+                    package,
+                    package_area,
+                    no_error,
+                    on_error,
+                }) => RepoAction::Version {
+                    csv: *csv,
+                    list: *list,
+                    md: *md,
+                    all: *all,
+                    package: package.clone(),
+                    package_area: package_area.clone(),
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
+                },
+                Some(RepoSubcommand::TestRunner { csv, list, md }) => RepoAction::TestRunner {
+                    csv: *csv,
+                    list: *list,
+                    md: *md,
+                },
             }),
             _ => None,
         }
@@ -1070,7 +1186,7 @@ Commands:
     sniff audio-devices   Show audio devices
 
   Repository & Filesystem:
-    sniff repo            Show repository structure (use --help for all repo commands)
+    sniff repo            Show repository name (--json for the scope-complete aggregate; --help for all repo commands)
     sniff filesystem      Show full filesystem report
     sniff language        Show language detection
     sniff files           Show file associations
@@ -1078,12 +1194,18 @@ Commands:
     sniff blast-radius    Find docs affected by changed source files
 
   Programs:
-    sniff programs                        Show all installed programs
-    sniff programs install-plan <name>    Explain how a program would be installed
-    sniff editors                         Show editors (supports 'install' and 'install-plan')
-    sniff utilities                       Show utilities
-    sniff agents                          Show AI agent CLI tools
-    sniff notification-helpers            Show desktop notification helpers
+    sniff software                                      Show all installed programs
+    sniff software install-plan <name>                  Explain how a program would be installed
+    sniff software editors                              Show editors (supports 'install' and 'install-plan')
+    sniff software utilities                            Show utilities
+    sniff software agents                               Show AI agent CLI tools
+    sniff software notification-helpers                 Show desktop notification helpers
+    sniff software language-package-managers            Show language package managers
+    sniff software os-package-managers                  Show OS package managers
+    sniff software tts-clients                          Show TTS clients
+    sniff software terminal-apps                        Show terminal apps
+    sniff software audio-players                        Show headless audio players
+    sniff software test-runners                         Show test runners
 
   Services:
     sniff services        Show running services
@@ -1105,7 +1227,20 @@ Output modes:
 pub const REPO_AFTER_HELP: &str = "\
 Identity:
   sniff repo name                     Repository name (plain text)
-  sniff repo name -v                  Name + version + language or package count
+  sniff repo name -v                  Repository name only (verbose styling, no extra fields)
+  sniff repo -v                       Rich one-liner: name + version + language/package count
+  sniff repo is-monorepo              Monorepo label (e.g. `cargo`; `false` if not; exits non-zero when false)
+  sniff repo is-monorepo --json       { \"is_monorepo\": true, \"authority\": \"...\", \"orchestrators\": [...] }
+  sniff repo is-monorepo --no-error   Exit 0 while still printing `false` outside a monorepo
+  sniff repo package-count            Number of discovered packages (or { \"package-count\": N } with --json)
+  sniff repo package-count --json     { \"package-count\": 48 }
+  sniff repo package-manager          Package manager(s) for the current context
+  sniff repo version                  Declared version(s) for the current package/area/repo context
+  sniff repo version --json           { \"versions\": [ { \"version\": \"0.1.0\", \"packages\": [...], \"sources\": [...] } ] }
+  sniff repo version --all            All packages, regardless of CWD
+  sniff repo version --package <name> Scope to one package
+  sniff repo version --package-area <name>
+                                       Scope to one package area
 
 Structure:
   sniff repo structure                Show repository/monorepo structure
@@ -1146,8 +1281,8 @@ Languages:
   sniff repo language --json          Same, as { \"language\": \"Rust\" }
 
 Dependencies:
-  sniff repo deps                     Text dependency list
-  sniff repo deps --ui                Mermaid dependency diagram
+  sniff repo package-dependencies                     Text dependency list
+  sniff repo package-dependencies --ui                Mermaid dependency diagram
   sniff repo structure --latest-versions
                                       Check registries for updates
 ";
@@ -1328,30 +1463,30 @@ mod tests {
         }
 
         #[test]
-        fn repo_no_subcommand_is_name() {
+        fn repo_no_subcommand_is_default() {
             let cli = parse_args(&["repo"]).unwrap();
             let Some(cmd) = &cli.command else {
                 panic!("Expected Repo command")
             };
-            assert!(matches!(cmd.to_repo_action(), Some(RepoAction::Name)));
+            assert!(matches!(cmd.to_repo_action(), Some(RepoAction::Default)));
         }
 
         #[test]
         fn repo_subcommands_parse() {
-            let cli = parse_args(&["repo", "deps"]).unwrap();
+            let cli = parse_args(&["repo", "package-dependencies"]).unwrap();
             assert!(matches!(
                 cli.command,
                 Some(Commands::Repo {
-                    repo_subcommand: Some(RepoSubcommand::Deps { ui: false, .. }),
+                    repo_subcommand: Some(RepoSubcommand::PackageDependencies { ui: false, .. }),
                     ..
                 })
             ));
 
-            let cli = parse_args(&["repo", "deps", "--ui"]).unwrap();
+            let cli = parse_args(&["repo", "package-dependencies", "--ui"]).unwrap();
             assert!(matches!(
                 cli.command,
                 Some(Commands::Repo {
-                    repo_subcommand: Some(RepoSubcommand::Deps { ui: true, .. }),
+                    repo_subcommand: Some(RepoSubcommand::PackageDependencies { ui: true, .. }),
                     ..
                 })
             ));
@@ -1588,65 +1723,92 @@ mod tests {
         }
 
         #[test]
-        fn editors_install_no_name_parses() {
-            let cli = parse_args(&["editors", "install"]).unwrap();
-            if let Some(Commands::Editors {
-                action: Some(EditorAction::Install(args)),
+        fn software_editors_install_no_name_parses() {
+            let cli = parse_args(&["software", "editors", "install"]).unwrap();
+            if let Some(Commands::Software {
+                subcommand:
+                    Some(SoftwareSubcommand::Editors {
+                        action: Some(EditorAction::Install(args)),
+                    }),
             }) = cli.command
             {
                 assert!(args.program.is_none());
             } else {
-                panic!("Expected Editors install with no program");
+                panic!("Expected software editors install with no program");
             }
         }
 
         #[test]
-        fn editors_install_with_name_parses() {
-            let cli = parse_args(&["editors", "install", "vim"]).unwrap();
-            if let Some(Commands::Editors {
-                action: Some(EditorAction::Install(args)),
+        fn software_editors_install_with_name_parses() {
+            let cli = parse_args(&["software", "editors", "install", "vim"]).unwrap();
+            if let Some(Commands::Software {
+                subcommand:
+                    Some(SoftwareSubcommand::Editors {
+                        action: Some(EditorAction::Install(args)),
+                    }),
             }) = cli.command
             {
                 assert_eq!(args.program.as_deref(), Some("vim"));
             } else {
-                panic!("Expected Editors install with program name");
+                panic!("Expected software editors install with program name");
             }
         }
 
         #[test]
-        fn editors_without_action_parses() {
-            let cli = parse_args(&["editors"]).unwrap();
-            if let Some(Commands::Editors { action }) = cli.command {
+        fn software_editors_without_action_parses() {
+            let cli = parse_args(&["software", "editors"]).unwrap();
+            if let Some(Commands::Software {
+                subcommand: Some(SoftwareSubcommand::Editors { action }),
+            }) = cli.command
+            {
                 assert!(action.is_none());
             } else {
-                panic!("Expected Editors with no action");
+                panic!("Expected software editors with no action");
             }
         }
 
         #[test]
-        fn programs_install_no_name_parses() {
-            let cli = parse_args(&["programs", "install"]).unwrap();
-            if let Some(Commands::Programs {
-                action: Some(AllProgramAction::Install(args)),
+        fn software_install_no_name_parses() {
+            let cli = parse_args(&["software", "install"]).unwrap();
+            if let Some(Commands::Software {
+                subcommand: Some(SoftwareSubcommand::Install(args)),
             }) = cli.command
             {
                 assert!(args.program.is_none());
             } else {
-                panic!("Expected Programs install with no program");
+                panic!("Expected software install with no program");
             }
         }
 
         #[test]
-        fn programs_install_with_name_parses() {
-            let cli = parse_args(&["programs", "install", "nvim"]).unwrap();
-            if let Some(Commands::Programs {
-                action: Some(AllProgramAction::Install(args)),
+        fn software_install_with_name_parses() {
+            let cli = parse_args(&["software", "install", "nvim"]).unwrap();
+            if let Some(Commands::Software {
+                subcommand: Some(SoftwareSubcommand::Install(args)),
             }) = cli.command
             {
                 assert_eq!(args.program.as_deref(), Some("nvim"));
             } else {
-                panic!("Expected Programs install with program name");
+                panic!("Expected software install with program name");
             }
+        }
+
+        #[test]
+        fn old_top_level_programs_command_rejected() {
+            let result = parse_args(&["programs"]);
+            assert!(result.is_err(), "old top-level 'programs' must be rejected");
+        }
+
+        #[test]
+        fn old_top_level_editors_command_rejected() {
+            let result = parse_args(&["editors"]);
+            assert!(result.is_err(), "old top-level 'editors' must be rejected");
+        }
+
+        #[test]
+        fn old_top_level_agents_command_rejected() {
+            let result = parse_args(&["agents"]);
+            assert!(result.is_err(), "old top-level 'agents' must be rejected");
         }
     }
 
@@ -1673,8 +1835,15 @@ mod tests {
                 OutputFilter::Files
             );
             assert_eq!(
-                Commands::Programs { action: None }.to_output_filter(),
+                Commands::Software { subcommand: None }.to_output_filter(),
                 OutputFilter::Programs
+            );
+            assert_eq!(
+                Commands::Software {
+                    subcommand: Some(SoftwareSubcommand::Editors { action: None }),
+                }
+                .to_output_filter(),
+                OutputFilter::Editors
             );
             assert_eq!(
                 Commands::Services {
@@ -1687,7 +1856,12 @@ mod tests {
 
         #[test]
         fn programs_mode_accessors_work() {
-            let cmd = Commands::Programs { action: None };
+            let cmd = Commands::Software { subcommand: None };
+            assert!(cmd.is_programs_mode());
+
+            let cmd = Commands::Software {
+                subcommand: Some(SoftwareSubcommand::Editors { action: None }),
+            };
             assert!(cmd.is_programs_mode());
 
             let non_programs = Commands::Cpu;
@@ -1696,16 +1870,18 @@ mod tests {
 
         #[test]
         fn is_install_action_returns_true() {
-            let cmd = Commands::Editors {
-                action: Some(EditorAction::Install(InstallCommandArgs {
-                    program: None,
-                    ..Default::default()
-                })),
+            let cmd = Commands::Software {
+                subcommand: Some(SoftwareSubcommand::Editors {
+                    action: Some(EditorAction::Install(InstallCommandArgs {
+                        program: None,
+                        ..Default::default()
+                    })),
+                }),
             };
             assert!(cmd.is_install_action());
 
-            let cmd = Commands::Programs {
-                action: Some(AllProgramAction::Install(InstallCommandArgs {
+            let cmd = Commands::Software {
+                subcommand: Some(SoftwareSubcommand::Install(InstallCommandArgs {
                     program: Some("vim".to_string()),
                     ..Default::default()
                 })),
@@ -1715,7 +1891,9 @@ mod tests {
 
         #[test]
         fn is_install_action_returns_false() {
-            let cmd = Commands::Editors { action: None };
+            let cmd = Commands::Software {
+                subcommand: Some(SoftwareSubcommand::Editors { action: None }),
+            };
             assert!(!cmd.is_install_action());
 
             let cmd = Commands::Cpu;
@@ -1724,23 +1902,29 @@ mod tests {
 
         #[test]
         fn install_program_name_extracts_name() {
-            let cmd = Commands::Editors {
-                action: Some(EditorAction::Install(InstallCommandArgs {
-                    program: Some("vim".to_string()),
-                    ..Default::default()
-                })),
+            let cmd = Commands::Software {
+                subcommand: Some(SoftwareSubcommand::Editors {
+                    action: Some(EditorAction::Install(InstallCommandArgs {
+                        program: Some("vim".to_string()),
+                        ..Default::default()
+                    })),
+                }),
             };
             assert_eq!(cmd.install_program_name(), Some("vim"));
 
-            let cmd = Commands::Editors {
-                action: Some(EditorAction::Install(InstallCommandArgs {
-                    program: None,
-                    ..Default::default()
-                })),
+            let cmd = Commands::Software {
+                subcommand: Some(SoftwareSubcommand::Editors {
+                    action: Some(EditorAction::Install(InstallCommandArgs {
+                        program: None,
+                        ..Default::default()
+                    })),
+                }),
             };
             assert_eq!(cmd.install_program_name(), None);
 
-            let cmd = Commands::Editors { action: None };
+            let cmd = Commands::Software {
+                subcommand: Some(SoftwareSubcommand::Editors { action: None }),
+            };
             assert_eq!(cmd.install_program_name(), None);
         }
 
@@ -1767,9 +1951,9 @@ mod tests {
                 panic!("Expected Structure action");
             }
 
-            // Deps subcommand carries its own filter
+            // Package-dependencies subcommand carries its own filter.
             let cmd = Commands::Repo {
-                repo_subcommand: Some(RepoSubcommand::Deps {
+                repo_subcommand: Some(RepoSubcommand::PackageDependencies {
                     ui: true,
                     svg: false,
                     filter: vec!["sub-level".to_string()],
@@ -1779,11 +1963,11 @@ mod tests {
                     orientation: None,
                 }),
             };
-            if let Some(RepoAction::Deps { filter, ui, .. }) = cmd.to_repo_action() {
+            if let Some(RepoAction::PackageDependencies { filter, ui, .. }) = cmd.to_repo_action() {
                 assert_eq!(filter, vec!["sub-level".to_string()]);
                 assert!(ui);
             } else {
-                panic!("Expected Deps action");
+                panic!("Expected PackageDependencies action");
             }
 
             let cmd = Commands::Repo {
@@ -2218,9 +2402,17 @@ mod tests {
         }
 
         #[test]
-        fn to_repo_action_none_is_name() {
+        fn to_repo_action_none_is_default() {
             let cmd = Commands::Repo {
                 repo_subcommand: None,
+            };
+            assert!(matches!(cmd.to_repo_action(), Some(RepoAction::Default)));
+        }
+
+        #[test]
+        fn to_repo_action_name_is_name() {
+            let cmd = Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Name),
             };
             assert!(matches!(cmd.to_repo_action(), Some(RepoAction::Name)));
         }
@@ -2310,6 +2502,65 @@ mod tests {
                     assert!(!verbose);
                 }
                 _ => panic!("Expected Worktrees action"),
+            }
+        }
+
+        #[test]
+        fn to_repo_action_is_monorepo() {
+            let cmd = Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::IsMonorepo { no_error: true }),
+            };
+            match cmd.to_repo_action() {
+                Some(RepoAction::IsMonorepo { no_error }) => assert!(no_error),
+                _ => panic!("Expected IsMonorepo action with no_error"),
+            }
+
+            let cmd = Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::IsMonorepo { no_error: false }),
+            };
+            match cmd.to_repo_action() {
+                Some(RepoAction::IsMonorepo { no_error }) => assert!(!no_error),
+                _ => panic!("Expected IsMonorepo action without no_error"),
+            }
+        }
+
+        #[test]
+        fn to_repo_action_package_count() {
+            let cmd = Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::PackageCount),
+            };
+            assert!(matches!(
+                cmd.to_repo_action(),
+                Some(RepoAction::PackageCount)
+            ));
+        }
+
+        #[test]
+        fn to_repo_action_version() {
+            let cmd = Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Version {
+                    csv: false,
+                    list: false,
+                    md: false,
+                    all: false,
+                    package: Some("app".to_string()),
+                    package_area: None,
+                    no_error: true,
+                    on_error: Some("msg".to_string()),
+                }),
+            };
+            match cmd.to_repo_action() {
+                Some(RepoAction::Version {
+                    no_error,
+                    on_error,
+                    package,
+                    ..
+                }) => {
+                    assert!(no_error);
+                    assert_eq!(on_error, Some("msg".to_string()));
+                    assert_eq!(package, Some("app".to_string()));
+                }
+                _ => panic!("Expected Version action"),
             }
         }
     }
@@ -2487,10 +2738,14 @@ mod tests {
         use super::*;
 
         #[test]
-        fn editors_install_parses_with_dry_run_and_yes() {
-            let cli = parse_args(&["editors", "install", "vim", "--dry-run", "-y"]).unwrap();
-            if let Some(Commands::Editors {
-                action: Some(EditorAction::Install(args)),
+        fn software_editors_install_parses_with_dry_run_and_yes() {
+            let cli =
+                parse_args(&["software", "editors", "install", "vim", "--dry-run", "-y"]).unwrap();
+            if let Some(Commands::Software {
+                subcommand:
+                    Some(SoftwareSubcommand::Editors {
+                        action: Some(EditorAction::Install(args)),
+                    }),
             }) = cli.command
             {
                 assert_eq!(args.program.as_deref(), Some("vim"));
@@ -2500,13 +2755,13 @@ mod tests {
                 assert!(!args.force);
                 assert!(args.via.is_none());
             } else {
-                panic!("Expected Editors install with InstallCommandArgs");
+                panic!("Expected software editors install with InstallCommandArgs");
             }
         }
 
         #[test]
-        fn editors_install_plan_parses() {
-            let cli = parse_args(&["editors", "install-plan", "vim"]).unwrap();
+        fn software_editors_install_plan_parses() {
+            let cli = parse_args(&["software", "editors", "install-plan", "vim"]).unwrap();
             assert!(cli.command.as_ref().unwrap().is_install_plan_action());
             assert_eq!(
                 cli.command.as_ref().unwrap().install_program_name(),
@@ -2515,8 +2770,9 @@ mod tests {
         }
 
         #[test]
-        fn editors_install_via_and_no_sudo_parse() {
+        fn software_editors_install_via_and_no_sudo_parse() {
             let cli = parse_args(&[
+                "software",
                 "editors",
                 "install",
                 "vim",
@@ -2526,15 +2782,18 @@ mod tests {
                 "--force",
             ])
             .unwrap();
-            if let Some(Commands::Editors {
-                action: Some(EditorAction::Install(args)),
+            if let Some(Commands::Software {
+                subcommand:
+                    Some(SoftwareSubcommand::Editors {
+                        action: Some(EditorAction::Install(args)),
+                    }),
             }) = cli.command
             {
                 assert_eq!(args.via.as_deref(), Some("brew"));
                 assert!(args.no_sudo);
                 assert!(args.force);
             } else {
-                panic!("Expected editors install with via+no_sudo+force");
+                panic!("Expected software editors install with via+no_sudo+force");
             }
         }
     }

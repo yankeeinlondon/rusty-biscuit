@@ -236,7 +236,7 @@ let retina = graph.render(&RenderRequest { scale: 2, ..RenderRequest::default() 
 
 ### Why we don't need DOT-side tricks anymore
 
-Earlier iterations of `sniff repo deps --ui` worked around terminal blur by injecting `node [fontsize=48]` into the generated DOT source. The bigger fontsize grew layout-rs's SVG canvas so that the fixed `scale=2` rasterization happened to produce a PNG big enough to survive terminal downscaling.
+Earlier iterations of `sniff repo package-dependencies --ui` worked around terminal blur by injecting `node [fontsize=48]` into the generated DOT source. The bigger fontsize grew layout-rs's SVG canvas so that the fixed `scale=2` rasterization happened to produce a PNG big enough to survive terminal downscaling.
 
 With `target_width`-driven rendering that hack is unnecessary — the rasterizer renders at terminal pixel dimensions directly. `build_deps_dot` in `sniff/cli/src/output/filesystem/deps.rs` now emits DOT at `layout-rs`'s default `fontsize=14`, and sharpness is delivered by the rasterizer instead of by inflating the source SVG.
 

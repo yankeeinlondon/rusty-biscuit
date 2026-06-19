@@ -109,7 +109,7 @@ claudine compose @prompts/review.md review="review.md" count=3 draft=true
 
 All three commands share a wrapper-grade execution pipeline with full support for environment setup, system prompt resolution, harness detection, structured streaming, and handler-driven recovery.
 
-**Consistent Rendering.** `compose` and `inline-compose` go through one shared execution path (`execute_without_harness`) with one shared structured-stream helper (`run_structured_composition`) and one shared summary emitter (`emit_composition_summary`). Their stderr summary output is identical modulo four intentional inline-only differences: closure validation messages, file-write status, partial-body reports on interruption, and writability pre-checks. Deferred summary timing in inline-compose is the only reason those two flows diverge. The legacy (non-structured) path — reachable today only for Goose — emits the same stderr summary block as structured runs via `emit_minimal_composition_summary`, so Goose compositions are no longer JSONL-only silent.
+**Unified Harness Execution.** Every non-dry-run `compose` and `inline-compose` run flows through `run_harness_loop` with `HarnessPromptMode::Compose` or `HarnessPromptMode::Inline`. Documents without harness frontmatter yield the empty/bare plan; inline documents receive a single system-owned writability pre-check injected by `finalize_effective_plan`. The loop handles structured streaming, captured/non-structured fallback, inline closure, summary emission, and handler-driven recovery through one code path.
 
 Provider selection uses explicit flags (`--claude`, `--codex`, etc.), frontmatter hints, config favorites, or interactive chooser. Use `-i` for interactive sessions, `--exclude` to filter providers.
 

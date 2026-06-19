@@ -3,7 +3,7 @@ status: ready for planning and implementation
 reviewed: true
 ---
 
-# Spec: Rename `tui-chrome` to `biscuit-tui`
+# Spec: Rename `biscuit-tui` to `biscuit-tui`
 
 **Date:** 2026-06-05
 **Status:** Ready for planning and implementation
@@ -19,12 +19,12 @@ reviewed: true
 
 Rename the two crates in the `biscuit-tui/` package area so the package
 names match the directory/area name (a historical inconsistency where the
-crates were named `tui-chrome*` instead of `biscuit-tui*`):
+crates were named `biscuit-tui*` instead of `biscuit-tui*`):
 
 | Role | Current crate name | New crate name | Import path change |
 |------|--------------------|----------------|--------------------|
-| Library | `tui-chrome` | `biscuit-tui` | `tui_chrome::` → `biscuit_tui::` |
-| CLI | `tui-chrome-cli` | `biscuit-tui-cli` | n/a (no public lib) |
+| Library | `biscuit-tui` | `biscuit-tui` | `tui_chrome::` → `biscuit_tui::` |
+| CLI | `biscuit-tui-cli` | `biscuit-tui-cli` | n/a (no public lib) |
 
 **Unchanged on purpose:**
 
@@ -40,7 +40,7 @@ crates were named `tui-chrome*` instead of `biscuit-tui*`):
 > dependency table key is both the package lookup name and the Rust crate name
 > visible to the dependent target (with hyphens normalized to underscores).
 > Therefore the package rename requires changing each dependency key from
-> `tui-chrome` to `biscuit-tui`, and every `tui_chrome::…` Rust path to
+> `biscuit-tui` to `biscuit-tui`, and every `tui_chrome::…` Rust path to
 > `biscuit_tui::…`. The dependency `path` values do not change.
 
 ## Compatibility Decision
@@ -48,7 +48,7 @@ crates were named `tui-chrome*` instead of `biscuit-tui*`):
 This is a clean internal breaking rename:
 
 - Do not use Cargo's `package = "biscuit-tui"` syntax to retain a
-  `tui-chrome` dependency alias.
+  `biscuit-tui` dependency alias.
 - Do not add a compatibility crate or a `tui_chrome` re-export module.
 - Update all live workspace callers in the same change.
 
@@ -61,7 +61,7 @@ must update its dependency key and imports when it adopts this change.
 ## Success Criteria
 
 - `sniff repo packages --package-area biscuit-tui` reports
-  `biscuit-tui-cli, biscuit-tui` (no `tui-chrome*` remnants).
+  `biscuit-tui-cli, biscuit-tui` (no `biscuit-tui*` remnants).
 - `cargo metadata --no-deps` lists `biscuit-tui` and `biscuit-tui-cli`.
 - `just build`, `just test`, `just doctest`, and `just lint` pass in both
   `biscuit-tui/` and `claudine/` (the sole external workspace caller).
@@ -76,13 +76,13 @@ must update its dependency key and imports when it adopts this change.
 ### 1.1 Manifests
 
 - **`biscuit-tui/lib/Cargo.toml`**
-  - `name = "tui-chrome"` → `name = "biscuit-tui"`
+  - `name = "biscuit-tui"` → `name = "biscuit-tui"`
 - **`biscuit-tui/cli/Cargo.toml`**
-  - `name = "tui-chrome-cli"` → `name = "biscuit-tui-cli"`
-  - dependency `tui-chrome = { path = "../lib" }` →
+  - `name = "biscuit-tui-cli"` → `name = "biscuit-tui-cli"`
+  - dependency `biscuit-tui = { path = "../lib" }` →
     `biscuit-tui = { path = "../lib" }`
   - `[[bin]] name = "question"` — **unchanged**
-  - benchmark opt-out `reason` strings mention "tui-chrome" — update prose.
+  - benchmark opt-out `reason` strings mention "biscuit-tui" — update prose.
 
 ### 1.2 Rust source — import path `tui_chrome` → `biscuit_tui`
 
@@ -96,7 +96,7 @@ All `use tui_chrome::…`, qualified paths, and intra-doc links.
   `commands/input_table/columns.rs`, `commands/input_table/tests.rs`.
 - **CLI tests (`biscuit-tui/cli/tests/`):** `choose_cli.rs`,
   `common/pty.rs`, `completions_shell.rs` (doc-comment
-  `cargo test -p tui-chrome-cli` → `-p biscuit-tui-cli`; the `question`
+  `cargo test -p biscuit-tui-cli` → `-p biscuit-tui-cli`; the `question`
   binary references stay).
 - **Library doctests/module docs (`biscuit-tui/lib/src/`):** the `///`
   and `//!` examples in `prelude.rs`, `components/*.rs`,
@@ -112,10 +112,10 @@ live Rust reference, including test modules and doctests added after this spec.
 
 ### 1.3 `biscuit-tui/justfile`
 
-- `LIBRARY := "tui-chrome"` → `"biscuit-tui"`
-- `CLI := "tui-chrome-cli"` → `"biscuit-tui-cli"`
-- Echo/label strings: `"tui-chrome Library & CLI…"`, `"tui-chrome Library"`,
-  `"tui-chrome CLI"`, install label `"tui-chrome"`, docs echo. The
+- `LIBRARY := "biscuit-tui"` → `"biscuit-tui"`
+- `CLI := "biscuit-tui-cli"` → `"biscuit-tui-cli"`
+- Echo/label strings: `"biscuit-tui Library & CLI…"`, `"biscuit-tui Library"`,
+  `"biscuit-tui CLI"`, install label `"biscuit-tui"`, docs echo. The
   `install` recipe's binary arg `"question"` stays.
 
 ### 1.4 Area docs
@@ -125,7 +125,7 @@ live Rust reference, including test modules and doctests added after this spec.
 - `biscuit-tui/docs/cli-reference.md`
 - `biscuit-tui/docs/components/*.md` (index, choose_one, choose_many,
   frame_chrome, input_table, text_input, text_area_input)
-- `biscuit-tui/docs/theming.md` — includes `https://docs.rs/tui-chrome/latest/tui_chrome/…`
+- `biscuit-tui/docs/theming.md` — includes `https://docs.rs/biscuit-tui/latest/tui_chrome/…`
   URLs → `https://docs.rs/biscuit-tui/latest/biscuit_tui/…`
 - `biscuit-tui/docs/dependencies.md` (if it names the crate)
 
@@ -135,13 +135,13 @@ live Rust reference, including test modules and doctests added after this spec.
 
 **`claudine` is the only external workspace member that depends on the
 library.** This is based on the current manifest scan: the only
-`Cargo.toml` files referencing `tui-chrome` are the two in-area manifests and
+`Cargo.toml` files referencing `biscuit-tui` are the two in-area manifests and
 `claudine/cli/Cargo.toml`. Re-run that scan during implementation rather than
 treating this statement as permanently exhaustive.
 
 ### 2.1 `claudine/cli/Cargo.toml`
 
-- `tui-chrome = { path = "../../biscuit-tui/lib" }` →
+- `biscuit-tui = { path = "../../biscuit-tui/lib" }` →
   `biscuit-tui = { path = "../../biscuit-tui/lib" }`
 - *(Unrelated, do not touch as part of this rename:* claudine/cli pins
   `ratatui = "0.30"` while the library uses `0.29` — out of scope.)
@@ -150,20 +150,20 @@ treating this statement as permanently exhaustive.
 
 - `commands/schema_interactive.rs` — `use tui_chrome::prelude::*;`
 - `commands/wrap/selection_ui.rs` — two `use tui_chrome::…` lines, the
-  `//!` module-doc mentions of "tui-chrome", and intra-doc links
+  `//!` module-doc mentions of "biscuit-tui", and intra-doc links
   `[`tui_chrome::ChooseOne`]`, `[`tui_chrome::InputTable`]`,
   `[`tui_chrome::run_standalone`]`.
 
 ### 2.3 `claudine/cli/tests/`
 
-- `level2_schema_prompt_pty.rs:187` — comment mentions "tui-chrome"
+- `level2_schema_prompt_pty.rs:187` — comment mentions "biscuit-tui"
   rendering path (prose only).
 
 ### 2.4 claudine docs (current, non-historical)
 
 - `claudine/cli/README.md`
 - `claudine/docs/pipeline.md`, `claudine/docs/topics/execution-flow.md`,
-  `claudine/docs/topics/composition.md` — update any `tui-chrome`/`tui_chrome`
+  `claudine/docs/topics/composition.md` — update any `biscuit-tui`/`tui_chrome`
   prose references.
 - Active or unscheduled implementation documents that must remain executable:
   - `claudine/features/2026-05-25-prompt-reporting-encapsulation/plan.md`
@@ -178,19 +178,19 @@ treating this statement as permanently exhaustive.
 
 ## Part 3 — Repo-wide config & docs
 
-- **`release-plz.toml`** — two `name = "tui-chrome"` / `name = "tui-chrome-cli"`
+- **`release-plz.toml`** — two `name = "biscuit-tui"` / `name = "biscuit-tui-cli"`
   entries (these gate publish exclusion) → rename both.
-- **`docs/dependencies.md`** (root) — `tui-chrome` / `tui-chrome-cli`
+- **`docs/dependencies.md`** (root) — `biscuit-tui` / `biscuit-tui-cli`
   entries and the `_Interactive prompt CLI…_` description.
 - **`docs/topics/ci-cd.md`** — "No release for excluded packages"
-  list names `tui-chrome`, `tui-chrome-cli`.
+  list names `biscuit-tui`, `biscuit-tui-cli`.
 - **`.claude/skills/biscuit-tui/SKILL.md`** — crate table
-  (`tui-chrome` / `tui-chrome-cli`), the `description:` frontmatter,
+  (`biscuit-tui` / `biscuit-tui-cli`), the `description:` frontmatter,
   prose, and all `use tui_chrome::…` examples. This file does not currently
   use a `hash:` frontmatter property, so do not introduce one as part of this
   rename.
 - **`features/2026-05-24-testing-best-practices/plan.md`** — update the active
-  package inventory entry from `tui-chrome-cli` to `biscuit-tui-cli`.
+  package inventory entry from `biscuit-tui-cli` to `biscuit-tui-cli`.
 - **Root `justfile`** — `areas` list already uses `biscuit-tui` (the area
   name); **no change needed**.
 - **Root `Cargo.toml`** — members are path-based (`"biscuit-tui/lib"`,
@@ -211,7 +211,7 @@ left as written:
 - `biscuit-tui/reviews/**`
 - `claudine/features/_completed/**`
 - `biscuit-terminal/features/_completed/**` (mentions
-  `cargo test -p tui-chrome-cli` in a completed plan)
+  `cargo test -p biscuit-tui-cli` in a completed plan)
 - Review and implementation records for the testing-best-practices feature,
   including `features/2026-05-24-testing-best-practices/review-*.md`; these
   record package names and commands that existed when the review ran.
@@ -230,7 +230,7 @@ Active and unscheduled plans are not historical records and are in scope.
 
 1. Rename `name =` in both in-area `Cargo.toml`s + the in-area path dep.
 2. Update `claudine/cli/Cargo.toml` path dep.
-3. Sweep `tui_chrome` → `biscuit_tui` and `tui-chrome` → `biscuit-tui`
+3. Sweep `tui_chrome` → `biscuit_tui` and `biscuit-tui` → `biscuit-tui`
    across live `.rs` in `biscuit-tui/` and `claudine/cli/`
    (leave the `question` binary name and `-p` flags pointing at the right
    crate name).
@@ -251,7 +251,7 @@ cargo metadata --no-deps --format-version 1 \
   | rg '^(biscuit-tui|biscuit-tui-cli)$'
 sniff repo packages --package-area biscuit-tui --list
 
-rg -n --hidden 'tui-chrome|tui_chrome' . \
+rg -n --hidden 'biscuit-tui|tui_chrome' . \
   -g '!target/**' \
   -g '!.git/**' \
   -g '!**/features/_completed/**' \
@@ -285,10 +285,10 @@ Do not run `cargo fmt` as part of this rename.
 - **Doctests are compiled** — missing a `tui_chrome` in a `///`/`//!`
   example surfaces as a doctest failure, not a silent skip. Sweep lib
   source thoroughly.
-- **Two literal forms** — `tui-chrome` (manifests, justfile, prose, docs.rs
+- **Two literal forms** — `biscuit-tui` (manifests, justfile, prose, docs.rs
   URLs) and `tui_chrome` (Rust paths). Grep for both.
-- **`-p` flags** — any `cargo … -p tui-chrome-cli` in test docs/CI must
-  point at `biscuit-tui-cli`; any `-p tui-chrome` → `biscuit-tui`.
+- **`-p` flags** — any `cargo … -p biscuit-tui-cli` in test docs/CI must
+  point at `biscuit-tui-cli`; any `-p biscuit-tui` → `biscuit-tui`.
 - **Cargo target cache** — stale artifacts may still contain the old name, so
   searches must exclude `target/**`; metadata and clean compilation are the
   authority.

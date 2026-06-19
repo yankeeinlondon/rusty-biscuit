@@ -45,11 +45,27 @@ pub fn run(branch: &str, stay: bool) -> Result<(), WorktreeError> {
     );
     eprintln!("{}", Prose::new(msg).render(&terminal));
 
+    if let Some(commit) = &result.reused_branch_at {
+        let notice = build_reuse_notice(&result.branch, commit);
+        eprintln!("{}", Prose::new(notice).render(&terminal));
+    }
+
     if !stay {
         println!("cd:{}", result.target_cwd.display());
     }
 
     Ok(())
+}
+
+/// Notice shown when `create` re-attached a pre-existing branch instead of
+/// forking a fresh one. Surfaces the commit so a stale branch is not reused
+/// silently.
+fn build_reuse_notice(branch: &str, commit: &str) -> String {
+    format!(
+        "<yellow><b>Note:</b></yellow> branch <bold>{branch}</bold> already existed and was \
+        reused at <dim>{commit}</dim> — <b>not</b> forked from your current branch.\n  \
+        <dim>Delete it first (<i>git branch -d {branch}</i>) if you wanted a fresh fork.</dim>"
+    )
 }
 
 fn render_invalid_format_error(
@@ -161,5 +177,18 @@ fn map_inquire_err(e: InquireError) -> WorktreeError {
             WorktreeError::Cancelled
         }
         e => WorktreeError::Io(std::io::Error::other(e.to_string())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reuse_notice_names_branch_commit_and_flags_no_fork() {
+        let msg = build_reuse_notice("w-cli-heretic", "d4ea98a");
+        assert!(msg.contains("w-cli-heretic"));
+        assert!(msg.contains("d4ea98a"));
+        assert!(msg.contains("not"));
     }
 }

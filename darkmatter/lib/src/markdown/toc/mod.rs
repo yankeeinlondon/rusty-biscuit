@@ -19,8 +19,10 @@
 //! assert_eq!(toc.title, Some("Introduction".to_string()));
 //! ```
 
+mod tree;
 mod types;
 
+pub use tree::TocTree;
 pub use types::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode, PreludeNode};
 
 use crate::markdown::Markdown;

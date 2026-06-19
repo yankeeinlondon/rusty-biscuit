@@ -1,6 +1,6 @@
 //! Stacked visual inspection of darkmatter's render-tree components.
 //!
-//! `YamlBlock` is the darkmatter component on the render-tree architecture.
+//! `CodeBlock::yaml` is the darkmatter component on the render-tree architecture.
 //! This example renders it under three layout configurations and prints each
 //! one two ways, one after the other, with its layout settings labeled:
 //!
@@ -10,7 +10,7 @@
 //!
 //! Margins, alignment, and `max_width` are per-component `Layout` settings that
 //! both paths honor. Page background is a `DarkmatterPage`-level concern, not a
-//! property the `YamlBlock` component carries, so it is labeled N/A here.
+//! property the `CodeBlock` component carries, so it is labeled N/A here.
 //!
 //! For the biscuit-terminal components (Section, List, TwoColumn, Progress,
 //! Table, BlockQuote) see `cargo run -p biscuit-terminal --example
@@ -22,13 +22,17 @@
 //! cargo run -p darkmatter --example render_tree_parity
 //! ```
 
+// Whitebox: wires the deprecated `TerminalCodeRenderer` adapter directly to
+// render through the render-tree code path.
+#![allow(deprecated)]
+
 use std::rc::Rc;
 
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Layout, Length, TargetValue};
-use darkmatter::markdown::YamlBlock;
+use darkmatter::markdown::CodeBlock;
 use darkmatter::markdown::render_tree::TerminalCodeRenderer;
 use renderable::tree::{RenderNode, RenderStrictness};
 
@@ -76,7 +80,7 @@ fn main() {
 fn show(variant: usize, settings: &str, layout: Layout) {
     let term = Terminal::new_optimistic(WIDTH as u32);
 
-    let mut block = YamlBlock::new(SAMPLE).expect("sample YAML is valid");
+    let mut block = CodeBlock::yaml(SAMPLE);
     *block.layout_mut() = layout;
 
     let bespoke = block.render(&term);
@@ -85,7 +89,7 @@ fn show(variant: usize, settings: &str, layout: Layout) {
         None => "<no tree projection>".to_string(),
     };
 
-    print_header(&format!("YamlBlock · variant {variant}"));
+    print_header(&format!("CodeBlock::yaml · variant {variant}"));
     print_settings(settings);
     print_label("BESPOKE");
     println!("{bespoke}");

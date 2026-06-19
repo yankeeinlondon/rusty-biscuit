@@ -64,6 +64,14 @@ pub struct TerminalRenderContext {
     pub page_text_color: Option<(u8, u8, u8)>,
     /// The detected terminal background color, when available.
     pub page_background_color: Option<(u8, u8, u8)>,
+    /// Theme-resolved foreground for inline code spans, when supplied by the
+    /// caller. Set by the darkmatter terminal entry point from the prose theme;
+    /// `None` for callers that build the context directly.
+    pub inline_code_color: Option<(u8, u8, u8)>,
+    /// Theme-resolved background for inline code spans, when supplied by the
+    /// caller. When set, inline code renders on this band instead of
+    /// reverse-video; `None` falls back to a dim run.
+    pub inline_code_background: Option<(u8, u8, u8)>,
     /// Whether the terminal renders OSC8 hyperlinks.
     pub hyperlinks: bool,
     /// The terminal image-protocol support level.
@@ -169,9 +177,11 @@ impl TerminalRenderContext {
         Self {
             width,
             color_depth: term.color_depth,
-            color_mode: term.color_mode.clone(),
+            color_mode: term.color_mode,
             page_text_color: term.text_color.map(|c| (c.r, c.g, c.b)),
             page_background_color: term.background_color.map(|c| (c.r, c.g, c.b)),
+            inline_code_color: None,
+            inline_code_background: None,
             hyperlinks: term.osc_link_support,
             image_support: term.image_support.clone(),
             supports_unicode: term.supports_unicode,

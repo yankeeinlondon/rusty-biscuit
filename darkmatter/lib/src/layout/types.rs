@@ -47,11 +47,13 @@ pub enum PageComponent {
     Hyperlinks,
     /// Horizontal rules.
     Hr,
+    /// Disclosure blocks.
+    Disclosure,
 }
 
 impl PageComponent {
     /// All page-component variants in canonical order.
-    pub const ALL: [PageComponent; 9] = [
+    pub const ALL: [PageComponent; 10] = [
         PageComponent::Images,
         PageComponent::BlockQuotes,
         PageComponent::Tables,
@@ -61,6 +63,7 @@ impl PageComponent {
         PageComponent::Li,
         PageComponent::Hyperlinks,
         PageComponent::Hr,
+        PageComponent::Disclosure,
     ];
 }
 
@@ -75,6 +78,6 @@ mod tests {
 
     #[test]
     fn page_component_all_covers_every_variant() {
-        assert_eq!(PageComponent::ALL.len(), 9);
+        assert_eq!(PageComponent::ALL.len(), 10);
     }
 }
