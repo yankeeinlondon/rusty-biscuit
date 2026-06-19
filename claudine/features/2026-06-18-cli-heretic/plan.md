@@ -6,6 +6,98 @@ start_phase: 1
 yolo: "true"
 packages:
   - claudine-cli
+source_code:
+  - claudine/cli/src/commands/compose/mod.rs
+  - claudine/cli/src/commands/compose/prep.rs
+  - claudine/cli/src/commands/compose/tests.rs
+  - claudine/cli/src/commands/config_tui/tabs/messenger/input.rs
+  - claudine/cli/src/commands/config_tui/tabs/messenger/mod.rs
+  - claudine/cli/src/commands/config_tui/tabs/messenger/modal.rs
+  - claudine/cli/src/commands/config_tui/tabs/messenger/render.rs
+  - claudine/cli/src/commands/config_tui/tabs/messenger/tests.rs
+  - claudine/cli/src/commands/wrap/composition/mod.rs
+  - claudine/cli/src/commands/wrap/composition/tests.rs
+  - claudine/cli/src/commands/wrap/env/mod.rs
+  - claudine/cli/src/commands/wrap/env/package_context.rs
+  - claudine/cli/src/commands/wrap/env/sanitize.rs
+  - claudine/cli/src/commands/wrap/env/tests.rs
+  - claudine/cli/src/commands/wrap/exec/exit.rs
+  - claudine/cli/src/commands/wrap/exec/mod.rs
+  - claudine/cli/src/commands/wrap/exec/watchdog/breach.rs
+  - claudine/cli/src/commands/wrap/exec/watchdog/evaluate.rs
+  - claudine/cli/src/commands/wrap/exec/watchdog/mod.rs
+  - claudine/cli/src/commands/wrap/exec/watchdog/spawn.rs
+  - claudine/cli/src/commands/wrap/exec/watchdog/tests/breach_messages.rs
+  - claudine/cli/src/commands/wrap/exec/watchdog/tests/opencode.rs
+  - claudine/cli/src/commands/wrap/exec/watchdog/tests/timeout_evaluation.rs
+  - claudine/cli/src/commands/wrap/exec/wiring/mod.rs
+  - claudine/cli/src/commands/wrap/exec/wiring/tests.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/event_sink.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/mod.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/provider_extension.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/render_event.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/tests/dispatch_and_recording.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/tests/golden_stderr.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/tests/provider_extension_and_opencode.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/tests/render_basics.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/tests/sections_and_output.rs
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/src/commands/wrap/profile/apply.rs
+  - claudine/cli/src/commands/wrap/profile/mod.rs
+  - claudine/cli/src/commands/wrap/profile/resolve.rs
+  - claudine/cli/src/commands/wrap/profile/tests/apply_output_format.rs
+  - claudine/cli/src/commands/wrap/profile/tests/apply_yolo.rs
+  - claudine/cli/src/commands/wrap/profile/tests/native_output.rs
+  - claudine/cli/src/commands/wrap/profile/tests/positional.rs
+  - claudine/cli/src/commands/wrap/sequence/iterate.rs
+  - claudine/cli/src/commands/wrap/sequence/mod.rs
+  - claudine/cli/src/commands/wrap/sequence/report.rs
+  - claudine/cli/src/commands/wrap/sequence/tests.rs
+  - claudine/cli/src/commands/wrap/tests.rs
+  - claudine/cli/src/commands/wrap/wrapper_mcp.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
+  - claudine/cli/src/perf/mod.rs
+  - claudine/cli/src/perf/render.rs
+  - claudine/cli/src/perf/report.rs
+  - claudine/cli/src/perf/tests/bootstrap.rs
+  - claudine/cli/src/perf/tests/perf_tree.rs
+  - claudine/cli/src/perf/tests/report.rs
+  - claudine/cli/src/perf/tree.rs
+  - claudine/cli/tests/common/mod.rs
+  - claudine/cli/tests/common/pty.rs
+  - claudine/cli/tests/common/wrap.rs
+  - claudine/cli/tests/level2_context_capture.rs
+  - claudine/cli/tests/level2_dry_run_metadata_capture.rs
+  - claudine/cli/tests/level2_dry_run_pty.rs
+  - claudine/cli/tests/level2_inline_compose_mismatch_capture.rs
+  - claudine/cli/tests/level2_schema_prompt_pty.rs
+  - claudine/cli/tests/level2_sequence_overlay_pty.rs
+  - claudine/cli/tests/sequence_cli.rs
+  - claudine/cli/tests/sequence_magic_reference.rs
+  - claudine/cli/tests/sequence_prompt_property.rs
+  - claudine/cli/tests/sequence_schema.rs
+  - claudine/cli/tests/snapshots/wrap_basics__help_lists_wrapper_subcommands.snap
+  - claudine/cli/tests/snapshots/wrap_basics__wrapper_help_includes_expected_flags.snap
+  - claudine/cli/tests/snapshots/wrap_basics__wrapper_reports_removed_sensitive_env_names.snap
+  - claudine/cli/tests/wrap_basics.rs
+  - claudine/cli/tests/wrap_compose_agent.rs
+  - claudine/cli/tests/wrap_compose_exec.rs
+  - claudine/cli/tests/wrap_compose_preflight.rs
+  - claudine/cli/tests/wrap_compose_validation.rs
+  - claudine/cli/tests/wrap_inline_compose.rs
+  - claudine/cli/tests/wrap_inline_compose_interactive.rs
+  - claudine/cli/tests/wrap_opencode.rs
+  - claudine/cli/tests/wrap_opencode_models.rs
+  - claudine/cli/tests/wrap_perf.rs
+  - claudine/cli/tests/wrap_provider_flags.rs
+  - claudine/cli/tests/wrap_sequence_composition.rs
+  - claudine/cli/tests/wrap_sigint.rs
+  - claudine/cli/tests/wrap_structured_stream.rs
+  - claudine/cli/tests/wrap_watchdog_timeout.rs
+documentation:
+  - claudine/features/2026-06-18-cli-heretic/baseline/phase1-baseline-high-risk.txt
+  - claudine/features/2026-06-18-cli-heretic/baseline/phase1-baseline-repo-high-risk.txt
+  - claudine/features/2026-06-18-cli-heretic/plan.md
 source_files_during_phase_1:
   - claudine/cli/src/commands/compose/mod.rs
   - claudine/cli/src/commands/compose/tests.rs
@@ -109,6 +201,36 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
 packages_during_phase_3:
+  - claudine-cli
+source_files_during_phase_4:
+  - claudine/cli/src/commands/compose/mod.rs
+  - claudine/cli/src/commands/compose/prep.rs
+  - claudine/cli/src/commands/compose/tests.rs
+  - claudine/cli/src/commands/wrap/composition/mod.rs
+  - claudine/cli/src/commands/wrap/env/mod.rs
+  - claudine/cli/src/commands/wrap/exec/exit.rs
+  - claudine/cli/src/commands/wrap/exec/mod.rs
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/src/commands/wrap/sequence/mod.rs
+  - claudine/cli/src/commands/wrap/sequence/iterate.rs
+  - claudine/cli/src/commands/wrap/sequence/report.rs
+  - claudine/cli/src/commands/wrap/tests.rs
+  - claudine/cli/src/commands/wrap/wrapper_mcp.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
+docs_updated_during_phase_4:
+  - claudine/features/2026-06-18-cli-heretic/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+packages_during_phase_4:
+  - claudine-cli
+source_files_during_phase_5:
+  - claudine/cli/tests/level2_context_capture.rs
+  - claudine/cli/tests/level2_inline_compose_mismatch_capture.rs
+docs_updated_during_phase_5:
+  - claudine/features/2026-06-18-cli-heretic/plan.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+packages_during_phase_5:
   - claudine-cli
 ---
 
@@ -216,20 +338,20 @@ Decompose the highest-risk orchestration functions into named sequential stages.
 This is the most behavior-sensitive work and should land after test extraction
 and wide-surface moves have reduced file size pressure.
 
-- [ ] Decompose `wrap/composition/mod.rs::execute_composition_request_inner` into stages for target resolution, header emission, prepare, dispatch, and outcome assembly under `wrap/composition/`.
-- [ ] Keep `execute_composition_request_inner` as a readable orchestrator and verify dry-run, prepare, dispatch, and schema-validation behavior remains unchanged.
-- [ ] Decompose `wrap/mod.rs::run_provider_wrapper_inner` by moving startup detection, MCP bootstrap, environment assembly, spawn/stream handling, and exit handling into existing `wrap/exec/`, `wrap/env.rs`, `repo_home`, and overlay modules.
-- [ ] Verify provider wrapper CLI output, exit codes, MCP injection behavior, timeout behavior, and stream rendering match the baseline.
-- [ ] Decompose `wrap/sequence.rs::execute_sequence` into child modules for per-step iteration, result/reporting assembly, and Phase-1c schema behavior.
-- [ ] Verify fail-fast propagation, shared shell approval cache, schema aggregation, magic references, and step timeout behavior remain unchanged.
-- [ ] Decompose `wrap/harness_orch.rs` into modules for loop control, attempt execution, prompt materialization, and launch building.
-- [ ] Verify `run_harness_loop`, `execute_harness_attempt`, and `materialize_harness_prompt` behavior with existing harness and composition tests.
-- [ ] Decompose `commands/compose.rs` so `run_compose_inner` and `run_inline_compose_inner` share extracted prepare/loop scaffolding while each entrypoint remains thin.
-- [ ] Verify compose and inline-compose output, file mutation behavior, `last_updated` handling, and exit codes match the baseline.
-- [ ] Extract Kimi wire-mode protocol code from `wrap/exec/wiring.rs` into `wrap/exec/wire/` modules for session lifecycle, request dispatch, `WireWriter`, and exit handling.
-- [ ] Preserve the `cfg(unix)` and `cfg(not(unix))` `install_sigint_forwarder` arms verbatim when relocating wiring code.
-- [ ] Before and after the wiring move, grep the target files for `cfg(` and confirm every cross-OS branch still exists.
-- [ ] Run `hug god-files claudine/cli --high-risk --plain` after each mega-function file and confirm each drops below 1000 effective SLOC.
+- [x] Decompose `wrap/composition/mod.rs::execute_composition_request_inner` into stages for target resolution, header emission, prepare, dispatch, and outcome assembly under `wrap/composition/`.
+- [x] Keep `execute_composition_request_inner` as a readable orchestrator and verify dry-run, prepare, dispatch, and schema-validation behavior remains unchanged.
+- [x] Decompose `wrap/mod.rs::run_provider_wrapper_inner` by moving startup detection, MCP bootstrap, environment assembly, spawn/stream handling, and exit handling into existing `wrap/exec/`, `wrap/env.rs`, `repo_home`, and overlay modules.
+- [x] Verify provider wrapper CLI output, exit codes, MCP injection behavior, timeout behavior, and stream rendering match the baseline.
+- [x] Decompose `wrap/sequence.rs::execute_sequence` into child modules for per-step iteration, result/reporting assembly, and Phase-1c schema behavior.
+- [x] Verify fail-fast propagation, shared shell approval cache, schema aggregation, magic references, and step timeout behavior remain unchanged.
+- [x] Decompose `wrap/harness_orch.rs` into modules for loop control, attempt execution, prompt materialization, and launch building.
+- [x] Verify `run_harness_loop`, `execute_harness_attempt`, and `materialize_harness_prompt` behavior with existing harness and composition tests.
+- [x] Decompose `commands/compose.rs` so `run_compose_inner` and `run_inline_compose_inner` share extracted prepare/loop scaffolding while each entrypoint remains thin.
+- [x] Verify compose and inline-compose output, file mutation behavior, `last_updated` handling, and exit codes match the baseline.
+- [x] Extract Kimi wire-mode protocol code from `wrap/exec/wiring.rs` into `wrap/exec/wire/` modules for session lifecycle, request dispatch, `WireWriter`, and exit handling.
+- [x] Preserve the `cfg(unix)` and `cfg(not(unix))` `install_sigint_forwarder` arms verbatim when relocating wiring code.
+- [x] Before and after the wiring move, grep the target files for `cfg(` and confirm every cross-OS branch still exists.
+- [x] Run `hug god-files claudine/cli --high-risk --plain` after each mega-function file and confirm each drops below 1000 effective SLOC.
 
 **Parallelizable:** limited. `commands/compose.rs` can proceed separately from
 `wrap/harness_orch.rs`; the remaining `wrap/` pipeline files should be
@@ -248,18 +370,18 @@ all hold. Documentation changes are only required if implementation discovers a
 real workflow or architecture update; this refactor should not change public
 behavior.
 
-- [ ] Run `hug god-files claudine/cli --high-risk --plain` and confirm it reports zero files.
-- [ ] Run `hug god-files claudine/cli --plain` and confirm no newly-created file is in the high-risk band.
-- [ ] Compare final high-risk output against the Phase 1 baseline and confirm all original 15 files are below 1000 effective SLOC.
-- [ ] Run `just build` and confirm `claudine-cli` compiles.
-- [ ] Run `just lint` and confirm no new lint failures.
-- [ ] Run `just test-cli` and confirm the CLI suite is green.
-- [ ] Run the relevant `just test-l2` filters for PTY-touched files and confirm PTY behavior is green.
-- [ ] Run `just all` as the final repository gate if time and machine constraints allow; record any pre-existing unrelated failures separately.
-- [ ] Verify no `cargo fmt` / `rustfmt` write-mode was run and the diff is relocation plus module wiring rather than broad formatting churn.
-- [ ] Verify no public `claudine-cli` command, flag, output format, exit code, timeout semantic, provider wiring behavior, or stream-rendering behavior changed.
-- [ ] Verify no changes reached into the `claudine` library or `claudine-contract` except for unavoidable compile fallout; if any did, document why and review scope.
-- [ ] Update README/topic docs, `.claude/skills/`, or this feature documentation only if the refactor changed architecture, workflows, or public behavior.
+- [x] Run `hug god-files claudine/cli --high-risk --plain` and confirm it reports zero files.
+- [x] Run `hug god-files claudine/cli --plain` and confirm no newly-created file is in the high-risk band.
+- [x] Compare final high-risk output against the Phase 1 baseline and confirm all original 15 files are below 1000 effective SLOC.
+- [x] Run `just build` and confirm `claudine-cli` compiles.
+- [x] Run `just lint` and confirm no new lint failures.
+- [x] Run `just test-cli` and confirm the CLI suite is green.
+- [x] Run the relevant `just test-l2` filters for PTY-touched files and confirm PTY behavior is green.
+- [x] Run `just all` as the final repository gate if time and machine constraints allow; record any pre-existing unrelated failures separately.
+- [x] Verify no `cargo fmt` / `rustfmt` write-mode was run and the diff is relocation plus module wiring rather than broad formatting churn.
+- [x] Verify no public `claudine-cli` command, flag, output format, exit code, timeout semantic, provider wiring behavior, or stream-rendering behavior changed.
+- [x] Verify no changes reached into the `claudine` library or `claudine-contract` except for unavoidable compile fallout; if any did, document why and review scope.
+- [x] Update README/topic docs, `.claude/skills/`, or this feature documentation only if the refactor changed architecture, workflows, or public behavior.
 
 **Parallelizable:** final validation commands are mostly sequential because each
 gate depends on the completed tree. Documentation review can run in parallel
@@ -271,9 +393,9 @@ green or has explicitly documented pre-existing failures.
 
 ## Cross-phase guardrails
 
-- [ ] Treat every phase as behavior-preserving; if a latent bug appears, file it separately and do not fix it inside a move/decomposition task.
-- [ ] Keep extracted modules private by default and widen only to `pub(super)` or `pub(crate)` when required by the module boundary.
-- [ ] Preserve cross-OS `cfg` branches exactly during moves, especially in wiring and process/session code.
-- [ ] Do not run `cargo fmt` or `rustfmt` write-mode.
-- [ ] Use `hug` effective SLOC, not `wc -l`, to determine whether the high-risk gate is satisfied.
-- [ ] Apply the <1000 effective-SLOC gate to every produced file, including test files.
+- [x] Treat every phase as behavior-preserving; if a latent bug appears, file it separately and do not fix it inside a move/decomposition task.
+- [x] Keep extracted modules private by default and widen only to `pub(super)` or `pub(crate)` when required by the module boundary.
+- [x] Preserve cross-OS `cfg` branches exactly during moves, especially in wiring and process/session code.
+- [x] Do not run `cargo fmt` or `rustfmt` write-mode.
+- [x] Use `hug` effective SLOC, not `wc -l`, to determine whether the high-risk gate is satisfied.
+- [x] Apply the <1000 effective-SLOC gate to every produced file, including test files.
