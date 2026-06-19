@@ -562,6 +562,7 @@ fn scan_one_frontmatter(
                 indent: String::new(),
                 origin: ShellCommandOrigin::Frontmatter {
                     key: candidate.key.clone(),
+                    line: candidate.line,
                 },
                 error_handling: Default::default(),
                 timeout_override: candidate.timeout_override,
@@ -584,6 +585,7 @@ fn scan_one_frontmatter(
                         source_file: source_file.to_path_buf(),
                         origin: ShellCommandOrigin::Frontmatter {
                             key: candidate.key.clone(),
+                            line: candidate.line,
                         },
                     };
                     local_entries.push(entry.clone());
@@ -995,7 +997,8 @@ replace:
         assert_eq!(
             entries[0].origin,
             ShellCommandOrigin::Frontmatter {
-                key: "child_cmd".to_string()
+                key: "child_cmd".to_string(),
+                line: None,
             }
         );
     }
@@ -1010,7 +1013,7 @@ replace:
 
         assert_eq!(entries.len(), 1);
         match &entries[0].origin {
-            ShellCommandOrigin::Frontmatter { key } => assert_eq!(key, "files"),
+            ShellCommandOrigin::Frontmatter { key, .. } => assert_eq!(key, "files"),
             other => panic!("Expected Frontmatter origin, got: {other:?}"),
         }
     }
