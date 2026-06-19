@@ -23,6 +23,7 @@ pub(crate) mod overlay;
 pub(crate) mod policy;
 pub(crate) mod prompt_source;
 pub(crate) mod resume;
+pub(crate) mod wrapper_stages;
 pub(crate) mod wrapper_exec;
 pub(crate) mod wrapper_mcp;
 
@@ -55,21 +56,21 @@ pub(crate) use resume::{
     NextAttemptPlan, append_resume_passthrough_args, apply_next_attempt_plan,
     build_next_attempt_plan, normalize_resume_args, try_resolve_handler,
 };
+use wrapper_stages::{
+    detect_wrapper_harness, emit_preflight_preamble, parse_cli_timeouts,
+    prepare_stream_and_prompt, resolve_and_apply_system_prompt, resolve_opencode_model,
+    run_execution_stage, validate_timeout_constraints,
+};
 
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::InstalledProviderSnapshot;
-use claudine::events::EnvironmentContext;
 use claudine::provider::Provider;
 use claudine::stream::stderr::Verbosity;
 use color_eyre::eyre::{Result, eyre};
 use profile::{OutputFormat, WrapperProfile};
 use sniff::programs::InstalledAiClients;
 use std::collections::HashMap;
-use std::ffi::OsString;
-use std::fs;
-use std::io::{IsTerminal, Write};
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
 use tracing::info_span;
 
 use crate::log;
@@ -87,115 +88,6 @@ pub(crate) struct McpRuntimeInfo {
     pub(crate) env_vars_set: Vec<String>,
     pub(crate) temp_files: Vec<PathBuf>,
     pub(crate) extra_args: Vec<String>,
-}
-
-/// Shared startup detection results for the direct wrap path.
-///
-/// Populated by a single `sniff::detect_with_plan` call and consumed by
-/// three independent downstream structures that would otherwise each
-/// trigger their own full repo walk.
-pub(crate) struct WrapStartupDetection {
-    pub(crate) env_context: EnvironmentContext,
-    pub(crate) launch_context: claudine::system_prompt::LaunchContext,
-    pub(crate) launch_workspace: claudine::composition::LaunchWorkspaceContext,
-}
-
-/// Run one sniff-based filesystem scan and build every startup context
-/// the direct wrap path needs from the shared result.
-///
-/// On a cold filesystem cache in a large monorepo the previous pipeline
-/// walked the tree 3-5 times (once in `detect_environment_fast`, once in
-/// `LaunchContext::from_cwd`, and twice inside `build_child_env`). This
-/// helper collapses that into a single scan and then builds the three
-/// consumer contexts from borrowed data.
-pub(crate) fn detect_wrap_startup(cwd: &Path) -> Result<WrapStartupDetection> {
-    use sniff::request::*;
-
-    let plan = DetectionPlan::new()
-        .base_dir(cwd.to_path_buf())
-        .without_os()
-        .without_hardware()
-        .without_network()
-        .filesystem(
-            FilesystemRequest::new()
-                .git(GitRequest::summary())
-                .repo(RepoRequest::structure())
-                .without_file_inventory()
-                .without_docs()
-                .without_formatting(),
-        );
-
-    let result = sniff::detect_with_plan(plan)
-        .map_err(|e| eyre!("startup detection failed for '{}': {e}", cwd.display()))?;
-
-    let launch_context = claudine::system_prompt::LaunchContext::from_sniff_result(&result, cwd);
-
-    let (git_root, repo) = result
-        .filesystem
-        .as_ref()
-        .map(|f| {
-            (
-                f.git.as_ref().map(|g| g.repo_root.clone()),
-                f.repo.as_ref().cloned(),
-            )
-        })
-        .unwrap_or((None, None));
-
-    // Direct wrapper has no composed-document source, so no source-repo
-    // hint to pass. `repo_root` and `child_cwd` both follow the launch CWD.
-    let launch_workspace =
-        env::launch_workspace_context_from_repo_info(cwd, git_root.as_deref(), repo.as_ref(), None);
-
-    let env_context = claudine::events::environment_context_from_sniff_result(result);
-
-    Ok(WrapStartupDetection {
-        env_context,
-        launch_context,
-        launch_workspace,
-    })
-}
-
-fn fallback_wrap_startup(cwd: &Path) -> WrapStartupDetection {
-    WrapStartupDetection {
-        env_context: EnvironmentContext::default(),
-        launch_context: claudine::system_prompt::LaunchContext {
-            cwd: cwd.to_path_buf(),
-            repo_root: None,
-            package_area_root: None,
-            package_root: None,
-            agent: None,
-        },
-        launch_workspace: claudine::composition::LaunchWorkspaceContext {
-            launch_cwd: cwd.to_path_buf(),
-            repo_root: None,
-            child_cwd: cwd.to_path_buf(),
-            package_context: None,
-            warnings: Vec::new(),
-        },
-    }
-}
-
-pub(crate) fn switch_process_cwd(child_cwd: &Path) -> Result<()> {
-    let current = std::env::current_dir()?;
-    if current != child_cwd {
-        std::env::set_current_dir(child_cwd)?;
-    }
-    // Rust's `set_current_dir` calls `chdir(2)` but does NOT touch the
-    // `PWD` environment variable — the shell convention is that `PWD`
-    // tracks "where the user thinks they are", which can differ from
-    // `getcwd(3)`. Several downstream tools (notably OpenCode's
-    // `run.ts:276` resolving `process.env.PWD ?? process.cwd()`) trust
-    // `PWD` over the real cwd. If we don't sync them, the spawned
-    // child inherits the user's pre-chdir `PWD` (e.g. a package
-    // subdirectory the user ran `just commit` from) and resolves paths
-    // against the wrong root.
-    //
-    // SAFETY: single-threaded wrapper startup; no other thread reads
-    // or writes `PWD` concurrently with this call.
-    unsafe {
-        std::env::set_var("PWD", child_cwd.as_os_str());
-    }
-    Ok(())
 }
 
 pub(crate) fn structured_verbosity(silent: bool, quiet: bool) -> Verbosity {
@@ -344,6 +236,9 @@ fn run_provider_wrapper_inner(
     verbose: u8,
     mut perf_collector: Option<&mut crate::perf::CommandPerfCollector>,
 ) -> Result<(i32, Option<String>, Option<profile::OpenCodeModelSource>)> {
+    // ------------------------------------------------------------------
+    // Stage 1: Resolve profile and binary
+    // ------------------------------------------------------------------
     let profile = profile::profile_for_provider(provider).ok_or_else(|| {
         eyre!(
             "'{}' cannot be wrapped (it is a VS Code extension)",
@@ -359,6 +254,9 @@ fn run_provider_wrapper_inner(
     )
     .in_scope(|| resolve_binary_path_direct(profile, None))?;
 
+    // ------------------------------------------------------------------
+    // Stage 2: Extract launch intent from CLI and passthrough argv
+    // ------------------------------------------------------------------
     let raw_agent_params: Vec<String> = std::env::args().skip(2).collect();
     let mut child_args = args.passthrough.clone();
     let extracted = flags::extract_wrapper_flags_from_passthrough(&mut child_args)?;
@@ -374,25 +272,11 @@ fn run_provider_wrapper_inner(
     let mut deferred_warnings: Vec<String> = Vec::new();
     let mut deferred_messages: Vec<String> = Vec::new();
 
-    // One sniff-based scan produces the raw git + repo-structure data that
-    // the rest of startup needs. The result is consumed by three separate
-    // consumers (EnvironmentContext, LaunchContext, LaunchWorkspaceContext)
-    // without ever walking the filesystem again — this avoids the 3-5
-    // redundant tree walks the earlier pipeline performed.
-    let startup = match detect_wrap_startup(&cwd) {
-        Ok(startup) => startup,
-        Err(error) => {
-            if repo_requested {
-                return Err(eyre!(
-                    "--repo requires startup repo detection, but startup detection failed: {error}"
-                ));
-            }
-            deferred_warnings.push(format!(
-                "startup detection failed; continuing without repo/package context: {error}"
-            ));
-            fallback_wrap_startup(&cwd)
-        }
-    };
+    // ------------------------------------------------------------------
+    // Stage 3: Detect startup context (env, launch, workspace)
+    // ------------------------------------------------------------------
+    let startup =
+        env::detect_wrap_startup_or_fallback(&cwd, repo_requested, &mut deferred_warnings)?;
     let env_context = startup.env_context;
     let launch_context = startup.launch_context;
     let launch_workspace = startup.launch_workspace;
@@ -404,10 +288,9 @@ fn run_provider_wrapper_inner(
     // Composition (Task 14) is where InheritStdin / stdin_seed matters.
     let has_piped_stdin = false;
 
-    // Extract the prompt up-front into a typed PromptSource, leaving
-    // child_args free of any prompt characters. Downstream apply_*
-    // methods see clean args; prompt_delivery is the only code path
-    // that places the prompt back in.
+    // ------------------------------------------------------------------
+    // Stage 4: Extract and optionally edit the prompt source
+    // ------------------------------------------------------------------
     let (extracted_args, mut prompt_source) =
         profile::extract_prompt_source_from_passthrough(profile, &child_args, has_piped_stdin)?;
     child_args = extracted_args;
@@ -429,6 +312,7 @@ fn run_provider_wrapper_inner(
     } else {
         has_prompt
     };
+
     let wrapper_span = info_span!(
         "wrapper_session",
         binary_path = %binary_path.display(),
@@ -444,76 +328,24 @@ fn run_provider_wrapper_inner(
     );
     let _wrapper_guard = wrapper_span.enter();
 
-    // Early check: --timeout + --interactive is always an error
-    if args.timeout.is_some() && interactive_requested {
-        return Err(eyre!("--timeout cannot be used with --interactive mode"));
-    }
-
-    // Early check: --step-timeout + --interactive is always an error
-    if args.step_timeout.is_some() && interactive_requested {
-        return Err(eyre!(
-            "--step-timeout cannot be used with --interactive mode"
-        ));
-    }
-
-    // clap catches direct `--edit` + `--interactive` conflicts, but once a
-    // prompt token starts passthrough capture either flag can arrive from the
-    // fallback extractor instead. Keep the merged behavior consistent.
-    if edit_requested && interactive_requested {
-        return Err(eyre!("--edit cannot be used with --interactive"));
-    }
-
-    // Early check: --timeout requires non-interactive mode
-    if args.timeout.is_some() && !non_interactive_requested {
-        return Err(eyre!(
-            "--timeout can only be used in non-interactive mode \
-             (provide a prompt or use a composition switch)"
-        ));
-    }
-
-    // Early check: --step-timeout requires non-interactive mode
-    if args.step_timeout.is_some() && !non_interactive_requested {
-        return Err(eyre!(
-            "--step-timeout can only be used in non-interactive mode \
-             (provide a prompt or use a composition switch)"
-        ));
-    }
-
-    // Parse `--timeout DURATION` and `--step-timeout DURATION` once via the
-    // same parser frontmatter uses so CLI and frontmatter errors share one
-    // grammar. The `Path` argument is only used to decorate `HarnessError`;
-    // the CLI flag has no source file, so we use a synthetic label.
-    let cli_timeout_duration: Option<std::time::Duration> = match args.timeout.as_deref() {
-        Some(raw) => Some(
-            claudine::harness::parse_timeout(raw, std::path::Path::new("<--timeout>"))
-                .map_err(|e| eyre!("invalid --timeout value: {e}"))?,
-        ),
-        None => None,
-    };
-    if cli_timeout_duration == Some(std::time::Duration::from_secs(0)) {
-        return Err(eyre!(
-            "--timeout: zero duration is not accepted; omit the flag to disable the wall-clock timeout"
-        ));
-    }
-
-    let cli_step_timeout_duration: Option<std::time::Duration> = match args.step_timeout.as_deref()
-    {
-        Some(raw) => Some(
-            claudine::harness::parse_timeout(raw, std::path::Path::new("<--step-timeout>"))
-                .map_err(|e| eyre!("invalid --step-timeout value: {e}"))?,
-        ),
-        None => None,
-    };
-    if cli_step_timeout_duration == Some(std::time::Duration::from_secs(0)) {
-        return Err(eyre!(
-            "--step-timeout: zero duration is not accepted; omit the flag or set the env var to 0s to disable the step timeout"
-        ));
-    }
+    // ------------------------------------------------------------------
+    // Stage 5: Validate and parse timeouts
+    // ------------------------------------------------------------------
+    validate_timeout_constraints(
+        &args,
+        interactive_requested,
+        non_interactive_requested,
+        edit_requested,
+    )?;
+    let cli_timeout_duration = parse_cli_timeouts(&args)?;
 
     // The effective interactivity state is determined solely by the explicit flag.
     let effective_non_interactive = non_interactive_requested;
     let term = wrap_terminal_for_mode(effective_non_interactive);
 
+    // ------------------------------------------------------------------
+    // Stage 6: Apply provider profile to argv and env
+    // ------------------------------------------------------------------
     profile.reject_direct_yolo(&child_args)?;
     flags::reject_retired_composition_flags(&child_args)?;
 
@@ -555,24 +387,14 @@ fn run_provider_wrapper_inner(
     // validate_non_interactive_requirements).
     let opencode_model_source: Option<profile::OpenCodeModelSource> =
         if provider == Provider::OpenCode {
-            let has_model = env_overrides.iter().any(|(k, _)| k == "MODEL");
-            match profile::apply_opencode_model_resolution(
+            resolve_opencode_model(
+                provider,
+                profile,
                 &mut child_args,
-                &mut |k, v| env_overrides.push((k, v)),
-                has_model,
+                &mut env_overrides,
                 args.model.as_deref(),
                 non_interactive_requested,
-                &profile::OpenCodeEnvSnapshot::from_system(),
-            ) {
-                Ok(source) => source,
-                Err(_) => {
-                    let term = wrap_terminal();
-                    let report =
-                        crate::output::error_report::AgentErrorReport::no_model_provided(provider);
-                    report.render(&term);
-                    std::process::exit(1);
-                }
-            }
+            )?
         } else {
             None
         };
@@ -615,6 +437,9 @@ fn run_provider_wrapper_inner(
         env_overrides.push(("OPERATION".to_string(), op.clone()));
     }
 
+    // ------------------------------------------------------------------
+    // Stage 7: Emit wrapper header
+    // ------------------------------------------------------------------
     if !silent_requested {
         let header_env_plan = env::EnvPlan {
             package_context: launch_workspace.package_context.clone(),
@@ -638,56 +463,24 @@ fn run_provider_wrapper_inner(
         );
     }
 
-    let sp_args = claudine::system_prompt::SystemPromptArgs {
-        append_file: args.append_system_prompt.clone(),
-        replace_file: args.replace_system_prompt.clone(),
-    };
-    // Plumb the provider slug into the launch context so system-prompt
-    // templates that reference {{env.AGENT}} resolve correctly without
-    // mutating the parent process env.
-    let mut launch_context = launch_context;
-    launch_context.agent = Some(profile.agent_env().to_string());
-    let effective_sp = claudine::system_prompt::resolve_and_prepare_for_session(
-        &sp_args,
+    // ------------------------------------------------------------------
+    // Stage 8: Resolve and apply system prompt
+    // ------------------------------------------------------------------
+    let (effective_sp, _sp_artifacts) = resolve_and_apply_system_prompt(
+        profile,
+        &args,
         &launch_context,
+        &launch_workspace,
+        &cwd,
         non_interactive_requested,
+        &mut child_args,
+        &mut env_overrides,
+        &mut deferred_warnings,
     )?;
 
-    let mut sp_artifacts: Vec<system_prompt::SystemPromptArtifact> = Vec::new();
-
-    let scoped_tmp = system_prompt::scoped_tmp_dir(&launch_workspace);
-    system_prompt::maybe_gitignore_claudine_tmp(
-        launch_workspace
-            .repo_root
-            .as_deref()
-            .unwrap_or(&launch_workspace.launch_cwd),
-    );
-
-    match &effective_sp {
-        claudine::system_prompt::ResolvedSystemPrompt::None
-        | claudine::system_prompt::ResolvedSystemPrompt::Disabled { .. } => {}
-        claudine::system_prompt::ResolvedSystemPrompt::Ready(prepared) => {
-            let application = profile.apply_system_prompt(
-                prepared,
-                !non_interactive_requested,
-                &cwd,
-                &scoped_tmp,
-            )?;
-            child_args.extend(application.args);
-            env_overrides.extend(
-                application
-                    .env
-                    .into_iter()
-                    .map(|(k, v)| (k.to_string_lossy().into(), v.to_string_lossy().into())),
-            );
-            sp_artifacts = application.artifacts;
-            for warn in application.warnings {
-                deferred_warnings.push(warn);
-            }
-        }
-    }
-    let _ = &sp_artifacts;
-
+    // ------------------------------------------------------------------
+    // Stage 9: Apply sandbox and build child environment
+    // ------------------------------------------------------------------
     if args.sandbox
         && let Some(warn) = profile.apply_sandbox(&mut child_args)
     {
@@ -735,6 +528,9 @@ fn run_provider_wrapper_inner(
         ));
     }
 
+    // ------------------------------------------------------------------
+    // Stage 10: Compose MCP session
+    // ------------------------------------------------------------------
     let (mcp_runtime, mcp_cleanup) = wrapper_mcp::compose_mcp_session(
         &args,
         provider,
@@ -756,7 +552,9 @@ fn run_provider_wrapper_inner(
         collector.mark_env_setup_complete();
     }
 
-    // --dry-run: print what would be executed and exit
+    // ------------------------------------------------------------------
+    // Stage 11: Dry-run or continue to execution
+    // ------------------------------------------------------------------
     let sp_display_lines = system_prompt::describe_effective(&effective_sp);
     if args.dry_run {
         crate::output::log_dry_run(
@@ -776,129 +574,52 @@ fn run_provider_wrapper_inner(
         return Ok((0, None, None));
     }
 
-    switch_process_cwd(child_cwd)?;
+    // ------------------------------------------------------------------
+    // Stage 12: Switch to child cwd and emit preflight preamble
+    // ------------------------------------------------------------------
+    exec::switch_process_cwd(child_cwd)?;
 
     let dispatch_context = HashMap::new();
 
-    // Output verbosity: --silent suppresses everything, --quiet hides env/info preamble
-    // but still shows the system prompt when one is active.
-    if !silent_requested {
-        if !quiet_requested {
-            crate::output::log_wrapper_env_details(&env_plan, mcp_runtime.as_ref(), &term, verbose);
+    emit_preflight_preamble(
+        &env_plan,
+        mcp_runtime.as_ref(),
+        &effective_sp,
+        &deferred_warnings,
+        &deferred_messages,
+        repo_requested,
+        silent_requested,
+        quiet_requested,
+        detail_requested,
+        &launch_context,
+        opencode_model_source.as_ref(),
+        &term,
+        verbose,
+    );
 
-            if let Some(info_message) =
-                crate::output::removed_env_info_message(&env_plan.removed, &term)
-            {
-                log::message(&info_message);
-            }
-            if repo_requested {
-                log::message(&crate::output::repo_flag_info_message(
-                    &term,
-                    env_plan.shadow_home_path.as_deref(),
-                ));
-            }
-            for warning in &env_plan.warnings {
-                log::message(&crate::output::post_env_warning_message(warning, &term));
-            }
-            for warning in &deferred_warnings {
-                log::message(&crate::output::post_env_warning_message(warning, &term));
-            }
-            for message in &deferred_messages {
-                log::message(&crate::output::post_env_message(message, &term));
-            }
-
-            if let Some(ref source) = opencode_model_source {
-                use biscuit_terminal::components::status::Status;
-                use biscuit_terminal::prelude::TerminalRenderable as _;
-                let status = Status::from_prose(source.status_markup());
-                log::message(&status.render(&term));
-            }
-        }
-
-        let scope_for_report = launch_context
-            .repo_root
-            .as_deref()
-            .unwrap_or(&launch_context.cwd);
-        crate::output::log_system_prompt_with_scope(
-            &effective_sp,
-            detail_requested,
-            silent_requested,
-            quiet_requested,
-            Some(scope_for_report),
-            &term,
-        );
-
-        // Blank line to separate preamble from execution output. Keep it aligned with
-        // whichever preamble blocks were actually emitted.
-        if !quiet_requested
-            || matches!(
-                effective_sp,
-                claudine::system_prompt::ResolvedSystemPrompt::Ready(_)
-            )
-        {
-            log::message("");
-        }
-    }
-
-    let stdout_noise = if effective_non_interactive {
-        profile.stdout_noise_prefixes()
-    } else {
-        &[]
-    };
-    // Interactive TUIs (Codex, OpenCode, etc.) must inherit stderr directly.
-    // A non-empty stderr filter causes `exec::run_child` to pipe stderr,
-    // which flips `isolate_process_group` on and leaves the child in a
-    // background pgroup — it then hangs on SIGTTIN when reading the TTY.
-    let stderr_noise = if effective_non_interactive {
-        profile.stderr_noise_prefixes()
-    } else {
-        &[]
-    };
-
-    // Decide whether to use internal structured stream parsing.
-    // Conditions: provider supports it, non-interactive, no explicit output format.
-    let use_structured = profile.supports_structured_stream()
-        && effective_non_interactive
-        && args.output.is_none()
-        && !flags::has_explicit_native_output_request(provider, &child_args);
-    wrapper_span.record("structured_mode", use_structured);
-    let stream_verbosity = structured_verbosity(silent_requested, quiet_requested);
-
-    // `step_timeout` is only enforceable in structured-stream mode because
-    // it gates on `LiveMetrics::last_event_at`. Warn and drop it otherwise so
-    // the downstream exec path never has to re-check.
-    let cli_step_timeout = if !use_structured && args.step_timeout.is_some() {
-        if !silent_requested {
-            log::warn(
-                "--step-timeout is only enforced in structured-stream mode; \
-                 this run does not qualify, so the flag will be ignored",
-            );
-        }
-        None
-    } else {
-        args.step_timeout.clone()
-    };
-
-    if use_structured {
-        profile.apply_structured_stream(&mut child_args);
-    }
-
-    let structured_codex_output = if use_structured && provider == Provider::Codex {
-        Some(StructuredCodexOutput::prepare(&mut child_args))
-    } else {
-        None
-    };
-
-    let mut wire_prompt: Option<String> = None;
-    let stdin_seed: Option<String> = if let Some(prompt) = prompt_source.as_inline() {
-        let delivery = profile.prompt_delivery(&child_args, prompt, effective_non_interactive)?;
-        if let Some(body) = delivery.as_wire_rpc() {
-            wire_prompt = Some(body.to_string());
-        }
-        delivery.apply_to(&mut child_args)
-    } else {
-        None
-    };
+    // ------------------------------------------------------------------
+    // Stage 13: Decide stream mode and deliver prompt
+    // ------------------------------------------------------------------
+    let (
+        use_structured,
+        stream_verbosity,
+        cli_step_timeout,
+        stdout_noise,
+        stderr_noise,
+        structured_codex_output,
+        wire_prompt,
+        stdin_seed,
+    ) = prepare_stream_and_prompt(
+        profile,
+        provider,
+        &args,
+        &mut child_args,
+        &prompt_source,
+        effective_non_interactive,
+        silent_requested,
+        quiet_requested,
+        &wrapper_span,
+    )?;
 
     profile::require_prompt_present(profile.binary(), effective_non_interactive, &prompt_source)?;
 
@@ -906,57 +627,18 @@ fn run_provider_wrapper_inner(
         profile::validate_argv_flags_before_separator(profile.binary(), &child_args);
     }
 
-    let wrapper_harness = {
-        let base_prompt = prompt_source
-            .as_inline()
-            .map(|s| s.to_string())
-            .or_else(|| stdin_seed.clone());
-        let harness_source = base_prompt.as_ref().and_then(|_| {
-            harness_orch::find_wrapper_harness_source(provider, env_plan.repo_root.as_deref(), &cwd)
-        });
-
-        if let (Some(base_prompt), Some(source_path)) = (base_prompt, harness_source) {
-            let seed = harness_orch::materialize_passthrough_harness_seed(
-                &source_path,
-                base_prompt.clone(),
-                Some(child_cwd),
-            )?;
-            let harness_enabled = claudine::harness::has_harness_properties(&seed.frontmatter);
-            if harness_enabled {
-                let resolve_ctx = claudine::harness::HarnessResolutionContext {
-                    source_path: &source_path,
-                    repo_root: env_plan.repo_root.as_deref(),
-                };
-                let shell_options = harness_orch::build_harness_shell_options(
-                    &source_path,
-                    env_plan.repo_root.as_deref(),
-                );
-                let plan = claudine::harness::parse_harness_plan(
-                    &seed.frontmatter,
-                    &source_path,
-                    &resolve_ctx,
-                )
-                .map_err(|e| eyre!("{e}"))?;
-
-                // Pre-flight harness shell commands
-                let _harness_preflight = claudine::composition::resolve_shell_approvals(
-                    None,
-                    None,
-                    Some(&plan),
-                    &shell_options,
-                )
-                .map_err(|e| eyre!("{e}"))?;
-
-                drop(plan);
-
-                Some((source_path, base_prompt, seed, shell_options))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    };
+    // ------------------------------------------------------------------
+    // Stage 14: Detect wrapper harness
+    // ------------------------------------------------------------------
+    let wrapper_harness = detect_wrapper_harness(
+        provider,
+        profile,
+        &prompt_source,
+        stdin_seed.as_deref(),
+        &env_plan,
+        child_cwd,
+        &cwd,
+    )?;
 
     if !silent_requested && !quiet_requested {
         use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
@@ -968,132 +650,40 @@ fn run_provider_wrapper_inner(
         crate::log::message(&status.render(&term));
     }
 
-    // Execute the provider. Composition and harness execution are handled by
-    // `claudine compose` / `claudine inline-compose` through the wrapper-grade
-    // composition executor; the wrapper path handles plain prompt passthrough.
-    let (exit_code, stderr_capture) = if let Some((
-        source_path,
-        base_prompt,
-        initial_materialized,
-        shell_options,
-    )) = wrapper_harness
-    {
-        let mut prompt_state = HarnessPromptState {
-            mode: HarnessPromptMode::Passthrough,
-            original_ref: source_path.display().to_string(),
-            source_path,
-            base_prompt: Some(base_prompt),
-            overlay: indexmap::IndexMap::new(),
-            prompt_tail: Vec::new(),
-            next_prompt_override: None,
-            next_resume_session_id: None,
-        };
+    // ------------------------------------------------------------------
+    // Stage 15: Execute the provider
+    // ------------------------------------------------------------------
+    let (exit_code, stderr_capture) = run_execution_stage(
+        wrapper_harness,
+        use_structured,
+        provider,
+        profile,
+        &binary_path,
+        &child_args,
+        &env_plan,
+        child_cwd,
+        effective_non_interactive,
+        &args,
+        cli_timeout_duration,
+        cli_step_timeout,
+        stdout_noise,
+        stderr_noise,
+        stream_verbosity,
+        detail_requested,
+        structured_codex_output.as_ref(),
+        wire_prompt,
+        stdin_seed.as_deref(),
+        &env_context,
+        &dispatch_context,
+        &term,
+        &wrapper_span,
+        perf_collector,
+    )?;
 
-        let mut harness_base_args = child_args.clone();
-        if !use_structured {
-            profile.prepare_captured_output(&mut harness_base_args);
-        }
-
-        let source_path_for_lifecycle = prompt_state.source_path.clone();
-        let default_lifecycle = claudine::composition::LifecycleConfig::default();
-        let default_lifecycle_settings = claudine::events::GlobalSettings::default();
-        let default_lifecycle_messaging = claudine::messaging::RuntimeMessagingSettings {
-            user: None,
-            repo: None,
-        };
-        let default_lifecycle_ctx = claudine::composition::LifecycleRuntimeContext {
-            settings: &default_lifecycle_settings,
-            messaging: &default_lifecycle_messaging,
-            term: &term,
-            source_path: &source_path_for_lifecycle,
-            repo_root: env_plan.repo_root.as_deref(),
-        };
-        let default_lifecycle_emitter = claudine::composition::DefaultLifecycleEmitter;
-
-        let (harness_code, harness_perf, _harness_signals) = harness_orch::run_harness_loop(
-            provider,
-            profile,
-            binary_path.as_path(),
-            child_cwd,
-            effective_non_interactive,
-            args.timeout.clone(),
-            cli_step_timeout.clone(),
-            &harness_base_args,
-            &env_plan.env,
-            &mut prompt_state,
-            env_plan.repo_root.as_deref(),
-            shell_options,
-            use_structured,
-            structured_codex_output.as_ref(),
-            stdout_noise,
-            stderr_noise,
-            profile.suppress_structured_stderr_on_success(),
-            !silent_requested,
-            stream_verbosity,
-            detail_requested,
-            &env_context,
-            &dispatch_context,
-            Some(initial_materialized),
-            &term,
-            &default_lifecycle,
-            &default_lifecycle_ctx,
-            &default_lifecycle_emitter,
-            true,
-        )?;
-        if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {
-            collector.set_agent_perf(perf);
-        }
-        (harness_code, None)
-    } else if use_structured {
-        wrapper_exec::run_structured_stream_session(
-            &args,
-            provider,
-            profile,
-            binary_path.as_path(),
-            &child_args,
-            &env_plan,
-            child_cwd,
-            &env_context,
-            &dispatch_context,
-            stream_verbosity,
-            detail_requested,
-            structured_codex_output.as_ref(),
-            wire_prompt.clone(),
-            stdin_seed.as_deref(),
-            cli_step_timeout.clone(),
-            stderr_noise,
-            &term,
-            &wrapper_span,
-            perf_collector.as_deref_mut(),
-        )?
-    } else {
-        // Legacy path: forward I/O to terminal
-        let mut _spawned = false;
-        let result = exec::run_child(
-            binary_path.as_path(),
-            &child_args,
-            &env_plan.env,
-            child_cwd,
-            cli_timeout_duration.map(|d| d.as_secs()),
-            exec::ChildIoOptions {
-                stdout_noise_prefixes: stdout_noise,
-                stderr_noise_prefixes: stderr_noise,
-                stdin_seed: stdin_seed.as_deref(),
-            },
-            &mut _spawned,
-        )?;
-        if let Some(collector) = perf_collector.as_mut() {
-            collector.set_agent_perf(result.telemetry.into_agent_perf(None));
-        }
-        (result.data, None)
-    };
-
-    // MCP injector cleanup: remove temp files written during injection
-    if let Some((injector, injection_result)) = mcp_cleanup
-        && let Err(e) = injector.cleanup(&injection_result)
-    {
-        tracing::warn!("MCP injector cleanup failed: {e}");
-    }
+    // ------------------------------------------------------------------
+    // Stage 16: Cleanup and return
+    // ------------------------------------------------------------------
+    exec::cleanup_mcp_injection(mcp_cleanup);
 
     Ok((exit_code, stderr_capture, opencode_model_source))
 }

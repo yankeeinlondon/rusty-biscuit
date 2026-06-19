@@ -24,6 +24,10 @@ use super::{McpRuntimeInfo, bootstrap_mcp_state, env, inline, profile};
 /// extra argv, and `#tag`-stripped prompt) and appends any warnings/messages
 /// to the deferred buffers.
 #[allow(clippy::type_complexity)]
+// The eight parameters mirror the caller-owned structures this function
+// mutates in place; grouping them would only add a context struct that
+// every call site has to construct and destructure.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compose_mcp_session(
     args: &WrapperArgs,
     provider: Provider,

@@ -37,9 +37,9 @@ use super::profile::{self, WrapperProfile};
 use super::{
     HarnessPromptMode, HarnessPromptState, StructuredCodexOutput, apply_composition_shell_overrides,
     build_harness_shell_options_with_cache, materialized_harness_prompt_from_prepared,
-    resolve_binary_path_direct, run_harness_loop, structured_verbosity, switch_process_cwd,
-    wrap_terminal,
+    resolve_binary_path_direct, run_harness_loop, structured_verbosity, wrap_terminal,
 };
+use super::exec::switch_process_cwd;
 use crate::log;
 
 pub(crate) mod dry_run;

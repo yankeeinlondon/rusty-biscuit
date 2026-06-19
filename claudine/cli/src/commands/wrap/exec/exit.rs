@@ -1,6 +1,21 @@
 use std::process::ExitStatus;
 use std::time::{Duration, Instant};
 
+/// Cleanup type returned by the MCP injector after a session.
+pub(crate) type McpCleanup = Option<(
+    Box<dyn claudine::mcp::inject::McpInjector>,
+    claudine::mcp::inject::InjectionResult,
+)>;
+
+/// Remove temp files written during MCP injection.
+pub(crate) fn cleanup_mcp_injection(mcp_cleanup: McpCleanup) {
+    if let Some((injector, injection_result)) = mcp_cleanup
+        && let Err(e) = injector.cleanup(&injection_result)
+    {
+        tracing::warn!("MCP injector cleanup failed: {e}");
+    }
+}
+
 /// Resolve first-response latency from three observed timestamps.
 ///
 /// Preferred precedence: semantic stdout > raw stdout > stderr.

@@ -2,6 +2,7 @@
 //! preflight, and `package_name_display` rendering.
 
 use super::*;
+use super::exec::switch_process_cwd;
 use std::collections::HashMap;
 
 /// Regression: `switch_process_cwd` must update both the OS cwd

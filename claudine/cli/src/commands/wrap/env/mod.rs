@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Result, eyre};
 
 use super::profile::WrapperProfile;
 use super::repo_home;
@@ -22,6 +22,119 @@ pub(crate) use package_context::{
 pub(crate) use sanitize::{
     is_sensitive_key, redact_sensitive_args, sanitize_process_env, validate_include_names,
 };
+
+/// Shared startup detection results for the direct wrap path.
+///
+/// Populated by a single `sniff::detect_with_plan` call and consumed by
+/// three independent downstream structures that would otherwise each
+/// trigger their own full repo walk.
+pub(crate) struct WrapStartupDetection {
+    pub(crate) env_context: claudine::events::EnvironmentContext,
+    pub(crate) launch_context: claudine::system_prompt::LaunchContext,
+    pub(crate) launch_workspace: LaunchWorkspaceContext,
+}
+
+/// Run one sniff-based filesystem scan and build every startup context
+/// the direct wrap path needs from the shared result.
+///
+/// On a cold filesystem cache in a large monorepo the previous pipeline
+/// walked the tree 3-5 times (once in `detect_environment_fast`, once in
+/// `LaunchContext::from_cwd`, and twice inside `build_child_env`). This
+/// helper collapses that into a single scan and then builds the three
+/// consumer contexts from borrowed data.
+pub(crate) fn detect_wrap_startup(cwd: &Path) -> Result<WrapStartupDetection> {
+    use sniff::request::*;
+
+    let plan = DetectionPlan::new()
+        .base_dir(cwd.to_path_buf())
+        .without_os()
+        .without_hardware()
+        .without_network()
+        .filesystem(
+            FilesystemRequest::new()
+                .git(GitRequest::summary())
+                .repo(RepoRequest::structure())
+                .without_file_inventory()
+                .without_docs()
+                .without_formatting(),
+        );
+
+    let result = sniff::detect_with_plan(plan)
+        .map_err(|e| eyre!("startup detection failed for '{}': {e}", cwd.display()))?;
+
+    let launch_context = claudine::system_prompt::LaunchContext::from_sniff_result(&result, cwd);
+
+    let (git_root, repo) = result
+        .filesystem
+        .as_ref()
+        .map(|f| {
+            (
+                f.git.as_ref().map(|g| g.repo_root.clone()),
+                f.repo.as_ref().cloned(),
+            )
+        })
+        .unwrap_or((None, None));
+
+    // Direct wrapper has no composed-document source, so no source-repo
+    // hint to pass. `repo_root` and `child_cwd` both follow the launch CWD.
+    let launch_workspace =
+        launch_workspace_context_from_repo_info(cwd, git_root.as_deref(), repo.as_ref(), None);
+
+    let env_context = claudine::events::environment_context_from_sniff_result(result);
+
+    Ok(WrapStartupDetection {
+        env_context,
+        launch_context,
+        launch_workspace,
+    })
+}
+
+pub(crate) fn fallback_wrap_startup(cwd: &Path) -> WrapStartupDetection {
+    WrapStartupDetection {
+        env_context: claudine::events::EnvironmentContext::default(),
+        launch_context: claudine::system_prompt::LaunchContext {
+            cwd: cwd.to_path_buf(),
+            repo_root: None,
+            package_area_root: None,
+            package_root: None,
+            agent: None,
+        },
+        launch_workspace: LaunchWorkspaceContext {
+            launch_cwd: cwd.to_path_buf(),
+            repo_root: None,
+            child_cwd: cwd.to_path_buf(),
+            package_context: None,
+            warnings: Vec::new(),
+        },
+    }
+}
+
+/// Run startup detection and fall back to a minimal context on failure.
+///
+/// When `repo_requested` is true, detection failure is propagated as an
+/// error because `--repo` depends on repo/package discovery. Otherwise
+/// the failure is logged as a deferred warning and the wrapper continues
+/// without repo context.
+pub(crate) fn detect_wrap_startup_or_fallback(
+    cwd: &Path,
+    repo_requested: bool,
+    deferred_warnings: &mut Vec<String>,
+) -> Result<WrapStartupDetection> {
+    match detect_wrap_startup(cwd) {
+        Ok(startup) => Ok(startup),
+        Err(error) => {
+            if repo_requested {
+                return Err(eyre!(
+                    "--repo requires startup repo detection, but startup detection failed: {error}"
+                ));
+            }
+            deferred_warnings.push(format!(
+                "startup detection failed; continuing without repo/package context: {error}"
+            ));
+            Ok(fallback_wrap_startup(cwd))
+        }
+    }
+}
 
 #[derive(Debug, Default)]
 #[allow(dead_code)]
