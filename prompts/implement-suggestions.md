@@ -10,10 +10,10 @@ spec_path: "{{ join(directory, 'spec.md') }}"
 spec: "{{ file_exists(spec_path) ? spec_path : '' }}"
 
 start:
-    message: "🏃 starting the _implementation_ of the `{{ parent_dir(review)) }}` review suggestions ({{area}}, iteration: {{interation}})"
+    message: "🏃 starting the _implementation_ of the `{{ parent_dir(review) }}` review suggestions ({{ctx.area}})"
 success:
-    message: "✅  review _implemention_ for `{{ parent_dir(review) }}` in **{{area}}** completed"
-    say: "the review suggestions for {{ title_case(without_date(parent_dir(review))) }} in {{area}} completed successfully"
+    message: "✅  review _implementation_ for `{{ parent_dir(review) }}` in **{{ctx.area}}** completed"
+    say: "the review suggestions for {{ title_case(without_date(parent_dir(review))) }} in {{ctx.area}} completed successfully"
     effect: bong
 failure:
     message: "❌ the review suggestions from **{{ title_case(parent_dir(review)) }}** failed to complete!"
