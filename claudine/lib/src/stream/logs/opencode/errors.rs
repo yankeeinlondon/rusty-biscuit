@@ -7,6 +7,7 @@ use std::sync::LazyLock;
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use regex::Regex;
+use tracing::debug;
 
 use crate::stream::logs::opencode::events::{AssetType, LogClassification, OpenCodeLogRecord, ProviderLimitKind};
 use crate::stream::summary::RateLimitInfo;
@@ -21,7 +22,7 @@ static ANSI_RE: LazyLock<Regex> =
 
 static STATUS_CODE_RES: LazyLock<[Regex; 2]> = LazyLock::new(|| {
     [
-        Regex::new(r#""statusCode":(\d{3})"#).expect("status-code regex 1 must compile"),
+        Regex::new(r#""statusCode":(\d{3})(?:\D|$)"#).expect("status-code regex 1 must compile"),
         Regex::new(r"statusCode=(\d{3})").expect("status-code regex 2 must compile"),
     ]
 });
@@ -128,8 +129,9 @@ fn summarize_error_json(record: &OpenCodeLogRecord) -> String {
 
     let root: serde_json::Value = match serde_json::from_str(error_tag) {
         Ok(v) => v,
-        Err(_) => {
+        Err(err) => {
             // If it's not valid JSON, return the raw tag (truncated if huge).
+            debug!(%err, "opencode error tag not valid JSON; falling back to raw");
             if error_tag.len() > 500 {
                 let truncated: String = error_tag.chars().take(497).collect();
                 return format!("{truncated}...");
@@ -166,8 +168,10 @@ fn summarize_error_json(record: &OpenCodeLogRecord) -> String {
 
     let mut parts = Vec::new();
 
-    if let Some(code) = status_code {
-        let desc = get_http_status_description(code as u16);
+    if let Some(code) = status_code
+        && let Some(code_u16) = u16::try_from(code).ok()
+    {
+        let desc = get_http_status_description(code_u16);
         if !desc.is_empty() {
             parts.push(format!("{error_name} ({code}: {desc})"));
         } else {
@@ -192,36 +196,41 @@ fn extract_provider_message(envelope: &serde_json::Value) -> Option<String> {
     }
 
     if let Some(body_str) = envelope.get("responseBody").and_then(|v| v.as_str()) {
-        if let Ok(body) = serde_json::from_str::<serde_json::Value>(body_str) {
-            if let Some(msg) = body
-                .get("error")
-                .and_then(|e| e.get("message"))
-                .and_then(|v| v.as_str())
-                && !msg.is_empty()
-            {
-                return Some(msg.to_string());
-            }
-
-            if let Some(msg) = body.get("message").and_then(|v| v.as_str())
-                && !msg.is_empty()
-            {
-                return Some(msg.to_string());
-            }
-
-            let code = body
-                .get("code")
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-                .or_else(|| {
-                    body.get("code")
-                        .and_then(|v| v.as_u64())
-                        .map(|v| v.to_string())
-                });
-
-            if let Some(code_str) = code {
-                let desc = get_provider_code_description(&code_str);
-                if !desc.is_empty() {
-                    return Some(format!("{code_str}: {desc}"));
+        match serde_json::from_str::<serde_json::Value>(body_str) {
+            Ok(body) => {
+                if let Some(msg) = body
+                    .get("error")
+                    .and_then(|e| e.get("message"))
+                    .and_then(|v| v.as_str())
+                    && !msg.is_empty()
+                {
+                    return Some(msg.to_string());
                 }
+
+                if let Some(msg) = body.get("message").and_then(|v| v.as_str())
+                    && !msg.is_empty()
+                {
+                    return Some(msg.to_string());
+                }
+
+                let code = body
+                    .get("code")
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+                    .or_else(|| {
+                        body.get("code")
+                            .and_then(|v| v.as_u64())
+                            .map(|v| v.to_string())
+                    });
+
+                if let Some(code_str) = code {
+                    let desc = get_provider_code_description(&code_str);
+                    if !desc.is_empty() {
+                        return Some(format!("{code_str}: {desc}"));
+                    }
+                }
+            }
+            Err(err) => {
+                debug!(%err, "opencode responseBody not valid JSON; falling back to raw");
             }
         }
         if !body_str.is_empty() {
@@ -306,8 +315,9 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
 
     // Resolution order is critical — cap-with-context wins over retries-exhausted.
     // 1. Cap signal present with error tag → terminal usage cap.
+    // ProviderLimitKind is authoritative; preserve the real HTTP code when
+    // available instead of stamping a 429 sentinel onto a 403 billing cap.
     if has_cap && has_error_context {
-        let status_code = status_code.unwrap_or(429);
         let reset_at = extract_reset_at(haystack);
         let provider_id = record.tags.get("providerID").cloned();
         let model_id = record.tags.get("modelID").cloned();
@@ -318,7 +328,7 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
             .unwrap_or_else(|| haystack.to_string());
 
         return Some(LogClassification::ProviderLimit {
-            status_code,
+            status_code: status_code.unwrap_or(0),
             kind: ProviderLimitKind::UsageCap,
             reset_at,
             provider_id,
@@ -1573,6 +1583,24 @@ mod tests {
     }
 
     #[test]
+    fn overflow_status_code_does_not_produce_bogus_description() {
+        let line = r#"ERROR 2026-04-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_APICallError","statusCode":70000,"message":"unknown error"}}"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ApiFailure { message, .. } => {
+                assert_eq!(message, "AI_APICallError (70000): unknown error");
+                assert!(
+                    !message.contains("Bad Request"),
+                    "overflow status should not pick up a u16 description: {message}"
+                );
+            }
+            other => panic!("expected ApiFailure, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn extracts_zai_code_from_response_body() {
         let line = r#"ERROR 2026-04-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_APICallError","responseBody":"{\"code\":1301,\"message\":\"internal server error\"}"}}"#;
         let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
@@ -1618,6 +1646,20 @@ mod tests {
     }
 
     #[test]
+    fn malformed_response_body_falls_back_to_raw() {
+        let line = r#"ERROR 2026-04-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_APICallError","responseBody":"not json"}}"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ApiFailure { message, .. } => {
+                assert_eq!(message, "AI_APICallError: not json");
+            }
+            other => panic!("expected ApiFailure, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn api_failure_falls_back_to_record_message() {
         let line = "ERROR 2026-04-15T19:26:02 +100ms service=llm dummy=tag AI_APICallError: connection reset";
         let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
@@ -1636,7 +1678,11 @@ mod tests {
         assert_eq!(extract_status_code("no status here"), None);
         assert_eq!(extract_status_code(""), None);
         assert_eq!(extract_status_code("statusCode=99"), None); // too short
-        assert_eq!(extract_status_code("statusCode=9999"), Some(999)); // matches first 3 digits
+        // JSON variant: a 4-digit code must not match the first 3 digits.
+        assert_eq!(extract_status_code(r#""statusCode":4291"#), None);
+        assert_eq!(extract_status_code(r#""statusCode":9999"#), None);
+        // Key-value variant still matches the first three digits by design.
+        assert_eq!(extract_status_code("statusCode=9999"), Some(999));
         assert_eq!(extract_status_code("other=500"), None); // wrong key
     }
 
