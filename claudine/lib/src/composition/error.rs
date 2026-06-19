@@ -780,7 +780,7 @@ pub struct SequenceSelectionFailure {
 }
 
 impl BlockError for CompositionError {
-    fn status_block(&self, _term: &Terminal) -> StatusBlock {
+    fn status_block(&self, term: &Terminal) -> StatusBlock {
         match self {
             CompositionError::LifecycleInvalid {
                 property,
@@ -995,6 +995,13 @@ impl BlockError for CompositionError {
                          conditional block.",
                     )
             }
+            CompositionError::ShellExpansionFailed { error, .. } => {
+                // Delegate to the structured shell-expansion block so the
+                // linked source path, source excerpt, composed frontmatter
+                // block, and captured stderr/stdout all survive the claudine
+                // boundary instead of being flattened by the catch-all arm.
+                error.status_block(term)
+            }
             _ => {
                 let msg = self.to_string();
                 StatusBlock::new(StatusState::Error)
@@ -1018,6 +1025,21 @@ impl BlockError for CompositionError {
     /// keep the default `status_block(term).render(term)` behavior.
     fn report_block_error(&self, term: &Terminal) -> String {
         match self {
+            CompositionError::ShellExpansionFailed { .. } => {
+                // The delegated status block contains OSC 8 links, SGR
+                // styling, and source gutters. When the terminal has no color
+                // depth (piped / NO_COLOR / JSON), those escape bytes must be
+                // stripped at the claudine boundary so pipeable output stays
+                // plain text per the error-formatting contract.
+                let mut out = self.status_block(term).render(term);
+                if matches!(
+                    term.color_depth,
+                    biscuit_terminal::discovery::detection::ColorDepth::None
+                ) {
+                    out = biscuit_terminal::utils::escape_codes::strip_escape_codes(&out);
+                }
+                out
+            }
             CompositionError::InlineComposeSequenceMismatch {
                 raw_yaml,
                 stderr_is_tty,
@@ -1850,5 +1872,95 @@ mod tests {
                 "regression: hint must appear inside block quote border, got: {hint_line:?}\nfull output:\n{rendered}"
             );
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 4: shell-expansion failure boundary fidelity
+    // -------------------------------------------------------------------------
+
+    fn shell_expansion_failed_err() -> CompositionError {
+        use darkmatter::markdown::compose::ShellCommandOrigin;
+
+        let content = "---\ntitle: Test\n---\n# Body\n\n::shell \"cmd-that-fails\"\n";
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            PathBuf::from("/repo/prompts/test.md"),
+            PathBuf::from("prompts/test.md"),
+            content,
+        );
+        let shell = ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(ctx),
+            command: "cmd-that-fails".to_string(),
+            code: 2,
+            stdout: "".to_string(),
+            stderr: "this command failed\nunknown flag --whatever".to_string(),
+            origin: ShellCommandOrigin::Body { line: 6 },
+        };
+        CompositionError::ShellExpansionFailed {
+            source_path: PathBuf::from("prompts/test.md"),
+            error: Box::new(shell),
+        }
+    }
+
+    #[test]
+    fn shell_expansion_failed_status_block_delegates_to_shell_error() {
+        use biscuit_terminal::prelude::TerminalRenderable;
+
+        let err = shell_expansion_failed_err();
+        let term = Terminal::new_optimistic(80);
+        let rendered = err.status_block(&term).render(&term);
+        assert!(
+            rendered.contains("ShellExpansionError"),
+            "expected delegated shell-expansion header: {rendered}"
+        );
+        assert!(
+            !rendered.contains("CompositionError"),
+            "must not use the generic composition header: {rendered}"
+        );
+    }
+
+    #[test]
+    fn shell_expansion_failed_preserves_rich_diagnostic() {
+        use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+        let err = shell_expansion_failed_err();
+        let term = Terminal::new_optimistic(80);
+        let rendered = strip_escape_codes(err.report_block_error(&term));
+
+        assert!(
+            rendered.contains("line 6"),
+            "expected file-relative line in diagnostic: {rendered}"
+        );
+        assert!(
+            rendered.contains("this command failed"),
+            "expected stderr text in diagnostic: {rendered}"
+        );
+        assert!(
+            rendered.contains("::shell"),
+            "expected source excerpt in diagnostic: {rendered}"
+        );
+        assert!(
+            rendered.contains("cmd-that-fails"),
+            "expected command name in diagnostic: {rendered}"
+        );
+    }
+
+    #[test]
+    fn shell_expansion_failed_plain_terminal_has_no_escape_bytes() {
+        let mut term = Terminal::builder()
+            .width(80)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+            .build();
+        term.is_nerd_font = Some(false);
+
+        let err = shell_expansion_failed_err();
+        let rendered = err.report_block_error(&term);
+
+        assert!(
+            !rendered.contains('\x1b'),
+            "plain render must contain no escape byte; got: {rendered:?}"
+        );
+        assert!(rendered.contains("line 6"), "got: {rendered}");
+        assert!(rendered.contains("this command failed"), "got: {rendered}");
+        assert!(rendered.contains("::shell"), "got: {rendered}");
     }
 }

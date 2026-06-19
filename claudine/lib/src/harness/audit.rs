@@ -82,7 +82,7 @@ pub fn collect_auditable_commands(
             text.to_string(),
         );
         let directives = darkmatter::markdown::compose::shell_expansion::parse_directives(
-            text, ctx,
+            text, ctx, 0,
         )
         .map_err(|e| HarnessError::ShellAuditParseError {
             detail: e.to_string(),
