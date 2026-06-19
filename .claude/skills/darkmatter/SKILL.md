@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-8f3baf954d17f806
-last_updated: 2026-06-17
+hash: 87f17662fa397abe-69cba5b0572cb5c2
+last_updated: 2026-06-19
 ---
 
 # darkmatter
@@ -233,7 +233,7 @@ See `compose.md` for the full API, interpolation syntax, and transclusion detail
 
 ## Schema Validation
 
-Darkmatter defines, detects, and evaluates schemas for Markdown frontmatter via **SimplifiedSchema** — a single-line YAML grammar that compiles to Draft 2020-12 JSON Schema. Key surfaces:
+Darkmatter defines, detects, and evaluates schemas for Markdown frontmatter via **SimplifiedSchema** — a single-line YAML grammar that compiles to Draft 2020-12 JSON Schema. Optional properties are nullable: a frontmatter value that resolves to `null` validates the same way as a missing key. Key surfaces:
 
 - `$schema` frontmatter property (inline, file reference, or root-level union).
 - `md schema validate`, `md schema detect`, and `md schema about` CLI subcommands.
