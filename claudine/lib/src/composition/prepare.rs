@@ -634,6 +634,40 @@ mod tests {
         assert!(prepared.lifecycle.failure.is_none());
     }
 
+    /// Regression: Darkmatter's `normalize_list_spacing` used to insert a
+    /// blank line between a tight parent list item and the first child of a
+    /// nested unordered list. That blank line was mis-rendered as an indented
+    /// code block by downstream renderers, corrupting prompts like the
+    /// `## Closure` section of `prompts/review-feature.md`.
+    #[test]
+    fn direct_composition_preserves_tight_nested_list() {
+        let dir = TempDir::new().unwrap();
+        let body = r#"## Closure
+
+- Save your review suggestions to a file
+- Save the following frontmatter properties on "review.md":
+    - based on your review suggestions indicate whether you think this feature is **ready for production**
+    - set the `agent` frontmatter property to claude
+    - set the `model` frontmatter property to some-model
+    - set the `created` frontmatter property to today
+
+**bold:**
+"#;
+        let source = make_source(&dir, &[("title", json!("Test"))], body);
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert!(
+            prepared.prompt.contains("properties on \"review.md\":\n    - based on"),
+            "parent item must be immediately followed by its first child; got:\n{}",
+            prepared.prompt
+        );
+        assert!(
+            !prepared.prompt.contains("properties on \"review.md\":\n\n    - "),
+            "tight nested list must not gain a blank line between parent and child; got:\n{}",
+            prepared.prompt
+        );
+    }
+
     #[test]
     fn inline_composition_parses_lifecycle_config() {
         let dir = TempDir::new().unwrap();
