@@ -46,6 +46,13 @@ This monorepo has the following packages:
 
 ::shell sniff repo packages
 
+::block when="ctx.current_package_area"
+However you've started this session in the "{{ctx.current_package_area}}" package area so the most relevant packages to focus on are:
+
+::shell sniff repo packages --package-area '{{ctx.current_package_area}}'
+
+::end-block
+
 Of these packages, the following ones appear to have changes _staged_ for commit:
 
 ::shell sniff repo staged-packages --when-error "No repo packages have files staged for commit! Any staged files must be in the repo's root, or possibly in a 'package area' but not inside an actual package. This almost always means that no source code files have been staged for commit."
