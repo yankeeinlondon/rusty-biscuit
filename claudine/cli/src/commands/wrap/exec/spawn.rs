@@ -244,7 +244,7 @@ pub(crate) fn run_child(
     }
 
     let (exit_code, termination) = if let Some(seconds) = timeout {
-        wait_with_timeout(&mut child, seconds)?
+        wait_with_timeout(&mut child, isolate_process_group, seconds)?
     } else {
         wait_with_signal_handling(&mut child, isolate_process_group)?
     };
@@ -504,7 +504,7 @@ pub(crate) fn run_child_capture(
     }
 
     let (exit_code, termination) = if let Some(seconds) = timeout {
-        wait_with_timeout(&mut child, seconds)?
+        wait_with_timeout(&mut child, true, seconds)?
     } else {
         wait_with_signal_handling(&mut child, true)?
     };

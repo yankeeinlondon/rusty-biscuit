@@ -10,6 +10,14 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 
 use super::exit::exit_code_from_status;
 
+/// Maximum time to wait for a child to reap after SIGKILL before giving up.
+///
+/// A wedged (D-state) child may never reap; the wrapper must not hang
+/// indefinitely. This cap is intentionally conservative: the kernel has
+/// already been asked to destroy the process, and the caller's timeout
+/// budget has long been exhausted.
+const POST_SIGKILL_REAP_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Reason for a watchdog-initiated termination.
 ///
 /// The unified two-rule design has exactly two reasons. Stuck-subagent
@@ -103,6 +111,8 @@ pub(crate) fn wait_with_signal_and_early_termination(
 
     let mut early_termination: Option<EarlyTermination> = None;
     let mut grace_deadline: Option<Instant> = None;
+    let mut reap_deadline: Option<Instant> = None;
+    let mut watchdog_rx = watchdog_rx;
     let poll_interval = Duration::from_millis(75);
     let grace_period = kill_grace;
 
@@ -123,27 +133,42 @@ pub(crate) fn wait_with_signal_and_early_termination(
             return Ok((code, termination, early_termination));
         }
 
+        if let Some(deadline) = reap_deadline
+            && Instant::now() >= deadline
+        {
+            child_exited.store(true, Ordering::SeqCst);
+            tracing::error!(
+                child_pid,
+                "child did not reap after SIGKILL; giving up to avoid hanging the wrapper"
+            );
+            return Ok((
+                137,
+                claudine::harness::ProcessTermination::TimedOut,
+                early_termination,
+            ));
+        }
+
         if early_termination.is_none() {
             match early_rx.try_recv() {
                 Ok(signal) => {
-                    tracing::info!(
-                        child_pid,
-                        "early-termination signal received; sending SIGTERM to child process group",
-                    );
-                    let kill_pid = if child_in_own_pgroup {
-                        -(child_pid as i32)
-                    } else {
-                        child_pid as i32
-                    };
-                    unsafe {
-                        libc::kill(kill_pid, libc::SIGTERM);
+                    // Re-check ownership immediately before signaling to
+                    // close the PID-recycle window between the loop-top
+                    // try_wait and the kill.
+                    if child.try_wait()?.is_none() {
+                        tracing::info!(
+                            child_pid,
+                            "early-termination signal received; sending SIGTERM to child process group",
+                        );
+                        send_signal_to_child(child_pid, child_in_own_pgroup, libc::SIGTERM);
+                        early_termination = Some(signal);
+                        grace_deadline = Some(Instant::now() + grace_period);
                     }
-                    early_termination = Some(signal);
-                    grace_deadline = Some(Instant::now() + grace_period);
                 }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
-                    // Channel closed with no signal; continue normal polling.
+                    tracing::warn!(
+                        "early-termination channel disconnected; early-exit signals will no longer be processed"
+                    );
                 }
             }
         }
@@ -154,41 +179,42 @@ pub(crate) fn wait_with_signal_and_early_termination(
         {
             match wd_rx.try_recv() {
                 Ok(req) => {
-                    tracing::warn!(
-                        child_pid,
-                        reason = ?req.reason,
-                        "watchdog termination received; sending SIGTERM to child process group",
-                    );
-                    let kill_pid = if child_in_own_pgroup {
-                        -(child_pid as i32)
-                    } else {
-                        child_pid as i32
-                    };
-                    unsafe {
-                        libc::kill(kill_pid, libc::SIGTERM);
+                    // Re-check ownership immediately before signaling to
+                    // close the PID-recycle window.
+                    if child.try_wait()?.is_none() {
+                        tracing::warn!(
+                            child_pid,
+                            reason = ?req.reason,
+                            "watchdog termination received; sending SIGTERM to child process group",
+                        );
+                        send_signal_to_child(child_pid, child_in_own_pgroup, libc::SIGTERM);
+                        early_termination = Some(watchdog_request_to_early_termination(req));
+                        grace_deadline = Some(Instant::now() + grace_period);
                     }
-                    early_termination = Some(watchdog_request_to_early_termination(req));
-                    grace_deadline = Some(Instant::now() + grace_period);
                 }
                 Err(TryRecvError::Empty) => {}
-                Err(TryRecvError::Disconnected) => {}
+                Err(TryRecvError::Disconnected) => {
+                    tracing::warn!(
+                        "watchdog ticker channel disconnected; timeout enforcement disabled for remainder of run"
+                    );
+                    // Stop polling the disconnected channel.
+                    watchdog_rx = None;
+                }
             }
         }
 
         if let Some(deadline) = grace_deadline
             && Instant::now() >= deadline
         {
-            tracing::warn!(
-                child_pid,
-                "child did not exit after early-termination SIGTERM; escalating to SIGKILL",
-            );
-            let kill_pid = if child_in_own_pgroup {
-                -(child_pid as i32)
-            } else {
-                child_pid as i32
-            };
-            unsafe {
-                libc::kill(kill_pid, libc::SIGKILL);
+            // Re-check ownership before the unconditional grace SIGKILL,
+            // which is the most exposed PID-recycle site.
+            if child.try_wait()?.is_none() {
+                tracing::warn!(
+                    child_pid,
+                    "child did not exit after early-termination SIGTERM; escalating to SIGKILL",
+                );
+                send_signal_to_child(child_pid, child_in_own_pgroup, libc::SIGKILL);
+                reap_deadline = Some(Instant::now() + POST_SIGKILL_REAP_TIMEOUT);
             }
             grace_deadline = None;
         }
@@ -197,12 +223,32 @@ pub(crate) fn wait_with_signal_and_early_termination(
     }
 }
 
+/// Send a signal to the child, choosing the process-group form when safe.
+///
+/// When `child_in_own_pgroup` is `true` the child leads its own process
+/// group, so `-pid` reaches descendants. When it is `false` the child
+/// shares the parent's process group (interactive TUI mode); a negative
+/// PID would hit Claudine and the terminal itself, so only the immediate
+/// child is targeted. The caller must re-check `child.try_wait()`
+/// immediately before this call to avoid signaling a recycled PID.
+#[cfg(unix)]
+fn send_signal_to_child(child_pid: u32, child_in_own_pgroup: bool, signal: i32) {
+    let kill_pid = if child_in_own_pgroup {
+        -(child_pid as i32)
+    } else {
+        child_pid as i32
+    };
+    unsafe {
+        libc::kill(kill_pid, signal);
+    }
+}
+
 #[cfg(not(unix))]
 pub(crate) fn wait_with_signal_and_early_termination(
     child: &mut Child,
     _child_in_own_pgroup: bool,
     early_rx: Receiver<EarlyTermination>,
-    watchdog_rx: Option<Receiver<WatchdogTermination>>,
+    mut watchdog_rx: Option<Receiver<WatchdogTermination>>,
     kill_grace: Duration,
 ) -> Result<(
     i32,
@@ -211,6 +257,7 @@ pub(crate) fn wait_with_signal_and_early_termination(
 )> {
     let mut early_termination: Option<EarlyTermination> = None;
     let mut grace_deadline: Option<Instant> = None;
+    let mut reap_deadline: Option<Instant> = None;
     let poll_interval = Duration::from_millis(75);
     let grace_period = kill_grace;
 
@@ -225,15 +272,35 @@ pub(crate) fn wait_with_signal_and_early_termination(
             return Ok((code, termination, early_termination));
         }
 
+        if let Some(deadline) = reap_deadline
+            && Instant::now() >= deadline
+        {
+            tracing::error!(
+                child_pid = child.id(),
+                "child did not reap after kill; giving up to avoid hanging the wrapper"
+            );
+            return Ok((
+                1,
+                claudine::harness::ProcessTermination::TimedOut,
+                early_termination,
+            ));
+        }
+
         if early_termination.is_none() {
             match early_rx.try_recv() {
                 Ok(signal) => {
-                    let _ = child.kill();
-                    early_termination = Some(signal);
-                    grace_deadline = Some(Instant::now() + grace_period);
+                    if child.try_wait()?.is_none() {
+                        let _ = child.kill();
+                        early_termination = Some(signal);
+                        grace_deadline = Some(Instant::now() + grace_period);
+                    }
                 }
                 Err(TryRecvError::Empty) => {}
-                Err(TryRecvError::Disconnected) => {}
+                Err(TryRecvError::Disconnected) => {
+                    tracing::warn!(
+                        "early-termination channel disconnected; early-exit signals will no longer be processed"
+                    );
+                }
             }
         }
 
@@ -242,19 +309,29 @@ pub(crate) fn wait_with_signal_and_early_termination(
         {
             match wd_rx.try_recv() {
                 Ok(req) => {
-                    let _ = child.kill();
-                    early_termination = Some(watchdog_request_to_early_termination(req));
-                    grace_deadline = Some(Instant::now() + grace_period);
+                    if child.try_wait()?.is_none() {
+                        let _ = child.kill();
+                        early_termination = Some(watchdog_request_to_early_termination(req));
+                        grace_deadline = Some(Instant::now() + grace_period);
+                    }
                 }
                 Err(TryRecvError::Empty) => {}
-                Err(TryRecvError::Disconnected) => {}
+                Err(TryRecvError::Disconnected) => {
+                    tracing::warn!(
+                        "watchdog ticker channel disconnected; timeout enforcement disabled for remainder of run"
+                    );
+                    watchdog_rx = None;
+                }
             }
         }
 
         if let Some(deadline) = grace_deadline
             && Instant::now() >= deadline
         {
-            let _ = child.kill();
+            if child.try_wait()?.is_none() {
+                let _ = child.kill();
+                reap_deadline = Some(Instant::now() + POST_SIGKILL_REAP_TIMEOUT);
+            }
             grace_deadline = None;
         }
 
@@ -541,5 +618,117 @@ mod tests {
             outstanding[0].elapsed_since_progress,
             Duration::from_secs(900)
         );
+    }
+
+    /// Regression: a disconnected watchdog channel must log a warning rather
+    /// than silently disabling timeout enforcement. The wait loop should still
+    /// return normally once the child exits.
+    #[cfg(unix)]
+    #[test]
+    #[tracing_test::traced_test]
+    fn disconnected_watchdog_channel_warns_and_returns_on_child_exit() {
+        use std::os::unix::process::CommandExt;
+        use std::process::Command;
+        use std::sync::mpsc::channel;
+
+        let mut child = Command::new("sleep")
+            .arg("0.5")
+            .process_group(0)
+            .spawn()
+            .expect("sleep must be available on PATH");
+        let (_early_tx, early_rx) = channel::<EarlyTermination>();
+        let (watchdog_tx, watchdog_rx) = channel::<WatchdogTermination>();
+        // Drop the sender to disconnect the channel before the loop polls it.
+        drop(watchdog_tx);
+
+        let result = wait_with_signal_and_early_termination(
+            &mut child,
+            true,
+            early_rx,
+            Some(watchdog_rx),
+            Duration::from_secs(1),
+        );
+
+        let (code, termination, _) = result.expect("wait loop must return when child exits");
+        assert_eq!(code, 0, "sleep should exit 0; got {code}");
+        assert_eq!(termination, claudine::harness::ProcessTermination::Completed);
+        assert!(
+            logs_contain("watchdog ticker channel disconnected"),
+            "expected warning log for disconnected watchdog channel"
+        );
+    }
+
+    /// The SIGTERM/SIGKILL escalation path should still reap a normally
+    /// exiting child after an early-termination signal. This exercises the
+    /// loop-driven kill path and its PID-recycle guard (the guard re-checks
+    /// try_wait immediately before each signal).
+    #[cfg(unix)]
+    #[test]
+    fn early_termination_signal_reaps_child_and_reports_timed_out() {
+        use std::os::unix::process::CommandExt;
+        use std::process::Command;
+        use std::sync::mpsc::channel;
+
+        let mut child = Command::new("sleep")
+            .arg("10")
+            .process_group(0)
+            .spawn()
+            .expect("sleep must be available on PATH");
+        let (early_tx, early_rx) = channel::<EarlyTermination>();
+        let (_watchdog_tx, watchdog_rx) = channel::<WatchdogTermination>();
+
+        // Send the early-termination signal from another thread so the wait
+        // loop has time to start polling.
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            let _ = early_tx.send(EarlyTermination::Timeout {
+                message: "test timeout".into(),
+            });
+        });
+
+        let result = wait_with_signal_and_early_termination(
+            &mut child,
+            true,
+            early_rx,
+            Some(watchdog_rx),
+            Duration::from_millis(100),
+        );
+
+        let (code, termination, early) = result.expect("wait loop must return");
+        assert!(
+            matches!(early, Some(EarlyTermination::Timeout { ref message }) if message == "test timeout"),
+            "early termination should be carried through; got {early:?}"
+        );
+        assert_eq!(termination, claudine::harness::ProcessTermination::TimedOut);
+        // Killed by SIGTERM or SIGKILL; either way the exit code is non-zero.
+        assert!(code != 0, "child should have been terminated; got {code}");
+    }
+
+    /// Smoke-test for the non-Unix parity path. Only runs on Windows, but the
+    /// branch is compile-checked on every target.
+    #[cfg(not(unix))]
+    #[test]
+    fn non_unix_wait_loop_returns_on_child_exit() {
+        use std::process::Command;
+        use std::sync::mpsc::channel;
+
+        let mut child = Command::new("cmd")
+            .args(["/C", "timeout /T 1 /nobreak >nul"])
+            .spawn()
+            .expect("cmd must be available");
+        let (_early_tx, early_rx) = channel::<EarlyTermination>();
+        let (_watchdog_tx, watchdog_rx) = channel::<WatchdogTermination>();
+
+        let result = wait_with_signal_and_early_termination(
+            &mut child,
+            false,
+            early_rx,
+            Some(watchdog_rx),
+            Duration::from_secs(1),
+        );
+
+        let (code, termination, _) = result.expect("wait loop must return when child exits");
+        assert_eq!(code, 0);
+        assert_eq!(termination, claudine::harness::ProcessTermination::Completed);
     }
 }

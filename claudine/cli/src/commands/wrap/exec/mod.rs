@@ -477,13 +477,17 @@ fn join_with_timeout_or<T>(handle: thread::JoinHandle<T>, timeout: Duration, fal
 #[cfg(unix)]
 fn kill_process_group(child: &mut Child) {
     let pid = child.id() as i32;
+    // Derive the grace period from the same `TimeoutConfig` knob that
+    // governs SIGTERM->SIGKILL escalation in the streaming wait loop,
+    // so the two termination paths stay consistent.
+    let kill_grace = timeouts::TimeoutConfig::resolve(None, None).kill_grace;
     // Send SIGTERM to the process group first (graceful), then SIGKILL.
     unsafe {
         // kill(-pgid, ...) sends to the entire process group.
         // With process_group(0), the pgid == child pid.
         if libc::kill(-pid, libc::SIGTERM) == 0 {
-            // Give descendants a brief grace period to exit.
-            std::thread::sleep(Duration::from_millis(200));
+            // Give descendants the configured grace period to exit.
+            std::thread::sleep(kill_grace);
             // Ensure everything is dead.
             libc::kill(-pid, libc::SIGKILL);
         }
