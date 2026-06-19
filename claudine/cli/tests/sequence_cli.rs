@@ -689,4 +689,3 @@ fn sequence_summary_emits_final_line() {
         .success()
         .stderr(contains("Sequence finished"));
 }
-

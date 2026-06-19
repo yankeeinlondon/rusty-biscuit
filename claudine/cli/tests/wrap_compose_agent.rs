@@ -700,4 +700,3 @@ fn direct_wrap_dry_run_delivers_prompt_for_every_provider() {
         );
     }
 }
-

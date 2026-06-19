@@ -595,4 +595,3 @@ fi
         "missing View Image line in:\n{stderr_plain}"
     );
 }
-

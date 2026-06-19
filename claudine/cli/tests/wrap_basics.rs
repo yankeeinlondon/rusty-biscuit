@@ -831,4 +831,3 @@ exit 0
         "provider must not receive AGENT_PID in its environment; got: {env_lines}"
     );
 }
-

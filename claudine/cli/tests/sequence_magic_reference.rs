@@ -246,4 +246,3 @@ fn sequence_external_file_not_found_fails_clearly() {
         "error should mention the missing external file; stderr: {plain}"
     );
 }
-

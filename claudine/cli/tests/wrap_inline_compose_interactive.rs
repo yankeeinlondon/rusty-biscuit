@@ -260,4 +260,3 @@ fn inline_compose_harness_writability_pre_check_fires() {
 // ---------------------------------------------------------------------------
 // Handler-engagement banner emission semantics
 // ---------------------------------------------------------------------------
-

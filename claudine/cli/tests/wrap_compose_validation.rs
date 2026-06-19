@@ -372,4 +372,3 @@ fn compose_dry_run_missing_file_errors_to_stderr_with_clean_stdout() {
         "error naming the missing file must appear on stderr; stderr was:\n{stderr}"
     );
 }
-

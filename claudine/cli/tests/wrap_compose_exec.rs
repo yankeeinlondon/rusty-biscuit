@@ -389,4 +389,3 @@ exit 0
         "runtime MCP for codex should use a shadow HOME; env: {env_lines}"
     );
 }
-

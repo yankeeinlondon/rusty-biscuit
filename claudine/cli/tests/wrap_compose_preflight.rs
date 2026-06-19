@@ -431,4 +431,3 @@ exit 0
         "compose harness should block launch before the provider runs"
     );
 }
-

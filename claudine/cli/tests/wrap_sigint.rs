@@ -119,4 +119,3 @@ exit 0
         "stderr must contain the clean interrupt notice; got: {plain}"
     );
 }
-

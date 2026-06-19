@@ -420,4 +420,3 @@ Step {{state}} with tier {{tier}}.
     // Silence unused linter for the predicates import that other tests use.
     let _ = contains("");
 }
-

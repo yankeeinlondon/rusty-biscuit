@@ -246,4 +246,3 @@ fn sequence_claude_dry_run_does_not_call_opencode_models() {
 // ---------------------------------------------------------------------------
 // Phase 5 acceptance tests: Ctrl+C during prep exits 130 with clean notice
 // ---------------------------------------------------------------------------
-

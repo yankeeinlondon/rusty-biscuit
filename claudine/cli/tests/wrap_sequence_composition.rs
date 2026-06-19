@@ -609,4 +609,3 @@ fn sequence_live_silent_does_not_suppress_agent_resolution_abort() {
 // Phase 6 — cross-cutting hardening (stdout/stderr discipline, error
 // surfaces, quiet/silent matrix)
 // ---------------------------------------------------------------------------
-

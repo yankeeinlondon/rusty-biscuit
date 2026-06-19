@@ -222,4 +222,3 @@ exit 0
         .stderr(contains("--approval-mode yolo"))
         .stderr(contains("--yolo"));
 }
-
