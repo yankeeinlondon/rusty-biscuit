@@ -5,7 +5,7 @@ $schema:
 ready: "{{ review && file_exists(review) ? frontmatter(review, 'ready') : null }}"
 index: "{{ is_indexed_file(review) ? file_index(review) : '' }}"
 has_index: "{{ is_number(index) }}"
-directory: "{{ dir(review) }}"
+directory: "{{ dirname(review) }}"
 spec_path: "{{ join(directory, 'spec.md') }}"
 spec: "{{ file_exists(spec_path) ? spec_path : '' }}"
 

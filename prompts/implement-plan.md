@@ -6,12 +6,12 @@ $schema:
     spec: file
     spec_file: file
 phase: "{{ frontmatter(plan, 'start_phase') || 1 }}"
-dir: "{{ dir(plan) }}"
+dirname: "{{ dirname(plan) }}"
 # spec: "{{ frontmatter( }}"
 area: "{{ ctx.area }}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
 total_phases: "{{ frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') }}"
-spec_file: "{{ file_exists(spec) ? spec : file_exists(join(dir, 'spec.md')) ? join(dir, 'spec.md')  :  '' }}"
+spec_file: "{{ file_exists(spec) ? spec : file_exists(join(dirname, 'spec.md')) ? join(dirname, 'spec.md')  :  '' }}"
 start:
     message: "🎬  starting the implementation of phase **#{{phase}}** of `{{parent_dir(plan)}}` in **{{ctx.area}}**"
 success: 
