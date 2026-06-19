@@ -17,7 +17,8 @@ source_files_during_phase_1:
   - claudine/lib/src/composition/lifecycle.rs
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
-skills_files_updated_during_phase_1: []
+skills_files_updated_during_phase_1:
+  - .opencode/skill/claudine/SKILL.md
 source_files_during_phase_2:
   - claudine/lib/src/dispatch/mod.rs
   - claudine/lib/src/protect/observe.rs
@@ -26,10 +27,15 @@ source_files_during_phase_2:
   - claudine/lib/src/protect/service.rs
   - claudine/lib/src/protect/catalog.rs
   - claudine/lib/src/protect/config.rs
+  - claudine/lib/src/protect/mod.rs
+  - claudine/lib/benches/runtime_hot_paths.rs
+  - claudine/cli/src/commands/compose/mod.rs
+  - claudine/cli/src/commands/compose/prep.rs
 docs_updated_during_phase_2:
   - claudine/docs/topics/protect-service.md
 docs_created_during_phase_2: []
-skills_files_updated_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/claudine/SKILL.md
 source_files_during_phase_3:
   - claudine/rendezvous/daemon/src/service.rs
   - claudine/rendezvous/daemon/src/session_log.rs
@@ -38,6 +44,9 @@ source_files_during_phase_3:
   - claudine/rendezvous/daemon/src/peers.rs
   - claudine/rendezvous/daemon/src/discovery.rs
   - claudine/rendezvous/daemon/src/quic.rs
+  - claudine/rendezvous/daemon/src/projection.rs
+  - claudine/rendezvous/daemon/tests/phase6_integration.rs
+  - claudine/rendezvous/justfile
 docs_updated_during_phase_3:
   - claudine/rendezvous/daemon/src/quic.rs
 docs_created_during_phase_3: []
@@ -80,11 +89,9 @@ docs_created_during_phase_6:
   - claudine/docs/dependencies.md
 skills_files_updated_during_phase_6: []
 source_files_during_phase_7: []
-docs_updated_during_phase_7:
-  - .opencode/skill/claudine/SKILL.md
+docs_updated_during_phase_7: []
 docs_created_during_phase_7: []
-skills_files_updated_during_phase_7:
-  - .opencode/skill/claudine/SKILL.md
+skills_files_updated_during_phase_7: []
 ---
 
 # Comprehensive Review Remediation — Execution Plan
@@ -196,56 +203,56 @@ and `protect/service.rs` edits in Phases 2 and 6.
 
 **File:** `claudine/lib/src/stream/logs/opencode/errors.rs:133-134`
 
-- [ ] Add a fail-first test: an OpenCode `error` tag >500 bytes with a
+- [x] Add a fail-first test: an OpenCode `error` tag >500 bytes with a
       multi-byte UTF-8 codepoint straddling byte 497 panics in
       `classify_error` (or the responsible entry point) before the fix. Commit
       the failing test (red).
-- [ ] Replace the byte-index slice
+- [x] Replace the byte-index slice
       `&error_tag[..497]` with char-safe truncation. Prefer
       `error_tag.chars().take(497).collect::<String>()` (the value is a
       truncated diagnostic, so a character cap is acceptable), recombined with
       the `"..."` suffix to preserve the original intent.
-- [ ] Confirm the fail-first test now passes (green) and that existing
+- [x] Confirm the fail-first test now passes (green) and that existing
       classifier tests are unchanged.
 
 ### 1.2 — Fix UTF-8 byte-slice panic in protect tracing span (P1.2)
 
 **File:** `claudine/lib/src/protect/service.rs:79` (`evaluate_bash_command`)
 
-- [ ] Add a fail-first test in the protect test module: a >80-byte command
+- [x] Add a fail-first test in the protect test module: a >80-byte command
       whose 80th byte lands inside a multi-byte codepoint, passed into
       `evaluate_bash_command`, panics before the fix (red).
-- [ ] Replace
+- [x] Replace
       `command_truncated = &command[..command.len().min(80)]` with a
       char-boundary truncation:
       `command.char_indices().nth(80).map_or(command, |(i, _)| &command[..i])`.
-- [ ] Confirm the fail-first test passes (green).
+- [x] Confirm the fail-first test passes (green).
 
 ### 1.3 — Descend ternary conditions in lifecycle undefined-variable guard (P5.1)
 
 **File:** `claudine/lib/src/composition/lifecycle.rs:784`
 (`find_undefined_variable`)
 
-- [ ] Add fail-first tests through `validate_no_undefined_lifecycle_variables`
+- [x] Add fail-first tests through `validate_no_undefined_lifecycle_variables`
       (red): `{{ missing == 'x' ? 'a' : 'b' }}` and `{{ missing ? 'a' : 'b' }}`
       with `missing` absent from composed frontmatter are currently accepted
       (bug). Also assert the branch operands stay tolerated: a defined
       condition with an undefined branch operand still passes. Add
       `{{ missing[0] }}` and `{{ missing.foo }}` to exercise `Index` /
       `MemberAccess` descent.
-- [ ] Split the `Expr::Fallback { .. } | Expr::Ternary { .. } => None` arm.
+- [x] Split the `Expr::Fallback { .. } | Expr::Ternary { .. } => None` arm.
       Descend the ternary condition only, keep skipping branches:
       `Expr::Ternary { condition, .. } => find_undefined_variable(condition, defined)`,
       `Expr::Fallback { .. } => None`.
-- [ ] Confirm all fail-first ternary cases now reject; the
+- [x] Confirm all fail-first ternary cases now reject; the
       defined-condition/undefined-branch case still passes.
 
 ### Phase 1 validation checkpoint
 
-- [ ] `just test` green in the `claudine` area; `just lint` clean.
-- [ ] All three fail-first tests demonstrably went red→green (commit the test
+- [x] `just test` green in the `claudine` area; `just lint` clean.
+- [x] All three fail-first tests demonstrably went red→green (commit the test
       first, then the fix, per repo convention where applicable).
-- [ ] No behavioral change beyond the three documented fixes.
+- [x] No behavioral change beyond the three documented fixes.
 
 ---
 
@@ -273,7 +280,7 @@ implementer; 2.5 follows the service routing change; the docs + bypass corpus
 **Files:** `claudine/lib/src/protect/observe.rs:52-101`,
 `claudine/lib/src/dispatch/mod.rs:261-284, 350-374`
 
-- [ ] Introduce an explicit extraction outcome in place of overloaded `Option`:
+- [x] Introduce an explicit extraction outcome in place of overloaded `Option`:
       ```rust
       enum ProtectObservation<'a> {
           Request(ProtectRequest<'a>),
@@ -284,17 +291,17 @@ implementer; 2.5 follows the service routing change; the docs + bypass corpus
       `NoOpinion` = parsed, nothing relevant; `Unparsed` = looked command/write-
       shaped but could not extract. This makes fail-open vs fail-closed an
       explicit, testable choice at the dispatch boundary.
-- [ ] Broaden command-key detection in the extractor to at least `command`,
+- [x] Broaden command-key detection in the extractor to at least `command`,
       `cmd`, `script`, `input`, and string arrays (not just the `command`
       string). Broaden write-path keys to at least `path`, `file_path`, `file`,
       `target`, `filename`, `dest`, and `paths[]`. Add tool-name recognition
       for common names the review flagged (`run_command`, `terminal`).
-- [ ] At the dispatch boundary, handle `Unparsed` per the reviewed posture:
+- [x] At the dispatch boundary, handle `Unparsed` per the reviewed posture:
       clearly command- or write-shaped tools return a blocking provider
       response with a loud `warn!`; unrelated tools stay `NoOpinion` and
       execute normally; include the tool name and a secret-free reason in
       tracing.
-- [ ] Tests (fail-first where a hole existed): a Bash-like tool with the
+- [x] Tests (fail-first where a hole existed): a Bash-like tool with the
       command under `cmd`, `script`, `input`, and an array is **not** silently
       allowed; a write-like tool with `filename`, `dest`, and `paths[]` is
       scanned; an unrelated tool with no relevant payload stays `NoOpinion`.
@@ -303,14 +310,14 @@ implementer; 2.5 follows the service routing change; the docs + bypass corpus
 
 **File:** `claudine/lib/src/protect/path.rs:173-188`
 
-- [ ] For relative allow entries, replace the any-segment match with an
+- [x] For relative allow entries, replace the any-segment match with an
       anchored component-sequence match under the evaluated target, so
       `allow_paths = ["build"]` no longer permits `/etc/build/passwd`.
-- [ ] Use boundary-aware prefix semantics for absolute entries everywhere, so
+- [x] Use boundary-aware prefix semantics for absolute entries everywhere, so
       `/var/tmp` does not permit `/var/tmpevil`.
-- [ ] Preserve the common developer use cases (`node_modules`, `target`,
+- [x] Preserve the common developer use cases (`node_modules`, `target`,
       `dist`, `build`, `.cache`) for project-local destructive commands.
-- [ ] Tests: `/etc/build/passwd` is not allowed by `["build"]`;
+- [x] Tests: `/etc/build/passwd` is not allowed by `["build"]`;
       `/var/tmpevil` is not allowed by `["/var/tmp"]`; existing intended
       suppressions (`rm -rf node_modules`, `rm -rf target`) still pass.
 
@@ -318,14 +325,14 @@ implementer; 2.5 follows the service routing change; the docs + bypass corpus
 
 **File:** `claudine/lib/src/protect/path.rs:14-29`
 
-- [ ] Add home-relative credential/config entries: `.aws`, `.kube`,
+- [x] Add home-relative credential/config entries: `.aws`, `.kube`,
       `.docker/config.json`, `.netrc`, `.npmrc`, `.git-credentials`,
       `.config/gh`, `.claude`, `.codex`, `.gemini`, `.goose`, `.opencode`,
       `.qwen`, `.roo`.
-- [ ] Add absolute high-impact entries, platform-gated or harmless off-platform:
+- [x] Add absolute high-impact entries, platform-gated or harmless off-platform:
       macOS `/Library/LaunchDaemons`, `/System` (already present); Unix-like
       `/bin`, `/sbin`, `/root`, `/opt`.
-- [ ] Tests: writes to the added credential/config paths are blocked;
+- [x] Tests: writes to the added credential/config paths are blocked;
       absolute paths covered with OS-gated tests where needed. Do **not** add
       a user-configurable catalog unless implementation reveals unacceptable
       false positives.
@@ -336,14 +343,14 @@ implementer; 2.5 follows the service routing change; the docs + bypass corpus
 `claudine/lib/src/protect/service.rs` (MCP evaluation path),
 `claudine/lib/src/protect/config.rs`
 
-- [ ] Add a `surface` field to `CustomPattern` defaulting to `bash_command`.
+- [x] Add a `surface` field to `CustomPattern` defaulting to `bash_command`.
       Accepted values: `bash_command`, `mcp_response`, and `write_path` only
       if write-path string scanning is implemented; otherwise reject
       `write_path` at config validation with a clear error.
-- [ ] Route `mcp_response` custom patterns through `evaluate_mcp_response`.
+- [x] Route `mcp_response` custom patterns through `evaluate_mcp_response`.
       Preserve the old default (omitted `surface` ⇒ `bash_command`) for
       compatibility.
-- [ ] Tests: a custom pattern with `surface = "mcp_response"` blocks an MCP
+- [x] Tests: a custom pattern with `surface = "mcp_response"` blocks an MCP
       payload; a custom pattern with no `surface` still applies to bash
       commands; invalid surfaces are rejected at config validation.
 
@@ -351,12 +358,12 @@ implementer; 2.5 follows the service routing change; the docs + bypass corpus
 
 **File:** `claudine/lib/src/protect/path.rs:139-159` (and built-in rules)
 
-- [ ] For rules whose target grammar is not parsed correctly by the
+- [x] For rules whose target grammar is not parsed correctly by the
       `rm`-operand heuristic (`find ... -delete`, `chmod`, `chown`), set
       `supports_allow_paths = false` unless a small per-command extractor is
       added in the same change.
-- [ ] Document the limitation in `claudine/docs/topics/protect-service.md`.
-- [ ] Tests: `find . -delete` with `allow_paths = ["."]` does not silently
+- [x] Document the limitation in `claudine/docs/topics/protect-service.md`.
+- [x] Tests: `find . -delete` with `allow_paths = ["."]` does not silently
       claim reliable suppression (unless a dedicated `find` extractor is
       implemented); `rm`-shaped behavior remains covered by 2.2.
 
@@ -367,27 +374,27 @@ implementer; 2.5 follows the service routing change; the docs + bypass corpus
 `claudine/lib/src/protect/service.rs:76-120`,
 `claudine/docs/topics/protect-service.md`
 
-- [ ] State the operational consequence plainly at module level and in
+- [x] State the operational consequence plainly at module level and in
       `docs/topics/protect-service.md`: protect is best-effort
       defense-in-depth, **not** the security boundary; provider permission
       systems and contract sandboxing are the load-bearing controls.
-- [ ] Add a protect bypass-corpus test suite covering the shell variants from
+- [x] Add a protect bypass-corpus test suite covering the shell variants from
       the review (`rm -fr /`, `\rm -rf /`, `X=rm; $X -rf /`, case changes,
       refspec force pushes, separator/chaining variants). Each case must
       declare whether it is expected to block under the current best-effort
       posture or is a documented non-boundary case.
-- [ ] Ensure obvious destructive examples remain blocked; documented bypass
+- [x] Ensure obvious destructive examples remain blocked; documented bypass
       forms are either blocked where cheap or marked as known non-boundary
       cases.
 
 ### Phase 2 validation checkpoint
 
-- [ ] `just test` and `just test-l2` green in the `claudine` area; `just lint`
+- [x] `just test` and `just test-l2` green in the `claudine` area; `just lint`
       clean.
-- [ ] The bypass corpus (2.6) passes with the posture it encodes — no docs
+- [x] The bypass corpus (2.6) passes with the posture it encodes — no docs
       drift back into "boundary" language without a matching implementation
       change.
-- [ ] `docs/topics/protect-service.md` reflects the new extraction, surface,
+- [x] `docs/topics/protect-service.md` reflects the new extraction, surface,
       and `allow_paths` behavior.
 
 ---
@@ -411,16 +418,16 @@ run under `just test-l2` with nextest retries.
 `:455`), `claudine/rendezvous/daemon/src/storage.rs:204-232`,
 `claudine/rendezvous/daemon/src/service.rs:123/151/271/354`
 
-- [ ] Compute the staged snapshot under the lock, **drop the lock**, call
+- [x] Compute the staged snapshot under the lock, **drop the lock**, call
       `save_snapshot` without it, then re-acquire briefly to swap state and
       bump the cursor. Re-check the active chunk index on re-acquire
       (idempotent snapshots tolerate it).
-- [ ] Wrap synchronous redb `begin_write()`/`commit()` persistence in
+- [x] Wrap synchronous redb `begin_write()`/`commit()` persistence in
       `tokio::task::spawn_blocking` (handles are `Clone + Send`), or move
       OLTP/OLAP behind a blocking actor as the projection batcher already
       does. Ensure `query_projection`'s DuckDB call under
       `parking_lot::Mutex` is likewise off the worker thread.
-- [ ] Test (integration): simultaneous `append_entry` to one session exposes
+- [x] Test (integration): simultaneous `append_entry` to one session exposes
       the lock-across-fsync regression and verifies cursor correctness; the
       handler does not serialize unrelated sessions.
 
@@ -429,11 +436,11 @@ run under `just test-l2` with nextest retries.
 **File:** `claudine/rendezvous/daemon/src/session_log.rs:642-711`
 (`stage_remote_update`) and `:718-729` (`commit_staged_update`)
 
-- [ ] Hold a per-chunk lock across stage+commit, **or** re-import the staged
+- [x] Hold a per-chunk lock across stage+commit, **or** re-import the staged
       delta into the current live doc (merge) rather than wholesale replacing,
       **or** re-run append-only validation against current state before insert
       and retry on conflict.
-- [ ] Test (integration): two concurrent inbound sync sessions on one chunk;
+- [x] Test (integration): two concurrent inbound sync sessions on one chunk;
       assert no entries are dropped.
 
 ### 3.3 — Make sealer-counter persistence atomic with the seal (P3.3)
@@ -441,11 +448,11 @@ run under `just test-l2` with nextest retries.
 **Files:** `claudine/rendezvous/daemon/src/sync.rs:450-458`;
 `claudine/rendezvous/daemon/src/session_log.rs:347-352`
 
-- [ ] Capture the counter-to-persist inside the same lock scope as the seal
+- [x] Capture the counter-to-persist inside the same lock scope as the seal
       (have `seal` return the new counter, or read it before dropping the
       guard), then persist outside the lock — or persist the counter
       transactionally with the accepted-envelope write.
-- [ ] Test (integration): sealer-counter monotonicity across interleaved seals
+- [x] Test (integration): sealer-counter monotonicity across interleaved seals
       plus a simulated restart (post-restart `with_start` must not reissue an
       already-used message_id).
 
@@ -455,10 +462,10 @@ run under `just test-l2` with nextest retries.
 (`record_inbound`) vs `:183` (`connection_for(node_id)`); consumed at
 `service.rs:326`; handshake node_id learned at `sync.rs:346`
 
-- [ ] After the responder handshake validates `node_id`, re-key/merge the
+- [x] After the responder handshake validates `node_id`, re-key/merge the
       inbound record under the real hex node_id; **or** explicitly document
       that inbound peers are intentionally responder-only for this phase.
-- [ ] Test (integration): an inbound-connected peer targeted by
+- [x] Test (integration): an inbound-connected peer targeted by
       `SyncWithPeer` resolves to its live connection (no
       `failed_precondition "no active QUIC connection"`).
 
@@ -466,10 +473,10 @@ run under `just test-l2` with nextest retries.
 
 **File:** `claudine/rendezvous/daemon/src/session_log.rs:819-851`
 
-- [ ] Write rebuild rows synchronously (bypass the async batcher) so
+- [x] Write rebuild rows synchronously (bypass the async batcher) so
       truncate+repopulate is atomic from the query path, **or** propagate
       submit errors and defer the truncate until repopulate is confirmed.
-- [ ] Test (integration): a submit failure during rebuild does not leave a
+- [x] Test (integration): a submit failure during rebuild does not leave a
       silently-truncated projection.
 
 ### 3.6 — Bound the mDNS browse blocking task (P3.6)
@@ -477,17 +484,17 @@ run under `just test-l2` with nextest retries.
 **File:** `claudine/rendezvous/daemon/src/discovery.rs:130-154`
 (`Drop` at `:88-90`)
 
-- [ ] Switch the `spawn_blocking` `recv()` loop to `recv_timeout` with a
+- [x] Switch the `spawn_blocking` `recv()` loop to `recv_timeout` with a
       periodic shutdown-flag check, **or** confirm `daemon.shutdown()` drops
       the browse sender and document the dependence.
-- [ ] Test: `just test-l2` (leak suite) shows no leaked browse thread after
+- [x] Test: `just test-l2` (leak suite) shows no leaked browse thread after
       daemon shutdown.
 
 ### 3.7 — Document the permissive QUIC verifier as a forward-looking gate (P3.7)
 
 **File:** `claudine/rendezvous/daemon/src/quic.rs:257-303` (`AcceptAnyServerCert`)
 
-- [ ] No code change required for the POC. Add/confirm a code comment and
+- [x] No code change required for the POC. Add/confirm a code comment and
       topic-doc note that, before shipping beyond LAN, the QUIC cert must be
       bound to the node's Ed25519 key and verified in the custom verifier.
 
@@ -496,20 +503,20 @@ run under `just test-l2` with nextest retries.
 **Files:** `claudine/rendezvous/daemon/src/session_log.rs:519-540`
 (`list_chunk_entries` disk fallback), `claudine/rendezvous/daemon/src/storage.rs:208/398`
 
-- [ ] `list_chunk_entries` disk fallback: stop fabricating metadata
+- [x] `list_chunk_entries` disk fallback: stop fabricating metadata
       (`created_at=0`) that would fail the crate's own validator — read real
       metadata, or comment the read-only intent explicitly.
-- [ ] Replace `io::Error::new(ErrorKind::Other, …)` with `io::Error::other`.
-- [ ] Tests: `list_chunk_entries` fallback path returns metadata consistent
+- [x] Replace `io::Error::new(ErrorKind::Other, …)` with `io::Error::other`.
+- [x] Tests: `list_chunk_entries` fallback path returns metadata consistent
       with the validator (or documents the read-only intent).
 
 ### Phase 3 validation checkpoint
 
-- [ ] `just test` and `just test-l2` green in the `rendezvous` area (run from
+- [x] `just test` and `just test-l2` green in the `rendezvous` area (run from
       the `rendezvous/daemon` area or `just test rendezvous-daemon` at root).
-- [ ] No mutex held across fsync; no sync redb/DuckDB I/O on tokio worker
+- [x] No mutex held across fsync; no sync redb/DuckDB I/O on tokio worker
       threads (verifiable by the 3.1 integration test and a code read).
-- [ ] `just test-l2` leak suite is clean after daemon shutdown.
+- [x] `just test-l2` leak suite is clean after daemon shutdown.
 
 ---
 
