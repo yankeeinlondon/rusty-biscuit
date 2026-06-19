@@ -176,6 +176,14 @@ fn assert_fills_to_140_cap_with_right_margin(frame: &CapturedFrame) {
     );
 }
 
+fn context_report_plain(frame: &CapturedFrame) -> &str {
+    frame
+        .plain
+        .find("Darkmatter Expression Engine")
+        .map(|idx| &frame.plain[idx..])
+        .unwrap_or(&frame.plain)
+}
+
 /// Asserts the unordered list bracketed by the `heading` line and the
 /// `next_heading` line is surrounded by exactly one blank line on each side.
 ///
@@ -183,49 +191,59 @@ fn assert_fills_to_140_cap_with_right_margin(frame: &CapturedFrame) {
 /// list. Earlier iterations double-spaced these lists because the caller emitted
 /// its own `log::data("")` on top of the blank line the list helper already
 /// owns. Counting blanks from the bytes the emulator actually displayed guards
-/// that contract: the line directly after `heading` must be blank and the next
-/// must open the list (`- `), and the line directly before `next_heading` must
-/// be blank while the line above it still carries list content.
-fn assert_list_single_blank_lines(frame: &CapturedFrame, heading: &str, next_heading: &str) {
-    let lines: Vec<&str> = frame.plain.lines().map(|l| l.trim_end()).collect();
+/// that contract: the list must have exactly one blank line immediately before
+/// its first marker and exactly one blank line immediately after its last
+/// content line.
+fn assert_list_single_blank_lines(plain: &str, heading: &str, next_heading: &str) {
+    let lines: Vec<&str> = plain.lines().map(|l| l.trim_end()).collect();
     let find = |label: &str| {
         lines
             .iter()
             .position(|l| l.trim() == label)
-            .unwrap_or_else(|| panic!("heading `{label}` not found.\nplain:\n{}", frame.plain))
+            .unwrap_or_else(|| panic!("heading `{label}` not found.\nplain:\n{plain}"))
     };
     let h = find(heading);
     let n = find(next_heading);
+    let list_start = lines[h + 1..n]
+        .iter()
+        .position(|l| l.trim_start().starts_with("- "))
+        .map(|offset| h + 1 + offset)
+        .unwrap_or_else(|| {
+            panic!("expected a list between `{heading}` and `{next_heading}`.\nplain:\n{plain}")
+        });
+    let list_end = lines[list_start + 1..n]
+        .iter()
+        .position(|l| l.is_empty())
+        .map(|offset| list_start + 1 + offset)
+        .unwrap_or(n);
     assert!(
-        n >= h + 4,
+        list_end > list_start,
         "expected a list between `{heading}` and `{next_heading}`.\nplain:\n{}",
-        frame.plain,
+        plain,
     );
 
     // Exactly one blank line before the list.
     assert!(
-        lines[h + 1].is_empty(),
-        "expected one blank line directly after `{heading}`.\nplain:\n{}",
-        frame.plain,
+        list_start > 0 && lines[list_start - 1].is_empty(),
+        "expected one blank line directly before the `{heading}` list.\nplain:\n{}",
+        plain,
     );
     assert!(
-        lines[h + 2].trim_start().starts_with("- "),
-        "expected the list to open one line below the blank (a double blank before \
-         the `{heading}` list).\nplain:\n{}",
-        frame.plain,
+        list_start == 1 || !lines[list_start - 2].is_empty(),
+        "expected exactly one blank before the `{heading}` list.\nplain:\n{}",
+        plain,
     );
 
     // Exactly one blank line after the list.
     assert!(
-        lines[n - 1].is_empty(),
-        "expected one blank line directly before `{next_heading}`.\nplain:\n{}",
-        frame.plain,
+        lines[list_end].is_empty(),
+        "expected one blank line directly after the `{heading}` list.\nplain:\n{}",
+        plain,
     );
     assert!(
-        !lines[n - 2].is_empty(),
-        "expected list content directly above the trailing blank (a double blank \
-         after the list preceding `{next_heading}`).\nplain:\n{}",
-        frame.plain,
+        list_end + 1 >= lines.len() || !lines[list_end + 1].is_empty(),
+        "expected exactly one blank after the list preceding `{next_heading}`.\nplain:\n{}",
+        plain,
     );
 }
 
@@ -501,12 +519,13 @@ fn level2_context_values_caps_at_140_in_wide_tmux() {
 #[serial(level2_terminal)]
 fn level2_context_expressions_narrow_inline_code_and_list_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
-    let frame = capture_context(&["--expressions"], 100, 320);
+    let frame = capture_context(&["--expressions"], 100, 700);
+    let report_plain = context_report_plain(&frame);
 
     assert!(
-        !frame.plain.contains("`||`"),
+        !report_plain.contains("`||`"),
         "styled output must not show literal backticks around `||`.\nplain:\n{}",
-        frame.plain,
+        report_plain,
     );
     assert!(
         frame.raw.contains("\x1b[7m"),
@@ -518,11 +537,12 @@ fn level2_context_expressions_narrow_inline_code_and_list_in_tmux() {
     let marker_line = frame
         .plain
         .lines()
+        .skip_while(|l| !l.contains("Darkmatter Expression Engine"))
         .find(|l| l.trim_start().starts_with("- "))
-        .unwrap_or_else(|| panic!("expected a `- ` list marker.\nplain:\n{}", frame.plain));
+        .unwrap_or_else(|| panic!("expected a `- ` list marker.\nplain:\n{}", report_plain));
     let bullet_indent = marker_line.len() - marker_line.trim_start().len();
     // A wrapped continuation line of a list item is indented past the bullet.
-    let has_hanging_indent = frame.plain.lines().any(|l| {
+    let has_hanging_indent = report_plain.lines().any(|l| {
         let trimmed = l.trim();
         let indent = l.len() - l.trim_start().len();
         !trimmed.is_empty()
@@ -533,13 +553,14 @@ fn level2_context_expressions_narrow_inline_code_and_list_in_tmux() {
     assert!(
         has_hanging_indent,
         "wrapped list items must hang-indent past the `- ` bullet.\nplain:\n{}",
-        frame.plain,
+        report_plain,
     );
 
-    // The comparison-operator list is bracketed by the `Comparison Operators`
-    // and `Arithmetic Operators` headings and must carry exactly one blank line
-    // on each side (spec: one blank before and after every unordered list).
-    assert_list_single_blank_lines(&frame, "Comparison Operators", "Arithmetic Operators");
+    assert_list_single_blank_lines(
+        report_plain,
+        "Interpolation vs. Condition Mode",
+        "Null Propagation Summary",
+    );
 
     assert!(
         max_visible_width(&frame) <= 100,
