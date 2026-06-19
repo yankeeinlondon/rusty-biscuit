@@ -32,16 +32,16 @@ Your task is to:
 
 1. act as an orchestrator and iterate over each suggestions serially
 2. for each suggestion call a subagent to:
-    - implement the suggestion, 
-    - add tests to provide full test coverage for the suggestion, 
-    - and make sure that the implementation passes all tests (just test) 
+    - implement the suggestion,
+    - add tests to provide full test coverage for the suggestion,
+    - and make sure that the implementation passes all tests (just test)
     - and has no lints (just lint)
 
 ::block when="spec_path"
-> **Note:** 
-> 
-> - this review's suggestions were based on evaluating the current implementation of the spec file: 
-> 
+> **Note:**
+>
+> - this review's suggestions were based on evaluating the current implementation of the spec file:
+>
 > {{ directory + '/spec.md' }}
 ::end-block
 ::end-block

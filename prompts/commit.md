@@ -36,7 +36,7 @@ The valid operations we use include: fix, docs, chore, feat, refactor, style, pe
 
 This monorepo has the following packages:
 
-::shell sniff repo packages 
+::shell sniff repo packages
 
 ::block when="ctx.current_package_area"
 However you've started this session in the "{{ctx.current_package_area}}" package area so the most relevant packages to focus on are:
