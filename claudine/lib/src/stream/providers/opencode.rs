@@ -619,6 +619,7 @@ mod tests {
 
     use super::*;
     use crate::stream::progress::LiveMetricsState;
+    use serde_json::json;
 
     struct Recording {
         events: Arc<Mutex<Vec<SemanticEvent>>>,
@@ -774,6 +775,42 @@ mod tests {
             events.lock().unwrap()[0],
             SemanticEvent::Warning { .. }
         ));
+    }
+
+    #[test]
+    fn tool_input_string_fallback_parses_without_panic() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"tool_start","part":{"tool_name":"bash","input":"ls -la"}}"#)
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        assert_eq!(kinds(&collected), vec!["tool_call"]);
+        match &collected[0] {
+            SemanticEvent::ToolCall { input, .. } => {
+                assert_eq!(input.as_ref().and_then(Value::as_str), Some("ls -la"));
+            }
+            other => panic!("expected ToolCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn missing_discriminator_falls_through_to_provider_extension() {
+        let (events, mut parser) = new_parser();
+        parser.feed_line(r#"{"payload":{"k":1}}"#).unwrap();
+        let collected = events.lock().unwrap().clone();
+        assert_eq!(collected.len(), 1);
+        match &collected[0] {
+            SemanticEvent::ProviderExtension {
+                provider,
+                kind,
+                payload,
+            } => {
+                assert_eq!(*provider, Provider::OpenCode);
+                assert_eq!(kind, "");
+                assert_eq!(payload.get("payload"), Some(&json!({"k": 1})));
+            }
+            other => panic!("expected ProviderExtension, got {other:?}"),
+        }
     }
 
     #[test]

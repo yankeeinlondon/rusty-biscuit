@@ -339,6 +339,10 @@ pub struct ClaudeRateLimit {
     pub resets_at: Option<i64>,
     #[serde(default, rename = "reset_at")]
     pub reset_at_seconds: Option<i64>,
+    /// Dynamic fallback for unknown fields so the raw payload can be
+    /// reconstructed without a second parse.
+    #[serde(flatten, default)]
+    pub extra: Map<String, Value>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -635,6 +639,24 @@ mod tests {
         assert_eq!(usage.input_tokens, Some(1000));
         assert_eq!(usage.output_tokens, Some(500));
         assert_eq!(usage.cache_read_input_tokens, Some(200));
+        assert!(
+            result.extra.is_empty(),
+            "known result fields must not land in extra; extra={:?}",
+            result.extra
+        );
+    }
+
+    #[test]
+    fn claude_result_round_trips_through_json() {
+        let line = r#"{"type":"result","duration_ms":12345,"duration_api_ms":11000,"num_turns":1,"stop_reason":"end_turn","total_cost_usd":0.0042,"usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":200}}"#;
+        let event = parse(line);
+        let serialized = serde_json::to_string(&event).unwrap();
+        let reparsed: ClaudeEvent = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(
+            serde_json::to_string(&reparsed).unwrap(),
+            serialized,
+            "parse -> serialize -> parse should be stable for a known event"
+        );
     }
 
     #[test]
@@ -659,6 +681,11 @@ mod tests {
         assert_eq!(rl.is_throttled, Some(true));
         assert_eq!(rl.retry_after_ms, Some(5000));
         assert_eq!(rl.message.as_deref(), Some("slow"));
+        assert!(
+            rl.extra.is_empty(),
+            "known rate-limit fields must not land in extra; extra={:?}",
+            rl.extra
+        );
     }
 
     #[test]
