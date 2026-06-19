@@ -46,6 +46,10 @@ test *args="":
     @just _test {{ DAEMON }} {{ args }}
     @just _test {{ CLIENT }} {{ args }}
 
+# Level-2 (real-terminal) tests are not applicable to rendezvous.
+test-l2 *args="":
+    @echo "test-l2: not applicable for rendezvous"
+
 # Lint all three rendezvous crates.
 lint:
     @just _lint {{ CORE }}

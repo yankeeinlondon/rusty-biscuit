@@ -205,7 +205,7 @@ impl Storage {
         #[cfg(test)]
         if self.fail_next_save.swap(false, std::sync::atomic::Ordering::SeqCst) {
             return Err(StorageError::Storage(Box::new(redb::StorageError::Io(
-                std::io::Error::new(std::io::ErrorKind::Other, "injected save failure"),
+                std::io::Error::other("injected save failure"),
             ))));
         }
         let session_key = chunk.session_key();
@@ -284,7 +284,6 @@ impl Storage {
     }
 
     /// Number of snapshots currently stored. Convenient for tests.
-    #[must_use]
     pub fn snapshot_count(&self) -> Result<u64, StorageError> {
         let txn = self.db.begin_read()?;
         let table = txn.open_table(SNAPSHOTS)?;
@@ -395,7 +394,7 @@ impl Storage {
         #[cfg(test)]
         if self.fail_next_accepted_envelope.swap(false, std::sync::atomic::Ordering::SeqCst) {
             return Err(StorageError::Storage(Box::new(redb::StorageError::Io(
-                std::io::Error::new(std::io::ErrorKind::Other, "injected accepted-envelope failure"),
+                std::io::Error::other("injected accepted-envelope failure"),
             ))));
         }
         let composite_key = format!("{sender_hex}:{message_id_hex}");
@@ -754,7 +753,7 @@ mod tests {
     #[test]
     fn accepted_envelope_persists_signature_and_payload_bytes() {
         let (storage, _tmp) = fresh_storage();
-        let signature = vec![0xABu8; 64];
+        let signature = [0xABu8; 64];
         let signature_hex: String = signature.iter().map(|b| format!("{b:02x}")).collect();
         let payload = b"crdt-delta-bytes".to_vec();
 
