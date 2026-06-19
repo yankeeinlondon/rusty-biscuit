@@ -40,8 +40,16 @@ pub struct BranchGraphData {
     default_context: Vec<CommitId>,
     /// Up to 5 commits on the default branch since the merge-base, oldest first.
     default_after_base: Vec<CommitId>,
+    /// Commits on the default branch since the merge-base not shown in
+    /// `default_after_base` (older than the newest-5 window). Drives the
+    /// fork-adjacent elision marker on the default line.
+    default_hidden: usize,
     /// Up to 5 commits on the branch since the merge-base, oldest first.
     branch_after_base: Vec<CommitId>,
+    /// Commits on the branch since the merge-base not shown in
+    /// `branch_after_base` (older than the newest-5 window). Drives the
+    /// fork-adjacent elision marker on the branch line.
+    branch_hidden: usize,
     /// Verbose detail for the merge-base commit, populated only when requested.
     pub merge_base_detail: Option<CommitDetail>,
     /// Verbose details for branch commits since the merge-base, populated only when requested.
@@ -89,15 +97,17 @@ fn gather_branch_impl(
 ) -> Option<BranchGraphData> {
     let merge_base_full = get_merge_base(default_branch, branch)?;
 
-    let (default_context, default_after_base) = match scope {
-        GatherScope::Full => (
-            ancestor_commits(&merge_base_full, 2),
-            commits_since(default_branch, &merge_base_full, 5),
-        ),
-        GatherScope::BaseOverview => (Vec::new(), Vec::new()),
+    let (default_context, default_after_base, default_hidden) = match scope {
+        GatherScope::Full => {
+            let after = commits_since(default_branch, &merge_base_full, 5);
+            let hidden = hidden_since(default_branch, &merge_base_full, after.len());
+            (ancestor_commits(&merge_base_full, 2), after, hidden)
+        }
+        GatherScope::BaseOverview => (Vec::new(), Vec::new(), 0),
     };
 
     let branch_after_base = commits_since(branch, &merge_base_full, 5);
+    let branch_hidden = hidden_since(branch, &merge_base_full, branch_after_base.len());
 
     let (merge_base_detail, branch_details) = if verbose {
         (
@@ -115,7 +125,9 @@ fn gather_branch_impl(
         merge_base_idx: 0,
         default_context,
         default_after_base,
+        default_hidden,
         branch_after_base,
+        branch_hidden,
         merge_base_detail,
         branch_details,
     })
@@ -342,6 +354,30 @@ fn get_merge_base(a: &str, b: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// Count commits on `target` since `merge_base` that fall outside the displayed
+/// window, i.e. the older commits the newest-`shown` window elides.
+///
+/// Returns 0 on any git failure so a missing count degrades to "no elision
+/// marker" rather than suppressing the whole graph.
+fn hidden_since(target: &str, merge_base: &str, shown: usize) -> usize {
+    let total = git_command(&["rev-list", "--count", target, "--not", merge_base, "--"])
+        .ok()
+        .and_then(|s| s.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    total.saturating_sub(shown)
+}
+
+/// Mermaid gitGraph line for a fork-adjacent elision marker standing in for
+/// `hidden` commits the newest-5 window does not draw.
+///
+/// Rendered as a `HIGHLIGHT` node (a distinct square, not a commit dot) so it
+/// reads as "more history here" rather than a real commit. The label carries
+/// the elided count; duplicate labels across branches render fine — the
+/// renderer does not require unique commit ids.
+fn elision_commit(hidden: usize) -> String {
+    format!("    commit id: \"+{hidden}\" type: HIGHLIGHT")
+}
+
 /// Build Mermaid gitGraph instructions for the 2-branch case
 /// (current worktree branch vs. the default/main branch).
 ///
@@ -362,12 +398,18 @@ pub fn worktree_graph(data: &BranchGraphData) -> Option<String> {
     if data.branch_after_base.is_empty() {
         lines.push("    commit id: \"HEAD\"".to_string());
     } else {
+        if data.branch_hidden > 0 {
+            lines.push(elision_commit(data.branch_hidden));
+        }
         for commit in &data.branch_after_base {
             lines.push(format!("    commit id: \"{}\"", commit.display));
         }
     }
     lines.push(format!("    checkout {default_branch}"));
 
+    if data.default_hidden > 0 {
+        lines.push(elision_commit(data.default_hidden));
+    }
     for commit in &data.default_after_base {
         lines.push(format!("    commit id: \"{}\"", commit.display));
     }
@@ -444,6 +486,9 @@ pub fn base_graph(data: &BaseGraphData) -> Option<String> {
             if info.branch_after_base.is_empty() {
                 lines.push("    commit id: \"HEAD\"".to_string());
             } else {
+                if info.branch_hidden > 0 {
+                    lines.push(elision_commit(info.branch_hidden));
+                }
                 for c in &info.branch_after_base {
                     lines.push(format!("    commit id: \"{}\"", c.display));
                 }
@@ -808,6 +853,17 @@ mod tests {
             "expected one main-commits log plus one per branch, got {calls:?}"
         );
 
+        // Plus one `git rev-list --count` per branch to size the elision marker.
+        // No default-branch count is issued in the base-overview scope.
+        let rev_list_count = count_matching(&calls, |args| {
+            args.first().map(String::as_str) == Some("rev-list")
+        });
+        assert_eq!(
+            rev_list_count,
+            data.branches.len(),
+            "expected one rev-list --count per branch, got {calls:?}"
+        );
+
         // No rev-parse --short calls in the base-graph path.
         let short_sha_count = count_matching(&calls, |args| {
             args.len() >= 2 && args[0] == "rev-parse" && args[1] == "--short"
@@ -843,5 +899,99 @@ mod tests {
                 "full-SHA placement must match short-SHA placement for {branch}"
             );
         }
+    }
+
+    /// Build a repo where both lines exceed the 5-commit window:
+    /// `feature` has 7 commits since the fork, `main` has 6.
+    fn temp_repo_over_window() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path();
+
+        run_git(path, &["init", "-b", "main"]);
+        run_git(path, &["config", "user.email", "test@example.com"]);
+        run_git(path, &["config", "user.name", "Test User"]);
+        run_git(path, &["config", "commit.gpgsign", "false"]);
+        run_git(path, &["config", "gc.auto", "0"]);
+        run_git(path, &["config", "core.fsmonitor", "false"]);
+        run_git(path, &["config", "core.commitGraph", "false"]);
+
+        let commit = |n: &str| {
+            fs::write(path.join(format!("{n}.txt")), format!("{n}\n")).unwrap();
+            run_git(path, &["add", "."]);
+            run_git(path, &["commit", "-m", n]);
+        };
+
+        commit("root");
+        run_git(path, &["checkout", "-b", "feature"]);
+        for i in 1..=7 {
+            commit(&format!("f{i}"));
+        }
+        run_git(path, &["checkout", "main"]);
+        for i in 1..=6 {
+            commit(&format!("m{i}"));
+        }
+        run_git(path, &["checkout", "main"]);
+        dir
+    }
+
+    /// A branch and default line that exceed the window each get exactly one
+    /// fork-adjacent HIGHLIGHT elision node carrying the elided count, placed
+    /// before the first windowed commit on that line.
+    #[test]
+    #[serial_test::serial]
+    fn worktree_graph_marks_elided_commits() {
+        let repo = temp_repo_over_window();
+        let _guard = DirGuard::enter(repo.path());
+
+        let data = gather_branch(DEFAULT_BRANCH, "feature", false).expect("gather should succeed");
+        assert_eq!(data.branch_hidden, 2, "7 ahead − 5 shown = 2 elided on feature");
+        assert_eq!(data.default_hidden, 1, "6 ahead − 5 shown = 1 elided on main");
+
+        let graph = worktree_graph(&data).expect("graph should render");
+        let lines: Vec<&str> = graph.lines().collect();
+
+        let branch_elide = "    commit id: \"+2\" type: HIGHLIGHT";
+        let default_elide = "    commit id: \"+1\" type: HIGHLIGHT";
+        assert_eq!(
+            lines.iter().filter(|l| **l == branch_elide).count(),
+            1,
+            "exactly one feature-line elision marker:\n{graph}"
+        );
+        assert_eq!(
+            lines.iter().filter(|l| **l == default_elide).count(),
+            1,
+            "exactly one main-line elision marker:\n{graph}"
+        );
+
+        // The marker is fork-adjacent: it precedes every windowed commit on its
+        // line. `checkout feature` opens the branch segment; the elision node is
+        // the first commit after it.
+        let checkout_feature = lines
+            .iter()
+            .position(|l| *l == "    checkout feature")
+            .expect("feature checkout present");
+        assert_eq!(
+            lines[checkout_feature + 1],
+            branch_elide,
+            "elision marker must be the first node on the branch line:\n{graph}"
+        );
+    }
+
+    /// A line that fits within the window draws no elision marker.
+    #[test]
+    #[serial_test::serial]
+    fn worktree_graph_omits_marker_within_window() {
+        let repo = temp_repo_with_branches();
+        let _guard = DirGuard::enter(repo.path());
+
+        let data = gather_branch(DEFAULT_BRANCH, "feature-a", false).expect("gather should succeed");
+        assert_eq!(data.branch_hidden, 0);
+        assert_eq!(data.default_hidden, 0);
+
+        let graph = worktree_graph(&data).expect("graph should render");
+        assert!(
+            !graph.contains("type: HIGHLIGHT"),
+            "no elision marker expected when within window:\n{graph}"
+        );
     }
 }

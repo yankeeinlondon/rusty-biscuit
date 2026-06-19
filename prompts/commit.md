@@ -7,6 +7,7 @@ operation: commit
 agent: opencode
 model: minimax/MiniMax-M3
 ---
+
 # Commit Staged Files
 
 ## Conventional Commits
@@ -24,13 +25,20 @@ model: minimax/MiniMax-M3
 The valid operations we use include: fix, docs, chore, feat, refactor, style, perf, test, ci, style, planning.
 
 > **Note:**
+>
 > - when you detect that a directory of files with a "spec.md" are being **moved INTO** a directory containing `_completed` in the directory path:
 >     - mark the operation as "planning"
 >     - this movement indicates that the feature/fixture/review has now been completed; it is kept in git but moved out of the hotpath of actively planned items
-> - when you detect that a directory of files with a "spec.md" are being **moved OUT OF** a directory containing `_unscheduled` in the directory path:
->     - mark the operation as "planning"
->     - this indicates that a specification that had no immediacy before has been scheduled to be implemented very soon
-> **Note:** the action 'refactor' should be reserved for commits which have at least some source code files.
+> - when you detect that a directory of files with a "spec.md" are being **moved OUT OF** a directory containing `_unscheduled` in the directory path: - mark the operation as "planning" - this indicates that a specification that had no immediacy before has been scheduled to be implemented very soon
+>   **Note:** the action 'refactor' should be reserved for commits which have at least some source code files.
+
+## Concurrency
+
+Your task is to make sure all _staged_ files are committed. While you are evaluating how to best structure the commits
+from this set of staged files, the git repo you are operating in is still being used. You should expect that new files
+might be created, existing files modified, etc.
+
+It is important that the git operations you perform do not interfere with this expected behavior.
 
 ## Package in this Monorepo
 
@@ -80,56 +88,64 @@ Your task is to:
 
 1. If no files are staged for commit then communicate this to the user and exit.
 2. read the lessons you've learned while making commits by reading:
-   - {{lessons_learned}}
+    - {{lessons_learned}}
 3. evaluate all the _staged_ files in this monorepo,
 4. organize the work into **semantic groups**
-   - each group will have an "operation" and "scope" in addition to the set of files representing the group
-   - every group must have a minimum of 1 file associated to it
-   - a file can only be in one group
+    - each group will have an "operation" and "scope" in addition to the set of files representing the group
+    - every group must have a minimum of 1 file associated to it
+    - a file can only be in one group
 5. act as an orchestrator and concurrently execute a subagent for every semantic group:
-   - provide the subagent the grouped files and the delta's in these files
-   - provide the subagent the "operation" and "scope" (including no scope if that's the determination)
-      - tell the subagent to run `git log --oneline -20` for examples of real commits in this repo
-      - **Commit Message Format:** Messages must follow this structure:
-          - First line: Brief summary (under 72 chars)
-          - Blank line
-          - Bullet points describing WHAT changed, WHY it changed, and any NOTABLE ASPECTS (each bullet starts with `-`)
-          - Example:
 
-            ```
-            feat(biscuit-clip): add initial clipboard package structure
+    - provide the subagent the grouped files and the delta's in these files
+    - provide the subagent the "operation" and "scope" (including no scope if that's the determination)
 
-            - add README.md documenting package purpose and usage
-            - add lib.rs with basic module exports
-            - add cli.rs for command-line interface
-            ```
+        - tell the subagent to run `git log --oneline -20` for examples of real commits in this repo
+        - **Commit Message Format:** Messages must follow this structure:
 
-      - the subagent is then responsible for:
-          - reviewing the changes and drafting a useful commit message following the format above,
-          - committing ONLY the files assigned to them. **Never pass the message inline with `-m "…"`.** Commit bodies routinely contain backticks (inline code like `` `::end-block` ``), `$`, and other shell metacharacters; inside a double-quoted `-m` string the shell evaluates those (backticks are command substitution even within double quotes), which corrupts the message and makes OpenCode's snapshot subsystem try to `git add` the extracted tokens as pathspecs (`fatal: pathspec '::end-block' did not match any files`). Instead, feed the message on stdin via a **single-quoted heredoc** so nothing is expanded:
+            - First line: Brief summary (under 72 chars)
+            - Blank line
+            - Bullet points describing WHAT changed, WHY it changed, and any NOTABLE ASPECTS (each bullet starts with `-`)
+            - Example:
 
-            ```
-            git commit --only -F - -- path1 path2 <<'COMMIT_MSG'
-            refactor(darkmatter): scope block-quote support to ::shell-block
+                ```
+                feat(biscuit-clip): add initial clipboard package structure
 
-            - Add `quoted` field to stack entries
-            - `::end-block` only closes matching quoted openers
-            COMMIT_MSG
-            ```
+                - add README.md documenting package purpose and usage
+                - add lib.rs with basic module exports
+                - add cli.rs for command-line interface
+                ```
 
-            The `'COMMIT_MSG'` delimiter must be single-quoted — that is what disables expansion. `-F -` reads the message from stdin; the `-- path1 path2` pathspecs still restrict the commit to the assigned files.
-          - **retrying on git lock contention.** Because multiple subagents commit in parallel against the same worktree, `git commit` can fail with `fatal: Unable to create '.git/index.lock': File exists.` (or the equivalent `refs/heads/<branch>.lock` variant). This is not corruption — git's locks are fail-fast, not queuing. On such a failure, wait 1–3 seconds and retry the same `git commit --only …` command. Retry up to 5 times with short backoff before giving up and reporting failure to the orchestrator.
-          - and finally, to let the orchestrator know of any problems they ran into and how they were able to overcome these issues
-   - NOTE: if the subagent is not able to make a commit for any reason then this needs to be communicated back to the orchestrator with details on why they weren't able to commit.
-   - the subagent SHOULD NOT push commits to any remote!
-   - the subagent SHOULD be reminded that they are running in a non-interactive session so there is no way to get feedback from the user and attempts should be made to achieve the goals without asking for additional context
+        - the subagent is then responsible for:
+
+            - reviewing the changes and drafting a useful commit message following the format above,
+            - committing ONLY the files assigned to them. **Never pass the message inline with `-m "…"`.** Commit bodies routinely contain backticks (inline code like `` `::end-block` ``), `$`, and other shell metacharacters; inside a double-quoted `-m` string the shell evaluates those (backticks are command substitution even within double quotes), which corrupts the message and makes OpenCode's snapshot subsystem try to `git add` the extracted tokens as pathspecs (`fatal: pathspec '::end-block' did not match any files`). Instead, feed the message on stdin via a **single-quoted heredoc** so nothing is expanded:
+
+                ```
+                git commit --only -F - -- path1 path2 <<'COMMIT_MSG'
+                refactor(darkmatter): scope block-quote support to ::shell-block
+
+                - Add `quoted` field to stack entries
+                - `::end-block` only closes matching quoted openers
+                COMMIT_MSG
+                ```
+
+                The `'COMMIT_MSG'` delimiter must be single-quoted — that is what disables expansion. `-F -` reads the message from stdin; the `-- path1 path2` pathspecs still restrict the commit to the assigned files.
+
+            - **retrying on git lock contention.** Because multiple subagents commit in parallel against the same worktree, `git commit` can fail with `fatal: Unable to create '.git/index.lock': File exists.` (or the equivalent `refs/heads/<branch>.lock` variant). This is not corruption — git's locks are fail-fast, not queuing. On such a failure, wait 1–3 seconds and retry the same `git commit --only …` command. Retry up to 5 times with short backoff before giving up and reporting failure to the orchestrator.
+            - and finally, to let the orchestrator know of any problems they ran into and how they were able to overcome these issues
+
+    - NOTE: if the subagent is not able to make a commit for any reason then this needs to be communicated back to the orchestrator with details on why they weren't able to commit.
+    - the subagent SHOULD NOT push commits to any remote!
+    - the subagent SHOULD be reminded that they are running in a non-interactive session so there is no way to get feedback from the user and attempts should be made to achieve the goals without asking for additional context
+
 6. once all the subagents have completed their tasks, you will run `sniff repo` to provide the user a summary of the state of the repo
-   - **DO NOT `cd` anywhere before running this command.** The wrapper has already placed you in the correct git worktree's root. Prefixing with `cd /Users/.../rusty-biscuit` (or any other path) will move you to the worktrees-*parent* directory (the one that holds all linked worktrees of this repo), which is OUTSIDE the worktree, triggers OpenCode's `external_directory: ask` permission, and produces noise in the trace. Run plainly: `sniff repo` — `sniff` is already worktree-aware and resolves the correct git root from cwd.
+    - **DO NOT `cd` anywhere before running this command.** The wrapper has already placed you in the correct git worktree's root. Prefixing with `cd /Users/.../rusty-biscuit` (or any other path) will move you to the worktrees-_parent_ directory (the one that holds all linked worktrees of this repo), which is OUTSIDE the worktree, triggers OpenCode's `external_directory: ask` permission, and produces noise in the trace. Run plainly: `sniff repo` — `sniff` is already worktree-aware and resolves the correct git root from cwd.
 7. then you will review the "lessons learned" that the subagents provided to you and determine if these are both:
-   1. important and worthy of saving to the lessons learned memory file, and
-   2. not already represented in the lessons-learned file
 
-   If both criteria are met then you should add a new entry into the lessons-learned file: {{lessons_learned}}
+    1. important and worthy of saving to the lessons learned memory file, and
+    2. not already represented in the lessons-learned file
+
+    If both criteria are met then you should add a new entry into the lessons-learned file: {{lessons_learned}}
 
 **IMPORTANT:**
 
