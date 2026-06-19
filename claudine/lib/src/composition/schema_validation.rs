@@ -1600,6 +1600,88 @@ mod tests {
         assert!(prepared.prompt.contains("List three colors"));
     }
 
+    // -- optional null acceptance (Phase 3) -------------------------------
+
+    #[test]
+    fn optional_string_resolved_to_null_passes_direct() {
+        // Regression for the optional-schema-properties incident: an optional
+        // `string` whose frontmatter ternary resolves to `null` must validate
+        // successfully, and the resolved `null` must be retained in the
+        // effective frontmatter rather than silently dropped.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            concat!(
+                "---\n",
+                "$schema:\n",
+                "  design: 'string'\n",
+                "design: \"{{ file_exists('design.md') ? 'design.md' : null }}\"\n",
+                "---\nbody\n",
+            ),
+        );
+
+        let prepared = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap();
+        let fm = prepared.effective_frontmatter.as_object().unwrap();
+        assert!(
+            fm.contains_key("design"),
+            "optional property resolved to null must be retained"
+        );
+        assert_eq!(fm.get("design"), Some(&serde_json::Value::Null));
+    }
+
+    #[test]
+    fn optional_string_resolved_to_null_passes_inline() {
+        // Same null-retention contract on the inline-compose path, which also
+        // requires a `prompt` property.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            concat!(
+                "---\n",
+                "$schema:\n",
+                "  prompt: 'string(required)'\n",
+                "  design: 'string'\n",
+                "prompt: List three colors\n",
+                "design: \"{{ file_exists('design.md') ? 'design.md' : null }}\"\n",
+                "---\nbody\n",
+            ),
+        );
+
+        let prepared = prepare_inline_with_schema(&source, PrepareOptions::default()).unwrap();
+        let fm = prepared.effective_frontmatter.as_object().unwrap();
+        assert!(
+            fm.contains_key("design"),
+            "optional property resolved to null must be retained in inline compose"
+        );
+        assert_eq!(fm.get("design"), Some(&serde_json::Value::Null));
+    }
+
+    #[test]
+    fn required_string_resolved_to_null_fails_schema_validation() {
+        // A required `string` whose ternary resolves to `null` must still be
+        // classified as an invalid required value (Type problem), producing
+        // `SchemaValidation`. If categorization read requiredness from the JSON
+        // Schema instead of the `PropertyAtom`, the null could be treated as
+        // "absent" and surface as `MissingProperties` instead.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            concat!(
+                "---\n",
+                "$schema:\n",
+                "  design: 'string(required)'\n",
+                "design: \"{{ file_exists('design.md') ? 'design.md' : null }}\"\n",
+                "---\nbody\n",
+            ),
+        );
+
+        let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::SchemaValidation { .. }),
+            "required property resolved to null must fail with SchemaValidation, got: {err:?}"
+        );
+    }
+
     // -- interactive_shape -----------------------------------------------
 
     #[test]
