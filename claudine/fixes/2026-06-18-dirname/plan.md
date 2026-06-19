@@ -4,6 +4,23 @@ phases: 4
 created: 2026-06-18
 start_phase: 1
 yolo: "true"
+source_files_during_phase_1:
+  - darkmatter/lib/src/markdown/compose/expression/functions.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog.rs
+docs_updated_during_phase_1:
+  - claudine/fixes/2026-06-18-dirname/plan.md
+  - prompts/implement-suggestions.md
+  - prompts/implement-plan.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/compose/expression/functions.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+packages:
+  - darkmatter
+  - claudine
 ---
 
 # Plan: Rename `dir(file)` to `dirname(file)`
@@ -45,31 +62,31 @@ concurrently.
 
 ### 1A. `darkmatter/lib/src/markdown/compose/expression/functions.rs`
 
-- [ ] Rename the handler `pub fn dir_fn` → `pub fn dirname_fn` (functions.rs:1255).
-- [ ] Update the handler rustdoc leading line from `` /// `dir(file) -> string` ``
+- [x] Rename the handler `pub fn dir_fn` → `pub fn dirname_fn` (functions.rs:1255).
+- [x] Update the handler rustdoc leading line from `` /// `dir(file) -> string` ``
       to `` /// `dirname(file) -> string` `` (functions.rs:1254); keep the
       trailing "directory portion of the display path" prose unchanged.
-- [ ] In the handler body, change the two name strings: `require_args("dir", …)`
+- [x] In the handler body, change the two name strings: `require_args("dir", …)`
       → `require_args("dirname", …)` (functions.rs:1256) and
       `resolve_path_arg("dir", …)` → `resolve_path_arg("dirname", …)`
       (functions.rs:1260) so arity/resolution errors name `dirname`.
-- [ ] Update the `FS_FUNCTIONS` entry (functions.rs:1811) to
+- [x] Update the `FS_FUNCTIONS` entry (functions.rs:1811) to
       `FsFunction { canonical: "dirname", aliases: &[], signatures: &["dirname(file)"], handler: dirname_fn }`.
       Do **not** add `"dir"` to `aliases`.
-- [ ] Update the three `dir_fn(…)` test call sites to `dirname_fn(…)`:
+- [x] Update the three `dir_fn(…)` test call sites to `dirname_fn(…)`:
       functions.rs:2900 (`path_components_resolve_against_base_dir`),
       functions.rs:2923 (`path_components_handle_bare_basename`), and
       functions.rs:2974 (`path_functions_do_not_require_existence`).
 
 ### 1B. `darkmatter/lib/src/markdown/compose/expression/catalog.rs`
 
-- [ ] Change the descriptor `signature` from `"dir(file)"` to `"dirname(file)"`
+- [x] Change the descriptor `signature` from `"dir(file)"` to `"dirname(file)"`
       (catalog.rs:707). Leave `description`, `category: "Filesystem"`, `order`,
       and `verification` unchanged.
-- [ ] Change the descriptor example `invocation` from `"dir(\"sub/note.md\")"`
+- [x] Change the descriptor example `invocation` from `"dir(\"sub/note.md\")"`
       to `"dirname(\"sub/note.md\")"` (catalog.rs:712). `result: "sub"` is
       unchanged.
-- [ ] In `feature_functions_are_present_in_exported_expression_catalog`, change
+- [x] In `feature_functions_are_present_in_exported_expression_catalog`, change
       the expected `"dir(file)"` string to `"dirname(file)"` (catalog.rs:1122).
 
 ### Checkpoint 1 — compiles, renamed-handler tests green
@@ -94,14 +111,14 @@ relying on a source search. Depends on Phase 1's renamed `FS_FUNCTIONS`.
 
 ### 2A. Focused dispatch regression in `functions.rs` test module
 
-- [ ] Add a test in `mod fn_filesystem` (alongside
+- [x] Add a test in `mod fn_filesystem` (alongside
       `dispatch_fs_returns_none_for_non_fs_names` at functions.rs:2292) that
       asserts **both** directions:
       - `dispatch_fs("dirname", &[json!("sub/note.md")], &ctx)` resolves and
         returns `Ok(Value::String("sub".into()))`.
       - `dispatch_fs("dir", &[json!("sub/note.md")], &ctx)` returns `None`
         (old canonical name no longer dispatches; not present in `aliases`).
-- [ ] Optionally also extend `path_functions_dispatch_by_name`
+- [x] Optionally also extend `path_functions_dispatch_by_name`
       (functions.rs:2982) with a `dispatch_fs("dirname", …)` assertion for
       symmetry with the other path helpers exercised there.
 
