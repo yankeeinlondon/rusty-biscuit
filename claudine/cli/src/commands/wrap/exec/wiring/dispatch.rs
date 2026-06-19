@@ -64,7 +64,7 @@ pub(crate) fn map_kimi_hook_event(event: &str) -> Option<AgenticEvent> {
 /// [`claudine::stream::reporting`] — so templates and expressions can resolve
 /// them even though the typed fields remain authoritative for JSONL and SQL
 /// ingest.
-fn build_hook_event_meta(
+pub(crate) fn build_hook_event_meta(
     request: &KimiHookRequest,
     canonical_event: AgenticEvent,
     env_context: &EnvironmentContext,
@@ -175,7 +175,7 @@ pub(crate) fn dispatch_hook_request(
     }
 }
 
-fn outcome_to_hook_outcome(outcome: &claudine::dispatch::DispatchOutcome) -> HookOutcome {
+pub(crate) fn outcome_to_hook_outcome(outcome: &claudine::dispatch::DispatchOutcome) -> HookOutcome {
     if outcome.protect_pre.is_some() || outcome.protect_post.is_some() {
         return HookOutcome::Deny {
             reason: Some("Blocked by Claudine Protect".to_string()),
@@ -213,7 +213,7 @@ fn outcome_to_hook_outcome(outcome: &claudine::dispatch::DispatchOutcome) -> Hoo
 /// the caller should feed back into the semantic parser so it surfaces
 /// as a `SemanticEvent::Warning`. Returns `None` for normal flows.
 #[must_use = "synthetic envelope must be fed into the semantic parser"]
-fn handle_request_dispatch(
+pub(crate) fn handle_request_dispatch(
     trimmed: &str,
     writer: &WireWriter,
     runtime_handle: Option<&tokio::runtime::Handle>,
@@ -285,7 +285,7 @@ fn handle_request_dispatch(
 /// the moment this line is observed. Both `result` and `error` shapes are
 /// treated as terminal — an auth-expired error on `prompt-2`, for example,
 /// still ends the session.
-fn is_prompt_response_line(line: &str) -> bool {
+pub(crate) fn is_prompt_response_line(line: &str) -> bool {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
         return false;
     };
