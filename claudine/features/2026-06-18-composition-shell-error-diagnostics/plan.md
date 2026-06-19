@@ -9,8 +9,56 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+  - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+  - darkmatter/lib/tests/error_snapshots/shell_expansion.rs
+  - darkmatter/cli/src/approval.rs
+  - claudine/lib/src/harness/shell.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - darkmatter/lib/src/markdown/mod.rs
+  - darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs
+  - darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
+  - darkmatter/lib/src/markdown/transform/mod.rs
+  - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+  - darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+  - claudine/lib/src/harness/audit.rs
+  - darkmatter/lib/tests/shell_expansion_coordinates.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - claudine/lib/src/composition/error.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_code:
+  - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+  - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+  - darkmatter/lib/tests/error_snapshots/shell_expansion.rs
+  - darkmatter/cli/src/approval.rs
+  - claudine/lib/src/harness/shell.rs
+  - darkmatter/lib/src/markdown/mod.rs
+  - darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs
+  - darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
+  - darkmatter/lib/src/markdown/transform/mod.rs
+  - darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+  - claudine/lib/src/harness/audit.rs
+  - darkmatter/lib/tests/shell_expansion_coordinates.rs
+  - claudine/lib/src/composition/error.rs
+documentation: []
 packages:
   - darkmatter
+  - claudine
 ---
 
 # Execution Plan — Composition Shell-Error Diagnostics
@@ -59,13 +107,13 @@ rationale, the excerpt is wired here but its **line correctness** becomes true o
 Phase 3 lands the coordinate change — so each P2 task must stay green against today's
 coordinate space.
 
-- [ ] Extend the `ExecutionFailed` `BlockError` arm (`types.rs:726`) to render `ctx.linked_path_prose()` (OSC 8 file link) in the header or first body line.
-- [ ] Render the composed frontmatter block via `ctx.frontmatter_prose()` when the `SourceContext` carries a frontmatter range; omit cleanly (`None`) when absent. (Note: today's body-only `SourceContext` yields `None`, so this is a no-op until P3 — that is expected and keeps P2 green.)
-- [ ] Reorder the assembled body to the spec's render order: (1) linked path, (2) excerpt (`ctx.excerpt_prose(origin.line_number(), 1, "markdown")`), (3) frontmatter block, (4) captured output (`stderr`, then optional `stdout`) using the P1 truncation rule.
-- [ ] Add the frontmatter-origin special rule: when `ShellCommandOrigin::Frontmatter { key }` cannot resolve an exact YAML line, render the linked path + frontmatter block + a plain `Origin: frontmatter.<key>` field, but **omit the excerpt** rather than pointing at line 1 or another misleading fallback.
+- [x] Extend the `ExecutionFailed` `BlockError` arm (`types.rs:726`) to render `ctx.linked_path_prose()` (OSC 8 file link) in the header or first body line.
+- [x] Render the composed frontmatter block via `ctx.frontmatter_prose()` when the `SourceContext` carries a frontmatter range; omit cleanly (`None`) when absent. (Note: today's body-only `SourceContext` yields `None`, so this is a no-op until P3 — that is expected and keeps P2 green.)
+- [x] Reorder the assembled body to the spec's render order: (1) linked path, (2) excerpt (`ctx.excerpt_prose(origin.line_number(), 1, "markdown")`), (3) frontmatter block, (4) captured output (`stderr`, then optional `stdout`) using the P1 truncation rule.
+- [x] Add the frontmatter-origin special rule: when `ShellCommandOrigin::Frontmatter { key }` cannot resolve an exact YAML line, render the linked path + frontmatter block + a plain `Origin: frontmatter.<key>` field, but **omit the excerpt** rather than pointing at line 1 or another misleading fallback.
   - Open Question 1 resolution: attempt **Option B** (carry a file-relative line in `ShellCommandOrigin::Frontmatter`) to match the construction-time coordinate decision for body directives; if the constructor changes prove too invasive, fall back to **Option C** (no frontmatter excerpt) for this feature and track precise frontmatter excerpts separately.
-- [ ] Add `cfg(test)` asserting the linked path and (when a full-file `SourceContext` is supplied to the test) the frontmatter block appear in the rendered `ExecutionFailed` diagnostic.
-- [ ] Add `cfg(test)` asserting a `Frontmatter`-origin failure renders the path + `frontmatter.<key>` field and **no** excerpt line gutter.
+- [x] Add `cfg(test)` asserting the linked path and (when a full-file `SourceContext` is supplied to the test) the frontmatter block appear in the rendered `ExecutionFailed` diagnostic.
+- [x] Add `cfg(test)` asserting a `Frontmatter`-origin failure renders the path + `frontmatter.<key>` field and **no** excerpt line gutter.
 
 **Parallelizable:** within this phase, the two new `cfg(test)` blocks can be authored in parallel once the arm edits land. P2 is independent of P1's truncation internals (it consumes P1's truncation rule), so P2 may start as soon as P1's `truncate_output` contract is stable.
 
@@ -80,13 +128,13 @@ excerpt and the line number **become correct together**. This is the phase that 
 `SourceContext` to full-file content, which simultaneously makes P2's `frontmatter_prose()`
 render real frontmatter and makes the excerpt point at the file line the author edits.
 
-- [ ] Introduce a frontmatter line-offset mechanism: carry the frontmatter line count into `parse_directives` so `ShellCommandOrigin::Body { line }` and `ShellBlock { start_line, command_line }` store **file-relative** line numbers from construction (spec decision: normalize at construction, not at render time).
-- [ ] Update `parse_directives` and its three call sites to supply the offset: `markdown/transform/mod.rs:420`, `markdown/compose/inline/shell_expansion.rs:22`, `markdown/compose/preflight/collect.rs:247`. Compute the offset from the frontmatter/body split the pipeline already owns.
-- [ ] Switch the `SourceContext` used by the compose/transform shell paths to carry **full-file** content (frontmatter + body) with the frontmatter byte range set, so `excerpt_prose` uses file-relative lines and `frontmatter_prose` renders. Likely a new helper on `Markdown` (full-file reconstruction + range) or an extension of `source_context_for_errors()` (`markdown/mod.rs:184`).
-- [ ] Preserve the existing file-relative behavior of frontmatter-`$(...)` origins (constructed in `markdown/compose/frontmatter_shell_expansion.rs` and `preflight/collect.rs`); do **not** apply the body offset to frontmatter origins. Add a regression assertion.
-- [ ] Add `cfg(test)`: a fixture with N frontmatter lines and a failing `::shell` on a known **file** line asserts the reported origin equals the file line (this assertion fails against today's body-relative numbering). Cover the `::shell-block` and frontmatter-`$(...)` origins too.
-- [ ] Add a CRLF `cfg(test)` fixture proving the offset counts **source lines, not bytes** (no LF byte-length assumption; `detect_frontmatter_range` already handles CRLF — reuse its discipline).
-- [ ] Reconcile preflight `ShellCommandEntry` line fields (`preflight/collect.rs:249,260,300`) with the now-file-relative origins; update assertions / deny-list entries that previously assumed body-relative lines.
+- [x] Introduce a frontmatter line-offset mechanism: carry the frontmatter line count into `parse_directives` so `ShellCommandOrigin::Body { line }` and `ShellBlock { start_line, command_line }` store **file-relative** line numbers from construction (spec decision: normalize at construction, not at render time).
+- [x] Update `parse_directives` and its three call sites to supply the offset: `markdown/transform/mod.rs:420`, `markdown/compose/inline/shell_expansion.rs:22`, `markdown/compose/preflight/collect.rs:247`. Compute the offset from the frontmatter/body split the pipeline already owns.
+- [x] Switch the `SourceContext` used by the compose/transform shell paths to carry **full-file** content (frontmatter + body) with the frontmatter byte range set, so `excerpt_prose` uses file-relative lines and `frontmatter_prose` renders. Likely a new helper on `Markdown` (full-file reconstruction + range) or an extension of `source_context_for_errors()` (`markdown/mod.rs:184`).
+- [x] Preserve the existing file-relative behavior of frontmatter-`$(...)` origins (constructed in `markdown/compose/frontmatter_shell_expansion.rs` and `preflight/collect.rs`); do **not** apply the body offset to frontmatter origins. Add a regression assertion.
+- [x] Add `cfg(test)`: a fixture with N frontmatter lines and a failing `::shell` on a known **file** line asserts the reported origin equals the file line (this assertion fails against today's body-relative numbering). Cover the `::shell-block` and frontmatter-`$(...)` origins too.
+- [x] Add a CRLF `cfg(test)` fixture proving the offset counts **source lines, not bytes** (no LF byte-length assumption; `detect_frontmatter_range` already handles CRLF — reuse its discipline).
+- [x] Reconcile preflight `ShellCommandEntry` line fields (`preflight/collect.rs:249,260,300`) with the now-file-relative origins; update assertions / deny-list entries that previously assumed body-relative lines.
 
 **Parallelizable with care:** the `parse_directives` offset plumbing and the `SourceContext` full-file switch are tightly coupled (both must land together or the excerpt breaks). They may be developed in parallel by two engineers with a single coordinated merge, but must not ship independently.
 
@@ -100,11 +148,11 @@ Ensure the structured shell-failure diagnostic (path link, excerpt, stderr, fron
 survives the wrapper instead of being `{e}`-flattened, and that piped/JSON output carries
 no ANSI.
 
-- [ ] Audit `CompositionError::ShellExpansionFailed` rendering (`claudine/lib/src/composition/error.rs:113` + the `_` catch-all at `error.rs:992`). Add an explicit `CompositionError::ShellExpansionFailed { error, .. }` arm in the `BlockError` impl (`error.rs:776`) that delegates to `error.status_block(term)` — mirroring the `ShellExpansionError::Preflight` delegation at `types.rs:766`.
-- [ ] Only if delegation still cannot surface the inner block: verify whether `error_walker.rs::deepest_block_error` reaches the leaf `ShellExpansionError` via `as_block_error`; if not, update the walker / `as_block_error` discovery so the leaf is reached. Prefer the explicit-arm fix first; do **not** duplicate Darkmatter's shell formatter in claudine.
-- [ ] Honor the plain-vs-styled contract: when terminal `ColorDepth::None` (piped / `NO_COLOR` / JSON), the rendered diagnostic must contain no escape bytes. Apply the same boundary strip used by `InlineComposeSequenceMismatch` (`error.rs:1036`).
-- [ ] Add a claudine-side test (Writer-seam / `report_block_error` capture, per `error.rs:1662+` conventions) asserting the rendered failure contains the **file-relative line**, the **stderr text**, and the **source excerpt** — i.e. it is not collapsed to a one-line string.
-- [ ] Add a claudine-side test asserting piped / `ColorDepth::None` output for a shell failure carries no ANSI (`!rendered.contains('\x1b')`), mirroring `error.rs:1711`.
+- [x] Audit `CompositionError::ShellExpansionFailed` rendering (`claudine/lib/src/composition/error.rs:113` + the `_` catch-all at `error.rs:992`). Add an explicit `CompositionError::ShellExpansionFailed { error, .. }` arm in the `BlockError` impl (`error.rs:776`) that delegates to `error.status_block(term)` — mirroring the `ShellExpansionError::Preflight` delegation at `types.rs:766`.
+- [x] Only if delegation still cannot surface the inner block: verify whether `error_walker.rs::deepest_block_error` reaches the leaf `ShellExpansionError` via `as_block_error`; if not, update the walker / `as_block_error` discovery so the leaf is reached. Prefer the explicit-arm fix first; do **not** duplicate Darkmatter's shell formatter in claudine.
+- [x] Honor the plain-vs-styled contract: when terminal `ColorDepth::None` (piped / `NO_COLOR` / JSON), the rendered diagnostic must contain no escape bytes. Apply the same boundary strip used by `InlineComposeSequenceMismatch` (`error.rs:1036`).
+- [x] Add a claudine-side test (Writer-seam / `report_block_error` capture, per `error.rs:1662+` conventions) asserting the rendered failure contains the **file-relative line**, the **stderr text**, and the **source excerpt** — i.e. it is not collapsed to a one-line string.
+- [x] Add a claudine-side test asserting piped / `ColorDepth::None` output for a shell failure carries no ANSI (`!rendered.contains('\x1b')`), mirroring `error.rs:1711`.
 
 **Validation checkpoint (P4):** `just claudine test` green; boundary test shows the structured diagnostic survives (file line + stderr + excerpt all present); no-ANSI test passes.
 
@@ -112,11 +160,11 @@ no ANSI.
 
 ## Cross-phase validation & success criteria (maps to spec `Success criteria`)
 
-- [ ] After P4: run `just darkmatter test`, `just claudine test`, `just lint`, `just build` (or the repo-equivalent `just` recipes) — all green.
-- [ ] **Spec criterion — file-relative line:** a failing `::shell` reports the line of the source file the author edits (P3 `cfg(test)` with N frontmatter lines proves it and would fail today). ✔ P3
-- [ ] **Spec criterion — stderr surfaced:** the failing command's `stderr` appears in the rendered diagnostic. ✔ P1
-- [ ] **Spec criterion — tail-truncation:** large captured output is tail-truncated with an explicit marker and no UTF-8 corruption. ✔ P1
-- [ ] **Spec criterion — full SourceContext render:** diagnostic includes linked source path, a source excerpt centered on the offending line, and the composed frontmatter block, reusing existing `SourceContext` helpers. ✔ P2 + P3
-- [ ] **Spec criterion — boundary fidelity:** claudine renders the full structured diagnostic on stderr; piped/JSON output carries no ANSI. ✔ P4
-- [ ] **Spec criterion — no behavior change:** schema-validation fail-fast ordering unchanged; no change to shell execution, policy, caching, or timeout behavior (add a regression note / test if the schema-before-shell ordering has an existing guard test). ✔ all phases
-- [ ] **Manual smoke (macOS):** compose a fixture with frontmatter + a failing `::shell`; confirm the rendered diagnostic shows the file-relative line, stderr, excerpt, frontmatter block, and linked path; confirm `| cat` output has no ANSI.
+- [x] After P4: run `just darkmatter test`, `just claudine test`, `just lint`, `just build` (or the repo-equivalent `just` recipes) — all green.
+- [x] **Spec criterion — file-relative line:** a failing `::shell` reports the line of the source file the author edits (P3 `cfg(test)` with N frontmatter lines proves it and would fail today). ✔ P3
+- [x] **Spec criterion — stderr surfaced:** the failing command's `stderr` appears in the rendered diagnostic. ✔ P1
+- [x] **Spec criterion — tail-truncation:** large captured output is tail-truncated with an explicit marker and no UTF-8 corruption. ✔ P1
+- [x] **Spec criterion — full SourceContext render:** diagnostic includes linked source path, a source excerpt centered on the offending line, and the composed frontmatter block, reusing existing `SourceContext` helpers. ✔ P2 + P3
+- [x] **Spec criterion — boundary fidelity:** claudine renders the full structured diagnostic on stderr; piped/JSON output carries no ANSI. ✔ P4
+- [x] **Spec criterion — no behavior change:** schema-validation fail-fast ordering unchanged; no change to shell execution, policy, caching, or timeout behavior (add a regression note / test if the schema-before-shell ordering has an existing guard test). ✔ all phases
+- [x] **Manual smoke (macOS):** compose a fixture with frontmatter + a failing `::shell`; confirm the rendered diagnostic shows the file-relative line, stderr, excerpt, frontmatter block, and linked path; confirm `| cat` output has no ANSI.
