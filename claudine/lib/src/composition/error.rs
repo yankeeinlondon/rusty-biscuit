@@ -277,6 +277,29 @@ pub enum CompositionError {
         reason: String,
     },
 
+    /// A lifecycle string references a bare `{{ variable }}` that is undefined
+    /// after composition.
+    ///
+    /// Darkmatter resolves an unknown bare variable to an empty string with no
+    /// warning and no error (even in fail-fast mode), so a message like
+    /// `"before {{ missing }} after"` would otherwise dispatch silently as
+    /// `"before  after"`. This guard inspects the **raw** (pre-composition)
+    /// lifecycle strings — where the span is still visible — and aborts
+    /// preparation before any side effect (Discord, Slack, TTS, stderr,
+    /// desktop notification) can dispatch the degraded message.
+    #[error(
+        "lifecycle property `{property}` references undefined variable `{variable}` ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleUndefinedVariable {
+        /// The prompt file whose lifecycle frontmatter referenced the variable.
+        source_path: PathBuf,
+        /// Dotted lifecycle key path, e.g. `"start.message"`.
+        property: String,
+        /// The undefined bare variable name, e.g. `"missing_lifecycle_var"`.
+        variable: String,
+    },
+
     // -- Sequence errors -------------------------------------------------------
     /// The `sequence` frontmatter value is not a valid type (must be a list or a string).
     #[error("invalid sequence definition: {0}")]
@@ -872,6 +895,30 @@ impl BlockError for CompositionError {
                     .hint(
                         "Fix the expression grammar or define the referenced variable in the \
                          lifecycle frontmatter section of your prompt file.",
+                    )
+            }
+            CompositionError::LifecycleUndefinedVariable {
+                source_path,
+                property,
+                variable,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "Lifecycle property <cyan>`{property}`</cyan> in {file_link} references \
+                     undefined variable <cyan>`{}`</cyan>, which composition resolves to an \
+                     empty string.",
+                    escape_prose_path(variable)
+                );
+
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "undefined lifecycle variable",
+                    ))
+                    .body(body)
+                    .hint(
+                        "Define the variable in frontmatter, prefix a runtime value with \
+                         `ctx.`/`env.`, or supply a fallback (`{{ var || 'default' }}`).",
                     )
             }
             CompositionError::LoopIterationFailed {

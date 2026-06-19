@@ -92,7 +92,10 @@ fn find_git_root_from_path(path: &Path) -> Option<PathBuf> {
 
 use super::error::CompositionError;
 use super::guardrails::load_or_create_guardrails;
-use super::lifecycle::{parse_lifecycle_config, validate_no_interpolation_leaks};
+use super::lifecycle::{
+    parse_lifecycle_config, validate_no_interpolation_leaks,
+    validate_no_undefined_lifecycle_variables,
+};
 use super::types::{
     AgentHint, CompositionClosurePlan, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
     ModelHint, PreparedComposition, ResolvedCompositionSource,
@@ -164,6 +167,11 @@ pub fn prepare_direct(
     };
     let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
     validate_no_interpolation_leaks(&lifecycle, &source.resolved_path, &report.warnings)?;
+    validate_no_undefined_lifecycle_variables(
+        source.markdown.frontmatter(),
+        &effective_frontmatter,
+        &source.resolved_path,
+    )?;
 
     let source_repo_root = options
         .source_repo_root
@@ -258,6 +266,11 @@ pub fn prepare_inline(
     };
     let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
     validate_no_interpolation_leaks(&lifecycle, &source.resolved_path, &report.warnings)?;
+    validate_no_undefined_lifecycle_variables(
+        source.markdown.frontmatter(),
+        &effective_frontmatter,
+        &source.resolved_path,
+    )?;
 
     let mut prompt = composed.content().to_string();
     if prompt.trim().is_empty() {
@@ -678,6 +691,89 @@ mod tests {
             }
             other => panic!("expected LifecycleInterpolationLeak, got: {other:?}"),
         }
+    }
+
+    #[test]
+    fn undefined_lifecycle_variable_fails_preparation() {
+        // Regression: a bare `{{ missing_lifecycle_var }}` resolves to an empty
+        // string during composition with no Darkmatter warning, so the
+        // post-compose leak guard never sees it. Preparation must still fail
+        // before the message becomes eligible for lifecycle dispatch.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("title", json!("Test")),
+                (
+                    "start",
+                    json!({"message": "before {{ missing_lifecycle_var }} after"}),
+                ),
+            ],
+            "Content",
+        );
+
+        let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+        match err {
+            CompositionError::LifecycleUndefinedVariable {
+                property, variable, ..
+            } => {
+                assert_eq!(property, "start.message");
+                assert_eq!(variable, "missing_lifecycle_var");
+            }
+            other => panic!("expected LifecycleUndefinedVariable, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lifecycle_variable_defined_in_frontmatter_passes_preparation() {
+        // A bare variable that names a real frontmatter key is defined, so it
+        // must not trip the undefined-variable guard.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("area", json!("claudine")),
+                ("start", json!({"message": "working on {{ area }}"})),
+            ],
+            "Content",
+        );
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        let message = prepared
+            .lifecycle
+            .start
+            .as_ref()
+            .unwrap()
+            .message
+            .as_ref()
+            .unwrap();
+        assert_eq!(message, "working on claudine");
+    }
+
+    #[test]
+    fn lifecycle_fallback_for_undefined_variable_passes_preparation() {
+        // Fallback (`{{ x || 'y' }}`) intentionally tolerates an undefined
+        // operand, so the guard must leave it alone.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[(
+                "start",
+                json!({"message": "{{ missing_lifecycle_var || 'default' }}"}),
+            )],
+            "Content",
+        );
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        let message = prepared
+            .lifecycle
+            .start
+            .as_ref()
+            .unwrap()
+            .message
+            .as_ref()
+            .unwrap();
+        assert_eq!(message, "default");
     }
 
     #[test]
