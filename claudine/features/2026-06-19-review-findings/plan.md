@@ -55,20 +55,29 @@ source_files_during_phase_4:
   - claudine/cli/src/commands/wrap/exec/timeouts.rs
   - claudine/cli/src/commands/wrap/exec/termination.rs
   - claudine/cli/src/commands/wrap/exec/mod.rs
+  - claudine/cli/src/commands/wrap/exec/spawn.rs
   - claudine/cli/src/commands/compose/loop_run.rs
   - claudine/cli/src/commands/wrap/env/sanitize.rs
-  - claudine/cli/src/commands/wrap/env/mod.rs
+  - claudine/cli/src/commands/wrap/env/tests.rs
   - claudine/cli/src/output/mod.rs
+  - claudine/cli/Cargo.toml
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+packages:
+  - claudine-cli
 source_files_during_phase_5:
-  - claudine/contract/src/home.rs
+  - claudine/contract/Cargo.toml
   - claudine/contract/src/adapter.rs
-  - claudine/contract/src/session.rs
+  - claudine/contract/src/error.rs
   - claudine/contract/src/lib.rs
+  - claudine/contract/src/profile.rs
+  - claudine/contract/src/session.rs
   - claudine/contract/src/support.rs
-docs_updated_during_phase_5: []
+  - claudine/contract/src/tests.rs
+docs_updated_during_phase_5:
+  - claudine/contract/README.md
+  - claudine/contract/docs/dependencies.md
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
 source_files_during_phase_6:
@@ -537,13 +546,13 @@ code the others touch — resolve it first.
 
 **File:** `claudine/cli/src/commands/wrap/exec/timeouts.rs:59-66`
 
-- [ ] **First**, determine whether `wait_with_timeout` is dead/legacy. If it
+- [x] **First**, determine whether `wait_with_timeout` is dead/legacy. If it
       is, remove it (preferred, per repo Rules 2/3) so the divergent blocking
       behavior cannot regress.
-- [ ] If it is live: replace the blocking `child.wait()?` after SIGKILL with a
+- [x] If it is live: replace the blocking `child.wait()?` after SIGKILL with a
       bounded `try_wait` poll loop, kill `-pid` (process group) when spawned
       in its own group, and cap the post-SIGKILL reap.
-- [ ] Test: an unkillable D-state child reap times out (simulated via a
+- [x] Test: an unkillable D-state child reap times out (simulated via a
       non-returning `try_wait` seam) rather than hanging.
 
 ### 4.2 — Close PID-recycle TOCTOU on loop-driven kills (P4.2)
@@ -551,15 +560,15 @@ code the others touch — resolve it first.
 **File:** `claudine/cli/src/commands/wrap/exec/termination.rs:109-194`
 (kills at `:138`, `:167`, `:190`)
 
-- [ ] Re-check `child.try_wait()?.is_none()` immediately before each
+- [x] Re-check `child.try_wait()?.is_none()` immediately before each
       loop-driven kill (watchdog/early-termination/grace kills at `:138`,
       `:167`, `:190`), or gate them on the same `child_exited` atomic used by
       the SIGINT handler. The unconditional grace SIGKILL at `:190` is the
       most exposed.
-- [ ] Prefer always killing via the negative-PID group form; document why the
+- [x] Prefer always killing via the negative-PID group form; document why the
       positive-PID branch (`:135-137`, `child_in_own_pgroup == false`) is
       benign.
-- [ ] Test (fail-first): PID recycle around loop-driven kills — assert no
+- [x] Test (fail-first): PID recycle around loop-driven kills — assert no
       kill is issued after the child exits (not just the handler path).
 
 ### 4.3 — Stop mutating the process environment in the compose loop (P4.3)
@@ -567,12 +576,12 @@ code the others touch — resolve it first.
 **Files:** `claudine/cli/src/commands/compose/loop_run.rs:196-201`,
 `claudine/cli/src/commands/wrap/env/mod.rs:351`
 
-- [ ] Remove the per-iteration `env::set_var("PWD")` / `remove_var("PWD")`
+- [x] Remove the per-iteration `env::set_var("PWD")` / `remove_var("PWD")`
       from the top of the compose loop. `PWD` is already injected onto the
       child `Command` env map (`env/mod.rs:351`), so set it only there via
       `.env("PWD", …)`. This removes the edition-2024 `unsafe` and the
       cross-iteration race with leaked reader/ticker threads.
-- [ ] Test: confirm the loop no longer calls `set_var` for `PWD` (the race
+- [x] Test: confirm the loop no longer calls `set_var` for `PWD` (the race
       window is gone by construction) and the child still receives the correct
       `PWD`.
 
@@ -580,10 +589,10 @@ code the others touch — resolve it first.
 
 **File:** `claudine/cli/src/commands/wrap/exec/termination.rs:173-175`
 
-- [ ] Replace the silent `Err(TryRecvError::Disconnected) => {}` with
+- [x] Replace the silent `Err(TryRecvError::Disconnected) => {}` with
       `tracing::warn!("watchdog ticker channel disconnected; timeout
       enforcement disabled for remainder of run")`; optionally stop polling.
-- [ ] Test: a disconnected watchdog channel asserts the `warn!` (and the test
+- [x] Test: a disconnected watchdog channel asserts the `warn!` (and the test
       documents whether enforcement stops).
 
 ### 4.5 — Bound waits, derive grace, and overflow-check the deadline (P4.5)
@@ -595,34 +604,34 @@ ignores kill result, hard-coded 200ms unrelated to `kill_grace`),
 `claudine/cli/src/commands/wrap/exec/timeouts.rs:18`
 (`Instant::now() + Duration::from_secs(seconds)` can panic)
 
-- [ ] Bound the post-SIGKILL reap and return a synthesized "could not reap"
+- [x] Bound the post-SIGKILL reap and return a synthesized "could not reap"
       outcome instead of spinning forever.
-- [ ] Derive the `kill_process_group` grace from `TimeoutConfig::kill_grace`
+- [x] Derive the `kill_process_group` grace from `TimeoutConfig::kill_grace`
       instead of the hard-coded 200ms.
-- [ ] Use `Instant::now().checked_add(...)` for the deadline so an absurd
+- [x] Use `Instant::now().checked_add(...)` for the deadline so an absurd
       `--timeout` returns an error instead of panicking.
-- [ ] Tests: absurd `--timeout` does not panic; post-SIGKILL reap is bounded.
+- [x] Tests: absurd `--timeout` does not panic; post-SIGKILL reap is bounded.
 
 ### 4.6 — Broaden `is_sensitive_key` env sanitization (P4.6)
 
 **File:** `claudine/cli/src/commands/wrap/env/sanitize.rs:85-95`
 
-- [ ] Add word-boundary matching for `_KEY`, `AUTH`, `_PAT`, `PWD`, `_PEM`.
+- [x] Add word-boundary matching for `_KEY`, `AUTH`, `_PAT`, `PWD`, `_PEM`.
       Catch `STRIPE_KEY`, `SENDGRID_KEY` (bare `*_KEY`), `NPM_AUTH`, `*_PAT`,
       `*_PWD`, `*_PEM`. Preserve the existing `contains("PRIVATE_KEY")`
       exclusion of `PUBLIC_KEY`.
-- [ ] Avoid false positives such as `SSH_AUTH_SOCK`.
-- [ ] Tests: `STRIPE_KEY`, `NPM_AUTH`, `*_PAT`, `*_PWD`, `*_PEM` are redacted;
+- [x] Avoid false positives such as `SSH_AUTH_SOCK`.
+- [x] Tests: `STRIPE_KEY`, `NPM_AUTH`, `*_PAT`, `*_PWD`, `*_PEM` are redacted;
       `SSH_AUTH_SOCK` is not falsely redacted.
 
 ### 4.7 — Case-insensitive, alias-aware `redact_sensitive_args` (P4.7)
 
 **File:** `claudine/cli/src/commands/wrap/env/sanitize.rs:101-148`
 
-- [ ] Lowercase before prefix-match; add aliases (`-k`, `--bearer`, `--ApiKey`).
-- [ ] Add a value-shape redactor for known token prefixes (`sk-`, `ghp_`,
+- [x] Lowercase before prefix-match; add aliases (`-k`, `--bearer`, `--ApiKey`).
+- [x] Add a value-shape redactor for known token prefixes (`sk-`, `ghp_`,
       `xox[bp]-`, `AKIA`).
-- [ ] Tests: `redact_sensitive_args` case-insensitivity/alias coverage and
+- [x] Tests: `redact_sensitive_args` case-insensitivity/alias coverage and
       value-shape redaction; also cover the previously-untested
       `#[cfg(not(unix))]` `wait_with_signal_and_early_termination` branch.
 
@@ -631,16 +640,16 @@ ignores kill result, hard-coded 200ms unrelated to `kill_grace`),
 **File:** `claudine/cli/src/output/mod.rs` (`mark_user_interrupted`),
 called from the SIGINT handler in `interrupt.rs`
 
-- [ ] Confirm `mark_user_interrupted` is a pure atomic store with no
+- [x] Confirm `mark_user_interrupted` is a pure atomic store with no
       `OnceLock`/`Mutex` initialization on the store path (async-signal-safe).
-- [ ] Add a contract comment at its definition documenting the
+- [x] Add a contract comment at its definition documenting the
       signal-handler-safety invariant.
 
 ### Phase 4 validation checkpoint
 
-- [ ] `just test` and `just test-l2` green in the `claudine-cli` area;
+- [x] `just test` and `just test-l2` green in the `claudine-cli` area;
       `just lint` clean.
-- [ ] Unix signal/`libc::kill` paths verified; the `#[cfg(not(unix))]` branch
+- [x] Unix signal/`libc::kill` paths verified; the `#[cfg(not(unix))]` branch
       has the newly added test (4.7) and keeps parity (compiles on Windows).
 
 ---
@@ -661,25 +670,25 @@ independent; tasks may run in parallel.
 **Files:** `claudine/contract/src/home.rs:74-85`,
 `claudine/contract/src/adapter.rs:156-159`
 
-- [ ] Before collapsing to the secret-free inference error, emit
+- [x] Before collapsing to the secret-free inference error, emit
       `tracing::warn!(error = %err, ...)` with the underlying `io::Error`
       (ENOSPC, unreadable credential, partial copy).
-- [ ] Reconsider whether a failed auth copy should be fatal vs. letting the
+- [x] Reconsider whether a failed auth copy should be fatal vs. letting the
       session surface a clearer `Unauthorized`; the external returned message
       must stay secret-free — only the local trace gains detail.
-- [ ] Test: a simulated copy failure logs the underlying `io::Error` and still
+- [x] Test: a simulated copy failure logs the underlying `io::Error` and still
       returns the secret-free `InferenceError`.
 
 ### 5.2 — Correct the Codex `read-only` network-isolation claim (P6.2)
 
 **File:** `claudine/contract/src/session.rs:236-240` (and `lib.rs` framing)
 
-- [ ] Soften the comment/doc to what `--sandbox read-only` is verified to do
+- [x] Soften the comment/doc to what `--sandbox read-only` is verified to do
       (deny writes + post-hoc stream rejection); treat network denial as a
       defense-in-depth assumption, not a guarantee.
-- [ ] If network isolation is load-bearing, add an explicit Codex
+- [x] If network isolation is load-bearing, add an explicit Codex
       network-sandbox flag to `tool_denial_args`.
-- [ ] Test: documentation change. If a network-sandbox flag is added, assert
+- [x] Test: documentation change. If a network-sandbox flag is added, assert
       it is present in the Codex argv.
 
 ### 5.3 — Narrow the over-exported internal session API (P6.3)
@@ -687,19 +696,19 @@ independent; tasks may run in parallel.
 **File:** `claudine/contract/src/lib.rs:54`
 (`pub use session::{RawSession, SessionPlan, SessionRunner}`)
 
-- [ ] Make `RawSession`/`SessionPlan`/`SessionRunner` `pub(crate)` unless they
+- [x] Make `RawSession`/`SessionPlan`/`SessionRunner` `pub(crate)` unless they
       are deliberately part of the consumer (Reaper/Darkmatter) contract; if
       intended, document that intent on each type.
-- [ ] Verify against `biscuit-contract` consumers; the crate compiles with the
+- [x] Verify against `biscuit-contract` consumers; the crate compiles with the
       narrowed visibility and downstream consumers are unaffected.
 
 ### 5.4 — Add the secret-redaction-at-boundary test and named contract tests (P6.4)
 
 **File:** `claudine/contract/src/adapter.rs` (error mapping / boundary)
 
-- [ ] Add the headline security test: feed stderr containing `sk-…` and assert
+- [x] Add the headline security test: feed stderr containing `sk-…` and assert
       `!error.message.contains("sk-")`.
-- [ ] Add the contract tests the review names: spawn failure
+- [x] Add the contract tests the review names: spawn failure
       (`NotFound`/`PermissionDenied` → `Unavailable`); non-zero exit + valid
       text → `Ok`; `rate_limit` via `retry_after_ms` only;
       `stderr_diagnostics.auth_failures` path; a one-line note documenting the
@@ -709,15 +718,15 @@ independent; tasks may run in parallel.
 
 **File:** `claudine/contract/src/support.rs` (`auth_env_vars`)
 
-- [ ] Remove the `_ => &[]` arm so all enumerated providers are covered
+- [x] Remove the `_ => &[]` arm so all enumerated providers are covered
       explicitly; adding a 9th provider becomes a compile error rather than a
       silent "no auth env vars" result.
-- [ ] Test: existing auth-env-var behavior unchanged across all providers.
+- [x] Test: existing auth-env-var behavior unchanged across all providers.
 
 ### Phase 5 validation checkpoint
 
-- [ ] `just test` green in the `claudine-contract` area; `just lint` clean.
-- [ ] Verify downstream consumers (`biscuit-contract` users: Reaper,
+- [x] `just test` green in the `claudine-contract` area; `just lint` clean.
+- [x] Verify downstream consumers (`biscuit-contract` users: Reaper,
       Darkmatter) still compile.
 
 ---
