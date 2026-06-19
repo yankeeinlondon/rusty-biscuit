@@ -11,14 +11,14 @@ features:
 The two modes of _interaction_ that take place with the **rendezvous** daemon are:
 
 1. **gRPC** API
-    - allows _clients_ to communicates locally on the same host system to the **redezvous** daemon
-    - uses gRPC messaging over a Unix domain **sockets** (macOs, Linux) and **Named Pipes** (windows)
+    - allows clients to communicates locally on the same host system to the **redezvous** daemon
+    - gRPC messaging is done over a Unix domain **sockets** (macOs, Linux) and **Named Pipes** (windows)
     - provides a strongly typed RPC protocol for clients and the daemon to communicate in near real-time
     
 2. **CRDT** syncing over Mesh Network
     - **rendezvous** daemons can communicate to other **rendezvous** daemons (on other hosts)
     - this is done over a mesh network:
-        - `loro` crate provides the foundation of the CRTD implementation
+        - `loro` crate provides the foundation of the CRDT implementation
     - The mechanism of ensuring "eventual consistency" across all daemons is achieved through CRDT Delta Syncing
 
 

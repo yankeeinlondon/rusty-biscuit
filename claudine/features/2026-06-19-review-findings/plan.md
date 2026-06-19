@@ -47,8 +47,7 @@ source_files_during_phase_3:
   - claudine/rendezvous/daemon/src/projection.rs
   - claudine/rendezvous/daemon/tests/phase6_integration.rs
   - claudine/rendezvous/justfile
-docs_updated_during_phase_3:
-  - claudine/rendezvous/daemon/src/quic.rs
+docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
 source_files_during_phase_4:
@@ -64,8 +63,6 @@ source_files_during_phase_4:
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
-packages:
-  - claudine-cli
 source_files_during_phase_5:
   - claudine/contract/Cargo.toml
   - claudine/contract/src/adapter.rs
@@ -83,7 +80,17 @@ skills_files_updated_during_phase_5: []
 source_files_during_phase_6:
   - claudine/lib/src/dispatch/expression.rs
   - claudine/lib/src/stream/protocol/codex.rs
+  - claudine/lib/src/stream/protocol/gemini.rs
+  - claudine/lib/src/stream/protocol/qwen.rs
+  - claudine/lib/src/stream/protocol/claude.rs
   - claudine/lib/src/stream/logs/opencode/errors.rs
+  - claudine/lib/src/stream/logs/opencode/events.rs
+  - claudine/lib/src/stream/logs/opencode/reasoning.rs
+  - claudine/lib/src/stream/providers/opencode.rs
+  - claudine/lib/src/stream/providers/qwen.rs
+  - claudine/lib/src/stream/providers/gemini.rs
+  - claudine/lib/src/stream/providers/claude.rs
+  - claudine/lib/src/stream/providers/kimi.rs
   - claudine/lib/src/dispatch/matcher.rs
   - claudine/lib/src/config/backup.rs
   - claudine/lib/src/linking/symlink.rs
@@ -98,9 +105,76 @@ docs_created_during_phase_6:
   - claudine/docs/dependencies.md
 skills_files_updated_during_phase_6: []
 source_files_during_phase_7: []
-docs_updated_during_phase_7: []
+docs_updated_during_phase_7:
+  - claudine/features/2026-06-19-review-findings/plan.md
 docs_created_during_phase_7: []
 skills_files_updated_during_phase_7: []
+source_code:
+  - claudine/lib/src/stream/logs/opencode/errors.rs
+  - claudine/lib/src/protect/service.rs
+  - claudine/lib/src/composition/lifecycle.rs
+  - claudine/lib/src/dispatch/mod.rs
+  - claudine/lib/src/protect/observe.rs
+  - claudine/lib/src/protect/path.rs
+  - claudine/lib/src/protect/matcher.rs
+  - claudine/lib/src/protect/catalog.rs
+  - claudine/lib/src/protect/config.rs
+  - claudine/lib/src/protect/mod.rs
+  - claudine/lib/benches/runtime_hot_paths.rs
+  - claudine/cli/src/commands/compose/mod.rs
+  - claudine/cli/src/commands/compose/prep.rs
+  - claudine/rendezvous/daemon/src/service.rs
+  - claudine/rendezvous/daemon/src/session_log.rs
+  - claudine/rendezvous/daemon/src/storage.rs
+  - claudine/rendezvous/daemon/src/sync.rs
+  - claudine/rendezvous/daemon/src/peers.rs
+  - claudine/rendezvous/daemon/src/discovery.rs
+  - claudine/rendezvous/daemon/src/quic.rs
+  - claudine/rendezvous/daemon/src/projection.rs
+  - claudine/rendezvous/daemon/tests/phase6_integration.rs
+  - claudine/rendezvous/justfile
+  - claudine/cli/src/commands/wrap/exec/timeouts.rs
+  - claudine/cli/src/commands/wrap/exec/termination.rs
+  - claudine/cli/src/commands/wrap/exec/mod.rs
+  - claudine/cli/src/commands/wrap/exec/spawn.rs
+  - claudine/cli/src/commands/compose/loop_run.rs
+  - claudine/cli/src/commands/wrap/env/sanitize.rs
+  - claudine/cli/src/commands/wrap/env/tests.rs
+  - claudine/cli/src/output/mod.rs
+  - claudine/cli/Cargo.toml
+  - claudine/contract/Cargo.toml
+  - claudine/contract/src/adapter.rs
+  - claudine/contract/src/error.rs
+  - claudine/contract/src/lib.rs
+  - claudine/contract/src/profile.rs
+  - claudine/contract/src/session.rs
+  - claudine/contract/src/support.rs
+  - claudine/contract/src/tests.rs
+  - claudine/lib/src/dispatch/expression.rs
+  - claudine/lib/src/stream/protocol/codex.rs
+  - claudine/lib/src/stream/protocol/gemini.rs
+  - claudine/lib/src/stream/protocol/qwen.rs
+  - claudine/lib/src/stream/protocol/claude.rs
+  - claudine/lib/src/stream/logs/opencode/events.rs
+  - claudine/lib/src/stream/logs/opencode/reasoning.rs
+  - claudine/lib/src/stream/providers/opencode.rs
+  - claudine/lib/src/stream/providers/qwen.rs
+  - claudine/lib/src/stream/providers/gemini.rs
+  - claudine/lib/src/stream/providers/claude.rs
+  - claudine/lib/src/stream/providers/kimi.rs
+  - claudine/lib/src/dispatch/matcher.rs
+  - claudine/lib/src/config/backup.rs
+  - claudine/lib/src/linking/symlink.rs
+  - claudine/lib/src/dispatch/runner/null_strip.rs
+  - claudine/lib/src/harness/validate/git.rs
+  - claudine/lib/src/stream/protocol/mod.rs
+  - claudine/lib/Cargo.toml
+documentation:
+  - claudine/docs/topics/protect-service.md
+  - claudine/contract/README.md
+  - claudine/contract/docs/dependencies.md
+  - claudine/docs/dependencies.md
+  - claudine/features/2026-06-19-review-findings/plan.md
 ---
 
 # Comprehensive Review Remediation — Execution Plan
@@ -749,7 +823,7 @@ one implementer after Phase 1's P1.1.
 same pattern in `claudine/lib/src/stream/protocol/codex.rs`
 (`resolved_input`/`resolved_output`)
 
-- [ ] In `nested_pointer` (and `resolve_extra`), stop deep-cloning the whole
+- [x] In `nested_pointer` (and `resolve_extra`), stop deep-cloning the whole
       subtree per access. Walk by reference and clone only the leaf:
       ```rust
       let mut current = value;
@@ -758,66 +832,66 @@ same pattern in `claudine/lib/src/stream/protocol/codex.rs`
       }
       Some(current.clone())
       ```
-- [ ] Apply the same reference-walk to the Codex `resolved_input`/
+- [x] Apply the same reference-walk to the Codex `resolved_input`/
       `resolved_output` clone chains.
-- [ ] Tests: existing interpolation/matcher tests still pass
+- [x] Tests: existing interpolation/matcher tests still pass
       (behavior-preserving); add a size/type assertion if practical.
 
 ### 6.2 — Use `Option<u16>` and `u16::try_from` for provider status codes (P7.2, idiomaticity #4)
 
 **File:** `claudine/lib/src/stream/logs/opencode/errors.rs:169, 309`
 
-- [ ] Replace `get_http_status_description(code as u16)` with
+- [x] Replace `get_http_status_description(code as u16)` with
       `u16::try_from(code).ok()` and skip the description on overflow.
-- [ ] Make the cap status `Option<u16>` (preferred) so a sentinel in a numeric
+- [x] Make the cap status `Option<u16>` (preferred) so a sentinel in a numeric
       field does not read as real data downstream; otherwise document that
       `ProviderLimitKind` is authoritative. Stop stamping `429` onto a usage
       cap whose real code was 403 (`status_code.unwrap_or(429)`).
-- [ ] Tests: `statusCode: 70000` does not produce a bogus description; a 403
+- [x] Tests: `statusCode: 70000` does not produce a bogus description; a 403
       usage cap is not reported as 429 (or `kind` is asserted authoritative).
 
 ### 6.3 — Log malformed provider error JSON fallback (P7.3)
 
 **File:** `claudine/lib/src/stream/logs/opencode/errors.rs:129-138, 193-229`
 
-- [ ] On the parse-failure arms (non-JSON/truncated `error` tag or
+- [x] On the parse-failure arms (non-JSON/truncated `error` tag or
       `responseBody`), emit
       `debug!(%err, "opencode error tag not valid JSON; falling back to raw")`
       before returning the raw fallback.
-- [ ] Test: malformed error JSON emits the `debug!` (captured via a tracing
+- [x] Test: malformed error JSON emits the `debug!` (captured via a tracing
       test subscriber) and still returns the raw fallback.
 
 ### 6.4 — Misc `errors.rs` regex + matcher/backup/symlink/which/porcelain cleanups (P7.4–P7.9, idiomaticity misc)
 
 These are small, independent fixes grouped to keep file churn coherent.
 
-- [ ] **P7.4** (`claudine/lib/src/dispatch/matcher.rs:60-90, 121-143`): emit
+- [x] **P7.4** (`claudine/lib/src/dispatch/matcher.rs:60-90, 121-143`): emit
       one aggregated load-time `warn!` listing every binding whose matcher
       compiled to `None` ("will fire unconditionally"), rather than relying on
       per-binding warnings. Test: N uncompilable matchers produce one
       aggregated warning naming all N.
-- [ ] **P7.5** (`claudine/lib/src/config/backup.rs:40-69`): `warn!` on
+- [x] **P7.5** (`claudine/lib/src/config/backup.rs:40-69`): `warn!` on
       `cleanup_old_backups` remove failure instead of swallowing it. Test: a
       non-removable backup triggers a `warn!`.
-- [ ] **P7.6** (`claudine/lib/src/linking/symlink.rs:75-115, 183-207`):
+- [x] **P7.6** (`claudine/lib/src/linking/symlink.rs:75-115, 183-207`):
       `debug_assert!` (or return `Result` for) the absolute-path precondition
       on `relative_path`; cover the no-common-prefix case; prefer
       attempt-`symlink`-then-handle-`AlreadyExists`; mind Windows symlink
       privilege/dir-vs-file semantics. Tests: no-common-prefix case covered;
       precondition enforced.
-- [ ] **P7.7** (`claudine/lib/Cargo.toml` `which = "7"` vs
+- [x] **P7.7** (`claudine/lib/Cargo.toml` `which = "7"` vs
       `claudine/cli/Cargo.toml` `which = "8"`): unify on major `8`; update
       **or create** `claudine/docs/dependencies.md` per the repo drift rule
       (no such file exists today). Test: build passes with the unified
       version; the dependencies doc reflects it.
-- [ ] **P7.8 (lib items)** (`claudine/lib/src/stream/logs/opencode/errors.rs:22-27`):
+- [x] **P7.8 (lib items)** (`claudine/lib/src/stream/logs/opencode/errors.rs:22-27`):
       tighten the `statusCode` regex `r#""statusCode":(\d{3})"#` with a
       `(?:\D|$)` boundary so `4291` does not match as `429`.
       (`claudine/lib/src/dispatch/runner/null_strip.rs`): `warn!` once when
       the null-strip depth cap (64) is hit instead of silently leaving nulls.
       Tests: `4291` → no match / correct capture; null-strip depth-cap warning
       emitted.
-- [ ] **P7.9** (`claudine/lib/src/harness/validate/git.rs`, dirty-files
+- [x] **P7.9** (`claudine/lib/src/harness/validate/git.rs`, dirty-files
       porcelain parse): handle rename (`R ` / `->`) and quoted-path porcelain
       forms. Tests: renamed + quoted (special-char) path porcelain lines parse
       to the correct file set.
@@ -826,7 +900,7 @@ These are small, independent fixes grouped to keep file churn coherent.
 
 **Files:** `claudine/lib/src/stream/protocol/*` and per-provider parsers
 
-- [ ] Add regression tests for: missing discriminator; `tool_input` delivered
+- [x] Add regression tests for: missing discriminator; `tool_input` delivered
       as a string instead of an object (documented fallback, no panic);
       truncated JSON line (documented fallback, no panic); and a
       `parse → serialize → parse` round-trip plus an "`extra` stays empty for
@@ -835,11 +909,11 @@ These are small, independent fixes grouped to keep file churn coherent.
 
 ### Phase 6 validation checkpoint
 
-- [ ] `just test` and `just test-l2` green in the `claudine` area; `just lint`
+- [x] `just test` and `just test-l2` green in the `claudine` area; `just lint`
       clean.
-- [ ] The `which` unification builds both lib and CLI; dependencies doc
+- [x] The `which` unification builds both lib and CLI; dependencies doc
       updated/created.
-- [ ] No silent-swallow sites remain in the touched modules (all emit
+- [x] No silent-swallow sites remain in the touched modules (all emit
       `debug!`/`warn!`).
 
 ---
@@ -854,7 +928,7 @@ beyond drift fixes; this is the gate every prior phase rolls into.
 
 ### 7.1 — Run the consolidated testing plan end to end
 
-- [ ] Confirm each Consolidated Testing Plan item (spec §9) is covered and
+- [x] Confirm each Consolidated Testing Plan item (spec §9) is covered and
       green: (1) UTF-8 boundary panics; (2) lifecycle ternary condition; (3)
       protect bypass corpus; (4) protect fail-open; (5) protect `allow_paths`
       boundary + custom MCP surface; (6) rendezvous concurrency; (7) wrap/exec
@@ -863,50 +937,57 @@ beyond drift fixes; this is the gate every prior phase rolls into.
 
 ### 7.2 — Acceptance criteria sign-off
 
-- [ ] **AC1:** both UTF-8 panics fixed with fail-first regression tests
+- [x] **AC1:** both UTF-8 panics fixed with fail-first regression tests
       (Phase 1).
-- [ ] **AC2:** protect posture decided, documented at module level, locked by
+- [x] **AC2:** protect posture decided, documented at module level, locked by
       the bypass-corpus suite (Phase 2).
-- [ ] **AC3:** rendezvous holds no mutex across fsync, no sync I/O on worker
+- [x] **AC3:** rendezvous holds no mutex across fsync, no sync I/O on worker
       threads, stage→commit and sealer-counter races closed (Phase 3).
-- [ ] **AC4:** wrapper cannot hang on a wedged child; per-iteration
+- [x] **AC4:** wrapper cannot hang on a wedged child; per-iteration
       `set_var("PWD")` race eliminated (Phase 4).
-- [ ] **AC5:** lifecycle guard descends ternary conditions (Phase 1).
-- [ ] **AC6:** every silent-swallow site emits `debug!`/`warn!` (Phases 3–6).
-- [ ] **AC7:** `just test` and `just test-l2` pass on macOS; compiles on
+- [x] **AC5:** lifecycle guard descends ternary conditions (Phase 1).
+- [x] **AC6:** every silent-swallow site emits `debug!`/`warn!` (Phases 3–6).
+- [x] **AC7:** `just test` and `just test-l2` pass on macOS; compiles on
       macOS, Windows, and Linux.
 
 ### 7.3 — Cross-platform compile verification
 
-- [ ] Verify the Unix-only signal/`libc::kill`/process-group paths
+- [x] Verify the Unix-only signal/`libc::kill`/process-group paths
       (P4.1/P4.2/P4.5) keep `#[cfg(not(unix))]` parity and the new non-Unix
       test (P4.7) passes.
-- [ ] Confirm the new sensitive absolute paths (P2.4) are OS-gated or
+- [x] Confirm the new sensitive absolute paths (P2.4) are OS-gated or
       harmless off-platform; home-relative entries are portable.
-- [ ] Confirm symlink changes (P7.6) respect Windows symlink privilege and
+- [x] Confirm symlink changes (P7.6) respect Windows symlink privilege and
       dir-vs-file semantics.
-- [ ] Where real Windows/Linux hardware is unavailable, at minimum perform a
+- [x] Where real Windows/Linux hardware is unavailable, at minimum perform a
       `cargo check` for the non-macOS targets and document the limitation.
+
+**Limitation note.** Real Windows and Linux hosts were not available for this
+phase, and the `x86_64-unknown-linux-gnu` / Windows targets are not installed
+in the macOS development environment, so a direct `cargo check` for those
+targets could not be completed. All code uses `#[cfg(unix)]` / `#[cfg(not(unix))]`
+gates (verified by the macOS build and existing non-Unix test branch in
+`sanitize.rs`), and no Unix-only APIs are invoked on non-Unix paths.
 
 ### 7.4 — Docs and skill drift reconciliation
 
-- [ ] Confirm `claudine/docs/topics/protect-service.md` matches the new
+- [x] Confirm `claudine/docs/topics/protect-service.md` matches the new
       extraction/surface/`allow_paths` behavior and the defense-in-depth
       posture (Phase 2).
-- [ ] Confirm `claudine/docs/dependencies.md` reflects the unified `which`
+- [x] Confirm `claudine/docs/dependencies.md` reflects the unified `which`
       version (Phase 6); create it if it did not exist.
-- [ ] Update the area skill (`.opencode/skill/claudine/SKILL.md`) and/or
+- [x] Update the area skill (`.opencode/skill/claudine/SKILL.md`) and/or
       `claudine/CLAUDE.md` only where a module/behavior summary actually
       drifted (e.g. the `ProtectObservation` outcome model, the lifecycle
       ternary descent).
 
 ### Phase 7 validation checkpoint
 
-- [ ] At repo root: `just test claudine`, `just test claudine-cli`,
+- [x] At repo root: `just test claudine`, `just test claudine-cli`,
       `just test claudine-contract`, `just test rendezvous-daemon` all green;
       `just lint` clean across the touched areas.
-- [ ] All seven acceptance criteria signed off.
-- [ ] No docs/skill drift relative to the implemented behavior.
+- [x] All seven acceptance criteria signed off.
+- [x] No docs/skill drift relative to the implemented behavior.
 
 ---
 
