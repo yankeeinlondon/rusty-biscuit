@@ -7,12 +7,12 @@ $schema-descriptor:
     - "provide a _file path_ for 'doc' to indicate where this documentation will live"
 
 operation: 
-    test: "file_exists({{doc}}) && !file_empty({{doc}}) ? 'update' : '"
+    test: "file_exists({{doc.doc}}) && !file_empty({{doc.doc}}) ? 'update' : '"
 
 ---
 
-::block when="file_exists({{doc}})"
-::block when="file_empty({{doc}})"
-- save the documentation to {{doc}}
+::block when="file_exists({{doc.doc}})"
+::block when="file_empty({{doc.doc}})"
+- save the documentation to {{doc.doc}}
     - NOTE: the file already exists but is _empty_ so you will be creating this document
 ::end-block

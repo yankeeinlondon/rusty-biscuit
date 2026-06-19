@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde_json::Value;
 use std::hash::Hash;
 use std::{collections::HashMap, fs, path::Path};
 
+use crate::execution::{self, CompletionOutput, CompletionRequest};
+use crate::models::selection::{self, StdEnvView};
 use crate::primitives::runnable::Runnable;
 use crate::primitives::state::{PipelineState, StepError};
 use crate::{models::model_capability::ModelCapability, utils::datetime::Epoch};
@@ -350,24 +353,20 @@ impl<V> Runnable for Prompt<V>
 where
     V: Serialize + Hash + Eq + Send + Sync + Clone + 'static,
 {
-    /// The output type is `String` representing the LLM's text response.
+    /// Executes the prompt by resolving its capability to a concrete model and
+    /// running a single-turn completion through the execution surface.
     ///
-    /// For structured responses, use the `structured_response` field to define
-    /// a schema and parse the response accordingly.
+    /// The returned string is the model's prose response, or the
+    /// JSON-serialized structured output when a structured response schema was
+    /// configured.
     type Output = String;
 
-    /// Executing a `Prompt` will:
-    ///
-    /// 1. Identify the concrete `ProviderModel` to use
-    /// 2. Call the LLM model with the prompt; providing tools
-    ///    a system prompt, and structured output instructions
-    ///    if they were added.
     fn execute(&self, _state: &mut PipelineState) -> Result<Self::Output, StepError> {
-        Err(StepError::new(self.name(), "LLM execution not yet implemented").fatal())
+        self.run_completion()
     }
 
     fn execute_readonly(&self, _state: &PipelineState) -> Result<Self::Output, StepError> {
-        Err(StepError::new(self.name(), "LLM execution not yet implemented").fatal())
+        self.run_completion()
     }
 
     fn name(&self) -> &str {
@@ -377,6 +376,55 @@ where
     fn supports_readonly(&self) -> bool {
         // Prompts can run in parallel since they just call external LLMs
         true
+    }
+}
+
+impl<V> Prompt<V>
+where
+    V: Serialize + Hash + Eq + Send + Sync + Clone + 'static,
+{
+    fn run_completion(&self) -> Result<String, StepError> {
+        let capability = self
+            .capability
+            .clone()
+            .unwrap_or(PromptCapability::TextOnly(ModelCapability::Normal));
+
+        let model_capability = match capability {
+            PromptCapability::TextOnly(cap) => cap,
+            PromptCapability::MultiModal(cap) => cap,
+            PromptCapability::TextImageDocument(text_cap, _, _) => text_cap,
+            PromptCapability::TextDocument(text_cap) => text_cap,
+        };
+
+        let model = selection::resolve_model(&model_capability, &StdEnvView)
+            .map_err(|e| StepError::new(self.name(), e.to_string()).fatal().with_source(e))?;
+
+        let schema = self
+            .structured_response
+            .as_ref()
+            .map(|structure| serde_json::to_value(structure).unwrap_or(Value::Null));
+
+        let request = CompletionRequest {
+            model,
+            system_prompt: self.system_prompt.clone(),
+            prompt: self.text.clone().unwrap_or_default(),
+            schema,
+            parameters: None,
+        };
+
+        let output = execution::complete_blocking(request)
+            .map_err(|e| StepError::new(self.name(), e.to_string()).fatal().with_source(e))?;
+
+        match output {
+            CompletionOutput::Text(text) => Ok(text),
+            CompletionOutput::Structured(value) => serde_json::to_string(&value).map_err(|e| {
+                StepError::new(
+                    self.name(),
+                    format!("failed to serialize structured response: {e}"),
+                )
+                .fatal()
+            }),
+        }
     }
 }
 
@@ -458,5 +506,79 @@ impl<V: Serialize + Hash + Eq> Prompt<V> {
             Ok(response) => response.status().is_success(),
             Err(_) => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    struct TestBackendGuard;
+
+    impl Drop for TestBackendGuard {
+        fn drop(&mut self) {
+            execution::clear_test_backend_factory();
+        }
+    }
+
+    fn install_fake_backend(response: &str) -> TestBackendGuard {
+        let backend = execution::FakeCompletionBackend::new(response);
+        execution::install_test_backend(Arc::new(backend));
+        TestBackendGuard
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_execute_returns_text_via_fake_backend() {
+        let _guard = install_fake_backend("hello from prompt");
+        let prompt = Prompt::<String>::new("say hi").using_model(ModelCapability::Fast);
+        let mut state = PipelineState::new();
+
+        let result = prompt.execute(&mut state).expect("execute should succeed");
+
+        assert_eq!(result, "hello from prompt");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_execute_readonly_returns_text_via_fake_backend() {
+        let _guard = install_fake_backend("readonly hello");
+        let prompt = Prompt::<String>::new("say hi").using_model(ModelCapability::Fast);
+        let state = PipelineState::new();
+
+        let result = prompt
+            .execute_readonly(&state)
+            .expect("readonly should succeed");
+
+        assert_eq!(result, "readonly hello");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_execute_structured_response_returns_json_string() {
+        let _guard = install_fake_backend(r#"{"answer": 42}"#);
+        let mut structure = HashMap::new();
+        structure.insert("answer".to_string(), "integer".to_string());
+        let prompt = Prompt::<String>::new("What is the answer?")
+            .using_model(ModelCapability::Fast)
+            .with_structured_response(structure);
+        let mut state = PipelineState::new();
+
+        let result = prompt.execute(&mut state).expect("execute should succeed");
+
+        assert!(result.contains("42"));
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_execute_inside_runtime_does_not_panic() {
+        let _guard = install_fake_backend("runtime safe");
+        let prompt = Prompt::<String>::new("say hi").using_model(ModelCapability::Fast);
+        let mut state = PipelineState::new();
+
+        let result = prompt.execute(&mut state).expect("execute should succeed");
+
+        assert_eq!(result, "runtime safe");
     }
 }

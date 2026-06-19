@@ -803,7 +803,7 @@ mod tests {
             written.contains("# Generated\nNo blank line before paragraph\n"),
             "raw replacement body must be on disk for downstream cleanup; got:\n{written}"
         );
-        // Now simulate the cleanup step that callers (inline_guards, try_inline_closure) perform
+        // Now simulate the cleanup step that callers (inline_cleanup, try_inline_closure) perform
         let (fm_prefix, body) = split_frontmatter(&written);
         let cleaned = darkmatter::markdown::cleanup::cleanup_content(body);
         assert_ne!(

@@ -113,9 +113,9 @@ impl CodeBlock {
     }
 
     /// Sets the language from a raw fence-style token, resolved through
-    /// [`LanguageGrammar::from_fence_token`].
+    /// [`LanguageGrammar::from_token_or_plain_text`].
     pub fn with_fence_language(mut self, language: impl Into<String>) -> Self {
-        self.language = Some(LanguageGrammar::from_fence_token(language.into()));
+        self.language = Some(LanguageGrammar::from_token_or_plain_text(language.into()));
         self
     }
 
@@ -164,9 +164,9 @@ impl CodeBlock {
 
     /// Reads a file from disk and wraps its contents in a [`CodeBlock`].
     ///
-    /// The language is inferred from the file extension via
-    /// [`LanguageGrammar::from_fence_token`]; unknown extensions flow
-    /// through [`LanguageGrammar::OtherByToken`].
+    /// The language is inferred from the filename via
+    /// [`LanguageGrammar::from_lossy`]; unsupported paths fall back to
+    /// [`LanguageGrammar::PlainText`].
     ///
     /// ## Errors
     ///
@@ -174,12 +174,8 @@ impl CodeBlock {
     pub fn from_source_file(path: impl AsRef<Path>) -> Result<Self, CodeBlockError> {
         let path = path.as_ref();
         let code = std::fs::read_to_string(path)?;
-        let lang_token = path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("")
-            .to_string();
-        Ok(Self::new(code).with_fence_language(lang_token))
+        let language = LanguageGrammar::from_lossy(path.to_string_lossy());
+        Ok(Self::new(code).with_language(language))
     }
 
     /// Constructs a [`CodeBlock`] from a parsed [`CodeBlockMeta`] and the
@@ -198,7 +194,7 @@ impl CodeBlock {
         meta: CodeBlockMeta,
     ) -> Self {
         let code = code.into();
-        let language = language.map(|lang| LanguageGrammar::from_fence_token(lang));
+        let language = language.map(|lang| LanguageGrammar::from_token_or_plain_text(lang));
         Self {
             code,
             language,
@@ -413,6 +409,7 @@ pub(crate) fn render_code_block_for_terminal(
     width: Option<u16>,
 ) -> Result<(Option<String>, String), crate::markdown::MarkdownError> {
     let _ = code_block_mode.resolve(page_mode);
+    let grammar = LanguageGrammar::from_token_or_plain_text(language);
     let color_mode = super::output::code_block::mode_for_background(
         highlighter
             .theme()
@@ -422,7 +419,7 @@ pub(crate) fn render_code_block_for_terminal(
     );
     let body = super::output::code_block::render_terminal_code_block(
         code,
-        language,
+        &grammar,
         highlighter,
         options,
         meta,
@@ -959,9 +956,17 @@ mod tests {
     /// output is byte-for-byte equal to a direct `CodeBlock::rust(...).render`
     /// for the same code, language, and metadata.
     #[test]
+    #[serial]
     fn fenced_rust_block_routes_through_code_block() {
         use crate::markdown::output::terminal::TerminalOptions;
         use crate::markdown::Markdown;
+
+        let _code_theme = EnvVarGuard::capture("CODE_THEME");
+        let _theme = EnvVarGuard::capture("THEME");
+        unsafe {
+            std::env::remove_var("CODE_THEME");
+            std::env::remove_var("THEME");
+        }
 
         let code = "fn main() {}\n";
 

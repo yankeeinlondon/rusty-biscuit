@@ -17,3 +17,7 @@ The **Reaper** library is a consumer of this contract and the **Darkmatter** lib
 ## Usage Example
 
 TODO
+
+## Considerations
+
+TODO

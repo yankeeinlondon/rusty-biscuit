@@ -1,5 +1,6 @@
 mod args;
 mod commands;
+mod perf;
 
 use args::{Cli, Commands};
 use biscuit_terminal::components::prose::Prose;
@@ -9,9 +10,11 @@ use clap::{CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 
 fn main() {
+    let process_start = std::time::Instant::now();
+
     CompleteEnv::with_factory(Cli::command).complete();
 
-    if let Err(e) = run() {
+    if let Err(e) = run(process_start) {
         let msg = format!("<red><b>Error:</b></red> {e}");
         let terminal = Terminal::default();
         eprintln!("{}", Prose::new(msg).render(&terminal));
@@ -19,7 +22,7 @@ fn main() {
     }
 }
 
-fn run() -> Result<(), worktree::WorktreeError> {
+fn run(process_start: std::time::Instant) -> Result<(), worktree::WorktreeError> {
     let cli = Cli::parse();
 
     // Handle --completions
@@ -30,8 +33,9 @@ fn run() -> Result<(), worktree::WorktreeError> {
 
     let width = cli.width.as_deref();
     let verbose = cli.verbose;
+    let perf = cli.perf;
     match cli.command.unwrap_or(Commands::List) {
-        Commands::List => commands::list(width, verbose),
+        Commands::List => commands::list(width, verbose, perf, process_start),
         Commands::Create { branch, stay } => commands::create(&branch, stay),
         Commands::Go { name, .. } => commands::go(&name),
         Commands::Remove {
@@ -60,9 +64,10 @@ wt() {{
     (( exit_code != 0 )) && return $exit_code
     if [[ "$output" == cd:* ]]; then
         builtin cd -- "${{output#cd:}}"
-    else
-        [[ -n "$output" ]] && echo "$output"
+    elif [[ -n "$output" ]]; then
+        echo "$output"
     fi
+    return 0
 }}
 source <(COMPLETE=bash command wt)"#
         ),
@@ -76,9 +81,10 @@ wt() {{
     (( exit_code != 0 )) && return $exit_code
     if [[ "$output" == cd:* ]]; then
         builtin cd -- "${{output#cd:}}"
-    else
-        [[ -n "$output" ]] && print -- "$output"
+    elif [[ -n "$output" ]]; then
+        print -- "$output"
     fi
+    return 0
 }}
 source <(COMPLETE=zsh command wt)"#
         ),
@@ -93,9 +99,10 @@ function wt
     end
     if string match -q 'cd:*' -- $output
         builtin cd (string replace 'cd:' '' -- $output)
-    else
-        test -n "$output" && echo $output
+    else if test -n "$output"
+        echo $output
     end
+    return 0
 end
 COMPLETE=fish command wt | source"#
         ),

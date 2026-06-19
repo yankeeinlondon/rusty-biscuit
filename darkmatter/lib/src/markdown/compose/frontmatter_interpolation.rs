@@ -1,7 +1,11 @@
 //! Frontmatter interpolation engine.
 //!
-//! Resolves `{{ variable }}` expressions inside frontmatter values using
-//! non-templated (seed) frontmatter values, `ctx.*`, and `env.*` as inputs.
+//! Resolves `{{ variable }}` expressions inside frontmatter values. Lookups
+//! read non-templated (seed) frontmatter values, the reserved `doc` / `doc.*`
+//! namespace (the incrementally-resolved frontmatter object), `ctx.*`, and
+//! `env.*`. When a [`ResolutionContext`] is attached, the read-side functions
+//! (`file_exists`, `frontmatter`, `absolute`, `relative`, …) resolve their path
+//! arguments here too — the same capability every other expression surface has.
 //!
 //! ## Incremental Seed Semantics
 //!
@@ -23,9 +27,9 @@
 //! caller can run frontmatter shell expansion and then call this function a
 //! second time to resolve those keys against the shell-expanded values.
 
-use super::expression::{EvaluationLookup, Expr, ExpressionFinder, parse};
-use super::interpolation::{Evaluator, ScanMode, interpolate_text};
-use super::types::{ComposeContext, ComposeWarning};
+use super::expression::{EvaluationLookup, Expr, ExpressionFinder, ResolutionContext, doc_namespace, parse};
+use super::interpolation::{Evaluator, interpolate_value};
+use super::{ComposeContext, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
 use crate::markdown::types::MarkdownError;
 use serde_json::Value;
@@ -43,21 +47,48 @@ pub(crate) fn contains_interpolation(value: &Value) -> bool {
 
 /// Lookup state for frontmatter interpolation.
 ///
-/// Contains only non-templated (seed) top-level frontmatter values,
-/// plus `ctx.*` and `env.*` from the runtime context.
+/// Resolves the reserved `doc` namespace (the incrementally-resolved seed map),
+/// the non-templated (seed) top-level frontmatter values, and `ctx.*` / `env.*`
+/// from the runtime context. An optional [`ResolutionContext`] enables the
+/// read-side expression functions (`file_exists`, `frontmatter`, …) during
+/// frontmatter interpolation; it is `None` for context-free callers.
 pub(crate) struct FrontmatterSeedState {
     data: HashMap<String, Value>,
     context: ComposeContext,
+    resolution_context: Option<ResolutionContext>,
 }
 
 impl FrontmatterSeedState {
     pub(crate) fn new(data: HashMap<String, Value>, context: ComposeContext) -> Self {
-        Self { data, context }
+        Self {
+            data,
+            context,
+            resolution_context: None,
+        }
+    }
+
+    /// Attaches a [`ResolutionContext`] so the read-side expression functions
+    /// (`file_exists`, `frontmatter`, `absolute`, `relative`, …) can evaluate
+    /// during frontmatter interpolation. Passing `None` leaves the state
+    /// context-free (read-side functions remain disabled).
+    #[must_use]
+    pub(crate) fn with_resolution_context(
+        mut self,
+        resolution_context: Option<ResolutionContext>,
+    ) -> Self {
+        self.resolution_context = resolution_context;
+        self
     }
 }
 
 impl EvaluationLookup for FrontmatterSeedState {
     fn get(&self, path: &str) -> Option<Value> {
+        // Reserved `doc` namespace, intercepted before key/ctx/env lookup.
+        if doc_namespace::is_doc_namespace(path) {
+            let root = Value::Object(self.data.clone().into_iter().collect());
+            return doc_namespace::resolve_doc_namespace(path, &root);
+        }
+
         // ctx.* prefix
         if let Some(ctx_key) = path.strip_prefix("ctx.") {
             return self.context.get(ctx_key).cloned();
@@ -93,6 +124,10 @@ impl EvaluationLookup for FrontmatterSeedState {
             Some(v) => v.to_string(),
         }
     }
+
+    fn resolution_context(&self) -> Option<ResolutionContext> {
+        self.resolution_context.clone()
+    }
 }
 
 /// Walks a dotted path through a JSON value.
@@ -117,18 +152,9 @@ fn rewrite_value<L: EvaluationLookup>(
 ) -> Result<(Value, usize, Vec<ComposeWarning>), MarkdownError> {
     match value {
         Value::String(s) => {
-            let result = interpolate_text(
-                s,
-                evaluator,
-                ScanMode::Plain,
-                fail_fast,
-                "frontmatter-interpolation",
-            )?;
-            Ok((
-                Value::String(result.output),
-                result.replacements,
-                result.warnings,
-            ))
+            // Preserve scalar type when the whole value is one `{{ expr }}`
+            // (e.g. `{{ false }}` stays a boolean), else rewrite as a string.
+            interpolate_value(s, evaluator, fail_fast, "frontmatter-interpolation")
         }
         Value::Array(arr) => {
             let mut new_arr = Vec::with_capacity(arr.len());
@@ -179,11 +205,16 @@ pub(crate) struct FrontmatterInterpolationReport {
 /// with `$(` are treated as shell-pending. Templated keys that reference any
 /// shell-pending key are left unresolved so a caller can run frontmatter
 /// shell expansion and invoke this function again to finish the work.
+///
+/// `resolution_context` enables the read-side expression functions
+/// (`file_exists`, `frontmatter`, `absolute`, `relative`, …) during both
+/// interpolation passes. Pass `None` for context-free callers (e.g. tests).
 pub(crate) fn interpolate_frontmatter(
     frontmatter: &mut Frontmatter,
     context: &ComposeContext,
     fail_fast: bool,
     defer_shell_pending: bool,
+    resolution_context: Option<ResolutionContext>,
 ) -> Result<FrontmatterInterpolationReport, MarkdownError> {
     let fm = frontmatter.as_map();
 
@@ -197,16 +228,6 @@ pub(crate) fn interpolate_frontmatter(
     } else {
         HashSet::new()
     };
-
-    if std::env::var("DM_DEBUG_DEFER").is_ok() {
-        eprintln!("DM_DEBUG: defer_shell_pending={defer_shell_pending} shell_pending_keys={shell_pending_keys:?}");
-        for (k, v) in fm.iter() {
-            if let Value::String(s) = v {
-                let refs = extract_frontmatter_key_refs(v);
-                eprintln!("DM_DEBUG: key={k:?} value={s:?} refs={refs:?}");
-            }
-        }
-    }
 
     let mut seed_map: HashMap<String, Value> = HashMap::new();
     let templated_keys: Vec<String> = fm
@@ -260,7 +281,8 @@ pub(crate) fn interpolate_frontmatter(
                 continue;
             }
 
-            let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone());
+            let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone())
+                .with_resolution_context(resolution_context.clone());
             let evaluator = Evaluator::new(&seed_state);
             let (new_value, count, mut warnings) = rewrite_value(original, &evaluator, fail_fast)?;
 
@@ -305,7 +327,8 @@ pub(crate) fn interpolate_frontmatter(
             continue;
         }
 
-        let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone());
+        let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone())
+            .with_resolution_context(resolution_context.clone());
         let evaluator = Evaluator::new(&seed_state);
         let (new_value, count, mut warnings) = rewrite_value(original, &evaluator, fail_fast)?;
 
@@ -412,13 +435,23 @@ fn collect_frontmatter_key_refs(value: &Value, refs: &mut Vec<String>) {
 /// Walks an `Expr` AST and pushes the root segment of every `Variable` node
 /// onto `refs`, skipping `ctx.*` and `env.*` since those resolve from the
 /// runtime context, not seed frontmatter.
+///
+/// The reserved `doc` namespace mirrors bare-name dependencies (Decision C):
+/// `doc.<root>` contributes the same dependency root as bare `<root>`, so
+/// `{{ doc.a }}` waits for templated key `a` and `doc.doc` waits for a literal
+/// key named `doc`. Bare `doc` is a snapshot of the currently-resolved values
+/// and contributes no dependency, avoiding all-key dependencies and self-cycles.
 fn collect_variable_roots(expr: &Expr, refs: &mut Vec<String>) {
     match expr {
         Expr::Variable(path) => {
             if path.starts_with("ctx.") || path.starts_with("env.") {
                 return;
             }
-            let root = path.split('.').next().unwrap_or(path);
+            if path == "doc" {
+                return;
+            }
+            let effective = path.strip_prefix("doc.").unwrap_or(path);
+            let root = effective.split('.').next().unwrap_or(effective);
             if !root.is_empty() {
                 refs.push(root.to_string());
             }
@@ -505,7 +538,7 @@ mod tests {
 
     mod seed_state_tests {
         use super::*;
-        use crate::markdown::compose::types::ComposeContext;
+        use crate::markdown::compose::ComposeContext;
 
         fn test_context() -> ComposeContext {
             ComposeContext::fixed_for_testing()
@@ -556,6 +589,35 @@ mod tests {
         }
 
         #[test]
+        fn doc_namespace_resolves_against_seed_only() {
+            let mut data = HashMap::new();
+            data.insert("build".to_string(), json!("seed-build"));
+            data.insert("doc".to_string(), json!({ "child": "literal-doc" }));
+            let state = FrontmatterSeedState::new(data, test_context());
+
+            // doc.<path> resolves a seed property.
+            assert_eq!(state.get("doc.build"), Some(json!("seed-build")));
+
+            // bare doc returns the whole seed object.
+            let obj = state.get("doc").expect("bare doc resolves");
+            assert!(obj.is_object());
+            assert_eq!(obj.get("build"), Some(&json!("seed-build")));
+
+            // a literal property named `doc` is reached as doc.doc.
+            assert_eq!(state.get("doc.doc.child"), Some(json!("literal-doc")));
+
+            // missing doc.* values do not fall back to ctx.*.
+            assert_eq!(state.get("ctx.today"), Some(json!("2024-06-15")));
+            assert_eq!(state.get("doc.today"), None);
+        }
+
+        #[test]
+        fn resolution_context_defaults_to_none() {
+            let state = FrontmatterSeedState::new(HashMap::new(), test_context());
+            assert!(state.resolution_context().is_none());
+        }
+
+        #[test]
         fn get_string_returns_empty_for_missing() {
             let state = FrontmatterSeedState::new(HashMap::new(), test_context());
             assert_eq!(state.get_string("nonexistent"), "");
@@ -572,7 +634,7 @@ mod tests {
 
     mod interpolate_frontmatter_tests {
         use super::*;
-        use crate::markdown::compose::types::ComposeContext;
+        use crate::markdown::compose::ComposeContext;
         use crate::markdown::frontmatter::Frontmatter;
 
         fn test_context() -> ComposeContext {
@@ -594,7 +656,7 @@ mod tests {
                 "spec": "{{base}}/spec.md",
                 "plan": "{{base}}/plan.md"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
             assert_eq!(report.replacements, 2);
             assert_eq!(
                 fm.as_map().get("spec"),
@@ -614,7 +676,7 @@ mod tests {
                 "title": "Hello",
                 "count": 42
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
             assert_eq!(report.replacements, 0);
         }
 
@@ -627,7 +689,7 @@ mod tests {
                     "owner": "Alice"
                 }
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
             assert_eq!(report.replacements, 1);
             let meta = fm.as_map().get("metadata").unwrap();
             assert_eq!(meta.get("home"), Some(&json!("/docs/home")));
@@ -640,7 +702,7 @@ mod tests {
                 "base": "/root",
                 "paths": ["{{base}}/a", "{{base}}/b"]
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
             assert_eq!(report.replacements, 2);
             let paths = fm.as_map().get("paths").unwrap().as_array().unwrap();
             assert_eq!(paths[0], json!("/root/a"));
@@ -652,7 +714,7 @@ mod tests {
             let mut fm = fm_from_json(json!({
                 "spec": "{{missing}}/spec.md"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
             assert_eq!(report.replacements, 1);
             assert_eq!(fm.as_map().get("spec"), Some(&json!("/spec.md")));
         }
@@ -662,7 +724,7 @@ mod tests {
             let mut fm = fm_from_json(json!({
                 "date": "{{ctx.today}}"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
             assert_eq!(report.replacements, 1);
             assert_eq!(fm.as_map().get("date"), Some(&json!("2024-06-15")));
         }
@@ -675,7 +737,7 @@ mod tests {
                 "spec": "{{base}}/spec.md",
                 "plan": "{{spec}}.plan.md"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
             assert_eq!(fm.as_map().get("spec"), Some(&json!("/root/spec.md")));
             assert_eq!(
                 fm.as_map().get("plan"),
@@ -686,19 +748,19 @@ mod tests {
 
         #[test]
         fn unknown_function_errors_instead_of_leaking_raw_template() {
-            // Regression: an unknown function (`dir`) used to be demoted to a
-            // warning in non-fail-fast mode, leaving the raw `{{ … }}` text in
+            // Regression: an unknown function used to be demoted to a warning
+            // in non-fail-fast mode, leaving the raw `{{ … }}` text in
             // `review` to poison the downstream `review_path` file reference.
             let mut fm = fm_from_json(json!({
                 "spec": "features/x/spec.md",
-                "review": "{{ dir(spec) + '/review.md' }}",
+                "review": "{{ unknown_fn(spec) + '/review.md' }}",
                 "review_path": "@area/{{review}}"
             }));
-            let result = interpolate_frontmatter(&mut fm, &test_context(), false, false);
+            let result = interpolate_frontmatter(&mut fm, &test_context(), false, false, None);
             let Err(err) = result else {
                 panic!("unknown function must abort interpolation");
             };
-            assert!(err.to_string().contains("Unknown function: dir"));
+            assert!(err.to_string().contains("Unknown function: unknown_fn"));
         }
 
         #[test]
@@ -706,7 +768,7 @@ mod tests {
             let mut fm = fm_from_json(json!({
                 "bad": "{{ > invalid }}"
             }));
-            let result = interpolate_frontmatter(&mut fm, &test_context(), true, false);
+            let result = interpolate_frontmatter(&mut fm, &test_context(), true, false, None);
             assert!(result.is_err());
         }
 
@@ -715,7 +777,7 @@ mod tests {
             let mut fm = fm_from_json(json!({
                 "bad": "{{ > invalid }}"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
             assert!(!report.warnings.is_empty());
         }
 
@@ -727,7 +789,7 @@ mod tests {
                 "combined": "cwd is {{pwd}} and os is {{uname}}",
                 "plain": "literal"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, true).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, true, None).unwrap();
             // combined depends on shell-pending keys, so it stays templated.
             assert_eq!(
                 fm.as_map().get("combined"),
@@ -754,7 +816,7 @@ mod tests {
                 "review_path": "@area/{{review}}"
             }));
 
-            interpolate_frontmatter(&mut fm, &test_context(), false, true).unwrap();
+            interpolate_frontmatter(&mut fm, &test_context(), false, true, None).unwrap();
             assert_eq!(
                 fm.as_map().get("review"),
                 Some(&json!("{{ dir + '/review-' + iteration + '.md' }}"))
@@ -769,7 +831,7 @@ mod tests {
                 .insert("dir".to_string(), json!("features/x"));
 
             // Second pass resolves the whole chain against the expanded value.
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, true).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, true, None).unwrap();
             assert_eq!(
                 fm.as_map().get("review"),
                 Some(&json!("features/x/review-1.md"))
@@ -788,7 +850,7 @@ mod tests {
                 "combined": "cwd is {{pwd}}"
             }));
             // First pass: defer because pwd is shell-pending.
-            interpolate_frontmatter(&mut fm, &test_context(), false, true).unwrap();
+            interpolate_frontmatter(&mut fm, &test_context(), false, true, None).unwrap();
             assert_eq!(fm.as_map().get("combined"), Some(&json!("cwd is {{pwd}}")));
 
             // Simulate frontmatter shell expansion completing.
@@ -796,12 +858,112 @@ mod tests {
                 .insert("pwd".to_string(), json!("/real/path"));
 
             // Second pass: pwd is now concrete (no longer starts with `$(`).
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, true).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, true, None).unwrap();
             assert_eq!(
                 fm.as_map().get("combined"),
                 Some(&json!("cwd is /real/path"))
             );
             assert_eq!(report.replacements, 1);
+        }
+
+        #[test]
+        fn whole_value_interpolation_preserves_scalar_type() {
+            // A frontmatter value that is exactly one `{{ expr }}` keeps its
+            // scalar type (bool/number/null) instead of stringifying. Mixed
+            // text and string results stay strings.
+            let mut fm = fm_from_json(json!({
+                "b": "{{ false }}",
+                "n": "{{ 1 + 1 }}",
+                "nul": "{{ null }}",
+                "s": "{{ 'x' }}",
+                "mixed": "prefix {{ false }}",
+            }));
+            interpolate_frontmatter(&mut fm, &test_context(), false, true, None).unwrap();
+
+            let map = fm.as_map();
+            assert_eq!(map.get("b"), Some(&json!(false)));
+            assert_eq!(map.get("n"), Some(&json!(2)));
+            assert_eq!(map.get("nul"), Some(&Value::Null));
+            assert_eq!(map.get("s"), Some(&json!("x")));
+            assert_eq!(map.get("mixed"), Some(&json!("prefix false")));
+        }
+
+        #[test]
+        fn read_side_functions_resolve_with_context_pre_shell_pass() {
+            // The pre-shell pass (`defer_shell_pending = true`) carries the
+            // resolution context, so read-side functions resolve in frontmatter.
+            let dir = tempfile::TempDir::new().unwrap();
+            std::fs::write(dir.path().join("spec.md"), "# Spec").unwrap();
+            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+
+            let mut fm = fm_from_json(json!({
+                "exists": "{{ file_exists('spec.md') }}",
+                "missing": "{{ file_exists('nope.md') }}",
+                "abs": "{{ absolute('spec.md') }}",
+                "rel": "{{ relative('spec.md') }}",
+            }));
+            interpolate_frontmatter(&mut fm, &test_context(), false, true, Some(ctx)).unwrap();
+
+            assert_eq!(fm.as_map().get("exists"), Some(&json!(true)));
+            assert_eq!(fm.as_map().get("missing"), Some(&json!(false)));
+            assert_eq!(
+                fm.as_map().get("abs"),
+                Some(&json!(
+                    dir.path().join("spec.md").to_string_lossy().to_string()
+                ))
+            );
+            assert_eq!(fm.as_map().get("rel"), Some(&json!("spec.md")));
+        }
+
+        #[test]
+        fn read_side_functions_resolve_with_context_post_shell_pass() {
+            // The post-shell pass (`defer_shell_pending = false`) carries the
+            // same resolution context.
+            let dir = tempfile::TempDir::new().unwrap();
+            std::fs::write(dir.path().join("spec.md"), "# Spec").unwrap();
+            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+
+            let mut fm = fm_from_json(json!({
+                "exists": "{{ file_exists('spec.md') }}",
+                "abs": "{{ absolute('spec.md') }}",
+                "rel": "{{ relative('spec.md') }}",
+            }));
+            interpolate_frontmatter(&mut fm, &test_context(), false, false, Some(ctx)).unwrap();
+
+            assert_eq!(fm.as_map().get("exists"), Some(&json!(true)));
+            assert_eq!(
+                fm.as_map().get("abs"),
+                Some(&json!(
+                    dir.path().join("spec.md").to_string_lossy().to_string()
+                ))
+            );
+            assert_eq!(fm.as_map().get("rel"), Some(&json!("spec.md")));
+        }
+
+        #[test]
+        fn read_side_functions_unavailable_without_context() {
+            // Without a resolution context, read-side functions fail to evaluate
+            // (the recoverable "requires a document resolution context" error),
+            // which aborts interpolation rather than silently leaking.
+            let mut fm = fm_from_json(json!({
+                "exists": "{{ file_exists('spec.md') }}",
+            }));
+            let result = interpolate_frontmatter(&mut fm, &test_context(), true, false, None);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn doc_root_dependency_orders_like_bare_name() {
+            // `{{ doc.a }}` must wait for the templated key `a` exactly as a bare
+            // `{{ a }}` reference would (Decision C).
+            let mut fm = fm_from_json(json!({
+                "base": "/root",
+                "a": "{{ base }}/spec.md",
+                "b": "{{ doc.a }}",
+            }));
+            interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
+            assert_eq!(fm.as_map().get("a"), Some(&json!("/root/spec.md")));
+            assert_eq!(fm.as_map().get("b"), Some(&json!("/root/spec.md")));
         }
 
         #[test]
@@ -811,7 +973,7 @@ mod tests {
                 "combined": "cwd is {{pwd}}"
             }));
             // With defer disabled, the literal `$(pwd)` flows through.
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
             assert_eq!(fm.as_map().get("combined"), Some(&json!("cwd is $(pwd)")));
             assert_eq!(report.replacements, 1);
         }

@@ -1,6 +1,8 @@
 ---
 $schema:
-    doc: string(required)
+    - doc: string(required)
+    - spec: string(required)
+    - design: string(reqquired)
 doc: "{{spec || design}}"
 interactive: true
 start:
@@ -8,16 +10,16 @@ start:
     say: "Please stand by while we prepare a set of clarification questions"
 success:
     say: "Specification clarification process is now complete in {{ ctx.current_package_area || env.PACKAGE || ctx.repo || env.REPO }}"
-    message: "The specification file `{{doc}}` has been completed. Now ready for a technical design specification or jumping directly to a plan."
+    message: "The specification file `{{doc.doc}}` has been completed. Now ready for a technical design specification or jumping directly to a plan."
 ---
 
 - You are acting as a senior technical analyst and design reviewer.
 - Your job is to help clarify the requirements, boundaries, and intended decisions that a specification or design document is meant to define.
-- The document you will be working with is: {{doc}}
+- The document you will be working with is: {{doc.doc}}
 
 ## Primary Goal
 
-Given the functional specification document: {{doc}}. Analyze this document and identify:
+Given the functional specification document: {{doc.doc}}. Analyze this document and identify:
 
 1. what the document clearly defines
 2. what it implies but does not explicitly define
@@ -86,14 +88,15 @@ Drive the conversation forward through structured human-in-the-loop clarificatio
 
 ## Task Process
 
-1. Ask a subagent to analyze the document ({{doc}}) and identify 2-3 questions that need clarification from the user. 
+1. Ask a subagent to analyze the document ({{doc.doc}}) and identify 2-3 questions that need clarification from the user. 
 
       - For each question the subagent should be sure to provide:
           - the question
-          - adequate contextual information, using examples where appropriate
+          - adequate contextual information, using examples of how this problem presents
       - Provide 3-4 solutions for each question:
           - these solutions should be well thought out and clearly articulated
-          - you should recommend one of the solutions and say why you're recommending it
+            - each solution must include a description, pros/cons of this solution, and an example of what this solution would look like
+          - you must recommend one of the solutions and say WHY you are recommending it
       - Each question should allow the user to choose an option you've provided, or specify a question or offer an alternative solution
 
 2. Present the questions (along with the sub-agent's solutions) to the user one at a time:
@@ -115,8 +118,8 @@ Drive the conversation forward through structured human-in-the-loop clarificatio
 
 3. Create a `spec-writer` subagent to:
 
-     - and instruct them to update the document ({{doc}}) based on the decisions made between yourself and the user
-     - provide the subagent both the spec location ({{doc}}) as well as the questions and solutions
+     - and instruct them to update the document ({{doc.doc}}) based on the decisions made between yourself and the user
+     - provide the subagent both the spec location ({{doc.doc}}) as well as the questions and solutions
 
 4. Do an honest review of the specification/design looking for areas that still feel unclear or under-specified
 
@@ -125,4 +128,4 @@ Drive the conversation forward through structured human-in-the-loop clarificatio
 
 ## Completion
 
-Once you have iterated over the specification file enough times that you feel it is sufficiently clear and detailed, you must set the `clarified` frontmatter property of the document ({{doc}}) to "${env.AGENT}/${env.MODEL}"
+Once you have iterated over the specification file enough times that you feel it is sufficiently clear and detailed, you must set the `clarified` frontmatter property of the document ({{doc.doc}}) to "${env.AGENT}/${env.MODEL}"

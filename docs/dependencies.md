@@ -2,6 +2,9 @@
 
 ## Recent Dependency Notes
 
+- `worktree/lib` uses `biscuit-hash` for the SHA-pair cache file name. The cache
+  stores deterministic ahead/behind and clean-merge results under the user cache
+  directory, keyed by canonical repo-root xxHash plus branch tip SHAs.
 - `claudine/contract` (`claudine-contract`) implements
   `biscuit_contract::inference::InferenceAdapter` over a Claudine
   non-interactive, tool-free agentic-CLI session. It is the one crate that
@@ -11,6 +14,15 @@
   Draft 2020-12 validation), `tempfile` (isolated session CWD), `thiserror`,
   and `tracing`. See
   [`claudine/contract/docs/dependencies.md`](./claudine/contract/docs/dependencies.md).
+- `unchained-ai/contract` (`unchained-ai-contract`) implements
+  `biscuit_contract::inference::InferenceAdapter` over the `unchained-ai`
+  single-turn execution surface and capability-based model resolver. It is the
+  one crate that depends on **both** `biscuit-contract` and `unchained-ai`
+  (lib); it must not depend on `unchained-ai-cli`. Beyond those two it adds
+  `async-trait`, `tokio`, `serde_json`, `jsonschema` (`0.42`, the workspace-wide
+  pin, for adapter-owned Draft 2020-12 validation), `thiserror`, and `tracing`.
+  See
+  [`unchained-ai/contract/docs/dependencies.md`](./unchained-ai/contract/docs/dependencies.md).
 - `biscuit-contract/lib` is a provider-neutral inference contract crate. It
   depends only on `async-trait` (object-safety for `Arc<dyn
   InferenceAdapter>`), `serde_json` (JSON Schema + structured payloads), and
@@ -72,6 +84,8 @@ This is a Rust workspace with the following modules:
 - `unchained-ai/lib/Cargo.toml` - LLM pipeline primitives and provider integrations
 - `unchained-ai/gen/Cargo.toml` - Provider model enum generator (`gen-models`)
 - `unchained-ai/cli/Cargo.toml` - Future AI CLI (`unchained`)
+- `worktree/lib/Cargo.toml` - Git worktree business logic (git subprocess orchestration, SHA-pair status cache)
+- `worktree/cli/Cargo.toml` - Worktree CLI (`wt`)
 - `tools/test-toolkit/Cargo.toml` - Shared test lifecycle helpers
 - `biscuit-test-harness/Cargo.toml` - Real-terminal test harness (WezTerm, Kitty, tmux, Apple Terminal)
 - `biscuit-browser-harness/Cargo.toml` - Headless browser test harness (Chrome/Chromium)
@@ -306,6 +320,12 @@ This is a Rust workspace with the following modules:
 
     _Tags: workspace, cli, codegen_
 
+- [unchained-ai-contract](./unchained-ai/contract) _v0.1.0_
+
+    _`InferenceAdapter` backed by the `unchained-ai` single-turn execution surface and capability-based model resolver. Bridges `biscuit-contract` and `unchained-ai` for deterministic consumers (Reaper, Darkmatter); see [`unchained-ai/contract/docs/dependencies.md`](./unchained-ai/contract/docs/dependencies.md)._
+
+    _Tags: workspace, library, inference, adapter_
+
 - [messenger](./messenger/lib) _v0.1.0_
 
     _Unified outbound messaging library for Rust (Discord, Slack, Signal, WhatsApp, Telegram, desktop OS notifications)._
@@ -340,7 +360,7 @@ This is a Rust workspace with the following modules:
 
 ### AI & LLM
 
-- [rig-core](https://github.com/0xplaygrounds/rig) _v0.29.0_ [📄](https://docs.rig.rs/)
+- [rig-core](https://github.com/0xplaygrounds/rig) _v0.31.0_ [📄](https://docs.rig.rs/)
 
     _Opinionated library for building modular and scalable LLM-powered applications with abstractions for completion models, embeddings, and RAG systems._
 

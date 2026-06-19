@@ -89,6 +89,7 @@ pub fn validate_and_approve_command(
 /// Rejects chain operators and redirections so single-command callers
 /// cannot accidentally validate a chain as if it were one command.
 /// Chains are split per-command upstream by Darkmatter's discovery layer.
+#[allow(clippy::result_large_err)]
 pub(crate) fn tokenize_words_strict(raw: &str) -> Result<Vec<String>, ShellExpansionError> {
     let ctx = biscuit_terminal::errors::SourceContext::new(
         PathBuf::from("<harness-shell>"),

@@ -105,6 +105,17 @@ Normalized event metadata: provider, event, tool name, error, prompt, session ID
 
 Auto-detected OS, hardware, git, and repo context (via `sniff`).
 
+### Composition Session Interactivity
+
+Composition commands resolve whether a session runs interactive via `SharedComposeArgs::resolve_session_interactivity`, which combines CLI flags with the authored `interactive` frontmatter property parsed into `EffectiveSelectionHints::interactive` by `parse_interactive_hint`:
+
+1. `--no-interactive` → non-interactive (`SessionInteractivitySource::NoInteractiveFlag`)
+2. `-i` / `--interactive` → interactive (`SessionInteractivitySource::InteractiveFlag`)
+3. `interactive: true` / `false` frontmatter → that value (`SessionInteractivitySource::Frontmatter`)
+4. Otherwise → non-interactive (`SessionInteractivitySource::Default`)
+
+`--interactive` and `--no-interactive` are mutually exclusive at the clap level. The resolved value and its source are stored on `CompositionExecutionRequest` (`session_interactive` and `session_interactive_source`) so downstream diagnostics and dry-run metadata can attribute the mode. `claudine sequence` rejects `interactive: true` frontmatter because a sequence is serial automation; use the explicit `--interactive` flag when an interactive sequence step is required.
+
 ## Provider Adapters
 
 Each provider has its own adapter implementing the `ProviderAdapter` trait. The `adapter_for(provider)` factory returns the appropriate adapter. Each adapter normalizes the provider's native JSON payload into `(AgenticEvent, EventMeta)` and can format `HookResponse` back into provider-native response payloads.
@@ -333,7 +344,7 @@ Atomic file writes (`config::atomic`) prevent corruption during concurrent acces
 | `os.*` | `{{os.name}}`, `{{os.type}}`, `{{os.version}}`, `{{os.hostname}}` |
 | `hardware.*` | `{{hardware.arch}}`, `{{hardware.cpu}}`, `{{hardware.cores}}` |
 | `git.*` | `{{git.branch}}`, `{{git.is_dirty}}`, `{{git.head_sha}}`, `{{git.head_message}}`, `{{git.remote}}`, `{{git.hosting}}`, `{{git.repo_name}}`, `{{git.repo_org}}` |
-| `project.*` | `{{project.language}}`, `{{project.is_monorepo}}`, `{{project.monorepo_tool}}` |
+| `project.*` | `{{project.language}}`, `{{project.is_monorepo}}`, `{{project.monorepo_standard}}`, `{{project.monorepo_orchestrators}}`, `{{project.monorepo_tool}}` (deprecated alias) |
 
 Shell environment variables are also supported via `{{env.VAR_NAME}}` with optional defaults: `{{env.MY_VAR || "fallback"}}`. The legacy single-pipe `|` form is no longer supported.
 

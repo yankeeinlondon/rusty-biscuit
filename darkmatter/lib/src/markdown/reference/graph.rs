@@ -19,7 +19,10 @@ use biscuit_terminal::errors::SourceContext;
 use crate::markdown::compose::transclusion::{
     DirectiveKind, TransclusionRuntime, parse_directives, parse_frontmatter_refs,
 };
-use crate::markdown::compose::{ComposeOperation, ComposeSource, EffectiveStateBuilder};
+use crate::markdown::compose::expression::ResolutionContext;
+use crate::markdown::compose::{
+    ComposeOperation, ComposeSource, EffectiveStateBuilder, ResolvingLookup,
+};
 use crate::markdown::normalize::HeadingLevel;
 use crate::markdown::types::MarkdownResult;
 
@@ -289,6 +292,20 @@ fn build_node(
         })
     };
 
+    // Wrap the effective state with a document-rooted resolution context so
+    // `when=` conditions can use the read-side functions (`file_exists`, …) and
+    // `doc.*`. Reference-graph analysis is local-only (no remote runtime in
+    // scope), so `ResolutionContext::new` supplies just the base directory.
+    let when_base_dir = match source {
+        ComposeSource::File(path) => path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from(".")),
+        _ => std::path::PathBuf::from("."),
+    };
+    let when_lookup =
+        ResolvingLookup::new(&effective_state, ResolutionContext::new(when_base_dir));
+
     // Block directives
     if let Ok(directives) = parse_directives(&prepared_content, ctx.clone()) {
         for directive in &directives {
@@ -296,7 +313,7 @@ fn build_node(
             if let Some(ref when_expr) = directive.options.when_expr {
                 let condition_met = conditions::evaluate_condition(
                     when_expr,
-                    &effective_state,
+                    &when_lookup,
                     directive.line,
                     ctx.clone(),
                 )
@@ -973,6 +990,44 @@ mod tests {
             source_to_id(&ComposeSource::Unknown),
             NodeId::from("unknown")
         );
+    }
+
+    #[test]
+    fn when_condition_uses_read_side_functions_against_document_dir() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("child.md"), "# Child\n").unwrap();
+
+        // `when=` references a read-side function rooted at the document's
+        // directory. With the resolution context wired in, the condition
+        // evaluates true and the child is traversed.
+        let root_path = dir.path().join("root.md");
+        std::fs::write(
+            &root_path,
+            "::file child.md when=\"file_exists('child.md')\"\n",
+        )
+        .unwrap();
+
+        let root_md = Markdown::try_from(root_path.as_path()).unwrap();
+        let graph = build_reference_graph(&root_md, &ReferenceGraphOptions::default()).unwrap();
+        assert_eq!(graph.node_count(), 2);
+    }
+
+    #[test]
+    fn when_condition_false_excludes_directive_via_read_side_function() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("child.md"), "# Child\n").unwrap();
+
+        let root_path = dir.path().join("root.md");
+        std::fs::write(
+            &root_path,
+            "::file child.md when=\"file_exists('does-not-exist.md')\"\n",
+        )
+        .unwrap();
+
+        let root_md = Markdown::try_from(root_path.as_path()).unwrap();
+        let graph = build_reference_graph(&root_md, &ReferenceGraphOptions::default()).unwrap();
+        // Condition false → directive skipped, child not traversed.
+        assert_eq!(graph.node_count(), 1);
     }
 
     #[test]

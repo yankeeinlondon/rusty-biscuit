@@ -9,6 +9,7 @@ use crate::markdown::{
     MarkdownError, MarkdownResult,
     dsl::CodeBlockMeta,
     highlighting::{CodeHighlighter, ColorMode},
+    language_grammar::LanguageGrammar,
     output::html::HtmlOptions,
     output::terminal::TerminalOptions,
 };
@@ -26,7 +27,7 @@ use syntect::util::LinesWithEndings;
 /// ## Arguments
 ///
 /// * `code` - Source code to highlight
-/// * `language` - Programming language identifier (e.g., "rust", "python")
+/// * `language` - Resolved [`LanguageGrammar`] for syntax highlighting
 /// * `highlighter` - Code highlighter with loaded syntax set and theme
 /// * `options` - Terminal rendering options (includes global line numbering flag)
 /// * `meta` - Code block DSL metadata (title, highlight ranges, line numbering override)
@@ -46,7 +47,7 @@ use syntect::util::LinesWithEndings;
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_terminal_code_block(
     code: &str,
-    language: &str,
+    language: &LanguageGrammar,
     highlighter: &CodeHighlighter,
     options: &TerminalOptions,
     meta: &CodeBlockMeta,
@@ -54,8 +55,9 @@ pub(crate) fn render_terminal_code_block(
     target_width: Option<u16>,
     override_bg: Option<Color>,
 ) -> Result<String, MarkdownError> {
-    let syntax = find_syntax(language, highlighter.syntax_set())
-        .unwrap_or_else(|| highlighter.syntax_set().find_syntax_plain_text());
+    let syntax = language
+        .resolve(highlighter.syntax_set())
+        .unwrap_or_else(|_| highlighter.syntax_set().find_syntax_plain_text());
     let theme = highlighter.theme();
 
     // Use override background when provided (e.g. from page/component style),
@@ -197,7 +199,8 @@ pub(crate) fn render_terminal_code_block(
 /// ## Arguments
 ///
 /// * `code` - Source code to highlight
-/// * `language` - Programming language identifier
+/// * `language` - Resolved [`LanguageGrammar`] for syntax highlighting and
+///   the HTML `language-*` class
 /// * `meta` - Code block DSL metadata
 /// * `highlighter` - Code highlighter with loaded syntax set and theme
 /// * `options` - HTML rendering options
@@ -207,7 +210,7 @@ pub(crate) fn render_terminal_code_block(
 /// HTML string containing the highlighted code block.
 pub(crate) fn render_html_code_block(
     code: &str,
-    language: &str,
+    language: &LanguageGrammar,
     meta: &CodeBlockMeta,
     highlighter: &CodeHighlighter,
     options: &HtmlOptions,
@@ -226,9 +229,10 @@ pub(crate) fn render_html_code_block(
     // Determine if we should show line numbers
     let show_line_numbers = meta.line_numbering || options.include_line_numbers;
 
-    // Find syntax definition (mirrors the terminal path via the shared helper)
-    let syntax = find_syntax(language, highlighter.syntax_set())
-        .unwrap_or_else(|| highlighter.syntax_set().find_syntax_plain_text());
+    // Resolve syntax through the same LanguageGrammar path as the terminal renderer.
+    let syntax = language
+        .resolve(highlighter.syntax_set())
+        .unwrap_or_else(|_| highlighter.syntax_set().find_syntax_plain_text());
 
     // Start code block container
     output.push_str(r#"<div class="code-block">"#);
@@ -282,10 +286,11 @@ pub(crate) fn render_html_code_block(
     } else {
         // Simple pre/code block without line numbers
         output.push_str("<pre><code");
-        if !language.is_empty() {
+        let language_label = language.to_string();
+        if !language_label.is_empty() {
             output.push_str(&format!(
                 r#" class="language-{}""#,
-                html_escape::encode_text(language)
+                html_escape::encode_text(&language_label)
             ));
         }
         output.push('>');
@@ -318,57 +323,6 @@ pub(crate) fn render_html_code_block(
     output.push_str("</div>\n");
 
     Ok(output)
-}
-
-/// Finds syntax definition by language identifier.
-///
-/// Searches in the following order:
-/// 1. By file extension (e.g., "rs", "py", "js")
-/// 2. By exact name (e.g., "Rust", "Python")
-/// 3. By case-insensitive name match (e.g., "rust" -> "Rust")
-/// 4. By common alias mapping (e.g., "shell" -> "bash", "c++" -> "cpp")
-pub(crate) fn find_syntax<'a>(
-    language: &str,
-    syntax_set: &'a syntect::parsing::SyntaxSet,
-) -> Option<&'a syntect::parsing::SyntaxReference> {
-    if language.is_empty() {
-        return None;
-    }
-
-    // Try by extension first (common case)
-    if let Some(syntax) = syntax_set.find_syntax_by_extension(language) {
-        return Some(syntax);
-    }
-
-    // Try by exact name
-    if let Some(syntax) = syntax_set.find_syntax_by_name(language) {
-        return Some(syntax);
-    }
-
-    // Try case-insensitive name match
-    let language_lower = language.to_lowercase();
-    for syntax in syntax_set.syntaxes() {
-        if syntax.name.to_lowercase() == language_lower {
-            return Some(syntax);
-        }
-    }
-
-    // Try common aliases that differ from extension/name
-    let alias = match language_lower.as_str() {
-        "shell" | "zsh" => "bash",
-        "c++" => "cpp",
-        "dockerfile" => "Dockerfile",
-        "makefile" | "make" => "Makefile",
-        "javascript" => "js",
-        "typescript" => "ts",
-        "python3" => "py",
-        _ => return None,
-    };
-
-    // Try alias as extension first, then as name
-    syntax_set
-        .find_syntax_by_extension(alias)
-        .or_else(|| syntax_set.find_syntax_by_name(alias))
 }
 
 /// Derives the effective color mode of a code panel from its resolved theme
@@ -468,7 +422,7 @@ mod tests {
         let code = "fn main() {}";
         let result = render_terminal_code_block(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -496,7 +450,7 @@ mod tests {
         let code = "foo: 1\nbar: 2";
         let result = render_terminal_code_block(
             code,
-            "yaml",
+            &LanguageGrammar::yaml(),
             &highlighter,
             &options,
             &meta,
@@ -526,7 +480,7 @@ mod tests {
         let code = "test: value";
         let result = render_terminal_code_block(
             code,
-            "yaml",
+            &LanguageGrammar::yaml(),
             &highlighter,
             &options,
             &meta,
@@ -552,7 +506,7 @@ mod tests {
         let code = "test: value";
         let result = render_terminal_code_block(
             code,
-            "yaml",
+            &LanguageGrammar::yaml(),
             &highlighter,
             &options,
             &meta,
@@ -577,7 +531,7 @@ mod tests {
 
         let output = render_terminal_code_block(
             "foo: string\n",
-            "yaml",
+            &LanguageGrammar::yaml(),
             &highlighter,
             &options,
             &meta,
@@ -603,7 +557,7 @@ mod tests {
         let meta = CodeBlockMeta::default();
 
         let code = "foo: 1\nbar: <script>";
-        let result = render_html_code_block(code, "yaml", &meta, &highlighter, &options);
+        let result = render_html_code_block(code, &LanguageGrammar::yaml(), &meta, &highlighter, &options);
 
         assert!(result.is_ok());
         let html = result.unwrap();
@@ -612,27 +566,6 @@ mod tests {
         assert!(html.contains("language-yaml"));
         // Should escape HTML in scalar content
         assert!(html.contains("&lt;script&gt;") || html.contains("&#60;script&#62;"));
-    }
-
-    #[test]
-    fn test_find_syntax_rust() {
-        let highlighter = CodeHighlighter::new(
-            crate::markdown::highlighting::ThemePair::Github,
-            ColorMode::Dark,
-        );
-        let syntax = find_syntax("rust", highlighter.syntax_set());
-        assert!(syntax.is_some());
-        assert_eq!(syntax.unwrap().name, "Rust");
-    }
-
-    #[test]
-    fn test_find_syntax_unknown() {
-        let highlighter = CodeHighlighter::new(
-            crate::markdown::highlighting::ThemePair::Github,
-            ColorMode::Dark,
-        );
-        let syntax = find_syntax("unknown_language_xyz", highlighter.syntax_set());
-        assert!(syntax.is_none());
     }
 
     #[test]
@@ -708,7 +641,7 @@ mod tests {
         let code = "ok";
         let result = render_terminal_code_block(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,

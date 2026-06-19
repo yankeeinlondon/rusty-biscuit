@@ -1,0 +1,218 @@
+//! Shared helpers used across the compose pipeline that are not stages
+//! themselves: path abbreviation, git-root discovery, reference-target
+//! location, and pre-effective-state frontmatter preparation.
+//!
+//! These are re-exported from `compose/mod.rs` so in-crate callers continue to
+//! reach them as `compose::<name>`.
+
+use super::Markdown;
+use super::context;
+use super::context::options::ComposeOptions;
+use serde_json::Value;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use tracing::trace;
+
+/// Shorten an absolute path for display in diagnostics.
+///
+/// Tries to make the path relative to the git repo root discovered by
+/// walking up from the file's parent directory. Falls back to `~/…` when
+/// the path is under the user's home directory, or the absolute path
+/// otherwise.
+pub(crate) fn abbreviate_path(path: &Path) -> String {
+    // Try git repo root first (walk up looking for .git)
+    if let Some(root) = find_git_root_from(path)
+        && let Ok(rel) = path.strip_prefix(&root)
+    {
+        return rel.display().to_string();
+    }
+
+    // Fall back to ~/… for paths under HOME
+    if let Some(home) = dirs::home_dir()
+        && let Ok(rel) = path.strip_prefix(&home)
+    {
+        return format!("~/{}", rel.display());
+    }
+
+    path.display().to_string()
+}
+
+/// Walk up from `start` (or its parent if it's a file) looking for a `.git`
+/// directory, returning the repo root if found.
+pub(crate) fn find_git_root_from(start: &Path) -> Option<PathBuf> {
+    let mut dir = if start.is_dir() {
+        start.to_path_buf()
+    } else {
+        start.parent()?.to_path_buf()
+    };
+    loop {
+        if dir.join(".git").exists() {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
+/// Helper to find target range within content.
+pub(crate) fn find_target_range(
+    content: &str,
+    record: &crate::markdown::reference::ReferenceRecord,
+    raw_target: &str,
+) -> Option<(usize, usize)> {
+    let span = &record.origin.span;
+    if span.end > content.len() {
+        trace!(
+            "find_target_range: span.end {} > content.len {}",
+            span.end,
+            content.len()
+        );
+        return None;
+    }
+    let outer_text = &content[span.clone()];
+
+    // Try attribute-aware search for HTML syntax first
+    if let Some(attr_name) = get_attribute_name_for_syntax(&record.origin.syntax) {
+        // Try searching for attr="target" or attr = "target" (with optional whitespace)
+        let patterns = [
+            format!(r#"{}="{}""#, attr_name, raw_target),
+            format!("{}='{}'", attr_name, raw_target),
+        ];
+        for pattern in &patterns {
+            if let Some(idx) = outer_text.find(pattern) {
+                let mut actual_idx = idx + attr_name.len() + 1; // skip past attr_name=
+                // Skip optional whitespace after =
+                while actual_idx < outer_text.len() && outer_text[actual_idx..].starts_with(' ') {
+                    actual_idx += 1;
+                }
+                let start = span.start + actual_idx + 1; // skip past quote
+                let end = start + raw_target.len();
+                trace!(
+                    "find_target_range: attribute-aware match for '{}' in {:?} at {}",
+                    raw_target, record.origin.syntax, start
+                );
+                return Some((start, end));
+            }
+        }
+
+        // Try HTML-encoded form (for entities like &amp;)
+        let encoded = html_escape::encode_quoted_attribute(raw_target);
+        if encoded != raw_target {
+            let patterns = [
+                format!(r#"{}="{}""#, attr_name, encoded),
+                format!("{}='{}'", attr_name, encoded),
+            ];
+            for pattern in &patterns {
+                if let Some(idx) = outer_text.find(pattern.as_str()) {
+                    let actual_idx = idx + attr_name.len() + 1;
+                    // Skip optional whitespace after =
+                    let mut quote_start = actual_idx;
+                    while quote_start < outer_text.len()
+                        && outer_text[quote_start..].starts_with(' ')
+                    {
+                        quote_start += 1;
+                    }
+                    let start = span.start + quote_start + 1; // skip past quote
+                    let end = start + encoded.len();
+                    trace!(
+                        "find_target_range: HTML-encoded match for '{}' in {:?} at {}",
+                        raw_target, record.origin.syntax, start
+                    );
+                    return Some((start, end));
+                }
+            }
+        }
+    }
+
+    // Fallback: search for raw target string with context check
+    let mut start_idx = 0;
+    while let Some(idx) = outer_text[start_idx..].find(raw_target) {
+        let actual_idx = start_idx + idx;
+
+        if actual_idx > 0 {
+            let prev_char = outer_text[..actual_idx].chars().next_back();
+            trace!(
+                "find_target_range: found '{}' at {}, prev_char: {:?}",
+                raw_target, actual_idx, prev_char
+            );
+            if matches!(prev_char, Some('(' | '=' | '"' | '\'' | '<')) {
+                let start = span.start + actual_idx;
+                let end = start + raw_target.len();
+                return Some((start, end));
+            }
+        } else {
+            trace!("find_target_range: found '{}' at 0", raw_target);
+            // Edge case: if raw_target is the exact span, match it.
+            let start = span.start + actual_idx;
+            let end = start + raw_target.len();
+            return Some((start, end));
+        }
+
+        start_idx = actual_idx + 1;
+    }
+    trace!(
+        "find_target_range: failed to find '{}' in '{}'",
+        raw_target, outer_text
+    );
+    None
+}
+
+/// Maps a ReferenceSyntax to its target attribute name for HTML-aware matching.
+fn get_attribute_name_for_syntax(
+    syntax: &crate::markdown::reference::ReferenceSyntax,
+) -> Option<&'static str> {
+    use crate::markdown::reference::ReferenceSyntax;
+    match syntax {
+        ReferenceSyntax::HtmlAnchor | ReferenceSyntax::HtmlLinkTag => Some("href"),
+        ReferenceSyntax::HtmlImage
+        | ReferenceSyntax::HtmlVideoTag
+        | ReferenceSyntax::HtmlAudioTag
+        | ReferenceSyntax::HtmlSourceTag
+        | ReferenceSyntax::HtmlIframeTag
+        | ReferenceSyntax::HtmlScriptTag => Some("src"),
+        _ => None,
+    }
+}
+
+/// Applies pre-effective-state frontmatter preparation shared by runtime
+/// compose and shell-command discovery.
+///
+/// This mutates frontmatter with external-state defaults and `--set`
+/// overrides using the same rules the real compose pipeline uses. When
+/// requested, it also captures the post-merge/pre-interpolation string
+/// snapshot used for frontmatter shell executable provenance checks.
+pub(crate) fn prepare_frontmatter_for_compose(
+    markdown: &mut Markdown,
+    options: &ComposeOptions,
+    capture_pre_interpolation_snapshot: bool,
+) -> Option<HashMap<String, String>> {
+    // Apply external state as defaults using deep-merge: nested keys
+    // from external state fill in missing values at every level, not
+    // just top-level keys. Frontmatter values take precedence.
+    if let Some(external) = options.external_state.as_ref() {
+        let fm = markdown.frontmatter_mut().as_map_mut();
+        let current = Value::Object(fm.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+        let merged = context::effective_state::deep_merge(external, &current);
+        if let Value::Object(map) = merged {
+            *fm = map.into_iter().collect();
+        }
+    }
+
+    // Apply set overrides: unconditionally overwrite frontmatter keys.
+    if let Some(overrides) = options.set_overrides.as_ref().and_then(Value::as_object) {
+        let fm = markdown.frontmatter_mut().as_map_mut();
+        for (key, value) in overrides {
+            fm.insert(key.clone(), value.clone());
+        }
+    }
+
+    capture_pre_interpolation_snapshot.then(|| {
+        markdown
+            .frontmatter()
+            .as_map()
+            .iter()
+            .filter_map(|(key, value)| value.as_str().map(|s| (key.clone(), s.to_string())))
+            .collect()
+    })
+}

@@ -7,7 +7,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::ComposePerfReport;
+use darkmatter::markdown::compose::{ComposePerfReport, ComposeWarning};
 use serde::{Deserialize, Serialize};
 
 use super::launch_workspace::LaunchWorkspaceContext;
@@ -235,6 +235,39 @@ impl fmt::Display for ResolutionMode {
     }
 }
 
+/// Why a composition session is interactive or non-interactive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionInteractivitySource {
+    /// The `--no-interactive` CLI flag was provided.
+    NoInteractiveFlag,
+    /// The `-i` / `--interactive` CLI flag was provided.
+    InteractiveFlag,
+    /// The source document's `interactive` frontmatter property set the mode.
+    Frontmatter,
+    /// The default non-interactive session mode was used.
+    Default,
+}
+
+impl fmt::Display for SessionInteractivitySource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoInteractiveFlag => write!(f, "--no-interactive"),
+            Self::InteractiveFlag => write!(f, "--interactive"),
+            Self::Frontmatter => write!(f, "frontmatter"),
+            Self::Default => write!(f, "default"),
+        }
+    }
+}
+
+/// Resolved interactivity for a composition session, including its source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedSessionInteractivity {
+    /// Whether the session should be interactive.
+    pub value: bool,
+    /// Why `value` was chosen.
+    pub source: SessionInteractivitySource,
+}
+
 /// Snapshot of installed providers at command start.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstalledProviderSnapshot {
@@ -432,6 +465,11 @@ pub struct EffectiveSelectionHints {
     pub agent: Option<AgentHint>,
     /// Parsed `model` frontmatter property.
     pub model: Option<ModelHint>,
+    /// Parsed `interactive` frontmatter property.
+    ///
+    /// `None` means absent or explicitly `null`, preserving today's default
+    /// non-interactive behavior.
+    pub interactive: Option<bool>,
     /// `agent` strings that did not match the known provider catalog.
     ///
     /// Kept separate from [`Self::agent`] so existing resolution code can
@@ -482,6 +520,9 @@ pub struct PreparedComposition {
     /// post-shell re-validation). The CLI renders one user-visible warning
     /// per entry so silently dropped values are surfaced before launch.
     pub dropped_optionals: Vec<super::error::DroppedOptional>,
+    /// Non-fatal warnings emitted by Darkmatter during composition,
+    /// including parser-aware `ctx.*` typo diagnostics.
+    pub warnings: Vec<ComposeWarning>,
 }
 
 /// How the composition result should be applied after provider execution.
@@ -589,6 +630,8 @@ pub struct CompositionExecutionRequest {
     pub strict: bool,
     /// Whether the provider session should be interactive (`-i`).
     pub session_interactive: bool,
+    /// Why the session is interactive or non-interactive.
+    pub session_interactive_source: SessionInteractivitySource,
     /// Show only header; suppress env details and info.
     pub quiet: bool,
     /// Suppress all preflight output.

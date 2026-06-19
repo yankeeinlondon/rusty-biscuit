@@ -50,7 +50,7 @@ pub use types::{
 };
 
 use crate::markdown::compose::ComposeOptions;
-use crate::markdown::compose::types::ComposeWarning;
+use crate::markdown::compose::ComposeWarning;
 
 /// A directive that has passed alias resolution, policy checks, and approval.
 #[derive(Debug, Clone)]
@@ -112,6 +112,7 @@ impl DirectiveExecutionResult {
 ///     origin: ShellCommandOrigin::Body { line: 1 },
 ///     error_handling: ErrorHandling::default(),
 ///     timeout_override: None,
+///     no_cache: false,
 ///     pipeline: None,
 ///     ctx,
 /// };
@@ -144,7 +145,7 @@ pub(crate) fn execute_directive_detailed(
     shell_runtime: &mut ShellExpansionRuntime,
 ) -> Result<DirectiveExecutionResult, ShellExpansionError> {
     let prepared = prepare_directive(directive, options, policy_paths, shell_runtime)?;
-    execute_prepared_directive(&prepared, options)
+    execute_prepared_directive(&prepared, options, shell_runtime)
 }
 
 /// Resolves aliases, applies policy checks, and records approval decisions
@@ -382,9 +383,120 @@ pub(crate) fn prepare_directive(
     }
 }
 
-/// Executes a previously prepared directive and converts timeout fallbacks into
-/// compose warnings.
+/// Built-in allowlist of read-only-but-nondeterministic executables.
+///
+/// A cached (collapsed) repeat of one of these is the foot-gun the cache
+/// discoverability warning targets; `--no-cache` (or `::no-cache` /
+/// `no_cache=true`) opts a volatile command back into fresh execution at each
+/// occurrence.
+const VOLATILE_EXECUTABLES: &[&str] = &["uuidgen", "date", "openssl"];
+
+/// Returns the normalized cache key for a directive.
+///
+/// The key is the canonical pipeline shape: each action is rendered with
+/// [`normalize_command`] (so quoting is canonical), joined by its real chain
+/// operator (`&&`/`||`), with redirection tokens appended. This prevents two
+/// directives that differ only in chain operator or redirection from sharing
+/// one cache entry — `false || echo fallback` and `false && echo fallback`
+/// have different execution semantics and must not collide.
+fn cache_key(effective: &ShellDirective) -> String {
+    if let Some(ref pipeline) = effective.pipeline {
+        let mut key = String::new();
+        for action in &pipeline.actions {
+            let op_str = match action.operator {
+                types::ChainOperator::None => "",
+                types::ChainOperator::And => " && ",
+                types::ChainOperator::Or => " || ",
+            };
+            key.push_str(op_str);
+            key.push_str(&normalize_command(
+                &action.command.executable,
+                &action.command.args,
+            ));
+            key.push_str(&types::render_redirection(&action.command.redirection));
+        }
+        key
+    } else {
+        normalize_command(&effective.executable, &effective.args)
+    }
+}
+
+/// Returns `true` if any executable in the directive is on the volatile
+/// allowlist, so silently collapsing repeats could hide an intended fresh value.
+fn directive_is_volatile(effective: &ShellDirective) -> bool {
+    executables_with_args(effective).iter().any(|(exe, _)| {
+        let base = std::path::Path::new(exe)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(exe.as_str());
+        VOLATILE_EXECUTABLES.contains(&base)
+    })
+}
+
+/// Builds the discoverability warning emitted the first time a volatile command
+/// is served from cache.
+fn volatile_cache_warning(effective: &ShellDirective, display: &str) -> ComposeWarning {
+    let warning = ComposeWarning::new(
+        "shell_expansion",
+        format!(
+            "'{display}' is a volatile command that appears more than once; it was executed \
+             once and its result reused (cached). Add `--no-cache` (body), `::no-cache` \
+             (frontmatter), or `no_cache=true` (shell block) for a fresh value each time."
+        ),
+    );
+    match effective.origin {
+        ShellCommandOrigin::Body { line } => warning.at_line(line),
+        ShellCommandOrigin::Frontmatter { .. } => warning,
+        ShellCommandOrigin::ShellBlock { command_line, .. } => warning.at_line(command_line),
+    }
+}
+
+/// Executes a previously prepared directive, applying the per-compose command
+/// cache.
+///
+/// Identical normalized commands execute once per compose: the first occurrence
+/// runs and memoizes its output; later occurrences reuse it. A directive marked
+/// `no_cache` (via `--no-cache` / `::no-cache` / `no_cache=true`) bypasses the
+/// cache entirely — it neither reads nor writes it and runs fresh every time.
 pub(crate) fn execute_prepared_directive(
+    prepared: &PreparedShellDirective,
+    options: &ComposeOptions,
+    shell_runtime: &ShellExpansionRuntime,
+) -> Result<DirectiveExecutionResult, ShellExpansionError> {
+    if prepared.effective.no_cache {
+        return run_prepared_fresh(prepared, options);
+    }
+
+    let key = cache_key(&prepared.effective);
+
+    if let Some((stdout, stderr)) = shell_runtime.cache_lookup(&key) {
+        // Warnings from the original execution (e.g. a timeout fallback) belong
+        // to that occurrence and are not replayed; a one-shot discoverability
+        // warning may fire for a volatile command the cache just collapsed.
+        let mut warnings = Vec::new();
+        if directive_is_volatile(&prepared.effective)
+            && shell_runtime.note_volatile_cache_hit(&key)
+        {
+            warnings.push(volatile_cache_warning(
+                &prepared.effective,
+                &prepared.display_command,
+            ));
+        }
+        return Ok(DirectiveExecutionResult {
+            stdout,
+            stderr,
+            warnings,
+        });
+    }
+
+    let result = run_prepared_fresh(prepared, options)?;
+    shell_runtime.cache_store(&key, &result.stdout, &result.stderr);
+    Ok(result)
+}
+
+/// Executes a prepared directive without consulting the cache and converts
+/// timeout fallbacks into compose warnings.
+fn run_prepared_fresh(
     prepared: &PreparedShellDirective,
     options: &ComposeOptions,
 ) -> Result<DirectiveExecutionResult, ShellExpansionError> {
@@ -529,6 +641,7 @@ fn resolve_or_passthrough(directive: &ShellDirective) -> (ShellDirective, Option
                 origin: directive.origin.clone(),
                 error_handling: directive.error_handling.clone(),
                 timeout_override: directive.timeout_override,
+                no_cache: directive.no_cache,
                 pipeline: Some(new_pipeline),
                 ctx: directive.ctx.clone(),
             };
@@ -568,6 +681,7 @@ fn resolve_or_passthrough(directive: &ShellDirective) -> (ShellDirective, Option
             origin: directive.origin.clone(),
             error_handling: directive.error_handling.clone(),
             timeout_override: directive.timeout_override,
+            no_cache: directive.no_cache,
             pipeline: new_pipeline,
             ctx: directive.ctx.clone(),
         };
@@ -742,6 +856,174 @@ mod integration_tests {
             });
         let (composed, _report) = md.compose_with(options).unwrap();
         composed.content().to_string()
+    }
+
+    /// Like [`compose_shell_only`] but also returns the compose report so cache
+    /// discoverability warnings can be asserted.
+    fn compose_shell_with_report(content: &str) -> (String, crate::markdown::compose::ComposeReport) {
+        let temp_dir = TempDir::new().unwrap();
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+        let (composed, report) = md.compose_with(options).unwrap();
+        (composed.content().to_string(), report)
+    }
+
+    /// Returns the non-blank output lines of a body composed through the shell
+    /// stage — one per `uuidgen` directive.
+    fn non_blank_lines(body: &str) -> Vec<String> {
+        body.lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// T5 — identical pure commands execute once per compose: both occurrences
+    /// of `uuidgen` collapse to a single execution and share one value.
+    #[test]
+    fn cache_default_collapses_identical_commands() {
+        if which::which("uuidgen").is_err() {
+            return;
+        }
+        let (body, _) = compose_shell_with_report("::shell uuidgen\n\n::shell uuidgen\n");
+        let ids = non_blank_lines(&body);
+        assert_eq!(ids.len(), 2, "expected two output lines: {body:?}");
+        assert_eq!(
+            ids[0], ids[1],
+            "cached command must yield one consistent value at both sites"
+        );
+    }
+
+    /// T6 — `--no-cache` fully bypasses the cache: each occurrence executes
+    /// fresh and yields a distinct value.
+    #[test]
+    fn no_cache_body_flag_executes_fresh_each_time() {
+        if which::which("uuidgen").is_err() {
+            return;
+        }
+        let (body, _) =
+            compose_shell_with_report("::shell --no-cache uuidgen\n\n::shell --no-cache uuidgen\n");
+        let ids = non_blank_lines(&body);
+        assert_eq!(ids.len(), 2, "expected two output lines: {body:?}");
+        assert_ne!(ids[0], ids[1], "--no-cache must yield distinct values");
+    }
+
+    /// Cache keys must preserve chain operators. `false || echo fallback` and
+    /// `false && echo fallback` normalize to the same per-action commands
+    /// (`false`, `echo fallback`) but have different execution semantics. The
+    /// `&&` chain must not be served from the `||` chain's cache entry.
+    #[test]
+    fn cache_key_preserves_chain_operators() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell false || echo fallback\n\n::shell false && echo fallback\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let result = md.compose_with(options);
+        let err = result.expect_err(
+            "the `&&` chain must fail (exit 1) instead of reusing the `||` chain's cached success",
+        );
+        assert!(
+            err.to_string().contains("exit 1"),
+            "expected ExecutionFailed exit 1, got: {err}"
+        );
+    }
+
+    /// Cache keys must preserve redirection. `echo a` and `echo a > /dev/null`
+    /// differ only in redirection and must produce distinct cache entries.
+    #[test]
+    fn cache_key_preserves_redirection() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell echo visible > /dev/null && echo cached\n\n::shell echo cached\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        let body = composed.content();
+        // The first directive suppresses `echo visible` (> /dev/null) and only
+        // emits `echo cached`. The second directive emits `echo cached` too.
+        // If redirection were dropped from the key, the second directive would
+        // reuse the first's cache entry (still "cached") — same output, so
+        // assert the suppressed command never leaks into the body instead.
+        assert!(
+            !body.contains("visible"),
+            "redirection must suppress output; got: {body:?}"
+        );
+        assert_eq!(body.matches("cached").count(), 2, "got: {body:?}");
+    }
+
+    /// T9 — a repeated volatile command without `--no-cache` emits a single
+    /// discoverability warning.
+    #[test]
+    fn volatile_repeated_command_warns_once() {
+        if which::which("uuidgen").is_err() {
+            return;
+        }
+        let (_body, report) =
+            compose_shell_with_report("::shell uuidgen\n\n::shell uuidgen\n\n::shell uuidgen\n");
+        let warnings: Vec<_> = report
+            .warnings
+            .iter()
+            .filter(|w| w.message.contains("volatile") && w.message.contains("--no-cache"))
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "expected exactly one discoverability warning, got: {:?}",
+            report.warnings
+        );
+    }
+
+    /// T2 — execution is condition-aware: a `::shell` in a `when:`-false page
+    /// block is pruned before the shell stage and never executes (the side
+    /// effect — creating the sentinel file — must not happen).
+    #[test]
+    fn dead_page_block_shell_command_never_executes() {
+        let temp_dir = TempDir::new().unwrap();
+        let sentinel = temp_dir.path().join("ran.txt");
+        let content = format!(
+            "---\nenabled: false\n---\n::block when=\"enabled == true\"\n::shell touch {}\n::end-block\n",
+            sentinel.display()
+        );
+        let md: Markdown = content.as_str().into();
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::PageBlocks, ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+        let _ = md.compose_with(options).unwrap();
+        assert!(
+            !sentinel.exists(),
+            "dead-branch command must not execute under condition-aware execution"
+        );
     }
 
     #[test]

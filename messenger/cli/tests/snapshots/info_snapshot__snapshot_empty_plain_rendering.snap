@@ -2,16 +2,16 @@
 source: messenger/cli/tests/info_snapshot.rs
 expression: text
 ---
-[1mHost OS:[22m macOS[0m
+[1mHost OS:[0m macOS
 
-[1mNotification helpers[22m[0m
+[1mNotification helpers[0m
 ┌────────┬───────────┬─────────┬──────────────┐
 │ Helper │ Installed │ Version │ Install hint │
 ├────────┼───────────┼─────────┼──────────────┤
 └────────┴───────────┴─────────┴──────────────┘
 
-[1mElection order on this host[22m[0m
-  [2m(no helpers installed; falling back to native backend)[22m[0m
+[1mElection order on this host[0m
+  [2m(no helpers installed; falling back to native backend)[0m
 
-[1mConfigured routes[22m[0m
-  [2m(none configured; run `messenger setup`)[22m[0m
+[1mConfigured routes[0m
+  [2m(none configured; run `messenger setup`)[0m

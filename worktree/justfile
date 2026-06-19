@@ -44,21 +44,106 @@ default:
     echo
 
 # Build the library and CLI
-# Build the library and CLI
 build *args="":
     @just _build worktree "Worktree Library" {{ args }}
     @just _build worktree-cli "Worktree CLI" {{ args }}
 
-# Test both library and CLI.
-test:
-    @just _test worktree
-    @just _test worktree-cli --no-tests=pass
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
+
+# Fast confidence subset (<=15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity {{ LIBRARY }}
+    @just _sanity {{ CLI }}
+
+# Test both library and CLI (Level-1 only -- `test-l2` runs real-terminal tests).
+# `perf_` tests are excluded here: their wall-clock SLAs only hold under the
+# contention-free `-j 1` run in `test-perf`, which `all` invokes separately.
+test *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    filter='!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/) + test(/perf_/))'
+    echo
+    echo -e "Testing {{ BOLD }}{{ LIBRARY }}{{ RESET }} package"
+    echo
+    cargo nextest run -p {{ LIBRARY }} -E "$filter" {{ args }}
+    echo
+    echo -e "Testing {{ BOLD }}{{ CLI }}{{ RESET }} package"
+    echo
+    cargo nextest run -p {{ CLI }} -E "$filter" --no-tests=pass {{ args }}
+    echo
+    echo -e "{{ GREEN }} all tests passing in {{ BOLD }}{{ PACKAGE }}{{ RESET }}{{ GREEN }} (Level-1){{ RESET }}"
+    echo -e "{{ DIM }}use {{ RESET }}just test-l2{{ DIM }} for real-terminal (Level-2) tests{{ RESET }}"
+
+# Level-2 real-terminal tests for the CLI. Skips cleanly if the harness is
+# unavailable unless `BISCUIT_TEST_LEVEL_REQUIRED=2` is set in the environment.
+test-l2 *args="":
+    @just _test_l2 {{ CLI }} {{ args }}
+
+# Not applicable: worktree has no OS-keyboard-injection (Level-3) tests.
+test-l3 *args="":
+    @just _test_l3 {{ LIBRARY }} {{ args }}
+    @just _test_l3 {{ CLI }} {{ args }}
+
+# Not applicable: worktree has no browser-target tests.
+test-browser:
+    @echo "test-browser: not applicable for worktree"
+
+# Not applicable: worktree has no real-resource (device / network) tier.
+test-real:
+    @echo "test-real: not applicable for worktree"
+
+# Performance SLA + subprocess-count tests, run serially for contention-free
+# wall-clock measurement. Enforces the 1-second SLA without parallel-test load.
+test-perf *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo
+    echo -e "Perf tests for {{ BOLD }}{{ CLI }}{{ RESET }} (serial)"
+    echo
+    cargo nextest run -p {{ CLI }} -E 'test(/perf_/)' -j 1 --no-tests=pass --nocapture {{ args }}
 
 # Lint both the library and CLI
-
 lint:
     @just _lint worktree
     @just _lint worktree-cli
+
+# Per-package LCOV coverage for the library and CLI.
+coverage *args="":
+    @just _coverage {{ LIBRARY }} {{ args }}
+    @just _coverage {{ CLI }} {{ args }}
+
+# Doctests for the library and CLI.
+doctest *args="":
+    @just _doctest {{ LIBRARY }} {{ args }}
+    @just _doctest {{ CLI }} {{ args }}
+
+# Criterion benches for worktree gather performance.
+bench *args="":
+    @just _bench {{ LIBRARY }} {{ args }}
+
+# Save the current bench run as this host's baseline (run before a change).
+bench-save *args="":
+    @just _bench_save {{ LIBRARY }} {{ args }}
+
+# Compare the current bench run against this host's saved baseline.
+bench-compare *args="":
+    @just _bench_compare {{ LIBRARY }} {{ args }}
+
+# Not applicable: worktree has no cargo-fuzz targets.
+fuzz:
+    @echo "fuzz: not applicable for worktree"
+
+# Canonical PR-gate runner: sanity -> lint -> doctest -> test -> test-perf -> test-l2 -> test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-perf
+    @just test-l2
+    @just test-browser
+
+# ---------------------------------------------------------------------------
 
 # Lint (and fix) both the library and CLI
 lint-fix:

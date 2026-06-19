@@ -38,6 +38,40 @@ Darkmatter also supports shell expansion in top-level frontmatter string values 
 - Body `::shell` expansion stores combined `stdout` + `stderr`
 - Both variants share the same policy, whitelist/blacklist, approval, and timeout infrastructure
 
+## Caching
+
+Identical commands (same normalized command string) execute **once per compose
+run** by default; the result is memoized and reused at every other call site,
+including across recursive transclusion. Caching is the default because the
+destructive, non-idempotent commands are already blacklisted, while the common
+multi-reference commands (`git rev-parse HEAD`, `cat VERSION`, …) are pure and
+benefit from one consistent value across the document.
+
+The residual risk is read-only-but-non-deterministic commands (`uuidgen`,
+`date`, `openssl rand`). Opt those out with a full cache **bypass** — the
+directive then neither reads nor writes the cache and executes fresh at each
+occurrence, in document order:
+
+```md
+::shell uuidgen                 # cached (default)
+::shell --no-cache uuidgen      # fresh each occurrence
+```
+
+The opt-out spelling follows each directive family:
+
+- Body `::shell` — the `--no-cache` flag.
+- Frontmatter `$(...)` — the `::no-cache` suffix (see
+  [Frontmatter Shell Expansion](./fm-shell-expansion.md)).
+- `::shell-block` — the `no_cache=true` key-value parameter (`--no-cache` is a
+  parse error there).
+
+### Discoverability warning
+
+When the cache collapses a repeated command whose executable is on the built-in
+volatile allowlist (`uuidgen`, `date`, `openssl`), compose emits a one-time
+warning suggesting `--no-cache` for a fresh value each time. This keeps the
+convenient default while catching the foot-gun.
+
 
 ## Handling Error Exit Codes
 

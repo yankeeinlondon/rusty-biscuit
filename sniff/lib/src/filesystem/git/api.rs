@@ -14,7 +14,7 @@ use super::discovery::{
 };
 use super::open;
 use super::status::detect_merge_conflicts_fallible;
-use super::types::{CommitInfo, GitHostingProvider};
+use super::types::{BranchInfo, CommitInfo, GitHostingProvider};
 use crate::Result;
 
 /// Working-directory root of the repository containing `path`.
@@ -121,6 +121,19 @@ pub fn merge_conflicts_at(path: &Path) -> Result<Vec<PathBuf>> {
         return Ok(Vec::new());
     };
     detect_merge_conflicts_fallible(&repo)
+}
+
+/// Local branch projection for the repository containing `path`.
+///
+/// ## Errors
+///
+/// Trust/ownership, permission, I/O, and corruption failures surface as
+/// [`SniffError::Git`]; genuine repository absence yields `Ok(None)`.
+pub fn branches_at(path: &Path, refresh_remotes: bool) -> Result<Option<Vec<BranchInfo>>> {
+    let Some(repo) = super::types::GitRepo::discover(path)? else {
+        return Ok(None);
+    };
+    Ok(Some(repo.branch_info(refresh_remotes)?))
 }
 
 /// Preferred remote URL for the repository: `origin` if present, otherwise the

@@ -116,18 +116,18 @@ Wire six third-party notification helper CLIs (2 per OS) into messenger's deskto
 - **Depends on**: Step 1.1, Step 1.2.
 - **Validation**: `sniff::programs::ProgramsInfo::detect()` includes `notification_helpers` field. Existing tests still pass.
 
-### Step 1.4 — Add `sniff notification-helpers` CLI subcommand
+### Step 1.4 — Add `sniff software notification-helpers` CLI subcommand
 
 - **Files**: `sniff/cli/src/commands.rs`, `sniff/cli/src/args.rs`, `sniff/cli/src/main.rs`, new `sniff/cli/src/output/notification_helpers.rs`
-- **Action**: Add `NotificationHelpers` variant to the CLI command enum. Wire subcommand `sniff notification-helpers [--json]`. Render text output (table of helpers with install hints) and JSON output.
+- **Action**: Add `NotificationHelpers` variant to the software command enum. Wire subcommand `sniff software notification-helpers [--json]`. Render text output (table of helpers with install hints) and JSON output.
 - **Depends on**: Step 1.3.
-- **Validation**: `sniff notification-helpers` prints a table. `sniff notification-helpers --json` produces valid JSON. `sniff programs` output now includes notification helpers section.
+- **Validation**: `sniff software notification-helpers` prints a table. `sniff software notification-helpers --json` produces valid JSON. `sniff software` output includes the notification helpers section.
 
 ### Checkpoint 1
 
 - `cargo test -p sniff-lib` passes.
 - `cargo test -p sniff-cli` passes.
-- `sniff notification-helpers` runs on macOS (detects terminal-notifier/alerter presence).
+- `sniff software notification-helpers` runs on macOS (detects terminal-notifier/alerter presence).
 - No changes to messenger crate yet.
 
 ---

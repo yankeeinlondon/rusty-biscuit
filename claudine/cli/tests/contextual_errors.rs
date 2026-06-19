@@ -12,6 +12,26 @@ use tempfile::tempdir;
 mod common;
 use common::{augmented_path, strip_ansi, write_executable};
 
+#[cfg(windows)]
+fn shim_name(name: &str) -> String {
+    format!("{name}.cmd")
+}
+
+#[cfg(not(windows))]
+fn shim_name(name: &str) -> String {
+    name.to_string()
+}
+
+#[cfg(windows)]
+fn successful_provider_shim() -> &'static str {
+    "@echo off\r\nexit /b 0\r\n"
+}
+
+#[cfg(not(windows))]
+fn successful_provider_shim() -> &'static str {
+    "#!/bin/sh\nexit 0\n"
+}
+
 /// Shell-expansion failure during `claudine compose`.
 ///
 /// Uses a blacklisted command (`rm -rf /`) so the test works deterministically
@@ -33,7 +53,10 @@ fn compose_shell_expansion_failure_renders_rich_block() {
 
     // Fake claude binary so the wrapper pipeline picks a provider and
     // reaches shell-expansion resolution.
-    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
+    write_executable(
+        &path_dir.join(shim_name("claude")),
+        successful_provider_shim(),
+    );
 
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
@@ -52,6 +75,71 @@ fn compose_shell_expansion_failure_renders_rich_block() {
     assert!(
         plain.contains("rm") || plain.contains("rm -rf"),
         "expected the denied command to appear in the report; got:\n{plain}"
+    );
+    assert!(
+        !plain.contains("__claudine_pre_rendered__"),
+        "legacy pre-render marker must never reach the user; got:\n{plain}"
+    );
+}
+
+/// Real `ExecutionFailed` shell-expansion failure during `claudine compose`.
+///
+/// Uses a portable failing command (`rustc --edition=invalid`) so the test
+/// exercises the full boundary from Markdown composition through the CLI's
+/// top-level error walker, not just the preflight `Blacklisted` path.
+#[test]
+fn compose_shell_execution_failure_renders_rich_block() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let md_file = workspace.path().join("compose.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: Shell demo\n---\n\nPre.\n\n::shell rustc --edition=invalid\n\nPost.\n",
+    )
+    .unwrap();
+
+    // Fake claude binary so the wrapper pipeline picks a provider and
+    // reaches shell-expansion resolution.
+    write_executable(
+        &path_dir.join(shim_name("claude")),
+        successful_provider_shim(),
+    );
+
+    // `--silent` suppresses the execution header so the only stderr output
+    // is the structured error block, letting us assert the full captured
+    // stderr is ANSI-free under `NO_COLOR=1`.
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--yolo", "--silent", "--claude", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr_raw = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+
+    assert!(
+        !stderr_raw.contains('\x1b'),
+        "raw stderr must contain no ANSI escape bytes under NO_COLOR=1; got:\n{stderr_raw:?}"
+    );
+
+    let plain = strip_ansi(&stderr_raw);
+
+    assert!(
+        plain.contains("line 7") || plain.contains("> 7 │"),
+        "expected file-relative line in diagnostic; got:\n{plain}"
+    );
+    assert!(
+        plain.contains("error:"),
+        "expected captured rustc stderr text in diagnostic; got:\n{plain}"
+    );
+    assert!(
+        plain.contains("::shell"),
+        "expected source excerpt in diagnostic; got:\n{plain}"
+    );
+    assert!(
+        plain.contains("title:") || plain.contains("---"),
+        "expected frontmatter block in diagnostic; got:\n{plain}"
     );
     assert!(
         !plain.contains("__claudine_pre_rendered__"),

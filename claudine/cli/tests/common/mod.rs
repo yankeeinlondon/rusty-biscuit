@@ -1,6 +1,9 @@
 #![allow(dead_code)]
 
 pub(crate) mod completion;
+#[cfg(unix)]
+pub(crate) mod pty;
+pub(crate) mod wrap;
 
 use std::fs;
 use std::path::{Path, PathBuf};

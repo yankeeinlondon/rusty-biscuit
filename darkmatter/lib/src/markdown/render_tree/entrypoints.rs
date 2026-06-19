@@ -722,6 +722,17 @@ fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRen
     // disagreed with the caller-supplied `opts.color_mode`).
     context.color_mode = opts.color_mode;
 
+    // Inline code spans take their foreground/background from the prose theme
+    // reduced to the page's color mode — the same source the syntect code panel
+    // uses — so a `code` span sits on a subtle theme-derived band instead of
+    // reverse-video. Resolved here (syntect lives in darkmatter) and forwarded
+    // to the generic terminal renderer, which cannot load themes itself.
+    let inline_mode = opts.color_mode.resolve_unknown();
+    let (inline_fg, inline_bg) =
+        crate::markdown::highlighting::themes::inline_code_colors(opts.prose_theme, inline_mode);
+    context.inline_code_color = Some(inline_fg);
+    context.inline_code_background = Some(inline_bg);
+
     TerminalRenderOptions {
         context,
         strictness: RenderStrictness::Warn,
@@ -901,6 +912,29 @@ mod tests {
         };
         let result = render_tree_terminal(&md, &opts).expect("terminal render");
         assert!(result.output.contains("Heading"));
+    }
+
+    #[test]
+    fn render_tree_terminal_inline_code_uses_theme_background() {
+        // Regression guard: inline code derives its background from the prose
+        // theme (reduced to the page color mode), not reverse-video.
+        let md: Markdown = "Use the `review.md` file.".into();
+        let opts = terminal_opts_for_pipeline(crate::markdown::highlighting::ColorMode::Dark);
+        let result = render_tree_terminal(&md, &opts).expect("terminal render");
+
+        let bg = one_half_background(crate::markdown::highlighting::ColorMode::Dark);
+        assert!(
+            result
+                .output
+                .contains(&format!("\x1b[48;2;{};{};{}m", bg.r, bg.g, bg.b)),
+            "inline code should paint the OneHalf dark background band, raw:\n{:?}",
+            result.output,
+        );
+        assert!(
+            !result.output.contains("\x1b[7m"),
+            "inline code must not use reverse video, raw:\n{:?}",
+            result.output,
+        );
     }
 
     #[test]

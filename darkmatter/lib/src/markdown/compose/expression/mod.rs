@@ -29,15 +29,16 @@
 //! 4. Additive `+`, `-` (`+` doubles as string concatenation when either
 //!    operand is a string)
 //! 5. Comparison `==`, `!=`, `>`, `>=`, `<`, `<=`
-//! 6. Logical AND `&&` (condition mode)
+//! 6. Logical AND `&&`
 //! 7. Logical OR / Fallback `||`
 //! 8. Ternary `? :` (right-associative; all binary operators are
 //!    left-associative)
 //!
 //! ## Parser Modes
 //!
+//! `&&` is logical AND in both modes. Only `||` differs:
 //! - **Interpolation** (`ParseMode::Interpolation`) - `||` is fallback operator
-//! - **Condition** (`ParseMode::Condition`) - `||` is logical OR, `&&` is logical AND
+//! - **Condition** (`ParseMode::Condition`) - `||` is logical OR
 //!
 //! ## Truthiness
 //!
@@ -66,15 +67,17 @@
 pub mod ast;
 pub mod catalog;
 pub mod ctx;
+pub(crate) mod doc_namespace;
 pub mod functions;
 pub mod lexer;
 pub mod parser;
 pub mod resolve_ctx;
+pub mod semantics;
 
 pub use ast::{BinaryOp, Expr};
 pub use catalog::{
-    expression_function_descriptors, ExpressionFunctionDescriptor,
-    EXPRESSION_FUNCTION_DESCRIPTORS,
+    expression_function_descriptors, generate_expression_function_table,
+    ExpressionFunctionDescriptor, EXPRESSION_FUNCTION_DESCRIPTORS,
 };
 pub use ctx::CtxLookup;
 pub use resolve_ctx::ResolutionContext;
@@ -84,6 +87,8 @@ pub use lexer::{
 pub use parser::{ParseError, Parser, parse, parse_condition};
 
 use serde_json::Value;
+
+use crate::catalog::{describe, describe_for_error, suggest, Described};
 
 /// Converts a value to a number for arithmetic operations.
 ///
@@ -188,11 +193,40 @@ pub trait EvaluationLookup {
         }
     }
 
-    /// Returns the document-relative resolution context for filesystem
-    /// functions. Defaults to `None` (filesystem functions then error or treat
-    /// paths as CWD-relative).
+    /// Returns the document-relative resolution context that the seven
+    /// read-side functions (`file_exists`, `frontmatter`, `markdown_title`,
+    /// `markdown_body_empty`, `validate_schema`, `absolute`, `relative`)
+    /// resolve their path arguments against.
+    ///
+    /// The default `None` is the **opt-out / test** case: a lookup that has no
+    /// document anchor (or a unit test that does not exercise read-side
+    /// functions). Every production surface that evaluates the grammar against
+    /// a real document — frontmatter interpolation, body interpolation, `$()`
+    /// ternary conditions, `when=` conditions, the public condition API, and
+    /// claudine's loop/hook conditions — overrides this to return
+    /// `Some(ctx)` so read-side functions resolve identically wherever the
+    /// grammar runs. A `None`-returning lookup makes a read-side function
+    /// return the recoverable "requires a document resolution context" error.
     fn resolution_context(&self) -> Option<ResolutionContext> {
         None
+    }
+
+    /// Returns true when `name` is a known runtime context variable.
+    ///
+    /// The default implementation always returns `false`, which disables
+    /// parser-aware typo detection for lookups that don't expose a context
+    /// catalog.
+    fn is_valid_context_variable(&self, _name: &str) -> bool {
+        false
+    }
+
+    /// Returns the list of known runtime context variable names.
+    ///
+    /// The default implementation returns an empty slice. Implementors that
+    /// expose a context catalog should override this so typo diagnostics can
+    /// offer did-you-mean suggestions.
+    fn context_variable_names(&self) -> &[&'static str] {
+        &[]
     }
 }
 
@@ -475,6 +509,7 @@ fn evaluate_member(base: &Value, name: &str) -> Value {
             _ => return Value::Null,
         }
     }
+
     current
 }
 
@@ -484,6 +519,47 @@ fn evaluate_member(base: &Value, name: &str) -> Value {
 /// this prefix as fatal even in non-fail-fast mode, since an unknown symbol can
 /// never resolve and would otherwise leak its literal `{{ … }}` text downstream.
 pub(crate) const UNKNOWN_FUNCTION_PREFIX: &str = "Unknown function:";
+
+/// Whether an evaluator error message is an arity (wrong-argument-count) error.
+///
+/// Arity errors read "… requires N argument(s)" / "… requires 1 or 2 arguments"
+/// / "… requires at least 1 argument". Type errors also contain "requires …
+/// argument" but name the rejected domain ("numeric"/"string"/"array"), so
+/// those are excluded.
+fn is_arity_error(message: &str) -> bool {
+    let m = message.to_lowercase();
+    m.contains("requires")
+        && m.contains("argument")
+        && !m.contains("numeric")
+        && !m.contains("string argument")
+        && !m.contains("array argument")
+}
+
+/// Returns a plain-text error for an unrecognized function name, with a fuzzy
+/// did-you-mean suggestion when one exists.
+fn unknown_function_error(name: &str) -> String {
+    let mut text = format!("{UNKNOWN_FUNCTION_PREFIX} {name}");
+    if let Some(suggestion) = suggest(EXPRESSION_FUNCTION_DESCRIPTORS, name, 1).first() {
+        text.push_str("\n\nDid you mean:\n  ");
+        text.push_str(&describe_for_error(*suggestion));
+    }
+    text
+}
+
+/// Appends the matched function descriptor's signature, description, and example
+/// to an arity error message.
+fn enrich_arity_error(name: &str, message: &str) -> String {
+    let signature = EXPRESSION_FUNCTION_DESCRIPTORS
+        .iter()
+        .find(|d| d.key().starts_with(&format!("{name}(")) || d.key() == name)
+        .map(|d| d.key());
+    match signature {
+        Some(sig) if let Some(descriptor) = describe(EXPRESSION_FUNCTION_DESCRIPTORS, sig) => {
+            format!("{message}\n\nExpected:\n  {}", describe_for_error(descriptor))
+        }
+        _ => message.to_string(),
+    }
+}
 
 fn evaluate_function<L: EvaluationLookup>(
     name: &str,
@@ -522,20 +598,33 @@ fn evaluate_function<L: EvaluationLookup>(
             if let Some(ctx) = lookup.resolution_context()
                 && let Some(result) = functions::dispatch_fs(other, &evaluated, &ctx)
             {
-                return result;
+                return result.map_err(|message| {
+                    if is_arity_error(&message) {
+                        enrich_arity_error(other, &message)
+                    } else {
+                        message
+                    }
+                });
             }
             if let Some(result) = functions::dispatch(other, &evaluated) {
-                return result;
+                return result.map_err(|message| {
+                    if is_arity_error(&message) {
+                        enrich_arity_error(other, &message)
+                    } else {
+                        message
+                    }
+                });
             }
-            // A known filesystem function reaches here only because no document
-            // resolution context was available (e.g. frontmatter interpolation);
-            // keep that recoverable so it doesn't read as an unknown symbol.
+            // A known filesystem function reaches here only because the lookup
+            // returned no resolution context — an opt-out or test lookup, not a
+            // real document surface (all of which now supply one). Keep it
+            // recoverable so it doesn't read as an unknown symbol.
             if functions::is_fs_function(other) {
                 return Err(format!(
                     "Filesystem function '{name}' requires a document resolution context, which is unavailable here"
                 ));
             }
-            Err(format!("{UNKNOWN_FUNCTION_PREFIX} {name}"))
+            Err(unknown_function_error(other))
         }
     }
 }
@@ -562,6 +651,65 @@ mod tests {
             _ => HashMap::new(),
         };
         TestLookup { data: map }
+    }
+
+    mod error_enrichment {
+        use super::*;
+
+        #[test]
+        fn unknown_function_includes_did_you_mean() {
+            let err = evaluate(
+                &parse("lenght(\"abc\")").unwrap(),
+                &lookup(json!({})),
+            )
+            .unwrap_err();
+            assert!(
+                err.contains("Unknown function:"),
+                "error should identify unknown function: {err}"
+            );
+            assert!(
+                err.contains("Did you mean"),
+                "error should offer a did-you-mean hint: {err}"
+            );
+            assert!(
+                err.contains("length"),
+                "error should suggest 'length': {err}"
+            );
+        }
+
+        #[test]
+        fn unknown_function_without_close_match_omits_suggestion() {
+            // "xyzxyzxyz" is unrelated to every catalog function; the suggestion
+            // quality gate (threshold max(2, 9/3) = 3) rejects every candidate,
+            // so the error must carry the bare prefix and NO did-you-mean hint.
+            let err = evaluate(
+                &parse("xyzxyzxyz()").unwrap(),
+                &lookup(json!({})),
+            )
+            .unwrap_err();
+            assert!(err.starts_with("Unknown function:"), "{err}");
+            assert!(
+                !err.contains("Did you mean"),
+                "unrelated typo must not emit a close-match suggestion: {err}"
+            );
+        }
+
+        #[test]
+        fn arity_error_includes_signature_and_example() {
+            let err = evaluate(&parse("length()").unwrap(), &lookup(json!({}))).unwrap_err();
+            assert!(
+                err.contains("requires 1 argument"),
+                "error should preserve arity message: {err}"
+            );
+            assert!(
+                err.contains("length("),
+                "error should include function signature: {err}"
+            );
+            assert!(
+                err.contains("example:"),
+                "error should include an example: {err}"
+            );
+        }
     }
 
     mod parity {

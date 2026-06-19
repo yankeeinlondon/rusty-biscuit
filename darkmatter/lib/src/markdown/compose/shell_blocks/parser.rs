@@ -20,31 +20,33 @@ pub(crate) fn parse_shell_block_region(
     // leading `>` / `:`.
     let prefix_len = directive_prefix_len(opener_line);
     let indent = opener_line[..prefix_len].to_string();
-    let (options, timeout_override) =
+    let (options, timeout_override, no_cache) =
         parse_opener_params(&opener_line[prefix_len..], pair.start_line)?;
 
     Ok(ShellBlockRegion {
         options,
         timeout_override,
+        no_cache,
         indent,
     })
 }
 
 /// Parse key=value parameters from a `::shell-block` opener line.
 ///
-/// Returns `(ErrorHandling, Option<Duration>)`.
+/// Returns `(ErrorHandling, Option<Duration>, no_cache)`.
 fn parse_opener_params(
     opener: &str,
     line: usize,
-) -> Result<(ErrorHandling, Option<Duration>), ShellBlockError> {
+) -> Result<(ErrorHandling, Option<Duration>, bool), ShellBlockError> {
     let prefix = "::shell-block";
     let after_prefix = opener.strip_prefix(prefix).unwrap_or(opener).trim_start();
 
     let mut handling = ErrorHandling::default();
     let mut timeout_override = None;
+    let mut no_cache = false;
 
     if after_prefix.is_empty() {
-        return Ok((handling, timeout_override));
+        return Ok((handling, timeout_override, no_cache));
     }
 
     let mut cursor = super::super::parse_utils::Cursor::new(after_prefix);
@@ -192,6 +194,20 @@ fn parse_opener_params(
                     });
                 }
             },
+            "no_cache" => match value.as_str() {
+                "true" => no_cache = true,
+                "false" => no_cache = false,
+                _ => {
+                    return Err(ShellBlockError::Parse {
+                        line,
+                        message: format!(
+                            "Invalid no_cache value '{value}'. Expected true or false."
+                        ),
+                        excerpt: SourceExcerpt::from_text(opener, line, line, 0),
+                        source_file: None,
+                    });
+                }
+            },
             _ => {
                 return Err(ShellBlockError::Parse {
                     line,
@@ -203,7 +219,7 @@ fn parse_opener_params(
         }
     }
 
-    Ok((handling, timeout_override))
+    Ok((handling, timeout_override, no_cache))
 }
 
 /// Read a key identifier from the cursor.
@@ -306,6 +322,7 @@ fn wrong_style_hint(input: &str) -> String {
             "Use enrich_error_on=\"<N>,<text>\" instead.".to_string()
         }
         "--timeout" | "-timeout" => "Use timeout=<seconds> instead.".to_string(),
+        "--no-cache" | "-no-cache" => "Use no_cache=true instead.".to_string(),
         s if s.contains('-') => format!("Use {}=\"<value>\" syntax.", s.replace('-', "_")),
         _ => "Shell block parameters use key=\"value\" syntax.".to_string(),
     }
@@ -317,7 +334,7 @@ mod tests {
 
     #[test]
     fn parse_no_params() {
-        let (handling, timeout) = parse_opener_params("::shell-block", 1).unwrap();
+        let (handling, timeout, _no_cache) = parse_opener_params("::shell-block", 1).unwrap();
         assert!(handling.is_empty());
         assert!(timeout.is_none());
     }
@@ -375,7 +392,7 @@ mod tests {
 
     #[test]
     fn parse_when_error() {
-        let (handling, timeout) =
+        let (handling, timeout, _no_cache) =
             parse_opener_params("::shell-block when_error=\"fallback\"", 1).unwrap();
         assert_eq!(handling.when_error, Some("fallback".to_string()));
         assert!(timeout.is_none());
@@ -383,14 +400,14 @@ mod tests {
 
     #[test]
     fn parse_when_exit_code() {
-        let (handling, _) =
+        let (handling, _, _) =
             parse_opener_params("::shell-block when_exit_code=\"1,oops\"", 1).unwrap();
         assert_eq!(handling.when_exit_code, vec![(1, "oops".to_string())]);
     }
 
     #[test]
     fn parse_stderr_contains() {
-        let (handling, _) =
+        let (handling, _, _) =
             parse_opener_params("::shell-block stderr_contains=\"warn,warning found\"", 1).unwrap();
         assert_eq!(
             handling.stderr_contains,
@@ -400,14 +417,14 @@ mod tests {
 
     #[test]
     fn parse_timeout() {
-        let (handling, timeout) = parse_opener_params("::shell-block timeout=5", 1).unwrap();
+        let (handling, timeout, _no_cache) = parse_opener_params("::shell-block timeout=5", 1).unwrap();
         assert!(handling.is_empty());
         assert_eq!(timeout, Some(Duration::from_secs(5)));
     }
 
     #[test]
     fn parse_multiple_params() {
-        let (handling, timeout) =
+        let (handling, timeout, _no_cache) =
             parse_opener_params("::shell-block when_error=\"fallback\" timeout=10", 1).unwrap();
         assert_eq!(handling.when_error, Some("fallback".to_string()));
         assert_eq!(timeout, Some(Duration::from_secs(10)));
@@ -482,14 +499,14 @@ mod tests {
 
     #[test]
     fn parse_except_exit_code() {
-        let (handling, _) =
+        let (handling, _, _) =
             parse_opener_params("::shell-block except_exit_code=\"2,skip\"", 1).unwrap();
         assert_eq!(handling.except_exit_code, vec![(2, "skip".to_string())]);
     }
 
     #[test]
     fn parse_stderr_lacks() {
-        let (handling, _) =
+        let (handling, _, _) =
             parse_opener_params("::shell-block stderr_lacks=\"error,clean\"", 1).unwrap();
         assert_eq!(
             handling.stderr_lacks,
@@ -499,16 +516,61 @@ mod tests {
 
     #[test]
     fn parse_enrich_error() {
-        let (handling, _) =
+        let (handling, _, _) =
             parse_opener_params("::shell-block enrich_error=\"details\"", 1).unwrap();
         assert_eq!(handling.enrich_error, Some("details".to_string()));
     }
 
     #[test]
     fn parse_enrich_error_on() {
-        let (handling, _) =
+        let (handling, _, _) =
             parse_opener_params("::shell-block enrich_error_on=\"1,info\"", 1).unwrap();
         assert_eq!(handling.enrich_error_on, vec![(1, "info".to_string())]);
+    }
+
+    #[test]
+    fn parse_no_cache_true() {
+        let (handling, timeout, no_cache) =
+            parse_opener_params("::shell-block no_cache=true", 1).unwrap();
+        assert!(handling.is_empty());
+        assert!(timeout.is_none());
+        assert!(no_cache);
+    }
+
+    #[test]
+    fn parse_no_cache_false() {
+        let (_handling, _timeout, no_cache) =
+            parse_opener_params("::shell-block no_cache=false", 1).unwrap();
+        assert!(!no_cache);
+    }
+
+    #[test]
+    fn parse_no_cache_default_is_false() {
+        let (_handling, _timeout, no_cache) = parse_opener_params("::shell-block", 1).unwrap();
+        assert!(!no_cache);
+    }
+
+    #[test]
+    fn parse_no_cache_alongside_timeout() {
+        let (_handling, timeout, no_cache) =
+            parse_opener_params("::shell-block no_cache=true timeout=5", 1).unwrap();
+        assert!(no_cache);
+        assert_eq!(timeout, Some(Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn reject_no_cache_flag_style() {
+        // `--no-cache` must remain a parse error: shell blocks use key=value.
+        let err = parse_opener_params("::shell-block --no-cache", 1).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Invalid flag syntax"), "{msg}");
+        assert!(msg.contains("no_cache=true"), "{msg}");
+    }
+
+    #[test]
+    fn reject_invalid_no_cache_value() {
+        let err = parse_opener_params("::shell-block no_cache=maybe", 1).unwrap_err();
+        assert!(err.to_string().contains("Invalid no_cache value"));
     }
 
     #[test]
@@ -527,7 +589,7 @@ mod tests {
 
     #[test]
     fn parse_all_error_handling_options() {
-        let (handling, timeout) = parse_opener_params(
+        let (handling, timeout, _no_cache) = parse_opener_params(
             "::shell-block when_error=\"fallback\" when_exit_code=\"1,oops\" except_exit_code=\"2,skip\" stderr_contains=\"warn,w\" stderr_lacks=\"err,c\" enrich_error=\"details\" enrich_error_on=\"3,info\" timeout=30",
             1,
         ).unwrap();
