@@ -6,22 +6,22 @@ $schema:
     spec: file
     spec_file: file
 phase: "{{ frontmatter(plan, 'start_phase') || 1 }}"
-dir: "{{ dir(plan) }}"
+dirname: "{{ dirname(plan) }}"
 # spec: "{{ frontmatter( }}"
 area: "{{ ctx.area }}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
 total_phases: "{{ frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') }}"
-spec_file: "{{ file_exists(spec) ? spec : file_exists(join(dir, 'spec.md')) ? join(dir, 'spec.md')  :  '' }}"
+spec_file: "{{ file_exists(spec) ? spec : file_exists(join(dirname, 'spec.md')) ? join(dirname, 'spec.md')  :  '' }}"
 start:
-    message: "🎬  starting the implementation of phase **#{{phase}}** of `{{area}}/{{plan}}`"
+    message: "🎬  starting the implementation of phase **#{{phase}}** of `{{parent_dir(plan)}}` in **{{ctx.area}}**"
 success: 
     say: "Phase {{phase}} of the plan in the {{area}} package area, was implemented successfully"
-    message: "{{pass_icon}} phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{area}}/{{plan}}` successfully completed"
+    message: "{{pass_icon}} phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed"
 blocked:
     message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved!"
 failure:
     say: "Phase {{phase}} of a plan in the {{area}} package area, ran into problems!"
-    message: "❌️  phase {{phase}} (_of {{total_phases}}_) failed in the plan `{{area}}/{{plan}}`"
+    message: "❌️  phase {{phase}} (_of {{total_phases}}_) failed in the plan `{{parent_dir(plan)}}`"
 loop:
     until: "phase > total_phases"
     action: "increment(phase)"

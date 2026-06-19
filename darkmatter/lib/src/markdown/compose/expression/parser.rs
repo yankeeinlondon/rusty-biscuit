@@ -547,6 +547,24 @@ pub fn parse_condition(input: &str) -> Result<Expr, ParseError> {
     Parser::with_mode(input, ParseMode::Condition)?.parse()
 }
 
+/// Precedence table shared with the semantics catalog.
+///
+/// Each entry is `(name, operators)` ordered from highest precedence to
+/// lowest. The `semantics` module mirrors this table so the parser remains
+/// the single source of truth for precedence while the report surface can
+/// iterate it.
+#[allow(dead_code)]
+pub(crate) const PRECEDENCE_TABLE: &[(&str, &str)] = &[
+    ("Primary / member access", "literals, variables, function calls, `foo.bar`, `foo[0]`, `(expr)`"),
+    ("Unary", "`!`, `-`"),
+    ("Multiplicative", "`*`, `/`, `%`"),
+    ("Additive", "`+`, `-`"),
+    ("Comparison", "`==`, `!=`, `>`, `>=`, `<`, `<=`"),
+    ("Logical AND", "`&&` (condition mode)"),
+    ("Logical OR / Fallback", "`||` (mode-dependent)"),
+    ("Ternary", "`? :`"),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;

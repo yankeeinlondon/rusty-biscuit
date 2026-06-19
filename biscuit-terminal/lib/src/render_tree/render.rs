@@ -1558,26 +1558,54 @@ impl Writer<'_> {
 
         let mut out = String::new();
         let mut prefix_used = false;
-        for (idx, child) in item_children.iter().enumerate() {
-            if idx > 0 {
+        let mut first_group = true;
+        let mut idx = 0;
+        while idx < item_children.len() {
+            if !first_group {
                 out.push('\n');
             }
-            if !prefix_used && is_inline_block(child) {
-                // Inline/paragraph child: carries the prefix, with the
-                // prefix width as hanging indent for continuation lines.
+            let child = &item_children[idx];
+            if is_inline_block(child) {
+                // A tight list item carries its content as a flat run of
+                // inline siblings (`[Text, InlineCode, Text, …]`) with no
+                // wrapping `Paragraph`. Coalesce a maximal run of consecutive
+                // bare-inline children into one inline render so the whole run
+                // flows and wraps as a single paragraph; a `Paragraph` child is
+                // already coalesced and is rendered on its own. Without this,
+                // every inline sibling after the first would fall through to the
+                // block branch below and render on its own unwrapped line.
                 let markup = match &child.kind {
                     NodeKind::Paragraph { children } => {
+                        idx += 1;
                         self.render_inline(children, &Style::default())?
                     }
-                    _ => self.render_inline(std::slice::from_ref(child), &Style::default())?,
+                    _ => {
+                        let start = idx;
+                        while idx < item_children.len()
+                            && is_inline_kind(&item_children[idx].kind)
+                        {
+                            idx += 1;
+                        }
+                        self.render_inline(&item_children[start..idx], &Style::default())?
+                    }
                 };
-                out.push_str(&self.render_list_text(&full_prefix, &markup, hanging_indent));
-                prefix_used = true;
+                if prefix_used {
+                    // A trailing inline run after a block child: indent it like
+                    // body text instead of re-applying the bullet prefix.
+                    out.push_str(&indent_block(&markup, indent_children));
+                } else {
+                    // First inline run: carries the prefix, with the prefix
+                    // width as hanging indent for continuation lines.
+                    out.push_str(&self.render_list_text(&full_prefix, &markup, hanging_indent));
+                    prefix_used = true;
+                }
             } else {
                 // Block child: indent by `indent_children`, no prefix.
                 let body = self.render(child)?;
                 out.push_str(&indent_block(&body, indent_children));
+                idx += 1;
             }
+            first_group = false;
         }
 
         // An item with no children still occupies a prefixed line.
@@ -3596,6 +3624,45 @@ mod render_tree_tests {
         let center = render_pad(RAlignment::Center);
         assert!(right > center, "right pad {right} should exceed center {center}");
         assert!(center > 0, "center pad should be positive");
+    }
+
+    #[test]
+    fn render_tree_tight_list_item_coalesces_inline_run_and_wraps() {
+        // A tight list item carries its content as a flat run of inline
+        // siblings (`[Text, InlineCode, Text]`) with no wrapping `Paragraph`.
+        // The whole run must flow and wrap as one paragraph — not split with
+        // the code span (and the text after it) each on its own line, and not
+        // overflow the width. Regression for the prompt-reporting wrap bug.
+        let item = RenderNode::list_item(
+            None,
+            vec![
+                RenderNode::text("the spec may include a "),
+                RenderNode::inline_code("sub-spec"),
+                RenderNode::text(
+                    " frontmatter property indicating that this spec is part of a larger series",
+                ),
+            ],
+        );
+        let node = RenderNode::list(false, None, vec![item]);
+        let out = render_terminal_node(&node, &no_osc_opts(40)).expect("render");
+        let stripped = strip_escape_codes(&out.output);
+
+        // No line exceeds the width.
+        for line in stripped.lines() {
+            assert!(line.chars().count() <= 40, "overflow line {line:?}");
+        }
+        // The first line carries the bullet and the text that precedes the
+        // code span flows onto it (not broken before `sub-spec`).
+        let first = stripped.lines().next().unwrap();
+        assert!(
+            first.starts_with("- the spec may include a sub-spec"),
+            "inline run did not coalesce: {first:?}"
+        );
+        // The trailing text wraps onto continuation lines rather than a single
+        // unwrapped overflow row — more than the two lines a broken render would
+        // collapse to, and the closing word survives.
+        assert!(stripped.contains("series"), "trailing text lost: {stripped:?}");
+        assert!(stripped.lines().count() >= 3, "did not wrap: {stripped:?}");
     }
 
     #[test]

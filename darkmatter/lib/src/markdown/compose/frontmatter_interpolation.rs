@@ -27,6 +27,7 @@
 //! caller can run frontmatter shell expansion and then call this function a
 //! second time to resolve those keys against the shell-expanded values.
 
+use super::context::catalog::CONTEXT_VARIABLE_DESCRIPTORS;
 use super::expression::{EvaluationLookup, Expr, ExpressionFinder, ResolutionContext, doc_namespace, parse};
 use super::interpolation::{Evaluator, interpolate_value};
 use super::{ComposeContext, ComposeWarning};
@@ -127,6 +128,27 @@ impl EvaluationLookup for FrontmatterSeedState {
 
     fn resolution_context(&self) -> Option<ResolutionContext> {
         self.resolution_context.clone()
+    }
+
+    /// Mirrors `EffectiveState`'s catalog-aware validation so frontmatter
+    /// interpolation does not flag valid `ctx.*` references as unknown. Without
+    /// this override the trait default (`false`) marks *every* `ctx.*` reference
+    /// in frontmatter as unknown, and the catalog-backed suggester then suggests
+    /// the same name back ("unknown context variable 'ctx.area' — did you mean:
+    /// area"). The body path already validates against the catalog via
+    /// `EffectiveState`, so the bug surfaced only on frontmatter keys.
+    fn is_valid_context_variable(&self, name: &str) -> bool {
+        if CONTEXT_VARIABLE_DESCRIPTORS.iter().any(|d| d.name == name) {
+            return true;
+        }
+        self.context.get(name).is_some()
+    }
+
+    fn context_variable_names(&self) -> &[&'static str] {
+        use std::sync::LazyLock;
+        static NAMES: LazyLock<Vec<&'static str>> =
+            LazyLock::new(|| CONTEXT_VARIABLE_DESCRIPTORS.iter().map(|d| d.name).collect());
+        NAMES.as_slice()
     }
 }
 
@@ -727,6 +749,58 @@ mod tests {
             let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
             assert_eq!(report.replacements, 1);
             assert_eq!(fm.as_map().get("date"), Some(&json!("2024-06-15")));
+        }
+
+        #[test]
+        fn valid_ctx_vars_in_frontmatter_do_not_warn() {
+            // Regression: frontmatter interpolation ran through
+            // `FrontmatterSeedState`, which did not override
+            // `is_valid_context_variable`, so the trait default (`false`) flagged
+            // every `ctx.*` reference in frontmatter as unknown — even catalog
+            // variables like `ctx.area`. The catalog-backed suggester then
+            // suggested the same name back ("unknown context variable 'ctx.area'
+            // — did you mean: area"). The body path was unaffected because it
+            // validates against the catalog via `EffectiveState`.
+            let mut fm = fm_from_json(json!({
+                "review_file": "{{ctx.area}}/review.md",
+                "summary": "{{ctx.current_package_area}}"
+            }));
+            let report =
+                interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
+            assert!(
+                !report
+                    .warnings
+                    .iter()
+                    .any(|w| w.message.contains("unknown context variable")),
+                "valid ctx.* vars must not warn, got: {:?}",
+                report.warnings
+            );
+        }
+
+        #[test]
+        fn unknown_ctx_var_in_frontmatter_still_warns() {
+            // The override must not blanket-approve every `ctx.*`: a genuine typo
+            // still warns and suggests the nearest catalog variable.
+            let mut fm = fm_from_json(json!({
+                "review_file": "{{ctx.aera}}/review.md"
+            }));
+            let report =
+                interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
+            let warning = report
+                .warnings
+                .iter()
+                .find(|w| w.message.contains("unknown context variable"))
+                .expect("typo'd ctx.* must warn");
+            assert!(
+                warning.message.contains("ctx.aera"),
+                "warning should name the offending reference, got: {}",
+                warning.message
+            );
+            assert!(
+                warning.message.contains("did you mean: area"),
+                "warning should suggest the nearest catalog variable, got: {}",
+                warning.message
+            );
         }
 
         #[test]

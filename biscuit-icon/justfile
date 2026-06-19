@@ -80,13 +80,23 @@ lint-fix:
 
 install *args="":
     @just build --release
-    @just _install "./cli" "Biscuit Icon" {{ args }}
+    # `--features image` enables inline-image rendering (Kitty/iTerm2/etc.).
+    # Without it, glyph-less icons degrade to a text identifier in any cell
+    # that does not have a Unicode/Nerd Font glyph — even in terminals like
+    # WezTerm that fully support the image protocol. Always include it.
+    # Inlined (rather than delegating to `_install`) because that helper
+    # treats the third positional as `binary` and would steal `--features`.
+    @echo -e "Installing \033[33m\033[1mBiscuit Icon\033[0m"
+    @cargo install --path ./cli --features image {{ args }} || (just _play error-2 && just _speak "Problems encountered when trying to install Biscuit Icon" && exit 1)
+    @echo -e "✅ \033[1m\033[32mBiscuit Icon installed!\033[0m"
+    @just _play drop-4 || exit 0
 
 docs:
     @cargo doc -p biscuit-icon --open
 
 cli *args="":
-    @cargo run -p biscuit-icon-cli -- {{ args }}
+    # `--features image` enables inline-image rendering. See `install`.
+    @cargo run -p biscuit-icon-cli --features image -- {{ args }}
 
 # Dev-only: fetch curated icon bodies from the Iconify API into assets + generated.rs.
 populate-assets *args="":

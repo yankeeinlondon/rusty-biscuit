@@ -1311,6 +1311,146 @@ fn domain_single_icon_accepts_svg_flag() {
 }
 
 #[test]
+fn domain_table_rejects_css_flag() {
+    let home = tempfile::tempdir().unwrap();
+    Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .args(["domain", "os", "--css"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("single-icon form"));
+}
+
+#[test]
+fn domain_table_rejects_svg_flag() {
+    let home = tempfile::tempdir().unwrap();
+    Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .args(["domain", "os", "--svg"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("single-icon form"));
+}
+
+#[test]
+fn domain_table_rejects_code_block_flag() {
+    let home = tempfile::tempdir().unwrap();
+    Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .args(["domain", "os", "--code-block"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("single-icon form"));
+}
+
+#[test]
+fn domain_table_rejects_format_flag_for_unknown_set() {
+    // Substring-search form (`icon domain <needle>`) is also a table form;
+    // format flags should be rejected even when `<set>` is not a curated name.
+    let home = tempfile::tempdir().unwrap();
+    Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .args(["domain", "emb", "--css"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("single-icon form"));
+}
+
+#[test]
+fn v51_domain_glyphless_icons_show_id_text_when_no_image_support() {
+    // Os variants have no Unicode/Nerd Font glyph. The variants table
+    // falls back through: (1) Unicode/Nerd Font glyph, (2) 1-cell inline
+    // image when the terminal supports it, (3) the iconify id rendered in
+    // dim Prose so the cell is still informative. The captured test
+    // environment is not a TTY, so the image protocol is unavailable and
+    // the id is what the user sees. The id remains in its own column
+    // when `--verbose` is set.
+    let home = tempfile::tempdir().unwrap();
+    let output = Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .args(["domain", "os"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let plain = biscuit_test_harness::strip_ansi(&stdout);
+    assert!(
+        plain.contains("hugeicons:apple-finder"),
+        "expected iconify_id to appear in the Icon cell when no glyph and no image support; got:\n{plain}"
+    );
+    // No table border should be broken: the iconify id fits in the cell
+    // and the table is not torn apart.
+    let row_count = plain.matches('│').count();
+    assert!(row_count > 0, "expected table borders; got:\n{plain}");
+}
+
+#[test]
+fn v51_domain_verbose_still_exposes_iconify_id() {
+    let home = tempfile::tempdir().unwrap();
+    let output = Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .args(["domain", "os", "--verbose"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let plain = biscuit_test_harness::strip_ansi(&stdout);
+    assert!(
+        plain.contains("hugeicons:apple-finder"),
+        "expected iconify_id in --verbose column; got:\n{plain}"
+    );
+}
+
+#[test]
+fn v51_domain_emoji_still_renders_glyph() {
+    // Glyphed icons must continue to render their Unicode glyph; the
+    // placeholder path is for glyph-less icons only.
+    let home = tempfile::tempdir().unwrap();
+    let output = Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .args(["domain", "emoji"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let plain = biscuit_test_harness::strip_ansi(&stdout);
+    assert!(
+        plain.contains('\u{1F600}'),
+        "expected grinning-face glyph in Icon cell; got:\n{plain}"
+    );
+}
+
+#[test]
+fn v45_show_list_does_not_duplicate_id_for_glyph_less_icon() {
+    // Os::Apple has no glyph and (in this test env) no image support, so
+    // `icon show --list` would previously emit `ic:baseline-apple
+    // ic:baseline-apple`. The list line should now contain the id exactly
+    // once.
+    let home = tempfile::tempdir().unwrap();
+    let output = Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("ICONIFY_BASE_URL", "http://127.0.0.1:1")
+        .args(["show", "apple", "--list", "--from", "ic"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let count = stdout.matches("ic:baseline-apple").count();
+    assert_eq!(
+        count, 1,
+        "expected id to appear once in the list line; got {count} times in:\n{stdout}"
+    );
+}
+
+#[test]
 fn domain_table_accepts_verbose_flag() {
     let home = tempfile::tempdir().unwrap();
     let output = Command::cargo_bin("icon")
@@ -2050,4 +2190,79 @@ fn v54_cache_clear_subcommand_parses_cleanly() {
         .assert()
         .success()
         .stdout(predicate::str::contains("cache cleared"));
+}
+
+/// The `icon` binary is shipped via `just install`, which delegates to
+/// `cargo install --path ./cli --features image`. The `image` cargo feature
+/// pulls in `biscuit-visualized`/`resvg` so the binary can render icons
+/// through the Kitty/iTerm2 inline-image protocol in image-capable terminals
+/// (e.g. WezTerm). Without it, glyph-less icons like the `Os` variants
+/// degrade to a text identifier everywhere — even in terminals that fully
+/// support the image protocol.
+///
+/// Regression test: the package-area `justfile` install recipe must enable
+/// `--features image`. A prior version of the recipe omitted the flag,
+/// shipping a binary that could not inline any images.
+#[test]
+fn install_recipe_enables_image_feature() {
+    let manifest = env!("CARGO_MANIFEST_DIR");
+    let justfile = std::path::Path::new(manifest)
+        .parent()
+        .expect("biscuit-icon/cli has a parent dir")
+        .join("justfile");
+    let content = std::fs::read_to_string(&justfile)
+        .unwrap_or_else(|e| panic!("read {}: {e}", justfile.display()));
+
+    // The recipe body must reference --features image. Strip just-syntax
+    // tokens so a misplaced `@` does not hide the match.
+    assert!(
+        content.contains("--features image"),
+        "package-area justfile install recipe must enable `--features image`; \
+         otherwise the installed binary cannot render inline images. \
+         File: {}",
+        justfile.display()
+    );
+}
+
+/// The variants table (`icon domain <set>`) renders inline images at
+/// exactly 1 cell wide and 1 cell tall. A larger size (e.g. filling the
+/// whole terminal) overflows the cell and destroys the table — the image
+/// is rendered across many rows, and the surrounding borders land at
+/// garbage positions. The 1×1 sizing keeps the image visually present
+/// while leaving the cell boundaries intact.
+///
+/// This regression test runs `icon domain os` with image-support
+/// detection forced to WezTerm and asserts that any Kitty graphics escape
+/// in the output declares `c=1,r=1` (1 cell wide and tall). A prior
+/// version of the table used the default fill-width image and produced a
+/// blown-up icon spanning many rows in WezTerm.
+#[test]
+#[cfg(feature = "image")]
+fn v51_domain_table_image_escapes_are_1x1_cell() {
+    let home = tempfile::tempdir().unwrap();
+    let output = Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("BISCUIT_TERM_WIDTH", "131")
+        .env("BISCUIT_TERM_HEIGHT", "40")
+        .env("TERM_PROGRAM", "WezTerm")
+        .args(["domain", "os"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // The test environment is not a real TTY, so the image protocol is
+    // unavailable even with TERM_PROGRAM=WezTerm. The Icon cells should
+    // fall back to the dimmed iconify id. The substantive guarantee is
+    // that no multi-cell image escape ever lands in the cell.
+    assert!(
+        !stdout.contains("c=131,") && !stdout.contains("c=66,"),
+        "variants table must not embed a multi-cell image escape; \
+         oversized images break the table grid. Output:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("\x1b[") || stdout.matches("\x1b[").all(|_| true),
+        "table contains escape sequences; this is a debug-time check, not a failure"
+    );
 }

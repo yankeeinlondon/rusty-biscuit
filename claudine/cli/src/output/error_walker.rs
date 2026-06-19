@@ -12,7 +12,7 @@
 
 use biscuit_terminal::errors::BlockError;
 use biscuit_terminal::terminal::Terminal;
-use claudine::composition::CompositionError;
+use claudine::composition::{CompositionError, FrontmatterExcerpt};
 use color_eyre::eyre::Report;
 use darkmatter::markdown::errors::as_block_error;
 use std::error::Error as StdError;
@@ -27,8 +27,46 @@ use std::error::Error as StdError;
 /// Returns `None` when no cause implements [`BlockError`].
 pub(crate) fn try_render_block_report(report: &Report, term: &Terminal) -> Option<String> {
     let root: &(dyn StdError + 'static) = report.as_ref();
-    let deepest = deepest_block_error(root)?;
-    Some(deepest.report_block_error(term))
+
+    // A frontmatter-enriched error wraps its real cause; render from the inner
+    // error so the deepest typed block still wins, then append the captured
+    // frontmatter excerpt after it.
+    let wrapper = find_frontmatter_wrapper(root);
+    let start: &(dyn StdError + 'static) = match wrapper {
+        Some((inner, _)) => inner,
+        None => root,
+    };
+
+    let deepest = deepest_block_error(start)?;
+    let mut out = deepest.report_block_error(term);
+
+    if let Some((_, excerpt)) = wrapper {
+        let appendix = excerpt.render_appendix(term);
+        if !appendix.is_empty() {
+            out = out.trim_end_matches('\n').to_string();
+            out.push_str(&appendix);
+            out.push('\n');
+        }
+    }
+
+    Some(out)
+}
+
+/// Find the first [`CompositionError::WithFrontmatter`] in the cause chain,
+/// returning its inner error and captured excerpt.
+fn find_frontmatter_wrapper<'a>(
+    root: &'a (dyn StdError + 'static),
+) -> Option<(&'a CompositionError, &'a FrontmatterExcerpt)> {
+    let mut current = Some(root);
+    while let Some(err) = current {
+        if let Some(CompositionError::WithFrontmatter { inner, excerpt }) =
+            err.downcast_ref::<CompositionError>()
+        {
+            return Some((inner.as_ref(), excerpt));
+        }
+        current = err.source();
+    }
+    None
 }
 
 fn deepest_block_error<'a>(
@@ -118,6 +156,64 @@ mod tests {
         assert!(plain.contains("a.md"), "got:\n{plain}");
         assert!(plain.contains("b.md"), "got:\n{plain}");
         assert!(plain.contains("cycle detected"), "got:\n{plain}");
+    }
+
+    const LEAK_DOC: &str =
+        "---\nreview_file: computed.md\nsuccess:\n    message: \"at {{review-file}}\"\n---\nbody\n";
+
+    fn leak_with_frontmatter(stderr_is_tty: bool) -> CompositionError {
+        let excerpt = FrontmatterExcerpt::capture(LEAK_DOC, Some("success.message"), stderr_is_tty)
+            .expect("frontmatter block");
+        CompositionError::WithFrontmatter {
+            inner: Box::new(CompositionError::LifecycleInterpolationLeak {
+                source_path: PathBuf::from("review.md"),
+                property: "success.message".to_string(),
+                expression: "review-file".to_string(),
+                reason: String::new(),
+            }),
+            excerpt,
+        }
+    }
+
+    #[test]
+    fn appends_frontmatter_yaml_block_for_lifecycle_leak_on_tty() {
+        let report: Report = eyre!(leak_with_frontmatter(true));
+        let rendered = try_render_block_report(&report, &width80()).expect("block error found");
+        let plain = strip_escape_codes(&rendered);
+        // The primary diagnostic still renders from the inner leak error.
+        assert!(plain.contains("interpolation leaked"), "got:\n{plain}");
+        // The frontmatter block is appended, showing the offending YAML lines.
+        assert!(plain.contains("review_file"), "yaml block missing:\n{plain}");
+        assert!(plain.contains("success:"), "yaml block missing:\n{plain}");
+    }
+
+    #[test]
+    fn withholds_frontmatter_yaml_block_when_not_tty() {
+        let report: Report = eyre!(leak_with_frontmatter(false));
+        let rendered = try_render_block_report(&report, &width80()).expect("block error found");
+        let plain = strip_escape_codes(&rendered);
+        assert!(plain.contains("interpolation leaked"), "got:\n{plain}");
+        // Non-TTY output must not expose the frontmatter body.
+        assert!(!plain.contains("review_file"), "yaml leaked to non-tty:\n{plain}");
+    }
+
+    #[test]
+    fn appends_yaml_block_for_inline_sequence_mismatch_on_tty() {
+        let doc = "---\nprompt: Do it\nsequence:\n  - name: Hello\n---\nbody\n";
+        let excerpt = FrontmatterExcerpt::capture(doc, None, true).expect("frontmatter block");
+        let err = CompositionError::WithFrontmatter {
+            inner: Box::new(CompositionError::InlineComposeSequenceMismatch {
+                source_path: PathBuf::from("greeting.md"),
+            }),
+            excerpt,
+        };
+        let report: Report = eyre!(err);
+        let plain =
+            strip_escape_codes(try_render_block_report(&report, &width80()).expect("block"));
+        assert!(plain.contains("claudine sequence"), "diagnostic: {plain}");
+        // The authored frontmatter is shown as a YAML block.
+        assert!(plain.contains("prompt: Do it"), "yaml block missing: {plain}");
+        assert!(plain.contains("sequence:"), "yaml block missing: {plain}");
     }
 
     #[test]

@@ -69,6 +69,7 @@
 //! - [`terminal`] - Terminal color detection utilities
 //! - [`testing`] - Testing utilities for terminal output verification
 
+pub mod catalog;
 pub mod diff;
 pub mod editor;
 pub mod effects;

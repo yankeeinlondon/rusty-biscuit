@@ -262,6 +262,7 @@ fn apply_increment_with_context(
                 total_actions: context.total_actions,
                 property: prop.to_string(),
                 found: json_type_name(value).to_string(),
+                value_excerpt: value_error_excerpt(value),
             })?
         }
     };
@@ -283,11 +284,33 @@ fn apply_decrement_with_context(
                 total_actions: context.total_actions,
                 property: prop.to_string(),
                 found: json_type_name(value).to_string(),
+                value_excerpt: value_error_excerpt(value),
             })?
         }
     };
     fm.insert(prop.to_string(), next);
     Ok(())
+}
+
+fn value_error_excerpt(value: &Value) -> String {
+    const MAX_WIDTH: usize = 80;
+
+    if let Value::String(raw) = value
+        && raw.contains("{{")
+        && raw.contains("}}")
+    {
+        return format!(
+            r#""{}" (unresolved template — the loop seed failed to resolve this property)"#,
+            raw
+        );
+    }
+
+    let json = serde_json::to_string(value).unwrap_or_else(|_| "<unserializable>".into());
+    if json.len() > MAX_WIDTH {
+        format!("{}…", &json[..MAX_WIDTH])
+    } else {
+        json
+    }
 }
 
 fn increment_value(value: &Value) -> Option<Value> {
@@ -718,7 +741,8 @@ mod tests {
                 action_index: 1,
                 total_actions: 1,
                 property,
-                found
+                found,
+                ..
             } if property == "counter" && found == "string"
         ));
     }
@@ -942,7 +966,8 @@ mod tests {
                 action_index: 1,
                 total_actions: 1,
                 property,
-                found
+                found,
+                ..
             } if property == "flag" && found == "boolean"
         ));
     }
@@ -958,7 +983,8 @@ mod tests {
                 action_index: 1,
                 total_actions: 1,
                 property,
-                found
+                found,
+                ..
             } if property == "flag" && found == "boolean"
         ));
     }
@@ -974,9 +1000,98 @@ mod tests {
                 action_index: 1,
                 total_actions: 1,
                 property,
-                found
+                found,
+                ..
             } if property == "counter" && found == "string"
         ));
+    }
+
+    #[test]
+    fn increment_error_includes_unresolved_template_excerpt() {
+        let template = "{{ frontmatter(plan, 'start_phase') || 1 }}";
+        let mut fm = object(json!({"phase": template}));
+        let err = apply_increment(&mut fm, "phase").unwrap_err();
+        let (property, found, excerpt) = match err {
+            CompositionError::InvalidIncrementType {
+                property,
+                found,
+                value_excerpt,
+                ..
+            } => (property, found, value_excerpt),
+            other => panic!("expected InvalidIncrementType, got {other}"),
+        };
+        assert_eq!(property, "phase");
+        assert_eq!(found, "string");
+        assert!(
+            excerpt.contains("{{ frontmatter(plan, 'start_phase')"),
+            "excerpt should quote the template start: {excerpt}"
+        );
+        assert!(
+            excerpt.contains("unresolved template"),
+            "excerpt should explain the stage: {excerpt}"
+        );
+    }
+
+    #[test]
+    fn increment_error_includes_resolved_non_numeric_excerpt() {
+        let mut fm = object(json!({"area": "claudine-cli"}));
+        let err = apply_increment(&mut fm, "area").unwrap_err();
+        let (property, found, excerpt) = match err {
+            CompositionError::InvalidIncrementType {
+                property,
+                found,
+                value_excerpt,
+                ..
+            } => (property, found, value_excerpt),
+            other => panic!("expected InvalidIncrementType, got {other}"),
+        };
+        assert_eq!(property, "area");
+        assert_eq!(found, "string");
+        assert!(excerpt.contains("claudine-cli"), "excerpt should quote the value: {excerpt}");
+    }
+
+    #[test]
+    fn decrement_error_includes_unresolved_template_excerpt() {
+        let template = "{{ frontmatter(plan, 'start_phase') || 1 }}";
+        let mut fm = object(json!({"phase": template}));
+        let err = apply_decrement(&mut fm, "phase").unwrap_err();
+        let (property, found, excerpt) = match err {
+            CompositionError::InvalidDecrementType {
+                property,
+                found,
+                value_excerpt,
+                ..
+            } => (property, found, value_excerpt),
+            other => panic!("expected InvalidDecrementType, got {other}"),
+        };
+        assert_eq!(property, "phase");
+        assert_eq!(found, "string");
+        assert!(
+            excerpt.contains("{{ frontmatter(plan, 'start_phase')"),
+            "excerpt should quote the template start: {excerpt}"
+        );
+        assert!(
+            excerpt.contains("unresolved template"),
+            "excerpt should explain the stage: {excerpt}"
+        );
+    }
+
+    #[test]
+    fn decrement_error_includes_resolved_non_numeric_excerpt() {
+        let mut fm = object(json!({"area": "claudine-cli"}));
+        let err = apply_decrement(&mut fm, "area").unwrap_err();
+        let (property, found, excerpt) = match err {
+            CompositionError::InvalidDecrementType {
+                property,
+                found,
+                value_excerpt,
+                ..
+            } => (property, found, value_excerpt),
+            other => panic!("expected InvalidDecrementType, got {other}"),
+        };
+        assert_eq!(property, "area");
+        assert_eq!(found, "string");
+        assert!(excerpt.contains("claudine-cli"), "excerpt should quote the value: {excerpt}");
     }
 
     #[test]

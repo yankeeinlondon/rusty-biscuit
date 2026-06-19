@@ -142,7 +142,16 @@ pub(crate) fn log_wrapper_header(
         header_parts.push(Prose::new(format!("<dim>{prose_safe}</dim>")).render(term));
     }
 
-    log::message(&format!("\n{}\n", header_parts.join(" ")));
+    let rendered = header_parts.join(" ");
+    let rendered = if matches!(
+        term.color_depth,
+        biscuit_terminal::discovery::detection::ColorDepth::None
+    ) {
+        strip_ansi_codes(&rendered)
+    } else {
+        rendered
+    };
+    log::message(&format!("\n{rendered}\n"));
 }
 
 /// Render the composed prompt as a BlockQuote after environment details.

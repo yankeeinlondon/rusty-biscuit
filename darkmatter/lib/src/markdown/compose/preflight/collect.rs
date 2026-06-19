@@ -233,7 +233,8 @@ fn collect_recursive(
     let mut inline_options = options.clone().only(&inline_ops);
     inline_options.defer_shell_pending_schema_problems = true;
     let (prepared, _) = markdown.compose_with(inline_options)?;
-    let prepared_ctx = prepared.source_context_for_errors();
+    let line_offset = prepared.frontmatter_line_count();
+    let prepared_ctx = prepared.full_source_context_for_errors();
 
     // ── Dynamic command shape (chicken-and-egg) ────────────────────
     // A body command whose text embeds a frontmatter value still pending
@@ -241,10 +242,10 @@ fn collect_recursive(
     // approved shape (with `$(...)`) differs from its executed shape. Reject it
     // here rather than letting it surface as a late `NotPreApproved`.
     let pending = pending_shell_literals(&prepared, &prepared_ctx);
-    detect_dynamic_command_shape(prepared.content(), &pending, &prepared_ctx)?;
+    detect_dynamic_command_shape(prepared.content(), &pending, &prepared_ctx, line_offset)?;
 
     // ── Body `::shell` directives ──────────────────────────────────
-    let directives = parse_directives(prepared.content(), prepared_ctx.clone())?;
+    let directives = parse_directives(prepared.content(), prepared_ctx.clone(), line_offset)?;
     for directive in directives {
         let line = directive.origin.line_number();
         for (raw_action, exe_raw, args_raw) in directive_action_iter(&directive) {
@@ -297,8 +298,8 @@ fn collect_recursive(
                     normalized,
                     source_file: source_file.clone(),
                     origin: ShellCommandOrigin::ShellBlock {
-                        start_line: pair.start_line,
-                        command_line: command.start_line,
+                        start_line: pair.start_line + line_offset,
+                        command_line: command.start_line + line_offset,
                     },
                 };
                 local_entries.push(entry.clone());
@@ -521,7 +522,7 @@ fn scan_one_frontmatter(
         );
     }
 
-    let scan_ctx = fm_clone.source_context_for_errors();
+    let scan_ctx = fm_clone.full_source_context_for_errors();
     let candidates = scan_frontmatter(
         fm_clone.frontmatter(),
         pre_interpolation_snapshot.as_ref(),
@@ -562,6 +563,7 @@ fn scan_one_frontmatter(
                 indent: String::new(),
                 origin: ShellCommandOrigin::Frontmatter {
                     key: candidate.key.clone(),
+                    line: candidate.line,
                 },
                 error_handling: Default::default(),
                 timeout_override: candidate.timeout_override,
@@ -584,6 +586,7 @@ fn scan_one_frontmatter(
                         source_file: source_file.to_path_buf(),
                         origin: ShellCommandOrigin::Frontmatter {
                             key: candidate.key.clone(),
+                            line: candidate.line,
                         },
                     };
                     local_entries.push(entry.clone());
@@ -624,6 +627,7 @@ fn detect_dynamic_command_shape(
     content: &str,
     pending: &[(String, String)],
     ctx: &biscuit_terminal::errors::SourceContext,
+    line_offset: usize,
 ) -> MarkdownResult<()> {
     if pending.is_empty() {
         return Ok(());
@@ -655,7 +659,7 @@ fn detect_dynamic_command_shape(
                 .any(|span| at >= span.start && at < span.end);
 
             if in_shell_directive || in_shell_block {
-                let line_number = content[..at].matches('\n').count() + 1;
+                let line_number = content[..at].matches('\n').count() + 1 + line_offset;
                 return Err(ShellExpansionError::DynamicCommandShape {
                     ctx: Box::new(ctx.clone()),
                     command: line.to_string(),
@@ -995,7 +999,8 @@ replace:
         assert_eq!(
             entries[0].origin,
             ShellCommandOrigin::Frontmatter {
-                key: "child_cmd".to_string()
+                key: "child_cmd".to_string(),
+                line: Some(2),
             }
         );
     }
@@ -1010,7 +1015,7 @@ replace:
 
         assert_eq!(entries.len(), 1);
         match &entries[0].origin {
-            ShellCommandOrigin::Frontmatter { key } => assert_eq!(key, "files"),
+            ShellCommandOrigin::Frontmatter { key, .. } => assert_eq!(key, "files"),
             other => panic!("Expected Frontmatter origin, got: {other:?}"),
         }
     }

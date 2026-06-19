@@ -33,7 +33,7 @@ use super::shell_expansion::store::resolve_policy_paths;
 use super::shell_expansion::tokenize::{parse_pipeline, tokenize};
 use super::shell_expansion::types::{
     ChainOperator, ErrorHandling, PipelineRuntime, ShellCommandOrigin, ShellDirective,
-    ShellExpansionError, ShellPipeline, ShellPolicyPaths,
+    ShellExpansionError, ShellPipeline, ShellPolicyPaths, frontmatter_key_line,
 };
 use super::shell_expansion::{PreparedShellDirective, execute_prepared_directive, prepare_directive};
 use super::{ComposeOptions, ComposeWarning};
@@ -160,6 +160,9 @@ pub(crate) struct FrontmatterShellDirective {
     #[allow(dead_code)] // Inspected by parser tests; production uses `directive_reachable_pipelines`.
     pub pipeline: Option<ShellPipeline>,
     pub ast: FrontmatterShellAst,
+    /// 1-indexed file line of the frontmatter key when it can be resolved from
+    /// the source context; `None` otherwise.
+    pub line: Option<usize>,
 }
 
 /// Result of frontmatter shell expansion.
@@ -315,6 +318,7 @@ pub(crate) fn parse_shell_value(
                 then_branch,
                 else_branch,
             },
+            line: None,
         }));
     }
 
@@ -374,6 +378,7 @@ pub(crate) fn parse_shell_value(
         no_cache,
         pipeline: Some(pipeline.clone()),
         ast: FrontmatterShellAst::Pipeline(pipeline),
+        line: None,
     }))
 }
 
@@ -968,7 +973,8 @@ pub(crate) fn scan_frontmatter(
                 .and_then(|map| map.get(key))
                 .map(|s| s.as_str());
 
-            if let Some(directive) = parse_shell_value(s, key, original, ctx)? {
+            if let Some(mut directive) = parse_shell_value(s, key, original, ctx)? {
+                directive.line = frontmatter_key_line(ctx, key);
                 directives.push(directive);
             }
         }
@@ -1315,6 +1321,7 @@ fn prepare_branch_pipeline(
         indent: String::new(),
         origin: ShellCommandOrigin::Frontmatter {
             key: candidate.key.clone(),
+            line: candidate.line,
         },
         error_handling: ErrorHandling::default(),
         timeout_override: candidate.timeout_override,
@@ -1508,6 +1515,7 @@ fn frontmatter_parse_error(
         ctx: Box::new(ctx.clone()),
         origin: ShellCommandOrigin::Frontmatter {
             key: key.to_string(),
+            line: frontmatter_key_line(ctx, key),
         },
         message: message.into(),
     }
@@ -1927,7 +1935,8 @@ mod tests {
                 assert_eq!(
                     origin,
                     ShellCommandOrigin::Frontmatter {
-                        key: "bad".to_string()
+                        key: "bad".to_string(),
+                        line: None,
                     }
                 );
             }

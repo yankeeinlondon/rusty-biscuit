@@ -301,92 +301,90 @@ Arithmetic errors fail composition:
 Function names are **case-insensitive**: `has_key`, `HasKey`, and `haskey` all
 resolve to the same function.
 
-### Logical Helpers
+The table below is generated from [`EXPRESSION_FUNCTION_DESCRIPTORS`](../../lib/src/markdown/compose/expression/catalog.rs). Run `just darkmatter regen-expr-doc` to refresh it.
 
-- `and(a, b, c, ...)` — all arguments truthy; left-to-right short-circuit
-- `or(a, b, c, ...)` — any argument truthy; left-to-right short-circuit
-- `has_key(object, key)` — `true` when the first argument is an object containing `key`
-- `contains(collection, value)` — substring/array/object/scalar containment
+<!-- BEGIN GENERATED FUNCTION TABLE -->
 
-### Length and Numbers
+| Category | Function | Description | Example |
+| --- | --- | --- | --- |
+| Type Predicates | `is_string(x)` | Returns true when the value is a string. | `is_string("hello")` ⇒ `true` |
+| Type Predicates | `is_number(x)` | Returns true when the value is a number. | `is_number(42)` ⇒ `true` |
+| Type Predicates | `is_array(x)` | Returns true when the value is an array. | `is_array(items)` ⇒ `true` |
+| Type Predicates | `is_null(x)` | Returns true when the value is null. | `is_null(null)` ⇒ `true` |
+| Type Predicates | `is_object(x)` | Returns true when the value is an object. | `is_object(obj)` ⇒ `true` |
+| Type Predicates | `is_empty(x)` | Returns true when the value is null, empty string, empty array, or empty object. | `is_empty("")` ⇒ `true` |
+| Type Predicates | `is_positive(val)` | Returns true when the coerced value is greater than zero. | `is_positive(5)` ⇒ `true` |
+| Type Predicates | `is_negative(val)` | Returns true when the coerced value is less than zero. | `is_negative(-3)` ⇒ `true` |
+| Type Predicates | `is_integer(val)` | Returns true when the value is a JSON number with no fractional component. | `is_integer(7)` ⇒ `true` |
+| Math | `min(a, b)` | Returns the smaller of two numbers. | `min(2, 5)` ⇒ `2` |
+| Math | `max(a, b)` | Returns the larger of two numbers. | `max(2, 5)` ⇒ `5` |
+| Math | `abs(x)` | Returns the absolute value of a number. | `abs(-3)` ⇒ `3` |
+| Collection | `first(x)` | Returns the first element of an array, or null when empty. | `first(items)` ⇒ `1` |
+| Collection | `last(x)` | Returns the last element of an array, or null when empty. | `last(items)` ⇒ `3` |
+| String Predicates | `starts_with(x, find)` | Returns true when the string starts with the given prefix (case-sensitive). | `starts_with("hello", "he")` ⇒ `true` |
+| String Predicates | `ends_with(x, find)` | Returns true when the string ends with the given suffix (case-sensitive). | `ends_with("hello", "lo")` ⇒ `true` |
+| String Mutations | `lower(x)` | Converts a string to lowercase. | `lower("HELLO")` ⇒ `hello` |
+| String Mutations | `upper(x)` | Converts a string to uppercase. | `upper("hello")` ⇒ `HELLO` |
+| String Mutations | `capitalize(x)` | Capitalizes the first character of a string. | `capitalize("hello")` ⇒ `Hello` |
+| String Mutations | `kebab_case(x)` | Converts a string to kebab-case. | `kebab_case("Hello World")` ⇒ `hello-world` |
+| String Mutations | `snake_case(x)` | Converts a string to snake_case. | `snake_case("Hello World")` ⇒ `hello_world` |
+| String Mutations | `camel_case(x)` | Converts a string to camelCase. | `camel_case("hello world")` ⇒ `helloWorld` |
+| String Mutations | `pascal_case(x)` | Converts a string to PascalCase. | `pascal_case("hello world")` ⇒ `HelloWorld` |
+| String Mutations | `title_case(x)` | Converts a string to Title Case. | `title_case("hello world")` ⇒ `Hello World` |
+| String Mutations | `without_date(string)` | Removes substrings that are real YYYY-MM-DD calendar dates, leaving surrounding text untouched. | `without_date("Note 2024-06-15")` ⇒ `Note ` |
+| String Mutations | `ensure_leading(var, prefix)` | Ensures the string form of a value starts with a prefix. | `ensure_leading("world", "hello ")` ⇒ `hello world` |
+| String Mutations | `ensure_trailing(var, postfix)` | Ensures the string form of a value ends with a postfix. | `ensure_trailing("hello", " world")` ⇒ `hello world` |
+| Rendering | `terminal(string)` | Renders Prose markup to a terminal string with ANSI SGR sequences. | `terminal("hello")` ⇒ `hello` |
+| Date Formatting | `date(iso, fmt)` | Reformats an ISO date/datetime string into a named human format. | `date("2024-06-15", "long")` ⇒ `Sat, June 15th, 2024` |
+| Date Validators | `is_date(x)` | Returns true when the string is a valid ISO date (YYYY-MM-DD). | `is_date("2024-06-15")` ⇒ `true` |
+| Date Validators | `is_date_utc(x)` | Same as is_date (the format itself is timezone-agnostic). | `is_date_utc("2024-06-15")` ⇒ `true` |
+| Date Validators | `is_date_time(x)` | Returns true when the string is a valid ISO datetime. | `is_date_time("2024-06-15T12:30:00")` ⇒ `true` |
+| Date Validators | `is_date_time_utc(x)` | Same parse contract as is_date_time. | `is_date_time_utc("2024-06-15T12:30:00Z")` ⇒ `true` |
+| Date Validators | `is_today(x)` | Returns true when the date/datetime is today (local). |  |
+| Date Validators | `is_today_utc(x)` | Returns true when the date/datetime is today (UTC). |  |
+| Date Validators | `is_yesterday(x)` | Returns true when the date/datetime is yesterday (local). |  |
+| Date Validators | `is_yesterday_utc(x)` | Returns true when the date/datetime is yesterday (UTC). |  |
+| Date Validators | `is_tomorrow(x)` | Returns true when the date/datetime is tomorrow (local). |  |
+| Date Validators | `is_tomorrow_utc(x)` | Returns true when the date/datetime is tomorrow (UTC). |  |
+| Date Validators | `is_this_month(x)` | Returns true when the date/datetime is in the current month (local). |  |
+| Date Validators | `is_this_month_utc(x)` | Returns true when the date/datetime is in the current month (UTC). |  |
+| Date Validators | `is_this_year(x)` | Returns true when the date/datetime is in the current year (local). |  |
+| Date Validators | `is_this_year_utc(x)` | Returns true when the date/datetime is in the current year (UTC). |  |
+| Logical | `and(...)` | Logical AND of all arguments. Short-circuits on first falsy value. | `and(true, true)` ⇒ `true` |
+| Logical | `or(...)` | Logical OR of all arguments. Short-circuits on first truthy value. | `or(false, true)` ⇒ `true` |
+| Collection | `has_key(obj, key)` | Returns true when the object contains the given key. | `has_key(obj, "a")` ⇒ `true` |
+| Collection | `contains(haystack, needle)` | Returns true when haystack contains needle (array, object, or string). | `contains("hello", "ell")` ⇒ `true` |
+| Collection | `length(x)` | Returns the length of a string, array, or object. | `length("hello")` ⇒ `5` |
+| Type Conversion | `number(x, [default])` | Converts a value to a number, with an optional default. | `number("42")` ⇒ `42` |
+| Math | `round(x, [default])` | Rounds a value to the nearest integer, with an optional default. | `round(3.7)` ⇒ `4` |
+| Filesystem | `absolute(file)` | Resolves a file path to an absolute path. |  |
+| Filesystem | `relative(file)` | Returns a best-effort relative path from the document base directory. | `relative("fixture.md")` ⇒ `fixture.md` |
+| Filesystem | `file_exists(file)` | Returns true when the file exists (local or remote URL). | `file_exists("fixture.md")` ⇒ `true` |
+| Filesystem | `frontmatter(file)` | Reads the frontmatter of a Markdown file as an object. | `frontmatter("fixture.md")` ⇒ `{"title":"Fixture Title"}` |
+| Filesystem | `frontmatter(file, prop)` | Reads a single frontmatter property from a Markdown file. | `frontmatter("fixture.md", "title")` ⇒ `Fixture Title` |
+| Filesystem | `markdown_body_empty(file)` | Returns true when the Markdown body has only whitespace. | `markdown_body_empty("fixture.md")` ⇒ `false` |
+| Filesystem | `markdown_title(file)` | Returns the title from frontmatter or the first H1 heading. | `markdown_title("fixture.md")` ⇒ `Fixture Title` |
+| Filesystem | `validate_schema(file)` | Validates a Markdown document against its declared schema. | `validate_schema("fixture.md")` ⇒ `true` |
+| Filesystem | `validate_schema(file, obj)` | Two-argument form accepted for forward compatibility. |  |
+| Filesystem | `is_indexed_file(file)` | Returns true when the filename stem matches the indexed grammar (base-NNN). | `is_indexed_file("review-1.md")` ⇒ `true` |
+| Filesystem | `file_index(file)` | Returns the parsed index suffix, or -1 when non-indexed. | `file_index("review-1.md")` ⇒ `1` |
+| Filesystem | `increment_file_index(file)` | Increments the numeric index suffix, preserving zero-padding width. | `increment_file_index("review-1.md")` ⇒ `review-2.md` |
+| Filesystem | `decrement_file_index(file)` | Decrements the numeric index suffix, clamped at 0. | `decrement_file_index("review-2.md")` ⇒ `review-1.md` |
+| Filesystem | `basename(file)` | Returns the final path component including extension. | `basename("sub/note.md")` ⇒ `note.md` |
+| Filesystem | `basename_without_index(file)` | Returns the basename with any indexed suffix removed from the stem. | `basename_without_index("review-1.md")` ⇒ `review.md` |
+| Filesystem | `dirname(file)` | Returns the directory portion of the display path. | `dirname("sub/note.md")` ⇒ `sub` |
+| Filesystem | `ext(file)` | Returns the final extension without the leading dot. | `ext("sub/note.md")` ⇒ `md` |
+| Filesystem | `parent_dir(file)` | Returns the directory segment immediately above the basename. | `parent_dir("sub/note.md")` ⇒ `sub` |
+| Filesystem | `file_trailing(file)` | Returns the last directory segment plus the basename. | `file_trailing("sub/note.md")` ⇒ `sub/note.md` |
+| Filesystem | `dir_leading(file)` | Returns the directory path above the last directory segment, dropping the basename and its parent (the complement of file_trailing). | `dir_leading("sub/note.md")` ⇒ `` |
+| Filesystem | `join(left, right)` | Joins two path strings with normalized separators. | `join("sub", "note.md")` ⇒ `sub/note.md` |
+| Filesystem | `link(file)` | Creates a Markdown link to a local file, using its relative path as the link text. |  |
+| Filesystem | `link(target, desc)` | Creates a Markdown link to a local file or HTTP(S) URL with the given description. |  |
+| Context | `has_skill(name)` | Returns true when a skill directory exists in a user-scoped or local-scoped skill root. |  |
+| Context | `has_local_skill(name)` | Returns true when a skill directory exists in a local-scoped skill root. |  |
+<!-- END GENERATED FUNCTION TABLE -->
 
-- `length(value)` — string char count, array length, object key count, number's character count, `0` for `null`/booleans
-- `number(value, default?)` — parses as number; falls back to `default` (or `0`)
-- `round(value, default?)` — rounds the parsed number to an integer
-
-### Math
-
-- `min(a, b)` — minimum of two numbers
-- `max(a, b)` — maximum of two numbers
-- `abs(x)` — absolute value
-
-Math helpers require numeric arguments. Booleans, strings, arrays, objects,
-and `null` all produce a type-mismatch error (`null` propagates to `null` when
-null-safety applies — see [Function Contracts](#function-contracts)).
-
-### Type Predicates
-
-- `is_string(x)`, `is_number(x)`, `is_array(x)`, `is_null(x)`, `is_object(x)`
-- `is_empty(x)` — `true` for `null`, `""`, `[]`, `{}`; `false` for numbers (including `0`), booleans, and non-empty containers
-- `is_integer(val)` — `true` only for JSON numbers with no fractional component; never errors and does not null-propagate
-
-### Numeric Predicates
-
-- `is_positive(val)` — `true` when the value coerces to a number greater than zero
-- `is_negative(val)` — `true` when the value coerces to a number less than zero
-
-Both predicates use the same coercion as `number()`. `0` is neither positive nor
-negative. Non-numeric values (including `null`) return an error rather than
-propagating.
-
-### Collection Helpers
-
-- `first(x)` — first element of array `x`, or `null` if empty
-- `last(x)` — last element of array `x`, or `null` if empty
-
-### String Predicates
-
-- `starts_with(x, find)` — case-sensitive prefix test
-- `ends_with(x, find)` — case-sensitive suffix test
-
-### String Mutations
-
-- `lower(x)`, `upper(x)`, `capitalize(x)`
-- `kebab_case(x)`, `snake_case(x)`, `camel_case(x)`, `pascal_case(x)`, `title_case(x)`
-- `without_date(string)` — removes valid `YYYY-MM-DD` substrings; invalid dates such as `2026-02-30` are left untouched
-- `ensure_leading(var, prefix)` — ensures the string form of `var` starts with `prefix`
-- `ensure_trailing(var, postfix)` — ensures the string form of `var` ends with `postfix`
-
-`ensure_leading` and `ensure_trailing` accept strings or numbers. If `var`
-already has the prefix/suffix, the original value is returned unchanged
-(including its JSON type). When `var` is a number and the result is
-representable as a number, a JSON number is returned; otherwise a string is
-returned.
-
-```md
-{{ ensure_leading("foobar", "foo") }}    ⇒ "foobar"
-{{ ensure_leading("bar", "foo") }}       ⇒ "foobar"
-{{ ensure_leading(123, 4) }}             ⇒ 4123
-{{ ensure_leading("123", 4) }}           ⇒ "4123"
-```
-
-### Date Validators
-
-Strict format validators (strings only, exact format required):
-
-- `is_date(x)` — `YYYY-MM-DD`
-- `is_date_utc(x)` — same format
-- `is_date_time(x)` — ISO 8601 datetime (also accepted as `is_datetime(x)`)
-- `is_date_time_utc(x)` — same format (also accepted as `is_datetime_utc(x)`)
-
-Relative validators (accept date *and* datetime strings):
-
-- Local: `is_today(x)`, `is_yesterday(x)`, `is_tomorrow(x)`, `is_this_month(x)`, `is_this_year(x)`
-- UTC:   `is_today_utc(x)`, `is_yesterday_utc(x)`, `is_tomorrow_utc(x)`, `is_this_month_utc(x)`, `is_this_year_utc(x)`
-
-All return `false` for non-string inputs and unparseable strings.
-
-### Date Formatting
+### `date()` format tokens
 
 `date(iso, format)` reformats an ISO date or datetime string into a named
 human format. The date portion is extracted from datetime inputs.
@@ -405,14 +403,6 @@ Supported format tokens (canonical name plus aliases):
 The `[YYYY]` token includes the year only when it differs from the current
 year. Invalid ISO input or an unknown format token returns an error; a `null`
 argument propagates as `null`.
-
-### Rendering
-
-- `terminal(string)` — renders the input as **Prose markup** and returns the
-  resulting terminal string, including ANSI SGR sequences. The input is markup,
-  not literal text, so angle brackets that should appear literally must be
-  escaped before calling. Rendering uses deterministic, non-interactive
-  terminal settings and does not probe the live terminal. `null` propagates.
 
 ### Read-Side Functions
 
@@ -469,7 +459,7 @@ one or more digits, where the hyphen is not preceded by another hyphen:
 | `decrement_file_index(file)` | decrements the index, clamped at `0`; non-indexed files start at `0` |
 | `basename(file)` | final component including extension |
 | `basename_without_index(file)` | basename with any indexed suffix removed from the stem |
-| `dir(file)` | directory portion of the display path |
+| `dirname(file)` | directory portion of the display path |
 | `ext(file)` | final extension without the leading dot; `""` when none |
 | `parent_dir(file)` | directory segment immediately above the basename |
 | `file_trailing(file)` | last directory segment plus basename |

@@ -94,7 +94,7 @@ pub enum Commands {
     /// Curated domain icons (offline enum sets).
     Domain {
         /// Enum name, `enum:variant`, or substring filter.
-        #[arg(value_name = "ARG")]
+        #[arg(value_name = "ARG", add = ArgValueCompleter::new(domain_arg_completer))]
         arg: Option<String>,
 
         /// `show`-style format flags, applied to the single-icon form
@@ -190,4 +190,47 @@ fn set_name_completer(current: &std::ffi::OsStr) -> Vec<CompletionCandidate> {
         .take(50)
         .map(|p| CompletionCandidate::new(format!("{prefix}{p}")))
         .collect()
+}
+
+/// Offers the 16 curated domain set names (`os`, `emoji`, `brand`, ...) when
+/// the shell asks for completions of the `icon domain <arg>` positional.
+/// Substring match is case-insensitive; completion never fails the shell.
+fn domain_arg_completer(current: &std::ffi::OsStr) -> Vec<CompletionCandidate> {
+    let needle = current.to_string_lossy().to_lowercase();
+    biscuit_icon::domain::domain_sets()
+        .into_iter()
+        .map(|(name, _)| name)
+        .filter(|name| needle.is_empty() || name.contains(needle.as_str()))
+        .map(|name| CompletionCandidate::new(name.to_string()))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn domain_arg_completer_returns_all_sets_for_empty_token() {
+        let candidates = domain_arg_completer(std::ffi::OsStr::new(""));
+        let names: Vec<String> =
+            candidates.iter().map(|c| c.get_value().to_string_lossy().into_owned()).collect();
+        assert_eq!(names.len(), 16, "expected all 16 domain sets; got: {names:?}");
+        assert!(names.contains(&"os".to_string()));
+        assert!(names.contains(&"emoji".to_string()));
+        assert!(names.contains(&"brand".to_string()));
+    }
+
+    #[test]
+    fn domain_arg_completer_substring_is_case_insensitive() {
+        let candidates = domain_arg_completer(std::ffi::OsStr::new("OS"));
+        let names: Vec<String> =
+            candidates.iter().map(|c| c.get_value().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, vec!["os".to_string()], "expected only `os` for `OS`; got: {names:?}");
+    }
+
+    #[test]
+    fn domain_arg_completer_unknown_token_returns_empty() {
+        let candidates = domain_arg_completer(std::ffi::OsStr::new("zzz"));
+        assert!(candidates.is_empty(), "expected no completions; got: {candidates:?}");
+    }
 }

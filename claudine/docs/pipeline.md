@@ -7,7 +7,7 @@ description: |-
     named so they can be discussed, reordered, parallelized, deferred, or
     eliminated in pursuit of an order-of-magnitude speedup of both real and
     perceived latency.
-last_updated: 2026-05-09
+last_updated: 2026-06-18
 ---
 
 # Compose / Inline-Compose Pipeline
@@ -128,7 +128,7 @@ This is where Darkmatter actually runs. **Per iteration** when looping.
 
 | # | Step | Notes |
 |---|------|-------|
-| B6.1 | **Compose: `prepare_direct`** [O-mode, compose] | `compose_prep.prepare_direct`. Runs the full Darkmatter compose pass on the document body: Handlebars template variables, `${VAR}` / `${VAR:-default}` shell-env expansion, `$(cmd)` shell expansion (against the cache), TOC linking, `@file` includes, expression evaluation, frontmatter merging. Produces `PreparedComposition.prompt`. |
+| B6.1 | **Compose: `prepare_direct`** [O-mode, compose] | `compose_prep.prepare_direct`. Runs the full Darkmatter compose pass on the document body: `{{ }}` expression-engine interpolation (including `env.*` access), `$(cmd)` shell expansion (against the cache), TOC linking, `@file` includes, expression evaluation, frontmatter merging. Produces `PreparedComposition.prompt`. |
 | B6.2 | **Inline-compose: `prepare_inline`** [O-mode, inline] | `compose_prep.prepare_inline`. Same Darkmatter pass, but composes the `prompt` frontmatter property as the body, then appends inline guardrails (closure markers). Body is unread; only frontmatter `prompt` matters. |
 | B6.3 | **Build `CompositionExecutionRequest`** [M] | Carries every flag, `prepared`, `resolved_target`, the cached prep context. |
 

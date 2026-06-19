@@ -6,9 +6,9 @@
 //! > The metadata table includes Document (with OSC8 link), Description,
 //! > Agent, Model, YOLO, and Area … rendered in blue / italic+dim / green+red.
 //!
-//! The L1 unit tests in `dry_run.rs` and the CLI integration tests in
-//! `wrap_commands.rs` assert the table's *semantics* after stripping escape
-//! codes, so they cannot catch broken SGR/OSC8 emission. These tests drive the
+//! The L1 unit tests in `dry_run.rs` and the CLI integration tests in the
+//! `wrap_compose_*.rs` binaries assert the table's *semantics* after stripping
+//! escape codes, so they cannot catch broken SGR/OSC8 emission. These tests drive the
 //! real `claudine compose --dry-run` binary inside a real terminal emulator and
 //! assert against the bytes the terminal actually displayed (`frame.raw`):
 //!
