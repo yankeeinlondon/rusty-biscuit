@@ -390,6 +390,23 @@ fn emit_compose_warnings(warnings: &[ComposeWarning], silent: bool) {
     }
 }
 
+/// Enrich a `color_eyre::Report` with a frontmatter excerpt when its root cause
+/// is a frontmatter-rooted [`CompositionError`].
+///
+/// Used at boundaries that have already mapped the typed error into a `Report`
+/// (e.g. eager target resolution); typed-`CompositionError` boundaries call
+/// [`CompositionError::enrich_frontmatter`] directly instead.
+fn enrich_report(
+    err: color_eyre::Report,
+    source: &composition::ResolvedCompositionSource,
+    stderr_is_tty: bool,
+) -> color_eyre::Report {
+    match err.downcast::<CompositionError>() {
+        Ok(typed) => typed.enrich_frontmatter(source, stderr_is_tty).into(),
+        Err(other) => other,
+    }
+}
+
 fn run_compose_inner(
     args: ComposeArgs,
     verbose: u8,
@@ -429,6 +446,10 @@ fn run_compose_inner(
     let source = composition::resolve_composition_source(&file)?;
     record_prep_substage(&mut prep_substages, perf_enabled, "frontmatter load", prep_t);
 
+    // Captured once for frontmatter-excerpt enrichment of any error rendered
+    // below; gates whether the YAML block is shown (TTY) or withheld (pipe/CI).
+    let stderr_is_tty = std::io::stderr().is_terminal();
+
     // Schema-aware pre-prepare validation. Runs BEFORE the preflight
     // compose pass so the user-visible error surface is Claudine's
     // typed `CompositionError` rather than Darkmatter's raw
@@ -448,7 +469,8 @@ fn run_compose_inner(
             set_overrides.as_ref(),
             interactive_opts,
             &term,
-        )?;
+        )
+        .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
         super::schema_interactive::emit_dropped_optional_warnings(&pre.dropped_optionals);
         (pre.source, pre.set_overrides)
     };
@@ -491,7 +513,8 @@ fn run_compose_inner(
             shared.model.as_deref(),
             shared.dry_run,
             &source.resolved_path,
-        )?
+        )
+        .map_err(|e| enrich_report(e, &source, stderr_is_tty))?
     };
 
     let mut env_overrides: std::collections::BTreeMap<String, String> =
@@ -722,7 +745,7 @@ fn run_compose_inner(
                 emit_rate_limit_halt(&error);
                 return Ok(claudine::composition::LOOP_RATE_LIMITED_EXIT_CODE);
             }
-            return Err(error.into());
+            return Err(error.enrich_frontmatter(&source, stderr_is_tty).into());
         }
         return Ok(loop_result.final_exit_code);
     }
@@ -744,7 +767,8 @@ fn run_compose_inner(
                 source_repo_root: prep_context.source_repo_root.clone(),
                 shell_working_directory: Some(prep_context.launch_workspace.child_cwd.clone()),
             },
-        )?
+        )
+        .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?
     };
     super::schema_interactive::emit_dropped_optional_warnings(&prepared.dropped_optionals);
     emit_compose_warnings(&prepared.warnings, shared.silent);
@@ -876,6 +900,10 @@ fn run_inline_compose_inner(
         frontmatter_load_t,
     );
 
+    // Captured once for frontmatter-excerpt enrichment of any error rendered
+    // below; gates whether the YAML block is shown (TTY) or withheld (pipe/CI).
+    let stderr_is_tty = std::io::stderr().is_terminal();
+
     // -- Fail-fast: inline-compose / sequence mismatch ----------------------
     //
     // A document authoring both a non-null `prompt` and a non-null `sequence`
@@ -885,14 +913,10 @@ fn run_inline_compose_inner(
     // composition, provider selection, and execution. Detection reads authored
     // frontmatter only; `set_overrides` never participate.
     if composition::is_inline_sequence_mismatch(&source) {
-        let raw_yaml =
-            composition::capture_frontmatter_yaml(&source.original_text).unwrap_or_default();
-        let stderr_is_tty = std::io::stderr().is_terminal();
         return Err(CompositionError::InlineComposeSequenceMismatch {
             source_path: source.resolved_path.clone(),
-            raw_yaml,
-            stderr_is_tty,
         }
+        .enrich_frontmatter(&source, stderr_is_tty)
         .into());
     }
 
@@ -928,7 +952,9 @@ fn run_inline_compose_inner(
     // missing `prompt` produces the right typed error before any schema
     // scrubbing kicks in.
     if !has_prompt {
-        return Err(CompositionError::PromptPropertyMissing.into());
+        return Err(CompositionError::PromptPropertyMissing
+            .enrich_frontmatter(&source, stderr_is_tty)
+            .into());
     }
     if let Some(value) = prompt_value.as_ref()
         && !matches!(value, serde_json::Value::String(_))
@@ -936,6 +962,7 @@ fn run_inline_compose_inner(
         return Err(CompositionError::PromptPropertyWrongType(
             json_type_name(value).to_string(),
         )
+        .enrich_frontmatter(&source, stderr_is_tty)
         .into());
     }
 
@@ -953,7 +980,8 @@ fn run_inline_compose_inner(
             set_overrides.as_ref(),
             interactive_opts,
             &term_for_schema,
-        )?;
+        )
+        .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
         super::schema_interactive::emit_dropped_optional_warnings(&pre.dropped_optionals);
         (pre.source, pre.set_overrides)
     };
@@ -982,7 +1010,8 @@ fn run_inline_compose_inner(
             shared.model.as_deref(),
             shared.dry_run,
             &source.resolved_path,
-        )?
+        )
+        .map_err(|e| enrich_report(e, &source, stderr_is_tty))?
     };
 
     let mut env_overrides: std::collections::BTreeMap<String, String> =
@@ -1216,7 +1245,7 @@ fn run_inline_compose_inner(
                 emit_rate_limit_halt(&error);
                 return Ok(claudine::composition::LOOP_RATE_LIMITED_EXIT_CODE);
             }
-            return Err(error.into());
+            return Err(error.enrich_frontmatter(&source, stderr_is_tty).into());
         }
         return Ok(loop_result.final_exit_code);
     }
@@ -1237,7 +1266,8 @@ fn run_inline_compose_inner(
                 source_repo_root: prep_context.source_repo_root.clone(),
                 shell_working_directory: Some(prep_context.launch_workspace.child_cwd.clone()),
             },
-        )?
+        )
+        .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?
     };
     super::schema_interactive::emit_dropped_optional_warnings(&prepared.dropped_optionals);
     emit_compose_warnings(&prepared.warnings, shared.silent);
