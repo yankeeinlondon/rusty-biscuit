@@ -13,7 +13,7 @@ start:
     message: "👓 starting feature review #{{iteration}} of `{{parent_dir(spec)}}` (_in the **{{ctx.area}}** package area_)"
 success:
     stderr: "Feature review {{iteration}} in the {{ctx.area}} package area has completed"
-    message: "✅  feature review #{{iteration}} for `{{dir}}` in the **{{ctx.current_package_area}}** package area has completed. The review can be found at `{{review-file}}`"
+    message: "✅  feature review #{{iteration}} for `{{dir}}` in the **{{ctx.current_package_area}}** package area has completed. The review can be found at `{{review_file}}`"
     effect: "small-group-cheer"
 failure:
     stderr: "Feature Review {{iteration}} in the {{ctx.area}} package area failed to complete!"
