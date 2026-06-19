@@ -4,6 +4,13 @@ phases: 4
 created: 2026-06-18
 start_phase: 1
 yolo: "true"
+source_files_during_phase_1:
+  - prompts/implement-suggestions.md
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+  - claudine
 ---
 
 # Plan: Expression Engine Errors Must Not Leak Into Lifecycle Messages
@@ -67,19 +74,19 @@ parallelizable with it.
 The offending block is `prompts/implement-suggestions.md:12-20`. Confirmed
 defects:
 
-- [ ] Fix the unmatched paren in `start.message`: `{{ parent_dir(review)) }}`
+- [x] Fix the unmatched paren in `start.message`: `{{ parent_dir(review)) }}`
       → `{{ parent_dir(review) }}` (prompts/implement-suggestions.md:13).
-- [ ] Fix the misspelling in `start.message`: `{{interation}}` →
+- [x] Fix the misspelling in `start.message`: `{{interation}}` →
       `{{iteration}}` (prompts/implement-suggestions.md:13).
-- [ ] Fix the misspelling in `success.message`: `_implemention_` →
+- [x] Fix the misspelling in `success.message`: `_implemention_` →
       `_implementation_` (prompts/implement-suggestions.md:15).
-- [ ] Normalize the bare `{{area}}` references to `{{ctx.area}}` in
+- [x] Normalize the bare `{{area}}` references to `{{ctx.area}}` in
       `start.message`, `success.message`, and `success.say`
       (prompts/implement-suggestions.md:13,15,16). The prompt body already
       uses `{{ctx.area}}` (prompts/implement-suggestions.md:22,32); the
       lifecycle strings must match so the variable resolves from context
       instead of resolving to an empty string.
-- [ ] Resolve the `{{iteration}}` reference. The prompt defines no
+- [x] Resolve the `{{iteration}}` reference. The prompt defines no
       `iteration` frontmatter key and no `ctx.iteration` exists. Either:
       - remove the `(… iteration: {{iteration}})` clause from
         `start.message` if iteration tracking is not part of this prompt's
@@ -89,7 +96,7 @@ defects:
       Prefer removal unless the spec author confirms iteration is meaningful
       here — a missing variable in a lifecycle message is an operational
       status defect, not cosmetic prose.
-- [ ] Re-scan the full lifecycle block (`start`, `success`, `failure`) once
+- [x] Re-scan the full lifecycle block (`start`, `success`, `failure`) once
       the above edits land and confirm no other `{{ … }}` expression has a
       grammar defect or references an undefined bare variable. The
       `title_case(...)` and `without_date(...)` calls in `success.say` /
