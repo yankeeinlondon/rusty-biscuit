@@ -1216,8 +1216,8 @@ fn process_single_table(events: Vec<Event<'_>>) -> Vec<Event<'_>> {
 /// then inserts blank lines based on the mode:
 ///
 /// - **Compact**: no blank lines between list items
-/// - **Normal**: blank lines at indentation level transitions and after
-///   sub-lists return to prose
+/// - **Normal**: blank lines when returning from a sub-list (shallower
+///   transition) or for loose list items, and before prose that follows a list
 /// - **Loose**: blank lines between all list items
 fn normalize_list_spacing(output: &mut String, mode: ListSpacingMode) {
     let lines: Vec<&str> = output.lines().collect();
@@ -1274,9 +1274,9 @@ fn normalize_list_spacing(output: &mut String, mode: ListSpacingMode) {
                     ListSpacingMode::Loose => true,
                     ListSpacingMode::Normal => {
                         if let Some(prev) = prev_item_indent {
-                            // Blank line on indent change OR when the previous item
-                            // had continuation content (loose list items).
-                            indent != prev || had_continuation
+                            // Descents and same-level siblings stay tight; loose items
+                            // and shallower returns keep their separating blank.
+                            indent < prev || had_continuation
                         } else {
                             false
                         }
@@ -2259,6 +2259,17 @@ mod tests {
             "8-space indentation should be preserved, got:\n{}",
             cleaned
         );
+        // Tight nested lists must not gain a spurious blank line before children.
+        assert!(
+            !cleaned.contains("\n\n    - Level 2"),
+            "no blank line before a tight child, got:\n{}",
+            cleaned
+        );
+        assert!(
+            !cleaned.contains("\n\n        - Level 3"),
+            "no blank line before a tight grandchild, got:\n{}",
+            cleaned
+        );
     }
 
     #[test]
@@ -2272,6 +2283,11 @@ mod tests {
             "Default indentation should be 4 spaces, got:\n{}",
             cleaned
         );
+        assert!(
+            !cleaned.contains("\n\n    - Level 2"),
+            "no blank line before a tight child, got:\n{}",
+            cleaned
+        );
     }
 
     #[test]
@@ -2283,6 +2299,21 @@ mod tests {
         assert!(
             cleaned.contains("\n  - Level 2"),
             "2-space indentation should be preserved when explicitly requested, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("\n    - Level 3"),
+            "4-space indentation should be preserved at level 2, got:\n{}",
+            cleaned
+        );
+        assert!(
+            !cleaned.contains("\n\n  - Level 2"),
+            "no blank line before a tight child, got:\n{}",
+            cleaned
+        );
+        assert!(
+            !cleaned.contains("\n\n    - Level 3"),
+            "no blank line before a tight grandchild, got:\n{}",
             cleaned
         );
     }
@@ -2315,6 +2346,16 @@ mod tests {
             "Nested list should use 8-space indentation at level 2, got:\n{}",
             cleaned
         );
+        assert!(
+            !cleaned.contains("\n\n    - Level 2"),
+            "no blank line before a tight child, got:\n{}",
+            cleaned
+        );
+        assert!(
+            !cleaned.contains("\n\n        - Level 3"),
+            "no blank line before a tight grandchild, got:\n{}",
+            cleaned
+        );
     }
 
     #[test]
@@ -2330,6 +2371,16 @@ mod tests {
         assert!(
             cleaned.contains("\n    - Level 3"),
             "Nested list should use 4-space indentation at level 2, got:\n{}",
+            cleaned
+        );
+        assert!(
+            !cleaned.contains("\n\n  - Level 2"),
+            "no blank line before a tight child, got:\n{}",
+            cleaned
+        );
+        assert!(
+            !cleaned.contains("\n\n    - Level 3"),
+            "no blank line before a tight grandchild, got:\n{}",
             cleaned
         );
     }
@@ -2807,24 +2858,33 @@ mod tests {
     }
 
     #[test]
-    fn normal_blank_lines_around_level_transition() {
+    fn normal_descent_into_sublist_is_tight() {
         let input = "\
 1. read the lessons:
    - @docs/knowledge/commits.md
 2. evaluate all the _staged_ files
 ";
         let cleaned = cleanup_content(input);
-        // Blank line before the sub-list (level change 0→indented)
-        // Blank line after the sub-list (level change indented→0)
-        // Note: default indent is 4 spaces
+        // Descending into a tight sub-list must not insert a blank line.
         assert!(
-            cleaned.contains("lessons:\n\n    - @docs"),
-            "Normal: blank line before entering sub-list, got:\n{}",
+            cleaned.contains("lessons:\n    - @docs"),
+            "Normal: tight descent into sub-list stays tight, got:\n{}",
             cleaned
         );
+    }
+
+    #[test]
+    fn normal_return_from_sublist_inserts_blank() {
+        let input = "\
+1. read the lessons:
+   - @docs/knowledge/commits.md
+2. evaluate all the _staged_ files
+";
+        let cleaned = cleanup_content(input);
+        // Returning to the shallower parent level still separates with a blank line.
         assert!(
             cleaned.contains("commits.md\n\n2."),
-            "Normal: blank line after leaving sub-list, got:\n{}",
+            "Normal: blank line when returning from sub-list, got:\n{}",
             cleaned
         );
     }
@@ -2988,6 +3048,115 @@ Some prose after the list.
         assert!(
             cleaned.contains("represented\n\n   If both"),
             "Normal: blank line between sub-list and prose continuation, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn tight_nested_list_stays_tight_after_cleanup() {
+        // Regression test modeled on the incident's `## Closure` section.
+        let input = "\
+## Closure
+
+- Save your review suggestions to \"path.md\"
+- Save the following frontmatter properties on \"path.md\":
+    - based on your review suggestions indicate whether you think this feature is **ready for production**
+    - set the `agent` frontmatter property to \"codex\"
+    - set the `model` frontmatter property as \"gpt-4o\"
+    - set the `created` frontmatter property to \"2026-06-18\"
+
+**Next steps:**
+
+- verify the file
+";
+        let cleaned = cleanup_content(input);
+
+        assert!(
+            cleaned.contains("properties on \"path.md\":\n    - based on"),
+            "tight nested list: parent must be directly followed by child, got:\n{}",
+            cleaned
+        );
+        assert!(
+            !cleaned.contains("properties on \"path.md\":\n\n    - based on"),
+            "tight nested list: no blank line before the first child, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("\n    - set the `agent` frontmatter property"),
+            "nested children must keep the configured 4-space indent, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn tight_siblings_stay_tight() {
+        let input = "\
+- alpha
+- beta
+    - gamma
+    - delta
+";
+        let cleaned = cleanup_content(input);
+
+        assert!(
+            cleaned.contains("- alpha\n- beta\n    - gamma\n    - delta"),
+            "Normal: same-level siblings and descents stay tight, got:\n{}",
+            cleaned
+        );
+        assert!(
+            !cleaned.contains("\n\n- beta"),
+            "Normal: no blank line between same-level siblings, got:\n{}",
+            cleaned
+        );
+        assert!(
+            !cleaned.contains("\n\n    - gamma"),
+            "Normal: no blank line before a tight child, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn closing_a_sublist_inserts_blank() {
+        let input = "\
+- parent:
+    - child
+
+- sibling
+";
+        let cleaned = cleanup_content(input);
+
+        assert!(
+            cleaned.contains("parent:\n    - child"),
+            "Normal: descent into sub-list stays tight, got:\n{}",
+            cleaned
+        );
+        assert!(
+            !cleaned.contains("parent:\n\n    - child"),
+            "Normal: no blank line between parent and child, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("child\n\n- sibling"),
+            "Normal: returning to a shallower level inserts a blank line, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn loose_list_keeps_blank_lines_in_normal_mode() {
+        // Focused guard: loose (continuation) items must still separate with blanks.
+        let input = "\
+- **First**
+
+    Paragraph under first item.
+
+- **Second**
+";
+        let cleaned = cleanup_content(input);
+
+        assert!(
+            cleaned.contains("Paragraph under first item.\n\n- **Second**"),
+            "Normal: loose list items keep their blank-line separator, got:\n{}",
             cleaned
         );
     }

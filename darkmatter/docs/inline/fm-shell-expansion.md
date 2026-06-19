@@ -20,6 +20,7 @@ A top-level frontmatter property whose entire string value matches one of these 
 ```text
 $(<command and args>)
 $(<command and args>)::timeout:<seconds>
+$(<command and args>)::no-cache
 ```
 
 Examples:
@@ -28,6 +29,7 @@ Examples:
 ---
 files: "$(sniff repo dirty-files)"
 cwd: "$(pwd)::timeout:1"
+build_id: "$(uuidgen)::no-cache"
 ---
 ```
 
@@ -36,19 +38,49 @@ cwd: "$(pwd)::timeout:1"
 - The **entire** frontmatter value must be the shell expression -- embedded expressions like `"prefix $(cmd) suffix"` are not supported.
 - Only top-level string-valued frontmatter properties are scanned. Nested objects and array elements are ignored.
 - The optional `::timeout:<N>` suffix overrides the global shell timeout for that specific command. `N` must be a positive integer of seconds.
-- Once a value matches the `$(` shape, malformed syntax is a hard compose error. Invalid timeout suffixes, tokenizer failures, and rejected executable interpolation are not silently ignored.
+- The optional `::no-cache` suffix bypasses the per-compose command cache so the command executes fresh at each occurrence. It combines with `::timeout:<N>` in either order (e.g. `$(uuidgen)::no-cache::timeout:5`).
+- Once a value matches the `$(` shape, malformed syntax is a hard compose error. Invalid timeout suffixes, an unrecognized suffix, tokenizer failures, and rejected executable interpolation are not silently ignored.
 - Closing `)` characters inside quoted arguments are supported, so values like `$(printf ')')` parse correctly.
+
+## Token Resolution
+
+Inside a `$( … )`, the engine and the shell coexist. A token in **executed
+position** (a non-ternary directive body, or a ternary branch) resolves by a
+precedence ladder — quoted/numeric/boolean literal → `name(...)` safe expression
+function → path-bearing executable → bare name on `PATH` (executable) → bare name
+frontmatter property → `null`. `true`/`false` are always booleans, path-bearing
+tokens are always executables, and `doc.<name>` forces a frontmatter-property
+reading even when a same-named executable exists.
+
+A `$()` must resolve to at least one real shell command in executed position
+(for a ternary, at least one branch; the condition never counts). A `$()` that
+is entirely expression content — e.g. `"$( file_exists('x') ? 'a' : 'b' )"` —
+is rejected with a diagnostic suggesting `{{ … }}` instead. Mixed forms such as
+`"$( file_exists('Cargo.toml') ? cargo build : make )"` are fully supported.
+
+See [Token Resolution in `$()` Shell Expressions](../topics/darkmatter-expressions.md#token-resolution-in--shell-expressions)
+for the full ladder, the validity rule, and preflight behavior.
+
+## Remote URLs
+
+The `$()` shell ternary condition/branch shares the same local-filesystem-only
+resolution context as frontmatter interpolation. A remote URL argument passed
+to a read-side function there fails loudly rather than being fetched. Use body
+interpolation for remote reads.
 
 ## Pipeline Placement
 
-Frontmatter Shell Expansion runs in the **Inline Pre** phase, after Frontmatter Interpolation and before EffectiveState construction:
+Frontmatter Shell Expansion runs in the **Inline Pre** phase, bracketed by the
+two frontmatter interpolation passes and before EffectiveState construction:
 
 1. Merge external/inherited state
 2. Apply `--set` overrides
-3. **Frontmatter Interpolation** -- resolve `{{ }}` expressions
-4. **Frontmatter Shell Expansion** -- execute `$(cmd)` expressions
-5. Build EffectiveState
-6. Body operations continue...
+3. **Frontmatter Interpolation (pass 1)** -- resolve `{{ }}` expressions; defer keys that reference a whole-value `$(...)`
+4. **Schema Validation** -- validate/coerce frontmatter against `$schema` (values still holding `$(...)` are deferred)
+5. **Frontmatter Shell Expansion** -- execute `$(cmd)` expressions
+6. **Frontmatter Interpolation (pass 2)** -- resolve the keys deferred in pass 1 against the now-concrete shell-expanded values
+7. Build EffectiveState
+8. Body operations continue...
 
 Because interpolation runs first, shell commands can use interpolated values as arguments:
 

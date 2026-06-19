@@ -25,6 +25,27 @@ fn map_compose_error(source_path: &std::path::Path, err: MarkdownError) -> Compo
     }
 }
 
+/// Bind the agent's workspace onto compose options: the source file (for
+/// `::file` transclusion and diagnostic spans) and, when known, the directory
+/// the dispatched agent will run in.
+///
+/// Without `shell_cwd`, Darkmatter defaults `::shell` execution to the source
+/// file's parent directory — wrong for `@`-resolved prompts that physically
+/// live under `~/.claudine/prompts/` but reason about the repo the agent runs
+/// in. Pinning the working directory keeps compose-time shell and the agent on
+/// the same root.
+pub fn bind_agent_workspace(
+    opts: ComposeOptions,
+    source_path: &Path,
+    shell_cwd: Option<&Path>,
+) -> ComposeOptions {
+    let opts = opts.with_source_file(source_path);
+    match shell_cwd {
+        Some(cwd) => opts.with_shell_working_directory(cwd),
+        None => opts,
+    }
+}
+
 /// Options for composition preparation.
 #[derive(Debug, Default, Clone)]
 pub struct PrepareOptions {
@@ -46,6 +67,15 @@ pub struct PrepareOptions {
     /// (`find_git_root_from_path`) preserves the original behavior for
     /// library-only callers and tests.
     pub source_repo_root: Option<PathBuf>,
+    /// Directory the dispatched agent will run in.
+    ///
+    /// When `Some`, `::shell` directives execute here instead of the prompt
+    /// file's parent, keeping compose-time shell expansion and the agent on
+    /// one working directory. CLI callers populate this from
+    /// `CompositionPrepContext::launch_workspace.child_cwd`. `None` (the
+    /// default) preserves Darkmatter's source-relative fallback for
+    /// library-only callers and tests.
+    pub shell_working_directory: Option<PathBuf>,
 }
 
 /// Walk up from a file path to find the nearest `.git` directory.
@@ -62,7 +92,10 @@ fn find_git_root_from_path(path: &Path) -> Option<PathBuf> {
 
 use super::error::CompositionError;
 use super::guardrails::load_or_create_guardrails;
-use super::lifecycle::parse_lifecycle_config;
+use super::lifecycle::{
+    parse_lifecycle_config, validate_no_interpolation_leaks,
+    validate_no_undefined_lifecycle_variables,
+};
 use super::types::{
     AgentHint, CompositionClosurePlan, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
     ModelHint, PreparedComposition, ResolvedCompositionSource,
@@ -82,9 +115,12 @@ pub fn prepare_direct(
     for (key, value) in &options.env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
     }
-    let mut compose_opts = ComposeOptions::new_with_context(ctx)
-        .with_source_file(&source.resolved_path)
-        .with_perf(options.perf_enabled);
+    let mut compose_opts = bind_agent_workspace(
+        ComposeOptions::new_with_context(ctx),
+        &source.resolved_path,
+        options.shell_working_directory.as_deref(),
+    )
+    .with_perf(options.perf_enabled);
     if let Some(overrides) = options.set_overrides {
         compose_opts = compose_opts.with_set_overrides(overrides);
     }
@@ -117,13 +153,25 @@ pub fn prepare_direct(
         .as_map()
         .get("model")
         .map_or(Ok(None), parse_model_hint)?;
+    let interactive_hint = composed
+        .frontmatter()
+        .as_map()
+        .get("interactive")
+        .map_or(Ok(None), parse_interactive_hint)?;
     let selection_hints = EffectiveSelectionHints {
         agent: agent_hint,
         model: model_hint,
+        interactive: interactive_hint,
         agent_invalid: agent_full.invalid,
         agent_was_list: agent_full.is_list,
     };
     let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
+    validate_no_interpolation_leaks(&lifecycle, &source.resolved_path, &report.warnings)?;
+    validate_no_undefined_lifecycle_variables(
+        source.markdown.frontmatter(),
+        &effective_frontmatter,
+        &source.resolved_path,
+    )?;
 
     let source_repo_root = options
         .source_repo_root
@@ -140,6 +188,7 @@ pub fn prepare_direct(
         lifecycle,
         compose_perf: report.perf,
         dropped_optionals: Vec::new(),
+        warnings: report.warnings.clone(),
     })
 }
 
@@ -175,9 +224,12 @@ pub fn prepare_inline(
     for (key, value) in &options.env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
     }
-    let mut compose_opts = ComposeOptions::new_with_context(ctx)
-        .with_source_file(&source.resolved_path)
-        .with_perf(options.perf_enabled);
+    let mut compose_opts = bind_agent_workspace(
+        ComposeOptions::new_with_context(ctx),
+        &source.resolved_path,
+        options.shell_working_directory.as_deref(),
+    )
+    .with_perf(options.perf_enabled);
     if let Some(overrides) = options.set_overrides {
         compose_opts = compose_opts.with_set_overrides(overrides);
     }
@@ -200,13 +252,25 @@ pub fn prepare_inline(
         .as_map()
         .get("model")
         .map_or(Ok(None), parse_model_hint)?;
+    let interactive_hint = composed
+        .frontmatter()
+        .as_map()
+        .get("interactive")
+        .map_or(Ok(None), parse_interactive_hint)?;
     let selection_hints = EffectiveSelectionHints {
         agent: agent_hint,
         model: model_hint,
+        interactive: interactive_hint,
         agent_invalid: agent_full.invalid,
         agent_was_list: agent_full.is_list,
     };
     let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
+    validate_no_interpolation_leaks(&lifecycle, &source.resolved_path, &report.warnings)?;
+    validate_no_undefined_lifecycle_variables(
+        source.markdown.frontmatter(),
+        &effective_frontmatter,
+        &source.resolved_path,
+    )?;
 
     let mut prompt = composed.content().to_string();
     if prompt.trim().is_empty() {
@@ -243,6 +307,7 @@ pub fn prepare_inline(
         lifecycle,
         compose_perf: report.perf,
         dropped_optionals: Vec::new(),
+        warnings: report.warnings.clone(),
     })
 }
 
@@ -278,9 +343,13 @@ pub fn parse_selection_hints_from_frontmatter(
         .map_or(Ok(ParsedAgentHint::default()), parse_agent_hint_full)?;
     let agent = agent_full.to_agent_hint();
     let model = map.get("model").map_or(Ok(None), parse_model_hint)?;
+    let interactive = map
+        .get("interactive")
+        .map_or(Ok(None), parse_interactive_hint)?;
     Ok(EffectiveSelectionHints {
         agent,
         model,
+        interactive,
         agent_invalid: agent_full.invalid,
         agent_was_list: agent_full.is_list,
     })
@@ -385,6 +454,22 @@ fn parse_model_hint(value: &serde_json::Value) -> Result<Option<ModelHint>, Comp
         }
         serde_json::Value::Null => Ok(None),
         other => Err(CompositionError::ModelHintWrongType(
+            json_type_name(other).to_string(),
+        )),
+    }
+}
+
+/// Parse the `interactive` frontmatter value into an optional boolean.
+///
+/// Accepts `true`, `false`, or `null` (treated as absent). Anything else
+/// is a typed error naming the offending JSON type.
+pub fn parse_interactive_hint(
+    value: &serde_json::Value,
+) -> Result<Option<bool>, CompositionError> {
+    match value {
+        serde_json::Value::Bool(b) => Ok(Some(*b)),
+        serde_json::Value::Null => Ok(None),
+        other => Err(CompositionError::InteractiveHintWrongType(
             json_type_name(other).to_string(),
         )),
     }
@@ -549,6 +634,40 @@ mod tests {
         assert!(prepared.lifecycle.failure.is_none());
     }
 
+    /// Regression: Darkmatter's `normalize_list_spacing` used to insert a
+    /// blank line between a tight parent list item and the first child of a
+    /// nested unordered list. That blank line was mis-rendered as an indented
+    /// code block by downstream renderers, corrupting prompts like the
+    /// `## Closure` section of `prompts/review-feature.md`.
+    #[test]
+    fn direct_composition_preserves_tight_nested_list() {
+        let dir = TempDir::new().unwrap();
+        let body = r#"## Closure
+
+- Save your review suggestions to a file
+- Save the following frontmatter properties on "review.md":
+    - based on your review suggestions indicate whether you think this feature is **ready for production**
+    - set the `agent` frontmatter property to claude
+    - set the `model` frontmatter property to some-model
+    - set the `created` frontmatter property to today
+
+**bold:**
+"#;
+        let source = make_source(&dir, &[("title", json!("Test"))], body);
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert!(
+            prepared.prompt.contains("properties on \"review.md\":\n    - based on"),
+            "parent item must be immediately followed by its first child; got:\n{}",
+            prepared.prompt
+        );
+        assert!(
+            !prepared.prompt.contains("properties on \"review.md\":\n\n    - "),
+            "tight nested list must not gain a blank line between parent and child; got:\n{}",
+            prepared.prompt
+        );
+    }
+
     #[test]
     fn inline_composition_parses_lifecycle_config() {
         let dir = TempDir::new().unwrap();
@@ -580,6 +699,210 @@ mod tests {
 
         let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
         assert!(matches!(err, CompositionError::LifecycleSayConflict(_)));
+    }
+
+    #[test]
+    fn malformed_lifecycle_interpolation_fails_preparation() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("title", json!("Test")),
+                ("start", json!({"message": "{{ parent_dir(review)) }}"})),
+            ],
+            "Content",
+        );
+
+        let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+        match err {
+            CompositionError::LifecycleInterpolationLeak {
+                property,
+                expression,
+                ..
+            } => {
+                assert_eq!(property, "start.message");
+                assert!(expression.contains("parent_dir(review))"));
+            }
+            other => panic!("expected LifecycleInterpolationLeak, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn undefined_lifecycle_variable_fails_preparation() {
+        // Regression: a bare `{{ missing_lifecycle_var }}` resolves to an empty
+        // string during composition with no Darkmatter warning, so the
+        // post-compose leak guard never sees it. Preparation must still fail
+        // before the message becomes eligible for lifecycle dispatch.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("title", json!("Test")),
+                (
+                    "start",
+                    json!({"message": "before {{ missing_lifecycle_var }} after"}),
+                ),
+            ],
+            "Content",
+        );
+
+        let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+        match err {
+            CompositionError::LifecycleUndefinedVariable {
+                property, variable, ..
+            } => {
+                assert_eq!(property, "start.message");
+                assert_eq!(variable, "missing_lifecycle_var");
+            }
+            other => panic!("expected LifecycleUndefinedVariable, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lifecycle_variable_defined_in_frontmatter_passes_preparation() {
+        // A bare variable that names a real frontmatter key is defined, so it
+        // must not trip the undefined-variable guard.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("area", json!("claudine")),
+                ("start", json!({"message": "working on {{ area }}"})),
+            ],
+            "Content",
+        );
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        let message = prepared
+            .lifecycle
+            .start
+            .as_ref()
+            .unwrap()
+            .message
+            .as_ref()
+            .unwrap();
+        assert_eq!(message, "working on claudine");
+    }
+
+    #[test]
+    fn lifecycle_fallback_for_undefined_variable_passes_preparation() {
+        // Fallback (`{{ x || 'y' }}`) intentionally tolerates an undefined
+        // operand, so the guard must leave it alone.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[(
+                "start",
+                json!({"message": "{{ missing_lifecycle_var || 'default' }}"}),
+            )],
+            "Content",
+        );
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        let message = prepared
+            .lifecycle
+            .start
+            .as_ref()
+            .unwrap()
+            .message
+            .as_ref()
+            .unwrap();
+        assert_eq!(message, "default");
+    }
+
+    #[test]
+    fn clean_lifecycle_interpolation_passes_preparation() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("title", json!("Test")),
+                ("start", json!({"message": "{{ ctx.today }}"})),
+            ],
+            "Content",
+        );
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        let start = prepared.lifecycle.start.as_ref().unwrap();
+        let message = start.message.as_ref().unwrap();
+        assert!(!message.contains("{{"));
+        assert!(!message.contains("}}"));
+    }
+
+    #[test]
+    fn lifecycle_leak_reported_for_first_field_in_deterministic_order() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("title", json!("Test")),
+                ("start", json!({"message": "{{ parent_dir(review)) }}"})),
+                ("failure", json!({"say": "{{ broken( }}"})),
+            ],
+            "Content",
+        );
+
+        let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+        match err {
+            CompositionError::LifecycleInterpolationLeak { property, .. } => {
+                assert_eq!(property, "start.message");
+            }
+            other => panic!("expected LifecycleInterpolationLeak, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn implement_suggestions_prompt_composes_without_lifecycle_leak() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let prompt_path = manifest_dir.join("../../prompts/implement-suggestions.md");
+        let original_text = fs::read_to_string(&prompt_path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", prompt_path.display()));
+        let markdown: Markdown = original_text.clone().into();
+        let source = ResolvedCompositionSource {
+            original_ref: prompt_path.to_str().unwrap().to_string(),
+            resolved_path: prompt_path.clone(),
+            original_text,
+            markdown,
+        };
+
+        let dir = TempDir::new().unwrap();
+        let review_file = dir.path().join("review.md");
+        fs::write(&review_file, "# Review\n").unwrap();
+
+        let options = PrepareOptions {
+            set_overrides: Some(json!({ "review": review_file.to_str().unwrap() })),
+            ..Default::default()
+        };
+
+        let prepared = prepare_direct(&source, options).unwrap();
+        let notifications = [
+            prepared.lifecycle.start.as_ref(),
+            prepared.lifecycle.success.as_ref(),
+            prepared.lifecycle.blocked.as_ref(),
+            prepared.lifecycle.failure.as_ref(),
+        ];
+
+        for notification in notifications.into_iter().flatten() {
+            for text in [
+                notification.say.as_deref(),
+                notification.say_first.as_deref(),
+                notification.message.as_deref(),
+                notification.stderr.as_deref(),
+                notification.notify.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                assert!(
+                    !text.contains("{{"),
+                    "lifecycle string contains unresolved '{{': {text}"
+                );
+                assert!(
+                    !text.contains("}}"),
+                    "lifecycle string contains unresolved '}}': {text}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -876,18 +1199,117 @@ mod tests {
         assert_eq!(provided_overrides, vec!["spec".to_string()]);
     }
 
+    /// Regression: a `@`-resolved prompt physically lives outside the repo
+    /// it reasons about (e.g. `~/.claudine/prompts/commit.md`). With
+    /// `shell_working_directory` set, `::shell` directives must run there,
+    /// not next to the template file — otherwise `sniff repo packages` and
+    /// friends execute in the wrong repo.
     #[test]
-    fn direct_composition_empty_body_without_overrides() {
+    fn direct_composition_runs_shell_in_configured_working_directory() {
+        let source_dir = TempDir::new().unwrap();
+        let work_dir = TempDir::new().unwrap();
+        let source = make_source(&source_dir, &[("title", json!("T"))], "::shell pwd\n");
+
+        let mut approved = std::collections::HashSet::new();
+        approved.insert("pwd".to_string());
+        let options = PrepareOptions {
+            pre_approved_commands: Some(approved),
+            shell_working_directory: Some(work_dir.path().to_path_buf()),
+            ..Default::default()
+        };
+
+        let prepared = prepare_direct(&source, options).unwrap();
+        // `pwd` reports the physical path, so compare against canonicalized
+        // temp dirs (macOS routes `/var` through a `/private` symlink).
+        let work_canon = std::fs::canonicalize(work_dir.path()).unwrap();
+        let source_canon = std::fs::canonicalize(source_dir.path()).unwrap();
+        assert!(
+            prepared.prompt.contains(work_canon.to_str().unwrap()),
+            "expected shell to run in work_dir; got: {}",
+            prepared.prompt
+        );
+        assert!(
+            !prepared.prompt.contains(source_canon.to_str().unwrap()),
+            "shell must not run in the prompt's parent dir; got: {}",
+            prepared.prompt
+        );
+    }
+
+    /// Documents the library default: with no `shell_working_directory`,
+    /// Darkmatter's source-relative fallback runs `::shell` in the prompt
+    /// file's parent directory.
+    #[test]
+    fn parse_interactive_hint_accepts_true_false_and_null() {
+        assert_eq!(parse_interactive_hint(&json!(true)).unwrap(), Some(true));
+        assert_eq!(parse_interactive_hint(&json!(false)).unwrap(), Some(false));
+        assert_eq!(parse_interactive_hint(&json!(null)).unwrap(), None);
+    }
+
+    #[test]
+    fn parse_interactive_hint_rejects_non_booleans() {
+        for value in [
+            json!("true"),
+            json!(42),
+            json!([true]),
+            json!({"interactive": true}),
+        ] {
+            let err = parse_interactive_hint(&value).unwrap_err();
+            match err {
+                CompositionError::InteractiveHintWrongType(found) => {
+                    assert_eq!(found, json_type_name(&value));
+                }
+                other => panic!("expected InteractiveHintWrongType for {value}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn direct_composition_parses_interactive_hint() {
         let dir = TempDir::new().unwrap();
-        let source = make_source(&dir, &[("title", json!("Test"))], "");
+        let source = make_source(&dir, &[("interactive", json!(true))], "Content");
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert_eq!(prepared.selection_hints.interactive, Some(true));
+    }
+
+    #[test]
+    fn direct_composition_interactive_null_is_absent() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("interactive", json!(null))], "Content");
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert_eq!(prepared.selection_hints.interactive, None);
+    }
+
+    #[test]
+    fn direct_composition_interactive_wrong_type_errors() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("interactive", json!("yes"))], "Content");
 
         let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
-        let CompositionError::ComposedBodyEmpty {
-            provided_overrides, ..
-        } = err
-        else {
-            panic!("expected ComposedBodyEmpty");
-        };
-        assert!(provided_overrides.is_empty());
+        assert!(matches!(err, CompositionError::InteractiveHintWrongType(_)));
+    }
+
+    #[test]
+    fn inline_composition_parses_interactive_hint() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[("prompt", json!("Write something")), ("interactive", json!(false))],
+            "Old content",
+        );
+
+        let prepared = prepare_inline(&source, PrepareOptions::default()).unwrap();
+        assert_eq!(prepared.selection_hints.interactive, Some(false));
+    }
+
+    #[test]
+    fn parse_selection_hints_from_frontmatter_reads_interactive() {
+        let mut fm = Frontmatter::new();
+        fm.insert("interactive", json!(true)).unwrap();
+        let md = Markdown::with_frontmatter(fm, "Content");
+
+        let hints = parse_selection_hints_from_frontmatter(md.frontmatter()).unwrap();
+        assert_eq!(hints.interactive, Some(true));
     }
 }

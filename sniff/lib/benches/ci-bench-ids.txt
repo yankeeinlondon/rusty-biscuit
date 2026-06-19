@@ -7,6 +7,8 @@ network/interfaces_only
 git_ops/discover
 git_ops/status_dirty_flag/100
 git_ops/status_file_changes/100
+git_ops/request_levels/identity
+git_ops/request_levels/summary
 git_ops/config_read
 git_ops/revwalk_recent_gated/nograph
 git_ops/worktree_fanout/4

@@ -14,6 +14,55 @@ use crate::Result;
 
 use super::types::*;
 
+/// Test-only registry recording every working-tree status walk, keyed by the
+/// walked repository's working directory.
+///
+/// Used by unit tests to prove that [`GitRequest::identity()`] never triggers a
+/// status walk. Keying by repo path (rather than a single global counter) keeps
+/// each test isolated even under `cargo test`, which runs the whole binary's
+/// tests concurrently in one process: every test uses its own temp repo, so a
+/// concurrent test's walk lands under a different key and is never counted by
+/// [`status_walk_count`]. Walks are also recorded regardless of which thread
+/// performs them, so plan-level proofs (whose git stage runs on a scoped
+/// thread) work without any cross-thread counter propagation.
+#[cfg(test)]
+mod walk_probe {
+    use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
+
+    static WALKS: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+    fn key_for(repo: &gix::Repository) -> PathBuf {
+        let raw = repo
+            .workdir()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| repo.git_dir().to_path_buf());
+        raw.canonicalize().unwrap_or(raw)
+    }
+
+    /// Record a status walk against `repo`'s working directory.
+    pub(crate) fn record(repo: &gix::Repository) {
+        if let Ok(mut walks) = WALKS.lock() {
+            walks.push(key_for(repo));
+        }
+    }
+
+    /// Number of status walks recorded so far for the repository at `root`.
+    ///
+    /// Tests measure a before/after delta on their own repo path rather than
+    /// resetting a shared counter, so concurrent tests cannot perturb the count.
+    pub(crate) fn count_under(root: &Path) -> usize {
+        let target = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        WALKS
+            .lock()
+            .map(|walks| walks.iter().filter(|p| **p == target).count())
+            .unwrap_or(0)
+    }
+}
+
+#[cfg(test)]
+pub(crate) use walk_probe::count_under as status_walk_count;
+
 /// Per-file line stats accumulated from a diff.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct LineStats {
@@ -59,6 +108,8 @@ pub(crate) fn get_repo_status_with_changes(
     repo: &gix::Repository,
     include_diffs: bool,
 ) -> Result<(RepoStatus, Vec<FileChange>)> {
+    #[cfg(test)]
+    walk_probe::record(repo);
     use gix::bstr::{BString, ByteSlice};
     let workdir = repo.workdir().map(Path::to_path_buf);
 
@@ -864,6 +915,8 @@ pub(crate) fn get_repo_status_counts(repo: &gix::Repository) -> crate::Result<(b
 /// untracked-inclusive dirty definition, unlike gix's tracked-only
 /// [`gix::Repository::is_dirty`] (which disables the directory walk).
 pub(crate) fn is_repo_dirty(repo: &gix::Repository) -> Result<bool> {
+    #[cfg(test)]
+    walk_probe::record(repo);
     let platform = repo
         .status(gix::progress::Discard)
         .map_err(|e| crate::SniffError::git("status", e))?
@@ -903,6 +956,8 @@ pub(crate) fn is_repo_dirty(repo: &gix::Repository) -> Result<bool> {
 pub(crate) fn get_repo_status_counts_detailed(
     repo: &gix::Repository,
 ) -> Result<(bool, usize, usize, usize)> {
+    #[cfg(test)]
+    walk_probe::record(repo);
     let mut staged = 0usize;
     let mut unstaged = 0usize;
     let mut untracked = 0usize;

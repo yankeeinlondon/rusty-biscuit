@@ -1,10 +1,18 @@
 ---
-area: "{{ctx.current_package_area}}"
+area: "{{ctx.area}}"
+review_file: "{{ctx.area}}"
+start: 
+    message: "👓 starting a comprehensive review of the **{{ctx.area}}** package area"
+success:
+    message: "✅ the comprehensive review for **{{ctx.area}}** completed: ``"
+
+failure:
+    message: "💥 the comprehensive review in {{ctx.area}} did not finish successfully!"
 ---
 
 You are performing a **senior-level Rust code review** on the **{{area}}** package area which has the following package in it:
 
-::shell sniff repo package --package-area {{area}}
+::shell sniff repo packages --package-area {{area}}
 
 
 Your job is to produce a review that is:

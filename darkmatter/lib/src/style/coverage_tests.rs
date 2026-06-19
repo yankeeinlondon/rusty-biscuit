@@ -238,7 +238,8 @@ fn descriptor_entry_count_matches_expected() {
         // hyperlinks: 5 outer + 5 local-style = 10
         // images: 5 outer + 5 local-style = 10
         // hr: 7
-        16 + 5 + 5 + 5 + 5 + 6 + 10 + 10 + 7;
+        // disclosure: 5
+        16 + 5 + 5 + 5 + 5 + 6 + 10 + 10 + 7 + 5;
     assert_eq!(
         SCHEMA.len(),
         EXPECTED,
@@ -279,6 +280,41 @@ fn active_wiring_warnings_for_hr_keys() {
         assert!(
             !inactive.iter().any(|w| w.path == path),
             "wired hr key `{}` should not produce KnownButInactive, got: {:?}",
+            path,
+            inactive
+        );
+    }
+}
+
+/// Test: all wired disclosure keys produce no `KnownButInactive` warnings.
+#[test]
+fn active_wiring_warnings_for_disclosure_keys() {
+    let v = json!({
+        "disclosure": {
+            "width": "40ch",
+            "max-width": "50%",
+            "alignment": "left",
+            "color": "red-500",
+            "bg-color": "blue-500"
+        }
+    });
+    let (_parsed, warnings) = from_json_value(&v).unwrap();
+
+    let inactive: Vec<&StyleWarning> = warnings
+        .iter()
+        .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
+        .collect();
+
+    for path in [
+        "style.disclosure.width",
+        "style.disclosure.max-width",
+        "style.disclosure.alignment",
+        "style.disclosure.color",
+        "style.disclosure.bg-color",
+    ] {
+        assert!(
+            !inactive.iter().any(|w| w.path == path),
+            "wired disclosure key `{}` should not produce KnownButInactive, got: {:?}",
             path,
             inactive
         );

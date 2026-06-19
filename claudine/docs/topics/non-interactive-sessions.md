@@ -5,7 +5,9 @@ Claudine wraps agentic CLIs in both interactive and non-interactive modes. Non-i
 A session becomes non-interactive when:
 
 - A prompt is provided (positional argument, stdin, or composition file)
-- `claudine compose` or `claudine inline-compose` is used (always non-interactive)
+- `claudine compose` or `claudine inline-compose` is used and the resolved session mode is non-interactive (the default — see below)
+
+`compose` and `inline-compose` default to non-interactive but can be switched to an interactive provider session by `-i` / `--interactive` or an `interactive: true` frontmatter property (resolution precedence: `--no-interactive` > `--interactive` > frontmatter > default). `claudine sequence` is always non-interactive automation and rejects `interactive: true` frontmatter. See [Composition — The `--interactive` and `--no-interactive` Flags](composition.md#the---interactive-and---no-interactive-flags).
 
 ## Information Density Contract
 
@@ -373,7 +375,7 @@ Gemini replays the operator's own prompt back into the stream as a `message` eve
 
 **Inline compose** (`claudine inline-compose <file-ref>`) — extracts the `prompt` frontmatter property, composes it, sends to the provider, then atomically replaces the document body with the provider's response. The original frontmatter is preserved and `last_updated` is set.
 
-Both commands flow through the same unified pipeline ([`execute_without_harness`](../../cli/src/commands/wrap/composition.rs) parameterized by `CompositionExecutionMode::{Direct, Inline}`), share one structured-stream helper (`run_structured_composition`), and share one summary emitter (`emit_composition_summary`) with a `defer_section_separator` flag that selects between immediate emission (compose) and post-closure deferred emission (inline-compose).
+Both commands flow through the same unified pipeline: `execute_composition_request` builds a `HarnessPromptState` and calls `run_harness_loop()` with `HarnessPromptMode::Compose` for direct compose or `HarnessPromptMode::Inline` for inline compose. The loop re-parses the harness plan each attempt; bare documents (no harness frontmatter) yield the empty plan. The loop handles structured streaming, captured/non-structured fallback, summary emission, and inline closure through a single code path.
 
 ## Harness System
 
@@ -433,8 +435,11 @@ the provider runs in structured-stream mode. Capture-mode and passthrough
 runs (notably Goose) emit a warning and ignore the field.
 
 **Interactive restriction.** Both `--timeout` and `--step-timeout` are
-restricted to non-interactive mode — using either with `--interactive` is a
-hard error.
+restricted to non-interactive mode — combining either with a session that
+resolves to interactive (via `--interactive` or `interactive: true`
+frontmatter) is a hard error. The conflict is checked against the resolved
+session mode, and the diagnostic names the source (`--interactive` vs
+`frontmatter`).
 
 **CLI precedence.** CLI flags override frontmatter. On `compose`,
 `inline-compose`, and `sequence`, the `--step-timeout DURATION` flag uses

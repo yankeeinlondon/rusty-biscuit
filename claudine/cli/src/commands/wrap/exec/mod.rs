@@ -1,4 +1,5 @@
 use std::io::{IsTerminal, Write};
+use std::path::Path;
 use std::process::Child;
 use std::sync::Arc;
 use std::thread;
@@ -7,6 +8,7 @@ use std::time::{Duration, Instant};
 use biscuit_terminal::terminal::Terminal;
 use claudine::stream::parser::{SemanticStreamParser, StreamParseError};
 use claudine::stream::summary::StreamExecutionSummary;
+use color_eyre::eyre::Result;
 
 pub(crate) mod exit;
 pub(crate) mod spawn;
@@ -17,8 +19,35 @@ pub(crate) mod timeouts;
 pub(crate) mod watchdog;
 pub(crate) mod wiring;
 
-pub(crate) use exit::{exit_code_from_status, resolve_first_response};
+pub(crate) use exit::{cleanup_mcp_injection, exit_code_from_status, resolve_first_response};
 pub(crate) use spawn::{run_child, run_child_capture, run_child_stream_semantic};
+
+/// Switch the wrapper process cwd to the child's cwd and sync `PWD`.
+///
+/// Rust's `set_current_dir` calls `chdir(2)` but does NOT touch the
+/// `PWD` environment variable — the shell convention is that `PWD`
+/// tracks "where the user thinks they are", which can differ from
+/// `getcwd(3)`. Several downstream tools (notably OpenCode's
+/// `run.ts:276` resolving `process.env.PWD ?? process.cwd()`) trust
+/// `PWD` over the real cwd. If we don't sync them, the spawned
+/// child inherits the user's pre-chdir `PWD` (e.g. a package
+/// subdirectory the user ran `just commit` from) and resolves paths
+/// against the wrong root.
+///
+/// # Safety
+///
+/// Single-threaded wrapper startup; no other thread reads or writes
+/// `PWD` concurrently with this call.
+pub(crate) fn switch_process_cwd(child_cwd: &Path) -> Result<()> {
+    let current = std::env::current_dir()?;
+    if current != child_cwd {
+        std::env::set_current_dir(child_cwd)?;
+    }
+    unsafe {
+        std::env::set_var("PWD", child_cwd.as_os_str());
+    }
+    Ok(())
+}
 
 pub(crate) struct ChildIoOptions<'a> {
     pub(crate) stdout_noise_prefixes: &'a [&'a str],

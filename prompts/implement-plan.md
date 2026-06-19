@@ -4,21 +4,24 @@ $schema:
     total_phases: number(required)
     plan: file(required)
     spec: file
-phase: 1
-dir: "$(dirname '{{plan}}')"
+    spec_file: file
+phase: "{{ frontmatter(plan, 'start_phase') || 1 }}"
+dirname: "{{ dirname(plan) }}"
 # spec: "{{ frontmatter( }}"
-area: "{{ctx.current_package_area == 'root' ? ctx.current_package || '' : ctx.current_package_area}}"
+area: "{{ ctx.area }}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
+total_phases: "{{ frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') }}"
+spec_file: "{{ file_exists(spec) ? spec : file_exists(join(dirname, 'spec.md')) ? join(dirname, 'spec.md')  :  '' }}"
 start:
-    message: "🎬  starting the implementation of phase **#{{phase}}** of `{{ctx.current_package_area}}/{{plan}}`"
+    message: "🎬  starting the implementation of phase **#{{phase}}** of `{{parent_dir(plan)}}` in **{{ctx.area}}**"
 success: 
     say: "Phase {{phase}} of the plan in the {{area}} package area, was implemented successfully"
-    message: "{{pass_icon}} phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{area}}/{{plan}}` successfully completed"
+    message: "{{pass_icon}} phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed"
 blocked:
     message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved!"
 failure:
     say: "Phase {{phase}} of a plan in the {{area}} package area, ran into problems!"
-    message: "❌️  phase {{phase}} (_of {{total_phases}}_) failed in the plan `{{area}}/{{plan}}`"
+    message: "❌️  phase {{phase}} (_of {{total_phases}}_) failed in the plan `{{parent_dir(plan)}}`"
 loop:
     until: "phase > total_phases"
     action: "increment(phase)"
@@ -34,6 +37,10 @@ Your task is to implement phase {{phase}} of the plan found in '@{{area}}/{{plan
 
 ::block when="memory"
 > **NOTE:** for context you should read the lessons learned discovered in earlier stages of this plan. You will find these lessons learned in memory/{{memory}}.md. 
+::end-block
+
+::block when="spec_file"
+> **NOTE:** this plan is based on the specification file: {{spec_file}}
 ::end-block
 
 You are done when:

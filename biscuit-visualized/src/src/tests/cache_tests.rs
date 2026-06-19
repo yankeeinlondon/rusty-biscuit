@@ -1,8 +1,18 @@
-use serial_test::serial;
+use tempfile::TempDir;
 
 use crate::artifact::OutputFormat;
 use crate::cache::file_cache::{FileCache, MERMAID_BACKEND};
 use crate::cache::VisualizationKind;
+
+/// Builds a cache rooted at a fresh temp directory.
+///
+/// The returned [`TempDir`] must be kept alive for the cache's lifetime;
+/// dropping it deletes the backing directory.
+fn isolated_cache() -> (FileCache, TempDir) {
+    let dir = TempDir::new().expect("Failed to create temp dir");
+    let cache = FileCache::with_base_dir(dir.path().join("v1"));
+    (cache, dir)
+}
 
 #[test]
 fn cache_key_stability() {
@@ -113,9 +123,8 @@ fn cache_key_different_kind() {
 }
 
 #[test]
-#[serial]
 fn cache_roundtrip() {
-    let cache = FileCache::new();
+    let (cache, _dir) = isolated_cache();
     let data = b"test data";
 
     let key = FileCache::cache_key(
@@ -150,9 +159,8 @@ fn cache_roundtrip() {
 }
 
 #[test]
-#[serial]
 fn cache_directory_layout() {
-    let cache = FileCache::new();
+    let (cache, _dir) = isolated_cache();
     let data = b"test";
 
     let key = FileCache::cache_key(
@@ -184,12 +192,8 @@ fn cache_directory_layout() {
 }
 
 #[test]
-#[serial]
 fn cache_entry_count() {
-    let cache = FileCache::new();
-
-    // Clear cache first
-    cache.clear().expect("Failed to clear cache");
+    let (cache, _dir) = isolated_cache();
 
     let initial_count = cache.entry_count();
     assert_eq!(initial_count, 0, "Cache should be empty after clear");
@@ -232,10 +236,8 @@ fn cache_entry_count() {
 }
 
 #[test]
-#[serial]
 fn cache_size_bytes() {
-    let cache = FileCache::new();
-    cache.clear().expect("Failed to clear cache");
+    let (cache, _dir) = isolated_cache();
 
     let initial_size = cache.size_bytes();
     assert_eq!(initial_size, 0, "Cache should be empty after clear");
@@ -262,9 +264,8 @@ fn cache_size_bytes() {
 }
 
 #[test]
-#[serial]
 fn cache_clear() {
-    let cache = FileCache::new();
+    let (cache, _dir) = isolated_cache();
 
     // Store some data
     let key = FileCache::cache_key(
@@ -292,9 +293,8 @@ fn cache_clear() {
 }
 
 #[test]
-#[serial]
 fn cache_get_nonexistent() {
-    let cache = FileCache::new();
+    let (cache, _dir) = isolated_cache();
 
     let result = cache.get(
         VisualizationKind::Mermaid,

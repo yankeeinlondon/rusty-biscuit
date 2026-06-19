@@ -9,5 +9,6 @@ expression: out
 ┃ Image parsing failed here:
 ┃ 
 ┃ ```md
+┃ ```
 ┃ 
 ┃ Use the pattern !alt with balanced brackets.

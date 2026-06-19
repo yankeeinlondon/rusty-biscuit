@@ -1,0 +1,19 @@
+{
+  "file": "prologue.md",
+  "references": [],
+  "source": "/tmp/dm-baseline/prologue.md",
+  "transclusions": [
+    {
+      "followable": true,
+      "kind": "prologue",
+      "line": 0,
+      "node": {
+        "file": "other.md",
+        "references": [],
+        "source": "/private/tmp/dm-baseline/other.md",
+        "transclusions": []
+      },
+      "target": "/private/tmp/dm-baseline/other.md"
+    }
+  ]
+}

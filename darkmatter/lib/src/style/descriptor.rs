@@ -150,6 +150,13 @@ pub const SCHEMA: &[SchemaLeaf] = &[
     SchemaLeaf { canonical: "hr.bg-color",  alias: Some("hr.bg_color"),  sub_spec: 6, leaf_type: LeafType::Color },
     SchemaLeaf { canonical: "hr.kind",      alias: None,                 sub_spec: 6, leaf_type: LeafType::HrKind },
     SchemaLeaf { canonical: "hr.weight",    alias: None,                 sub_spec: 6, leaf_type: LeafType::HrWeight },
+
+    // ── disclosure ──────────────────────────────────────────────────────
+    SchemaLeaf { canonical: "disclosure.width",     alias: None,                          sub_spec: 8, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "disclosure.max-width", alias: Some("disclosure.max_width"),  sub_spec: 8, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "disclosure.alignment", alias: None,                          sub_spec: 8, leaf_type: LeafType::Alignment },
+    SchemaLeaf { canonical: "disclosure.color",     alias: None,                          sub_spec: 8, leaf_type: LeafType::Color },
+    SchemaLeaf { canonical: "disclosure.bg-color",  alias: Some("disclosure.bg_color"),   sub_spec: 8, leaf_type: LeafType::Color },
 ];
 
 /// Return the canonical schema leaf for `raw_path` if it matches either a
@@ -188,6 +195,7 @@ pub fn is_canonical_container(path: &str) -> bool {
             | "ol"
             | "li"
             | "page.code"
+            | "disclosure"
     )
 }
 

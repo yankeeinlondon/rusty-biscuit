@@ -1,26 +1,27 @@
 ---
 $schema:
-    review: string(required)
-    spec: string
-    design: string
+    spec: file(required)
+    iteration: number(required; default(1))
+    design: file
 name: Implement Review Suggestions
 description: |-
-    Implements all the recommendations/suggestions produced in a review. Provide either:
+    Implements all the recommendations/suggestions produced in a review.
 
-    1. a `review` path is required
-    2. optionally a `spec` path if this a review of **feature** or **fix**
-    3. optionally provide a `design` path if there design file for the **feature** or **fix**
+    - if implementing a spec review, provide the `spec` file and an `iteration` number for the review
 area: "{{ ctx.area }}"
-has_skill: true
-target: "{{ review || spec }}"
-dir: "$(dirname '{{target}}')"
-log: "review-implementation-1.md"
-review_path: "@{{area}}/{{review}}"
-spec_path: "@{{area}}/{{dir}}/{{spec || "spec.md"}}"
-log_path: "@{{area}}/{{dir}}/{{log}}"
+dir: "$(dirname '{{spec}}')"
+review: "{{ dir + '/review-' + iteration + '.md'  }}"
+log: "{{ 'review-implementation-log-' + iteration + '.md' }}"
+review_path: "{{review}}"
+spec_path: "{{spec}}"
+log_path: "{{dir}}/{{log}}"
+
+success:
+    effect: select-4
+    say: "Implementation of review suggestions complete in {{ctx.area}}"
 ---
 
-::block when="spec"
+::block when="spec && iteration"
 ## Context
 
 Your task revolves around **implementing** all the suggestions found in the recent review:
@@ -33,20 +34,6 @@ The review was done to evaluate the fidelity of the implementation to the specif
 
 ## Task
 
-::block when="frontmatter(review_path, 'ready') == true"
-You have been asked to implement a review's suggestions; but the review concluded that the current state is already 
-**production ready** so you are NOT obliged to implement anything. Instead your only task is to report back the findings of the review. Make sure to include
-any future implementation suggestions which were included in the review (if there were any). 
-
-In closing simply report:
-
-- Specification File: **{{spec_path}}**
-- Final Review: **{{review_path}}**
-- Ready: true
-- 
-::end-block
-
-::block when="frontmatter(review_path, 'ready') != true"
 
 1. Create a log file for this task at '{{log_path}}'
 
@@ -76,7 +63,6 @@ In closing simply report:
 - do not commit your work to git (this will be done as an independent process which you are not responsible for)
 ::file ./you-are-non-interactive.md
 
-::end-block
 ::end-block
 
 ::block when="!spec && review"

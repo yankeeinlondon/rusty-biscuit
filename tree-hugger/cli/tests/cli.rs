@@ -1843,8 +1843,12 @@ fn test_god_files_high_risk_suppresses_moderate_section() {
         .clone();
 
     let stdout = String::from_utf8_lossy(&output);
-    // Report heading still carries both band counts.
-    assert!(stdout.contains("There are 1 files with moderate risk of being considered god files"));
+    // Under --high-risk the moderate count line is suppressed; only the
+    // high-risk count is reported.
+    assert!(
+        !stdout.contains("moderate risk of being considered god files"),
+        "moderate count line should be absent with --high-risk"
+    );
     assert!(stdout.contains("There are 1 files with high risk of being considered god files"));
     // High body present.
     assert!(stdout.contains("the high.py file is 1000 lines of code"));

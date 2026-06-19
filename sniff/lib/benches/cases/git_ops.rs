@@ -60,6 +60,7 @@ fn history_depth() -> usize {
 pub fn register(c: &mut Criterion) {
     register_discovery(c);
     register_status(c);
+    register_request_levels(c);
     register_revwalk(c);
     register_diff(c);
     register_containment(c);
@@ -125,7 +126,38 @@ fn register_status(c: &mut Criterion) {
     group.finish();
 }
 
-/// `git_ops/revwalk_recent_gated` and `git_ops/revwalk_recent_full` — a
+/// `git_ops/request_levels` — compare the latency of the new identity-only
+/// request against `summary()` on the repository under test (the
+/// rusty-biscuit tree). This gives a concrete before/after cost for callers
+/// that previously had to pay for a status walk just to get repo root and
+/// branch.
+fn register_request_levels(c: &mut Criterion) {
+    let mut group = util::configure_group(c, "git_ops");
+
+    let cwd = std::env::current_dir().expect("current working directory");
+    let identity_req = GitRequest::identity();
+    let summary_req = GitRequest::summary();
+
+    group.bench_function("request_levels/identity", |b| {
+        b.iter(|| {
+            let info = detect_git_with_request(black_box(&cwd), black_box(&identity_req))
+                .unwrap()
+                .expect("identity detects the current repo");
+            black_box(info);
+        });
+    });
+
+    group.bench_function("request_levels/summary", |b| {
+        b.iter(|| {
+            let info = detect_git_with_request(black_box(&cwd), black_box(&summary_req))
+                .unwrap()
+                .expect("summary detects the current repo");
+            black_box(info);
+        });
+    });
+
+    group.finish();
+}
 /// time-gated range walk that stops at a cutoff versus a full count walk. Each
 /// runs against a commit-graph-absent and (when `git` is available) a
 /// commit-graph-present fixture so the gix port can show the graph win.

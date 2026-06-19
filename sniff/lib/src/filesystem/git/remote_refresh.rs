@@ -29,6 +29,101 @@ fn ahead_behind(
     ))
 }
 
+pub(crate) fn get_branch_info_fallible(
+    repo: &gix::Repository,
+    current_branch: Option<&str>,
+) -> crate::Result<Vec<BranchInfo>> {
+    let remote_tips = remote_tracking_tips(repo)?;
+    let config = repo.config_snapshot();
+    let mut branches = Vec::new();
+
+    let platform = repo
+        .references()
+        .map_err(|e| SniffError::git("references", e))?;
+    let iter = platform
+        .local_branches()
+        .map_err(|e| SniffError::git("local_branches", e))?;
+
+    for reference in iter {
+        let reference = reference.map_err(|e| SniffError::git("local_branches", e))?;
+        let full = reference.name().as_bstr().to_str_lossy().into_owned();
+        let Some(name) = full.strip_prefix("refs/heads/") else {
+            continue;
+        };
+        let name = name.to_string();
+        let tip = reference
+            .into_fully_peeled_id()
+            .map_err(|e| SniffError::git("peel", e))?
+            .detach();
+        let sha = tip.to_string();
+        let upstream = configured_upstream(&config, &name);
+        // ahead/behind are only meaningful against a known upstream tip. With no
+        // configured upstream (or one whose tip is not locally known), report
+        // `None` so a fresh branch is distinguishable from one that is exactly
+        // even with its upstream.
+        let (ahead, behind) = match upstream
+            .as_deref()
+            .and_then(|upstream| remote_tips.get(upstream))
+        {
+            Some(remote) => {
+                let (ahead, behind) = ahead_behind(repo, tip, *remote)?;
+                (Some(ahead), Some(behind))
+            }
+            None => (None, None),
+        };
+
+        branches.push(BranchInfo {
+            current: current_branch.is_some_and(|current| current == name),
+            remote_represented: remote_tips.values().any(|remote| *remote == tip),
+            name,
+            sha,
+            upstream,
+            ahead,
+            behind,
+        });
+    }
+
+    branches.sort_by(|a, b| b.current.cmp(&a.current).then_with(|| a.name.cmp(&b.name)));
+    Ok(branches)
+}
+
+fn configured_upstream(config: &gix::config::File<'_>, branch: &str) -> Option<String> {
+    let remote = config
+        .string(format!("branch.{branch}.remote").as_str())
+        .map(|value| value.to_string())?;
+    let merge = config
+        .string(format!("branch.{branch}.merge").as_str())
+        .map(|value| value.to_string())?;
+    let upstream_branch = merge.strip_prefix("refs/heads/").unwrap_or(&merge);
+    Some(format!("{remote}/{upstream_branch}"))
+}
+
+fn remote_tracking_tips(repo: &gix::Repository) -> crate::Result<HashMap<String, gix::ObjectId>> {
+    let platform = repo
+        .references()
+        .map_err(|e| SniffError::git("references", e))?;
+    let iter = platform
+        .prefixed("refs/remotes/")
+        .map_err(|e| SniffError::git("remote_branches", e))?;
+    let mut tips = HashMap::new();
+    for reference in iter {
+        let reference = reference.map_err(|e| SniffError::git("remote_branches", e))?;
+        let full = reference.name().as_bstr().to_str_lossy().into_owned();
+        let Some(name) = full.strip_prefix("refs/remotes/") else {
+            continue;
+        };
+        if name.ends_with("/HEAD") {
+            continue;
+        }
+        let tip = reference
+            .into_fully_peeled_id()
+            .map_err(|e| SniffError::git("peel", e))?
+            .detach();
+        tips.insert(name.to_string(), tip);
+    }
+    Ok(tips)
+}
+
 /// Count commits reachable from `tip` once everything reachable from `hide` is
 /// excluded — the building block for ahead/behind.
 fn count_reachable_excluding(
@@ -627,8 +722,7 @@ pub(crate) fn get_worktrees(
 
     // Canonicalize the current worktree path once so every worker can do a
     // cheap path comparison without repeated disk access.
-    let current_canonical = current_worktree_path
-        .and_then(|p| std::fs::canonicalize(p).ok());
+    let current_canonical = current_worktree_path.and_then(|p| std::fs::canonicalize(p).ok());
 
     // Collect (name, worktree path) pairs up front — cheap sequential work —
     // before the per-worktree analysis fans out. Trust, permission, I/O, and
@@ -665,10 +759,7 @@ pub(crate) fn get_worktrees(
 
             // Determine whether this worktree is the current one.
             let is_current = current_canonical.as_ref().is_some_and(|current| {
-                std::fs::canonicalize(worktree_path)
-                    .ok()
-                    .as_ref()
-                    == Some(current)
+                std::fs::canonicalize(worktree_path).ok().as_ref() == Some(current)
             });
 
             // Skip expensive commit-graph walks for non-current worktrees when
@@ -701,9 +792,7 @@ pub(crate) fn get_worktrees(
                     false
                 } else {
                     match (wt_head, base_oid) {
-                        (Some(wt), Some(base_id)) => {
-                            has_merge_conflicts(&base, wt, base_id)?
-                        }
+                        (Some(wt), Some(base_id)) => has_merge_conflicts(&base, wt, base_id)?,
                         _ => false,
                     }
                 }
@@ -1790,7 +1879,10 @@ mod tests {
         );
 
         let other = worktrees.get("other").expect("other worktree must exist");
-        assert!(!other.is_current, "other worktree must not be marked current");
+        assert!(
+            !other.is_current,
+            "other worktree must not be marked current"
+        );
         assert_eq!(
             other.ahead, 0,
             "non-current worktree must skip ahead in default mode"
@@ -1883,5 +1975,71 @@ mod tests {
             other.ahead, 0,
             "linked worktree must skip ahead when main is current"
         );
+    }
+
+    #[test]
+    fn branch_info_reports_some_ahead_behind_with_configured_upstream() {
+        let (dir, repo) = setup_repo();
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        let base = repo.head().unwrap().peel_to_commit().unwrap().id();
+
+        // origin/<branch> stays at the base commit.
+        add_fake_remote(&repo, "origin", &branch, base);
+
+        // Advance the local branch one commit past origin.
+        std::fs::write(dir.path().join("test.txt"), "second\n").unwrap();
+        stage_path(&repo, "test.txt");
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            let parent = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "second", &tree, &[&parent])
+                .unwrap();
+        }
+
+        // Configure the upstream so the branch tracks origin/<branch>.
+        let mut config = repo.config().unwrap();
+        config
+            .set_str(&format!("branch.{branch}.remote"), "origin")
+            .unwrap();
+        config
+            .set_str(
+                &format!("branch.{branch}.merge"),
+                &format!("refs/heads/{branch}"),
+            )
+            .unwrap();
+
+        let gix_repo = open_gix(&dir);
+        let branches = get_branch_info_fallible(&gix_repo, Some(&branch)).unwrap();
+        let info = branches
+            .iter()
+            .find(|b| b.name == branch)
+            .expect("branch present");
+
+        assert_eq!(
+            info.upstream.as_deref(),
+            Some(format!("origin/{branch}").as_str())
+        );
+        assert_eq!(info.ahead, Some(1), "one commit ahead of origin");
+        assert_eq!(info.behind, Some(0), "zero behind origin");
+    }
+
+    #[test]
+    fn branch_info_reports_null_tracking_without_upstream() {
+        let (dir, repo) = setup_repo();
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+
+        let gix_repo = open_gix(&dir);
+        let branches = get_branch_info_fallible(&gix_repo, Some(&branch)).unwrap();
+        let info = branches
+            .iter()
+            .find(|b| b.name == branch)
+            .expect("branch present");
+
+        // No configured upstream: tracking facts are absent, not zeroed.
+        assert_eq!(info.upstream, None);
+        assert_eq!(info.ahead, None);
+        assert_eq!(info.behind, None);
     }
 }

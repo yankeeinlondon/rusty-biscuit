@@ -13,6 +13,7 @@ use biscuit_speaks::{SpeedLevel, TtsConfig, TtsFailoverStrategy};
 use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
 use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
+use darkmatter::markdown::compose::expression::{Expr, ExpressionFinder, parse};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
@@ -593,6 +594,236 @@ pub fn parse_lifecycle_config(
     }
 
     Ok(config)
+}
+
+/// Validates that no rendered lifecycle string contains a surviving
+/// `{{ … }}` interpolation span.
+///
+/// Iterates every configured signal in deterministic order
+/// (`Start`, `Success`, `Blocked`, `Failure`) and every string field on the
+/// notification in deterministic order (`say`, `say_first`, `message`,
+/// `stderr`, `notify`). The first field with a non-empty span list aborts
+/// with [`CompositionError::LifecycleInterpolationLeak`].
+///
+/// This runs **after** composition, when expressions should have resolved.
+/// It intentionally does *not* run inside [`parse_lifecycle_config`], which
+/// is also used for raw frontmatter inspection where unresolved templates
+/// are legitimate.
+///
+/// ## Arguments
+///
+/// * `config` — parsed lifecycle configuration.
+/// * `source_path` — composed prompt file, used for the diagnostic.
+/// * `warnings` — compose report warnings, used best-effort to enrich the
+///   leak reason.
+pub fn validate_no_interpolation_leaks(
+    config: &LifecycleConfig,
+    source_path: &Path,
+    warnings: &[darkmatter::markdown::compose::ComposeWarning],
+) -> Result<(), CompositionError> {
+    let signals = [
+        LifecycleSignal::Start,
+        LifecycleSignal::Success,
+        LifecycleSignal::Blocked,
+        LifecycleSignal::Failure,
+    ];
+
+    for signal in signals {
+        let Some(notification) = config.get(signal) else {
+            continue;
+        };
+
+        let fields: [(&str, Option<&String>); 5] = [
+            ("say", notification.say.as_ref()),
+            ("say_first", notification.say_first.as_ref()),
+            ("message", notification.message.as_ref()),
+            ("stderr", notification.stderr.as_ref()),
+            ("notify", notification.notify.as_ref()),
+        ];
+
+        for (field_name, value) in fields {
+            let Some(text) = value else {
+                continue;
+            };
+            if text.is_empty() {
+                continue;
+            }
+
+            let spans = ExpressionFinder::find_all_plain(text);
+            if let Some(first) = spans.first() {
+                let property = format!("{}.{}", signal.property_name(), field_name);
+                let expression = first.expression.clone();
+                let reason = find_matching_warning_reason(&expression, warnings);
+                return Err(CompositionError::LifecycleInterpolationLeak {
+                    source_path: source_path.to_path_buf(),
+                    property,
+                    expression,
+                    reason,
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Best-effort extraction of a warning reason mentioning the leaked expression.
+fn find_matching_warning_reason(
+    expression: &str,
+    warnings: &[darkmatter::markdown::compose::ComposeWarning],
+) -> String {
+    let inner = expression
+        .trim_start_matches("{{")
+        .trim_end_matches("}}")
+        .trim();
+
+    for warning in warnings {
+        if warning.message.contains(expression) || warning.message.contains(inner) {
+            return warning.message.clone();
+        }
+    }
+
+    String::new()
+}
+
+/// Validates that no raw lifecycle string references a bare variable that is
+/// undefined after composition.
+///
+/// Darkmatter resolves an unknown bare variable to an empty string with no
+/// warning and no error — even in fail-fast mode (see
+/// `frontmatter_interpolation::missing_variable_resolves_to_empty`). So the
+/// post-compose [`validate_no_interpolation_leaks`] guard, which only scans
+/// the *rendered* string for surviving spans, never sees the collapsed
+/// reference. This guard closes that gap by inspecting the **raw**
+/// (pre-composition) lifecycle strings, where the `{{ … }}` span is still
+/// present, and resolving each bare variable against the composed frontmatter.
+///
+/// Every bare variable reachable in the parsed expression tree is checked, not
+/// just spans that are exactly `{{ variable }}`: a missing operand buried in a
+/// function argument (`{{ parent_dir(missing) }}`), comparison, or arithmetic
+/// node is rejected the same way a top-level `{{ missing }}` is. Fallback
+/// (`{{ x || 'y' }}`) and ternary (`{{ x ? 'a' : 'b' }}`) subtrees intentionally
+/// tolerate undefined operands, so they are skipped wholesale. `ctx.*` /
+/// `env.*` / `doc` references resolve from outside the frontmatter and are
+/// skipped — a bare name resolves only against top-level frontmatter keys.
+///
+/// Iterates signals (`Start`, `Success`, `Blocked`, `Failure`) and fields
+/// (`say`, `say_first`, `message`, `stderr`, `notify`) in the same
+/// deterministic order as [`validate_no_interpolation_leaks`]; the first
+/// undefined variable aborts with
+/// [`CompositionError::LifecycleUndefinedVariable`].
+///
+/// ## Arguments
+///
+/// * `raw_frontmatter` — the pre-composition frontmatter holding the original
+///   lifecycle strings (`{{ … }}` spans intact).
+/// * `effective_frontmatter` — the composed frontmatter object; a bare
+///   variable is "defined" when its root segment is one of these keys.
+/// * `source_path` — prompt file, used for the diagnostic.
+pub fn validate_no_undefined_lifecycle_variables(
+    raw_frontmatter: &darkmatter::markdown::Frontmatter,
+    effective_frontmatter: &serde_json::Value,
+    source_path: &Path,
+) -> Result<(), CompositionError> {
+    let signals = [
+        LifecycleSignal::Start,
+        LifecycleSignal::Success,
+        LifecycleSignal::Blocked,
+        LifecycleSignal::Failure,
+    ];
+    let fields = ["say", "say_first", "message", "stderr", "notify"];
+
+    let raw_map = raw_frontmatter.as_map();
+    let defined = effective_frontmatter.as_object();
+
+    for signal in signals {
+        let Some(serde_json::Value::Object(notification)) = raw_map.get(signal.property_name())
+        else {
+            continue;
+        };
+
+        for field in fields {
+            let Some(serde_json::Value::String(text)) = notification.get(field) else {
+                continue;
+            };
+
+            for span in ExpressionFinder::find_all_plain(text) {
+                let Ok(expr) = parse(&span.expression) else {
+                    continue;
+                };
+                if let Some(variable) = find_undefined_variable(&expr, defined) {
+                    return Err(CompositionError::LifecycleUndefinedVariable {
+                        source_path: source_path.to_path_buf(),
+                        property: format!("{}.{}", signal.property_name(), field),
+                        variable: variable.to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Recursively walks `expr`, returning the first frontmatter-scoped bare
+/// variable whose root key is undefined in the composed frontmatter.
+///
+/// Fallback (`||`) and ternary subtrees are not descended: those forms exist
+/// precisely to tolerate an undefined operand, so a miss inside them is
+/// intentional, not a leak. Every other node — function-call arguments,
+/// comparisons, arithmetic, indexing, member access, unary, parens — is
+/// descended so an undefined variable buried in `parent_dir(missing)` is caught
+/// like a top-level `{{ missing }}`. The returned reference borrows from `expr`.
+fn find_undefined_variable<'a>(
+    expr: &'a Expr,
+    defined: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> Option<&'a str> {
+    match expr {
+        Expr::Variable(path) => undefined_bare_variable(path, defined),
+        // Fallback / ternary tolerate undefined operands by design.
+        Expr::Fallback { .. } | Expr::Ternary { .. } => None,
+        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => None,
+        Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) | Expr::Paren(inner) => {
+            find_undefined_variable(inner, defined)
+        }
+        Expr::Binary { left, right, .. } | Expr::Comparison { left, right, .. } => {
+            find_undefined_variable(left, defined)
+                .or_else(|| find_undefined_variable(right, defined))
+        }
+        Expr::Index { base, index } => find_undefined_variable(base, defined)
+            .or_else(|| find_undefined_variable(index, defined)),
+        Expr::MemberAccess { base, .. } => find_undefined_variable(base, defined),
+        Expr::FunctionCall { args, .. } => args
+            .iter()
+            .find_map(|arg| find_undefined_variable(arg, defined)),
+    }
+}
+
+/// Returns the bare variable name when `path` is a frontmatter-scoped reference
+/// whose root segment is absent from the composed frontmatter, or `None` when
+/// it resolves elsewhere (`ctx.*` / `env.*` / `doc`) or its root key exists.
+///
+/// Nested misses (`{{ a.b }}` where `a` exists but `b` does not) are treated as
+/// defined: only the bare-root contract the spec describes is enforced.
+fn undefined_bare_variable<'a>(
+    path: &'a str,
+    defined: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> Option<&'a str> {
+    if path.starts_with("ctx.")
+        || path.starts_with("env.")
+        || path == "doc"
+        || path.starts_with("doc.")
+    {
+        return None;
+    }
+    let root = path.split('.').next().unwrap_or(path);
+    if root.is_empty() {
+        return None;
+    }
+    match defined {
+        Some(map) if map.contains_key(root) => None,
+        _ => Some(root),
+    }
 }
 
 /// Normalizes empty or whitespace-only strings to `None`.
@@ -1431,6 +1662,153 @@ mod tests {
         assert!(guard.provider_launched());
 
         guard.defuse();
+    }
+
+    #[test]
+    fn validation_is_the_dispatch_gate_for_leaked_lifecycle() {
+        // The `LifecycleRunGuard` does not re-validate; it dispatches whatever
+        // string the config holds. The contract "no side effect dispatches a
+        // leaked expression" is upheld by `validate_no_interpolation_leaks`
+        // running in the prepare layer, *before* a guard is ever built. This
+        // test proves both halves of that boundary against the fake emitter.
+        let leaked = parse_lifecycle_config(
+            &json!({ "start": { "message": "{{ broken( }}" } }),
+            dummy_path(),
+        )
+        .unwrap();
+
+        // 1. Validation rejects the leaked config — the production choke point.
+        let err = validate_no_interpolation_leaks(&leaked, dummy_path(), &[]).unwrap_err();
+        assert!(matches!(
+            err,
+            CompositionError::LifecycleInterpolationLeak { .. }
+        ));
+
+        // 2. A guard built from that same config WOULD dispatch the raw span
+        //    (the message reaches the emitter verbatim), confirming the guard
+        //    itself is not the gate — only the prepare-layer validation is.
+        let (settings, messaging, term) = test_ctx();
+        let ctx = LifecycleRuntimeContext {
+            settings: &settings,
+            messaging: &messaging,
+            term: &term,
+            source_path: Path::new("/tmp/test.md"),
+            repo_root: None,
+        };
+        let emitter = RecordingEmitter::new();
+        {
+            let mut guard = make_guard(&leaked, &ctx, &emitter);
+            guard.emit_start_once();
+            guard.defuse();
+        }
+        assert!(
+            emitter.actions().iter().any(|a| matches!(
+                a,
+                EmittedAction::Message { text } if text.contains("{{ broken(")
+            )),
+            "guard does not self-gate; validation must run before a guard exists"
+        );
+    }
+
+    fn fm_from_json(value: serde_json::Value) -> darkmatter::markdown::Frontmatter {
+        let mut fm = darkmatter::markdown::Frontmatter::new();
+        if let serde_json::Value::Object(map) = value {
+            for (key, val) in map {
+                fm.insert(&key, val).unwrap();
+            }
+        }
+        fm
+    }
+
+    #[test]
+    fn undefined_bare_variable_flags_missing_root() {
+        let effective = json!({ "area": "claudine" });
+        let defined = effective.as_object();
+        assert_eq!(undefined_bare_variable("missing", defined), Some("missing"));
+        assert_eq!(undefined_bare_variable("area", defined), None);
+        // Nested miss under a defined root is treated as defined.
+        assert_eq!(undefined_bare_variable("area.sub", defined), None);
+        // Runtime namespaces resolve outside the frontmatter.
+        assert_eq!(undefined_bare_variable("ctx.area", defined), None);
+        assert_eq!(undefined_bare_variable("env.HOME", defined), None);
+        assert_eq!(undefined_bare_variable("doc", defined), None);
+        assert_eq!(undefined_bare_variable("doc.area", defined), None);
+    }
+
+    #[test]
+    fn undefined_lifecycle_variable_is_rejected() {
+        let raw = fm_from_json(json!({
+            "start": { "message": "before {{ missing_lifecycle_var }} after" }
+        }));
+        let effective = json!({ "start": { "message": "before  after" } });
+
+        let err =
+            validate_no_undefined_lifecycle_variables(&raw, &effective, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleUndefinedVariable {
+                property, variable, ..
+            } => {
+                assert_eq!(property, "start.message");
+                assert_eq!(variable, "missing_lifecycle_var");
+            }
+            other => panic!("expected LifecycleUndefinedVariable, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn defined_and_namespaced_lifecycle_variables_pass() {
+        let raw = fm_from_json(json!({
+            "start": { "message": "{{ area }} on {{ ctx.today }}" },
+            "success": { "say": "{{ missing || 'fallback' }}" },
+        }));
+        let effective = json!({ "area": "claudine" });
+
+        assert!(validate_no_undefined_lifecycle_variables(&raw, &effective, dummy_path()).is_ok());
+    }
+
+    #[test]
+    fn undefined_variable_inside_function_call_is_rejected() {
+        // The original broken prompt used `parent_dir(review)`: a bare undefined
+        // variable as a function argument must fail preparation, not collapse to
+        // an empty string the way the whole-span-only guard let it.
+        let raw = fm_from_json(json!({
+            "start": { "message": "before {{ parent_dir(missing_review) }} after" }
+        }));
+        let effective = json!({ "area": "claudine" });
+
+        let err =
+            validate_no_undefined_lifecycle_variables(&raw, &effective, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleUndefinedVariable {
+                property, variable, ..
+            } => {
+                assert_eq!(property, "start.message");
+                assert_eq!(variable, "missing_review");
+            }
+            other => panic!("expected LifecycleUndefinedVariable, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn undefined_variable_inside_fallback_argument_passes() {
+        // Fallback semantics tolerate the undefined operand even when it is
+        // wrapped in a function call, so the whole subtree is skipped.
+        let raw = fm_from_json(json!({
+            "start": { "message": "{{ parent_dir(missing) || 'home' }}" }
+        }));
+        let effective = json!({ "area": "claudine" });
+
+        assert!(validate_no_undefined_lifecycle_variables(&raw, &effective, dummy_path()).is_ok());
+    }
+
+    #[test]
+    fn defined_variable_inside_function_call_passes() {
+        let raw = fm_from_json(json!({
+            "start": { "message": "{{ parent_dir(area) }}" }
+        }));
+        let effective = json!({ "area": "/repo/claudine" });
+
+        assert!(validate_no_undefined_lifecycle_variables(&raw, &effective, dummy_path()).is_ok());
     }
 
     #[test]

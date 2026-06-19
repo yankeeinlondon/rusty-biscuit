@@ -8,7 +8,7 @@ pub mod types;
 pub mod worktree;
 
 pub use api::{
-    commit_browser_url, commit_by_sha_at, commit_files_at, commits_for_branch_at,
+    branches_at, commit_browser_url, commit_by_sha_at, commit_files_at, commits_for_branch_at,
     commits_for_path_at, merge_conflicts_at, preferred_remote_url, remote_url, repo_root,
 };
 
@@ -23,8 +23,8 @@ pub use recent_commits::{
 };
 pub use status::detect_merge_conflicts;
 pub use types::{
-    BehindStatus, CommitInfo, ConventionalCommit, FileAction, FileChange, FileStatus, GitConfig,
-    GitHostingProvider, GitHostingProviderMetadata, GitInfo, GitRepo, LocalBranchInfo,
+    BehindStatus, BranchInfo, CommitInfo, ConventionalCommit, FileAction, FileChange, FileStatus,
+    GitConfig, GitHostingProvider, GitHostingProviderMetadata, GitInfo, GitRepo, LocalBranchInfo,
     RefDecoration, RefKind, RemoteInfo, RemoteTrackingStatus, RepoStatus, UntrackedFile,
     WorktreeInfo,
 };

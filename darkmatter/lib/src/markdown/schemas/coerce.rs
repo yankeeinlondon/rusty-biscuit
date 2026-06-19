@@ -55,6 +55,37 @@ pub struct CoercionOutcome {
     pub changed: bool,
 }
 
+/// If `schema` is one of Darkmatter's optional-property wrappers, returns the
+/// typed inner arm. Two shapes are recognized:
+///
+/// - `{"anyOf":[{"type":"null"}, <typed>]}` (2 arms) — every optional scalar,
+///   array, inline object, boolish/numberlike, and property-level union.
+/// - `{"anyOf":[{"type":"null"}, {"const":""}, <file-typed>]}` (3 arms) —
+///   optional scalar `file` preserving the legacy empty-string sentinel.
+///
+/// The recognizer is exact and only matches the wrappers
+/// [`super::simplified::convert`] emits; unrelated `anyOf` schemas return
+/// `None`.
+fn unwrap_nullable_arm(schema: &Value) -> Option<&Value> {
+    let obj = schema.as_object()?;
+    let arms = obj.get("anyOf").and_then(Value::as_array)?;
+
+    // 2-arm form: null + typed.
+    if arms.len() == 2 && arms[0].get("type").and_then(Value::as_str) == Some("null") {
+        return Some(&arms[1]);
+    }
+
+    // 3-arm form: null + empty const + file-typed.
+    if arms.len() == 3
+        && arms[0].get("type").and_then(Value::as_str) == Some("null")
+        && arms[1].get("const").and_then(Value::as_str) == Some("")
+    {
+        return Some(&arms[2]);
+    }
+
+    None
+}
+
 /// Maps a single property's JSON Schema fragment to its coercion target, or
 /// `None` when the fragment is outside the coercion matrix.
 ///
@@ -74,6 +105,13 @@ pub struct CoercionOutcome {
 /// numberlike shapes (the only `anyOf` forms Darkmatter itself emits at the
 /// property level today) are matched here for the matrix lookup.
 pub fn coercion_target(property_schema: &Value) -> Option<CoercionTarget> {
+    // Darkmatter optional properties wrap the typed fragment in a nullable
+    // `anyOf`. Look through the wrapper so non-null values are coerced against
+    // the real typed schema; `null` itself is left untouched by `coerce_value`.
+    if let Some(inner) = unwrap_nullable_arm(property_schema) {
+        return coercion_target(inner);
+    }
+
     let obj = property_schema.as_object()?;
 
     // `anyOf` shapes (boolish / numberlike) are checked before single `type`
@@ -299,10 +337,12 @@ fn coerce_object(schema: &Value, instance: &Value) -> CoercionOutcome {
         let Some(prop_schema) = props.get(name) else {
             continue;
         };
+        let effective_schema = unwrap_nullable_arm(prop_schema).unwrap_or(prop_schema);
+
         // 1. Specific shape: single-type, inline object, or boolish/numberlike
         //    anyOf. `coercion_target` returns a single coherent target so the
         //    per-arm pass below is unnecessary.
-        if let Some(target) = coercion_target(prop_schema) {
+        if let Some(target) = coercion_target(effective_schema) {
             if let Some(coerced) = coerce_value(&target, value) {
                 out.insert(name.clone(), coerced);
                 changed = true;
@@ -311,7 +351,7 @@ fn coerce_object(schema: &Value, instance: &Value) -> CoercionOutcome {
         }
         // 2. Property-level union with per-arm coercion. Only reached when the
         //    `anyOf` is not a boolish / numberlike / specific-shape match.
-        if let Some(arm_schemas) = prop_schema.get("anyOf").and_then(Value::as_array)
+        if let Some(arm_schemas) = effective_schema.get("anyOf").and_then(Value::as_array)
             && let Some(coerced) = coerce_property_union(arm_schemas, value)
         {
             out.insert(name.clone(), coerced);
@@ -1368,5 +1408,295 @@ mod tests {
         let outcome = coerce_frontmatter(&schema, &instance);
         assert!(!outcome.changed);
         assert_eq!(outcome.value, instance);
+    }
+
+    // ── Nullable wrapper recognition (Phase 2) ───────────────────────────
+
+    #[test]
+    fn nullable_wrapper_string_yields_to_string() {
+        assert_eq!(
+            coercion_target(&json!({"anyOf": [{"type": "null"}, {"type": "string"}]})),
+            Some(CoercionTarget::ToString)
+        );
+    }
+
+    #[test]
+    fn nullable_wrapper_number_yields_to_number() {
+        assert_eq!(
+            coercion_target(&json!({"anyOf": [{"type": "null"}, {"type": "number"}]})),
+            Some(CoercionTarget::ToNumber)
+        );
+    }
+
+    #[test]
+    fn nullable_wrapper_boolean_yields_to_boolean() {
+        assert_eq!(
+            coercion_target(&json!({"anyOf": [{"type": "null"}, {"type": "boolean"}]})),
+            Some(CoercionTarget::ToBoolean)
+        );
+    }
+
+    #[test]
+    fn nullable_wrapper_file_yields_to_string() {
+        let frag = json!({
+            "anyOf": [
+                {"type": "null"},
+                {"const": ""},
+                {"type": "string", "format": "darkmatter-file"}
+            ]
+        });
+        assert_eq!(coercion_target(&frag), Some(CoercionTarget::ToString));
+    }
+
+    #[test]
+    fn nullable_wrapper_array_yields_array_target() {
+        let frag = json!({
+            "anyOf": [
+                {"type": "null"},
+                {"type": "array", "items": {"type": "boolean"}}
+            ]
+        });
+        assert_eq!(
+            coercion_target(&frag),
+            Some(CoercionTarget::Array(Box::new(CoercionTarget::ToBoolean)))
+        );
+    }
+
+    #[test]
+    fn nullable_wrapper_inline_object_yields_object_target() {
+        let frag = json!({
+            "anyOf": [
+                {"type": "null"},
+                {
+                    "type": "object",
+                    "properties": {"enabled": {"type": "boolean"}},
+                    "additionalProperties": false
+                }
+            ]
+        });
+        match coercion_target(&frag) {
+            Some(CoercionTarget::Object(props)) => {
+                assert_eq!(props, vec![("enabled".to_string(), CoercionTarget::ToBoolean)]);
+            }
+            other => panic!("expected Object target, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nullable_wrapper_boolish_yields_to_boolean() {
+        let frag = json!({
+            "anyOf": [
+                {"type": "null"},
+                {
+                    "anyOf": [
+                        {"type": "boolean"},
+                        {"enum": ["true", "false", "True", "False", "TRUE", "FALSE"]}
+                    ]
+                }
+            ]
+        });
+        assert_eq!(coercion_target(&frag), Some(CoercionTarget::ToBoolean));
+    }
+
+    #[test]
+    fn nullable_wrapper_numberlike_yields_to_number() {
+        let frag = json!({
+            "anyOf": [
+                {"type": "null"},
+                {
+                    "anyOf": [
+                        {"type": "number"},
+                        {"type": "string", "pattern": r"^-?\d+(\.\d+)?$"}
+                    ]
+                }
+            ]
+        });
+        assert_eq!(coercion_target(&frag), Some(CoercionTarget::ToNumber));
+    }
+
+    #[test]
+    fn nullable_wrapper_unrelated_union_is_none() {
+        let unrelated = json!({"anyOf": [{"type": "null"}, {"type": "object"}]});
+        assert_eq!(coercion_target(&unrelated), None);
+    }
+
+    #[test]
+    fn optional_scalar_coerces_through_null_wrapper_and_preserves_null() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "s": {"anyOf": [{"type": "null"}, {"type": "string"}]},
+                "n": {"anyOf": [{"type": "null"}, {"type": "number"}]},
+                "b": {"anyOf": [{"type": "null"}, {"type": "boolean"}]}
+            }
+        });
+        let instance = json!({ "s": 7, "n": "42", "b": "true", "missing": null });
+        let outcome = coerce_frontmatter(&schema, &instance);
+        assert!(outcome.changed);
+        assert_eq!(outcome.value["s"], json!("7"));
+        assert_eq!(outcome.value["n"], json!(42));
+        assert_eq!(outcome.value["b"], json!(true));
+        assert_eq!(outcome.value["missing"], Value::Null);
+    }
+
+    #[test]
+    fn optional_string_null_is_preserved_unchanged() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "opt": {"anyOf": [{"type": "null"}, {"type": "string"}]}
+            }
+        });
+        let instance = json!({ "opt": null });
+        let outcome = coerce_frontmatter(&schema, &instance);
+        assert!(!outcome.changed);
+        assert_eq!(outcome.value, instance);
+    }
+
+    #[test]
+    fn optional_file_null_and_empty_are_preserved() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "file": {
+                    "anyOf": [
+                        {"type": "null"},
+                        {"const": ""},
+                        {"type": "string", "format": "darkmatter-file"}
+                    ]
+                }
+            }
+        });
+        let null_instance = json!({ "file": null });
+        let outcome = coerce_frontmatter(&schema, &null_instance);
+        assert!(!outcome.changed);
+        assert_eq!(outcome.value, null_instance);
+
+        let empty_instance = json!({ "file": "" });
+        let outcome2 = coerce_frontmatter(&schema, &empty_instance);
+        assert!(!outcome2.changed);
+        assert_eq!(outcome2.value, empty_instance);
+    }
+
+    #[test]
+    fn optional_boolish_and_numberlike_coerce_through_null_wrapper() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "flag": {
+                    "anyOf": [
+                        {"type": "null"},
+                        {
+                            "anyOf": [
+                                {"type": "boolean"},
+                                {"enum": ["true", "false", "True", "False", "TRUE", "FALSE"]}
+                            ]
+                        }
+                    ]
+                },
+                "n": {
+                    "anyOf": [
+                        {"type": "null"},
+                        {
+                            "anyOf": [
+                                {"type": "number"},
+                                {"type": "string", "pattern": r"^-?\d+(\.\d+)?$"}
+                            ]
+                        }
+                    ]
+                }
+            }
+        });
+        let instance = json!({ "flag": "false", "n": "99" });
+        let outcome = coerce_frontmatter(&schema, &instance);
+        assert!(outcome.changed);
+        assert_eq!(outcome.value["flag"], json!(false));
+        assert_eq!(outcome.value["n"], json!(99));
+    }
+
+    #[test]
+    fn optional_array_coerces_element_wise_and_preserves_null() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "tags": {
+                    "anyOf": [
+                        {"type": "null"},
+                        {"type": "array", "items": {"type": "boolean"}}
+                    ]
+                }
+            }
+        });
+        let instance = json!({ "tags": ["true", "false"] });
+        let outcome = coerce_frontmatter(&schema, &instance);
+        assert!(outcome.changed);
+        assert_eq!(outcome.value["tags"], json!([true, false]));
+
+        let null_instance = json!({ "tags": null });
+        let outcome2 = coerce_frontmatter(&schema, &null_instance);
+        assert!(!outcome2.changed);
+        assert_eq!(outcome2.value, null_instance);
+    }
+
+    #[test]
+    fn optional_inline_object_coerces_properties_and_preserves_null() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "config": {
+                    "anyOf": [
+                        {"type": "null"},
+                        {
+                            "type": "object",
+                            "properties": {
+                                "enabled": {"type": "boolean"},
+                                "retries": {"type": "number"}
+                            },
+                            "additionalProperties": false
+                        }
+                    ]
+                }
+            }
+        });
+        let instance = json!({ "config": { "enabled": "true", "retries": "3" } });
+        let outcome = coerce_frontmatter(&schema, &instance);
+        assert!(outcome.changed);
+        assert_eq!(outcome.value["config"]["enabled"], json!(true));
+        assert_eq!(outcome.value["config"]["retries"], json!(3));
+
+        let null_instance = json!({ "config": null });
+        let outcome2 = coerce_frontmatter(&schema, &null_instance);
+        assert!(!outcome2.changed);
+        assert_eq!(outcome2.value, null_instance);
+    }
+
+    #[test]
+    fn optional_property_level_union_runs_per_arm_coercion() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "count": {
+                    "anyOf": [
+                        {"type": "null"},
+                        {"anyOf": [{"type": "number"}, {"type": "string"}]}
+                    ]
+                }
+            }
+        });
+
+        let ambiguous = json!({ "count": "42" });
+        let outcome = coerce_frontmatter(&schema, &ambiguous);
+        assert!(!outcome.changed);
+        assert_eq!(outcome.value, ambiguous);
+
+        let unambiguous = json!({ "count": true });
+        let outcome2 = coerce_frontmatter(&schema, &unambiguous);
+        assert!(outcome2.changed);
+        assert_eq!(outcome2.value["count"], json!("true"));
+
+        let null_instance = json!({ "count": null });
+        let outcome3 = coerce_frontmatter(&schema, &null_instance);
+        assert!(!outcome3.changed);
+        assert_eq!(outcome3.value, null_instance);
     }
 }

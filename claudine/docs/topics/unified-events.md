@@ -948,7 +948,9 @@ Template variables available in `Speak` messages, `FireAndForget` args, and `Cal
 |---|---|---|
 | `{{project.language}}` | `meta.env.primary_language` | `"Rust"` |
 | `{{project.is_monorepo}}` | `meta.env.repo.is_monorepo` | `"true"` |
-| `{{project.monorepo_tool}}` | `meta.env.repo.monorepo_tool` | `"cargo_workspace"` |
+| `{{project.monorepo_standard}}` | `meta.env.repo.monorepo_standard` | `"cargo-workspace"` |
+| `{{project.monorepo_orchestrators}}` | `meta.env.repo.monorepo_orchestrators` | `"nx"` |
+| `{{project.monorepo_tool}}` | `meta.env.repo.monorepo_standard` (deprecated alias) | `"cargo-workspace"` |
 
 **Resolution rules:**
 

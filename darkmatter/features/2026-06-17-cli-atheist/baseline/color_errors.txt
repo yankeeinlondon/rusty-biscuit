@@ -1,0 +1,12 @@
+error: invalid value '#12' for '--page-bg-color <COLOR>': invalid color '#12': hex color must be #RGB or #RRGGBB, got '#12'
+
+For more information, try '--help'.
+error: invalid value '300,0,0' for '--page-bg-color <COLOR>': invalid color '300,0,0': red component '300' is out of range (0-255)
+
+For more information, try '--help'.
+error: invalid value 'not-a-tailwind' for '--page-bg-color <COLOR>': invalid color 'not-a-tailwind': expected #RGB / #RRGGBB hex, R,G,B triple, Tailwind name (e.g. red-500), or one of transparent / currentColor / inherit
+
+For more information, try '--help'.
+error: invalid value 'unknown-keyword' for '--page-bg-color <COLOR>': invalid color 'unknown-keyword': expected #RGB / #RRGGBB hex, R,G,B triple, Tailwind name (e.g. red-500), or one of transparent / currentColor / inherit
+
+For more information, try '--help'.

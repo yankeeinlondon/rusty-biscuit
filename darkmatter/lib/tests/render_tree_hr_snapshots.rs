@@ -17,6 +17,10 @@
 //! the captured bytes (width, ANSI palette, rule glyph) are reproducible
 //! regardless of the host terminal's detected capabilities.
 
+// Whitebox: these snapshots wire the deprecated `TerminalCodeRenderer` adapter
+// directly to exercise the render-tree code path.
+#![allow(deprecated)]
+
 use std::rc::Rc;
 
 use biscuit_terminal::discovery::detection::ImageSupport;
@@ -61,7 +65,8 @@ const FIXTURES: &[(&str, &str)] = &[
 fn fold(name: &str, markdown: &str) -> Document {
     let source = SourceDescriptor::Virtual { name: name.into() };
     let md: Markdown = markdown.into();
-    let (doc, diags) = fold_markdown_spanned_with_frontmatter(source, &md);
+    let (doc, diags) = fold_markdown_spanned_with_frontmatter(source, &md)
+        .expect("span-aware fold must succeed");
     assert!(
         diags.is_empty(),
         "[{name}] span-aware fold emitted diagnostics: {diags:#?}",

@@ -14,6 +14,7 @@ fn body_origin() -> ShellCommandOrigin {
 fn frontmatter_origin() -> ShellCommandOrigin {
     ShellCommandOrigin::Frontmatter {
         key: "today".into(),
+        line: None,
     }
 }
 

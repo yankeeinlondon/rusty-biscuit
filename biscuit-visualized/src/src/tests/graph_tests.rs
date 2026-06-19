@@ -1,10 +1,10 @@
 use crate::{
     artifact::{OutputFormat, RenderRequest},
-    cache::FileCache,
     graph::{
         EdgeKind, GraphBuilder, GraphColorTheme, GraphDiagram, GraphExpression, GraphInputSyntax,
         GraphOrientation,
     },
+    tests::isolated_cache_dir,
 };
 use serial_test::serial;
 
@@ -190,8 +190,7 @@ fn graph_diagram_with_title_includes_label() {
 #[test]
 #[serial]
 fn graph_diagram_render_produces_file() {
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let graph = GraphDiagram::from_expression("a -> b").expect("Should parse");
 
@@ -211,8 +210,7 @@ fn graph_diagram_render_produces_file() {
 #[test]
 #[serial]
 fn graph_diagram_render_cache_hit_on_second_call() {
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let graph = GraphDiagram::from_expression("a -> b").expect("Should parse");
 
@@ -288,8 +286,7 @@ fn graph_builder_with_orientation_applies_rankdir() {
 #[test]
 #[serial]
 fn graph_render_cache_separates_scale() {
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let graph = GraphDiagram::from_expression("a -> b").unwrap();
     let small = graph
@@ -315,8 +312,7 @@ fn graph_render_cache_separates_scale() {
 #[test]
 #[serial]
 fn graph_render_cache_separates_transparency() {
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let graph = GraphDiagram::from_expression("a -> b").unwrap();
     let opaque = graph
@@ -347,8 +343,7 @@ fn graph_render_cache_separates_transparency() {
 #[test]
 #[serial]
 fn graph_render_opaque_background_uses_theme_surface_color() {
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let light = GraphDiagram::from_expression("a -> b")
         .unwrap()

@@ -66,6 +66,14 @@ pub struct License {
 }
 
 #[derive(Deserialize)]
+struct Author {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    url: String,
+}
+
+#[derive(Deserialize)]
 struct CollectionMeta {
     #[serde(default)]
     name: String,
@@ -73,6 +81,12 @@ struct CollectionMeta {
     license: Option<License>,
     #[serde(default)]
     total: Option<usize>,
+    #[serde(default)]
+    author: Option<Author>,
+    #[serde(default)]
+    category: String,
+    #[serde(default)]
+    tags: Vec<String>,
 }
 
 /// Metadata for an Iconify collection returned by [`IconifyClient::fetch_collections`].
@@ -82,6 +96,10 @@ pub struct CollectionInfo {
     pub title: String,
     pub license: Option<License>,
     pub total: Option<usize>,
+    pub author_name: Option<String>,
+    pub author_url: Option<String>,
+    pub category: Option<String>,
+    pub tags: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -168,6 +186,26 @@ impl IconifyClient {
                 title: meta.name,
                 license: meta.license,
                 total: meta.total,
+                author_name: meta.author.as_ref().and_then(|a| {
+                    if a.name.is_empty() {
+                        None
+                    } else {
+                        Some(a.name.clone())
+                    }
+                }),
+                author_url: meta.author.as_ref().and_then(|a| {
+                    if a.url.is_empty() {
+                        None
+                    } else {
+                        Some(a.url.clone())
+                    }
+                }),
+                category: if meta.category.is_empty() {
+                    None
+                } else {
+                    Some(meta.category)
+                },
+                tags: meta.tags,
             })
             .collect())
     }
@@ -358,6 +396,10 @@ mod tests {
                 title: "Hero Icons".into(),
                 license: None,
                 total: None,
+                author_name: None,
+                author_url: None,
+                category: None,
+                tags: vec![],
             }
         );
         assert_eq!(
@@ -367,6 +409,10 @@ mod tests {
                 title: "Lucide".into(),
                 license: None,
                 total: Some(0),
+                author_name: None,
+                author_url: None,
+                category: None,
+                tags: vec![],
             }
         );
         assert_eq!(
@@ -376,8 +422,48 @@ mod tests {
                 title: "Material Design Icons".into(),
                 license: Some(License { title: "Apache License 2.0".into(), spdx: "Apache-2.0".into(), url: Some("https://github.com/Templarian/MaterialDesign/blob/master/LICENSE".into()) }),
                 total: Some(5000),
+                author_name: None,
+                author_url: None,
+                category: None,
+                tags: vec![],
             }
         );
+    }
+
+    #[tokio::test]
+    async fn fetch_collections_parses_author_category_tags() {
+        let server = MockServer::start().await;
+        let json = serde_json::json!({
+            "mdi": {
+                "name": "Material Design Icons",
+                "total": 5000,
+                "license": { "title": "Apache License 2.0", "spdx": "Apache-2.0", "url": "https://example.com/license" },
+                "author": { "name": "Templarian", "url": "https://templarian.com" },
+                "category": "General",
+                "tags": ["ui", "design"]
+            },
+            "simple": { "name": "Simple Icons" }
+        });
+        Mock::given(method("GET"))
+            .and(path("/collections"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json))
+            .mount(&server)
+            .await;
+        let client = IconifyClient::with_base(server.uri());
+        let sets = client.fetch_collections().await.unwrap();
+        assert_eq!(sets.len(), 2);
+
+        let mdi = sets.iter().find(|s| s.prefix == "mdi").unwrap();
+        assert_eq!(mdi.author_name, Some("Templarian".into()));
+        assert_eq!(mdi.author_url, Some("https://templarian.com".into()));
+        assert_eq!(mdi.category, Some("General".into()));
+        assert_eq!(mdi.tags, vec!["ui".to_string(), "design".to_string()]);
+
+        let simple = sets.iter().find(|s| s.prefix == "simple").unwrap();
+        assert_eq!(simple.author_name, None);
+        assert_eq!(simple.author_url, None);
+        assert_eq!(simple.category, None);
+        assert!(simple.tags.is_empty());
     }
 
     #[tokio::test]

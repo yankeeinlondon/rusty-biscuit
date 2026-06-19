@@ -7,53 +7,64 @@ filter, generates dynamic shell completions, and clears the local cache.
 ## Synopsis
 
 ```bash
-icon [GLOBAL FLAGS] [icons [FILTER] [--from <csv>]]
+icon [GLOBAL FLAGS] [show [ID…] [--from <csv>] [--svg|--code-block|--css] [--meta] [--list] [--pick]]
 icon [GLOBAL FLAGS] sets [FILTER]
-icon [GLOBAL FLAGS] cache clear
+icon [GLOBAL FLAGS] domain [ARG]
+icon [GLOBAL FLAGS] cache list
+icon [GLOBAL FLAGS] cache clear [FILTER]
 icon [GLOBAL FLAGS] completions <shell>
 ```
 
-When no subcommand is given, the CLI runs the default `icons` command, so:
+When no subcommand is given, the CLI runs the default `show` command, so:
 
 ```bash
-icon mdi:home           # ≡ icon icons mdi:home
-icon home               # ≡ icon icons home
-icon --from mdi home    # ≡ icon icons --from mdi home
+icon mdi:home           # ≡ icon show mdi:home
+icon home               # ≡ icon show home
+icon --from mdi home    # ≡ icon show --from mdi home
 ```
 
 ## Subcommands
 
-### `icons [FILTER] [--from <csv>]` (default)
+### `show [ID…] [--from <csv>] [--svg|--code-block|--css] [--meta] [--list] [--pick]` (default)
 
-List icons whose `prefix:name` matches `FILTER`, rendered visually beside
-their identifier. The output is one line per icon:
+Show icons by explicit id, filter, or interactive picker.
 
-```
-<rendered-icon>  <prefix:name>
-```
+- **One or more `prefix:name` ids** → direct lookup-and-render for each id.
+  `--from` is still applied; supplying a `prefix` that is not in `--from`
+  is an error. Multiple ids are rendered one per line.
+- **Single substring without `:`** → inexact match: list offline matches,
+  then paginate the online `/search` results (up to 100 hits) and merge,
+  deduped, with the offline results. Each merged hit is fetched and cached.
+  In a TTY with exactly one match, the match is auto-rendered; with two
+  or more, the interactive picker is launched (unless `--list` forces a
+  text list). In non-TTY, all matches are listed one per line.
+- **No ids** → list every offline icon (built-in domain catalog + the local
+  SQLite cache). The empty-query online search is skipped.
 
-The rendered icon follows the `Icon` terminal ladder — Nerd Font → Unicode
-→ image (when `--features image` is enabled and the terminal advertises
-an image protocol) → the identifier as plain text.
+#### Format flags (mutually exclusive)
 
-- **No filter** → list every offline icon (built-in domain catalog + the
-  local SQLite cache). The empty-query online search is skipped on
-  purpose: Iconify's `/search` endpoint does not support an empty `query`.
-- **`prefix:name`** → direct lookup-and-render. `--from` is still
-  applied; supplying a `prefix` that is not in `--from` is an error.
-- **Substring filter** → list offline matches, then paginate the online
-  `/search` results (up to 100 hits) and merge, deduped, with the offline
-  results. Each merged hit is fetched and cached. A trailing "… N more
-  result(s) available online; use a more specific filter" line is
-  printed when the API reports more.
+| Flag | Effect |
+|------|--------|
+| `--svg` | Emit raw `icon.svg()` text. |
+| `--code-block` | Emit the SVG wrapped in a Markdown fenced code block, rendered through `darkmatter` with terminal syntax highlighting. |
+| `--css` | Emit the icon as a CSS `url('data:image/svg+xml,…')` string (percent-encoded). |
+| (none) | Terminal ladder render (Nerd Font → Unicode → image → identifier text). |
+
+More than one format flag is an error.
+
+`--meta` forces a metadata table regardless of arg count: columns `Set`,
+`Icon`, `Categories`, `Tags`, plus `Author` and `License` when populated.
+
+`--list` forces a plain text list (one match per line) even in a TTY.
+`--pick` forces the interactive picker; errors in non-TTY.
 
 `--from <csv>` restricts the result set to a comma-separated list of
 prefixes. It applies to both offline listing and online search (the
 client passes `?prefix=` for one prefix, `?prefixes=` for several).
 
-Global flags and the positionally-defaulted `FILTER` are all covered by
-dynamic shell completions, so `<TAB>` after `icon --from m` offers the
-matching prefixes (see [Completion behavior](#completion-behavior) below).
+Global flags and positional ids are all covered by dynamic shell
+completions, so `<TAB>` after `icon --from m` offers the matching
+prefixes (see [Completion behavior](#completion-behavior) below).
 
 ### `sets [FILTER]`
 
@@ -83,11 +94,29 @@ the title. The full online catalog is fetched (and cached) on every
 invocation; if the network is unreachable and there are no offline rows
 for the filter, the command errors.
 
-### `cache clear`
+### `domain [ARG]`
 
-Drop every row in the local SQLite cache (`icons` and `sets` tables). The
-cache file itself is preserved (the schema is kept intact). There is no
-TTL — entries persist until you clear them.
+Curated domain icons (offline-only, no network).
+
+- **No arg** → table of the 16 curated enum-set names with variant counts.
+- **Enum name** (e.g. `emoji`) → list variants with columns `Variant`,
+  `Glyph`, `Iconify ID`.
+- **`enum:variant`** (e.g. `emoji:happy`) → render the single curated icon
+  infallibly when it matches.
+- **Substring** → filter the 16 set names; error when no match.
+
+### `cache list`
+
+List cached icons with metadata. Columns: `Set`, `Icon`, `Display`
+(omitted when the terminal cannot render visuals), `Categories`, `Tags`.
+
+### `cache clear [FILTER]`
+
+Drop cached icons. Without a filter, both `icons` and `sets` tables are
+wiped. With a filter, only `icons` rows whose `prefix:name` contains the
+filter (case-insensitive) are deleted; `sets` is left intact. The cache
+file itself is preserved (the schema is kept intact). There is no TTL —
+entries persist until you clear them.
 
 ### `completions <shell>`
 
@@ -166,6 +195,12 @@ icon happy
 # Limit the search to a few sets
 icon --from mdi,lucide home
 
+# Raw SVG output
+icon show mdi:home --svg
+
+# Metadata table
+icon show mdi:home --meta
+
 # List every curated set with a per-set icon count
 icon sets
 
@@ -175,8 +210,15 @@ icon sets lucide
 # Use Nerd Font for icons that have a glyph
 icon --nerd --from mdi devops
 
-# Clear the cache (re-fetch on next use)
+# Curated domain sets
+icon domain
+icon domain emoji
+icon domain emoji:happy
+
+# Cache maintenance
+icon cache list
 icon cache clear
+icon cache clear home
 
 # Install static bash completions
 icon completions bash > ~/.local/share/bash-completion/completions/icon

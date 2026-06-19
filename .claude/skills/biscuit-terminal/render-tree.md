@@ -94,6 +94,24 @@ two-column layouts render from `ComponentHints::Columns` on a `BlockQuote`
 two-pass pre-scan / emit renderer that reuses the table module's width-planning
 utilities (but not `Table::render()`).
 
+### List-item inline coalescing (wrap invariant)
+
+A list item's children shape differs by CommonMark list *kind*: a **loose**
+item wraps its content in a `Paragraph` (`[Paragraph([Text, InlineCode, …])]`),
+but a **tight** item carries a **flat run of inline siblings**
+(`[Text, InlineCode, Text, …]`) with no `Paragraph`. `render_list_item` must
+**coalesce a maximal run of consecutive inline-kind children into one inline
+render** before wrapping — wrapping is **per-list-item**, not per-inline-node.
+If only the first inline child is sent through the prefix/hanging-indent wrap
+path, every following sibling (the code span, the trailing text) falls through
+to the block branch and renders on its own **unwrapped** line — the span lands
+alone and the trailing text overflows the width. Regression test:
+`render_tree_tight_list_item_coalesces_inline_run_and_wraps`. Note this is
+purely a render-tree concern: darkmatter's `Markdown::as_terminal` (and thus
+every Markdown surface, e.g. claudine's prompt reporting) folds through here, so
+a "tight bullet with `code`/**bold**/link wraps wrong" bug is fixed in this
+renderer, not upstream.
+
 ## Layout
 
 The terminal tree renderer applies a block node's `renderable::layout::Layout`

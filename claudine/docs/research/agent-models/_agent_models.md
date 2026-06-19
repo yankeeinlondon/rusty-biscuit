@@ -2,7 +2,7 @@
 sequence: "@claudine/docs/providers.yaml"
 file: "{{ctx.repo_root}}/claudine/docs/research/agent-models/{{state.file}}"
 agent: opencode
-model: zai-coding-plan/glm-5.1
+model: zai-coding-plan/glm-5.2
 # all target documents we write to should provide this frontmatter
 target_schema: 
     created: date
@@ -13,7 +13,7 @@ target_schema:
     changes: string[]
     requires_claudine_update: boolean(required)
     reason: string
-update: "{{file_exists(file) && markdown_file_empty(file)}}"
+update: "{{file_exists(file) && markdown_file_empty(file) ? false : true }}"
 ---
 
 ## Skills
@@ -25,21 +25,14 @@ Use the 'claudine' skill.
 Your job is to do detailed research into the **model** support in the **{{state.desc}}** solution. You are expected to answer the following questions:
 
 - `## Model's Available` Section
-    - 
+    - what models are available by default when you install **{{state.name}}**?
+    - how can you add in bespoke models (local models or otherwise)?
 
-- `## Logging Schema` Section
-    - Try to identify an "official" schema that {{state.name}} has defined for their log output
-        - If found, document it's location and then convert this into a Rust struct/enum
-    - If no "official" schema exists:
-        - Document that no official schema exists
-        - Look at any popular open sources projects which might have attempted to model a schema for the logs
-        - Check if you have read access to actual log files on the host computer, if you do then analyze them for patterns
-        - If neither community schemas exist nor do you have read access to the actual log files then state this
-        - Otherwise, build a representative schema using Rust struct/enum's
-- `## Informational Content versus Hook Events` Section
-    - Claudine's current implementation for logging has been leveraging the hook event's that we can plug into rather than an Agent's actual log files
-    - When do log files on the file system represent a better source? When do event logs represent a better source?
-    - Are there any other sources which might help us enrich the data we're getting?
+- `## Model Configuration Details` Section
+
+    - Does **{{state.name}}** provide a formal schema for the configuration of it's models? An informal schema?
+    - Is 
+
 
 - `## Sources`
     - add all useful resources that you used in your research as Markdown links

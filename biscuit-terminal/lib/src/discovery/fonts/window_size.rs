@@ -168,15 +168,78 @@ fn parse_csi_14t_response(response: &[u8]) -> Option<WindowSizePixels> {
     Some(WindowSizePixels { width, height })
 }
 
+/// Divide window pixel dimensions by the character grid to yield cell size.
+///
+/// Returns `None` if any dimension is zero, which guards against both an
+/// unpopulated pixel size (terminal reports `0` for `ws_xpixel`/`ws_ypixel`)
+/// and a divide-by-zero on the grid.
+fn cell_from_pixels(xpixel: u32, ypixel: u32, cols: u32, rows: u32) -> Option<CellSize> {
+    if xpixel == 0 || ypixel == 0 || cols == 0 || rows == 0 {
+        return None;
+    }
+    Some(CellSize {
+        width: xpixel / cols,
+        height: ypixel / rows,
+    })
+}
+
+/// Read cell size from the `TIOCGWINSZ` ioctl.
+///
+/// The `winsize` struct carries pixel **and** grid dimensions in one atomic
+/// kernel read, so the cell size is computed from a self-consistent snapshot —
+/// no escape sequence, no read timeout, and no chance of a resize landing
+/// between two separate queries. Terminals that populate `ws_xpixel`/`ws_ypixel`
+/// (iTerm2, kitty, ghostty, WezTerm, Warp, Apple Terminal) resolve here; those
+/// that leave them at `0` fall through to the CSI 14 t query.
+#[cfg(unix)]
+fn cell_size_ioctl() -> Option<CellSize> {
+    use std::os::unix::io::AsRawFd;
+
+    if !is_tty() {
+        return None;
+    }
+
+    // Target the controlling terminal directly so the ioctl is correct even
+    // when stdout/stderr are piped.
+    let tty = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .ok()?;
+
+    // SAFETY: an all-zero `winsize` is a valid initial value; `ioctl` either
+    // overwrites it on success or leaves it untouched on the error path we
+    // discard below.
+    let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
+    let rc = unsafe { libc::ioctl(tty.as_raw_fd(), libc::TIOCGWINSZ, &mut ws) };
+    if rc != 0 {
+        return None;
+    }
+
+    cell_from_pixels(
+        ws.ws_xpixel as u32,
+        ws.ws_ypixel as u32,
+        ws.ws_col as u32,
+        ws.ws_row as u32,
+    )
+}
+
+#[cfg(not(unix))]
+fn cell_size_ioctl() -> Option<CellSize> {
+    None
+}
+
 /// Calculate the cell size (font dimensions) in pixels.
 ///
-/// Combines window pixel size with grid dimensions to calculate
-/// the approximate width and height of a single character cell.
+/// Prefers the synchronous `TIOCGWINSZ` ioctl, which is deterministic and free
+/// of the read-timeout race inherent to the CSI 14 t escape query. Only when the
+/// ioctl leaves the pixel fields unpopulated does this fall back to querying the
+/// terminal with [`window_size_pixels`].
 ///
 /// ## Returns
 ///
-/// - `Some(CellSize)` if both window pixels and grid size can be determined
-/// - `None` if either measurement fails
+/// - `Some(CellSize)` if pixel and grid dimensions can be determined
+/// - `None` if neither source yields a usable measurement
 ///
 /// ## Examples
 ///
@@ -188,18 +251,14 @@ fn parse_csi_14t_response(response: &[u8]) -> Option<WindowSizePixels> {
 /// }
 /// ```
 pub fn cell_size() -> Option<CellSize> {
+    if let Some(cs) = cell_size_ioctl() {
+        return Some(cs);
+    }
+
     let window = window_size_pixels()?;
     let cols = crate::discovery::detection::terminal_width();
     let rows = crate::discovery::detection::terminal_height();
-
-    if cols == 0 || rows == 0 {
-        return None;
-    }
-
-    Some(CellSize {
-        width: window.width / cols,
-        height: window.height / rows,
-    })
+    cell_from_pixels(window.width, window.height, cols, rows)
 }
 
 #[cfg(test)]
@@ -270,6 +329,35 @@ mod tests {
     fn test_cell_size_does_not_panic() {
         // cell_size() should not panic regardless of environment
         let _ = cell_size();
+    }
+
+    #[test]
+    fn test_cell_from_pixels_divides_window_by_grid() {
+        // 1920x1080 over a 120x40 grid -> 16x27 cells. This is the ioctl
+        // happy path the squished-graph fix relies on.
+        assert_eq!(
+            cell_from_pixels(1920, 1080, 120, 40),
+            Some(CellSize {
+                width: 16,
+                height: 27
+            })
+        );
+    }
+
+    #[test]
+    fn test_cell_from_pixels_rejects_unpopulated_pixels() {
+        // A terminal that reports a grid but zero pixel dimensions (the
+        // ioctl-unsupported case) must yield None so cell_size() falls through
+        // to the CSI 14 t query rather than fabricating a tiny cell.
+        assert_eq!(cell_from_pixels(0, 0, 120, 40), None);
+        assert_eq!(cell_from_pixels(1920, 0, 120, 40), None);
+    }
+
+    #[test]
+    fn test_cell_from_pixels_rejects_zero_grid() {
+        // Guards the division against a zero grid dimension.
+        assert_eq!(cell_from_pixels(1920, 1080, 0, 40), None);
+        assert_eq!(cell_from_pixels(1920, 1080, 120, 0), None);
     }
 
     #[test]

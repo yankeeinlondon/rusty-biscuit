@@ -30,7 +30,7 @@ lazy_static! {
 /// let rust_syntax = syntax_set.find_syntax_by_extension("rs");
 /// assert!(rust_syntax.is_some());
 /// ```
-pub(super) fn load_syntax_set() -> &'static SyntaxSet {
+pub(crate) fn load_syntax_set() -> &'static SyntaxSet {
     &SYNTAX_SET
 }
 

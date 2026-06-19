@@ -27,7 +27,7 @@
 //! // Output contains ANSI escape codes for terminal display
 //! ```
 
-use crate::markdown::highlighting::{ColorMode, ThemePair};
+use crate::markdown::highlighting::{CodeBlockMode, ColorMode, ThemePair};
 #[cfg(test)]
 use crate::markdown::output::code_block;
 use biscuit_terminal::components::image_options::TerminalImageOptions;
@@ -42,8 +42,6 @@ use syntect::highlighting::Color;
 // Re-export shared code-block helpers so darkmatter tests keep working.
 #[cfg(test)]
 pub(crate) use code_block::compute_highlight_bg;
-#[cfg(test)]
-pub(crate) use code_block::find_syntax;
 #[cfg(test)]
 pub(crate) use code_block::render_terminal_code_block as highlight_code;
 
@@ -710,6 +708,13 @@ pub struct TerminalOptions {
     /// default horizontal-rule style instead of reading the deprecated top-level
     /// `hr:` frontmatter block.
     pub hr_defaults: Option<crate::markdown::inline::HorizontalRuleAttrs>,
+    /// Controls how a code block's theme variant is chosen relative to the page
+    /// color mode.
+    ///
+    /// - `Inverse` (default): opposite variant from the page (dark page -> light panel)
+    /// - `Dark` / `Light`: force the named variant
+    /// - `Same`: match the page variant
+    pub code_block_mode: CodeBlockMode,
 }
 
 static DETECTED_COLOR_MODE: std::sync::OnceLock<ColorMode> = std::sync::OnceLock::new();
@@ -738,6 +743,7 @@ impl Default for TerminalOptions {
             mermaid_mode: MermaidMode::default(),
             hyperlink_mode: HyperlinkMode::default(),
             hr_defaults: None,
+            code_block_mode: CodeBlockMode::default(),
         }
     }
 }
@@ -899,6 +905,7 @@ pub(crate) fn adjust_background(
 mod tests {
     use super::*;
     use crate::markdown::highlighting::CodeHighlighter;
+    use crate::markdown::language_grammar::LanguageGrammar;
     use crate::testing::strip_ansi_codes;
 
     fn test_options() -> TerminalOptions {
@@ -916,6 +923,7 @@ mod tests {
             mermaid_mode: MermaidMode::Off,
             hyperlink_mode: HyperlinkMode::Always,
             hr_defaults: None,
+            code_block_mode: CodeBlockMode::default(),
         }
     }
 
@@ -1105,7 +1113,7 @@ mod tests {
         let code = "fn main() {}";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1130,7 +1138,7 @@ mod tests {
         let code = "fn main() {}";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1147,16 +1155,22 @@ mod tests {
         let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
         let bg_code = format!("\x1b[48;2;{};{};{}m", bg_color.r, bg_color.g, bg_color.b);
 
-        // Should start with top padding row (bg color + clear + reset + newline)
+        // Should start with the reset SGR (clears inherited attributes) followed
+        // by the top padding row (bg color + clear + reset + newline). The
+        // leading `\x1b[0m` is the inherited-attribute reset the code-block
+        // helper always emits before applying the theme's own background and
+        // foreground.
+        let expected_start = format!("\x1b[0m{}\x1b[K\x1b[0m\n", bg_code);
         assert!(
-            output.starts_with(&format!("{}\x1b[K\x1b[0m\n", bg_code)),
-            "Output should start with top padding row"
+            output.starts_with(&expected_start),
+            "Output should start with top padding row; got: {output:?}"
         );
 
         // Should end with bottom padding row (bg color + clear + reset, no newline)
+        let expected_end = format!("{}\x1b[K\x1b[0m", bg_code);
         assert!(
-            output.ends_with(&format!("{}\x1b[K\x1b[0m", bg_code)),
-            "Output should end with bottom padding row"
+            output.ends_with(&expected_end),
+            "Output should end with bottom padding row; got: {output:?}"
         );
     }
 
@@ -1169,7 +1183,7 @@ mod tests {
         let code = "fn main() {}";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1186,8 +1200,10 @@ mod tests {
         let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
         let bg_code = format!("\x1b[48;2;{};{};{}m", bg_color.r, bg_color.g, bg_color.b);
 
-        // After the top padding row and background color set, should have a space for left padding
-        let expected_sequence = format!("{}\x1b[K\x1b[0m\n{} ", bg_code, bg_code);
+        // After the top padding row, the body line begins with a reset SGR
+        // (clears inherited attributes) followed by the theme background
+        // color and one space of left padding before the syntax tokens.
+        let expected_sequence = format!("\x1b[K\x1b[0m\n\x1b[0m{} ", bg_code);
         assert!(
             output.contains(&expected_sequence),
             "Code lines should have 1-character left padding after background color"
@@ -1203,7 +1219,7 @@ mod tests {
         let code = "test";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1245,7 +1261,7 @@ mod tests {
         let code = "line 1\nline 2\nline 3";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1289,7 +1305,7 @@ mod tests {
         let code = "line 1\nline 2\nline 3\nline 4\nline 5";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1329,7 +1345,7 @@ mod tests {
         let code = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1374,7 +1390,7 @@ mod tests {
         let code = "line 1\nline 2\nline 3";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1420,7 +1436,7 @@ mod tests {
             "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1457,7 +1473,7 @@ mod tests {
         let code = "let x = 1;";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1516,7 +1532,7 @@ mod tests {
         let code = "line 1\nline 2\nline 3";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1562,7 +1578,7 @@ mod tests {
         let code = "line 1\nline 2\nline 3\nline 4\nline 5";
         let result = highlight_code(
             code,
-            "rust",
+            &LanguageGrammar::rust(),
             &highlighter,
             &options,
             &meta,
@@ -1630,98 +1646,6 @@ mod tests {
         assert_eq!(highlight_bg.g, 225); // 240 - 15
         assert_eq!(highlight_bg.b, 240); // unchanged
         assert_eq!(highlight_bg.a, 255);
-    }
-
-    #[test]
-    fn test_find_syntax_by_extension() {
-        let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-        let syntax = find_syntax("rs", highlighter.syntax_set());
-
-        assert!(syntax.is_some());
-        assert_eq!(syntax.unwrap().name, "Rust");
-    }
-
-    #[test]
-    fn test_find_syntax_unknown_language() {
-        let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-        let syntax = find_syntax("unknown_language", highlighter.syntax_set());
-
-        // Should return None for unknown languages
-        assert!(syntax.is_none());
-    }
-
-    #[test]
-    fn test_find_syntax_case_insensitive() {
-        let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-
-        // These should all find the Rust syntax
-        assert!(
-            find_syntax("rust", highlighter.syntax_set()).is_some(),
-            "lowercase 'rust' should find Rust syntax"
-        );
-        assert!(
-            find_syntax("Rust", highlighter.syntax_set()).is_some(),
-            "exact 'Rust' should find Rust syntax"
-        );
-        assert!(
-            find_syntax("RUST", highlighter.syntax_set()).is_some(),
-            "uppercase 'RUST' should find Rust syntax"
-        );
-        assert!(
-            find_syntax("rs", highlighter.syntax_set()).is_some(),
-            "extension 'rs' should find Rust syntax"
-        );
-
-        // Python
-        assert!(
-            find_syntax("python", highlighter.syntax_set()).is_some(),
-            "lowercase 'python' should find Python syntax"
-        );
-        assert!(
-            find_syntax("Python", highlighter.syntax_set()).is_some(),
-            "exact 'Python' should find Python syntax"
-        );
-        assert!(
-            find_syntax("py", highlighter.syntax_set()).is_some(),
-            "extension 'py' should find Python syntax"
-        );
-    }
-
-    #[test]
-    fn test_find_syntax_aliases() {
-        let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-
-        // Bash aliases
-        assert!(
-            find_syntax("bash", highlighter.syntax_set()).is_some(),
-            "'bash' should find Bash syntax"
-        );
-        assert!(
-            find_syntax("sh", highlighter.syntax_set()).is_some(),
-            "'sh' should find Bash syntax"
-        );
-        assert!(
-            find_syntax("shell", highlighter.syntax_set()).is_some(),
-            "'shell' alias should find Bash syntax"
-        );
-
-        // JavaScript/TypeScript
-        assert!(
-            find_syntax("js", highlighter.syntax_set()).is_some(),
-            "'js' should find JavaScript syntax"
-        );
-        assert!(
-            find_syntax("javascript", highlighter.syntax_set()).is_some(),
-            "'javascript' alias should find JS syntax"
-        );
-        assert!(
-            find_syntax("ts", highlighter.syntax_set()).is_some(),
-            "'ts' should find TypeScript syntax"
-        );
-        assert!(
-            find_syntax("typescript", highlighter.syntax_set()).is_some(),
-            "'typescript' alias should find TS syntax"
-        );
     }
 
     #[test]

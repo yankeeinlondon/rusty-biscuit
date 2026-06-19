@@ -135,17 +135,25 @@ fn union_property_to_schema(
     name: &str,
     arms: &[PropertyAtom],
 ) -> Result<(Value, bool), SchemaError> {
+    // Union requiredness must be known *before* building arms: a required
+    // union (any arm carries `required`) gets neither the property-level
+    // `null` arm nor the optional-`file` empty-string tolerance. Deciding
+    // this up front lets each arm be built with empty-`file` suppression so a
+    // required union containing an otherwise-optional `file` arm still rejects
+    // the `""` sentinel.
+    let required = arms.iter().any(atom_is_required);
+
     let mut any_of = Vec::with_capacity(arms.len());
-    let mut required = false;
     let mut hoisted_default: Option<Value> = None;
 
     for atom in arms {
-        let (arm_value, arm_required) = atom_to_schema(name, atom)?;
-        if arm_required {
-            required = true;
-        }
-        // Hoist any `default` key off the arm. `atom_to_schema` always returns
-        // a `Value::Object` for the converted fragment.
+        // Use the bare fragment builder so the optional `null` wrapper is
+        // applied once at the property level, not per arm. The optional-`file`
+        // empty-string arm is allowed only when the union itself is optional.
+        let (arm_value, _arm_required) =
+            atom_fragment_without_null_wrap(name, atom, !required)?;
+        // Hoist any `default` key off the arm. `atom_fragment_without_null_wrap`
+        // always returns a `Value::Object` for the converted fragment.
         let mut arm_value = arm_value;
         if let Value::Object(map) = &mut arm_value
             && let Some(arm_default) = map.remove("default")
@@ -172,12 +180,111 @@ fn union_property_to_schema(
     if let Some(default_val) = hoisted_default {
         union_schema.insert("default".into(), default_val);
     }
-    Ok((Value::Object(union_schema), required))
+
+    let schema = if required {
+        Value::Object(union_schema)
+    } else {
+        // Lift the null arm into the existing anyOf array so the output
+        // stays a single-level `anyOf: [null, arm1, arm2, ...]` rather than
+        // nesting the whole union under a second anyOf wrapper.
+        let mut arms = union_schema
+            .remove("anyOf")
+            .expect("union schema has anyOf")
+            .as_array()
+            .expect("anyOf is an array")
+            .clone();
+        arms.insert(0, json!({ "type": "null" }));
+        union_schema.insert("anyOf".into(), Value::Array(arms));
+        Value::Object(union_schema)
+    };
+    Ok((schema, required))
 }
 
 // ── Atom → JSON Schema fragment ──────────────────────────────────────────
 
+/// Wraps a finished typed fragment so an optional property also accepts
+/// JSON `null` as a sentinel for "absent".
+fn wrap_optional_null(inner: Value) -> Value {
+    json!({ "anyOf": [ { "type": "null" }, inner ] })
+}
+
 fn atom_to_schema(name: &str, atom: &PropertyAtom) -> Result<(Value, bool), SchemaError> {
+    let (mut fragment, required) = atom_fragment_without_null_wrap(name, atom, true)?;
+
+    // Required atoms are emitted unchanged. Optional atoms are wrapped so
+    // that JSON `null` validates as "absent". The optional `file` case also
+    // preserves the legacy empty-string sentinel.
+    if required {
+        return Ok((fragment, true));
+    }
+
+    // Pull annotations off the fragment so they land on the outer wrapper,
+    // not the typed arm. This keeps required-atom output byte-for-byte
+    // identical while allowing optional wrappers to carry their own metadata.
+    let mut default_val: Option<Value> = None;
+    let mut description_val: Option<Value> = None;
+    if let Value::Object(map) = &mut fragment {
+        default_val = map.remove("default");
+        description_val = map.remove("description");
+    }
+
+    let is_optional_scalar_file = matches!(&atom.ty, TypeExpr::Primitive(SimplifiedType::File))
+        && !atom.is_array;
+
+    let mut schema = if is_optional_scalar_file {
+        // The bare fragment is already `[{ "const": "" }, file-typed]`.
+        // Prepend the null arm to keep a flat, single-level anyOf.
+        let mut arms = fragment
+            .get("anyOf")
+            .and_then(|a| a.as_array())
+            .expect("optional file fragment has anyOf")
+            .clone();
+        arms.insert(0, json!({ "type": "null" }));
+        let mut m = Map::new();
+        m.insert("anyOf".into(), Value::Array(arms));
+        Value::Object(m)
+    } else {
+        wrap_optional_null(fragment)
+    };
+
+    if let Value::Object(map) = &mut schema {
+        if let Some(d) = default_val {
+            map.insert("default".into(), d);
+        }
+        if let Some(d) = description_val {
+            map.insert("description".into(), d);
+        }
+    }
+
+    Ok((schema, false))
+}
+
+/// Reports whether an atom carries the `required` constraint at either the
+/// value or array level. Used to decide union requiredness before any arm is
+/// built, so the per-arm empty-`file` sentinel can be suppressed for a
+/// required union.
+fn atom_is_required(atom: &PropertyAtom) -> bool {
+    atom.constraints
+        .iter()
+        .chain(atom.array_constraints.iter())
+        .any(|c| matches!(c, Constraint::Required))
+}
+
+/// Builds the bare atom fragment without the general optional `null` wrapper.
+///
+/// The returned fragment carries `default`/`description` annotations so that
+/// property-level union arms can reuse the same construction path. Callers
+/// that need the public optional wrapper must use [`atom_to_schema`].
+///
+/// `allow_optional_empty_file` gates the optional-`file` empty-string arm
+/// (Decision A). It is `true` for single atoms and optional unions, but
+/// `false` for a required union arm so the `""` sentinel never leaks into a
+/// required property.
+fn atom_fragment_without_null_wrap(
+    name: &str,
+    atom: &PropertyAtom,
+    allow_optional_empty_file: bool,
+) -> Result<(Value, bool), SchemaError> {
     // Required is hoisted out; default may appear on either constraints
     // (single/value-level) or array_constraints (array-level). The last write
     // wins, mirroring how a user reading left-to-right would expect.
@@ -196,19 +303,33 @@ fn atom_to_schema(name: &str, atom: &PropertyAtom) -> Result<(Value, bool), Sche
         TypeExpr::InlineObject(shape) => inline_object_fragment(name, shape, &atom.constraints)?,
     };
 
-    let mut schema = if atom.is_array {
+    // Decision A: a non-`required` scalar `file` field treats an empty string
+    // as "absent" so a ternary like `spec: "{{ ... ? path : '' }}"` validates
+    // when the optional file is missing. The empty arm wraps the unchanged
+    // `darkmatter-file` fragment, so file typing (and SimplifiedSchema-driven
+    // completions, which read `atom.ty`, not this JSON Schema) are preserved.
+    // Required file fields keep the strict fragment and still reject empty.
+    let optional_empty_file = allow_optional_empty_file
+        && matches!(&atom.ty, TypeExpr::Primitive(SimplifiedType::File))
+        && !atom.is_array
+        && !required;
+
+    let mut fragment = if atom.is_array {
         let mut arr = Map::new();
         arr.insert("type".into(), Value::String("array".into()));
         arr.insert("items".into(), inner);
         apply_array_constraints(name, &mut arr, &atom.array_constraints)?;
         Value::Object(arr)
+    } else if optional_empty_file {
+        json!({ "anyOf": [ { "const": "" }, inner ] })
     } else {
         inner
     };
 
-    // Attach default + description on the outermost object. Every type
-    // fragment we emit is an `Object` so this match is exhaustive in practice.
-    if let Value::Object(map) = &mut schema {
+    // Attach default + description on the fragment. For single atoms these
+    // are moved to the optional wrapper by `atom_to_schema`; for union arms
+    // `default` is hoisted and `description` stays arm-local.
+    if let Value::Object(map) = &mut fragment {
         if let Some(d) = default_val {
             map.insert("default".into(), d);
         }
@@ -217,7 +338,7 @@ fn atom_to_schema(name: &str, atom: &PropertyAtom) -> Result<(Value, bool), Sche
         }
     }
 
-    Ok((schema, required))
+    Ok((fragment, required))
 }
 
 /// Lowers an inline object `SchemaShape` to a Draft 2020-12 object fragment.
@@ -561,7 +682,9 @@ fn normalize_json_number(value: Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::markdown::schemas::ValidationProblemKind;
     use crate::markdown::schemas::simplified::{grammar::parse_type_expr, parse_yaml_schema};
+    use crate::markdown::schemas::validate::PositionMap;
 
     fn parse(yaml: &str) -> SimplifiedSchema {
         let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).expect("yaml parse");
@@ -573,6 +696,14 @@ mod tests {
     }
 
     fn atom_value(input: &str) -> Value {
+        let mut atom = parse_type_expr("test", input).expect("parse atom");
+        // Shape tests focus on the typed fragment, so force the atom to be
+        // required. Optional wrapping is exercised separately.
+        atom.constraints.push(Constraint::Required);
+        atom_to_schema("test", &atom).expect("convert").0
+    }
+
+    fn optional_atom_value(input: &str) -> Value {
         let atom = parse_type_expr("test", input).expect("parse atom");
         atom_to_schema("test", &atom).expect("convert").0
     }
@@ -660,12 +791,55 @@ mod tests {
 
     #[test]
     fn file_emits_format_and_match_extension() {
-        let v = atom_value("file(match('*.md', '!_*.md'))");
-        assert_eq!(v["type"], "string");
-        assert_eq!(v["format"], "darkmatter-file");
-        let globs = v["x-darkmatter-match"].as_array().unwrap();
+        // An optional `file` field wraps the `darkmatter-file` fragment in an
+        // `anyOf` with an empty-string arm (Decision A); the file shape lives
+        // in the second arm.
+        let v = optional_atom_value("file(match('*.md', '!_*.md'))");
+        let file_arm = &v["anyOf"][2];
+        assert_eq!(file_arm["type"], "string");
+        assert_eq!(file_arm["format"], "darkmatter-file");
+        let globs = file_arm["x-darkmatter-match"].as_array().unwrap();
         assert_eq!(globs[0], "*.md");
         assert_eq!(globs[1], "!_*.md");
+    }
+
+    #[test]
+    fn optional_file_wraps_empty_string_arm() {
+        let v = optional_atom_value("file");
+        // Arm 0 admits null, arm 1 admits the empty string ("absent"), and
+        // arm 2 is the file shape.
+        assert_eq!(v["anyOf"][0]["type"], "null");
+        assert_eq!(v["anyOf"][1]["const"], "");
+        assert_eq!(v["anyOf"][2]["format"], "darkmatter-file");
+    }
+
+    #[test]
+    fn required_file_is_not_empty_wrapped() {
+        // A required `file` field keeps the strict, unwrapped fragment so an
+        // empty string is still rejected.
+        let v = atom_value("file(required)");
+        assert_eq!(v["type"], "string");
+        assert_eq!(v["format"], "darkmatter-file");
+        assert!(v.get("anyOf").is_none(), "required file must not be empty-wrapped");
+    }
+
+    #[test]
+    fn optional_file_accepts_empty_string_as_absent() {
+        // End-to-end: the converted schema validates an empty-string optional
+        // `file` value as absent, and an omitted key (or explicit null) is
+        // likewise valid.
+        let schema = convert("spec: file");
+        let v = crate::markdown::schemas::validate::build_validator(&schema).unwrap();
+        assert!(v.is_valid(&json!({ "spec": "" })), "empty optional file must validate");
+        assert!(v.is_valid(&json!({ "spec": null })), "null optional file must validate");
+        assert!(v.is_valid(&json!({})), "absent optional file must validate");
+    }
+
+    #[test]
+    fn required_file_rejects_empty_string() {
+        let schema = convert("plan: 'file(required)'");
+        let v = crate::markdown::schemas::validate::build_validator(&schema).unwrap();
+        assert!(!v.is_valid(&json!({ "plan": "" })), "empty required file must fail");
     }
 
     #[test]
@@ -724,11 +898,11 @@ mod tests {
 
     #[test]
     fn description_lands_on_outer_schema() {
-        let v = atom_value("string -> The author's full name");
+        let v = optional_atom_value("string -> The author's full name");
         assert_eq!(v["description"], "The author's full name");
 
-        let v = atom_value("string[] -> A list of tags");
-        assert_eq!(v["type"], "array");
+        let v = optional_atom_value("string[] -> A list of tags");
+        assert_eq!(v["anyOf"][1]["type"], "array");
         assert_eq!(v["description"], "A list of tags");
     }
 
@@ -762,6 +936,44 @@ title:
         assert_eq!(arms[0]["pattern"], r"\S");
         // required is NOT emitted on the arm
         assert!(arms[0].get("required").is_none());
+    }
+
+    #[test]
+    fn required_union_with_file_arm_rejects_empty_string() {
+        // A required union (here via `number(required)`) must not inherit the
+        // optional-`file` empty-string sentinel from its `file` arm: the
+        // property is required, so `""` is not "absent" and must fail.
+        let yaml = r#"
+asset:
+  - file
+  - "number(required)"
+"#;
+        let v = convert(yaml);
+        assert_eq!(v["required"][0], "asset");
+        let arms = v["properties"]["asset"]["anyOf"].as_array().unwrap();
+        // No null arm (required) and no empty-string `const` arm anywhere.
+        assert!(
+            arms.iter().all(|a| a["type"] != "null"),
+            "required union must not carry a null arm: {arms:?}"
+        );
+        assert!(
+            arms.iter().all(|a| a.get("const") != Some(&json!(""))),
+            "required union must not carry an empty-string file arm: {arms:?}"
+        );
+
+        let validator = crate::markdown::schemas::validate::build_validator(&v).unwrap();
+        assert!(
+            !validator.is_valid(&json!({ "asset": "" })),
+            "required union must reject the empty-string sentinel"
+        );
+        assert!(
+            !validator.is_valid(&json!({ "asset": null })),
+            "required union must reject null"
+        );
+        assert!(
+            validator.is_valid(&json!({ "asset": 42 })),
+            "required union must still accept a valid number arm"
+        );
     }
 
     #[test]
@@ -912,8 +1124,9 @@ config: "{ host: string(required) }"
             v.get("required").is_none(),
             "root required must not include inline object inner requireds: {v:?}"
         );
-        // But the inner fragment carries it.
-        let config = &v["properties"]["config"];
+        // But the inner fragment carries it. Because the outer atom is
+        // optional, reach through the nullable wrapper to the typed arm.
+        let config = &v["properties"]["config"]["anyOf"][1];
         let required = config["required"].as_array().unwrap();
         assert_eq!(required, &vec![Value::String("host".into())]);
     }
@@ -966,7 +1179,7 @@ config: "{ host: string }(required)"
         let outer = &v;
         assert_eq!(outer["additionalProperties"], false);
         let outer_props = outer["properties"].as_object().unwrap();
-        let inner = &outer_props["outer"];
+        let inner = &outer_props["outer"]["anyOf"][1];
         assert_eq!(inner["type"], "object");
         assert_eq!(inner["additionalProperties"], false);
     }
@@ -1040,28 +1253,25 @@ config: "{ host: string }(required)"
     }
 
     #[test]
-    fn v1_scalar_atoms_are_byte_for_byte_unchanged() {
-        // Snapshot-style check on the v1 scalar atoms: the JSON shape
-        // emitted by the converter for a fully-typed scalar property
-        // matches what the Phase 1 codebase produced, byte for byte.
-        // This guards against any accidental behaviour drift in the
-        // atom-to-schema pass now that the dispatch has gained a new
-        // `TypeExpr::InlineObject` arm.
+    fn required_scalar_atoms_are_byte_for_byte_unchanged() {
+        // Snapshot-style check on required scalar atoms: the JSON shape
+        // emitted by the converter must match what the pre-nullable codebase
+        // produced, byte for byte. Optional variants are covered separately.
         for (input, expected_keys) in [
-            ("string", vec!["type"]),
-            ("number", vec!["type"]),
-            ("boolean", vec!["type"]),
+            ("string(required)", vec!["type"]),
+            ("number(required)", vec!["type"]),
+            ("boolean(required)", vec!["type"]),
             (
-                "string(min(5); max(80))",
+                "string(required; min(5); max(80))",
                 vec!["type", "minLength", "maxLength"],
             ),
-            ("date", vec!["type", "format"]),
-            ("datetime", vec!["type", "format"]),
-            ("time", vec!["type", "format"]),
-            ("email", vec!["type", "format"]),
-            ("any", vec![]),
+            ("date(required)", vec!["type", "format"]),
+            ("datetime(required)", vec!["type", "format"]),
+            ("time(required)", vec!["type", "format"]),
+            ("email(required)", vec!["type", "format"]),
+            ("any(required)", vec![]),
             (
-                "string(pattern(^[a-z]+$))[](min(1); max(5); unique)",
+                "string(pattern(^[a-z]+$))[](min(1); max(5); unique; required)",
                 vec!["type", "items", "minItems", "maxItems", "uniqueItems"],
             ),
         ] {
@@ -1073,8 +1283,229 @@ config: "{ host: string }(required)"
             expected.sort();
             assert_eq!(
                 keys, expected,
-                "v1 atom `{input}` has drifted: got keys {keys:?}"
+                "required atom `{input}` has drifted: got keys {keys:?}"
             );
+        }
+    }
+
+    #[test]
+    fn optional_scalar_atoms_emit_null_wrap() {
+        // Every optional scalar (and array) is now wrapped in a nullable
+        // `anyOf` whose first arm is `{"type":"null"}`.
+        for input in [
+            "string",
+            "number",
+            "boolean",
+            "string(min(5); max(80))",
+            "date",
+            "datetime",
+            "time",
+            "email",
+            "any",
+            "string(pattern(^[a-z]+$))[](min(1); max(5); unique)",
+        ] {
+            let v = optional_atom_value(input);
+            let obj = v.as_object().unwrap();
+            assert_eq!(
+                obj.keys().collect::<Vec<_>>(),
+                vec!["anyOf"],
+                "optional atom `{input}` should emit only an anyOf wrapper"
+            );
+            let arms = v["anyOf"].as_array().unwrap();
+            assert_eq!(
+                arms[0]["type"],
+                "null",
+                "optional atom `{input}` should lead with a null arm"
+            );
+        }
+    }
+
+    // ── Acceptance tests for nullable optional properties (Phase 1) ────────
+
+    #[test]
+    fn optional_primitives_accept_null_as_absent() {
+        let cases: &[(&str, Value)] = &[
+            ("string", json!("hello")),
+            ("number", json!(42)),
+            ("boolean", json!(true)),
+            ("date", json!("2026-06-18")),
+            ("datetime", json!("2026-06-18T12:00:00Z")),
+            ("time", json!("12:00:00Z")),
+            ("email", json!("a@example.com")),
+            ("url", json!("https://example.com")),
+            ("object", json!({ "x": 1 })),
+        ];
+        for (ty, valid_value) in cases {
+            let schema = convert(&format!("opt: {ty}"));
+            let v = crate::markdown::schemas::validate::build_validator(&schema).unwrap();
+            assert!(v.is_valid(&json!({})), "{ty}: absent must validate");
+            assert!(v.is_valid(&json!({ "opt": null })), "{ty}: null must validate");
+            assert!(
+                v.is_valid(&json!({ "opt": valid_value.clone() })),
+                "{ty}: valid non-null must validate"
+            );
+
+            let required_schema = convert(&format!("req: '{ty}(required)'"));
+            let v_req =
+                crate::markdown::schemas::validate::build_validator(&required_schema).unwrap();
+            assert!(
+                !v_req.is_valid(&json!({ "req": null })),
+                "{ty}: required must reject null"
+            );
+        }
+
+        // Enum is tested separately because its members live inside the
+        // grammar's parentheses; `required` follows after a `;` separator.
+        let schema = convert("opt: enum(red,green)");
+        let v = crate::markdown::schemas::validate::build_validator(&schema).unwrap();
+        assert!(v.is_valid(&json!({})), "enum: absent must validate");
+        assert!(v.is_valid(&json!({ "opt": null })), "enum: null must validate");
+        assert!(v.is_valid(&json!({ "opt": "red" })), "enum: valid member must validate");
+
+        let required_enum = convert("req: 'enum(red,green; required)'");
+        let v_req = crate::markdown::schemas::validate::build_validator(&required_enum).unwrap();
+        assert!(
+            !v_req.is_valid(&json!({ "req": null })),
+            "enum: required must reject null"
+        );
+        assert!(
+            v_req.is_valid(&json!({ "req": "red" })),
+            "enum: required valid member must validate"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn optional_file_accepts_null_and_empty_as_absent() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("x.md");
+        std::fs::write(&path, b"x").unwrap();
+        let _cwd = FileFormatCwdGuard::enter(dir.path());
+
+        let schema = convert("spec: file");
+        let v = crate::markdown::schemas::validate::build_validator(&schema).unwrap();
+        assert!(v.is_valid(&json!({})), "absent optional file must validate");
+        assert!(v.is_valid(&json!({ "spec": null })), "null optional file must validate");
+        assert!(v.is_valid(&json!({ "spec": "" })), "empty optional file must validate");
+        assert!(
+            v.is_valid(&json!({ "spec": "./x.md" })),
+            "existing optional file must validate"
+        );
+    }
+
+    #[test]
+    fn optional_object_and_inline_object_accept_null() {
+        for (key, ty) in [("object", "object"), ("inline", "'{ foo: string }'")] {
+            let schema = convert(&format!("opt: {ty}"));
+            let v = crate::markdown::schemas::validate::build_validator(&schema).unwrap();
+            assert!(v.is_valid(&json!({})), "{key}: absent must validate");
+            assert!(v.is_valid(&json!({ "opt": null })), "{key}: null must validate");
+        }
+    }
+
+    #[test]
+    fn optional_array_accepts_null() {
+        let schema = convert("opt: string[]");
+        let v = crate::markdown::schemas::validate::build_validator(&schema).unwrap();
+        assert!(v.is_valid(&json!({})));
+        assert!(v.is_valid(&json!({ "opt": null })));
+        assert!(v.is_valid(&json!({ "opt": [] })));
+        assert!(v.is_valid(&json!({ "opt": ["a"] })));
+    }
+
+    #[test]
+    fn optional_property_union_accepts_null() {
+        let yaml = "opt:\n  - string\n  - number\n";
+        let schema = convert(yaml);
+        let v = crate::markdown::schemas::validate::build_validator(&schema).unwrap();
+        assert!(v.is_valid(&json!({})));
+        assert!(v.is_valid(&json!({ "opt": null })));
+        assert!(v.is_valid(&json!({ "opt": "x" })));
+        assert!(v.is_valid(&json!({ "opt": 3 })));
+    }
+
+    #[test]
+    fn optional_constraints_are_bypassed_by_null() {
+        let schema = convert("opt: 'string(not-empty; min(5))'");
+        let v = crate::markdown::schemas::validate::build_validator(&schema).unwrap();
+        assert!(v.is_valid(&json!({ "opt": null })), "null must bypass constraints");
+        assert!(!v.is_valid(&json!({ "opt": "" })), "empty string still rejected");
+        assert!(!v.is_valid(&json!({ "opt": "ab" })), "too-short string still rejected");
+    }
+
+    #[test]
+    fn required_string_rejects_null_with_type_problem() {
+        use crate::markdown::schemas::validate::{collect_problems, build_validator};
+
+        let schema = convert("req: 'string(required)'");
+        let v = build_validator(&schema).unwrap();
+        assert!(!v.is_valid(&json!({ "req": null })));
+        let problems = collect_problems(&v, &json!({ "req": null }), &PositionMap::new());
+        assert_eq!(problems.len(), 1);
+        assert_eq!(problems[0].kind, ValidationProblemKind::Type);
+    }
+
+    #[test]
+    fn optional_any_accepts_null_and_required_any_is_presence_only() {
+        // Compatibility preservation: `any` already includes every JSON value,
+        // so the optional wrapper adds null and the required wrapper is only
+        // a presence check.
+        let schema = convert("opt: any");
+        let v = crate::markdown::schemas::validate::build_validator(&schema).unwrap();
+        assert!(v.is_valid(&json!({})));
+        assert!(v.is_valid(&json!({ "opt": null })));
+        assert!(v.is_valid(&json!({ "opt": { "nested": [1, 2, 3] } })));
+
+        let required_schema = convert("req: 'any(required)'");
+        let v_req =
+            crate::markdown::schemas::validate::build_validator(&required_schema).unwrap();
+        assert!(!v_req.is_valid(&json!({})), "required any rejects absent");
+        assert!(
+            v_req.is_valid(&json!({ "req": null })),
+            "required any accepts null (presence only)"
+        );
+    }
+
+    #[test]
+    fn optional_default_and_description_land_on_outer_wrapper() {
+        let v = optional_atom_value("string(default(hello)) -> A greeting");
+        assert_eq!(v["default"], "hello");
+        assert_eq!(v["description"], "A greeting");
+        // The typed arm should not carry them.
+        let typed_arm = &v["anyOf"][1];
+        assert!(typed_arm.get("default").is_none());
+        assert!(typed_arm.get("description").is_none());
+    }
+
+    #[test]
+    fn optional_union_property_is_single_level_nullable_any_of() {
+        let yaml = "opt:\n  - string\n  - number\n";
+        let v = convert(yaml);
+        let arms = v["properties"]["opt"]["anyOf"].as_array().unwrap();
+        assert_eq!(arms.len(), 3, "expected [null, string, number]: {arms:?}");
+        assert_eq!(arms[0]["type"], "null");
+        assert_eq!(arms[1]["type"], "string");
+        assert_eq!(arms[2]["type"], "number");
+    }
+
+    /// Temporary CWD guard so `darkmatter-file` validation sees deterministic
+    /// relative paths. Serialised with `darkmatter_file_cwd` to match the
+    /// convention used in `validate::tests`.
+    struct FileFormatCwdGuard {
+        prior: std::path::PathBuf,
+    }
+
+    impl FileFormatCwdGuard {
+        fn enter(dir: &std::path::Path) -> Self {
+            let prior = std::env::current_dir().expect("read CWD");
+            std::env::set_current_dir(dir).expect("set CWD");
+            Self { prior }
+        }
+    }
+
+    impl Drop for FileFormatCwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.prior);
         }
     }
 }

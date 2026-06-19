@@ -116,6 +116,79 @@ lint:
     @just _lint {{ LIBRARY }}
     @just _lint {{ CLI }}
 
+# Report CLI source/test files over the ~500-line review soft cap.
+#
+# Files listed in `ACCEPTED_OVERCAP` below are documented exceptions
+# (see `darkmatter/features/2026-06-17-cli-atheist/spec.md` § "Accepted
+# over-cap exceptions"). They are single-responsibility modules that
+# grew past the soft cap without becoming god-files — splitting them
+# further would create artificial fragmentation rather than reduce
+# coupling. The recipe still flags any *new* over-cap file so the
+# exception list stays explicit and reviewed.
+lint-files:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    limit=500
+    roots=(./cli/src ./cli/tests)
+    # Format: "relative/path: reason". Each path must live under one of
+    # `roots` and stay single-responsibility; the reason must explain why
+    # the file is not a god-file despite the line count.
+    ACCEPTED_OVERCAP=(
+        "./cli/src/commands/compose.rs:compose subcommand; split deferred to a separate feature (spec non-goals)"
+        "./cli/src/commands/schema/about.rs:SchemaAboutReport builder; one command, one struct"
+        "./cli/src/commands/schema/assignment.rs:assignment parsing + schema-aware coercion for md schema validate"
+        "./cli/tests/code_block.rs:exhaustive per-flag coverage of the md code-block surface"
+        "./cli/tests/schema_validate.rs:per-flag coverage of the md schema validate surface"
+        "./cli/tests/common/level2.rs:shared Level 2 harness — shim creation/integrity, sentinel polling, fixture runners, frame/color helpers"
+    )
+
+    is_accepted() {
+        local needle="$1"
+        local entry
+        for entry in "${ACCEPTED_OVERCAP[@]}"; do
+            if [[ "${entry%%:*}" == "$needle" ]]; then
+                return 0
+            fi
+        done
+        return 1
+    }
+
+    accepted_reason() {
+        local needle="$1"
+        local entry
+        for entry in "${ACCEPTED_OVERCAP[@]}"; do
+            if [[ "${entry%%:*}" == "$needle" ]]; then
+                printf '%s\n' "${entry#*:}"
+                return 0
+            fi
+        done
+    }
+
+    found_unaccepted=0
+    saw_accepted=0
+    while IFS= read -r file; do
+        lines=$(wc -l < "$file" | tr -d ' ')
+        if [ "$lines" -gt "$limit" ]; then
+            rel="${file#./}"
+            if is_accepted "$file"; then
+                saw_accepted=1
+                printf 'darkmatter/%s:%s lines (accepted: %s)\n' "$rel" "$lines" "$(accepted_reason "$file")"
+            else
+                printf 'darkmatter/%s:%s lines\n' "$rel" "$lines"
+                found_unaccepted=1
+            fi
+        fi
+    done < <(find "${roots[@]}" -type f -name '*.rs' | sort)
+
+    if [ "$found_unaccepted" -eq 0 ]; then
+        if [ "$saw_accepted" -eq 0 ]; then
+            echo "No darkmatter CLI source/test files exceed ${limit} lines."
+        else
+            echo
+            echo "All over-cap files are explicitly accepted; see spec for rationale."
+        fi
+    fi
+
 # Per-package LCOV coverage for the library and CLI.
 coverage *args="":
     @just _coverage {{ LIBRARY }} {{ args }}
@@ -142,14 +215,14 @@ all:
 # ----------------------------------------------------------------------------
 
 # commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
-commit:
+commit args="":
     @echo ""
     @echo -e "Committing staged changes in the {{ BOLD }}Rusty Biscuit{{ RESET }} monorepo to git"
-    @echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{ DIM }}model{{ RESET }}"
+    @echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M3}} {{ DIM }}model{{ RESET }}"
     @echo ""
     @echo -e "{{ BOLD }}{{ BLUE }}Staged Files:{{ RESET }}"
     @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}" -y
+    @claudine compose "@prompts/commit.md" --opencode --op "commit" --quiet -y {{ args }}
     @just _speak "git commits completed in rusty-biscuit monorepo"
     @sniff repo git-status 2>/dev/null || exit 0
     @echo
@@ -222,6 +295,15 @@ docs_library:
     @echo
     @just _claude_file ./prompts/update-library-docs.md || ( _speak "Ran into problems updating the CLI docs for Darkmatter!" && exit 1 )
     @just _play confirmation
+
+# Regenerate the expression function table in docs/topics/darkmatter-expressions.md
+regen-expr-doc:
+    @echo
+    @echo -e "Regenerating {{ BOLD }}Darkmatter Expressions{{ RESET }} function table"
+    @echo
+    @cargo run -p darkmatter --example expression_doc_generator -- --write
+    @echo
+    @echo -e "{{ BOLD }}{{ GREEN }}Function table regenerated{{ RESET }} in docs/topics/darkmatter-expressions.md"
 
 readme:
     _readme_files darkmatter

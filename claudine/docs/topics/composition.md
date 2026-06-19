@@ -170,10 +170,33 @@ frontmatter keys are available to inspect.
 
 The diagnostic identifies the resolved document (OSC8-linked when supported),
 names both `prompt` and `sequence`, points to `claudine sequence`, and notes the
-upcoming `sections` feature. When the error output stream is a TTY it also
-echoes the authored frontmatter YAML verbatim; when stderr is not a TTY the YAML
-is withheld (to avoid exposing frontmatter) and the diagnostic says so. There is
-no flag to reveal the YAML in non-TTY output.
+upcoming `sections` feature. Like every frontmatter-rooted composition error, it
+appends the authored frontmatter as a syntax-highlighted, line-numbered YAML
+block (see [Frontmatter YAML blocks in errors](#frontmatter-yaml-blocks-in-errors)).
+When stderr is not a TTY the block is withheld to avoid exposing frontmatter,
+and there is no flag to reveal it.
+
+## Frontmatter YAML blocks in errors
+
+Every composition error rooted in a prompt file's YAML frontmatter appends the
+authored frontmatter — delimiters included — as a `CodeBlock`: syntax
+highlighted, line-numbered so block line N equals source-file line N, and with
+the offending line highlighted when the error's property maps to a locatable
+key. This covers the lifecycle guards (interpolation leak, undefined variable,
+say/effect/shape errors), the prompt/agent/model/interactive type errors, the
+schema errors (load, validation, missing, unsupported-interactive), the
+inline-compose / sequence mismatch, and body-composition failures
+(`ComposeFailed`, `ShellExpansionFailed`, which show the block as context with no
+highlight).
+
+The block is **TTY-gated**: it is rendered only when stderr is a TTY, and
+withheld in piped / `NO_COLOR` / CI output so frontmatter is never exposed into
+logs. Capture happens at the render boundary — after all control-flow handling —
+so the wrapper never interferes with upstream decisions; the CLI error walker
+renders the deepest typed diagnostic and appends the YAML block after it. The
+motivating case: a `success.message` referencing `{{review-file}}` (hyphen) when
+the variable is `review_file` (underscore) now shows the frontmatter with the
+offending line highlighted, instead of an opaque "interpolation leaked" message.
 
 ## Provider Selection
 
@@ -236,11 +259,20 @@ Roo Code is excluded from composition provider selection because it is a VS Code
 
 The shorthand booleans and the `--provider` value both accept fuzzy input (`cl` → `claude`, `gem` → `gemini`, `oc` → `opencode`). The [argv normalizer](argv-normalization.md) rewrites every shorthand into a canonical `--provider <slug>` pair before clap runs, so runtime provider selection only ever reads the single `--provider` field.
 
-### The `--interactive` Flag
+### The `--interactive` and `--no-interactive` Flags
 
-`-i` / `--interactive` controls the **provider session mode**, not provider selection. The composed prompt is still prepared first, then passed as the initial message for an interactive session.
+`-i` / `--interactive` forces an **interactive provider session**; `--no-interactive` forces a **non-interactive provider session**. Both flags control the session mode, not provider selection, and the composed prompt is still prepared first before being passed to the provider.
 
-> **Note:** `inline-compose -i` is provider-gated. Claudine allows it only when the selected provider can recover the final assistant message for the inline rewrite path.
+Session interactivity is resolved from (highest to lowest precedence):
+
+1. `--no-interactive` CLI flag
+2. `-i` / `--interactive` CLI flag
+3. `interactive` frontmatter property (`true` / `false`)
+4. Default: non-interactive
+
+`--interactive` and `--no-interactive` are mutually exclusive; clap rejects `-i --no-interactive` at parse time. The `interactive` frontmatter property is honored by `compose` and `inline-compose`; `claudine sequence` rejects `interactive: true` because a sequence is serial automation and must be driven by the explicit `--interactive` override when needed.
+
+> **Note:** `inline-compose -i` is provider-gated. Claudine allows it only when the selected provider can recover the final assistant message for the inline rewrite path. When interactive mode is triggered by frontmatter `interactive: true`, the diagnostic names `frontmatter` as the source so the remediation is clear.
 
 ### The `--exclude` Flag
 
@@ -268,7 +300,7 @@ Dry-run output follows Unix stream conventions so `claudine compose --dry-run do
 - **stdout** — the composed document body (the data product).
 - **stderr** — the finalized YAML frontmatter (syntax-highlighted) followed by a metadata table.
 
-The metadata table rows, in order: **Document** (frontmatter `name`, or the relative path, rendered as a blue OSC8 link), **Description** (italic + dim, only when set), **Agent** (the resolved provider name when one is selected, or a classified resolution breakdown — no-agent, invalid frontmatter hint, not-installed hint, multi-suggestion list, auto-selected single suggestion, or zero-installed list — rendered as a multi-line cell), **Model** (the resolved model, or `default`), **YOLO** (`true`/`false`), and **Area** (the focused monorepo area, only when inside a monorepo).
+The metadata table rows, in order: **Document** (frontmatter `name`, or the relative path, rendered as a blue OSC8 link), **Description** (italic + dim, only when set), **Agent** (the resolved provider name when one is selected, or a classified resolution breakdown — no-agent, invalid frontmatter hint, not-installed hint, multi-suggestion list, auto-selected single suggestion, or zero-installed list — rendered as a multi-line cell), **Model** (the resolved model, or `default`), **YOLO** (`true`/`false`), **Session** (`interactive` or `non-interactive` with the resolved source in parentheses, e.g. `interactive (frontmatter)` or `non-interactive (--no-interactive)`), and **Area** (the focused monorepo area, only when inside a monorepo).
 
 `--quiet` and `--silent` have **no effect** in dry-run mode: the full output is always rendered.
 
@@ -313,6 +345,7 @@ For each property declared in `$schema`, claudine routes the validation outcome 
 | Outcome                | Required                                                            | Optional                                                                                |
 | ---------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | Present and valid      | continue                                                            | continue                                                                                |
+| Present as `null`      | hard `SchemaValidation` abort                                       | treated as absent (valid)                                                               |
 | Missing                | prompt in Interactive Mode when allowed; otherwise `MissingProperties` | continue                                                                                |
 | Present but invalid    | hard `SchemaValidation` abort (no prompt, no recovery)              | the value is dropped from the prompt context, a `tracing::warn!` fires, composition retries once |
 
@@ -343,6 +376,10 @@ When Interactive Mode is allowed, claudine first prints a per-property status re
 | `object`, `any`, property-level union, root-level union without projection | `UnsupportedInteractiveSchema` |
 
 Numeric inputs reprompt with an inline error on parse failure instead of aborting. Collected values feed back into the override set; composition re-runs with the new overrides before any provider session starts.
+
+### Schema Collection Independence
+
+The decision to prompt for missing required values depends **only** on the six signals listed under [Interactive Mode](#interactive-mode) above and **must not** depend on the resolved `session_interactive` value. Collection completes during the pre-flight schema-validation stage, before the provider child process is ever spawned. This means an `interactive: true` document with missing required properties still collects them interactively under a TTY, and a `--no-interactive` invocation of an `interactive: true` document still emits a typed `MissingProperties` error rather than launching a non-interactive session.
 
 ### User Config
 
