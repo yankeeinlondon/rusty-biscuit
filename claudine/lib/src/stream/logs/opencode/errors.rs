@@ -131,7 +131,8 @@ fn summarize_error_json(record: &OpenCodeLogRecord) -> String {
         Err(_) => {
             // If it's not valid JSON, return the raw tag (truncated if huge).
             if error_tag.len() > 500 {
-                return format!("{}...", &error_tag[..497]);
+                let truncated: String = error_tag.chars().take(497).collect();
+                return format!("{truncated}...");
             }
             return error_tag.to_string();
         }
@@ -1833,5 +1834,36 @@ mod tests {
             panic!("expected Structured");
         };
         assert_eq!(classify(&record), LogClassification::Unclassified);
+    }
+
+    #[test]
+    fn non_json_error_tag_truncation_respects_char_boundaries() {
+        use std::collections::BTreeMap;
+
+        // 496 ASCII bytes, then a 4-byte emoji, then more ASCII. Byte 497
+        // falls inside the emoji, so a byte-index slice at 497 would panic.
+        let prefix = "x".repeat(496);
+        let error_tag = format!("{prefix}😀AI_APICallError: something went wrong");
+        assert!(error_tag.len() > 500);
+        let raw = error_tag.clone();
+        let record = OpenCodeLogRecord {
+            level: LogLevel::Error,
+            timestamp: Utc::now(),
+            delta_ms: 0,
+            tags: BTreeMap::from([
+                ("service".into(), "llm".into()),
+                ("error".into(), error_tag),
+            ]),
+            message: String::new(),
+            raw,
+        };
+        match classify(&record) {
+            LogClassification::ApiFailure { message, .. } => {
+                assert!(message.starts_with(&prefix));
+                assert!(message.contains("😀"));
+                assert!(message.ends_with("..."));
+            }
+            other => panic!("expected ApiFailure, got {other:?}"),
+        }
     }
 }
