@@ -18,6 +18,25 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3: []
+docs_updated_during_phase_3:
+  - darkmatter/docs/topics/darkmatter-expressions.md
+  - claudine/fixes/2026-06-18-dirname/plan.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+  - claudine/fixes/2026-06-18-dirname/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_code:
+  - darkmatter/lib/src/markdown/compose/expression/functions.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog.rs
+documentation:
+  - claudine/fixes/2026-06-18-dirname/plan.md
+  - prompts/implement-suggestions.md
+  - prompts/implement-plan.md
+  - darkmatter/docs/topics/darkmatter-expressions.md
 packages:
   - darkmatter
   - claudine
@@ -142,12 +161,12 @@ hand-edited. Depends on Phase 1B (the generator reads `EXPRESSION_FUNCTION_DESCR
 
 ### 3A. Regenerate the catalog-backed verbose function table
 
-- [ ] Run the generator via the darkmatter just recipe:
+- [x] Run the generator via the darkmatter just recipe:
       ```sh
       just --justfile darkmatter/justfile --working-directory darkmatter regen-expr-doc
       ```
       (This wraps `cargo run -p darkmatter --example expression_doc_generator -- --write`.)
-- [ ] Verify the generated row in
+- [x] Verify the generated row in
       `darkmatter/docs/topics/darkmatter-expressions.md` (≈ line 375, between the
       `BEGIN GENERATED FUNCTION TABLE` / `END GENERATED FUNCTION TABLE` markers)
       now reads `| Filesystem | \`dirname(file)\` | … | \`dirname("sub/note.md")\` ⇒ \`sub\` |`.
@@ -155,7 +174,7 @@ hand-edited. Depends on Phase 1B (the generator reads `EXPRESSION_FUNCTION_DESCR
 
 ### 3B. Hand-edit the narrative compact helper table
 
-- [ ] In `darkmatter/docs/topics/darkmatter-expressions.md` under
+- [x] In `darkmatter/docs/topics/darkmatter-expressions.md` under
       "Indexed and Path Helpers" (darkmatter-expressions.md:462), change the
       signature cell from `` `dir(file)` `` to `` `dirname(file)` ``. Description
       column unchanged.
@@ -179,7 +198,7 @@ run after Phases 1–3.
 
 ### 4A. Stale-reference sweep
 
-- [ ] Run the spec's ripgrep and confirm zero matches in the expression engine,
+- [x] Run the spec's ripgrep and confirm zero matches in the expression engine,
       expression docs, and claudine tree:
       ```sh
       rg -n 'dir_fn|dir\(file\)|canonical: "dir"|signature: "dir\(file\)"' \
@@ -192,7 +211,7 @@ run after Phases 1–3.
 
 ### 4B. Full expression test suite
 
-- [ ] Run the canonical expression test command from the spec:
+- [x] Run the canonical expression test command from the spec:
       ```sh
       cargo test -p darkmatter --lib markdown::compose::expression
       ```
@@ -202,11 +221,11 @@ run after Phases 1–3.
 
 ### 4C. Claudine report verification (no source edits expected)
 
-- [ ] Confirm the claudine report renders a `dirname(file)` row:
+- [x] Confirm the claudine report renders a `dirname(file)` row:
       ```sh
       cargo run -p claudine-cli -- context --expressions | rg 'dirname\(file\)'
       ```
-- [ ] Confirm the data-driven claudine regression still passes (it derives its
+- [x] Confirm the data-driven claudine regression still passes (it derives its
       expected set from the renamed catalog):
       ```sh
       cargo test -p claudine-cli --test context_command context_expressions_includes_every_function
@@ -216,19 +235,19 @@ run after Phases 1–3.
 
 Walk the spec's acceptance list and confirm each:
 
-- [ ] `dir(file)` is renamed to `dirname(file)` in `FS_FUNCTIONS` (`canonical`,
+- [x] `dir(file)` is renamed to `dirname(file)` in `FS_FUNCTIONS` (`canonical`,
       `signatures`) and the handler is `dirname_fn`.
-- [ ] `EXPRESSION_FUNCTION_DESCRIPTORS` reports `signature: "dirname(file)"`
+- [x] `EXPRESSION_FUNCTION_DESCRIPTORS` reports `signature: "dirname(file)"`
       with example `dirname("sub/note.md")`.
-- [ ] `dir` absent from `FS_FUNCTIONS` `aliases`; `dispatch_fs("dir", …)`
+- [x] `dir` absent from `FS_FUNCTIONS` `aliases`; `dispatch_fs("dir", …)`
       returns `None`.
-- [ ] Focused regression asserts `dispatch_fs("dirname", …)` resolves and
+- [x] Focused regression asserts `dispatch_fs("dirname", …)` resolves and
       `dispatch_fs("dir", …)` returns `None`.
-- [ ] Arity/resolution error messages name `dirname`, not `dir`.
-- [ ] Generated function table regenerated; narrative helper table reads
+- [x] Arity/resolution error messages name `dirname`, not `dir`.
+- [x] Generated function table regenerated; narrative helper table reads
       `dirname(file)`.
-- [ ] `cargo test -p darkmatter --lib markdown::compose::expression` passes.
-- [ ] `claudine context --expressions` renders a `dirname(file)` row and
+- [x] `cargo test -p darkmatter --lib markdown::compose::expression` passes.
+- [x] `claudine context --expressions` renders a `dirname(file)` row and
       `context_expressions_includes_every_function` passes.
 
 ---
