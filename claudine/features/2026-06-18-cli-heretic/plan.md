@@ -399,3 +399,29 @@ green or has explicitly documented pre-existing failures.
 - [x] Do not run `cargo fmt` or `rustfmt` write-mode.
 - [x] Use `hug` effective SLOC, not `wc -l`, to determine whether the high-risk gate is satisfied.
 - [x] Apply the <1000 effective-SLOC gate to every produced file, including test files.
+
+## Review-1 resolution (2026-06-18)
+
+All four `review-1.md` findings addressed:
+
+- **High — "out-of-scope library/darkmatter changes":** not cli-heretic scope
+  creep. The `claudine/lib/src/composition/*` change is the
+  `2026-06-18-state-sequencing` feature (commit `2f3d9e4f`); the `darkmatter`
+  changes are the `2026-06-09-improved-descriptions` descriptor-catalog feature
+  (commits `afbb1bca`, `d4ea98a4`, `50cc1778`). Both are independently
+  spec'd/planned/reviewed under their own `claudine/features/` dirs and merely
+  share this branch. Every cli-heretic commit stayed inside `claudine/cli`.
+- **Medium — "Kimi wire-mode not extracted":** completed. Commit `157f1deda`
+  created the `wiring/{builders,dispatch,session,writer}.rs` split but never
+  declared the modules or trimmed `mod.rs`, leaving orphaned duplicates while
+  `mod.rs` stayed 765 SLOC. The submodules are now wired in (`mod builders;`
+  … + `pub(crate) use …::*`), `mod.rs` is a 77-line parent, and the
+  cross-referenced dispatch fns are `pub(crate)`. `run_kimi_wire_session`
+  lives in `session.rs`, `handle_request_dispatch` in `dispatch.rs`. The 36
+  wiring unit tests cover the byte-identical relocated code.
+- **Medium — "whitespace hygiene fails":** `git diff --check main` is clean
+  (blank-line-at-EOF removed from the split sources/tests, trailing whitespace
+  removed from `prompts/review-suggestions.md` and `prompts/commit.md`). No
+  `cargo fmt`.
+- **High — "full L2 not complete":** `just test-l2` now runs to completion —
+  57/57 passed (423s).
