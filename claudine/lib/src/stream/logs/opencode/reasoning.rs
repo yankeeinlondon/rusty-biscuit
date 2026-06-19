@@ -325,7 +325,7 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
     fn on_provider_limit(
         &mut self,
         record: &OpenCodeLogRecord,
-        status_code: u16,
+        status_code: Option<u16>,
         kind: ProviderLimitKind,
         reset_at: Option<DateTime<Utc>>,
         provider_id: Option<String>,
@@ -367,7 +367,9 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         }
 
         let mut extra_map = base_extra(record, "rate_limit");
-        extra_map.insert("status_code".into(), json!(status_code));
+        if let Some(code) = status_code {
+            extra_map.insert("status_code".into(), json!(code));
+        }
         extra_map.insert("kind".into(), Value::String(format!("{kind:?}")));
         if let Some(reset) = reset_at {
             extra_map.insert(

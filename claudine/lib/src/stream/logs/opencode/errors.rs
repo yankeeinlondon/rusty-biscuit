@@ -168,14 +168,16 @@ fn summarize_error_json(record: &OpenCodeLogRecord) -> String {
 
     let mut parts = Vec::new();
 
-    if let Some(code) = status_code
-        && let Some(code_u16) = u16::try_from(code).ok()
-    {
-        let desc = get_http_status_description(code_u16);
-        if !desc.is_empty() {
-            parts.push(format!("{error_name} ({code}: {desc})"));
-        } else {
+    if let Some(code) = status_code {
+        let desc = u16::try_from(code)
+            .ok()
+            .map(get_http_status_description)
+            .filter(|d| !d.is_empty())
+            .unwrap_or_default();
+        if desc.is_empty() {
             parts.push(format!("{error_name} ({code})"));
+        } else {
+            parts.push(format!("{error_name} ({code}: {desc})"));
         }
     } else {
         parts.push(error_name.to_string());
@@ -328,7 +330,7 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
             .unwrap_or_else(|| haystack.to_string());
 
         return Some(LogClassification::ProviderLimit {
-            status_code: status_code.unwrap_or(0),
+            status_code,
             kind: ProviderLimitKind::UsageCap,
             reset_at,
             provider_id,
@@ -349,7 +351,7 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
             .unwrap_or_else(|| haystack.to_string());
 
         return Some(LogClassification::ProviderLimit {
-            status_code: 429,
+            status_code: Some(429),
             kind: ProviderLimitKind::RetriesExhausted,
             reset_at,
             provider_id,
@@ -358,7 +360,7 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
         });
     }
 
-    // 3. Cap signal without error tag → advisory non-fatal ApiFailure.
+    // 3. Cap signal without error tag -> advisory non-fatal ApiFailure.
     if has_cap && !has_error_context {
         let mut message = None;
         if let Ok(val) = serde_json::from_str::<serde_json::Value>(&record.message) {
@@ -389,7 +391,7 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
             .unwrap_or_else(|| haystack.to_string());
 
         return Some(LogClassification::ProviderLimit {
-            status_code: 429,
+            status_code: Some(429),
             kind: ProviderLimitKind::Overloaded,
             reset_at,
             provider_id,
@@ -398,7 +400,7 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
         });
     }
 
-    // 5. Plain 429 → transient rate-limited.
+    // 5. Plain 429 -> transient rate-limited.
     if status_code == Some(429) {
         let reset_at = extract_reset_at(haystack);
         let provider_id = record.tags.get("providerID").cloned();
@@ -410,7 +412,7 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
             .unwrap_or_else(|| haystack.to_string());
 
         return Some(LogClassification::ProviderLimit {
-            status_code: 429,
+            status_code: Some(429),
             kind: ProviderLimitKind::RateLimited,
             reset_at,
             provider_id,
@@ -852,7 +854,7 @@ mod tests {
                 reset_at,
                 ..
             } => {
-                assert_eq!(status_code, 429);
+                assert_eq!(status_code, Some(429));
                 assert_eq!(kind, ProviderLimitKind::UsageCap);
                 let reset = reset_at.expect("reset_at should be parsed");
                 assert_eq!(
@@ -1329,7 +1331,7 @@ mod tests {
         };
         match classify(&record) {
             LogClassification::ProviderLimit { kind, status_code, .. } => {
-                assert_eq!(status_code, 429);
+                assert_eq!(status_code, Some(429));
                 assert_eq!(kind, ProviderLimitKind::Overloaded);
             }
             other => panic!("expected ProviderLimit, got {other:?}"),
@@ -1348,7 +1350,7 @@ mod tests {
                 kind,
                 ..
             } => {
-                assert_eq!(status_code, 429);
+                assert_eq!(status_code, Some(429));
                 assert_eq!(kind, ProviderLimitKind::Overloaded);
             }
             other => panic!("expected ProviderLimit, got {other:?}"),
@@ -1367,7 +1369,7 @@ mod tests {
                 kind,
                 ..
             } => {
-                assert_eq!(status_code, 429);
+                assert_eq!(status_code, Some(429));
                 assert_eq!(kind, ProviderLimitKind::RateLimited);
             }
             other => panic!("expected ProviderLimit, got {other:?}"),
@@ -1386,7 +1388,7 @@ mod tests {
                 kind,
                 ..
             } => {
-                assert_eq!(status_code, 429);
+                assert_eq!(status_code, Some(429));
                 assert_eq!(kind, ProviderLimitKind::RetriesExhausted);
             }
             other => panic!("expected ProviderLimit, got {other:?}"),
@@ -1411,7 +1413,7 @@ mod tests {
                 kind,
                 ..
             } => {
-                assert_eq!(status_code, 403);
+                assert_eq!(status_code, Some(403));
                 assert_eq!(kind, ProviderLimitKind::UsageCap);
             }
             other => panic!("expected ProviderLimit, got {other:?}"),
@@ -1430,7 +1432,7 @@ mod tests {
                 kind,
                 ..
             } => {
-                assert_eq!(status_code, 429);
+                assert_eq!(status_code, Some(429));
                 assert_eq!(kind, ProviderLimitKind::UsageCap);
             }
             other => panic!("expected ProviderLimit, got {other:?}"),
@@ -1470,7 +1472,7 @@ mod tests {
                 kind,
                 ..
             } => {
-                assert_eq!(status_code, 429);
+                assert_eq!(status_code, Some(429));
                 assert_eq!(kind, ProviderLimitKind::UsageCap);
             }
             other => panic!("expected ProviderLimit, got {other:?}"),
