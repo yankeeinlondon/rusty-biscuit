@@ -780,8 +780,10 @@ fn find_undefined_variable<'a>(
 ) -> Option<&'a str> {
     match expr {
         Expr::Variable(path) => undefined_bare_variable(path, defined),
-        // Fallback / ternary tolerate undefined operands by design.
-        Expr::Fallback { .. } | Expr::Ternary { .. } => None,
+        // Ternary conditions are evaluated, but the branches intentionally
+        // tolerate undefined operands by design.
+        Expr::Ternary { condition, .. } => find_undefined_variable(condition, defined),
+        Expr::Fallback { .. } => None,
         Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => None,
         Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) | Expr::Paren(inner) => {
             find_undefined_variable(inner, defined)
@@ -1799,6 +1801,92 @@ mod tests {
         let effective = json!({ "area": "claudine" });
 
         assert!(validate_no_undefined_lifecycle_variables(&raw, &effective, dummy_path()).is_ok());
+    }
+
+    #[test]
+    fn undefined_variable_in_ternary_condition_is_rejected() {
+        let raw = fm_from_json(json!({
+            "start": { "message": "{{ missing == 'x' ? 'a' : 'b' }}" }
+        }));
+        let effective = json!({});
+
+        let err =
+            validate_no_undefined_lifecycle_variables(&raw, &effective, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleUndefinedVariable {
+                property, variable, ..
+            } => {
+                assert_eq!(property, "start.message");
+                assert_eq!(variable, "missing");
+            }
+            other => panic!("expected LifecycleUndefinedVariable, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn undefined_variable_in_ternary_truthy_condition_is_rejected() {
+        let raw = fm_from_json(json!({
+            "start": { "message": "{{ missing ? 'a' : 'b' }}" }
+        }));
+        let effective = json!({});
+
+        let err =
+            validate_no_undefined_lifecycle_variables(&raw, &effective, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleUndefinedVariable {
+                property, variable, ..
+            } => {
+                assert_eq!(property, "start.message");
+                assert_eq!(variable, "missing");
+            }
+            other => panic!("expected LifecycleUndefinedVariable, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn defined_condition_with_undefined_branch_operands_passes() {
+        // Ternary branches intentionally tolerate undefined operands; only the
+        // condition is checked.
+        let raw = fm_from_json(json!({
+            "start": { "message": "{{ defined ? missing : also_missing }}" }
+        }));
+        let effective = json!({ "defined": true });
+
+        assert!(validate_no_undefined_lifecycle_variables(&raw, &effective, dummy_path()).is_ok());
+    }
+
+    #[test]
+    fn undefined_variable_in_index_is_rejected() {
+        let raw = fm_from_json(json!({
+            "start": { "message": "{{ missing[0] }}" }
+        }));
+        let effective = json!({});
+
+        let err =
+            validate_no_undefined_lifecycle_variables(&raw, &effective, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleUndefinedVariable { variable, .. } => {
+                assert_eq!(variable, "missing");
+            }
+            other => panic!("expected LifecycleUndefinedVariable, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn undefined_variable_in_member_access_is_rejected() {
+        let raw = fm_from_json(json!({
+            "start": { "message": "{{ missing.foo }}" }
+        }));
+        let effective = json!({});
+
+        let err =
+            validate_no_undefined_lifecycle_variables(&raw, &effective, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleUndefinedVariable { variable, .. } => {
+                assert_eq!(variable, "missing");
+            }
+            other => panic!("expected LifecycleUndefinedVariable, got: {other:?}"),
+        }
     }
 
     #[test]
