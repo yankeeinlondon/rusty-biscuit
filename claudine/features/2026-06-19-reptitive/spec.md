@@ -42,10 +42,11 @@ same short lines continuously. Claudine has no defense against this failure mode
 
 So Claudine faithfully streamed the garbage indefinitely. Separately, Ctrl+C
 *appeared* to do nothing because the child runs in its own process group and the
-forwarded-SIGINT path has gaps (see Part 3).
+forwarded-SIGINT path has gaps (see Part 4).
 
-This spec proposes two new content-driven termination guards plus a hardening
-audit of the Ctrl+C / signal-forwarding path.
+This spec proposes **three** content-driven termination guards (exit
+expressions, a repetition heuristic, and a volume-cap backstop) plus a hardening
+of the Ctrl+C / signal-forwarding path on both Unix and Windows.
 
 ## Goals
 
@@ -56,23 +57,33 @@ audit of the Ctrl+C / signal-forwarding path.
 2. **Repetition heuristic** — detect a line (or a group of lines) repeating over
    and over and, past a `MAX_REPETITION_ALLOWED` threshold, terminate the agent
    with an error.
-3. **Ctrl+C correctness** — guarantee that there is *no* spawn/wait path where a
-   user's Ctrl+C fails to terminate the wrapped child.
+3. **Volume-cap backstop** (added during brainstorming — see F2) — a per-turn
+   output-volume cap that terminates the agent when a single turn emits an
+   unmistakably pathological amount of output, catching runaways that are
+   acyclic or whose period exceeds the cycle detector's `K`, and bounding the
+   capture path's unbounded buffer.
+4. **Ctrl+C correctness** — guarantee that there is *no* spawn/wait path where a
+   user's Ctrl+C fails to terminate the wrapped child, on **both** Unix and
+   Windows (see Cluster D / Q15).
 
-All three converge on the **same termination plumbing** already used by the
-timeout watchdog: a signal that escalates SIGTERM → SIGKILL against the child
-process group, plus a synthesized `error_kind` on the summary so the standard
-failure handlers run.
+All three content guards (1–3) converge on the **same termination plumbing**
+already used by the timeout watchdog: a signal that escalates SIGTERM → SIGKILL
+(graceful → forceful on Windows) against the child process group, producing a
+distinct `error_kind` per guard (`exit_expression`, `runaway_repetition`,
+`runaway_volume`) and a synthesized summary so the standard failure handlers
+run.
 
-> **NOTE (drafting):** Open questions are flagged inline with **❓Q#** markers and
-> consolidated in [Open Questions](#open-questions). They are intentionally
-> unresolved pending the brainstorming pass. Resolved decisions are recorded in
-> the [Decisions Log](#decisions-log).
+> **NOTE (status):** The brainstorming pass is complete — every open question is
+> resolved and recorded in the [Decisions Log](#decisions-log), which is the
+> authoritative source. Parts 1–3 below have been reconciled to match it; the
+> [Open Questions](#open-questions) table is retained as a resolution index.
 
 ## Decisions Log
 
-Decisions made during the brainstorming pass, newest last. Each supersedes the
-corresponding inline **❓Q#** marker.
+Decisions made during the brainstorming pass, grouped by cluster (A, B, then
+E, F, D, C as they were inserted). This log is the authoritative source; the
+[Open Questions](#open-questions) table maps each `Q#` to the cluster that
+resolved it.
 
 ### Cluster A — detector placement, match unit, and surfaces (resolved 2026-06-19)
 
@@ -93,10 +104,10 @@ corresponding inline **❓Q#** marker.
   wrongful kills when the model legitimately reads files or runs commands with
   repetitive output.
 - **False-positive posture (informs Q8/Q12).** A wrongful kill is a **very
-  negative** outcome. `MAX_REPETITION_ALLOWED` must therefore be set
-  **conservatively high** so that only unmistakable runaways trip the guard.
-  Exact threshold still TBD in Cluster B, but the bias is explicit: prefer
-  missing a marginal runaway over killing a healthy run.
+  negative** outcome. `MAX_REPETITION_ALLOWED` is therefore set **conservatively
+  high** (`≈ 30`, settled in Cluster B) so only unmistakable runaways trip the
+  guard. The bias is explicit: prefer missing a marginal runaway over killing a
+  healthy run.
 
 ### Cluster B — repetition algorithm (resolved 2026-06-19)
 
@@ -205,6 +216,50 @@ corresponding inline **❓Q#** marker.
   in-scope pattern set at construction; scope is resolved and regexes compiled
   **once** before streaming, never per line.
 
+### Cluster F — defaults and blast radius (resolved 2026-06-19)
+
+- **F1 — Repetition guard on by default + kill-switch (resolves Q12).** Runs for
+  every structured streaming run with the conservative Cluster B constants; a
+  config flag disables it. (A default-off guard would sit unused until the next
+  incident — the original failure opted into *no* protection.) Exit-expressions
+  ship **empty** by default (purely user-authored).
+- **F2 — Volume-cap backstop IN SCOPE (resolves the parked Cluster B item).** A
+  per-turn output-volume cap (lines and/or bytes; high default, kill-switch)
+  trips regardless of structure. Catches runaways the cycle detector misses
+  (acyclic, or period > `K`) and, unlike a wall-clock timeout, does **not**
+  punish slow-but-legitimate runs (volume ≠ time). This makes it a **third
+  guard**, with ripple effects:
+  - third `error_kind`: `runaway_volume` (alongside `exit_expression`,
+    `runaway_repetition`);
+  - third `EarlyTermination` variant: `RunawayVolume { lines, bytes }`;
+  - measurement surface differs per path: **streaming** = assistant
+    `OutputText` + `Reasoning` volume, counted **per turn** (reset on
+    `TurnComplete`); **capture** = total captured-stdout bytes, **per run**
+    (see F3).
+  - exact unit(s) + default threshold are tunable consts, TBD like the Cluster B
+    constants (straw man: trip at e.g. ~50k lines or ~32 MB per turn — high
+    enough no honest single turn reaches it).
+- **F3 — Streaming path gets the full detector; capture path gets Ctrl+C +
+  volume cap (resolves Q16).** The line-assembling content detector (exit
+  expressions + repetition) wires into `run_child_stream_semantic` only — where
+  the incident occurred and where text is parsed live. `run_child_capture` is
+  not given the full content detector in v1 (its lines are raw provider stdout,
+  not cleanly assistant prose), but it **does** get: the unified Ctrl+C fix
+  (Cluster D) and the **volume cap** applied to its growing capture `String`
+  (which today accumulates unbounded — a real memory exposure on a runaway).
+  Full capture-path content detection deferred.
+- **F4 — Wall-clock `timeout` stays opt-in (resolves Q17).** No default
+  wall-clock kill is shipped. The new guards (repetition + exit-expressions +
+  volume cap) plus the Ctrl+C fix cover the incident class without a blanket
+  time limit that would create a new false-positive class (slow-but-legitimate
+  long runs). Volume is the better pathology signal than time.
+- **F5 — Shortened non-interactive interrupt ladder (resolves Q14b): YES.**
+  Non-interactive runs compress the ladder to **press 1 → SIGTERM** (still
+  escalating to SIGKILL on a repeat); interactive runs keep the full
+  SIGINT→SIGTERM→SIGKILL ladder (a human mid-session is protected from an
+  accidental single press). On Windows the analog is press 1 → Ctrl+Break /
+  graceful, repeat → `TerminateJobObject`/`TerminateProcess`.
+
 ### Cluster D — Ctrl+C correctness (resolved 2026-06-19)
 
 Grounding (verified call sites): both production `run_child`
@@ -226,17 +281,15 @@ watchdog + `wait_with_signal_and_early_termination`.
   `timeout` enforcement into the unified watchdog so **all** spawn paths wait via
   the single `wait_with_signal_and_early_termination` loop; retire
   `wait_with_timeout`. One loop then owns signal handling, group-targeting,
-  escalation, *and* the new content-trip channel from Parts 1–2 — making "a path
+  escalation, *and* the new content-trip channel from Parts 1–3 — making "a path
   that forgot Ctrl+C" structurally impossible. Must preserve the interactive-TUI
   passthrough case (`child_in_own_pgroup = false`, shared pgroup + TTY
   inheritance) so interactive providers (Claude/Codex) still receive terminal
   SIGINT naturally and don't hang on `SIGTTIN`.
 - **Q14 — Visible interrupt feedback (accepted).** On each counted SIGINT, emit
-  a visible stderr line (e.g. `⚠ interrupt received — press again to force-kill
-  (n/3)`) so a user during an output flood knows the press registered. *Open
-  sub-item (Q14b):* whether non-interactive runs should use a shortened ladder
-  (press 1 → SIGTERM directly). Leaning yes for non-interactive, but not yet
-  locked.
+  a visible stderr line (e.g. `⚠ interrupt received — press again to force-kill`)
+  so a user during an output flood knows the press registered. The Q14b
+  sub-item (shortened non-interactive ladder) is now resolved — see **F5**.
 - **Q15 — Windows must be equally robust (resolves Q15).** Not best-effort. The
   unified wait loop needs a real Windows implementation with parity to the Unix
   group-signal/escalation behavior:
@@ -268,14 +321,15 @@ all failure handling — the Ctrl+C path), `LaunchFailed → AgentFailure`,
 handler block, the lifecycle message (`failure:` vs `blocked:`), and loop
 fail-fast.
 
-- **C1 — Two distinct `error_kind`s (resolves Q1).** `exit_expression` and
-  `runaway_repetition`. Independent of routing; appears honestly in JSONL
-  logs / metrics regardless of the `ProcessTermination` chosen.
-- **C2 — Two new `EarlyTermination` variants.**
-  `ExitExpression { pattern, scope }` and
-  `RunawayRepetition { cycle_len, repeats }`. Each carries the structured detail
-  its message and the handler payload need; two clean arms in
-  `apply_early_termination_to_summary`.
+- **C1 — Distinct `error_kind` per guard (resolves Q1).** `exit_expression` and
+  `runaway_repetition` (and later `runaway_volume`, added by **F2**).
+  Independent of routing; appears honestly in JSONL logs / metrics regardless of
+  the `ProcessTermination` chosen.
+- **C2 — New `EarlyTermination` variant per guard.**
+  `ExitExpression { pattern, scope }`, `RunawayRepetition { cycle_len, repeats }`
+  (and later `RunawayVolume { lines, bytes }`, added by **F2**). Each carries the
+  structured detail its message and the handler payload need; one clean arm each
+  in `apply_early_termination_to_summary`.
 - **C3 — New `ProcessTermination::Aborted` (resolves Q7).** Add one variant
   (serde-persisted; forward-compatible) shared by both guards;
   `classify_failure` maps `Aborted → FailureEvent::AgentFailure` (no new
@@ -334,170 +388,259 @@ fail-fast.
 ### Concept
 
 A list of **exit expression** entries. Each entry carries one or more patterns
-and an optional scope. As assistant output streams, each new unit of text is
-tested against every in-scope entry; the first match terminates the run with
-`error_kind = "exit_expression"` (**❓Q1** — final kind name).
+and an optional `scope`. As assistant output streams, each reassembled completed
+line is tested against every in-scope entry (per-line match target, E3d); the
+first match terminates the run with `error_kind = "exit_expression"`.
 
-### Configuration shape (straw man)
+### Configuration shape
 
-Global, in `ClaudineConfig`:
+Entries are declared across three layers (user config, repo config, frontmatter
+— see [Layering](#layering-and-scope) below). A single entry looks like:
+
+```jsonc
+{
+  // `pattern` (single) or `patterns` (array sharing this entry's scope/kind)
+  "patterns": ["STOP.", "Bye."],
+  "kind": "literal",        // "literal" (default) | "regex"; E3a
+  "ignore_case": false,     // literal only; default false; E3c
+  "scope": "opencode/kimi-for-coding/k2p7"  // optional; absent = global
+}
+```
+
+User-config example (`~/.claudine/config.json`):
 
 ```jsonc
 {
   "exit_expressions": [
-    // Global (all providers, all models)
-    { "pattern": "(?i)\\bI cannot continue\\b" },
-
-    // Scoped to a provider
-    { "pattern": "FATAL: context exhausted", "provider": "opencode" },
-
-    // Scoped to a provider + model
+    { "pattern": "I cannot continue", "kind": "literal" },          // global
+    { "pattern": "FATAL: context exhausted", "scope": "opencode" }, // agent
     {
-      "patterns": ["^STOP\\.$", "^Bye\\.$"],
-      "provider": "opencode",
-      "model": "kimi-for-coding/k2p7",
-      "kind": "literal"          // ❓Q2 — literal vs regex
+      "patterns": ["^(STOP|Bye)\\.$"],
+      "kind": "regex",
+      "scope": "opencode/kimi-for-coding/k2p7"                      // agent/model
     }
   ]
 }
 ```
 
-Scoping precedence is **additive**, not override: a run with provider `opencode`
-+ model `k2p7` is checked against (global entries) ∪ (provider `opencode`
-entries) ∪ (provider+model entries). An entry matches a run when every field it
-declares matches the run; absent fields are wildcards.
+### Layering and scope
 
-**❓Q3 — per-prompt scope.** Should exit expressions also be declarable in
-composition frontmatter (per-prompt), in addition to global config? The protect
-service supports repo-level overlay; this could too.
+- **Three config layers** (E1): user → repo → frontmatter. Repo combines with a
+  default mode of `override` (deterministic for all contributors); frontmatter
+  combines with a default mode of `merge` (additive). Either layer may set its
+  mode explicitly via the `{ mode, rules }` object form. Full resolution
+  pipeline in the [Decisions Log → Cluster E](#cluster-e--exit-expression-config-shape-and-scoping-partially-resolved-2026-06-19).
+- **`scope` syntax** (E2): `{agent}` | `{agent/model}`; absent = global. Parsed
+  by splitting on the first `/` (agent = first segment, model = remainder
+  verbatim). Within the resolved set, scoping is **additive**: a run is checked
+  against the union of every entry whose `scope` matches (global ∪ agent ∪
+  agent/model). Unknown agents fail at config-load validation. Model match is
+  exact-string in v1.
 
 ### Matching semantics
 
-- **Pattern kind** — regex (default) vs literal substring. **❓Q2.**
-- **Match unit** — what text is each pattern tested against? Options in
-  [Open Questions](#open-questions) **❓Q4**: per-streamed-chunk, per-line, or a
-  rolling window of the last *N* characters of assistant text. Chunk boundaries
-  are arbitrary (a pattern can be split across two chunks), so a rolling
-  accumulated buffer is almost certainly required.
-- **Surfaces** — assistant `OutputText` only, or also `Reasoning` (thinking)
-  text, or also tool output? **❓Q5.** Default proposal: `OutputText` +
-  `Reasoning`, never tool *input/result* payloads (those are the model reading
-  files and would cause false positives).
-- **Case sensitivity / anchoring** — left to the regex author; provide
-  `(?i)` etc. For literal mode, **❓Q6** case-insensitive toggle.
+- **Pattern kind** (E3a) — `literal` substring (default) or `regex`. Literal is
+  the default to avoid metacharacter surprises (e.g. regex `STOP.` matching
+  `STOPS`), in keeping with the feature's strong false-positive aversion.
+- **Match unit** (A1/E3d) — each pattern is tested against a **completed,
+  reassembled line**. The detector accumulates arbitrary streamed chunks into
+  canonical lines (split on `\n`) before matching, so a pattern is never missed
+  because the provider split it across chunks. Multi-line patterns are
+  unsupported in v1.
+- **Surfaces** (A2) — assistant `OutputText` + `Reasoning` text. Tool
+  input/result payloads are **never** scanned (the model legitimately reads
+  files / runs commands with repetitive output).
+- **Case** (E3c) — regex uses inline flags (`(?i)`); literal honors the entry's
+  `ignore_case` (default `false`).
+- **Compilation** — the in-scope set is resolved and compiled **once** before
+  streaming, never per line.
 
 ### Behavior on match
 
 1. Stop feeding output to the renderer (avoid emitting more of the runaway).
-2. Send a termination request through the existing watchdog/early-terminate
-   channel → SIGTERM → SIGKILL escalation against the child process group.
+2. Send `EarlyTermination::ExitExpression { pattern, scope }` through the unified
+   wait loop → SIGTERM → SIGKILL escalation against the child process group
+   (Windows: graceful → forceful).
 3. Synthesize summary: `is_error = true`, `error_kind = "exit_expression"`,
    `error_message` naming the matched pattern and scope.
-4. Map to a `ProcessTermination` variant so the standard failure handler runs
-   (**❓Q7** — reuse `TimedOut`, or introduce a new `Terminated`/`Tripwire`
-   variant for clearer reporting and to keep loop-engine `fail_fast` honest).
+4. Map to `ProcessTermination::Aborted` (C3) → `FailureEvent::AgentFailure`, so
+   the standard `failure:` handler runs and the composition loop is fail-fast —
+   *without* triggering the `handle_timeout:` retry path. `error_kind` and the
+   matched `pattern`/`scope` are threaded into the failure-handler payload (C3a).
 
 ## Part 2 — Repetition Heuristic
 
 ### Concept
 
 Detect when the model emits the same content repeatedly. After
-`MAX_REPETITION_ALLOWED` (const, **❓Q8** — default value, proposal `≈ 20`)
-consecutive repetitions of the same unit, terminate with
-`error_kind = "runaway_repetition"`.
+`MAX_REPETITION_ALLOWED` (`≈ 30`, B3) full cycles of the same block, terminate
+with `error_kind = "runaway_repetition"`. On by default with a config
+kill-switch (F1).
 
-### Detection model (straw man)
+### Detection model (B1)
 
-Operate on **completed lines** of assistant output:
+Operate on **completed, normalized lines** of assistant output (shares the
+Cluster A detector with Part 1):
 
-- Maintain a small ring buffer of recent normalized lines (trimmed; blank lines
-  ignored or counted? **❓Q9**).
-- Track a **cycle**: the repeating unit may be a single line *or* a group of
-  lines (the reported failure cycled a 7-line group:
-  `Done. / No more. / End. / STOP. / OK. / Bye. / Done. …`). Detect a repeating
-  block of length `1..=K` (**❓Q10** — max cycle length `K`, proposal `8`).
-- Increment a counter each time the next lines match the established cycle;
-  reset when the cycle breaks. Trip when the counter ≥ `MAX_REPETITION_ALLOWED`.
+- Maintain a ring buffer of the last `~2K` normalized lines (`K ≈ 16`, B3).
+  Lines are trimmed of trailing whitespace; blank lines are kept as normal empty
+  lines (a blank-line flood is an `L = 1` cycle of `""` and still trips).
+- **Group-cycle detection:** the repeating unit may be a single line *or* a
+  block. The reproduced failure cycled a **6-line** block
+  (`Done. / No more. / End. / STOP. / OK. / Bye.`, after a one-time
+  `This is the final listening.` preamble). After each line, find the smallest
+  period `L ∈ 1..=K` such that the last `2L` lines are two identical halves.
+- Count **full cycles** (`consecutive_matching_lines / L`) so the threshold
+  means the same thing for any `L`; reset when the cycle breaks. Trip when the
+  full-cycle count ≥ `MAX_REPETITION_ALLOWED`.
 
-**❓Q11 — exactness.** Exact-equality on normalized lines, or fuzzy/near-match
-(e.g. counter that re-emits `1.`, `2.`, `3.` is technically not identical but is
-still runaway)? Proposal for v1: exact normalized equality only — simpler, fewer
-false positives — and revisit fuzzy later.
+**Matching is exact** on normalized lines (B2). Fuzzy/near-match is deferred —
+known limitation: runaways with a moving part (incrementing counters,
+timestamps) won't form an exact cycle and may slip through (the volume cap in
+Part 3 is the backstop for those).
 
-**❓Q12 — legitimate repetition.** Some real output repeats (tables, ASCII art,
-generated lists, progress bars). A high threshold plus line-group cycle
-detection mitigates this, but we should decide whether the guard is **on by
-default** or **opt-in**. Proposal: on by default with a conservative threshold,
-and a kill-switch in config.
+The high threshold is deliberate: a wrongful kill is a very negative outcome, so
+the guard only trips on unmistakable runaways (a flooding model still hits 30
+cycles in well under a second).
 
 ### Behavior on trip
 
-Identical to Part 1's termination path; only the `error_kind` and message
-differ.
+Same termination path as Part 1, with
+`EarlyTermination::RunawayRepetition { cycle_len, repeats }`,
+`error_kind = "runaway_repetition"`, and `cycle_len`/`repeats` threaded into the
+failure-handler payload (C3a).
 
-## Part 3 — Ctrl+C Correctness Audit
+## Part 3 — Volume-Cap Backstop
 
-### Known gaps found during investigation
+### Concept
 
-1. **`wait_with_timeout` installs no SIGINT handler.** When the legacy
-   `run_child` / `run_child_capture` paths are called with `timeout: Some(_)`,
-   they wait via `exec/timeouts.rs::wait_with_timeout`, which only polls
-   `try_wait` and the deadline. It never registers a SIGINT forwarder. If the
-   child is in its own process group (`isolate_process_group == true`, which
-   happens whenever streams are piped or a stdin seed is used), terminal SIGINT
-   reaches **neither** the child (it's in a background group) **nor** a
-   forwarding handler (there is none). Ctrl+C is silently ineffective on that
-   path. **❓Q13** — confirm exhaustively which production code paths reach this.
-2. **Escalation requires multiple presses.** On the streaming path the handler
-   maps press 1 → SIGINT, 2 → SIGTERM, 3 → SIGKILL. A child that ignores SIGINT
-   (or whose model loop swallows it) survives the first press; during an output
-   flood the user gets no feedback that presses are registering. **❓Q14** —
-   should we (a) print a visible "interrupt received (n) — press again to force
-   kill" line to stderr on each press, and/or (b) shorten the ladder for
-   non-interactive runs?
+Cycle detection only catches *structured* repetition up to length `K`. A runaway
+that is acyclic, or whose period exceeds `K`, slips through. The volume cap is
+the content-agnostic catch-all: if a single assistant turn emits more than a high
+threshold of output, terminate with `error_kind = "runaway_volume"`. On by
+default with a config kill-switch (F2).
 
-### Goal of the audit
+Unlike a wall-clock timeout, volume measures the pathology directly and does
+**not** punish slow-but-legitimate runs (a slow big refactor takes time but not
+excessive volume) — which is why a default wall-clock `timeout` was *not*
+adopted (F4).
 
-Enumerate every spawn path (`run_child`, `run_child_capture`,
-`run_child_stream_semantic`) × every wait path (`wait_with_signal_handling`,
-`wait_with_timeout`, `wait_with_signal_and_early_termination`) and prove that in
-each, a user Ctrl+C results in child-group termination. Produce a matrix and
-close any gap (most likely: give `wait_with_timeout` the same SIGINT-forwarding
-registration the other two have, or fold timeout enforcement into the unified
-watchdog so a single wait path handles all cases).
+### Detection model (F2)
 
-### Cross-platform note
+- **Streaming path** — count assistant `OutputText` + `Reasoning` volume (lines
+  and/or bytes) **per turn**, reset on `TurnComplete`. Straw-man defaults: trip
+  at `≈ 50k` lines or `≈ 32 MB` per turn (tunable consts, high enough that no
+  honest single turn reaches them).
+- **Capture path** — `run_child_capture` accumulates all stdout into a single
+  `String` with no cap today (a real memory exposure on a runaway). The volume
+  cap is applied to that growing buffer **per run**, bounding the memory and
+  terminating the child (F3).
 
-Signal handling here is `#[cfg(unix)]`. Windows uses different mechanics
-(`CTRL_C_EVENT`, no process groups in the POSIX sense). The audit must state the
-Windows contract explicitly (**❓Q15**) — even if v1 only guarantees Unix and
-documents Windows as best-effort, that must be a deliberate, written decision
-per the monorepo cross-platform rule.
+### Behavior on trip
+
+Same termination path as Parts 1–2, with
+`EarlyTermination::RunawayVolume { lines, bytes }`,
+`error_kind = "runaway_volume"`, and the volume detail threaded into the
+failure-handler payload.
+
+## Part 4 — Ctrl+C Correctness
+
+### Gaps found during investigation (verified)
+
+1. **`wait_with_timeout` installs no SIGINT handler.** Both production
+   `run_child` and `run_child_capture` call sites pass `timeout_config.timeout`
+   as the timeout arg, so when a wall-clock `timeout` is configured they wait via
+   `exec/timeouts.rs::wait_with_timeout`, which only polls `try_wait` and the
+   deadline — it never registers a SIGINT forwarder, and its timeout-kill targets
+   the bare child PID, not the process group. `run_child_capture` always puts the
+   child in its own process group, so a configured `timeout` makes terminal
+   Ctrl+C reach **neither** the child (background group) **nor** a forwarder —
+   **Ctrl+C is silently ineffective**, and claudine's default SIGINT disposition
+   can kill claudine while the child survives orphaned. The irony: opting into
+   the safety timeout disables Ctrl+C.
+2. **Escalation is invisible.** Even on the good paths, guaranteeing a kill needs
+   3 presses (SIGINT→SIGTERM→SIGKILL), and during an output flood the user gets
+   no feedback that presses registered — exactly why the incident *felt* like
+   Ctrl+C did nothing.
+
+### Resolution (D, Q14, Q15)
+
+- **Unify the wait paths (D).** Fold wall-clock `timeout` enforcement into the
+  unified watchdog so **all** spawn paths wait via the single
+  `wait_with_signal_and_early_termination` loop; retire `wait_with_timeout`. One
+  loop owns signal handling, group-targeting (`-pid`), escalation, and the
+  content-trip channel from Parts 1–3 — making "a path that forgot Ctrl+C"
+  structurally impossible. The interactive-TUI passthrough case
+  (`child_in_own_pgroup = false`, shared pgroup + TTY inheritance) must be
+  preserved so Claude/Codex still receive terminal SIGINT naturally and don't
+  hang on `SIGTTIN`.
+- **Invariant.** Every wait path installs the SIGINT-forwarding handler, and
+  every owned-process-group child receives **group-targeted** signals — for both
+  user interrupts and timeout/guard kills.
+- **Visible feedback (Q14).** Emit a stderr line on each counted interrupt
+  (e.g. `⚠ interrupt received — press again to force-kill`).
+- **Shortened non-interactive ladder (Q14b/F5).** Non-interactive runs:
+  press 1 → SIGTERM directly (→ SIGKILL on repeat). Interactive runs keep the
+  full SIGINT→SIGTERM→SIGKILL ladder.
+
+### Windows — equally robust (Q15)
+
+Not best-effort. The unified wait loop needs a real Windows implementation with
+parity to the Unix group-signal/escalation behavior:
+
+- Spawn the child in a new process group (`CREATE_NEW_PROCESS_GROUP`) and/or
+  assign it to a **Job Object** so the whole tree terminates as a unit
+  (`TerminateJobObject`) — the Windows analog of killing `-pid`.
+- Handle console Ctrl+C via `SetConsoleCtrlHandler`; deliver interrupts to the
+  child group via `GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pgid)` (Ctrl+C
+  cannot target a specific group; Ctrl+Break can).
+- Map the ladder: Ctrl+Break (graceful) → `TerminateJobObject` /
+  `TerminateProcess` (forceful), since Windows has no SIGTERM/SIGKILL split.
+- Likely pulls in `windows`/`windows-sys` (confirm against workspace deps).
+  **Testing caveat:** the dev host is macOS; Windows behavior must be designed
+  carefully and validated in CI or on a Windows host — a known verification risk
+  per the monorepo all-OS rule.
 
 ## Scope
 
 ### In scope
 
-- New global config: `exit_expressions` (and repetition toggle/threshold
-  overrides) on `ClaudineConfig`.
-- A streaming content detector wired into the `OutputText`/`Reasoning` path of
-  `run_child_stream_semantic`.
-- Reuse of the existing watchdog → wait-loop SIGTERM/SIGKILL termination channel.
-- New `EarlyTermination` variant(s) + `error_kind` value(s) + summary mapping.
-- Ctrl+C audit across all spawn/wait paths and closing of identified gaps.
-- Tests at the detector level (unit), the termination-mapping level (unit), and
-  the signal level (the existing harness patterns).
-- Docs: `claudine/docs/topics/timeouts.md` (or a new sibling) and the claudine
+- **Config:** `exit_expressions` across three layers (user / repo / frontmatter)
+  with per-layer combine mode and `scope` strings; repetition + volume
+  kill-switches/threshold overrides. Validation (unknown agent, invalid regex)
+  at config-load.
+- **Pure detector** in `claudine/lib`: line-assembling, exit-expression matching
+  + group-cycle repetition detection, with string-in/trip-out unit tests.
+- **Wiring** of the detector into the `OutputText`/`Reasoning` path of
+  `run_child_stream_semantic`, supplying resolved provider/model scope.
+- **Volume cap** on the streaming path (per turn) and the `run_child_capture`
+  buffer (per run).
+- **Termination plumbing:** three new `EarlyTermination` variants, three new
+  `error_kind`s, new `ProcessTermination::Aborted` (+ `classify_failure`
+  mapping), and `error_kind`+guard-context threaded into the failure-handler
+  payload (`AttemptOutcome`, env, JSON).
+- **Ctrl+C hardening:** unify all spawn paths onto one signal-aware wait loop
+  (retire `wait_with_timeout`); visible interrupt feedback; shortened
+  non-interactive ladder.
+- **Windows:** an equally robust Ctrl+C / group-kill implementation (Job Objects
+  + console control events).
+- **Tests:** detector unit tests, termination-mapping unit tests, and signal/
+  Ctrl+C behavior via the existing real-process harness patterns; a documented
+  spawn×wait matrix proof.
+- **Docs:** `claudine/docs/topics/timeouts.md` (or a new sibling) + the claudine
   skill.
 
-### Out of scope (proposed — confirm)
+### Out of scope
 
-- Detecting runaway behavior in *non-streaming* / captured-only paths
-  (`run_child_capture`) beyond what the Ctrl+C audit requires. **❓Q16.**
+- Full content detection (exit-expressions + repetition) on the captured-only
+  path (`run_child_capture`) — it gets Ctrl+C + the volume cap only (F3).
+- Multi-line exit-expression patterns; fuzzy/near-match repetition;
+  model-only-any-agent scope (`*/model`); prefix/glob model matching. (All noted
+  as deferred enhancements.)
+- A default wall-clock `timeout` — stays opt-in; the volume cap is the backstop
+  (F4).
 - Repairing the underlying model behavior (this is a harness backstop, not a
   model fix).
-- Changing the default wall-clock `timeout` (a separate, arguably-related
-  decision — **❓Q17** could ride along or stay out).
 
 ## Open Questions
 
@@ -514,21 +657,32 @@ per the monorepo cross-platform rule.
 | Q9 | blank lines | ✅ RESOLVED (B3) — kept as empty normalized lines, not skipped. |
 | Q10 | cycle length | ✅ RESOLVED (B1/B3) — group-cycle detection, `K ≈ 16`. |
 | Q11 | exactness | ✅ RESOLVED (B2) — exact normalized; fuzzy deferred. |
-| Q12 | default-on | Repetition guard on-by-default vs opt-in. |
+| Q12 | default-on | ✅ RESOLVED (F1) — repetition on by default + kill-switch. |
 | Q13 | path coverage | ✅ RESOLVED (D) — unify all spawn paths onto one signal-aware wait loop; retire `wait_with_timeout`. |
-| Q14 | feedback | ✅ RESOLVED — visible interrupt feedback line. Q14b (shortened non-interactive ladder) still open, leaning yes. |
+| Q14 | feedback | ✅ RESOLVED — visible interrupt feedback line (Q14b tracked separately below). |
 | Q15 | Windows | ✅ RESOLVED — equally robust Windows path (Job Objects + console control events); not best-effort. |
-| Q16 | capture paths | Guard captured-only paths too? |
-| Q17 | default timeout | Ship a default wall-clock timeout alongside? |
+| Q16 | capture paths | ✅ RESOLVED (F3) — streaming gets full detector; capture gets Ctrl+C + volume cap. |
+| Q17 | default timeout | ✅ RESOLVED (F4) — wall-clock stays opt-in; volume cap is the backstop. |
+| Q14b | nonint. ladder | ✅ RESOLVED (F5) — non-interactive ladder is SIGTERM-first; interactive keeps full ladder. |
 
 ## Success Criteria
 
-- A configured exit expression matching streamed output terminates the child and
-  reports `error_kind = "exit_expression"` with an honest message.
-- A synthetic runaway stream (the reproduced 7-line cycle) trips the repetition
-  guard at the threshold and terminates the child.
+- A configured exit expression (literal or regex, at the correct `scope` across
+  all three config layers) matching streamed output terminates the child and
+  reports `error_kind = "exit_expression"` with an honest message naming the
+  pattern and scope.
+- A synthetic runaway stream (the reproduced **6-line** cycle) trips the
+  repetition guard at the threshold and terminates the child with
+  `error_kind = "runaway_repetition"`; the high threshold means realistic
+  repetitive-but-legitimate output does not trip it.
+- An acyclic / over-`K` flood, and an unbounded capture-path buffer, trip the
+  volume cap (`error_kind = "runaway_volume"`).
+- All three trips map to `ProcessTermination::Aborted` → `FailureEvent::AgentFailure`
+  (fail-fast, never the timeout-retry path, never `Interrupted`), and thread
+  `error_kind` + guard context into the failure-handler payload.
 - A matrix test (or documented proof) shows Ctrl+C terminates the child on every
-  spawn/wait path combination on Unix; Windows behavior is explicitly documented.
-- All new behavior is covered by unit tests; signal behavior uses the existing
-  real-process harness patterns.
+  spawn/wait path combination on **both Unix and Windows**, including when a
+  wall-clock `timeout` is configured.
+- All new behavior is covered by unit tests; signal/Ctrl+C behavior uses the
+  existing real-process harness patterns.
 - `just test` and `just lint` pass in the claudine package area.
