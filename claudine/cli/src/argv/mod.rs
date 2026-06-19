@@ -356,7 +356,7 @@ pub(crate) fn is_composition_flag_with_value(token: &str) -> bool {
 /// `^[A-Za-z_][A-Za-z0-9_-]*=`.
 ///
 /// This is the same key validation used by
-/// [`crate::commands::compose::parse_compose_setter`]; keeping them in lockstep
+/// `crate::commands::compose`'s `parse_compose_setter`; keeping them in lockstep
 /// guarantees that any token Rule 3 protects behind a `--` separator will be
 /// classified the same way by the downstream positional parser.
 pub(crate) fn looks_like_setter(token: &str) -> bool {
