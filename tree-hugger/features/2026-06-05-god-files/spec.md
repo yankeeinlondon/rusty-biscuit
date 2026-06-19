@@ -231,8 +231,9 @@ hug god-files [DIR] [--high-risk]
 
 - `DIR` (optional positional): directory to scan. Defaults to the current
   working directory.
-- `--high-risk`: filter output to high-risk files only (moderate section and
-  its heading line are suppressed; the report heading still reports both counts).
+- `--high-risk`: filter output to high-risk files only (moderate section, its
+  heading line, and the moderate count line in the report heading are all
+  suppressed; only the high-risk count is reported).
 - Honors the existing global output flags (`--plain`, `--json`) where applicable;
   `--json` emits the `Vec<GodAnalysis>` as structured JSON.
 
@@ -320,8 +321,8 @@ High risk
   note; do not abort the whole scan.
 - **Files with code+comment on one line:** counted as code (not comment-only).
 - **Symlinks / non-UTF8 / binary:** excluded by the scanner's normal filters.
-- **`--high-risk` with zero high-risk files:** heading still prints both counts;
-  no section body.
+- **`--high-risk` with zero high-risk files:** heading prints only the high-risk
+  count (`0`); the moderate count line and both section bodies are suppressed.
 
 ## 8. Testing
 
