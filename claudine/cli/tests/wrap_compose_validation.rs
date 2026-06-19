@@ -1,0 +1,375 @@
+//! Integration tests: compose argument validation, retired-flag rejection, and dry-run stdout/stderr separation.
+//!
+//! Split out of the `wrap_commands.rs` god file; shared fixtures live in
+//! `common::wrap`.
+
+use assert_cmd::cargo::cargo_bin_cmd;
+use predicates::str::contains;
+use std::fs;
+use tempfile::tempdir;
+mod common;
+use common::wrap::*;
+use common::{augmented_path, strip_ansi, write_executable};
+
+#[test]
+fn compose_requires_positional_arg() {
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["compose"])
+        .assert()
+        .code(2);
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(plain.contains("ARG"), "usage should show ARG positional");
+}
+
+#[test]
+fn compose_missing_file_with_setter_only() {
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["compose", "key=val"])
+        .assert()
+        .code(1);
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("missing file reference"),
+        "expected missing-file error, got: {plain}"
+    );
+}
+
+#[test]
+fn compose_empty_key_setter_errors() {
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["compose", "=foo"])
+        .assert()
+        .code(1);
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("setter key must not be empty"),
+        "expected empty-key setter error, got: {plain}"
+    );
+}
+
+#[test]
+fn compose_multiple_file_candidates_errors() {
+    let workspace = tempdir().unwrap();
+    let a = workspace.path().join("a.md");
+    let b = workspace.path().join("b.md");
+    fs::write(&a, "---\n---\nbody\n").unwrap();
+    fs::write(&b, "---\n---\nbody\n").unwrap();
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .args(["compose", a.to_str().unwrap(), b.to_str().unwrap()])
+        .assert()
+        .code(1);
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("multiple"),
+        "expected multiple-file error, got: {plain}"
+    );
+}
+
+#[test]
+fn compose_rejects_nonexistent_file() {
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["compose", "/nonexistent/path/to/file.md"])
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn compose_rejects_non_markdown_file() {
+    let workspace = tempdir().unwrap();
+    let txt_file = workspace.path().join("file.txt");
+    fs::write(&txt_file, "hello").unwrap();
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["compose", txt_file.to_str().unwrap()])
+        .assert()
+        .code(1);
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_missing_explicit_system_prompt_fails_visibly() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let md_file = workspace.path().join("prompt.md");
+    let missing_prompt = workspace.path().join("missing-system-prompt.md");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+    fs::write(&md_file, "---\ntitle: test\n---\nHello compose\n").unwrap();
+
+    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .args([
+            "compose",
+            "--codex",
+            "--append-system-prompt",
+            missing_prompt.to_str().unwrap(),
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .code(1)
+        .stderr(contains("missing-system-prompt.md"));
+}
+
+#[cfg(unix)]
+#[test]
+fn no_cross_provider_retry_after_launch() {
+    // Verifies that after a provider is launched and fails, Claudine
+    // does NOT automatically retry with another provider. The exit code
+    // from the single provider invocation is returned directly.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nPrompt body\n").unwrap();
+
+    // Provider that exits with error code 42
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+exit 42
+"#,
+    );
+
+    // Also install a "claude" that succeeds -- if retry happened, we'd see code 0
+    write_executable(
+        &path_dir.join("claude"),
+        r#"#!/bin/sh
+exit 0
+"#,
+    );
+
+    // Explicitly select codex. It exits 42. No fallback to claude.
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .args(["compose", "--codex", md_file.to_str().unwrap()])
+        .assert()
+        .code(42);
+}
+
+#[test]
+fn old_compose_inline_command_is_unknown() {
+    // Verify that the old `compose-inline` command no longer exists
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["compose-inline", "file.md"])
+        .assert()
+        .code(2); // clap returns 2 for unrecognized subcommands
+}
+
+#[test]
+fn retired_compose_flag_rejected_in_wrapper() {
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["claude", "--compose", "file.md"])
+        .assert()
+        .failure()
+        .stderr(contains("--compose has been retired"))
+        .stderr(contains("claudine compose"));
+}
+
+#[test]
+fn retired_frontmatter_prompt_flag_rejected_in_wrapper() {
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["claude", "--frontmatter-prompt", "file.md"])
+        .assert()
+        .failure()
+        .stderr(contains("--frontmatter-prompt has been retired"))
+        .stderr(contains("claudine inline-compose"));
+}
+
+#[test]
+fn retired_prompt_file_flag_rejected_in_wrapper() {
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["claude", "--prompt-file", "file.md"])
+        .assert()
+        .failure()
+        .stderr(contains("--prompt-file has been retired"))
+        .stderr(contains("claudine compose"));
+}
+
+/// Data/status discipline: under `compose --dry-run` the composed body is the
+/// *only* thing on **stdout**; the finalized frontmatter and the metadata
+/// table land on **stderr**. Verifies the two streams never cross.
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_body_only_on_stdout_metadata_on_stderr() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("doc.md");
+    fs::write(
+        &md_file,
+        "---\nname: disc-doc\ndescription: a discipline doc\nagent: goose\n---\nBODY_MARKER_QQQ\n",
+    )
+    .unwrap();
+
+    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--goose", "--dry-run", md_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+
+    // stdout: body only — the composed body, none of the metadata-table
+    // labels or frontmatter that belong on stderr.
+    assert!(
+        stdout.contains("BODY_MARKER_QQQ"),
+        "stdout should carry the composed body; stdout was:\n{stdout}"
+    );
+    for leak in ["YOLO", "Document", "Field", "Agent", "name:"] {
+        assert!(
+            !stdout.contains(leak),
+            "stdout must not contain the `{leak}` metadata leaked from stderr; stdout was:\n{stdout}"
+        );
+    }
+
+    // stderr: horizontal rule, heading, frontmatter (YAML) + metadata table.
+    let hr_lines: Vec<&str> = stderr
+        .lines()
+        .filter(|l| l.len() >= 10 && l.chars().all(|c| c == '╌' || c == '-'))
+        .collect();
+    assert!(
+        !hr_lines.is_empty(),
+        "stderr should contain a horizontal rule; stderr was:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Frontmatter") && stderr.contains("resolved"),
+        "stderr should carry the 'Frontmatter (resolved):' heading; stderr was:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("name:") && stderr.contains("description:"),
+        "stderr should carry the highlighted frontmatter; stderr was:\n{stderr}"
+    );
+    for label in ["Document", "Agent", "Model", "YOLO"] {
+        assert!(
+            stderr.contains(label),
+            "stderr should carry the `{label}` metadata-table row; stderr was:\n{stderr}"
+        );
+    }
+}
+
+/// `--quiet` and `--silent` have no effect on `compose --dry-run` output:
+/// the body still lands on stdout and the full metadata block on stderr.
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_quiet_and_silent_are_no_op() {
+    for flag in ["--quiet", "--silent"] {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        fs::create_dir_all(&path_dir).unwrap();
+        seed_minimal_config(workspace.path());
+
+        let md_file = workspace.path().join("doc.md");
+        fs::write(
+            &md_file,
+            "---\nname: qs-doc\nagent: goose\n---\nBODY_MARKER_QQQ\n",
+        )
+        .unwrap();
+
+        write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+        let output = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("HOME", workspace.path())
+            .env("PATH", augmented_path(&path_dir))
+            .args([
+                "compose",
+                "--goose",
+                "--dry-run",
+                flag,
+                md_file.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "compose dry-run {flag} should succeed; stderr was:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+        let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+
+        assert!(
+            stdout.contains("BODY_MARKER_QQQ"),
+            "{flag} must not suppress the composed body on stdout; stdout was:\n{stdout}"
+        );
+        assert!(
+            stderr.contains("YOLO") && stderr.contains("name:"),
+            "{flag} must not suppress the dry-run metadata on stderr; stderr was:\n{stderr}"
+        );
+        assert!(
+            stderr.contains("Frontmatter") && stderr.contains("resolved"),
+            "{flag} must not suppress the dry-run heading on stderr; stderr was:\n{stderr}"
+        );
+    }
+}
+
+/// Error surface (compose): a missing source file under `--dry-run` renders
+/// the error to **stderr**, exits **non-zero**, and leaves stdout clean.
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_missing_file_errors_to_stderr_with_clean_stdout() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--goose", "--dry-run", "does-not-exist.md"])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "missing-file dry-run must exit non-zero"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "stdout must stay clean on error; stdout was:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(
+        stderr.contains("does-not-exist.md"),
+        "error naming the missing file must appear on stderr; stderr was:\n{stderr}"
+    );
+}
+
