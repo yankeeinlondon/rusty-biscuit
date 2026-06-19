@@ -197,6 +197,67 @@ impl Markdown {
         }
     }
 
+    /// Build a [`SourceContext`] that includes the full file content
+    /// (frontmatter + body) with the frontmatter byte range set.
+    ///
+    /// This is the coordinate space shell-expansion errors report into:
+    /// `excerpt_prose` uses file-relative lines and `frontmatter_prose`
+    /// renders the composed frontmatter block.
+    pub fn full_source_context_for_errors(&self) -> biscuit_terminal::errors::SourceContext {
+        use std::sync::Arc;
+        let (content, frontmatter) = self.reconstruct_source();
+        let content = Arc::from(content.as_str());
+        match &self.source {
+            Some(ComposeSource::File(path)) => {
+                let absolute = path.canonicalize().unwrap_or_else(|_| path.clone());
+                biscuit_terminal::errors::SourceContext::with_frontmatter(
+                    absolute,
+                    path.clone(),
+                    content,
+                    frontmatter,
+                )
+            }
+            _ => biscuit_terminal::errors::SourceContext::with_frontmatter(
+                std::path::PathBuf::from("unknown"),
+                std::path::PathBuf::from("unknown"),
+                content,
+                frontmatter,
+            ),
+        }
+    }
+
+    /// Number of source lines occupied by the frontmatter block, including
+    /// both `---` delimiters.
+    ///
+    /// Returns `0` when the document has no parsed frontmatter (e.g.
+    /// programmatically constructed documents without a raw source snapshot).
+    pub fn frontmatter_line_count(&self) -> usize {
+        match self.frontmatter.raw_source() {
+            Some("") => 2,
+            Some(raw) => 2 + raw.lines().count(),
+            None => 0,
+        }
+    }
+
+    /// Reconstruct the full source text (frontmatter + body) and the byte
+    /// range of the frontmatter block, when it can be recovered from the
+    /// parsed snapshot.
+    fn reconstruct_source(&self) -> (String, Option<std::ops::Range<usize>>) {
+        match self.frontmatter.raw_source() {
+            Some(raw) => {
+                let prefix = if raw.is_empty() {
+                    "---\n---\n".to_string()
+                } else {
+                    format!("---\n{raw}\n---\n")
+                };
+                let full = format!("{prefix}{}", self.content);
+                let end = prefix.len();
+                (full, Some(0..end))
+            }
+            None => (self.content.clone(), None),
+        }
+    }
+
     /// Sets the compose source, returning the modified document.
     pub fn with_source(mut self, source: ComposeSource) -> Self {
         self.source = Some(source);

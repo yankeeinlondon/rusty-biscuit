@@ -4,8 +4,9 @@ use std::ops::Range;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use biscuit_terminal::components::prose::Prose;
 use crate::markdown::compose::shell_expansion::types::{
-    ErrorHandling, ShellExpansionError, ShellPipeline,
+    ErrorHandling, ShellCommandOrigin, ShellExpansionError, ShellPipeline,
 };
 
 /// A discovered shell block region with parsed options.
@@ -250,62 +251,137 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                 source,
                 source_file,
             } => {
-                let mut body = String::new();
-                if let Some(path) = source_file {
-                    body.push_str(&format!("<dim>Source:</dim> {}\n", path.display()));
-                }
-                body.push_str(&format!("<dim>Block opened at line:</dim> {block_start_line}\n<dim>Command at line:</dim> {command_line}"));
-                if !partial_output.is_empty() {
-                    body.push_str("\n<dim>Partial output from earlier commands:</dim>\n");
-                    for output in partial_output.iter() {
-                        let dimmed = dim_output_for_error(output);
-                        body.push_str(&format!("<dim>---</dim>\n{dimmed}\n"));
-                    }
-                }
-                if !excerpt.lines.is_empty() {
-                    body.push_str("\n<dim>Context:</dim>\n");
-                    for (ln, text) in &excerpt.lines {
-                        if *ln == excerpt.highlight_line {
-                            body.push_str(&format!("  <red>> {ln:>4} | {text}</red>\n"));
-                        } else {
-                            body.push_str(&format!("  <dim>{ln:>4} |</dim> {text}\n"));
+                if let ShellExpansionError::ExecutionFailed {
+                    ctx,
+                    command,
+                    code,
+                    stdout,
+                    stderr,
+                    origin,
+                } = source.as_ref()
+                {
+                    let mut body: Vec<Prose> = Vec::new();
+
+                    body.push(ctx.linked_path_prose());
+
+                    let mut context = String::new();
+                    context.push_str(&format!(
+                        "<dim>Block opened at line:</dim> {block_start_line}\n<dim>Command at line:</dim> {command_line}"
+                    ));
+                    if !partial_output.is_empty() {
+                        context.push_str("\n<dim>Partial output from earlier commands:</dim>\n");
+                        for output in partial_output.iter() {
+                            let dimmed = dim_output_for_error(output);
+                            context.push_str(&format!("<dim>---</dim>\n{dimmed}\n"));
                         }
                     }
-                }
-                let mut block = StatusBlock::new(StatusState::Error)
-                    .error_header(ErrorHeader::new("ShellBlockError", "command failed"))
-                    .body(body);
+                    body.push(Prose::new(context));
 
-                let hint = match source.as_ref() {
-                    ShellExpansionError::ParseDirective { .. } => "Check the command syntax.",
-                    ShellExpansionError::CommandNotFound { .. } => {
-                        "Install the binary or update <cyan>$PATH</cyan>."
+                    let excerpt_line = origin.line_number();
+                    let show_excerpt = match origin {
+                        ShellCommandOrigin::Frontmatter { line, .. } => line.is_some(),
+                        _ => excerpt_line > 0,
+                    };
+                    if show_excerpt {
+                        body.push(ctx.excerpt_prose(excerpt_line, 1, "markdown"));
                     }
-                    ShellExpansionError::Blacklisted { .. } => {
-                        "Remove the entry from your blacklist file if you trust this command."
+
+                    if let Some(fm) = ctx.frontmatter_prose() {
+                        body.push(fm);
                     }
-                    ShellExpansionError::ApprovalRequired { .. } => {
-                        "Re-run with <cyan>--approve-shell</cyan> or add the command to your whitelist."
+
+                    let stderr = stderr.trim_end();
+                    let stdout = stdout.trim_end();
+
+                    let stderr_section = if stderr.is_empty() {
+                        String::new()
+                    } else {
+                        format!("\n<dim>stderr:</dim>\n{}", truncate_tail_output(stderr))
+                    };
+
+                    let stdout_section = if stdout.is_empty() {
+                        String::new()
+                    } else if stderr.is_empty() || stdout_looks_relevant(stdout) {
+                        format!("\n<dim>stdout:</dim>\n{}", truncate_tail_output(stdout))
+                    } else {
+                        String::new()
+                    };
+
+                    if !stderr_section.is_empty() || !stdout_section.is_empty() {
+                        body.push(Prose::new(format!(
+                            "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Exit code:</dim> {code}{stderr_section}{stdout_section}"
+                        )));
+                    } else {
+                        body.push(Prose::new(format!(
+                            "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Exit code:</dim> {code}"
+                        )));
                     }
-                    ShellExpansionError::Denied { .. } => {
-                        "The user declined to approve this shell command."
+
+                    StatusBlock::new(StatusState::Error)
+                        .error_header(ErrorHeader::new("ShellBlockError", "command failed"))
+                        .body(body)
+                        .hint("Run the command directly to reproduce the failure.")
+                } else {
+                    let mut body = String::new();
+                    if let Some(path) = source_file {
+                        body.push_str(&format!("<dim>Source:</dim> {}\n", path.display()));
                     }
-                    ShellExpansionError::Timeout { .. } => {
-                        "Raise the timeout, or pass <cyan>--allow-shell-timeout</cyan> to warn instead of fail."
+                    body.push_str(&format!(
+                        "<dim>Block opened at line:</dim> {block_start_line}\n<dim>Command at line:</dim> {command_line}"
+                    ));
+                    if !partial_output.is_empty() {
+                        body.push_str("\n<dim>Partial output from earlier commands:</dim>\n");
+                        for output in partial_output.iter() {
+                            let dimmed = dim_output_for_error(output);
+                            body.push_str(&format!("<dim>---</dim>\n{dimmed}\n"));
+                        }
                     }
-                    ShellExpansionError::ExecutionFailed { .. } => {
-                        "Run the command directly to reproduce the failure."
+                    if !excerpt.lines.is_empty() {
+                        body.push_str("\n<dim>Context:</dim>\n");
+                        for (ln, text) in &excerpt.lines {
+                            if *ln == excerpt.highlight_line {
+                                body.push_str(&format!("  <red>> {ln:>4} | {text}</red>\n"));
+                            } else {
+                                body.push_str(&format!("  <dim>{ln:>4} |</dim> {text}\n"));
+                            }
+                        }
                     }
-                    _ => "Check the command and its error handling options.",
-                };
-                block = block.hint(hint);
-                block
+                    let mut block = StatusBlock::new(StatusState::Error)
+                        .error_header(ErrorHeader::new("ShellBlockError", "command failed"))
+                        .body(body);
+
+                    let hint = match source.as_ref() {
+                        ShellExpansionError::ParseDirective { .. } => "Check the command syntax.",
+                        ShellExpansionError::CommandNotFound { .. } => {
+                            "Install the binary or update <cyan>$PATH</cyan>."
+                        }
+                        ShellExpansionError::Blacklisted { .. } => {
+                            "Remove the entry from your blacklist file if you trust this command."
+                        }
+                        ShellExpansionError::ApprovalRequired { .. } => {
+                            "Re-run with <cyan>--approve-shell</cyan> or add the command to your whitelist."
+                        }
+                        ShellExpansionError::Denied { .. } => {
+                            "The user declined to approve this shell command."
+                        }
+                        ShellExpansionError::Timeout { .. } => {
+                            "Raise the timeout, or pass <cyan>--allow-shell-timeout</cyan> to warn instead of fail."
+                        }
+                        ShellExpansionError::ExecutionFailed { .. } => unreachable!(),
+                        _ => "Check the command and its error handling options.",
+                    };
+                    block = block.hint(hint);
+                    block
+                }
             }
         }
     }
 
     fn block_source(&self) -> Option<&(dyn biscuit_terminal::errors::BlockError + 'static)> {
-        None
+        match self {
+            ShellBlockError::Command { source, .. } => Some(source.as_ref()),
+            _ => None,
+        }
     }
 }
 
@@ -349,9 +425,75 @@ fn dim_output_for_error(text: &str) -> String {
         .join("\n")
 }
 
+/// Truncate captured command output to a tail-biased budget for block rendering.
+///
+/// Keeps the final [`MAX_LINES`] lines and the final [`MAX_BYTES`] bytes,
+/// whichever is smaller after UTF-8-safe char-boundary slicing. A single
+/// truncation marker prefixes the kept tail when either limit is exceeded.
+/// Internal newlines are preserved exactly; no escaping or colorization is
+/// applied.
+fn truncate_tail_output(text: &str) -> String {
+    const MAX_LINES: usize = 20;
+    const MAX_BYTES: usize = 2048;
+
+    let total_lines = text.lines().count();
+    let exceeds_lines = total_lines > MAX_LINES;
+    let exceeds_bytes = text.len() > MAX_BYTES;
+
+    if !exceeds_lines && !exceeds_bytes {
+        return text.to_string();
+    }
+
+    let byte_start = if exceeds_bytes {
+        let target = text.len() - MAX_BYTES;
+        text.char_indices()
+            .find(|&(i, _)| i >= target)
+            .map(|(i, _)| i)
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
+    let line_start = if exceeds_lines {
+        let skip = total_lines - MAX_LINES;
+        let mut pos = 0usize;
+        for (idx, line) in text.split_inclusive('\n').enumerate() {
+            if idx >= skip {
+                break;
+            }
+            pos += line.len();
+        }
+        pos
+    } else {
+        0
+    };
+
+    let start = byte_start.max(line_start);
+    let marker = if line_start >= byte_start {
+        "… output truncated; showing last 20 lines"
+    } else {
+        "… output truncated; showing last 2 KiB"
+    };
+
+    format!("{marker}\n{}", &text[start..])
+}
+
+/// Returns `true` when captured stdout likely carries diagnostic information
+/// worth showing alongside non-empty stderr.
+fn stdout_looks_relevant(stdout: &str) -> bool {
+    let lowered = stdout.to_lowercase();
+    ["error", "fail", "fatal", "warning"]
+        .iter()
+        .any(|kw| lowered.contains(kw))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
+    use biscuit_terminal::errors::{BlockError, SourceContext};
+    use biscuit_terminal::prelude::strip_escape_codes;
+    use biscuit_terminal::terminal::Terminal;
 
     #[test]
     fn source_excerpt_from_text() {
@@ -385,5 +527,153 @@ mod tests {
         let long = "x\n".repeat(20);
         let dimmed = dim_output_for_error(&long);
         assert!(dimmed.contains("more lines"));
+    }
+
+    #[test]
+    fn command_block_source_exposes_inner_error() {
+        let ctx = SourceContext::new(
+            std::path::PathBuf::from("/tmp/doc.md"),
+            std::path::PathBuf::from("doc.md"),
+            "---\ntitle: Test\n---\n# Heading\n\n::shell-block\nrustc --edition=invalid\n::end-block\n",
+        );
+        let inner = ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(ctx.clone()),
+            command: "rustc --edition=invalid".to_string(),
+            code: 1,
+            stdout: String::new(),
+            stderr: "error: invalid value 'invalid' for '--edition'".to_string(),
+            origin: ShellCommandOrigin::ShellBlock {
+                start_line: 6,
+                command_line: 7,
+            },
+        };
+        let err = ShellBlockError::Command {
+            block_start_line: 6,
+            command_line: 7,
+            partial_output: Box::new(Vec::new()),
+            excerpt: SourceExcerpt::default(),
+            source: Box::new(inner),
+            source_file: Some(std::path::PathBuf::from("/tmp/doc.md")),
+        };
+
+        let inner = err.block_source().expect("block_source should expose inner error");
+        let rendered = strip_escape_codes(inner.status_block(&Terminal::default()).render(&Terminal::default()));
+        assert!(rendered.contains("ShellExpansionError"), "inner block should render ShellExpansionError; got: {rendered}");
+    }
+
+    #[test]
+    fn execution_failed_status_block_renders_inner_diagnostic() {
+        let ctx = SourceContext::new(
+            std::path::PathBuf::from("/tmp/doc.md"),
+            std::path::PathBuf::from("doc.md"),
+            "---\ntitle: Test\n---\n# Heading\n\n::shell-block\nrustc --edition=invalid\n::end-block\n",
+        );
+        let inner = ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(ctx.clone()),
+            command: "rustc --edition=invalid".to_string(),
+            code: 1,
+            stdout: String::new(),
+            stderr: "error: invalid value 'invalid' for '--edition'".to_string(),
+            origin: ShellCommandOrigin::ShellBlock {
+                start_line: 6,
+                command_line: 7,
+            },
+        };
+        let err = ShellBlockError::Command {
+            block_start_line: 6,
+            command_line: 7,
+            partial_output: Box::new(Vec::new()),
+            excerpt: SourceExcerpt::default(),
+            source: Box::new(inner),
+            source_file: Some(std::path::PathBuf::from("/tmp/doc.md")),
+        };
+
+        let term = Terminal::builder().width(80).build();
+        let rendered = strip_escape_codes(err.status_block(&term).render(&term));
+
+        assert!(
+            rendered.contains("ShellBlockError"),
+            "wrapper header should be present; got: {rendered}"
+        );
+        assert!(
+            rendered.contains("Block opened at line: 6"),
+            "wrapper should report block open line; got: {rendered}"
+        );
+        assert!(
+            rendered.contains("Command at line: 7"),
+            "wrapper should report command line; got: {rendered}"
+        );
+        assert!(
+            rendered.contains("doc.md"),
+            "rendered diagnostic should contain linked source path; got: {rendered}"
+        );
+        assert!(
+            rendered.contains("> 7 │"),
+            "rendered diagnostic should contain source excerpt centered on file line 7; got: {rendered}"
+        );
+        assert!(
+            rendered.contains("```yaml"),
+            "rendered diagnostic should contain composed frontmatter block; got: {rendered}"
+        );
+        assert!(
+            rendered.contains("title: Test"),
+            "rendered diagnostic should contain frontmatter content; got: {rendered}"
+        );
+        assert!(
+            rendered.contains("stderr:"),
+            "rendered diagnostic should label captured stderr; got: {rendered}"
+        );
+        assert!(
+            rendered.contains("invalid value"),
+            "rendered diagnostic should contain captured stderr text; got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn execution_failed_status_block_includes_partial_output() {
+        let ctx = SourceContext::new(
+            std::path::PathBuf::from("/tmp/doc.md"),
+            std::path::PathBuf::from("doc.md"),
+            "content".to_string(),
+        );
+        let inner = ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(ctx),
+            command: "rustc --edition=invalid".to_string(),
+            code: 1,
+            stdout: String::new(),
+            stderr: String::new(),
+            origin: ShellCommandOrigin::ShellBlock {
+                start_line: 2,
+                command_line: 3,
+            },
+        };
+        let err = ShellBlockError::Command {
+            block_start_line: 2,
+            command_line: 3,
+            partial_output: Box::new(vec!["first\noutput".to_string()]),
+            excerpt: SourceExcerpt::default(),
+            source: Box::new(inner),
+            source_file: None,
+        };
+
+        let term = Terminal::builder().width(80).build();
+        let rendered = strip_escape_codes(err.status_block(&term).render(&term));
+        assert!(
+            rendered.contains("Partial output from earlier commands"),
+            "wrapper should surface partial output; got: {rendered}"
+        );
+        assert!(
+            rendered.contains("first"),
+            "rendered diagnostic should contain partial output text; got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn truncate_tail_output_keeps_tail() {
+        let text = (0..30).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n");
+        let truncated = truncate_tail_output(&text);
+        assert!(truncated.contains("line29"), "tail should be preserved; got: {truncated}");
+        assert!(!truncated.contains("line0"), "head should be dropped; got: {truncated}");
+        assert!(truncated.contains("… output truncated"), "truncation marker should be present; got: {truncated}");
     }
 }

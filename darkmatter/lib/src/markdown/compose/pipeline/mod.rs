@@ -222,7 +222,7 @@ impl Markdown {
             // visible to all later stages.
             if shell_expansion_enabled {
                 let fse_start = perf.is_enabled().then(std::time::Instant::now);
-                let fse_ctx = self.source_context_for_errors();
+                let fse_ctx = self.full_source_context_for_errors();
                 let fse_report = frontmatter_shell_expansion::execute_frontmatter_shell_expansion(
                     self.frontmatter_mut(),
                     &options,
