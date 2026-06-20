@@ -253,6 +253,64 @@ pub(crate) fn interpolate_frontmatter(
     defer_shell_pending: bool,
     resolution_context: Option<ResolutionContext>,
 ) -> Result<FrontmatterInterpolationReport, MarkdownError> {
+    interpolate_frontmatter_impl(
+        frontmatter,
+        context,
+        fail_fast,
+        defer_shell_pending,
+        resolution_context,
+        false,
+    )
+}
+
+/// Best-effort variant for condition-blind pre-flight shell-command collection.
+///
+/// Identical to [`interpolate_frontmatter`] except that a per-key evaluation
+/// failure is swallowed for that one key instead of aborting the whole pass.
+/// The motivating case: pre-flight collection runs context-free
+/// (`resolution_context = None`), so a key invoking a filesystem function such
+/// as `frontmatter()` or `file_exists()` (which require a resolution context)
+/// errors. Aborting the pass on that error starves the post-main *fallback*
+/// pass — the only place a shell-pending `$(...)` key whose template is
+/// transitively blocked (e.g. `dir: "$(dirname '{{ spec || design }}')"` where
+/// `design` references `dir`) gets resolved. The collector would then approve
+/// the command with its raw `{{ … }}` template intact while execution runs the
+/// resolved form, producing a spurious "command not pre-approved" failure.
+///
+/// Tolerating per-key failures keeps the approval set a faithful superset of
+/// what execution will run; keys that legitimately cannot evaluate here are
+/// irrelevant to shell-command discovery, and the real run surfaces their
+/// errors with full diagnostics.
+pub(crate) fn interpolate_frontmatter_best_effort(
+    frontmatter: &mut Frontmatter,
+    context: &ComposeContext,
+    fail_fast: bool,
+    defer_shell_pending: bool,
+    resolution_context: Option<ResolutionContext>,
+) -> Result<FrontmatterInterpolationReport, MarkdownError> {
+    interpolate_frontmatter_impl(
+        frontmatter,
+        context,
+        fail_fast,
+        defer_shell_pending,
+        resolution_context,
+        true,
+    )
+}
+
+/// Shared implementation behind [`interpolate_frontmatter`] and
+/// [`interpolate_frontmatter_best_effort`]. When `best_effort` is `true`, a
+/// per-key rewrite error is skipped (the key is left unresolved) rather than
+/// propagated, so the remaining keys — including fallback-resolved shell-pending
+/// keys — still reach their final shape.
+fn interpolate_frontmatter_impl(
+    frontmatter: &mut Frontmatter,
+    context: &ComposeContext,
+    fail_fast: bool,
+    defer_shell_pending: bool,
+    resolution_context: Option<ResolutionContext>,
+    best_effort: bool,
+) -> Result<FrontmatterInterpolationReport, MarkdownError> {
     let fm = frontmatter.as_map();
 
     let shell_pending_keys: HashSet<String> = if defer_shell_pending {
@@ -321,8 +379,21 @@ pub(crate) fn interpolate_frontmatter(
             let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone())
                 .with_resolution_context(resolution_context.clone());
             let evaluator = Evaluator::new(&seed_state);
-            let (new_value, count, mut warnings) = rewrite_value(original, &evaluator, fail_fast)
-                .map_err(|e| key_scoped_error(key, e))?;
+            let (new_value, count, mut warnings) =
+                match rewrite_value(original, &evaluator, fail_fast)
+                    .map_err(|e| key_scoped_error(key, e))
+                {
+                    Ok(triple) => triple,
+                    Err(_) if best_effort => {
+                        // Mark resolved so the fixpoint loop makes progress and
+                        // the fallback pass still runs for the other keys; leave
+                        // this key's original (unresolved) value in place.
+                        resolved.insert(key.clone());
+                        made_progress = true;
+                        continue;
+                    }
+                    Err(e) => return Err(e),
+                };
 
             for w in &mut warnings {
                 w.message = format!("key '{}': {}", key, w.message);
@@ -372,8 +443,15 @@ pub(crate) fn interpolate_frontmatter(
         let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone())
             .with_resolution_context(resolution_context.clone());
         let evaluator = Evaluator::new(&seed_state);
-        let (new_value, count, mut warnings) = rewrite_value(original, &evaluator, fail_fast)
-            .map_err(|e| key_scoped_error(key, e))?;
+        let (new_value, count, mut warnings) = match rewrite_value(original, &evaluator, fail_fast)
+            .map_err(|e| key_scoped_error(key, e))
+        {
+            Ok(triple) => triple,
+            // Best-effort: leave this key's original value in place and keep
+            // resolving the rest (see [`interpolate_frontmatter_best_effort`]).
+            Err(_) if best_effort => continue,
+            Err(e) => return Err(e),
+        };
 
         for w in &mut warnings {
             w.message = format!("key '{}': {}", key, w.message);
@@ -929,6 +1007,97 @@ mod tests {
             );
             // base is unchanged
             assert_eq!(fm.as_map().get("base"), Some(&json!("/path/to/something")));
+        }
+
+        /// Frontmatter mirroring the `review-feature.md` shape that surfaced the
+        /// pre-flight "command not pre-approved" bug:
+        ///
+        /// - `dir` is a shell-pending `$(...)` directive whose template
+        ///   (`{{ spec || design }}`) is transitively blocked, so it resolves
+        ///   only in the post-main fallback pass;
+        /// - `iteration` invokes the `frontmatter()` filesystem function, which
+        ///   errors in a context-free pass (`resolution_context = None`).
+        fn review_feature_shape() -> Frontmatter {
+            fm_from_json(json!({
+                "spec": "fixes/x/spec.md",
+                "dir": "$(dirname '{{ spec || design }}')",
+                "design": "{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}",
+                "iteration": "{{ frontmatter(spec, 'review_iterations') ? frontmatter(spec, 'review_iterations') + 1 : 1 }}",
+            }))
+        }
+
+        #[test]
+        fn best_effort_resolves_shell_pending_when_unrelated_key_errors() {
+            // Regression: a context-requiring key (`iteration` -> `frontmatter()`)
+            // errors in the context-free pre-flight pass, but that must NOT abort
+            // before the fallback pass resolves the shell-pending `dir`. The
+            // command collector relies on `dir` reaching its final shape so the
+            // approval set matches what execution runs.
+            let mut fm = review_feature_shape();
+            interpolate_frontmatter_best_effort(&mut fm, &test_context(), false, true, None)
+                .expect("best-effort tolerates the per-key error");
+
+            // `dir`'s `{{ spec || design }}` is fully resolved — no template left.
+            assert_eq!(
+                fm.as_map().get("dir"),
+                Some(&json!("$(dirname 'fixes/x/spec.md')")),
+                "shell-pending dir must resolve via the fallback pass"
+            );
+            // The unrelated context-requiring key is left untouched (its real
+            // error is surfaced later by the context-bearing execution pass).
+            assert_eq!(
+                fm.as_map().get("iteration"),
+                Some(&json!(
+                    "{{ frontmatter(spec, 'review_iterations') ? frontmatter(spec, 'review_iterations') + 1 : 1 }}"
+                )),
+                "context-requiring key stays unresolved in best-effort mode"
+            );
+        }
+
+        #[test]
+        fn plain_interpolate_aborts_when_unrelated_key_errors() {
+            // The non-resilient variant must still propagate the per-key error
+            // (so the execution pipeline surfaces it). This guards against the
+            // best-effort behavior accidentally leaking into the default path.
+            let mut fm = review_feature_shape();
+            let result = interpolate_frontmatter(&mut fm, &test_context(), false, true, None);
+            let err = match result {
+                Ok(_) => panic!("plain variant must abort on the context-requiring key error"),
+                Err(e) => e,
+            };
+            assert!(
+                err.to_string().contains("frontmatter"),
+                "error should name the failing filesystem function; got: {err}"
+            );
+            // Because the pass aborted before the fallback, `dir` is left raw —
+            // exactly the state that produced the spurious approval mismatch.
+            assert_eq!(
+                fm.as_map().get("dir"),
+                Some(&json!("$(dirname '{{ spec || design }}')")),
+                "aborted pass leaves dir's template unresolved"
+            );
+        }
+
+        #[test]
+        fn best_effort_matches_plain_when_no_key_errors() {
+            // With no context-requiring key, best-effort and plain must agree:
+            // best-effort only changes behavior on a per-key evaluation error.
+            let make = || {
+                fm_from_json(json!({
+                    "spec": "fixes/x/spec.md",
+                    "dir": "$(dirname '{{ spec || design }}')",
+                    "design": "{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}",
+                }))
+            };
+            let mut a = make();
+            let mut b = make();
+            interpolate_frontmatter(&mut a, &test_context(), false, true, None).unwrap();
+            interpolate_frontmatter_best_effort(&mut b, &test_context(), false, true, None).unwrap();
+            assert_eq!(a.as_map().get("dir"), b.as_map().get("dir"));
+            assert_eq!(
+                a.as_map().get("dir"),
+                Some(&json!("$(dirname 'fixes/x/spec.md')"))
+            );
         }
 
         #[test]

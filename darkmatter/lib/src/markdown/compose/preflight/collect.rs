@@ -22,7 +22,7 @@ use crate::markdown::compose::ComposeOperation;
 use crate::markdown::compose::ComposeOptions;
 use crate::markdown::compose::ComposeSource;
 use crate::markdown::compose::context::effective_state as state;
-use crate::markdown::compose::frontmatter_interpolation::interpolate_frontmatter;
+use crate::markdown::compose::frontmatter_interpolation::interpolate_frontmatter_best_effort;
 use crate::markdown::compose::frontmatter_shell_expansion::{
     directive_reachable_pipelines, parse_shell_value, scan_frontmatter,
 };
@@ -513,7 +513,15 @@ fn scan_one_frontmatter(
         // pipelines for the approval workflow; it never performs expression
         // selection, so it stays context-free (no `ResolutionContext`). The real
         // run supplies the context.
-        let _ = interpolate_frontmatter(
+        //
+        // Best-effort: a context-free key that invokes a filesystem function
+        // (`frontmatter()`, `file_exists()`, …) errors here, and a non-resilient
+        // pass would abort before the fallback resolves a transitively-blocked
+        // shell-pending key (e.g. `dir: "$(dirname '{{ spec || design }}')"`).
+        // That left the command's `{{ … }}` template in the approval set while
+        // execution ran its resolved form, yielding a spurious "command not
+        // pre-approved" failure.
+        let _ = interpolate_frontmatter_best_effort(
             fm_clone.frontmatter_mut(),
             options.context(),
             false,
@@ -748,6 +756,45 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].executable, "dirname");
         assert_eq!(entries[0].args, vec!["features/rough-edges/spec.md"]);
+    }
+
+    /// Regression for the `review-feature.md` "command not pre-approved" bug.
+    ///
+    /// `dir` is a shell-pending directive whose template (`{{ spec || design }}`)
+    /// is transitively blocked because `design` references `dir`, so it resolves
+    /// only in the post-main fallback pass. A sibling `iteration` key calls
+    /// `file_exists()` — a filesystem function that errors in the context-free
+    /// pre-flight pass. Before the fix, that error aborted the interpolation
+    /// before the fallback ran, so the command was collected with its raw
+    /// `{{ … }}` template; execution then ran the resolved form, yielding a
+    /// spurious "command not pre-approved". The collected argument must be the
+    /// resolved path.
+    #[test]
+    fn collects_resolved_command_despite_context_requiring_sibling_key() {
+        let content = "---\n\
+dir: \"$(dirname '{{ spec || design }}')\"\n\
+design: \"{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}\"\n\
+iteration: \"{{ file_exists('design.md') ? 2 : 1 }}\"\n\
+---\nbody\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new().with_set_overrides(serde_json::json!({
+            "spec": "fixes/x/spec.md",
+        }));
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 1, "exactly one shell command (dir)");
+        assert_eq!(entries[0].executable, "dirname");
+        assert_eq!(
+            entries[0].args,
+            vec!["fixes/x/spec.md"],
+            "must collect the resolved argument, not the raw {{{{ }}}} template"
+        );
+        assert!(
+            !entries[0].normalized.contains("{{"),
+            "no template syntax should survive into the approval set: {:?}",
+            entries[0].normalized
+        );
     }
 
     #[test]
