@@ -7,13 +7,14 @@ description: "Reviews a _feature specification_ to make sure that the specificat
 
 dir: "$(dirname '{{spec || design}}')"
 design: "{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}"
-iteration: "{{ frontmatter(spec, 'review_iterations') ? increment(frontmatter(spec, 'review_iterations'))  : 1   }}"
+iteration: "{{ frontmatter(spec, 'review_iterations') ? frontmatter(spec, 'review_iterations') + 1  : 1   }}"
 review_file: "{{ctx.area}}/{{dir}}/review-{{iteration}}.md"
+feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 start:
     message: "👓 starting feature review #{{iteration}} of `{{parent_dir(spec)}}` (_in the **{{ctx.area}}** package area_)"
 success:
     stderr: "Feature review {{iteration}} in the {{ctx.area}} package area has completed"
-    message: "✅  feature review #{{iteration}} for `{{dir}}` in the **{{ctx.current_package_area}}** package area has completed. The review can be found at `{{review_file}}`"
+    message: "✅  review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area ({{feature_or_fix}})"
     effect: "small-group-cheer"
 failure:
     stderr: "Feature Review {{iteration}} in the {{ctx.area}} package area failed to complete!"
