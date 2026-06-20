@@ -1,5 +1,6 @@
 ---
 ready: false
+implemented: true
 agent: unknown/default
 created: "2026-06-19T18:20:54"
 ---
