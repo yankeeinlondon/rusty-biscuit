@@ -249,6 +249,28 @@ That means:
 When `fail_fast` is enabled, parse or evaluation failures stop the compose run.
 When `fail_fast` is disabled, the original string is preserved and a warning is recorded.
 
+### Whole-Value Exception (Strict)
+
+There is one exception to the lenient `fail_fast`-off behavior above. When a
+frontmatter value's trimmed content is **exactly one** `{{ ... }}` span (only
+whitespace before and after it), the value is treated as executable state, not
+text, and is held to a strict parse-and-evaluate contract:
+
+- The expression is parsed and evaluated directly, and the typed
+  `serde_json::Value` result is preserved (so `{{ false }}` stays the boolean
+  `false`, a numeric expression stays a number, and an array/object result keeps
+  its type).
+- A parse failure or an evaluation failure is **fatal regardless of
+  `fail_fast`**, so malformed expansion syntax (e.g. a mismatched paren) can
+  never leak downstream as a raw `{{ … }}` string.
+- Undefined variables stay lenient: a whole-value `{{ missing }}` resolves to
+  `null`, not an error.
+
+This is scoped to whole-value spans only. Mixed text (`"a {{ x }}"`), strings
+holding more than one expression, and body interpolation fall through to the
+lenient string path described above — they are **not** newly fatal when
+`fail_fast` is off.
+
 ## Important Limitation
 
 Chained references between templated top-level keys are intentionally not supported in v1.
