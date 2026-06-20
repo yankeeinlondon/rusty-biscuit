@@ -69,15 +69,17 @@ fn extract_before_tool_request<'a>(meta: &'a EventMeta) -> ProtectObservation<'a
     }
 
     if is_write_like_tool(tool_name) {
-        return match input.and_then(extract_path_string) {
-            Some(path) => ProtectObservation::Request(ProtectRequest::WritePath {
-                path,
-                cwd: meta.cwd.as_deref(),
-            }),
-            None => ProtectObservation::Unparsed {
+        let paths = input.map(extract_path_strings).unwrap_or_default();
+        return if paths.is_empty() {
+            ProtectObservation::Unparsed {
                 surface: ScanSurface::WritePath,
                 reason: "write-shaped tool with no extractable path",
-            },
+            }
+        } else {
+            ProtectObservation::Request(ProtectRequest::WritePath {
+                paths,
+                cwd: meta.cwd.as_deref(),
+            })
         };
     }
 
@@ -163,26 +165,33 @@ fn extract_command_string(input: &Value) -> Option<Cow<'_, str>> {
     }
 }
 
-fn extract_path_string(input: &Value) -> Option<&str> {
+/// Collect every candidate write path from a tool input.
+///
+/// Single-string keys yield one path; the `paths` array yields every string
+/// element. All candidates are returned so the protect service can block when
+/// any one of them is sensitive, rather than only inspecting the first.
+fn extract_path_strings(input: &Value) -> Vec<&str> {
     match input {
-        Value::String(s) => Some(s.as_str()),
+        Value::String(s) => vec![s.as_str()],
         Value::Object(map) => {
             for key in ["path", "file_path", "file", "target", "filename", "dest", "paths"] {
                 if let Some(value) = map.get(key) {
                     match value {
-                        Value::String(s) => return Some(s.as_str()),
+                        Value::String(s) => return vec![s.as_str()],
                         Value::Array(arr) if key == "paths" => {
-                            if let Some(Value::String(s)) = arr.first() {
-                                return Some(s.as_str());
+                            let paths: Vec<&str> =
+                                arr.iter().filter_map(Value::as_str).collect();
+                            if !paths.is_empty() {
+                                return paths;
                             }
                         }
                         _ => {}
                     }
                 }
             }
-            None
+            Vec::new()
         }
-        _ => None,
+        _ => Vec::new(),
     }
 }
 
@@ -328,8 +337,8 @@ mod tests {
         let obs = extract_protect_request(&AgenticEvent::BeforeTool, &meta);
         assert!(matches!(
             obs,
-            ProtectObservation::Request(ProtectRequest::WritePath { path, cwd })
-                if path == "/etc/hosts" && cwd.is_none()
+            ProtectObservation::Request(ProtectRequest::WritePath { paths, cwd })
+                if paths == ["/etc/hosts"] && cwd.is_none()
         ));
     }
 
@@ -339,8 +348,8 @@ mod tests {
         let obs = extract_protect_request(&AgenticEvent::BeforeTool, &meta);
         assert!(matches!(
             obs,
-            ProtectObservation::Request(ProtectRequest::WritePath { path, .. })
-                if path == ".aws/credentials"
+            ProtectObservation::Request(ProtectRequest::WritePath { paths, .. })
+                if paths == [".aws/credentials"]
         ));
     }
 
@@ -350,8 +359,8 @@ mod tests {
         let obs = extract_protect_request(&AgenticEvent::BeforeTool, &meta);
         assert!(matches!(
             obs,
-            ProtectObservation::Request(ProtectRequest::WritePath { path, .. })
-                if path == "/tmp/a"
+            ProtectObservation::Request(ProtectRequest::WritePath { paths, .. })
+                if paths == ["/tmp/a", "/tmp/b"]
         ));
     }
 

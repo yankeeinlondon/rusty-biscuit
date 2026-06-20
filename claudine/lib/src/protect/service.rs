@@ -16,7 +16,10 @@ use super::path::{
 #[derive(Debug)]
 pub enum ProtectRequest<'a> {
     BashCommand { command: Cow<'a, str> },
-    WritePath { path: &'a str, cwd: Option<&'a str> },
+    WritePath {
+        paths: Vec<&'a str>,
+        cwd: Option<&'a str>,
+    },
     McpResponse { payloads: Vec<Cow<'a, str>> },
 }
 
@@ -60,7 +63,7 @@ impl ProtectService {
 
         let decision = match request {
             ProtectRequest::BashCommand { command } => self.evaluate_bash_command(command.as_ref()),
-            ProtectRequest::WritePath { path, cwd } => self.evaluate_write_path(path, *cwd),
+            ProtectRequest::WritePath { paths, cwd } => self.evaluate_write_path(paths, *cwd),
             ProtectRequest::McpResponse { payloads } => self.evaluate_mcp_response(payloads),
         };
 
@@ -119,12 +122,25 @@ impl ProtectService {
         ProtectDecision::allow()
     }
 
-    fn evaluate_write_path(&self, path: &str, cwd: Option<&str>) -> ProtectDecision {
-        let _span = info_span!("protect_write", path).entered();
+    fn evaluate_write_path(&self, paths: &[&str], cwd: Option<&str>) -> ProtectDecision {
+        let _span = info_span!("protect_write", path_count = paths.len()).entered();
         if !self.config.is_group_enabled(RuleGroup::SensitivePaths) {
             return ProtectDecision::allow();
         }
 
+        // Any sensitive path blocks the whole write; a benign first entry must
+        // not shadow a later sensitive one.
+        for path in paths {
+            let decision = self.evaluate_single_write_path(path, cwd);
+            if decision.is_blocked() {
+                return decision;
+            }
+        }
+
+        ProtectDecision::allow()
+    }
+
+    fn evaluate_single_write_path(&self, path: &str, cwd: Option<&str>) -> ProtectDecision {
         // Resolve relative paths against cwd
         let resolved = match cwd {
             Some(cwd) if !path.starts_with('/') && !path.starts_with('~') => {
@@ -236,7 +252,7 @@ mod tests {
         let home = dirs::home_dir().unwrap();
         let ssh_path = format!("{}/.ssh/config", home.display());
         let decision = service.evaluate(&ProtectRequest::WritePath {
-            path: &ssh_path,
+            paths: vec![&ssh_path],
             cwd: None,
         });
         assert!(decision.is_blocked());
@@ -244,10 +260,27 @@ mod tests {
     }
 
     #[test]
+    fn write_paths_array_blocks_when_any_path_is_sensitive() {
+        let service = default_service();
+        let home = dirs::home_dir().unwrap();
+        let ssh_path = format!("{}/.ssh/config", home.display());
+        // First entry is benign; the sensitive second entry must still block.
+        let decision = service.evaluate(&ProtectRequest::WritePath {
+            paths: vec!["src/generated.txt", &ssh_path],
+            cwd: None,
+        });
+        assert!(
+            decision.is_blocked(),
+            "a benign first path must not shadow a later sensitive path"
+        );
+        assert_eq!(decision.blocked.unwrap().group, RuleGroup::SensitivePaths);
+    }
+
+    #[test]
     fn write_inside_repo_is_allowed() {
         let service = default_service();
         let decision = service.evaluate(&ProtectRequest::WritePath {
-            path: "src/main.rs",
+            paths: vec!["src/main.rs"],
             cwd: None,
         });
         assert!(!decision.is_blocked());
@@ -364,7 +397,7 @@ mod tests {
         let home = dirs::home_dir().unwrap();
         let cwd = format!("{}/projects/myapp", home.display());
         let decision = service.evaluate(&ProtectRequest::WritePath {
-            path: "../../.ssh/config",
+            paths: vec!["../../.ssh/config"],
             cwd: Some(&cwd),
         });
         assert!(
@@ -377,7 +410,7 @@ mod tests {
     fn relative_path_traversal_to_etc_is_blocked() {
         let service = default_service();
         let decision = service.evaluate(&ProtectRequest::WritePath {
-            path: "../../../../../etc/hosts",
+            paths: vec!["../../../../../etc/hosts"],
             cwd: Some("/home/user/project/src"),
         });
         assert!(
@@ -390,7 +423,7 @@ mod tests {
     fn relative_path_inside_repo_is_allowed() {
         let service = default_service();
         let decision = service.evaluate(&ProtectRequest::WritePath {
-            path: "../lib/src/main.rs",
+            paths: vec!["../lib/src/main.rs"],
             cwd: Some("/home/user/project/cli"),
         });
         assert!(
@@ -445,7 +478,7 @@ mod tests {
         }));
         let service = ProtectService::new(config, ProtectPlatform::current()).unwrap();
         let decision = service.evaluate(&ProtectRequest::WritePath {
-            path: "/etc/resolv.conf",
+            paths: vec!["/etc/resolv.conf"],
             cwd: None,
         });
         assert!(
@@ -463,7 +496,7 @@ mod tests {
         }));
         let service = ProtectService::new(config, ProtectPlatform::current()).unwrap();
         let decision = service.evaluate(&ProtectRequest::WritePath {
-            path: "/etc/passwd",
+            paths: vec!["/etc/passwd"],
             cwd: None,
         });
         assert!(
@@ -488,7 +521,7 @@ mod tests {
         // Lexical: tmp/home-link/.ssh/config — NOT under $HOME/.ssh
         // Canonical: $HOME/.ssh/config — IS under $HOME/.ssh
         let decision = service.evaluate(&ProtectRequest::WritePath {
-            path: ".ssh/config",
+            paths: vec![".ssh/config"],
             cwd: Some(&cwd_str),
         });
         assert!(
