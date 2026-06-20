@@ -182,6 +182,13 @@ pub struct ComposeOptions {
     /// during the cleanup operation. Default: `Normal`.
     pub(crate) list_spacing: crate::markdown::cleanup::ListSpacingMode,
 
+    /// Controls whether cleanup collapses incidental single newlines
+    /// in prose. Default: `Strip`.
+    pub(crate) incidental_newline_mode: crate::markdown::cleanup::IncidentalNewlineMode,
+
+    /// Optional fixed column width for cleanup reflow. Default: `None`.
+    pub(crate) fixed_width: Option<usize>,
+
     /// Number of spaces per nesting level for list indentation
     /// during cleanup. Default: 4.
     pub(crate) indent_size: usize,
@@ -335,6 +342,8 @@ impl std::fmt::Debug for ComposeOptions {
                     .map(|s| format!("{} commands", s.len())),
             )
             .field("list_spacing", &self.list_spacing)
+            .field("incidental_newline_mode", &self.incidental_newline_mode)
+            .field("fixed_width", &self.fixed_width)
             .field("indent_size", &self.indent_size)
             .field("cache_access_mode", &self.cache_access_mode)
             .field("cache_freshness_mode", &self.cache_freshness_mode)
@@ -407,6 +416,8 @@ impl ComposeOptions {
             shell_approval_handler: None,
             pre_approved_commands: None,
             list_spacing: crate::markdown::cleanup::ListSpacingMode::Normal,
+            incidental_newline_mode: crate::markdown::cleanup::IncidentalNewlineMode::Strip,
+            fixed_width: None,
             indent_size: crate::markdown::cleanup::DEFAULT_INDENT,
             cache_access_mode: CacheAccessMode::default(),
             cache_freshness_mode: CacheFreshnessMode::default(),
@@ -483,6 +494,23 @@ impl ComposeOptions {
     #[must_use]
     pub fn with_list_spacing(mut self, mode: crate::markdown::cleanup::ListSpacingMode) -> Self {
         self.list_spacing = mode;
+        self
+    }
+
+    /// Sets whether cleanup collapses incidental single newlines in prose.
+    #[must_use]
+    pub fn with_incidental_newline_mode(
+        mut self,
+        mode: crate::markdown::cleanup::IncidentalNewlineMode,
+    ) -> Self {
+        self.incidental_newline_mode = mode;
+        self
+    }
+
+    /// Sets the fixed column width for cleanup reflow.
+    #[must_use]
+    pub fn with_fixed_width(mut self, width: usize) -> Self {
+        self.fixed_width = Some(width.max(1));
         self
     }
 

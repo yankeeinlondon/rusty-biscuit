@@ -279,6 +279,47 @@ mod tests {
     }
 
     #[test]
+    fn clean_fixed_width_flag_parses() {
+        let cli = Cli::try_parse_from(["md", "clean", "doc.md", "--fixed-width", "80"]).unwrap();
+        match cli.command {
+            Some(crate::args::Command::Clean { fixed_width, .. }) => {
+                assert_eq!(fixed_width, Some(80));
+            }
+            _ => panic!("Expected Clean command"),
+        }
+    }
+
+    #[test]
+    fn clean_ignore_incidental_newlines_flag_parses() {
+        let cli =
+            Cli::try_parse_from(["md", "clean", "doc.md", "--ignore-incidental-newlines"])
+                .unwrap();
+        match cli.command {
+            Some(crate::args::Command::Clean {
+                ignore_incidental_newlines,
+                ..
+            }) => assert!(ignore_incidental_newlines),
+            _ => panic!("Expected Clean command"),
+        }
+    }
+
+    #[test]
+    fn clean_fixed_width_conflicts_with_ignore_incidental_newlines() {
+        let result = Cli::try_parse_from([
+            "md",
+            "clean",
+            "doc.md",
+            "--fixed-width",
+            "80",
+            "--ignore-incidental-newlines",
+        ]);
+        let Err(err) = result else {
+            panic!("expected conflicting clean flags to fail");
+        };
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
     fn debug_flag_parses_level() {
         let cli = Cli::try_parse_from(["md", "--debug", "2", "doc.md"]).unwrap();
         assert_eq!(cli.debug_level, Some(2));

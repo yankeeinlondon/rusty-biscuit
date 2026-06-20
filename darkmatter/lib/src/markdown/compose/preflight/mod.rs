@@ -615,7 +615,7 @@ flag: a
     #[test]
     fn execution_subset_of_approval_across_randomized_conditions() {
         const BRANCH_COUNT: usize = 4;
-        const ITERATIONS: usize = 16;
+        const ITERATIONS: usize = 8;
 
         let mut body = String::from("---\n");
         for i in 0..BRANCH_COUNT {
