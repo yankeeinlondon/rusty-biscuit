@@ -173,69 +173,79 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
     })
 }
 
-/// Interpolates a single frontmatter value, preserving scalar type when the
-/// whole value is one `{{ expr }}`.
+/// Interpolates a single frontmatter value.
 ///
-/// When `input` is exactly one interpolation expression (ignoring surrounding
-/// whitespace) that evaluates to a boolean, number, or null, the typed
-/// `serde_json::Value` is returned so `{{ false }}` stays the boolean `false`
-/// (falsy) rather than the string `"false"` (truthy), and `{{ file_index(x) }}`
-/// stays a number for downstream predicates like `is_number`. Strings, arrays,
-/// objects, mixed text (`"a {{ x }}"`), parse/eval failures, and unresolved
-/// (e.g. shell-pending) templates fall through to [`interpolate_text`], keeping
-/// the established string-rewrite behavior — including leaving an unresolved
-/// `{{ … }}` in place for a later pass.
+/// When `input`'s trimmed content is exactly one `{{ expr }}` (a *whole-value*
+/// interpolation), the value is executable state, not text: it is parsed and
+/// evaluated directly, and the typed `serde_json::Value` result is returned —
+/// so `{{ false }}` stays the boolean `false` (falsy) rather than the string
+/// `"false"` (truthy), `{{ file_index(x) }}` stays a number, and a whole-value
+/// expression that yields an array or object is preserved as that typed value.
+/// A whole-value parse or evaluation failure is **fatal regardless of
+/// `fail_fast`**, so malformed expansion syntax (e.g. a mismatched paren) can
+/// never leak downstream as a raw `{{ … }}` string.
+///
+/// Mixed text (`"a {{ x }}"`), strings holding more than one expression, and
+/// plain strings fall through to [`interpolate_text`], keeping the established
+/// lenient string-rewrite behavior — including leaving an unresolved `{{ … }}`
+/// in place for a later pass and demoting parse/eval failures to warnings when
+/// `fail_fast` is off.
 ///
 /// ## Errors
 ///
-/// Propagates the same `MarkdownError` as [`interpolate_text`] when `fail_fast`
-/// is set or a fatal evaluation error occurs on the string path.
+/// Returns `MarkdownError::Transform` when a whole-value expression fails to
+/// parse or evaluate, and propagates the same error as [`interpolate_text`]
+/// when `fail_fast` is set or a fatal evaluation error occurs on the string
+/// path. Whole-value undefined variables resolve to `null` (not an error), so
+/// `{{ missing }}` stays lenient.
 pub(crate) fn interpolate_value<L: EvaluationLookup>(
     input: &str,
     evaluator: &Evaluator<L>,
     fail_fast: bool,
     warning_stage: &'static str,
 ) -> Result<(Value, usize, Vec<ComposeWarning>), MarkdownError> {
-    if let Some((typed, expr)) = whole_value_scalar(input, evaluator) {
-        // The scalar fast-path bypasses `interpolate_text`, so it must still run
+    if let Some(loc) = whole_value_span(input) {
+        let expr = parse(&loc.expression).map_err(|e| {
+            MarkdownError::Transform(format!(
+                "Interpolation parse failed for '{}': {}",
+                loc.expression, e
+            ))
+        })?;
+        // The whole-value path bypasses `interpolate_text`, so it must still run
         // the context-typo check on its single parsed expression — otherwise
         // `phase: "{{ ctx.toady }}"` (resolving to null) would warn in body text
         // but stay silent in frontmatter.
         let warnings = evaluator.collect_context_warnings(&expr, warning_stage);
-        return Ok((typed, 1, warnings));
+        let value = evaluator.eval_json(&expr).map_err(|message| {
+            MarkdownError::Transform(format!(
+                "Interpolation evaluation failed for '{}': {}",
+                loc.expression, message
+            ))
+        })?;
+        return Ok((value, 1, warnings));
     }
     let result = interpolate_text(input, evaluator, ScanMode::Plain, fail_fast, warning_stage)?;
     Ok((Value::String(result.output), result.replacements, result.warnings))
 }
 
-/// Returns the typed scalar value and its parsed expression when `input` is a
-/// single whole-value `{{ expr }}` that evaluates to a boolean, number, or null.
+/// Returns the single interpolation span when `input`'s trimmed content is
+/// exactly one `{{ expr }}` (only whitespace before and after the span).
 ///
-/// Returns `None` (string path) when the value is mixed text, holds more than
-/// one expression, evaluates to a string/array/object, or fails to parse or
-/// evaluate. Restricting to `Bool`/`Number`/`Null` keeps the change to the
-/// value kinds literal frontmatter already produces (`yolo: true`, `phase: 1`),
-/// and leaves string/array/object results on the proven string path.
-///
-/// The parsed [`Expr`] is returned alongside the value so the caller can run
-/// AST-based diagnostics (context-typo detection) on the same expression
-/// without reparsing.
-fn whole_value_scalar<L: EvaluationLookup>(
-    input: &str,
-    evaluator: &Evaluator<L>,
-) -> Option<(Value, super::Expr)> {
-    let locations = ExpressionFinder::find_all_plain(input);
-    let [loc] = locations.as_slice() else {
+/// Returns `None` for plain strings, mixed text (`"a {{ x }}"`), and strings
+/// holding more than one expression — those route to the lenient
+/// [`interpolate_text`] string path. Detection is independent of parse/eval
+/// outcome, so a malformed whole-value `{{ … }}` is still recognized as
+/// whole-value and held to the strict parse-and-evaluate contract.
+fn whole_value_span(input: &str) -> Option<ExpressionLocation> {
+    let mut locations = ExpressionFinder::find_all_plain(input);
+    if locations.len() != 1 {
         return None;
-    };
+    }
+    let loc = locations.remove(0);
     if !input[..loc.start].trim().is_empty() || !input[loc.end..].trim().is_empty() {
         return None;
     }
-    let expr = parse(&loc.expression).ok()?;
-    match evaluator.eval_json(&expr) {
-        Ok(value @ (Value::Bool(_) | Value::Number(_) | Value::Null)) => Some((value, expr)),
-        _ => None,
-    }
+    Some(loc)
 }
 
 #[cfg(test)]
@@ -512,16 +522,16 @@ mod tests {
         assert!(!result.warnings.iter().any(|w| w.message.contains("unknown context variable")));
     }
 
-    // ── Whole-value scalar frontmatter context-typo coverage ──────────────
+    // ── Whole-value frontmatter context-typo coverage ─────────────────────
     //
-    // `interpolate_value`'s scalar fast-path bypasses `interpolate_text`, so
+    // `interpolate_value`'s whole-value path bypasses `interpolate_text`, so
     // the same ctx-typo diagnostic must still fire when the whole value is a
-    // single `{{ expr }}` resolving to a scalar (Bool/Number/Null).
+    // single `{{ expr }}`.
 
     #[test]
     fn whole_value_scalar_typo_emits_warning_with_suggestion() {
-        // `ctx.toady` is unknown and resolves to null (a scalar), taking the
-        // fast-path — it must still warn.
+        // `ctx.toady` is unknown and resolves to null, taking the whole-value
+        // path — it must still warn.
         let state = make_state(json!({}));
         let evaluator = Evaluator::new(&state);
         let (value, replacements, warnings) =

@@ -174,8 +174,10 @@ fn rewrite_value<L: EvaluationLookup>(
 ) -> Result<(Value, usize, Vec<ComposeWarning>), MarkdownError> {
     match value {
         Value::String(s) => {
-            // Preserve scalar type when the whole value is one `{{ expr }}`
-            // (e.g. `{{ false }}` stays a boolean), else rewrite as a string.
+            // A whole-value `{{ expr }}` is executable state, not text: it is
+            // parsed and evaluated directly (preserving its typed result), and
+            // a parse/eval failure is fatal regardless of `fail_fast`. Mixed
+            // text rewrites leniently as a string. See [`interpolate_value`].
             interpolate_value(s, evaluator, fail_fast, "frontmatter-interpolation")
         }
         Value::Array(arr) => {
@@ -204,6 +206,19 @@ fn rewrite_value<L: EvaluationLookup>(
         }
         // Number, Bool, Null — pass through
         other => Ok((other.clone(), 0, vec![])),
+    }
+}
+
+/// Prepends the frontmatter key to a rewrite error so a whole-value
+/// interpolation failure names the offending key alongside the expression text
+/// the underlying error already carries. Non-`Transform` errors pass through
+/// untouched.
+fn key_scoped_error(key: &str, err: MarkdownError) -> MarkdownError {
+    match err {
+        MarkdownError::Transform(msg) => {
+            MarkdownError::Transform(format!("frontmatter key '{key}': {msg}"))
+        }
+        other => other,
     }
 }
 
@@ -306,7 +321,8 @@ pub(crate) fn interpolate_frontmatter(
             let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone())
                 .with_resolution_context(resolution_context.clone());
             let evaluator = Evaluator::new(&seed_state);
-            let (new_value, count, mut warnings) = rewrite_value(original, &evaluator, fail_fast)?;
+            let (new_value, count, mut warnings) = rewrite_value(original, &evaluator, fail_fast)
+                .map_err(|e| key_scoped_error(key, e))?;
 
             for w in &mut warnings {
                 w.message = format!("key '{}': {}", key, w.message);
@@ -356,7 +372,8 @@ pub(crate) fn interpolate_frontmatter(
         let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone())
             .with_resolution_context(resolution_context.clone());
         let evaluator = Evaluator::new(&seed_state);
-        let (new_value, count, mut warnings) = rewrite_value(original, &evaluator, fail_fast)?;
+        let (new_value, count, mut warnings) = rewrite_value(original, &evaluator, fail_fast)
+            .map_err(|e| key_scoped_error(key, e))?;
 
         for w in &mut warnings {
             w.message = format!("key '{}': {}", key, w.message);
@@ -1069,12 +1086,55 @@ mod tests {
         }
 
         #[test]
-        fn non_fail_fast_records_warnings() {
+        fn whole_value_parse_failure_is_fatal_without_fail_fast() {
+            // A frontmatter value that is exactly one malformed `{{ … }}` is
+            // executable state: it must abort composition on a parse failure
+            // even when fail_fast is off, instead of leaking the raw template
+            // downstream. The error names the offending key and the expression.
             let mut fm = fm_from_json(json!({
                 "bad": "{{ > invalid }}"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
+            let result = interpolate_frontmatter(&mut fm, &test_context(), false, false, None);
+            let Err(err) = result else {
+                panic!("malformed whole-value interpolation must abort");
+            };
+            let msg = err.to_string();
+            assert!(msg.contains("'bad'"), "error must name the key, got: {msg}");
+            assert!(
+                msg.contains("Interpolation parse failed"),
+                "error must mention the parse failure, got: {msg}"
+            );
+        }
+
+        #[test]
+        fn mixed_malformed_interpolation_stays_warning_without_fail_fast() {
+            // A malformed `{{ … }}` embedded in surrounding text is NOT
+            // whole-value executable state, so it stays lenient when fail_fast
+            // is off: warn and leave the raw span in place.
+            let mut fm = fm_from_json(json!({
+                "note": "prefix {{ > invalid }}"
+            }));
+            let report =
+                interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
             assert!(!report.warnings.is_empty());
+            assert_eq!(
+                fm.as_map().get("note"),
+                Some(&json!("prefix {{ > invalid }}"))
+            );
+        }
+
+        #[test]
+        fn whole_value_array_reference_preserves_typed_value() {
+            // Decision: a whole-value `{{ expr }}` keeps its evaluated JSON type
+            // for arrays and objects too (not just scalars). A reference to a
+            // seed array resolves to that typed array rather than a stringified
+            // form.
+            let mut fm = fm_from_json(json!({
+                "tags": ["a", "b"],
+                "copy": "{{ tags }}",
+            }));
+            interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
+            assert_eq!(fm.as_map().get("copy"), Some(&json!(["a", "b"])));
         }
 
         #[test]
