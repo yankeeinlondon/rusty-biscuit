@@ -5,14 +5,13 @@ $schema:
 ready: "{{ review && file_exists(review) ? frontmatter(review, 'ready') : null }}"
 index: "{{ is_indexed_file(review) ? file_index(review) : '' }}"
 has_index: "{{ is_number(index) }}"
-directory: "{{ dirname(review) }}"
-spec_path: "{{ join(directory, 'spec.md') }}"
+spec_path: "{{ dirname(review) + '/spec.md') }}"
 spec: "{{ file_exists(spec_path) ? spec_path : '' }}"
 
 start:
-    message: "🏃 starting the _implementation_ of the `{{ parent_dir(review) }}` review suggestions ({{ctx.area}})"
+    message: "🏃 starting the _implementation_ of the `{{ parent_dir(review) }}` review suggestions ({{ctx.area}}, iteration #{{ file_index(review) }})"
 success:
-    message: "✅  review _implementation_ for `{{ parent_dir(review) }}` in **{{ctx.area}}** completed"
+    message: "✅ _implementation_ of the suggestions from the #{{ file_index(review) }} review of `{{ parent_dir(review) }}` ({{ctx.area}}) completed"
     say: "the review suggestions for {{ title_case(without_date(parent_dir(review))) }} in {{ctx.area}} completed successfully"
     effect: bong
 failure:
@@ -39,6 +38,8 @@ Your task is to:
     - add tests to provide full test coverage for the suggestion,
     - and make sure that the implementation passes all tests (just test)
     - and has no lints (just lint)
+    - tell the subagent to use the 'rust', 'rust-testing', and '{{ctx.area}}' agent skills
+3. when all suggestions have been implemented set the `implemented` frontmatter property to `true` on the review file ({{review}})
 
 ::block when="spec_path"
 > **Note:**
