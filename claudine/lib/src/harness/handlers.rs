@@ -198,6 +198,19 @@ fn execute_programmatic_handler(
         })
     });
 
+    // Prefer the context's honest per-guard label; fall back to the outcome's
+    // (the streaming path populates both, but only the outcome carries it on
+    // some paths). This lets a handler branch on `runaway_repetition` vs a
+    // generic `agent_failure` (C3a).
+    let error_kind = failure
+        .error_kind
+        .clone()
+        .or_else(|| failure.outcome.as_ref().and_then(|o| o.error_kind.clone()));
+    let guard_context = failure
+        .guard_context
+        .clone()
+        .or_else(|| failure.outcome.as_ref().and_then(|o| o.guard_context.clone()));
+
     // Build JSON payload
     let payload = serde_json::json!({
         "provider": failure.provider,
@@ -210,6 +223,8 @@ fn execute_programmatic_handler(
         "message": failure.message,
         "check": check,
         "response": response,
+        "error_kind": error_kind,
+        "guard_context": guard_context,
     });
 
     let exe = which::which(&command.executable).map_err(|_| HarnessError::HandlerFailed {
@@ -231,6 +246,7 @@ fn execute_programmatic_handler(
             failure.session_id.as_deref().unwrap_or(""),
         )
         .env("CLAUDINE_TERMINATION", termination.as_deref().unwrap_or(""))
+        .env("CLAUDINE_ERROR_KIND", error_kind.as_deref().unwrap_or(""))
         .env(
             "CLAUDINE_SOURCE_FILE",
             failure

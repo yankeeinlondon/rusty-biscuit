@@ -24,7 +24,7 @@ pub use config::{
     ExitExpressionEntry, ExitExpressionsLayer, ExitExpressionsValue, GuardSettings, LayerMode,
     RepetitionGuardSettings, VolumeGuardSettings,
 };
-pub use detector::{CaptureVolumeCap, ContentDetector};
+pub use detector::{CaptureVolumeCap, ContentDetector, DetectorConfig};
 pub use patterns::{CompiledExitExpressions, ExitExpressionInput, PatternKind};
 
 /// A terminal content-guard trip emitted by [`ContentDetector::feed`] /
