@@ -469,6 +469,70 @@ mod tests {
         assert!(composed.content().contains("hello"));
     }
 
+    /// End-to-end regression for the `review-feature.md` "command not
+    /// pre-approved" bug. The prompt has:
+    ///
+    /// - a shell-pending `dir` whose template (`{{ spec || design }}`) is
+    ///   transitively blocked (`design` references `dir`), so it resolves only
+    ///   in the interpolation fallback pass; and
+    /// - a sibling `iteration` key calling `file_exists()`, a filesystem
+    ///   function that errors during the context-free pre-flight pass.
+    ///
+    /// Pre-flight must collect the RESOLVED `dirname <spec>` command so the
+    /// pre-approved set covers exactly what `compose_with` later executes —
+    /// otherwise execution fails with `NotPreApproved`.
+    #[test]
+    fn full_flow_shell_pending_dir_with_context_requiring_sibling_key() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("review.md");
+        std::fs::write(
+            &file_path,
+            "---\n\
+dir: \"$(dirname '{{ spec || design }}')\"\n\
+design: \"{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}\"\n\
+iteration: \"{{ file_exists('design.md') ? 2 : 1 }}\"\n\
+---\nReview {{dir}} iteration {{iteration}}\n",
+        )
+        .unwrap();
+
+        // Whitelist `dirname` so pre-flight approves without an interactive handler.
+        let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
+        std::fs::write(&whitelist_path, "prefix dirname\n").unwrap();
+
+        let md = Markdown::try_from(file_path.as_path()).unwrap();
+        let overrides = serde_json::json!({ "spec": "fixes/x/spec.md" });
+        let compose_opts = ComposeOptions::new()
+            .with_source_file(&file_path)
+            .with_set_overrides(overrides.clone());
+
+        let options = ShellApprovalOptions {
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: None,
+            ..Default::default()
+        };
+
+        // Pre-flight must discover the RESOLVED command, not the raw template.
+        let result =
+            resolve_shell_approvals(Some(&md), Some(&compose_opts), None, &options).unwrap();
+        assert!(
+            result.approved_commands.contains("dirname fixes/x/spec.md"),
+            "pre-approved set must contain the resolved command; got: {:?}",
+            result.approved_commands
+        );
+
+        // Execution against the pre-approved set must succeed — no NotPreApproved.
+        let compose_with_approval = ComposeOptions::new()
+            .with_source_file(&file_path)
+            .with_set_overrides(overrides)
+            .with_pre_approved_commands(result.approved_commands);
+        let (composed, _) = md.compose_with(compose_with_approval).unwrap();
+        assert!(
+            composed.content().contains("fixes/x"),
+            "composed body should contain the resolved dir; got: {:?}",
+            composed.content()
+        );
+    }
+
     #[test]
     fn full_flow_blacklisted_command_aborts_preflight() {
         let content = "# Test\n::shell rm -rf /\n";
