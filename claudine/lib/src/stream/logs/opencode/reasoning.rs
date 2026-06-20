@@ -95,6 +95,50 @@ pub enum EarlyTermination {
         #[allow(dead_code)]
         outstanding: Vec<StuckSubagentInfo>,
     },
+    /// A user-authored exit-expression matched a line of streamed provider
+    /// output. The wrapper terminates the child process and maps the
+    /// outcome to [`crate::harness::ProcessTermination::Aborted`] so
+    /// [`crate::harness::classify_failure`] yields
+    /// [`crate::harness::FailureEvent::AgentFailure`] (never the
+    /// timeout-retry path).
+    ///
+    /// ## Notes
+    ///
+    /// Synthesized summary marks `error_kind = "exit_expression"`. The
+    /// matched `pattern` (literal substring or regex source) and optional
+    /// `scope` (e.g. `opencode/kimi-for-coding/k2p7`) are carried verbatim
+    /// into the failure payload.
+    ExitExpression {
+        pattern: String,
+        scope: Option<String>,
+    },
+    /// The content detector observed a tight group-cycle repetition that
+    /// crossed the configured threshold (`repeats` ≥ the runaway detector's
+    /// `MAX_REPETITION_ALLOWED` constant, landed in Phase 2). The wrapper
+    /// terminates the child process and maps the outcome to
+    /// [`crate::harness::ProcessTermination::Aborted`].
+    ///
+    /// ## Notes
+    ///
+    /// Synthesized summary marks `error_kind = "runaway_repetition"`.
+    /// `cycle_len` is the detected cycle length `L` in `1..=MAX_CYCLE_LENGTH`
+    /// and `repeats` is the count of consecutive matching cycles observed at
+    /// trip time (always ≥ the threshold). A trip is terminal — the caller
+    /// must not feed further output after one is observed.
+    RunawayRepetition { cycle_len: usize, repeats: usize },
+    /// The per-turn volume cap was exceeded on either the line count or the
+    /// byte count. The wrapper terminates the child process and maps the
+    /// outcome to [`crate::harness::ProcessTermination::Aborted`]. On the
+    /// capture path this additionally bounds the unbounded accumulator
+    /// buffer (per-run cap, not per-turn).
+    ///
+    /// ## Notes
+    ///
+    /// Synthesized summary marks `error_kind = "runaway_volume"`. `lines`
+    /// and `bytes` are the per-turn (streaming) or per-run (capture)
+    /// counters at the moment of breach; at least one will be ≥ its
+    /// threshold.
+    RunawayVolume { lines: u64, bytes: u64 },
 }
 
 /// Shared stderr-side state accumulated by the bridge as it parses lines.
@@ -2281,5 +2325,83 @@ mod tests {
             rx.try_recv().is_ok(),
             "early-termination signal expected for UsageCap",
         );
+    }
+
+    // --- EarlyTermination runaway-guard variant parity (VC-1.2) ---
+    //
+    // The three new content-guard variants must clone/compare cleanly and
+    // carry their fields verbatim. The summary-mapping behavior (error_kind
+    // routing through the CLI termination layer) is proven in Phase 4.
+
+    #[test]
+    fn exit_expression_variant_clones_and_compares() {
+        let original = EarlyTermination::ExitExpression {
+            pattern: "STOP.".to_string(),
+            scope: Some("opencode/kimi-for-coding/k2p7".to_string()),
+        };
+        let cloned = original.clone();
+        assert_eq!(original, cloned);
+        // Different pattern must not compare equal — guards against a
+        // future derive mistake that ignores fields.
+        let other = EarlyTermination::ExitExpression {
+            pattern: "HALT.".to_string(),
+            scope: Some("opencode/kimi-for-coding/k2p7".to_string()),
+        };
+        assert_ne!(original, other);
+    }
+
+    #[test]
+    fn runaway_repetition_variant_clones_and_compares() {
+        let original = EarlyTermination::RunawayRepetition {
+            cycle_len: 6,
+            repeats: 30,
+        };
+        let cloned = original.clone();
+        assert_eq!(original, cloned);
+        let other = EarlyTermination::RunawayRepetition {
+            cycle_len: 6,
+            repeats: 31,
+        };
+        assert_ne!(original, other);
+    }
+
+    #[test]
+    fn runaway_volume_variant_clones_and_compares() {
+        let original = EarlyTermination::RunawayVolume {
+            lines: 50_001,
+            bytes: 32 * 1024 * 1024,
+        };
+        let cloned = original.clone();
+        assert_eq!(original, cloned);
+        let other = EarlyTermination::RunawayVolume {
+            lines: 50_001,
+            bytes: 32 * 1024 * 1024 + 1,
+        };
+        assert_ne!(original, other);
+    }
+
+    #[test]
+    fn new_variants_are_distinct_from_legacy_terminations() {
+        // Exhaustive-distinctness smoke test: none of the three new
+        // variants may compare equal to a legacy variant or to each other.
+        let exit = EarlyTermination::ExitExpression {
+            pattern: "x".to_string(),
+            scope: None,
+        };
+        let rep = EarlyTermination::RunawayRepetition {
+            cycle_len: 1,
+            repeats: 30,
+        };
+        let vol = EarlyTermination::RunawayVolume { lines: 1, bytes: 1 };
+        let rate = EarlyTermination::RateLimit {
+            message: "m".to_string(),
+            reset_at: None,
+        };
+        assert_ne!(exit, rep);
+        assert_ne!(exit, vol);
+        assert_ne!(rep, vol);
+        assert_ne!(exit, rate);
+        assert_ne!(rep, rate);
+        assert_ne!(vol, rate);
     }
 }
