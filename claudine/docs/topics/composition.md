@@ -176,6 +176,36 @@ block (see [Frontmatter YAML blocks in errors](#frontmatter-yaml-blocks-in-error
 When stderr is not a TTY the block is withheld to avoid exposing frontmatter,
 and there is no flag to reveal it.
 
+## Whole-Value Frontmatter Expansion Is Executable State
+
+A frontmatter value whose trimmed content is *exactly one* expansion form —
+either a single `{{ ... }}` interpolation span or a single `$(...)` shell
+expression — is not ordinary text. It is executable state that downstream
+pipeline stages (and the provider prompt) consume as a resolved value, so it
+must parse and resolve successfully. Such a value must never leak into the
+effective frontmatter as raw expansion syntax.
+
+- **Whole-value `{{ ... }}` interpolation** must parse and evaluate
+  successfully. A parse failure (e.g. the malformed `spec_path: "{{ dirname(review) + '/spec.md') }}"`)
+  or an evaluation failure aborts composition with a precise
+  `Interpolation parse failed` / `Interpolation evaluation failed` diagnostic
+  naming the frontmatter key — **even when `fail_fast` is off**. Undefined
+  variables remain lenient: a bare `{{ missing }}` still resolves to `null`
+  rather than aborting.
+- **Whole-value `$(...)` shell expansion** must parse and expand when
+  frontmatter shell expansion is enabled. If shell expansion is explicitly
+  disabled, the `$(...)` value is deferred unchanged. When enabled, a value
+  that still trims to a whole-value `$(...)` candidate after the expansion pass
+  is rejected as a leak.
+
+This strictness is scoped to whole-value expansion only. **Mixed strings**
+(`"prefix {{ x }} suffix"`, `"literal $(echo ok)"`) and **body prose**
+interpolation are unchanged: when `fail_fast` is off they keep their lenient
+behavior, leaving an unresolved span in place and recording a warning rather
+than aborting. The enforcement lives in Darkmatter composition; see
+[Frontmatter Interpolation](../../../darkmatter/docs/inline/fm-interpolation.md)
+and [Frontmatter Shell Expansion](../../../darkmatter/docs/inline/fm-shell-expansion.md).
+
 ## Frontmatter YAML blocks in errors
 
 Every composition error rooted in a prompt file's YAML frontmatter appends the

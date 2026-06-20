@@ -1005,6 +1005,11 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     let candidates = scan_frontmatter(frontmatter, pre_interpolation_snapshot, ctx)?;
 
     if candidates.is_empty() {
+        // No directives to execute, but a scan-skipped whole-value `$(...)`
+        // (e.g. one behind leading whitespace) could still be sitting in
+        // frontmatter. Enabled shell expansion must never leave a raw
+        // expansion-form value behind, so guard even on the no-op path.
+        validate_no_whole_value_shell_leak(frontmatter, ctx)?;
         return Ok(FrontmatterShellExpansionReport {
             replacements: 0,
             approvals_used: 0,
@@ -1144,6 +1149,11 @@ pub(crate) fn execute_frontmatter_shell_expansion(
         warnings.extend(exec_warnings);
         fm_mut.insert(key, Value::String(stdout.trim().to_string()));
     }
+
+    // Post-expansion leak guard: after replacements, no top-level value may
+    // still be a whole-value `$(...)` candidate (e.g. command output that
+    // reproduced `$( … )`). Such a value is leaked executable state, not text.
+    validate_no_whole_value_shell_leak(frontmatter, ctx)?;
 
     let approvals_used = runtime.shell.take_recent_approval_count();
 
@@ -1504,6 +1514,70 @@ fn interpolate_branch_text(
         )
     })?;
     Ok(rewrite.output)
+}
+
+/// Post-expansion leak guard for top-level frontmatter string values.
+///
+/// After enabled frontmatter shell expansion has run, no top-level value may
+/// still be a whole-value `$(...)` shell-expansion candidate. A surviving
+/// candidate means executable state leaked as raw syntax — e.g. a command whose
+/// own output reproduced `$( … )`, or a `$(...)` value behind leading
+/// whitespace that the strict-start scan skipped. Frontmatter values that are
+/// exactly an expansion form are executable state, not text, and must resolve
+/// or fail loudly rather than reach the composed document verbatim.
+///
+/// Candidate recognition is delegated to [`is_whole_value_shell_candidate`],
+/// which reuses [`parse_shell_value`] so the `$( … )` grammar and supported
+/// suffix rules (`::timeout` / `::no-cache`) are defined in exactly one place.
+/// Mixed literals (`literal $(echo ok)`) and values with trailing content after
+/// the closing paren are not whole-value candidates and pass through unchanged.
+///
+/// ## Errors
+///
+/// Returns a key-tagged [`ShellExpansionError::ParseDirective`] for the first
+/// surviving whole-value candidate, carrying the frontmatter key, the offending
+/// expression text, and source location when [`SourceContext`] can locate the
+/// key.
+fn validate_no_whole_value_shell_leak(
+    frontmatter: &Frontmatter,
+    ctx: &SourceContext,
+) -> Result<(), ShellExpansionError> {
+    for (key, value) in frontmatter.as_map().iter() {
+        if let Value::String(s) = value
+            && is_whole_value_shell_candidate(s, key, ctx)
+        {
+            let trimmed = s.trim();
+            return Err(frontmatter_parse_error(
+                key,
+                ctx,
+                format!(
+                    "Frontmatter shell expression `{trimmed}` survived shell expansion as a raw \
+                     whole-value `$( … )` candidate. A frontmatter value that is exactly a `$( … )` \
+                     expansion is executable state, not text; it must resolve during shell \
+                     expansion, so a surviving candidate (e.g. command output that reproduced \
+                     `$( … )`) is rejected rather than leaked into the composed frontmatter."
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Reports whether `value`, after trimming, is a whole-value `$(...)`
+/// shell-expansion candidate that cleanly parses through [`parse_shell_value`].
+///
+/// Only a value that opens `$(` *and* parses to a directive (`Ok(Some(_))`)
+/// counts. A value that does not open `$(` is ordinary text; a value that opens
+/// `$(` but fails the shared parser (malformed, trailing content after the
+/// closing paren, or a no-command body) is not a clean whole-value candidate and
+/// is left to existing behavior — mirroring the scan-phase rules rather than
+/// duplicating them.
+fn is_whole_value_shell_candidate(value: &str, key: &str, ctx: &SourceContext) -> bool {
+    let trimmed = value.trim();
+    if !trimmed.starts_with("$(") {
+        return false;
+    }
+    matches!(parse_shell_value(trimmed, key, None, ctx), Ok(Some(_)))
 }
 
 fn frontmatter_parse_error(
@@ -1942,6 +2016,66 @@ mod tests {
             }
             other => panic!("Expected ParseDirective, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn leak_guard_rejects_surviving_whole_value_candidate() {
+        // A value that is still a clean whole-value `$(...)` after expansion —
+        // e.g. command output that reproduced `$( … )` — is rejected.
+        let mut fm = Frontmatter::new();
+        fm.insert("leaked", json!("$(echo hi)")).unwrap();
+
+        let err = super::validate_no_whole_value_shell_leak(&fm, &test_ctx()).unwrap_err();
+        match err {
+            ShellExpansionError::ParseDirective { origin, message, .. } => {
+                assert_eq!(
+                    origin,
+                    ShellCommandOrigin::Frontmatter {
+                        key: "leaked".to_string(),
+                        line: None,
+                    }
+                );
+                assert!(
+                    message.contains("survived shell expansion"),
+                    "unexpected message: {message}"
+                );
+            }
+            other => panic!("Expected ParseDirective, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn leak_guard_trims_before_classifying() {
+        // A whole-value `$(...)` behind leading whitespace is skipped by the
+        // strict-start scan but is still a leak after trimming.
+        let mut fm = Frontmatter::new();
+        fm.insert("padded", json!("   $(echo hi)  ")).unwrap();
+        assert!(super::validate_no_whole_value_shell_leak(&fm, &test_ctx()).is_err());
+    }
+
+    #[test]
+    fn leak_guard_ignores_plain_and_mixed_values() {
+        // Plain text, mixed literals, and `$(...)` with trailing content are not
+        // whole-value candidates and pass the guard untouched.
+        let mut fm = Frontmatter::new();
+        fm.insert("plain", json!("just text")).unwrap();
+        fm.insert("mixed_prefix", json!("literal $(echo ok)")).unwrap();
+        fm.insert("mixed_suffix", json!("$(echo ok) trailing")).unwrap();
+        fm.insert("expanded", json!("hello")).unwrap();
+        fm.insert("number", json!(42)).unwrap();
+
+        assert!(super::validate_no_whole_value_shell_leak(&fm, &test_ctx()).is_ok());
+    }
+
+    #[test]
+    fn is_whole_value_shell_candidate_recognizes_forms() {
+        let ctx = test_ctx();
+        assert!(super::is_whole_value_shell_candidate("$(echo hi)", "k", &ctx));
+        assert!(super::is_whole_value_shell_candidate("  $(pwd)  ", "k", &ctx));
+        // Not a candidate: plain text, mixed literal, trailing content.
+        assert!(!super::is_whole_value_shell_candidate("plain", "k", &ctx));
+        assert!(!super::is_whole_value_shell_candidate("x $(echo ok)", "k", &ctx));
+        assert!(!super::is_whole_value_shell_candidate("$(echo ok) x", "k", &ctx));
     }
 
     fn unwrap_ternary(
