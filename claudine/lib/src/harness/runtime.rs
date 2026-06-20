@@ -24,5 +24,7 @@ pub fn build_attempt_outcome(
         exit_code: summary.exit_code,
         termination,
         stderr_text: summary.stderr_text.clone(),
+        error_kind: None,
+        guard_context: None,
     }
 }
