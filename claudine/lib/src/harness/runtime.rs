@@ -24,7 +24,11 @@ pub fn build_attempt_outcome(
         exit_code: summary.exit_code,
         termination,
         stderr_text: summary.stderr_text.clone(),
-        error_kind: None,
+        // Preserve the synthesized per-guard label so the failure-handler
+        // payload can read it. The summary carries no structured guard
+        // detail, so `guard_context` stays `None` here; the wrapper attempt
+        // path sets it directly from `ProcessResult.guard_context`.
+        error_kind: summary.error_kind.clone(),
         guard_context: None,
     }
 }
