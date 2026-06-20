@@ -78,7 +78,14 @@ impl Markdown {
         match operation {
             ComposeOperation::Cleanup => {
                 let original_content = self.content.clone();
-                if options.incidental_newline_mode == cleanup::IncidentalNewlineMode::Strip {
+                // Fixed-width reflow must run over canonical unwrapped prose, so a
+                // requested `fixed_width` forces incidental-newline stripping even
+                // under `Preserve`. Otherwise reflow would re-wrap the source's own
+                // incidental wrapping rather than the document's canonical form.
+                let strip_incidental = options.incidental_newline_mode
+                    == cleanup::IncidentalNewlineMode::Strip
+                    || options.fixed_width.is_some();
+                if strip_incidental {
                     self.content = cleanup::strip_incidental_newlines(&self.content);
                 }
                 self.content = match options.list_spacing {

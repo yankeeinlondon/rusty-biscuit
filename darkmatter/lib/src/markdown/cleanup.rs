@@ -24,6 +24,7 @@ use biscuit_terminal::utils::UnicodeWidthStr;
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, Options, Parser, Tag, TagEnd};
 use pulldown_cmark_to_cmark::Options as CmarkOptions;
 use std::ops::Range;
+use unicode_script::{Script, UnicodeScript};
 
 /// Returns parser options suitable for cleanup operations.
 ///
@@ -411,8 +412,14 @@ pub fn strip_incidental_newlines(content: &str) -> String {
             match boundary {
                 NewlineBoundary::Preserve => result.push('\n'),
                 NewlineBoundary::Collapse { skip_next_prefix } => {
-                    if !line.ends_with(char::is_whitespace) {
-                        result.push(' ');
+                    let next_line = lines[idx + 1];
+                    let next_body = if next_line.len() >= skip_next_prefix {
+                        &next_line[skip_next_prefix..]
+                    } else {
+                        next_line
+                    };
+                    if let Some(separator) = join_separator(line, next_body) {
+                        result.push(separator);
                     }
                     skip_prefix_len = skip_next_prefix;
                 }
@@ -477,6 +484,9 @@ struct LineMetadata {
     list_item: bool,
     inline_code_open_after: bool,
     blockquote_prefix_len: Option<usize>,
+    /// Line ends in a CommonMark hard line break (two-or-more trailing spaces or
+    /// a trailing unescaped backslash); the newline after it must be preserved.
+    hard_break: bool,
 }
 
 impl LineMetadata {
@@ -519,6 +529,7 @@ impl LineMetadata {
                 list_item,
                 inline_code_open_after: inline_code_ticks.is_some(),
                 blockquote_prefix_len: blockquote_prefix_len(line),
+                hard_break: is_hard_break_line(line),
             });
 
             if let Some(marker) = starts_fence {
@@ -571,6 +582,11 @@ enum NewlineBoundary {
 }
 
 fn newline_boundary(current: &LineMetadata, next: &LineMetadata) -> NewlineBoundary {
+    // A CommonMark hard line break is structurally significant: keep its newline.
+    if current.hard_break {
+        return NewlineBoundary::Preserve;
+    }
+
     if current.list_item || next.list_item {
         return if current.list_item && !next.list_item && !next.blank && !next.protected {
             NewlineBoundary::Collapse {
@@ -603,6 +619,87 @@ fn newline_boundary(current: &LineMetadata, next: &LineMetadata) -> NewlineBound
     }
 }
 
+/// Reports whether `line` ends in a CommonMark hard line break.
+///
+/// A hard break is two-or-more trailing spaces, or a trailing unescaped
+/// backslash (an odd number of trailing backslashes — an even number is a
+/// literal escaped backslash, not a break).
+fn is_hard_break_line(line: &str) -> bool {
+    if line.ends_with("  ") {
+        return true;
+    }
+    let trailing_backslashes = line.chars().rev().take_while(|&c| c == '\\').count();
+    trailing_backslashes % 2 == 1
+}
+
+/// Decides the separator to insert when collapsing a single newline between two
+/// prose lines, keyed off the Unicode Script of the boundary scalars.
+///
+/// Returns `None` to join with no separator, or `Some(' ')` to insert a single
+/// space.
+///
+/// ## Notes
+///
+/// - Spaceless scripts (Han, Hiragana, Katakana, Bopomofo, Thai, Lao, Khmer,
+///   Myanmar, Tibetan) join with no separator. Hangul is deliberately excluded —
+///   Korean uses word spaces, so it is treated as space-delimited.
+/// - A script-transition boundary (one side spaceless, the other not, e.g. Han
+///   followed by Latin) emits no separator: un-wrapping is neutral, never
+///   "pangu" spacing.
+/// - A zero-width space (U+200B) on either side joins with no separator.
+/// - Otherwise (the space-delimited case) the newline is dropped when the prior
+///   line already ends in whitespace, and replaced with a single space when it
+///   does not.
+fn join_separator(prev_line: &str, next_body: &str) -> Option<char> {
+    const ZERO_WIDTH_SPACE: char = '\u{200B}';
+
+    let last = prev_line.chars().next_back();
+    let first = next_body.chars().next();
+
+    if last == Some(ZERO_WIDTH_SPACE) || first == Some(ZERO_WIDTH_SPACE) {
+        return None;
+    }
+
+    // Either both boundary scalars are spaceless-script letters, or the boundary
+    // straddles a spaceless/space-delimited transition; both reconstruct with no
+    // separator.
+    let last_spaceless = last.is_some_and(is_spaceless_letter);
+    let first_spaceless = first.is_some_and(is_spaceless_letter);
+    if last_spaceless || first_spaceless {
+        return None;
+    }
+
+    if prev_line.ends_with(char::is_whitespace) {
+        None
+    } else {
+        Some(' ')
+    }
+}
+
+/// Reports whether `c` is a letter belonging to a curated spaceless script.
+///
+/// The set is Han, Hiragana, Katakana, Bopomofo, Thai, Lao, Khmer, Myanmar, and
+/// Tibetan. Hangul is excluded because Korean is space-delimited. Non-letters
+/// (punctuation, symbols, emoji) are never spaceless, so they fall through to
+/// the space-delimited join rule.
+fn is_spaceless_letter(c: char) -> bool {
+    if !c.is_alphabetic() {
+        return false;
+    }
+    matches!(
+        c.script(),
+        Script::Han
+            | Script::Hiragana
+            | Script::Katakana
+            | Script::Bopomofo
+            | Script::Thai
+            | Script::Lao
+            | Script::Khmer
+            | Script::Myanmar
+            | Script::Tibetan
+    )
+}
+
 fn fence_marker(trimmed: &str) -> Option<String> {
     let marker = trimmed.chars().next()?;
     if marker != '`' && marker != '~' {
@@ -623,6 +720,19 @@ fn is_structural_line(trimmed: &str) -> bool {
         || trimmed.starts_with("---")
         || trimmed.starts_with("***")
         || trimmed.starts_with("___")
+        // `===` (and the `---` handled above) is a setext-heading underline; treat
+        // it as structural so the prose line before it keeps its newline.
+        || is_setext_underline(trimmed)
+}
+
+/// Reports whether `trimmed` is a setext-heading `===` underline.
+///
+/// A line consisting solely of `=` characters (optionally followed by trailing
+/// spaces) underlines a setext H1. The `---` setext H2 form is already matched
+/// by the thematic-break check above; only the `=` form needs adding here.
+fn is_setext_underline(trimmed: &str) -> bool {
+    let underline = trimmed.trim_end();
+    !underline.is_empty() && underline.bytes().all(|b| b == b'=')
 }
 
 fn directive_trimmed(line: &str) -> &str {
@@ -2117,6 +2227,101 @@ mod tests {
         let content = "One\r\ntwo\nthree\r\n\nFour";
         let stripped = strip_incidental_newlines(content);
         assert_eq!(stripped, "One two three\n\nFour");
+    }
+
+    // ---- Structural safety: hard line breaks and setext headings ----
+
+    #[test]
+    fn strip_incidental_newlines_preserves_two_space_hard_break() {
+        let content = "Roses are red  \nviolets are blue";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, content);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_trailing_backslash_hard_break() {
+        let content = "Roses are red\\\nviolets are blue";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, content);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_collapses_single_trailing_space_not_hard_break() {
+        // A single trailing space is incidental, not a hard break: the newline drops.
+        let content = "Roses are red \nviolets are blue";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "Roses are red violets are blue");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_setext_h1_underline() {
+        let content = "Heading\n===\nbody continues";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, content);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_setext_h2_underline() {
+        let content = "Heading\n---\nbody continues";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, content);
+    }
+
+    // ---- Join separator by Unicode Script ----
+
+    #[test]
+    fn strip_incidental_newlines_joins_han_without_separator() {
+        let content = "\u{6F22}\n\u{5B57}";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "\u{6F22}\u{5B57}");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_joins_thai_without_separator() {
+        let content = "\u{0E20}\u{0E32}\u{0E29}\u{0E32}\n\u{0E44}\u{0E17}\u{0E22}";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "\u{0E20}\u{0E32}\u{0E29}\u{0E32}\u{0E44}\u{0E17}\u{0E22}");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_keeps_space_between_hangul() {
+        // Hangul is space-delimited (excluded from the spaceless set).
+        let content = "\u{D55C}\n\u{AE00}";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "\u{D55C} \u{AE00}");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_joins_han_to_latin_without_separator() {
+        // Script transition: neutral reconstruction, never a pangu space.
+        let content = "\u{6F22}\ntext";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "\u{6F22}text");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_keeps_space_between_emoji() {
+        // Emoji are not letters, so they are not mis-joined as CJK.
+        let content = "\u{1F600}\n\u{1F601}";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "\u{1F600} \u{1F601}");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_joins_after_cjk_punctuation() {
+        // A line ending in `。` joined with a following ideograph: no separator.
+        let content = "\u{6F22}\u{3002}\n\u{5B57}";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "\u{6F22}\u{3002}\u{5B57}");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_no_separator_around_zwsp() {
+        let trailing = "foo\u{200B}\nbar";
+        assert_eq!(strip_incidental_newlines(trailing), "foo\u{200B}bar");
+
+        let leading = "foo\n\u{200B}bar";
+        assert_eq!(strip_incidental_newlines(leading), "foo\u{200B}bar");
     }
 
     // ==================== Fixed-Width Reflow Tests ====================

@@ -116,7 +116,9 @@ fn test_compose_cleanup_fixed_width_reflows_prose() {
 }
 
 #[test]
-fn test_compose_cleanup_preserve_and_fixed_width_is_noop_when_prose_fits() {
+fn test_compose_cleanup_fixed_width_forces_strip_over_preserve() {
+    // `fixed_width` must reflow canonical unwrapped prose, so it overrides
+    // `Preserve` and strips the source's incidental newline before wrapping.
     let content = "Short first line.\nShort second line.\n";
     let md: Markdown = content.into();
 
@@ -127,8 +129,9 @@ fn test_compose_cleanup_preserve_and_fixed_width_is_noop_when_prose_fits() {
 
     let (composed, report) = md.compose_with(options).unwrap();
 
-    assert_eq!(composed.content(), content);
-    assert!(!report.cleanup_changed);
+    // The two source lines collapse to a single line that fits within 80 columns.
+    assert_eq!(composed.content(), "Short first line. Short second line.\n");
+    assert!(report.cleanup_changed);
 }
 
 #[test]
