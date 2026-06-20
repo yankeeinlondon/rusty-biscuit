@@ -23,7 +23,7 @@ static ANSI_RE: LazyLock<Regex> =
 static STATUS_CODE_RES: LazyLock<[Regex; 2]> = LazyLock::new(|| {
     [
         Regex::new(r#""statusCode":(\d{3})(?:\D|$)"#).expect("status-code regex 1 must compile"),
-        Regex::new(r"statusCode=(\d{3})").expect("status-code regex 2 must compile"),
+        Regex::new(r"statusCode=(\d{3})(?:\D|$)").expect("status-code regex 2 must compile"),
     ]
 });
 
@@ -1683,8 +1683,12 @@ mod tests {
         // JSON variant: a 4-digit code must not match the first 3 digits.
         assert_eq!(extract_status_code(r#""statusCode":4291"#), None);
         assert_eq!(extract_status_code(r#""statusCode":9999"#), None);
-        // Key-value variant still matches the first three digits by design.
-        assert_eq!(extract_status_code("statusCode=9999"), Some(999));
+        // Key-value variant: a 4+ digit run must not match the first 3 digits.
+        assert_eq!(extract_status_code("statusCode=4299"), None);
+        assert_eq!(extract_status_code("statusCode=9999"), None);
+        // Valid 3-digit key-value codes still match (end-of-string or non-digit boundary).
+        assert_eq!(extract_status_code("statusCode=429"), Some(429));
+        assert_eq!(extract_status_code("statusCode=503 retrying"), Some(503));
         assert_eq!(extract_status_code("other=500"), None); // wrong key
     }
 
