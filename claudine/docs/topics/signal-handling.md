@@ -347,13 +347,13 @@ at the top of each `windows_wait_loop` call.
 
 | Surface | Status | Where |
 |---|---|---|
-| Unix — OS-keyboard Ctrl+C terminates the wrapped child | **Verified on macOS** — OS keyboard injection via cliclick into a real WezTerm window, L3, `RUN_LEVEL3=1` | `level3_wrap_ctrl_c.rs::level3_ctrl_c_terminates_wrapped_child` |
-| Unix — OS-keyboard Ctrl+C terminates even with a wall-clock `timeout` configured | **Verified on macOS** — OS keyboard injection via cliclick into a real WezTerm window, L3, `RUN_LEVEL3=1` | `level3_wrap_ctrl_c.rs::level3_ctrl_c_terminates_wrapped_child_with_timeout_configured` |
+| Unix — OS-keyboard Ctrl+C terminates the wrapped child | **OS keyboard injection (cliclick → real WezTerm window), L3, `RUN_LEVEL3=1`.** Verified end-to-end on macOS, including passing automated `just test-l3` runs; the window-title matcher blocker is fixed, but the cliclick chord delivery is intermittent across WezTerm window placements (see note below) | `level3_wrap_ctrl_c.rs::level3_ctrl_c_terminates_wrapped_child` |
+| Unix — OS-keyboard Ctrl+C terminates even with a wall-clock `timeout` configured | **OS keyboard injection (cliclick → real WezTerm window), L3, `RUN_LEVEL3=1`.** Verified end-to-end on macOS, including passing automated `just test-l3` runs; the window-title matcher blocker is fixed, but the cliclick chord delivery is intermittent across WezTerm window placements (see note below) | `level3_wrap_ctrl_c.rs::level3_ctrl_c_terminates_wrapped_child_with_timeout_configured` |
 | Unix — multiplexer Ctrl+C terminates the wrapped child | **Verified on macOS** | `level2_wrap_ctrl_c_tmux.rs::level2_ctrl_c_terminates_wrapped_child` (tmux `send-keys C-c`, L2 multiplexer injection) |
 | Unix — multiplexer Ctrl+C terminates even with a wall-clock `timeout` configured | **Verified on macOS** | `level2_wrap_ctrl_c_tmux.rs::level2_ctrl_c_terminates_wrapped_child_with_timeout_configured` (L2 multiplexer injection) |
 | Unix — visible per-press feedback line renders in a real terminal | **Verified on macOS** | `level2_interrupt_feedback_capture.rs::level2_interrupt_feedback_renders_in_tmux` (L2, asserts the `interrupt received` substring in `frame.raw`) |
 | Unix — process-signal SIGINT during prep exits 130 with notice | **Verified on macOS** | `wrap_sigint.rs::slow_compose_sigint_during_prep_exits_130_with_notice` (lower-level, retained) |
-| Windows — console Ctrl+C / Ctrl+Break terminates the Job-Object child (incl. with `timeout`) | **NOT verified — awaits a Windows host / CI** | `level3_wrap_ctrl_c.rs::windows_ctrl_c_verification_record` (`#[cfg(windows)]`, `#[ignore]`d with reason) |
+| Windows — console Ctrl+Break to the wrapped child's process group terminates the Job-Object child | **Real automated test, cross-compile-checked for `x86_64-pc-windows-gnu` on macOS; NOT yet runtime-run on a Windows host / CI** | `level3_wrap_ctrl_c.rs::windows_ctrl_c_verification_record` (`#[cfg(windows)]`, `#[ignore]`d — needs an attached console) |
 
 Ctrl+C termination is verified at two distinct injection levels. The genuine
 **L3** proof (`level3_wrap_ctrl_c.rs`) synthesises a real OS Ctrl+C chord with
@@ -369,11 +369,49 @@ test` run stays green on a host without a terminal backend. Run the OS-keyboard
 suite with `just test-l3` and the multiplexer suite (plus the feedback capture)
 with `just test-l2`.
 
+> **L3 automation note.** The window-title blocker is fixed. WezTerm overrides
+> the OS window title with the foreground program's basename (`claudine`), so
+> the harness's stamped tab title no longer matches; the test now registers the
+> extra title via `WezTermHarness::with_expected_window_title("claudine")` and
+> `focus_spawned_pane`'s AXRaise step reliably raises the window and returns
+> valid click coordinates on every run. Automated `just test-l3` runs do pass
+> (the child is terminated within ~3s on both the default and the
+> `timeout`-configured paths).
+>
+> What remains intermittent is the cliclick chord delivery itself: on some
+> WezTerm window placements (multi-monitor, cascaded positions) the OS
+> focus-transfer click does not seat keyboard focus before the Ctrl chord
+> fires, so WezTerm receives a bare `c` and no `SIGINT` reaches the child — the
+> documented cliclick focus-transfer reliability limit, not a wrapper-behavior
+> defect. The tests are not loosened to force a pass; they assert real
+> termination and fail honestly when the OS event does not land.
+
 Honest scope: the macOS host validates the Unix arm of the unified wait loop.
 The Windows arm (`windows_wait_loop`) shares the loop's structure but uses a
-distinct `#[cfg(not(unix))]` implementation; its runtime behavior is encoded by
-`windows_ctrl_c_verification_record` for execution on a Windows host and is
-**not** claimed as verified until that run happens.
+distinct `#[cfg(not(unix))]` implementation. Its parity is exercised by
+`windows_ctrl_c_verification_record` — a **real automated integration test**
+(not a panic placeholder), mirroring the Unix L3 proof: it builds a
+Windows-executable fake `opencode` provider (`opencode.cmd` on `PATH`), spawns
+the real `claudine compose --opencode` wrapper in its own process group
+(`CREATE_NEW_PROCESS_GROUP`), polls for the wrapped child's readiness marker,
+injects `GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, child_pid)`, and asserts the
+wrapper child terminates within 15s. Ctrl+Break (not Ctrl+C) is used because
+only `CTRL_BREAK_EVENT` can target a specific process group; the child runs in
+its own group so the event never reaches the test runner.
+
+On the macOS dev host this test is **cross-compile-checked** for
+`x86_64-pc-windows-gnu`
+(`cargo check --target x86_64-pc-windows-gnu -p claudine-cli --test level3_wrap_ctrl_c`)
+but its **runtime pass has not yet been observed** — it stays `#[ignore]`d
+because it needs a real attached console, which headless CI runners may lack. It
+is therefore **compile-verified for Windows, not runtime-verified on Windows**;
+do not read the table row as a "Windows verified" claim. Run it on a Windows
+host with an attached console to close the gap:
+
+```text
+cargo test -p claudine-cli --test level3_wrap_ctrl_c -- --ignored \
+  windows_ctrl_c_verification_record
+```
 
 ### Spawn × wait × timeout matrix
 
