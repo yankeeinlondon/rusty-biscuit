@@ -4,7 +4,9 @@
 
 Today, the auto-discovered `system-prompt.md` is **always treated as append-mode** (`claudine/lib/src/system_prompt/prepare.rs` — `mode_for_source` returns `SystemPromptMode::Append` for every `StandardDiscovered` source). The only way to get replace semantics is to pass the file explicitly via the `--replace-system-prompt <FILE>` (alias `--rsp`) CLI switch, which also skips standard discovery entirely.
 
-This forces an awkward choice: a project that wants replace semantics must either
+> Question: `which also skips standard discovery entirely` ... what does this mean?
+
+This forces an awkward choice; a project that wants replace semantics must either:
 
 1. stop using the standard `system-prompt.md` filename and point at a differently    named file with `--rsp` on every invocation, or
 2. accept append semantics even when the intent is to fully replace the    provider's default system prompt.
