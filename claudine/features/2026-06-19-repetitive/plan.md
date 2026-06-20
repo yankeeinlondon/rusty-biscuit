@@ -8,6 +8,11 @@ source_files_during_phase_1:
   - claudine/lib/src/harness/model.rs
   - claudine/lib/src/stream/logs/opencode/reasoning.rs
   - claudine/lib/src/harness/handlers.rs
+  - claudine/lib/src/harness/runtime.rs
+  - claudine/lib/src/harness/validate/mod.rs
+  - claudine/cli/src/commands/wrap/exec/termination.rs
+  - claudine/cli/src/commands/wrap/harness_orch/attempt.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
@@ -20,13 +25,21 @@ docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
 source_files_during_phase_3:
-  - claudine/lib/src/config/claudine_config.rs
   - claudine/lib/src/runaway/config.rs
+  - claudine/lib/src/runaway/mod.rs
+  - claudine/lib/src/runaway/patterns.rs
+  - claudine/lib/src/config/claudine_config.rs
+  - claudine/lib/src/config/merge.rs
+  - claudine/lib/src/dispatch/runner/mod.rs
+  - claudine/lib/src/dispatch/runner/speak.rs
+  - claudine/cli/src/commands/init/mod.rs
+  - claudine/cli/src/commands/init_wizard.rs
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
 source_files_during_phase_4:
   - claudine/cli/src/commands/wrap/exec/termination.rs
+  - claudine/cli/src/commands/wrap/exec/spawn.rs
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
@@ -214,7 +227,7 @@ nothing reads a stream yet.
 
 ### Tasks
 
-- [ ] **1.1 Add three `EarlyTermination` variants.**
+- [x] **1.1 Add three `EarlyTermination` variants.**
   In `stream/logs/opencode/reasoning.rs` extend the enum (currently
   `RateLimit` / `Timeout` / `StepTimeout`) with:
   - `ExitExpression { pattern: String, scope: Option<String> }` —
@@ -227,7 +240,7 @@ nothing reads a stream yet.
   `error_kind` and that it maps to `ProcessTermination::Aborted` (no `# H1`
   per repo rustdoc policy). Keep `#[derive(Debug, Clone, PartialEq, Eq)]`.
 
-- [ ] **1.2 Add `ProcessTermination::Aborted`.**
+- [x] **1.2 Add `ProcessTermination::Aborted`.**
   In `harness/model.rs` add variant `Aborted` to the `ProcessTermination`
   enum (serde `snake_case`, already persisted). Update `Display` to render
   `"aborted"`. Add a module-level `pub const CLAUDINE_TERMINATION: &str =
@@ -236,7 +249,7 @@ nothing reads a stream yet.
   family if none exists). `Aborted` must remain forward-compatible (no
   `#[non_exhaustive]` churn beyond what the enum already has).
 
-- [ ] **1.3 Extend `AttemptOutcome` with `error_kind` + guard context.**
+- [x] **1.3 Extend `AttemptOutcome` with `error_kind` + guard context.**
   In `harness/model.rs` add two fields to `AttemptOutcome`:
   - `pub error_kind: Option<String>` — the honest per-guard label
     (`"exit_expression"` / `"runaway_repetition"` / `"runaway_volume"` /
@@ -252,7 +265,7 @@ nothing reads a stream yet.
   `harness/handlers.rs` tests and elsewhere). Define `GuardContext` in
   `model.rs` with `#[derive(Debug, Clone, Default, Serialize, Deserialize)]`.
 
-- [ ] **1.4 Route `Aborted` through `classify_failure`.**
+- [x] **1.4 Route `Aborted` through `classify_failure`.**
   In `harness/handlers.rs::classify_failure` add the arm
   `ProcessTermination::Aborted => Some(FailureEvent::AgentFailure)`. This
   intentionally does **not** reuse `TimedOut` (would trigger
@@ -260,7 +273,7 @@ nothing reads a stream yet.
   `None` (would suppress failure handling like `Interrupted`). Add a
   rustdoc `## Notes` line stating both rejections and why.
 
-- [ ] **1.5 Carry `error_kind` into `build_agent_failure_context`.**
+- [x] **1.5 Carry `error_kind` into `build_agent_failure_context`.**
   Add an `error_kind: Option<String>` parameter (and optional
   `&GuardContext`) to `build_agent_failure_context` so the failure context
   can forward it to the handler payload in Phase 7. Update call sites
@@ -270,18 +283,18 @@ nothing reads a stream yet.
 
 ### Phase 1 validation checkpoints
 
-- [ ] **VC-1.1 `ProcessTermination::Aborted` unit tests.** `Display` renders
+- [x] **VC-1.1 `ProcessTermination::Aborted` unit tests.** `Display` renders
   `"aborted"`; serde round-trips `Aborted` through the snake_case form;
   `classify_failure` on an `Aborted` outcome returns
   `Some(FailureEvent::AgentFailure)` (new test alongside the existing
   `classify_*` tests in `harness/handlers.rs`).
-- [ ] **VC-1.2 `EarlyTermination` variant parity tests.** Each new variant
+- [x] **VC-1.2 `EarlyTermination` variant parity tests.** Each new variant
   clones/equals cleanly and its rustdoc names the right `error_kind` (light
   smoke test; the summary-mapping behavior is proven in Phase 4).
-- [ ] **VC-1.3 `AttemptOutcome` compiles across the workspace.**
+- [x] **VC-1.3 `AttemptOutcome` compiles across the workspace.**
   `cargo build -p claudine && cargo build -p claudine-cli` both succeed after
   updating every literal. This is the proof the field addition is exhaustive.
-- [ ] **VC-1.4 Existing termination/handler tests pass unchanged.**
+- [x] **VC-1.4 Existing termination/handler tests pass unchanged.**
   `cargo nextest run -p claudine` for `harness::` and `stream::logs::` is
   green (the new fields default to `None`/`None`, so semantics are unchanged).
 
@@ -308,7 +321,7 @@ with:** Phase 1, Phase 3.
 
 ### Tasks
 
-- [ ] **2.1 Define the `Trip` enum and constants.**
+- [x] **2.1 Define the `Trip` enum and constants.**
   In `runaway/mod.rs` define:
   ```rust
   pub enum Trip {
@@ -323,7 +336,7 @@ with:** Phase 1, Phase 3.
   `pub const VOLUME_BYTES: u64 = 32 * 1024 * 1024;`. Mark each with a brief
   `// Cluster B3 / F2` provenance comment and the false-positive rationale.
 
-- [ ] **2.2 Implement the compiled exit-expression set.**
+- [x] **2.2 Implement the compiled exit-expression set.**
   In `runaway/patterns.rs` define `CompiledExitExpressions` (a `Vec` of
   entries, each holding the original `pattern` + `scope`, plus either a
   precompiled `regex::Regex` or a literal substring matcher with an
@@ -338,7 +351,7 @@ with:** Phase 1, Phase 3.
     sides); regex uses `is_match`. Empty pattern set ⇒ always `None`, zero
     per-line cost.
 
-- [ ] **2.3 Implement the line-assembling detector core.**
+- [x] **2.3 Implement the line-assembling detector core.**
   In `runaway/detector.rs` define `ContentDetector` holding: a partial-line
   buffer (`String`), a `VecDeque<String>` ring of the last
   `2 * MAX_CYCLE_LENGTH` normalized lines, a running per-turn volume
@@ -356,7 +369,7 @@ with:** Phase 1, Phase 3.
   and stop further work (a trip is terminal). `flush` processes any trailing
   partial line without a newline.
 
-- [ ] **2.4 Implement group-cycle detection (B1/B2).**
+- [x] **2.4 Implement group-cycle detection (B1/B2).**
   A private `detect_cycle(&self) -> Option<(cycle_len, repeats)>` called
   after each line push. Find the smallest `L` in `1..=MAX_CYCLE_LENGTH` such
   that the last `2L` ring entries are two identical halves (exact equality on
@@ -366,7 +379,7 @@ with:** Phase 1, Phase 3.
   scan `O(K * K)` worst case — the ring is bounded at `2K = 32` entries, so
   this is trivially cheap.
 
-- [ ] **2.5 Implement volume accounting.**
+- [x] **2.5 Implement volume accounting.**
   In `feed`/`flush`, add the byte length of each completed line (including
   the implicit newline) to `bytes` and increment `lines`. Return
   `Trip::RunawayVolume { lines, bytes }` when either exceeds its threshold.
@@ -375,7 +388,7 @@ with:** Phase 1, Phase 3.
   helper (or a separate `CaptureVolumeCap` type) for the capture path's
   per-run cap — see task 6.4.
 
-- [ ] **2.6 Decouple from Phase 3 with a local input struct.**
+- [x] **2.6 Decouple from Phase 3 with a local input struct.**
   To keep Phase 2 independently testable, define a minimal
   `pub struct ExitExpressionInput { pub patterns: Vec<String>, pub kind:
   PatternKind, pub ignore_case: bool, pub scope: Option<String> }` in
@@ -386,30 +399,30 @@ with:** Phase 1, Phase 3.
 
 ### Phase 2 validation checkpoints
 
-- [ ] **VC-2.1 Captured-runaway trip.** Feed the **exact** 6-line cycle from
+- [x] **VC-2.1 Captured-runaway trip.** Feed the **exact** 6-line cycle from
   the spec (after the one-time `This is the final listening.` preamble) and
   assert the detector emits `Trip::RunawayRepetition { cycle_len: 6, repeats
   >= 30 }` — not earlier than 30 full cycles (false-positive posture).
-- [ ] **VC-2.2 Single-line spam trips at L = 1.** Feed `STOP.\n` × 40 and
+- [x] **VC-2.2 Single-line spam trips at L = 1.** Feed `STOP.\n` × 40 and
   assert `RunawayRepetition { cycle_len: 1, repeats: 30 }` exactly at the
   30th cycle.
-- [ ] **VC-2.3 Blank-line flood trips.** Feed `"\n"` × 40 and assert the
+- [x] **VC-2.3 Blank-line flood trips.** Feed `"\n"` × 40 and assert the
   `L = 1` cycle of `""` trips (B3: blanks are kept, not skipped).
-- [ ] **VC-2.4 Realistic repetitive-but-legitimate output does NOT trip.**
+- [x] **VC-2.4 Realistic repetitive-but-legitimate output does NOT trip.**
   Feed a 6-line cycle repeated 10× (well under threshold) + a numbered list
   1..100 + a markdown table — assert `None`. This is the false-positive
   guardrail.
-- [ ] **VC-2.5 Exit-expression match across chunk boundaries.** Feed
+- [x] **VC-2.5 Exit-expression match across chunk boundaries.** Feed
   `"STO"` then `"P.\n"` with a literal `pattern: "STOP."` and assert a trip
   (the line assembler must reassemble before matching — E3d).
-- [ ] **VC-2.6 Literal `ignore_case` + regex inline flags.** Literal
+- [x] **VC-2.6 Literal `ignore_case` + regex inline flags.** Literal
   `ignore_case: true` matches `"stop."`; regex `(?i)stop\.` matches without
   `ignore_case`. Literal default (case-sensitive) does **not** match
   `"StopS"` against `STOP.` (the metacharacter-surprise test from E3a).
-- [ ] **VC-2.7 Volume cap trips on acyclic flood.** Feed 50_001 distinct
+- [x] **VC-2.7 Volume cap trips on acyclic flood.** Feed 50_001 distinct
   lines (no cycle) and assert `Trip::RunawayVolume`; verify `reset_turn`
   zeroes the counter so a long multi-turn run does not accumulate.
-- [ ] **VC-2.8 Ring buffer stays bounded.** After feeding 100k lines, assert
+- [x] **VC-2.8 Ring buffer stays bounded.** After feeding 100k lines, assert
   the internal ring never exceeds `2 * MAX_CYCLE_LENGTH` (memory invariant).
 
 ---
@@ -433,7 +446,7 @@ detector lives in Phase 6.
 
 ### Tasks
 
-- [ ] **3.1 Define `ExitExpressionEntry` and `PatternKind`.**
+- [x] **3.1 Define `ExitExpressionEntry` and `PatternKind`.**
   In `runaway/config.rs`:
   ```rust
   pub enum PatternKind { Literal, Regex }   // default Literal (E3a)
@@ -449,7 +462,7 @@ detector lives in Phase 6.
   array (default combine mode) or an object `{ mode, rules }` (explicit mode)
   — matching the `ProtectConfig`/`TtsValue` house style (Cluster E1).
 
-- [ ] **3.2 Parse `scope` (E2-scope).**
+- [x] **3.2 Parse `scope` (E2-scope).**
   `pub fn parse_scope(scope: &str) -> (Provider, String)` — split on the
   **first** `/`: first segment is the agent (`Provider`), remainder is the
   model verbatim (models may contain `/`). Absent scope = global (wildcard).
@@ -457,7 +470,7 @@ detector lives in Phase 6.
   the additive rule: a run is checked against the union of global ∪ agent ∪
   agent/model entries whose scope matches.
 
-- [ ] **3.3 Implement the 3-layer resolution pipeline (E1).**
+- [x] **3.3 Implement the 3-layer resolution pipeline (E1).**
   `pub fn resolve_exit_expressions(user, repo, frontmatter) ->
   Vec<ExitExpressionEntry>` following the resolution pipeline in the spec:
   start `effective = user`; repo present → `override` (default) replaces or
@@ -465,7 +478,7 @@ detector lives in Phase 6.
   replaces. Encode each layer's default mode and the explicit `{ mode, rules }`
   override. The result is the compiled-in set the streaming path receives.
 
-- [ ] **3.4 Define scalar guard settings (repetition + volume).**
+- [x] **3.4 Define scalar guard settings (repetition + volume).**
   A `GuardSettings` struct (last-writer precedence: frontmatter > repo > user
   > built-in, like `timeout`/`step_timeout` — Cluster E1 note):
   - repetition: `enabled: bool` (default `true`), `max_repeats: usize`
@@ -476,7 +489,7 @@ detector lives in Phase 6.
   These do **not** use merge/override — only the list-typed `exit_expressions`
   carries a combine mode (Cluster E1 note).
 
-- [ ] **3.5 Wire config fields onto `ClaudineConfig` / `RepoOverrideConfig`.**
+- [x] **3.5 Wire config fields onto `ClaudineConfig` / `RepoOverrideConfig`.**
   Add `#[serde(default, skip_serializing_if = "...")] pub exit_expressions:
   Vec<ExitExpressionEntry>` and `pub guard_settings: GuardSettings` to
   `ClaudineConfig`. Add the same to `RepoOverrideConfig` (repo may override
@@ -485,7 +498,7 @@ detector lives in Phase 6.
   reads frontmatter into JSON); add a helper that extracts
   frontmatter-scoped `exit_expressions` for the resolution pipeline.
 
-- [ ] **3.6 Validate at config-load.**
+- [x] **3.6 Validate at config-load.**
   Extend `ClaudineConfig::validate()` (`config/claudine_config.rs:302`) to:
   - compile every `regex`-kind entry and reject invalid regex with
     `ClaudineError::ConfigValidation` (never mid-stream — E3a);
@@ -496,20 +509,20 @@ detector lives in Phase 6.
 
 ### Phase 3 validation checkpoints
 
-- [ ] **VC-3.1 Array + object `exit_expressions` both deserialize.** Array
+- [x] **VC-3.1 Array + object `exit_expressions` both deserialize.** Array
   form uses the layer default mode; `{ mode: "merge", rules: [...] }` parses
   explicitly. Unknown field on an entry is rejected (`deny_unknown_fields`).
-- [ ] **VC-3.2 Scope parsing.** `"opencode"` → `(OpenCode, "")`;
+- [x] **VC-3.2 Scope parsing.** `"opencode"` → `(OpenCode, "")`;
   `"opencode/kimi-for-coding/k2p7"` → `(OpenCode, "kimi-for-coding/k2p7")`
   (model keeps its inner `/`); absent → global wildcard.
-- [ ] **VC-3.3 Resolution pipeline matrix.** Assert each of: repo default
+- [x] **VC-3.3 Resolution pipeline matrix.** Assert each of: repo default
   (`override`) replaces user; repo `merge` adds; frontmatter default
   (`merge`) adds on top of repo; frontmatter `override` replaces all. A
   captured table of input → effective set is the proof.
-- [ ] **VC-3.4 Config validation rejects.** Invalid regex (`"["`) errors at
+- [x] **VC-3.4 Config validation rejects.** Invalid regex (`"["`) errors at
   load; unknown agent (`"nonsense"`) errors at load; empty `patterns` errors
   at load. Valid config (all three scopes, both kinds) passes.
-- [ ] **VC-3.5 Repo + user configs round-trip.** `ClaudineConfig` and
+- [x] **VC-3.5 Repo + user configs round-trip.** `ClaudineConfig` and
   `RepoOverrideConfig` serialize/deserialize with the new fields; defaults
   preserve today's behavior (empty exit-expressions, guards enabled with
   built-in thresholds).
@@ -534,7 +547,7 @@ with:** Phase 3, Phase 5 (different files in `exec/`).
 
 ### Tasks
 
-- [ ] **4.1 Summarize the three new variants.**
+- [x] **4.1 Summarize the three new variants.**
   Extend `apply_early_termination_to_summary` (`exec/termination.rs:348`)
   with one arm per new variant (the existing exhaustive match will fail to
   compile until you do — that's the gate). Each arm sets `exit_code = 1`,
@@ -544,20 +557,20 @@ with:** Phase 3, Phase 5 (different files in `exec/`).
   - `RunawayRepetition { cycle_len, repeats }` → message naming both;
   - `RunawayVolume { lines, bytes }` → message naming both.
 
-- [ ] **4.2 Map the three new variants to `Aborted`.**
+- [x] **4.2 Map the three new variants to `Aborted`.**
   Extend `early_termination_process_outcome` (`:409`) so each new variant
   returns `ProcessTermination::Aborted` (not `TimedOut`, not `Completed`).
   This is the routing decision C3 — `classify_failure` then yields
   `AgentFailure`, never the timeout-retry path.
 
-- [ ] **4.3 Add `trip_to_early_termination(Trip) -> EarlyTermination`.**
+- [x] **4.3 Add `trip_to_early_termination(Trip) -> EarlyTermination`.**
   A pure conversion in `exec/termination.rs` mapping the lib `Trip` to the
   lib `EarlyTermination` (`ExitExpression`/`RunawayRepetition`/`RunawayVolume`
   → the matching variant, fields copied verbatim). This is the single bridge
   between the detector and the termination channel — keeping it here means
   the detector (Phase 2) never imports `EarlyTermination`.
 
-- [ ] **4.4 Update the post-wait match in `spawn.rs`.**
+- [x] **4.4 Update the post-wait match in `spawn.rs`.**
   The match at `exec/spawn.rs:902` currently handles only `Timeout |
   StepTimeout`. Add arms (or a wildcard that logs) for the three new variants
   so they do not fall through silently — they need no special spawn-side
@@ -566,18 +579,18 @@ with:** Phase 3, Phase 5 (different files in `exec/`).
 
 ### Phase 4 validation checkpoints
 
-- [ ] **VC-4.1 Summary mapping unit tests.** For each new variant, drive
+- [x] **VC-4.1 Summary mapping unit tests.** For each new variant, drive
   `apply_early_termination_to_summary` and assert the exact `error_kind`,
   `is_error = true`, and that `error_message` contains the diagnostic token
   (pattern name / `cycle_len` / byte count). Add these alongside the existing
   `apply_early_termination_*` tests in `exec/termination.rs`.
-- [ ] **VC-4.2 Outcome mapping unit tests.**
+- [x] **VC-4.2 Outcome mapping unit tests.**
   `early_termination_process_outcome` returns `Aborted` for all three new
   variants (extend the existing `early_termination_process_outcome_maps_*`
   tests).
-- [ ] **VC-4.3 `trip_to_early_termination` round-trips fields.** Each `Trip`
+- [x] **VC-4.3 `trip_to_early_termination` round-trips fields.** Each `Trip`
   variant converts to the matching `EarlyTermination` with fields preserved.
-- [ ] **VC-4.4 `cargo build -p claudine-cli` compiles.** The exhaustive
+- [x] **VC-4.4 `cargo build -p claudine-cli` compiles.** The exhaustive
   matches are the proof all variants are handled.
 
 ---
