@@ -1,5 +1,6 @@
 ---
 source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+assertion_line: 300
 expression: convert_yaml(yaml)
 ---
 {
@@ -7,36 +8,50 @@ expression: convert_yaml(yaml)
   "additionalProperties": true,
   "properties": {
     "endpoints": {
-      "items": {
-        "additionalProperties": false,
-        "properties": {
-          "method": {
-            "enum": [
-              "GET",
-              "POST",
-              "PUT",
-              "DELETE"
-            ]
-          },
-          "timeout": {
-            "default": 30,
-            "type": "number"
-          },
-          "url": {
-            "format": "uri",
-            "type": "string",
-            "x-darkmatter-url-scheme": [
-              "https"
-            ]
-          }
+      "anyOf": [
+        {
+          "type": "null"
         },
-        "required": [
-          "url",
-          "method"
-        ],
-        "type": "object"
-      },
-      "type": "array"
+        {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "method": {
+                "enum": [
+                  "GET",
+                  "POST",
+                  "PUT",
+                  "DELETE"
+                ]
+              },
+              "timeout": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "default": 30
+              },
+              "url": {
+                "format": "uri",
+                "type": "string",
+                "x-darkmatter-url-scheme": [
+                  "https"
+                ]
+              }
+            },
+            "required": [
+              "url",
+              "method"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      ]
     }
   },
   "type": "object"

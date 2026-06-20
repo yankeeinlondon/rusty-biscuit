@@ -1,5 +1,6 @@
 ---
 source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+assertion_line: 125
 expression: "convert_atom(\"url\")"
 ---
 {
@@ -7,8 +8,15 @@ expression: "convert_atom(\"url\")"
   "additionalProperties": true,
   "properties": {
     "field": {
-      "format": "uri",
-      "type": "string"
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "format": "uri",
+          "type": "string"
+        }
+      ]
     }
   },
   "type": "object"

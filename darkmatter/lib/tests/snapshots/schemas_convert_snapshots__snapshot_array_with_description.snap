@@ -1,5 +1,6 @@
 ---
 source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+assertion_line: 180
 expression: "convert_atom(\"string[] -> A list of tags\")"
 ---
 {
@@ -7,11 +8,18 @@ expression: "convert_atom(\"string[] -> A list of tags\")"
   "additionalProperties": true,
   "properties": {
     "field": {
-      "description": "A list of tags",
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      ],
+      "description": "A list of tags"
     }
   },
   "type": "object"

@@ -1,5 +1,6 @@
 ---
 source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+assertion_line: 147
 expression: "convert_atom(\"string(pattern(^[a-z]+$))[](min(1); max(5); unique)\")"
 ---
 {
@@ -7,14 +8,21 @@ expression: "convert_atom(\"string(pattern(^[a-z]+$))[](min(1); max(5); unique)\
   "additionalProperties": true,
   "properties": {
     "field": {
-      "items": {
-        "pattern": "^[a-z]+$",
-        "type": "string"
-      },
-      "maxItems": 5,
-      "minItems": 1,
-      "type": "array",
-      "uniqueItems": true
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "items": {
+            "pattern": "^[a-z]+$",
+            "type": "string"
+          },
+          "maxItems": 5,
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        }
+      ]
     }
   },
   "type": "object"
