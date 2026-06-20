@@ -113,6 +113,20 @@ impl ContentDetector {
         }
     }
 
+    /// Swap the compiled exit-expression set in place, preserving every
+    /// other piece of detector state (the partial-line buffer, the cycle
+    /// ring, and the per-turn volume counters).
+    ///
+    /// The CLI wiring layer calls this when a provider reports its actual
+    /// model via `SessionStart` and the in-scope exit-expression set must
+    /// be re-filtered for the reported `(provider, model)`. `SessionStart`
+    /// fires before any meaningful assistant output, so no repetition or
+    /// volume progress is discarded by re-scoping at that point — only the
+    /// pattern set the next lines are tested against changes.
+    pub fn set_exit_expressions(&mut self, patterns: CompiledExitExpressions) {
+        self.patterns = patterns;
+    }
+
     /// Per-turn line counter at the moment of the last call (does not
     /// mutate state; useful in tests and for diagnostics).
     pub fn current_lines(&self) -> u64 {
