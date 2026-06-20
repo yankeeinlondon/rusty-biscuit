@@ -13,8 +13,8 @@ feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 start:
     message: "👓 starting feature review #{{iteration}} of `{{parent_dir(spec)}}` (_in the **{{ctx.area}}** package area_)"
 success:
-    stderr: "Feature review {{iteration}} in the {{ctx.area}} package area has completed"
-    message: "✅  review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area ({{feature_or_fix}})"
+    stderr: "✅ feature review {{iteration}} in the {{ctx.area}} package area has completed successfully"
+    message: "✅  review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area ({{feature_or_fix}}) completed successfully"
     effect: "small-group-cheer"
 failure:
     stderr: "Feature Review {{iteration}} in the {{ctx.area}} package area failed to complete!"
@@ -22,13 +22,9 @@ failure:
     effect: two-tone
 ---
 # Review of {{title_case(without_date(parent_dir(spec)))}}
-> - Iteration #{{iteration}}
-::block when="contains(spec, 'features')"
-> - Feature: `{{parent_dir(spec)}}`
-::end-block
-::block when="contains(spec, 'fixes')"
-> - Fix: `{{parent_dir(spec)}}`
-::end-block
+> - {{capitalize(feature_or_fix)}}: `{{parent_dir(spec)}}`
+> - Review File (_output_): `@{{review_file}}`
+> - Review Iteration: #{{iteration}}
 
 ::file _senior-reviewer.md
 
@@ -97,9 +93,10 @@ test is at the wrong level under "Findings" with severity at least "high".
     - set the `agent` frontmatter property to "{{ctx.agent}}/{{ctx.model}}" 
     - set the `created` frontmatter property to "{{ctx.now}}"
 - Set the spec file's ({{spec}}) `review_iterations` Frontmatter property to '{{iteration}}'
+- Summarize to the caller what was found and be sure to mention whether the review deemed the {{feature_or_fix}} to be **production ready** or not.
 
 ::block when="iteration != 1"
-> **Note:** this is _not_ the first review we've done on this functionality but the prior review's suggestions have now all been implemented.
+> **Note:** this is _not_ the first review we've done on this functionality but the prior review's suggestions have now all been implemented (or at least the developer has claimed that they are).
 ::end-block
 
 **IMPORTANT:**
