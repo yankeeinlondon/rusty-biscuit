@@ -351,6 +351,15 @@ fn interpolate_frontmatter_impl(
 
     let templated_set: HashSet<String> = templated_keys.iter().cloned().collect();
     let mut resolved: HashSet<String> = HashSet::new();
+    // Best-effort only: keys whose evaluation failed here (e.g. a context-free
+    // call to a filesystem function such as `file_exists`). A key that errors
+    // contributes no value to `seed_map`, so any sibling that references it must
+    // NOT be finalized — resolving it would substitute the errored key as
+    // empty/undefined and bake a value execution will never produce into the
+    // result (and, for a `$(...)` key, into the pre-flight approval set). Such
+    // dependents are propagated into this set and left unresolved, mirroring the
+    // shell-pending deferral.
+    let mut errored: HashSet<String> = HashSet::new();
     let mut total_replacements = 0;
     let mut all_warnings = Vec::new();
 
@@ -376,6 +385,18 @@ fn interpolate_frontmatter_impl(
                 continue;
             }
 
+            // A dependency errored in best-effort mode: this key cannot resolve
+            // to a faithful value. Mark it errored too (so its own dependents
+            // defer transitively) and leave its original text in place. The
+            // dependency-order loop guarantees the errored ref is already known
+            // by the time this key becomes eligible.
+            if best_effort && refs.iter().any(|r| errored.contains(r)) {
+                errored.insert(key.clone());
+                resolved.insert(key.clone());
+                made_progress = true;
+                continue;
+            }
+
             let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone())
                 .with_resolution_context(resolution_context.clone());
             let evaluator = Evaluator::new(&seed_state);
@@ -385,9 +406,11 @@ fn interpolate_frontmatter_impl(
                 {
                     Ok(triple) => triple,
                     Err(_) if best_effort => {
-                        // Mark resolved so the fixpoint loop makes progress and
-                        // the fallback pass still runs for the other keys; leave
-                        // this key's original (unresolved) value in place.
+                        // Record the failure and mark resolved so the fixpoint
+                        // loop makes progress and the fallback pass still runs
+                        // for the other keys; leave this key's original
+                        // (unresolved) value in place.
+                        errored.insert(key.clone());
                         resolved.insert(key.clone());
                         made_progress = true;
                         continue;
@@ -437,6 +460,14 @@ fn interpolate_frontmatter_impl(
         };
 
         if shell_blocked.contains(key) {
+            continue;
+        }
+
+        // Same errored-dependency guard as the main loop: a key reaching the
+        // fallback that still references an errored key must stay raw rather
+        // than finalize with the errored key substituted as empty.
+        if best_effort && extract_frontmatter_key_refs(original).iter().any(|r| errored.contains(r)) {
+            errored.insert(key.clone());
             continue;
         }
 
@@ -1051,6 +1082,66 @@ mod tests {
                     "{{ frontmatter(spec, 'review_iterations') ? frontmatter(spec, 'review_iterations') + 1 : 1 }}"
                 )),
                 "context-requiring key stays unresolved in best-effort mode"
+            );
+        }
+
+        #[test]
+        fn best_effort_does_not_finalize_command_depending_on_errored_key() {
+            // Regression (review-4): a context-requiring key (`exists` ->
+            // `file_exists`) errors in the context-free best-effort pass. A
+            // sibling shell-pending `$(...)` command interpolates that key
+            // (`{{ exists }}`). The best-effort pass must NOT substitute the
+            // errored key as empty/undefined — doing so would collect
+            // `$(echo '')` into the approval set while execution runs
+            // `$(echo 'true')`. The command must keep its raw template so the
+            // collector can reject it as a dynamic shape rather than approving a
+            // value execution will never produce.
+            let mut fm = fm_from_json(json!({
+                "exists": "{{ file_exists('existing.md') }}",
+                "cmd": "$(echo '{{ exists }}')",
+            }));
+            interpolate_frontmatter_best_effort(&mut fm, &test_context(), false, true, None)
+                .expect("best-effort tolerates the per-key error");
+
+            // The errored key is left untouched (its real error surfaces later
+            // with a resolution context).
+            assert_eq!(
+                fm.as_map().get("exists"),
+                Some(&json!("{{ file_exists('existing.md') }}")),
+                "context-requiring key stays unresolved in best-effort mode"
+            );
+            // The dependent command is NOT finalized with an empty `exists` —
+            // its template survives verbatim rather than collapsing to
+            // `$(echo '')`.
+            assert_eq!(
+                fm.as_map().get("cmd"),
+                Some(&json!("$(echo '{{ exists }}')")),
+                "command depending on an errored key must not substitute it as empty"
+            );
+        }
+
+        #[test]
+        fn best_effort_defers_transitive_dependent_of_errored_key() {
+            // The errored-dependency deferral is transitive: `mid` references the
+            // errored `exists`, and `cmd` references `mid`. Neither `mid` nor the
+            // `$(...)` command may finalize against the missing value.
+            let mut fm = fm_from_json(json!({
+                "exists": "{{ file_exists('existing.md') }}",
+                "mid": "{{ exists }}-suffix",
+                "cmd": "$(echo '{{ mid }}')",
+            }));
+            interpolate_frontmatter_best_effort(&mut fm, &test_context(), false, true, None)
+                .expect("best-effort tolerates the per-key error");
+
+            assert_eq!(
+                fm.as_map().get("mid"),
+                Some(&json!("{{ exists }}-suffix")),
+                "transitive dependent of an errored key must stay unresolved"
+            );
+            assert_eq!(
+                fm.as_map().get("cmd"),
+                Some(&json!("$(echo '{{ mid }}')")),
+                "command transitively depending on an errored key must not finalize"
             );
         }
 
