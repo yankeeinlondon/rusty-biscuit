@@ -13,15 +13,15 @@ pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
 total_phases: "{{ frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') }}"
 spec_file: "{{ file_exists(spec) ? spec : file_exists(join(dirname, 'spec.md')) ? join(dirname, 'spec.md')  :  '' }}"
 start:
-    message: "🎬  starting the implementation of phase **#{{phase}}** of `{{parent_dir(plan)}}` in **{{ctx.area}}**"
+    message: "🎬  starting the implementation of phase **#{{phase}}** of `{{parent_dir(plan)}}` in **{{ctx.area}}** (_{{ctx.agent}}/{{ctx.model}}_)"
 success: 
     say: "Phase {{phase}} of the plan in the {{area}} package area, was implemented successfully"
-    message: "{{pass_icon}} phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed"
+    message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{area}}, {{ctx.agent}}/{{ctx.model}})"
 blocked:
     message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved!"
 failure:
     say: "Phase {{phase}} of a plan in the {{area}} package area, ran into problems!"
-    message: "❌️  phase {{phase}} (_of {{total_phases}}_) failed in the plan `{{parent_dir(plan)}}`"
+    message: "❌️  phase {{phase}} (_of {{total_phases}}_) failed in the plan `{{parent_dir(plan)}}` ({{area}}, {{ctx.agent}}/{{ctx.model}})"
 loop:
     until: "phase > total_phases"
     action: "increment(phase)"

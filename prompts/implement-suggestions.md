@@ -9,9 +9,9 @@ spec_path: "{{ dirname(review) + '/spec.md') }}"
 spec: "{{ file_exists(spec_path) ? spec_path : null }}"
 
 start:
-    message: "🏃 starting the _implementation_ of the `{{ parent_dir(review) }}` review suggestions ({{ctx.area}}, iteration #{{ file_index(review) }})"
+    message: "🏃 starting the _implementation_ of the `{{ parent_dir(review) }}` review suggestions ({{ctx.area}}, iteration #{{ file_index(review) }}, {{ctx.agent}}/{{ctx.model}})"
 success:
-    message: "✅ _implementation_ of the suggestions from the #{{ file_index(review) }} review of `{{ parent_dir(review) }}` ({{ctx.area}}) completed"
+    message: "✅ _implementation_ of the suggestions from the #{{ file_index(review) }} review of `{{ parent_dir(review) }}` ({{ctx.area}}, {{ctx.agent}}/{{ctx.model}}) completed"
     say: "the review suggestions for {{ title_case(without_date(parent_dir(review))) }} in {{ctx.area}} completed successfully"
     effect: bong
 failure:
