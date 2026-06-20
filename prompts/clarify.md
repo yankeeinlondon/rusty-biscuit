@@ -1,8 +1,10 @@
 ---
+description: |-
+        Runs an interactive session to clarify the passed in spec or design file.
 $schema:
     - doc: string(required)
     - spec: string(required)
-    - design: string(reqquired)
+    - design: string(required)
 doc: "{{spec || design}}"
 interactive: true
 start:
@@ -10,7 +12,7 @@ start:
     say: "Please stand by while we prepare a set of clarification questions"
 success:
     say: "Specification clarification process is now complete in {{ ctx.current_package_area || env.PACKAGE || ctx.repo || env.REPO }}"
-    message: "The specification file `{{doc.doc}}` has been completed. Now ready for a technical design specification or jumping directly to a plan."
+    message: "The specification file `{{doc.doc}}` has been clarified ({{ctx.agent}}/{{ctx.model}})"
 ---
 
 - You are acting as a senior technical analyst and design reviewer.
