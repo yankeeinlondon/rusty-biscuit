@@ -2,7 +2,7 @@
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Roo), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
 last_updated: 2026-06-19
-hash: bbb32528c11dc53d-9097f9771264affa
+hash: bbb32528c11dc53d-e51ad9893b1798e8
 ---
 
 ## Overview
@@ -20,7 +20,7 @@ The package follows the monorepo `lib` + `cli` split: library crate `claudine`, 
 
 ## Library Module Map
 
-Nineteen modules plus the shared error type and the flat `provider_id` leaf. Full detail in [architecture.md](architecture.md).
+Twenty modules plus the shared error type and the flat `provider_id` leaf. Full detail in [architecture.md](architecture.md).
 
 | Module | Responsibility |
 |--------|----------------|
@@ -41,6 +41,7 @@ Nineteen modules plus the shared error type and the flat `provider_id` leaf. Ful
 | `protect` | Standalone regex deny catalog (bash commands, write/edit paths, MCP responses) |
 | `prompt_reporting` | System/user prompt reporting types and rendering |
 | `reporting` | JSONL-to-SQLite metrics index |
+| `runaway` | Pure content-guard detector (exit-expressions, group-cycle repetition, volume cap) + per-layer config; trips map to `ProcessTermination::Aborted` |
 | `stream` | Structured stream parsing for 6 providers (typed models in `stream::protocol`) |
 | `system_prompt` | Launch-CWD detection (`LaunchContext`), `system-prompt.md` discovery, `ResolvedSystemPrompt` resolution |
 | `provider_id` *(leaf)* | `Provider` enum, `provider_info()`, `PROVIDERS_DISPLAY_ORDER`, `OutputFormatSelector` (split from `provider/mod.rs` to break the `provider` ⇄ `stream` import cycle) |
@@ -105,6 +106,8 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 - **Argv pre-parsing** — `argv::normalize` rewrites composition-subcommand argv before clap (provider booleans → `--provider`, `--help` hoisting, `--` separator insertion). See [CLI Pre-Parsing](../../../claudine/docs/topics/cli-pre-parsing.md).
 - **System prompt** — file-backed only: `--append-system-prompt`/`--asp` and `--replace-system-prompt`/`--rsp`, with `system-prompt.md` discovery from the launch-CWD hierarchy; direct wrappers also support `--edit`. Delivery is spec-driven per provider. See [System Prompt](../../../claudine/docs/topics/system-prompt.md).
 - **Timeouts** — two rules, `timeout` (wall-clock, opt-in) and `step_timeout` (stream-silence, default `30m`). See [Timeouts](../../../claudine/docs/topics/timeouts.md).
+- **Runaway content guards** — three *volume*-driven backstops the time-driven timeouts can't catch (a child that floods rather than goes silent): user-authored `exit_expressions` (literal/regex, scoped `{agent}/{model}`), group-cycle `runaway_repetition` (≥30 cycles, on by default), and a `runaway_volume` cap (50k lines / 32 MiB, on by default). They scan `OutputText`/`Reasoning` only — never tool payloads — and all map to `ProcessTermination::Aborted` → `AgentFailure` (fail-fast, **never** the `handle_timeout:` retry that would reproduce the runaway). The honest per-guard `error_kind` + `guard_context` thread into the programmatic `handle` payload (`CLAUDINE_ERROR_KIND` env + JSON). See [Timeouts — Content guards](../../../claudine/docs/topics/timeouts.md#content-guards-runaway-output).
+- **Unified Ctrl+C** — every spawn path (`run_child`, `run_child_capture`, `run_child_stream_semantic`) routes through one signal-aware wait loop; the legacy no-signal `wait_with_timeout` was retired (it silently disabled Ctrl+C whenever a `timeout` was configured). Visible per-press stderr feedback, a shortened `SIGTERM → SIGKILL` ladder for non-interactive runs (F5), and a real Windows Job-Object/console-event implementation. See [Signal Handling](../../../claudine/docs/topics/signal-handling.md).
 - **Transient overlays** — written to `<repo_root>/.claudine/tmp/` (or `<launch_cwd>/.claudine-tmp/`) and cleaned up on `Drop`.
 - **Schema validation** — when a composition document declares `$schema`, the prepare layer runs Darkmatter's `SimplifiedSchema` validation and emits typed claudine errors (`SchemaLoad`, `SchemaValidation`, `MissingProperties`, `UnsupportedInteractiveSchema`). Optional properties accept `null` as a sentinel for absent (equivalent to missing). Required-missing values trigger a `biscuit-tui` prompt loop when stdin+stderr are TTYs, `--silent` is off, and the user-config `prompt_for_missing` is `true` (default). Invalid optional values are dropped with a warning and validation retries once. `sequence` aggregates per-step failures into `SequenceMissingProperties` so all steps can be fixed in one pass. See [Composition — Schema Validation](../../../claudine/docs/topics/composition.md#schema-validation).
 - **Composition warnings** — unknown expression functions and unknown `ctx.*` references detected during prepare emit non-fatal did-you-mean warnings to stderr, suppressed by `--silent`. String literals and code fences do not trigger the `ctx.*` diagnostic because it is parsed from the interpolation AST. See [Composition](../../../claudine/docs/topics/composition.md).
@@ -149,7 +152,8 @@ Wrapper behavior: `--mcp` launches with effective defaults; `--use id-or-alias[,
 ### Repo topic docs (canonical references, not duplicated here)
 
 - [Composition](../../../claudine/docs/topics/composition.md) — `compose`, `inline-compose`, `sequence`, harness validations, handlers, provider selection
-- [Timeouts](../../../claudine/docs/topics/timeouts.md) — the two timeout rules, four env vars, precedence, termination path, exit reasons
+- [Timeouts](../../../claudine/docs/topics/timeouts.md) — the two timeout rules, four env vars, precedence, termination path, exit reasons, and the three runaway content guards
+- [Signal Handling](../../../claudine/docs/topics/signal-handling.md) — user Ctrl+C vs wrapper-driven SIGTERM/SIGKILL, the unified wait loop, termination labels (`Aborted`/`Interrupted`/`TimedOut`), non-interactive ladder, Windows parity
 - [System Prompt](../../../claudine/docs/topics/system-prompt.md) — launch-context discovery, `--append`/`--replace`, Darkmatter preparation, per-provider delivery
 - [MCP Catalog](../../../claudine/docs/topics/mcp-catalog.md) and [MCP Mode](../../../claudine/docs/topics/mcp-mode.md)
 - [Protect Service](../../../claudine/docs/topics/protect-service.md) — deny catalog, scan surfaces, rule groups, merge semantics, dispatch integration
