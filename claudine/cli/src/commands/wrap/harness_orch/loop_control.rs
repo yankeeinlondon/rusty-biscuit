@@ -456,6 +456,8 @@ pub(crate) fn run_harness_loop(
                 attempt,
                 outcome.session_id.clone(),
                 Some(outcome.clone()),
+                None,
+                None,
             );
             if let Some(next_plan) = super::super::resume::try_resolve_handler(
                 &[ctx],
