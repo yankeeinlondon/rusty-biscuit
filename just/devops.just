@@ -47,9 +47,9 @@ _install path pkg_name binary="" *args="":
     just _play drop-4 || exit 0
 
 # commits all the staged changes with OpenCode (model is MODEL or COMMIT_MODEL)
-[arg("agent", long="agent")]
-[arg("model", long="model")]
-[arg("yolo", long="yolo")]
+[arg("agent")]
+[arg("model")]
+[arg("yolo")]
 commit yolo="true" agent="opencode" model="":
     #!/usr/bin/env bash
     set -euo pipefail
