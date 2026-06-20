@@ -7,7 +7,7 @@ use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 mod common;
-use common::{augmented_path, write_executable};
+use common::{augmented_path, strip_ansi, write_executable};
 
 // ============================================================================
 // Phase 1: convergence between non-harness and harness-enabled direct compose
@@ -86,5 +86,85 @@ fn compose_direct_non_harness_and_harness_produce_identical_stdout_body() {
     assert_eq!(
         bare_stdout, harness_stdout,
         "direct compose stdout must be identical with and without harness frontmatter"
+    );
+}
+
+// ============================================================================
+// Whole-value frontmatter interpolation regression
+// (2026-06-19-invalid-parsing-state)
+// ============================================================================
+
+/// A frontmatter value that is exactly one malformed `{{ … }}` interpolation is
+/// executable state, not text. Composition must abort during preparation with a
+/// parse error that names the offending key — and must never leak the raw
+/// template through `--dry-run` as a successful effective-frontmatter result.
+///
+/// `{{ dirname(review) + '/spec.md') }}` carries an unbalanced paren: the exact
+/// malformed shape shipped in `prompts/implement-suggestions.md` that motivated
+/// this fix.
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_malformed_whole_value_spec_path_aborts_without_leaking() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let count_path = workspace.path().join("call-count.txt");
+
+    let md_file = workspace.path().join("plan.md");
+    fs::write(
+        &md_file,
+        "---\n\
+         review: features/2026-06-19-review-findings/review-2.md\n\
+         spec_path: \"{{ dirname(review) + '/spec.md') }}\"\n\
+         ---\n\
+         Implement against {{ spec_path }}.\n",
+    )
+    .unwrap();
+
+    // Provider stub records every invocation so we can prove it was never
+    // launched — preparation must abort before the dry-run provider seam.
+    write_executable(
+        &path_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\necho touched >> {count}\nexit 0\n",
+            count = count_path.display()
+        ),
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args([
+            "compose",
+            "--goose",
+            md_file.to_str().unwrap(),
+            "--dry-run",
+        ])
+        .assert()
+        .failure();
+
+    let output = assert.get_output();
+    let plain_err = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        plain_err.contains("spec_path"),
+        "error must name the offending key; stderr:\n{plain_err}"
+    );
+    assert!(
+        plain_err.contains("Interpolation parse failed"),
+        "error must report the interpolation parse failure; stderr:\n{plain_err}"
+    );
+    // The original leak: the raw malformed template surfacing as a successful
+    // effective-frontmatter result on stdout. It must be gone.
+    assert!(
+        !stdout.contains("dirname(review)"),
+        "raw malformed template leaked to stdout; stdout:\n{stdout}"
+    );
+    assert!(
+        !count_path.exists(),
+        "no provider session should have been launched; stub recorded a call"
     );
 }
