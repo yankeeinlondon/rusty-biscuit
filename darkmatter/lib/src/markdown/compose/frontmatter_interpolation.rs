@@ -332,8 +332,12 @@ pub(crate) fn interpolate_frontmatter(
     // against expanded values. A direct-ref check is not enough: a key like
     // `review_path: "@{{area}}/{{review}}"` reaches a shell-pending `dir` only
     // through `review`, and finalizing it here would bake in an empty `review`.
-    let shell_blocked =
-        transitively_shell_blocked_keys(&templated_keys, &original_values, &shell_pending_keys);
+    let shell_blocked = transitively_shell_blocked_keys(
+        &templated_keys,
+        &original_values,
+        &shell_pending_keys,
+        &seed_map,
+    );
 
     for key in &templated_keys {
         if resolved.contains(key) {
@@ -384,6 +388,7 @@ fn transitively_shell_blocked_keys(
     templated_keys: &[String],
     original_values: &HashMap<String, Value>,
     shell_pending_keys: &HashSet<String>,
+    seed_map: &HashMap<String, Value>,
 ) -> HashSet<String> {
     let mut blocked: HashSet<String> = HashSet::new();
     if shell_pending_keys.is_empty() {
@@ -399,7 +404,12 @@ fn transitively_shell_blocked_keys(
             let Some(original) = original_values.get(key) else {
                 continue;
             };
-            let is_blocked = extract_frontmatter_key_refs(original)
+            let is_blocked = extract_frontmatter_key_refs_for_shell_blocking(
+                original,
+                shell_pending_keys,
+                &blocked,
+                seed_map,
+            )
                 .iter()
                 .any(|r| shell_pending_keys.contains(r) || blocked.contains(r));
             if is_blocked {
@@ -413,6 +423,218 @@ fn transitively_shell_blocked_keys(
     }
 
     blocked
+}
+
+fn extract_frontmatter_key_refs_for_shell_blocking(
+    value: &Value,
+    shell_pending_keys: &HashSet<String>,
+    blocked_keys: &HashSet<String>,
+    seed_map: &HashMap<String, Value>,
+) -> Vec<String> {
+    let mut refs = Vec::new();
+    collect_frontmatter_key_refs_for_shell_blocking(
+        value,
+        &mut refs,
+        shell_pending_keys,
+        blocked_keys,
+        seed_map,
+    );
+    refs.sort();
+    refs.dedup();
+    refs
+}
+
+fn collect_frontmatter_key_refs_for_shell_blocking(
+    value: &Value,
+    refs: &mut Vec<String>,
+    shell_pending_keys: &HashSet<String>,
+    blocked_keys: &HashSet<String>,
+    seed_map: &HashMap<String, Value>,
+) {
+    match value {
+        Value::String(s) => {
+            for loc in ExpressionFinder::find_all_plain(s) {
+                let Ok(expr) = parse(&loc.expression) else {
+                    continue;
+                };
+                collect_variable_roots_for_shell_blocking(
+                    &expr,
+                    refs,
+                    shell_pending_keys,
+                    blocked_keys,
+                    seed_map,
+                );
+            }
+        }
+        Value::Array(arr) => arr.iter().for_each(|v| {
+            collect_frontmatter_key_refs_for_shell_blocking(
+                v,
+                refs,
+                shell_pending_keys,
+                blocked_keys,
+                seed_map,
+            )
+        }),
+        Value::Object(obj) => obj.values().for_each(|v| {
+            collect_frontmatter_key_refs_for_shell_blocking(
+                v,
+                refs,
+                shell_pending_keys,
+                blocked_keys,
+                seed_map,
+            )
+        }),
+        _ => {}
+    }
+}
+
+fn collect_variable_roots_for_shell_blocking(
+    expr: &Expr,
+    refs: &mut Vec<String>,
+    shell_pending_keys: &HashSet<String>,
+    blocked_keys: &HashSet<String>,
+    seed_map: &HashMap<String, Value>,
+) {
+    match expr {
+        Expr::Fallback { primary, fallback } => match static_truthiness(primary, seed_map) {
+            Some(true) => collect_variable_roots(primary, refs),
+            Some(false) => collect_variable_roots_for_shell_blocking(
+                fallback,
+                refs,
+                shell_pending_keys,
+                blocked_keys,
+                seed_map,
+            ),
+            None => {
+                let mut primary_refs = Vec::new();
+                collect_variable_roots(primary, &mut primary_refs);
+                let primary_depends_on_shell = primary_refs
+                    .iter()
+                    .any(|r| shell_pending_keys.contains(r) || blocked_keys.contains(r));
+                refs.extend(primary_refs);
+                if primary_depends_on_shell {
+                    collect_variable_roots_for_shell_blocking(
+                        fallback,
+                        refs,
+                        shell_pending_keys,
+                        blocked_keys,
+                        seed_map,
+                    );
+                } else {
+                    collect_variable_roots(fallback, refs);
+                }
+            }
+        },
+        Expr::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            collect_variable_roots_for_shell_blocking(
+                condition,
+                refs,
+                shell_pending_keys,
+                blocked_keys,
+                seed_map,
+            );
+            collect_variable_roots_for_shell_blocking(
+                then_branch,
+                refs,
+                shell_pending_keys,
+                blocked_keys,
+                seed_map,
+            );
+            collect_variable_roots_for_shell_blocking(
+                else_branch,
+                refs,
+                shell_pending_keys,
+                blocked_keys,
+                seed_map,
+            );
+        }
+        Expr::UnaryNot(inner)
+        | Expr::UnaryMinus(inner)
+        | Expr::Paren(inner)
+        | Expr::MemberAccess { base: inner, .. } => collect_variable_roots_for_shell_blocking(
+            inner,
+            refs,
+            shell_pending_keys,
+            blocked_keys,
+            seed_map,
+        ),
+        Expr::Comparison { left, right, .. } | Expr::Binary { left, right, .. } => {
+            collect_variable_roots_for_shell_blocking(
+                left,
+                refs,
+                shell_pending_keys,
+                blocked_keys,
+                seed_map,
+            );
+            collect_variable_roots_for_shell_blocking(
+                right,
+                refs,
+                shell_pending_keys,
+                blocked_keys,
+                seed_map,
+            );
+        }
+        Expr::Index { base, index } => {
+            collect_variable_roots_for_shell_blocking(
+                base,
+                refs,
+                shell_pending_keys,
+                blocked_keys,
+                seed_map,
+            );
+            collect_variable_roots_for_shell_blocking(
+                index,
+                refs,
+                shell_pending_keys,
+                blocked_keys,
+                seed_map,
+            );
+        }
+        Expr::FunctionCall { args, .. } => {
+            for arg in args {
+                collect_variable_roots_for_shell_blocking(
+                    arg,
+                    refs,
+                    shell_pending_keys,
+                    blocked_keys,
+                    seed_map,
+                );
+            }
+        }
+        _ => collect_variable_roots(expr, refs),
+    }
+}
+
+fn static_truthiness(expr: &Expr, seed_map: &HashMap<String, Value>) -> Option<bool> {
+    match expr {
+        Expr::StringLiteral(value) => Some(!value.is_empty()),
+        Expr::NumberLiteral(value) => Some(*value != 0.0),
+        Expr::BoolLiteral(value) => Some(*value),
+        Expr::Paren(inner) => static_truthiness(inner, seed_map),
+        Expr::Variable(path) => {
+            let root = path.strip_prefix("doc.").unwrap_or(path);
+            if root == "doc" || root.starts_with("ctx.") || root.starts_with("env.") {
+                return None;
+            }
+            let (root, rest) = root.split_once('.').unwrap_or((root, ""));
+            let value = seed_map.get(root)?;
+            if rest.is_empty() {
+                Some(super::expression::is_truthy(value))
+            } else {
+                get_nested(value, rest).map(|nested| super::expression::is_truthy(&nested))
+            }
+        }
+        Expr::Fallback { primary, fallback } => match static_truthiness(primary, seed_map) {
+            Some(true) => Some(true),
+            Some(false) => static_truthiness(fallback, seed_map),
+            None => None,
+        },
+        _ => None,
+    }
 }
 
 /// Extracts frontmatter-key references from a JSON value tree.
@@ -915,6 +1137,28 @@ mod tests {
                 Some(&json!("@area/features/x/review-1.md"))
             );
             assert!(report.replacements >= 2);
+        }
+
+        #[test]
+        fn fallback_with_truthy_seed_does_not_shell_block_primary_key() {
+            let mut fm = fm_from_json(json!({
+                "spec": "features/example/spec.md",
+                "dir": "$(dirname '{{spec || design}}')",
+                "design": "{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}"
+            }));
+
+            interpolate_frontmatter(&mut fm, &test_context(), false, true, None).unwrap();
+
+            assert_eq!(
+                fm.as_map().get("dir"),
+                Some(&json!("$(dirname 'features/example/spec.md')"))
+            );
+            assert_eq!(
+                fm.as_map().get("design"),
+                Some(&json!(
+                    "{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}"
+                ))
+            );
         }
 
         #[test]
