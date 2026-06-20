@@ -2,7 +2,7 @@
 $schema:
     - doc: string(required)
     - spec: string(required)
-    - design: string(reqquired)
+    - design: string(required)
 doc: "{{spec || design}}"
 interactive: true
 start:
