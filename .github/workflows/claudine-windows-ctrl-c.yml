@@ -5,6 +5,21 @@ name: claudine-windows-ctrl-c
 # Windows host and an attached console.
 
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/claudine-windows-ctrl-c.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "claudine/**"
+      - "just/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/claudine-windows-ctrl-c.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "claudine/**"
+      - "just/**"
   workflow_dispatch: {}
 
 env:
