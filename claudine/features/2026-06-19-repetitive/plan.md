@@ -47,32 +47,49 @@ source_files_during_phase_5:
   - claudine/cli/src/commands/wrap/exec/spawn.rs
   - claudine/cli/src/commands/wrap/exec/termination.rs
   - claudine/cli/src/commands/wrap/exec/timeouts.rs
+  - claudine/cli/src/commands/wrap/exec/watchdog/mod.rs
+  - claudine/cli/src/commands/wrap/exec/watchdog/spawn.rs
+  - claudine/cli/src/commands/wrap/harness_orch/attempt.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
   - claudine/cli/Cargo.toml
+  - biscuit-tui/lib/src/core/standalone/mod.rs
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+packages_during_phase_5:
+  - claudine-cli
+  - biscuit-tui
 source_files_during_phase_6:
+  - claudine/lib/src/runaway/mod.rs
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/src/commands/wrap/runaway_guard.rs
+  - claudine/cli/src/commands/wrap/policy.rs
+  - claudine/cli/src/commands/wrap/wrapper_exec.rs
+  - claudine/cli/src/commands/wrap/exec/mod.rs
   - claudine/cli/src/commands/wrap/exec/spawn.rs
+  - claudine/cli/src/commands/wrap/exec/termination.rs
+  - claudine/cli/src/commands/wrap/exec/wiring/session.rs
   - claudine/cli/src/commands/wrap/live_semantic_sink/mod.rs
   - claudine/cli/src/commands/wrap/live_semantic_sink/event_sink.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/tests/content_guard.rs
   - claudine/cli/src/commands/wrap/harness_orch/attempt.rs
-  - claudine/cli/src/commands/wrap/harness_orch/launch.rs
-  - claudine/cli/src/commands/wrap/harness_orch/types.rs
 docs_updated_during_phase_6: []
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6: []
+packages_during_phase_6:
+  - claudine
+  - claudine-cli
 source_files_during_phase_7:
   - claudine/lib/src/harness/handlers.rs
-  - claudine/lib/src/harness/model.rs
-  - claudine/docs/topics/timeouts.md
-  - claudine/docs/topics/signal-handling.md
-  - .claude/skills/claudine/SKILL.md
+  - claudine/lib/tests/runaway_handler_payload.rs
 docs_updated_during_phase_7:
   - claudine/docs/topics/timeouts.md
   - claudine/docs/topics/signal-handling.md
 docs_created_during_phase_7: []
 skills_files_updated_during_phase_7:
   - .claude/skills/claudine/SKILL.md
+packages_during_phase_7:
+  - claudine
 source_code:
   - claudine/lib/src/harness/model.rs
   - claudine/lib/src/stream/logs/opencode/reasoning.rs
@@ -621,7 +638,7 @@ unification.
 
 ### Tasks
 
-- [ ] **5.1 Fold wall-clock `timeout` into the unified watchdog.**
+- [x] **5.1 Fold wall-clock `timeout` into the unified watchdog.**
   The watchdog ticker (`exec/watchdog/`) currently emits `WatchdogTermination`
   for `Timeout` + `StepTimeout`. Extend it (or the wiring in
   `run_child`/`run_child_capture`) so a configured wall-clock `timeout` is
@@ -630,7 +647,7 @@ unification.
   already threaded into every call site (`harness_orch/launch.rs:50`). This
   makes the timeout kill group-targeted (`-pid`) and signal-aware everywhere.
 
-- [ ] **5.2 Route `run_child` + `run_child_capture` through the unified loop.**
+- [x] **5.2 Route `run_child` + `run_child_capture` through the unified loop.**
   Replace the `if let Some(seconds) = timeout { wait_with_timeout(...) } else
   { wait_with_signal_handling(...) }` branch at `spawn.rs:246` and `:506` with
   a single call to `wait_with_signal_and_early_termination` (constructing a
@@ -642,7 +659,7 @@ unification.
   naturally — do **not** isolate that path into its own pgroup (the
   `SIGTTIN`-hang risk the existing code comments call out).
 
-- [ ] **5.3 Retire `wait_with_timeout`.**
+- [x] **5.3 Retire `wait_with_timeout`.**
   Delete the `wait_with_timeout` fn from `exec/timeouts.rs` (both the
   `#[cfg(unix)]` and `#[cfg(not(unix))]` bodies) and its two call sites.
   Keep `TimeoutConfig`, `detect_step_timeout`, `format_internal_duration`,
@@ -651,7 +668,7 @@ unification.
   responsibility; re-anchor it if the watchdog takes a deadline). Grep for
   any remaining `wait_with_timeout` references and confirm zero.
 
-- [ ] **5.4 Add visible interrupt feedback (Q14).**
+- [x] **5.4 Add visible interrupt feedback (Q14).**
   In the unix SIGINT handler inside
   `wait_with_signal_and_early_termination` (`exec/termination.rs:87`), on
   each counted press emit a stderr line via `eprintln!` (or the existing
@@ -661,7 +678,7 @@ unification.
   the existing atomic + `libc::kill`. Verify the message does not interleave
   with the runaway flood (stderr is unbuffered).
 
-- [ ] **5.5 Implement the shortened non-interactive ladder (F5).**
+- [x] **5.5 Implement the shortened non-interactive ladder (F5).**
   Thread an `interactive: bool` (or `non_interactive: bool`) flag into the
   unified wait loop. When non-interactive, press 1 → `SIGTERM` directly
   (escalating to `SIGKILL` on a repeat); when interactive, keep the full
@@ -671,7 +688,7 @@ unification.
   through `TimeoutConfig` (add a field) or as an explicit loop argument —
   match whatever the surrounding call convention is.
 
-- [ ] **5.6 Implement Windows parity (Q15).**
+- [x] **5.6 Implement Windows parity (Q15).**
   Replace the current `#[cfg(not(unix))]` stub of
   `wait_with_signal_and_early_termination` (`exec/termination.rs:246`, which
   today only calls `child.kill()` and has no group targeting and no real
@@ -697,10 +714,10 @@ unification.
 
 ### Phase 5 validation checkpoints
 
-- [ ] **VC-5.1 `wait_with_timeout` is gone.** `rg wait_with_timeout
+- [x] **VC-5.1 `wait_with_timeout` is gone.** `rg wait_with_timeout
   claudine/cli/src` returns zero hits; `cargo build -p claudine-cli`
   succeeds on Unix without it.
-- [ ] **VC-5.2 Ctrl+C terminates the child on every spawn path (Unix).**
+- [x] **VC-5.2 Ctrl+C terminates the child on every spawn path (Unix).**
   Using the existing real-process harness patterns, spawn a long-running
   child via each of `run_child`, `run_child_capture`, and
   `run_child_stream_semantic`; send SIGINT to the wrapper; assert the child
@@ -708,20 +725,20 @@ unification.
   is `Interrupted`. **Crucially: repeat with a wall-clock `timeout`
   configured** — this is the exact scenario the spec calls out as broken
   (opting into the safety timeout disabled Ctrl+C).
-- [ ] **VC-5.3 Visible feedback appears on each press.** Capture stderr
+- [x] **VC-5.3 Visible feedback appears on each press.** Capture stderr
   during a SIGINT and assert the `interrupt received` line is present (one
   per counted press).
-- [ ] **VC-5.4 Non-interactive ladder is SIGTERM-first.** A single SIGINT on
+- [x] **VC-5.4 Non-interactive ladder is SIGTERM-first.** A single SIGINT on
   a non-interactive run sends SIGTERM (observable via a child that traps
   SIGTERM); interactive runs still send SIGINT first.
-- [ ] **VC-5.5 Windows compiles with parity APIs.** `cargo check
+- [x] **VC-5.5 Windows compiles with parity APIs.** `cargo check
   --target x86_64-pc-windows-gnu -p claudine-cli` succeeds (cross-compile
   from macOS). The Windows implementation registers a console handler,
   targets a process group / Job Object, and escalates to
   `TerminateJobObject`. **Document the macOS-host verification gap:**
   runtime Windows behavior must be validated in CI or on a Windows host
   (flagged risk per the all-OS rule).
-- [ ] **VC-5.6 Regression: existing termination tests pass.**
+- [x] **VC-5.6 Regression: existing termination tests pass.**
   `just test` (or `cargo nextest run -p claudine-cli`) for the `exec::`
   modules is green, including the watchdog-disconnection and early-kill
   regression tests already in `exec/termination.rs`.
@@ -757,7 +774,7 @@ send on the termination channel the unified loop polls).
 
 ### Tasks
 
-- [ ] **6.1 Resolve the in-scope pattern set once before streaming.**
+- [x] **6.1 Resolve the in-scope pattern set once before streaming.**
   At the wiring point (`harness_orch/attempt.rs` around the sink
   construction, `:85`), call `runaway::resolve_exit_expressions(user, repo,
   frontmatter)` (Phase 3) and filter to the entries whose `scope` matches the
@@ -767,7 +784,7 @@ send on the termination channel the unified loop polls).
   wiring note). Merge in the resolved `GuardSettings` (repetition/volume
   thresholds + kill-switches).
 
-- [ ] **6.2 Construct + drive the `ContentDetector` from the sink.**
+- [x] **6.2 Construct + drive the `ContentDetector` from the sink.**
   Own the `ContentDetector` (and a trip `Sender`) in the `LiveSemanticSink`
   (or a small companion struct the sink holds). In
   `on_semantic_event(SemanticEvent::OutputText { text, .. })` and
@@ -780,7 +797,7 @@ send on the termination channel the unified loop polls).
   both repetition and volume are disabled and the exit-expression set is
   empty (zero overhead for runs that opt out).
 
-- [ ] **6.3 Wire the trip-sender into the streaming wait loop.**
+- [x] **6.3 Wire the trip-sender into the streaming wait loop.**
   The streaming path already builds `early_terminate_rx` from the stderr
   bridge (`spawn.rs:769`). Multiplex the detector's trips onto the same
   receiver the loop polls: either share one `mpsc::Sender<EarlyTermination>`
@@ -789,7 +806,7 @@ send on the termination channel the unified loop polls).
   (`termination.rs:152`) so no loop change is required — only the sender
   wiring. On trip, the existing SIGTERM→SIGKILL escalation runs unchanged.
 
-- [ ] **6.4 Volume cap on the capture path (F3).**
+- [x] **6.4 Volume cap on the capture path (F3).**
   In `run_child_capture`'s stdout/stderr reader threads (`spawn.rs:438` and
   `:471`), track `captured.len()` (bytes) and a line count; when either
   exceeds the per-run volume threshold, stop appending to the buffer
@@ -799,13 +816,13 @@ send on the termination channel the unified loop polls).
   5. Do **not** add exit-expression or repetition detection to the capture
   path (F3: capture gets Ctrl+C + volume cap only).
 
-- [ ] **6.5 Stop feeding the renderer on trip.**
+- [x] **6.5 Stop feeding the renderer on trip.**
   On a content trip, stop pushing further output to the terminal renderer
   (spec Part 1 step 1) so the tail of the runaway is not echoed. The sink's
   trip-send is the trigger; gate subsequent `OutputText` rendering on a
   "tripped" flag the sink holds.
 
-- [ ] **6.6 Populate `AttemptOutcome.error_kind` + `guard_context`.**
+- [x] **6.6 Populate `AttemptOutcome.error_kind` + `guard_context`.**
   In `harness_orch/attempt.rs` where `AttemptOutcome` is built (`:327`),
   read `summary.error_kind` (set by Phase 4's
   `apply_early_termination_to_summary`) and the guard detail, and populate
@@ -815,32 +832,32 @@ send on the termination channel the unified loop polls).
 
 ### Phase 6 validation checkpoints
 
-- [ ] **VC-6.1 Exit-expression trip end-to-end (streaming).** A stub
+- [x] **VC-6.1 Exit-expression trip end-to-end (streaming).** A stub
   provider streaming a line matching an in-scope literal at the correct
   `scope` (global / agent / agent+model) trips, terminates the child, and
   the resulting summary carries `error_kind = "exit_expression"` with the
   pattern + scope in `error_message`. An out-of-scope entry does **not**
   trip.
-- [ ] **VC-6.2 Repetition trip end-to-end (streaming).** A stub provider
+- [x] **VC-6.2 Repetition trip end-to-end (streaming).** A stub provider
   streaming the captured 6-line cycle trips at the threshold and the summary
   carries `error_kind = "runaway_repetition"`. Realistic output below the
   threshold does not trip (reuse the VC-2.4 fixture).
-- [ ] **VC-6.3 Volume trip end-to-end (streaming).** A stub provider
+- [x] **VC-6.3 Volume trip end-to-end (streaming).** A stub provider
   streaming > 50k lines in one turn trips `runaway_volume`; a multi-turn run
   where each turn stays under the cap does **not** trip (per-turn reset).
-- [ ] **VC-6.4 Capture-path volume cap.** A capture-mode run emitting > 32
+- [x] **VC-6.4 Capture-path volume cap.** A capture-mode run emitting > 32
   MB trips `runaway_volume`, the captured `String` stays bounded (assert its
   length is near the cap, not unbounded), and the child is reaped. Ctrl+C
   still works on the capture path (VC-5.2 already covers this; re-confirm
   with the cap armed).
-- [ ] **VC-6.5 `AttemptOutcome.error_kind` is populated.** For each trip
+- [x] **VC-6.5 `AttemptOutcome.error_kind` is populated.** For each trip
   kind, the outcome built at `attempt.rs:327` carries the matching
   `error_kind` and a populated `guard_context`.
-- [ ] **VC-6.6 Kill-switch honored.** With repetition disabled in config, the
+- [x] **VC-6.6 Kill-switch honored.** With repetition disabled in config, the
   6-line cycle does **not** trip; with the exit-expression set empty + both
   guards disabled, the detector is not constructed and behavior is identical
   to today (no regression).
-- [ ] **VC-6.7 No tool-payload scanning.** A stub provider emitting highly
+- [x] **VC-6.7 No tool-payload scanning.** A stub provider emitting highly
   repetitive `ToolResult` payloads does **not** trip (A2 — only
   `OutputText`/`Reasoning` are scanned).
 
@@ -867,7 +884,7 @@ Ctrl+C story.
 
 ### Tasks
 
-- [ ] **7.1 Thread `error_kind` + guard context into the handler payload.**
+- [x] **7.1 Thread `error_kind` + guard context into the handler payload.**
   In `execute_programmatic_handler` (`harness/handlers.rs:153`):
   - add env var `CLAUDINE_ERROR_KIND` (from `failure.outcome.error_kind`,
     falling back to the validation/timeout mapping);
@@ -877,7 +894,7 @@ Ctrl+C story.
     `agent_failure`. This is the C3a requirement that "error handling cannot
     make good decisions without context."
 
-- [ ] **7.2 End-to-end integration test: trip → terminate → classify →
+- [x] **7.2 End-to-end integration test: trip → terminate → classify →
   handler payload.** A library-level test (or a `claudine/lib/tests/`
   integration test) that drives a stub provider through the streaming path,
   forces a repetition trip, and asserts: (a) `ProcessTermination::Aborted`,
@@ -885,7 +902,7 @@ Ctrl+C story.
   payload env + JSON carry `error_kind = "runaway_repetition"` and the
   cycle detail. This ties Phases 1 + 4 + 6 + 7.1 together.
 
-- [ ] **7.3 Spawn × wait matrix proof.** A test (or a documented matrix in
+- [x] **7.3 Spawn × wait matrix proof.** A test (or a documented matrix in
   `signal-handling.md` if a real-process test is impractical for every cell)
   showing Ctrl+C terminates the child for every spawn-path × wait-loop ×
   timeout-configured combination, on **both Unix and Windows**: {
@@ -893,37 +910,37 @@ Ctrl+C story.
   unified-loop (all, post-Phase-5) } × { no-timeout, with-timeout }. The
   "with-timeout" column is the regression that motivated Part 4.
 
-- [ ] **7.4 Update `timeouts.md`.** Document the three new guards
+- [x] **7.4 Update `timeouts.md`.** Document the three new guards
   (exit-expressions, repetition, volume cap), their `error_kind`s, their
   config surfaces + defaults, the conservative false-positive posture, and
   that they all map to `ProcessTermination::Aborted` (not the timeout-retry
   path). Note that wall-clock `timeout` remains opt-in (F4) and that the
   volume cap is the content backstop.
 
-- [ ] **7.5 Update `signal-handling.md`.** Document the unified wait loop
+- [x] **7.5 Update `signal-handling.md`.** Document the unified wait loop
   (all spawn paths now route through it), the visible interrupt feedback,
   the shortened non-interactive ladder (F5), and the Windows
   Job-Object/console-event model. Add the new `Aborted` termination to the
   exit-code/label table (distinct from `Interrupted` and `TimedOut`).
 
-- [ ] **7.6 Update the claudine skill.** Add a concise note to
+- [x] **7.6 Update the claudine skill.** Add a concise note to
   `.claude/skills/claudine/SKILL.md` (and `architecture.md` if it lists the
   termination model) covering the runaway guards and the unified Ctrl+C
   path, linking to the updated topic docs.
 
 ### Phase 7 validation checkpoints
 
-- [ ] **VC-7.1 Handler payload carries `error_kind`.** A programmatic
+- [x] **VC-7.1 Handler payload carries `error_kind`.** A programmatic
   `handle` stub receives `CLAUDINE_ERROR_KIND=runaway_repetition` in its env
   and `error_kind` + `guard_context` in the stdin JSON for a repetition trip;
   it receives `exit_expression` + the pattern for an exit-expression trip.
-- [ ] **VC-7.2 Full success-criteria matrix green.** Every bullet in the
+- [x] **VC-7.2 Full success-criteria matrix green.** Every bullet in the
   spec's [Success Criteria](spec.md#success-criteria) is covered by at least
   one checkpoint in the validation matrix below.
-- [ ] **VC-7.3 `just test` and `just lint` pass in the claudine package
+- [x] **VC-7.3 `just test` and `just lint` pass in the claudine package
   area** (the spec's explicit gate). `cargo fmt --check` is read-only-clean
   for touched files (do **not** run `cargo fmt` write mode — repo policy).
-- [ ] **VC-7.4 Docs + skill updated and internally consistent** with the
+- [x] **VC-7.4 Docs + skill updated and internally consistent** with the
   implemented `error_kind` strings, config keys, and default thresholds.
 
 ---
