@@ -297,7 +297,7 @@ pub(crate) fn wait_with_signal_and_early_termination(
 /// child is targeted. The caller must re-check `child.try_wait()`
 /// immediately before this call to avoid signaling a recycled PID.
 #[cfg(unix)]
-fn send_signal_to_child(child_pid: u32, child_in_own_pgroup: bool, signal: i32) {
+pub(crate) fn send_signal_to_child(child_pid: u32, child_in_own_pgroup: bool, signal: i32) {
     let kill_pid = if child_in_own_pgroup {
         -(child_pid as i32)
     } else {

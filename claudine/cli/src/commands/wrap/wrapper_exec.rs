@@ -92,7 +92,6 @@ pub(crate) fn run_structured_stream_session(
                 }
             };
         let _ = stderr_bridge;
-        let _ = content_early_rx;
         wire_io::run_kimi_wire_session(
             wire_io::WireSessionConfig {
                 binary: binary_path,
@@ -113,6 +112,7 @@ pub(crate) fn run_structured_stream_session(
                 stream_output,
                 live_metrics,
                 runtime_context,
+                content_early_rx,
             },
             &mut _spawned,
         )?

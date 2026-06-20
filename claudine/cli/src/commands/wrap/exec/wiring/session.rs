@@ -25,6 +25,7 @@ pub(crate) struct WireSessionWiring {
     pub stream_output: Arc<StreamOutput>,
     pub live_metrics: LiveMetrics,
     pub runtime_context: claudine::dispatch::DispatchRuntimeContext,
+    pub content_early_rx: Option<std::sync::mpsc::Receiver<EarlyTermination>>,
 }
 
 /// Run the full Kimi wire-mode lifecycle: spawn child, send initialize,
@@ -208,17 +209,18 @@ pub(crate) fn run_kimi_wire_session(
     let cancel_requested = Arc::new(AtomicBool::new(false));
     let signal_guard = install_sigint_forwarder(Arc::clone(&cancel_requested));
 
-    let exit_code = match wait_for_child_exit(
+    let (exit_code, early_termination) = match wait_for_child_exit(
         &mut child,
         config.timeout,
         &cancel_requested,
         &prompt_finished,
         &writer,
+        wiring.content_early_rx,
     ) {
-        Ok(code) => code,
+        Ok(result) => result,
         Err(error) => {
             warn!(error = %error, "kimi wire wait loop failed");
-            -1
+            (-1, None)
         }
     };
 
@@ -242,13 +244,21 @@ pub(crate) fn run_kimi_wire_session(
     if !stderr_text.is_empty() && summary.stderr_text.is_none() {
         summary.stderr_text = Some(stderr_text);
     }
+    if let Some(termination) = early_termination.as_ref() {
+        super::super::termination::apply_early_termination_to_summary(&mut summary, termination);
+    }
 
     let total_elapsed = started_at.elapsed();
-    let termination = if cancel_requested.load(Ordering::SeqCst) {
+    let termination = if early_termination.is_some() {
+        super::super::termination::early_termination_process_outcome(early_termination.as_ref())
+    } else if cancel_requested.load(Ordering::SeqCst) {
         claudine::harness::ProcessTermination::Interrupted
     } else {
         claudine::harness::ProcessTermination::Completed
     };
+    let guard_context = early_termination
+        .as_ref()
+        .and_then(super::super::termination::early_termination_guard_context);
     Ok(ProcessResult {
         data: summary,
         termination,
@@ -257,8 +267,7 @@ pub(crate) fn run_kimi_wire_session(
             first_response_latency: None,
         },
         agent_pid: Some(captured_pid),
-        // The Kimi wire transport has no content-guard stream to scan.
-        guard_context: None,
+        guard_context,
     })
 }
 #[cfg(unix)]
@@ -303,15 +312,31 @@ fn wait_for_child_exit(
     cancel_flag: &Arc<AtomicBool>,
     prompt_finished: &Arc<AtomicBool>,
     writer: &WireWriter,
-) -> std::io::Result<i32> {
+    content_early_rx: Option<std::sync::mpsc::Receiver<EarlyTermination>>,
+) -> std::io::Result<(i32, Option<EarlyTermination>)> {
     let deadline = timeout.map(|d| Instant::now() + d);
     let mut cancel_sent = false;
     let mut cancel_sent_at: Option<Instant> = None;
     let mut prompt_finished_at: Option<Instant> = None;
+    let mut content_early_rx = content_early_rx;
 
     loop {
         if let Some(status) = child.try_wait()? {
-            return Ok(status_to_code(&status));
+            return Ok((status_to_code(&status), None));
+        }
+
+        if let Some(rx) = content_early_rx.as_ref() {
+            match rx.try_recv() {
+                Ok(early) => {
+                    info!("kimi wire content guard tripped; terminating child");
+                    let status = terminate_child_for_content_trip(child)?;
+                    return Ok((status_to_code(&status), Some(early)));
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    content_early_rx = None;
+                }
+            }
         }
 
         let timeout_elapsed = deadline.is_some_and(|d| Instant::now() >= d);
@@ -335,7 +360,7 @@ fn wait_for_child_exit(
             info!("kimi prompt finished; terminating child after grace period");
             let _ = child.kill();
             let _ = child.wait()?;
-            return Ok(0);
+            return Ok((0, None));
         }
 
         if !cancel_sent && (timeout_elapsed || user_canceled) {
@@ -356,11 +381,39 @@ fn wait_for_child_exit(
             warn!("kimi child did not exit 5s after cancel; sending SIGKILL");
             let _ = child.kill();
             let status = child.wait()?;
-            return Ok(status_to_code(&status));
+            return Ok((status_to_code(&status), None));
         }
 
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+#[cfg(unix)]
+fn terminate_child_for_content_trip(
+    child: &mut Child,
+) -> std::io::Result<std::process::ExitStatus> {
+    let child_pid = child.id();
+    super::super::termination::send_signal_to_child(child_pid, true, libc::SIGTERM);
+    let grace_deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status);
+        }
+        if Instant::now() >= grace_deadline {
+            warn!("kimi child did not exit after content-guard SIGTERM; sending SIGKILL");
+            let _ = child.kill();
+            return child.wait();
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[cfg(not(unix))]
+fn terminate_child_for_content_trip(
+    child: &mut Child,
+) -> std::io::Result<std::process::ExitStatus> {
+    let _ = child.kill();
+    child.wait()
 }
 
 fn status_to_code(status: &std::process::ExitStatus) -> i32 {
