@@ -927,6 +927,33 @@ mod tests {
     }
 
     #[test]
+    fn direct_lifecycle_ctx_agent_uses_env_overrides() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[(
+                "start",
+                json!({
+                    "message": "{{ctx.agent}}/{{ctx.model}}"
+                }),
+            )],
+            "Prompt",
+        );
+
+        let options = PrepareOptions {
+            env_overrides: std::collections::BTreeMap::from([
+                ("AGENT".to_string(), "codex".to_string()),
+                ("MODEL".to_string(), "gpt-5".to_string()),
+            ]),
+            ..Default::default()
+        };
+
+        let prepared = prepare_direct(&source, options).unwrap();
+        let start = prepared.lifecycle.start.as_ref().unwrap();
+        assert_eq!(start.message.as_deref(), Some("codex/gpt-5"));
+    }
+
+    #[test]
     fn direct_composition_perf_disabled_yields_none() {
         let dir = TempDir::new().unwrap();
         let source = make_source(&dir, &[("title", json!("Test"))], "Simple content.");
