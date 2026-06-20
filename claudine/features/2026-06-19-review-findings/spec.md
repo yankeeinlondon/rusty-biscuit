@@ -4,6 +4,7 @@ title: "Comprehensive Review Remediation — claudine Package Area"
 source_review: "claudine/reviews/2026-06-19-comprehensive/review.md"
 status: "ready for planning and implementation"
 reviewed: true
+review_iterations: 2
 ---
 
 # Specification — Comprehensive Review Remediation
