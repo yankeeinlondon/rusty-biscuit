@@ -257,6 +257,8 @@ pub(crate) fn run_kimi_wire_session(
             first_response_latency: None,
         },
         agent_pid: Some(captured_pid),
+        // The Kimi wire transport has no content-guard stream to scan.
+        guard_context: None,
     })
 }
 #[cfg(unix)]

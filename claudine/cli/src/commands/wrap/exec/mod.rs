@@ -98,6 +98,12 @@ pub(crate) struct ProcessResult<T> {
     // not trip `-D warnings`.
     #[allow(dead_code)]
     pub(crate) agent_pid: Option<u32>,
+    /// Structured runaway-guard context (Phase 6), populated when the run
+    /// ended on a content-guard trip (exit-expression / repetition / volume).
+    /// `None` for ordinary completions, timeouts, and rate-limit aborts.
+    /// Carried so the attempt outcome can thread `error_kind` + guard detail
+    /// into the failure-handler payload (C3a).
+    pub(crate) guard_context: Option<claudine::harness::GuardContext>,
 }
 
 /// Renders streamed assistant text as Markdown, flushing at block boundaries.
