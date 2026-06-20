@@ -1,6 +1,7 @@
 //! Markdown cleanup implementation using pulldown-cmark event stream manipulation.
 //!
 //! This module provides functionality to normalize markdown content by:
+//! - Collapsing incidental single newlines inside prose
 //! - Ensuring proper blank lines between block elements (via cmark Options)
 //! - Aligning table columns for visual consistency
 //! - Preserving original list markers (*, -, +)
@@ -43,6 +44,15 @@ pub enum EmphasisStyle {
     Asterisk,
     /// Use underscore for emphasis: `_text_` for italics, `__text__` for bold
     Underscore,
+}
+
+/// Controls whether cleanup collapses fixed-width prose wrapping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IncidentalNewlineMode {
+    /// Collapse incidental single newlines inside prose while preserving block structure.
+    Strip,
+    /// Leave single newlines untouched.
+    Preserve,
 }
 
 impl EmphasisStyle {
@@ -260,7 +270,8 @@ fn unescape_emphasis_chars(output: &mut String) {
 pub const DEFAULT_INDENT: usize = 4;
 
 pub fn cleanup_content(content: &str) -> String {
-    cleanup_content_internal(content, Some(DEFAULT_INDENT), ListSpacingMode::Normal)
+    let content = strip_incidental_newlines(content);
+    cleanup_content_internal(&content, Some(DEFAULT_INDENT), ListSpacingMode::Normal)
 }
 
 /// Cleans up markdown content in compact mode.
@@ -278,7 +289,8 @@ pub fn cleanup_content(content: &str) -> String {
 /// assert!(cleaned.contains("1. First\n2. Second"));
 /// ```
 pub fn cleanup_content_compact(content: &str) -> String {
-    cleanup_content_internal(content, Some(DEFAULT_INDENT), ListSpacingMode::Compact)
+    let content = strip_incidental_newlines(content);
+    cleanup_content_internal(&content, Some(DEFAULT_INDENT), ListSpacingMode::Compact)
 }
 
 /// Cleans up markdown content in loose mode.
@@ -296,7 +308,8 @@ pub fn cleanup_content_compact(content: &str) -> String {
 /// assert!(cleaned.contains("1. First\n\n2. Second"));
 /// ```
 pub fn cleanup_content_loose(content: &str) -> String {
-    cleanup_content_internal(content, Some(DEFAULT_INDENT), ListSpacingMode::Loose)
+    let content = strip_incidental_newlines(content);
+    cleanup_content_internal(&content, Some(DEFAULT_INDENT), ListSpacingMode::Loose)
 }
 
 /// Cleans up markdown content and enforces a consistent list indentation width.
@@ -314,17 +327,656 @@ pub fn cleanup_content_loose(content: &str) -> String {
 /// assert!(cleaned.contains("\n    - Child"));
 /// ```
 pub fn cleanup_content_with_indent(content: &str, indent_size: usize) -> String {
+    let content = strip_incidental_newlines(content);
+    cleanup_content_internal(&content, Some(indent_size.max(1)), ListSpacingMode::Normal)
+}
+
+/// Cleans markdown content with forced indentation without stripping incidental newlines.
+pub fn cleanup_content_with_indent_preserving_incidental(
+    content: &str,
+    indent_size: usize,
+) -> String {
     cleanup_content_internal(content, Some(indent_size.max(1)), ListSpacingMode::Normal)
 }
 
 /// Cleans up markdown content with forced indentation in compact mode.
 pub fn cleanup_content_with_indent_compact(content: &str, indent_size: usize) -> String {
+    let content = strip_incidental_newlines(content);
+    cleanup_content_internal(&content, Some(indent_size.max(1)), ListSpacingMode::Compact)
+}
+
+/// Cleans compact markdown content with forced indentation without stripping incidental newlines.
+pub fn cleanup_content_with_indent_compact_preserving_incidental(
+    content: &str,
+    indent_size: usize,
+) -> String {
     cleanup_content_internal(content, Some(indent_size.max(1)), ListSpacingMode::Compact)
 }
 
 /// Cleans up markdown content with forced indentation in loose mode.
 pub fn cleanup_content_with_indent_loose(content: &str, indent_size: usize) -> String {
+    let content = strip_incidental_newlines(content);
+    cleanup_content_internal(&content, Some(indent_size.max(1)), ListSpacingMode::Loose)
+}
+
+/// Cleans loose markdown content with forced indentation without stripping incidental newlines.
+pub fn cleanup_content_with_indent_loose_preserving_incidental(
+    content: &str,
+    indent_size: usize,
+) -> String {
     cleanup_content_internal(content, Some(indent_size.max(1)), ListSpacingMode::Loose)
+}
+
+/// Cleans Markdown prose by stripping incidental newlines and wrapping it to a fixed width.
+///
+/// # Panics
+///
+/// Panics when `width` is `0`.
+pub fn cleanup_to_fixed_width(content: &str, width: usize) -> String {
+    assert!(width > 0, "fixed-width cleanup requires a width greater than 0");
+    let content = strip_incidental_newlines(content);
+    reflow_to_width(&content, width)
+}
+
+/// Collapses incidental single newlines inside prose without crossing Markdown block boundaries.
+pub fn strip_incidental_newlines(content: &str) -> String {
+    let normalized = content.replace("\r\n", "\n").replace('\r', "\n");
+    if normalized.is_empty() {
+        return normalized;
+    }
+
+    let lines: Vec<&str> = normalized.split('\n').collect();
+    let line_count = if lines.last() == Some(&"") {
+        lines.len().saturating_sub(1)
+    } else {
+        lines.len()
+    };
+    let trailing_newline = lines.last() == Some(&"");
+    let metadata = LineMetadata::scan(&lines[..line_count]);
+
+    let mut result = String::with_capacity(normalized.len());
+    let mut skip_prefix_len = 0;
+
+    for idx in 0..line_count {
+        let line = lines[idx];
+        if skip_prefix_len > 0 && line.len() >= skip_prefix_len {
+            result.push_str(&line[skip_prefix_len..]);
+            skip_prefix_len = 0;
+        } else {
+            result.push_str(line);
+        }
+
+        if idx + 1 < line_count {
+            let boundary = newline_boundary(&metadata[idx], &metadata[idx + 1]);
+            match boundary {
+                NewlineBoundary::Preserve => result.push('\n'),
+                NewlineBoundary::Collapse { skip_next_prefix } => {
+                    if !line.ends_with(char::is_whitespace) {
+                        result.push(' ');
+                    }
+                    skip_prefix_len = skip_next_prefix;
+                }
+            }
+        } else if trailing_newline {
+            result.push('\n');
+        }
+    }
+
+    result
+}
+
+/// Reflows Markdown prose lines to `width` display columns.
+///
+/// Protected Markdown blocks such as fences, indented code, tables, HTML
+/// blocks, and transclusion directive lines are emitted unchanged. List,
+/// task-list, and blockquote prefixes are preserved while their body text is
+/// wrapped inside the remaining width.
+///
+/// # Panics
+///
+/// Panics when `width` is `0`.
+pub fn reflow_to_width(content: &str, width: usize) -> String {
+    assert!(width > 0, "fixed-width reflow requires a width greater than 0");
+
+    let normalized = content.replace("\r\n", "\n").replace('\r', "\n");
+    if normalized.is_empty() {
+        return normalized;
+    }
+
+    let lines: Vec<&str> = normalized.split('\n').collect();
+    let line_count = if lines.last() == Some(&"") {
+        lines.len().saturating_sub(1)
+    } else {
+        lines.len()
+    };
+    let trailing_newline = lines.last() == Some(&"");
+    let metadata = LineMetadata::scan(&lines[..line_count]);
+    let mut result = String::with_capacity(normalized.len());
+
+    for idx in 0..line_count {
+        let line = lines[idx];
+        if metadata[idx].blank || metadata[idx].protected {
+            result.push_str(line);
+        } else {
+            let wrapped = reflow_line(line, width);
+            result.push_str(&wrapped);
+        }
+
+        if idx + 1 < line_count || trailing_newline {
+            result.push('\n');
+        }
+    }
+
+    result
+}
+
+#[derive(Debug, Clone)]
+struct LineMetadata {
+    blank: bool,
+    protected: bool,
+    list_item: bool,
+    inline_code_open_after: bool,
+    blockquote_prefix_len: Option<usize>,
+}
+
+impl LineMetadata {
+    fn scan(lines: &[&str]) -> Vec<Self> {
+        let mut metadata = Vec::with_capacity(lines.len());
+        let mut fence: Option<String> = None;
+        let mut html_block: Option<HtmlBlockEnd> = None;
+        let mut inline_code_ticks: Option<usize> = None;
+        let mut shell_block_depth = 0usize;
+
+        for line in lines {
+            let trimmed = line.trim_start();
+            let directive_trimmed = directive_trimmed(line);
+            let blank = trimmed.is_empty();
+            let was_in_fence = fence.is_some();
+            let was_in_html = html_block.is_some();
+            let was_in_shell_block = shell_block_depth > 0;
+            let starts_fence = fence.is_none().then(|| fence_marker(trimmed)).flatten();
+            let starts_html = html_block.is_none().then(|| html_block_end(trimmed)).flatten();
+            let starts_shell_block = directive_trimmed.starts_with("::shell-block");
+            let ends_shell_block = directive_trimmed.starts_with("::end-block");
+            let list_item = is_list_item_start(trimmed);
+            let protected = was_in_fence
+                || was_in_html
+                || was_in_shell_block
+                || starts_fence.is_some()
+                || starts_html.is_some()
+                || is_indented_code_line(line)
+                || starts_shell_block
+                || is_structural_line(trimmed)
+                || is_structural_line(directive_trimmed);
+
+            if !protected {
+                update_inline_code_state(line, &mut inline_code_ticks);
+            }
+
+            metadata.push(Self {
+                blank,
+                protected,
+                list_item,
+                inline_code_open_after: inline_code_ticks.is_some(),
+                blockquote_prefix_len: blockquote_prefix_len(line),
+            });
+
+            if let Some(marker) = starts_fence {
+                fence = Some(marker);
+            } else if let Some(marker) = &fence
+                && trimmed.starts_with(marker)
+            {
+                fence = None;
+            }
+
+            if let Some(end) = starts_html {
+                html_block = Some(end);
+            }
+            if let Some(end) = html_block
+                && end.closes_on(line, blank)
+            {
+                html_block = None;
+            }
+
+            if starts_shell_block {
+                shell_block_depth += 1;
+            } else if was_in_shell_block && ends_shell_block {
+                shell_block_depth = shell_block_depth.saturating_sub(1);
+            }
+        }
+
+        metadata
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum HtmlBlockEnd {
+    BlankLine,
+    Contains(&'static str),
+}
+
+impl HtmlBlockEnd {
+    fn closes_on(self, line: &str, blank: bool) -> bool {
+        match self {
+            Self::BlankLine => blank,
+            Self::Contains(needle) => line.contains(needle),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NewlineBoundary {
+    Preserve,
+    Collapse { skip_next_prefix: usize },
+}
+
+fn newline_boundary(current: &LineMetadata, next: &LineMetadata) -> NewlineBoundary {
+    if current.list_item || next.list_item {
+        return if current.list_item && !next.list_item && !next.blank && !next.protected {
+            NewlineBoundary::Collapse {
+                skip_next_prefix: 0,
+            }
+        } else {
+            NewlineBoundary::Preserve
+        };
+    }
+
+    if current.blank
+        || next.blank
+        || current.protected
+        || next.protected
+        || current.inline_code_open_after
+    {
+        return NewlineBoundary::Preserve;
+    }
+
+    match (current.blockquote_prefix_len, next.blockquote_prefix_len) {
+        (Some(current_prefix), Some(next_prefix)) if current_prefix == next_prefix => {
+            NewlineBoundary::Collapse {
+                skip_next_prefix: next_prefix,
+            }
+        }
+        (Some(_), _) | (_, Some(_)) => NewlineBoundary::Preserve,
+        _ => NewlineBoundary::Collapse {
+            skip_next_prefix: 0,
+        },
+    }
+}
+
+fn fence_marker(trimmed: &str) -> Option<String> {
+    let marker = trimmed.chars().next()?;
+    if marker != '`' && marker != '~' {
+        return None;
+    }
+    let count = trimmed.chars().take_while(|&c| c == marker).count();
+    (count >= 3).then(|| marker.to_string().repeat(count))
+}
+
+fn is_indented_code_line(line: &str) -> bool {
+    line.starts_with('\t') || line.starts_with("    ")
+}
+
+fn is_structural_line(trimmed: &str) -> bool {
+    trimmed.starts_with('#')
+        || trimmed.starts_with("::")
+        || is_table_line(trimmed)
+        || trimmed.starts_with("---")
+        || trimmed.starts_with("***")
+        || trimmed.starts_with("___")
+}
+
+fn directive_trimmed(line: &str) -> &str {
+    if let Some(prefix_len) = blockquote_prefix_len(line) {
+        return line[prefix_len..].trim_start();
+    }
+
+    line.trim_start()
+}
+
+fn is_table_line(trimmed: &str) -> bool {
+    trimmed.starts_with('|') && trimmed[1..].contains('|')
+}
+
+fn html_block_end(trimmed: &str) -> Option<HtmlBlockEnd> {
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("<!--") {
+        return Some(HtmlBlockEnd::Contains("-->"));
+    }
+    if lower.starts_with("<?") {
+        return Some(HtmlBlockEnd::Contains("?>"));
+    }
+    if lower.starts_with("<![cdata[") {
+        return Some(HtmlBlockEnd::Contains("]]>"));
+    }
+    if lower.starts_with("<!") {
+        return Some(HtmlBlockEnd::Contains(">"));
+    }
+    if lower.starts_with("</script")
+        || lower.starts_with("</pre")
+        || lower.starts_with("</style")
+        || lower.starts_with("<script")
+        || lower.starts_with("<pre")
+        || lower.starts_with("<style")
+    {
+        return Some(HtmlBlockEnd::BlankLine);
+    }
+
+    const BLOCK_TAGS: &[&str] = &[
+        "address",
+        "article",
+        "aside",
+        "base",
+        "basefont",
+        "blockquote",
+        "body",
+        "caption",
+        "center",
+        "col",
+        "colgroup",
+        "dd",
+        "details",
+        "dialog",
+        "dir",
+        "div",
+        "dl",
+        "dt",
+        "fieldset",
+        "figcaption",
+        "figure",
+        "footer",
+        "form",
+        "frame",
+        "frameset",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "head",
+        "header",
+        "hr",
+        "html",
+        "iframe",
+        "legend",
+        "li",
+        "link",
+        "main",
+        "menu",
+        "menuitem",
+        "nav",
+        "noframes",
+        "ol",
+        "optgroup",
+        "option",
+        "p",
+        "param",
+        "search",
+        "section",
+        "summary",
+        "table",
+        "tbody",
+        "td",
+        "tfoot",
+        "th",
+        "thead",
+        "title",
+        "tr",
+        "track",
+        "ul",
+    ];
+
+    BLOCK_TAGS
+        .iter()
+        .any(|tag| html_line_starts_with_tag(&lower, tag))
+        .then_some(HtmlBlockEnd::BlankLine)
+}
+
+fn html_line_starts_with_tag(line: &str, tag: &str) -> bool {
+    let Some(rest) = line.strip_prefix("</").or_else(|| line.strip_prefix('<')) else {
+        return false;
+    };
+    let Some(rest) = rest.strip_prefix(tag) else {
+        return false;
+    };
+    matches!(rest.as_bytes().first(), Some(b' ' | b'\t' | b'>' | b'/'))
+}
+
+fn update_inline_code_state(line: &str, open_ticks: &mut Option<usize>) {
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '`' {
+            continue;
+        }
+
+        let mut count = 1;
+        while chars.peek() == Some(&'`') {
+            chars.next();
+            count += 1;
+        }
+
+        if count >= 3 {
+            continue;
+        }
+
+        match open_ticks {
+            Some(open) if *open == count => *open_ticks = None,
+            None => *open_ticks = Some(count),
+            _ => {}
+        }
+    }
+}
+
+fn blockquote_prefix_len(line: &str) -> Option<usize> {
+    let bytes = line.as_bytes();
+    let mut idx = 0;
+    let mut saw_marker = false;
+
+    while idx < bytes.len() {
+        while idx < bytes.len() && bytes[idx] == b' ' {
+            idx += 1;
+        }
+        if bytes.get(idx) != Some(&b'>') {
+            break;
+        }
+        saw_marker = true;
+        idx += 1;
+        if bytes.get(idx) == Some(&b' ') {
+            idx += 1;
+        }
+    }
+
+    saw_marker.then_some(idx)
+}
+
+fn reflow_line(line: &str, width: usize) -> String {
+    let prefix = line_reflow_prefix(line);
+    let body = line[prefix.first_len..].trim();
+    if body.is_empty() {
+        return line.to_string();
+    }
+
+    wrap_text(body, &prefix.first, &prefix.continuation, width)
+}
+
+#[derive(Debug, Clone)]
+struct ReflowPrefix {
+    first: String,
+    continuation: String,
+    first_len: usize,
+}
+
+fn line_reflow_prefix(line: &str) -> ReflowPrefix {
+    if let Some(prefix_len) = blockquote_prefix_len(line) {
+        let prefix = line[..prefix_len].to_string();
+        return ReflowPrefix {
+            first: prefix.clone(),
+            continuation: prefix,
+            first_len: prefix_len,
+        };
+    }
+
+    let leading_len = line.len() - line.trim_start().len();
+    let trimmed = &line[leading_len..];
+    if let Some(marker_len) = list_marker_prefix_len(trimmed) {
+        let first_len = leading_len + marker_len;
+        let first = line[..first_len].to_string();
+        return ReflowPrefix {
+            continuation: " ".repeat(UnicodeWidthStr::width(first.as_str())),
+            first,
+            first_len,
+        };
+    }
+
+    ReflowPrefix {
+        first: String::new(),
+        continuation: " ".repeat(leading_len),
+        first_len: leading_len,
+    }
+}
+
+fn list_marker_prefix_len(trimmed: &str) -> Option<usize> {
+    let marker_len = unordered_marker_prefix_len(trimmed).or_else(|| ordered_marker_prefix_len(trimmed))?;
+    let rest = &trimmed[marker_len..];
+    task_marker_prefix_len(rest).map_or(Some(marker_len), |task_len| Some(marker_len + task_len))
+}
+
+fn unordered_marker_prefix_len(trimmed: &str) -> Option<usize> {
+    let mut chars = trimmed.char_indices();
+    let (_, marker) = chars.next()?;
+    if !matches!(marker, '*' | '-' | '+') {
+        return None;
+    }
+    let (space_idx, space) = chars.next()?;
+    (space == ' ').then_some(space_idx + space.len_utf8())
+}
+
+fn ordered_marker_prefix_len(trimmed: &str) -> Option<usize> {
+    let bytes = trimmed.as_bytes();
+    if bytes.is_empty() || !bytes[0].is_ascii_digit() {
+        return None;
+    }
+
+    for (idx, &byte) in bytes.iter().enumerate().skip(1) {
+        if byte == b'.' || byte == b')' {
+            return (bytes.get(idx + 1) == Some(&b' ')).then_some(idx + 2);
+        }
+        if !byte.is_ascii_digit() {
+            return None;
+        }
+    }
+
+    None
+}
+
+fn task_marker_prefix_len(rest: &str) -> Option<usize> {
+    let bytes = rest.as_bytes();
+    if bytes.len() >= 4
+        && bytes[0] == b'['
+        && matches!(bytes[1], b' ' | b'x' | b'X')
+        && bytes[2] == b']'
+        && bytes[3] == b' '
+    {
+        Some(4)
+    } else {
+        None
+    }
+}
+
+fn wrap_text(text: &str, first_prefix: &str, continuation_prefix: &str, width: usize) -> String {
+    let tokens = reflow_tokens(text);
+    if tokens.is_empty() {
+        return first_prefix.to_string();
+    }
+
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut current_width = UnicodeWidthStr::width(first_prefix);
+    let mut prefix = first_prefix;
+
+    for token in tokens {
+        let token_width = UnicodeWidthStr::width(token.as_str());
+        let separator_width = usize::from(!current.is_empty());
+        if !current.is_empty() && current_width + separator_width + token_width > width {
+            lines.push(format!("{prefix}{current}"));
+            current.clear();
+            prefix = continuation_prefix;
+            current_width = UnicodeWidthStr::width(prefix);
+        }
+
+        if !current.is_empty() {
+            current.push(' ');
+            current_width += 1;
+        }
+        current.push_str(&token);
+        current_width += token_width;
+    }
+
+    if !current.is_empty() {
+        lines.push(format!("{prefix}{current}"));
+    }
+
+    lines.join("\n")
+}
+
+fn reflow_tokens(text: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut chars = text.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch.is_whitespace() {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+            continue;
+        }
+
+        if ch == '`' {
+            current.push(ch);
+            let ticks = consume_matching_chars(&mut chars, '`', &mut current) + 1;
+            consume_code_span(&mut chars, ticks, &mut current);
+            continue;
+        }
+
+        current.push(ch);
+    }
+
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+
+    tokens
+}
+
+fn consume_matching_chars<I>(chars: &mut std::iter::Peekable<I>, target: char, output: &mut String) -> usize
+where
+    I: Iterator<Item = char>,
+{
+    let mut count = 0;
+    while chars.peek() == Some(&target) {
+        output.push(chars.next().unwrap());
+        count += 1;
+    }
+    count
+}
+
+fn consume_code_span<I>(chars: &mut std::iter::Peekable<I>, ticks: usize, output: &mut String)
+where
+    I: Iterator<Item = char>,
+{
+    let mut run = 0;
+    for ch in chars.by_ref() {
+        output.push(ch);
+        if ch == '`' {
+            run += 1;
+            if run == ticks {
+                break;
+            }
+        } else {
+            run = 0;
+        }
+    }
 }
 
 /// Controls how blank lines between list items are handled during cleanup.
@@ -1361,6 +2013,219 @@ mod tests {
         haystack.matches(needle).count()
     }
 
+    // ==================== Incidental Newline Tests ====================
+
+    #[test]
+    fn strip_incidental_newlines_drops_after_trailing_whitespace() {
+        let content = "Wrapped line \ncontinues here";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "Wrapped line continues here");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_replaces_with_space_without_trailing_whitespace() {
+        let content = "Wrapped line\ncontinues here";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "Wrapped line continues here");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_blank_lines() {
+        let content = "First paragraph\n\nSecond paragraph\n\n\nThird paragraph";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, content);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_fenced_code_verbatim() {
+        let content = "Before\n```rust\nlet value = 1;\nlet other = 2;\n```\nAfter";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(
+            stripped,
+            "Before\n```rust\nlet value = 1;\nlet other = 2;\n```\nAfter"
+        );
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_indented_code_verbatim() {
+        let content = "Before\n\n    let value = 1;\n    let other = 2;\n\nAfter";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, content);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_newline_inside_inline_code_span() {
+        let content = "Before `code\nspan` after";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, content);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_html_block_verbatim() {
+        let content = "<div>\n<span>One</span>\n<span>Two</span>\n</div>\n\nAfter";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, content);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_blockquote_prefix() {
+        let content = "> Wrapped quote\n> continues here\n\nAfter";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "> Wrapped quote continues here\n\nAfter");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_table_rows() {
+        let content = "| A | B |\n|---|---|\n| 1 | 2 |\n\nAfter";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, content);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_list_marker() {
+        let content = "- Wrapped item\ncontinues here\n- Second item";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "- Wrapped item continues here\n- Second item");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_transclusion_directives() {
+        let content = "::file ./README.md\n::code ./src/main.rs\n::shell echo hi\n::disclosure Details\n::details\nWrapped\ntext\n::end-disclosure\n";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(
+            stripped,
+            "::file ./README.md\n::code ./src/main.rs\n::shell echo hi\n::disclosure Details\n::details\nWrapped text\n::end-disclosure\n"
+        );
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_shell_block_bodies() {
+        let content = "::shell-block\necho a\necho b\n::end-block\n\nAfter";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, content);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_blockquoted_shell_block_bodies() {
+        let content = "> ::shell-block\n> echo a\n> echo b\n> ::end-block\n\nAfter";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, content);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_treats_crlf_and_lf_as_newlines() {
+        let content = "One\r\ntwo\nthree\r\n\nFour";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "One two three\n\nFour");
+    }
+
+    // ==================== Fixed-Width Reflow Tests ====================
+
+    #[test]
+    fn reflow_to_width_wraps_ascii_paragraphs_at_common_widths() {
+        let content = "This paragraph has enough words to wrap cleanly at several common editor widths without needing to split any individual word.";
+
+        for width in [20, 40, 80, 100] {
+            let reflowed = cleanup_to_fixed_width(content, width);
+            assert!(
+                reflowed
+                    .lines()
+                    .all(|line| UnicodeWidthStr::width(line) <= width),
+                "line exceeded width {width}:\n{reflowed}"
+            );
+        }
+    }
+
+    #[test]
+    fn reflow_to_width_uses_unicode_display_columns() {
+        let content = "café naïve résumé words";
+        let reflowed = cleanup_to_fixed_width(content, 12);
+
+        assert_eq!(reflowed, "café naïve\nrésumé words");
+        assert!(reflowed.lines().all(|line| UnicodeWidthStr::width(line) <= 12));
+    }
+
+    #[test]
+    fn reflow_to_width_keeps_long_words_on_one_line() {
+        let content = "supercalifragilisticexpialidocious";
+        let reflowed = cleanup_to_fixed_width(content, 10);
+
+        assert_eq!(reflowed, content);
+    }
+
+    #[test]
+    fn reflow_to_width_handles_empty_document() {
+        assert_eq!(cleanup_to_fixed_width("", 80), "");
+    }
+
+    #[test]
+    fn reflow_to_width_preserves_code_only_document() {
+        let content = "```rust\nlet value = \"a very long line that stays untouched\";\n```\n";
+        let reflowed = cleanup_to_fixed_width(content, 20);
+
+        assert_eq!(reflowed, content);
+    }
+
+    #[test]
+    fn reflow_to_width_preserves_mixed_list_marker_alignment() {
+        let content = "- short marker has enough text to wrap around the target width\n1. ordered marker has enough text to wrap around the target width\n- [ ] task marker has enough text to wrap around the target width";
+        let reflowed = cleanup_to_fixed_width(content, 28);
+
+        assert_eq!(
+            reflowed,
+            "- short marker has enough\n  text to wrap around the\n  target width\n1. ordered marker has enough\n   text to wrap around the\n   target width\n- [ ] task marker has enough\n      text to wrap around\n      the target width"
+        );
+    }
+
+    #[test]
+    fn reflow_to_width_preserves_table_rows() {
+        let content = "| A | B |\n|---|---|\n| a very long cell | another long cell |\n";
+        let reflowed = cleanup_to_fixed_width(content, 12);
+
+        assert_eq!(reflowed, content);
+    }
+
+    #[test]
+    fn reflow_to_width_keeps_blockquote_prefixes() {
+        let content = "> This quote has enough text to wrap while preserving the quote prefix";
+        let reflowed = cleanup_to_fixed_width(content, 24);
+
+        assert_eq!(
+            reflowed,
+            "> This quote has enough\n> text to wrap while\n> preserving the quote\n> prefix"
+        );
+    }
+
+    #[test]
+    fn reflow_to_width_preserves_transclusion_directives() {
+        let content = "::file ./a/path/that/should/not/be/wrapped.md\n::code ./src/main.rs\n";
+        let reflowed = cleanup_to_fixed_width(content, 12);
+
+        assert_eq!(reflowed, content);
+    }
+
+    #[test]
+    fn reflow_to_width_preserves_shell_block_bodies() {
+        let content = "::shell-block\necho a\necho b\n::end-block\n";
+        let reflowed = cleanup_to_fixed_width(content, 8);
+
+        assert_eq!(reflowed, content);
+    }
+
+    #[test]
+    fn reflow_to_width_preserves_html_blocks() {
+        let content = "<div class=\"options\">\n<span>Very long HTML content stays untouched.</span>\n</div>\n";
+        let reflowed = cleanup_to_fixed_width(content, 12);
+
+        assert_eq!(reflowed, content);
+    }
+
+    #[test]
+    #[should_panic(expected = "fixed-width cleanup requires a width greater than 0")]
+    fn cleanup_to_fixed_width_rejects_zero_width() {
+        let _ = cleanup_to_fixed_width("content", 0);
+    }
+
     // ==================== Blank Line Tests ====================
 
     #[test]
@@ -1948,13 +2813,13 @@ mod tests {
 
     #[test]
     fn test_blockquote_multiline() {
-        // Multi-line blockquotes should be preserved correctly
+        // Incidental wrapping inside a blockquote should keep the quote prefix.
         let content = "> Line 1\n> Line 2\n> Line 3";
         let cleaned = cleanup_content(content);
 
         assert!(
-            cleaned.contains("> Line 1\n> Line 2\n> Line 3"),
-            "Multi-line blockquote should be preserved, got:\n{}",
+            cleaned.contains("> Line 1 Line 2 Line 3"),
+            "Blockquote prefix should be preserved after prose collapse, got:\n{}",
             cleaned
         );
     }

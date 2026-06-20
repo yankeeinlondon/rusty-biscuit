@@ -6,7 +6,7 @@
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{
-    ComposeOptions,
+    ComposeOperation, ComposeOptions,
     shell_expansion::types::{ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest},
 };
 use std::sync::Arc;
@@ -126,7 +126,8 @@ fn compose_shell_block_with_multiple_commands() {
         .with_source_file(dir.path().join("doc.md"))
         .with_shell_policy_root(dir.path())
         .with_shell_working_directory(std::env::current_dir().unwrap())
-        .with_shell_approval_handler(Arc::new(AllowAllHandler));
+        .with_shell_approval_handler(Arc::new(AllowAllHandler))
+        .disable(ComposeOperation::Cleanup);
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
     let (composed, _) = md.compose_with(options).unwrap();

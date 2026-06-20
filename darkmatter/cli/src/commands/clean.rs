@@ -4,9 +4,13 @@ use crate::io::{load_markdown, resolve_file_path};
 use color_eyre::eyre::{Context, Result, eyre};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
+use darkmatter::markdown::cleanup::{
+    DEFAULT_INDENT, ListSpacingMode, cleanup_content_with_indent_compact_preserving_incidental,
+    cleanup_content_with_indent_loose_preserving_incidental,
+    cleanup_content_with_indent_preserving_incidental, reflow_to_width,
+};
 use darkmatter::markdown::delta::DeltaReport;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::cleanup::ListSpacingMode;
 use std::path::PathBuf;
 use tracing::instrument;
 
@@ -26,11 +30,19 @@ pub fn run_clean(
     save: bool,
     indent: Option<usize>,
     list_spacing: ListSpacingMode,
+    fixed_width: Option<usize>,
+    ignore_incidental_newlines: bool,
     verbose: bool,
 ) -> Result<()> {
     if !save {
         let mut md = load_markdown(input)?;
-        apply_cleanup(&mut md, indent, list_spacing);
+        apply_cleanup(
+            &mut md,
+            indent,
+            list_spacing,
+            fixed_width,
+            ignore_incidental_newlines,
+        );
         println!("{}", md.as_string());
         return Ok(());
     }
@@ -46,7 +58,13 @@ pub fn run_clean(
     let resolved = resolve_file_path(input_path)?;
     let original = load_markdown(Some(input_path))?;
     let mut cleaned = original.clone();
-    apply_cleanup(&mut cleaned, indent, list_spacing);
+    apply_cleanup(
+        &mut cleaned,
+        indent,
+        list_spacing,
+        fixed_width,
+        ignore_incidental_newlines,
+    );
 
     let delta = original.delta(&cleaned);
     if !delta.is_unchanged() {
@@ -62,7 +80,18 @@ pub fn run_clean(
     Ok(())
 }
 
-fn apply_cleanup(md: &mut Markdown, indent: Option<usize>, mode: ListSpacingMode) {
+fn apply_cleanup(
+    md: &mut Markdown,
+    indent: Option<usize>,
+    mode: ListSpacingMode,
+    fixed_width: Option<usize>,
+    ignore_incidental_newlines: bool,
+) {
+    if ignore_incidental_newlines {
+        apply_cleanup_no_strip(md, indent, mode);
+        return;
+    }
+
     match (indent, mode) {
         (Some(size), ListSpacingMode::Compact) => md.cleanup_with_indent_compact(size),
         (Some(size), ListSpacingMode::Loose) => md.cleanup_with_indent_loose(size),
@@ -71,4 +100,25 @@ fn apply_cleanup(md: &mut Markdown, indent: Option<usize>, mode: ListSpacingMode
         (None, ListSpacingMode::Loose) => md.cleanup_loose(),
         (None, ListSpacingMode::Normal) => md.cleanup(),
     };
+
+    if let Some(width) = fixed_width {
+        let reflowed = reflow_to_width(md.content(), width);
+        *md.content_mut() = reflowed;
+    }
+}
+
+fn apply_cleanup_no_strip(md: &mut Markdown, indent: Option<usize>, mode: ListSpacingMode) {
+    let indent_size = indent.unwrap_or(DEFAULT_INDENT);
+    let cleaned = match mode {
+        ListSpacingMode::Compact => {
+            cleanup_content_with_indent_compact_preserving_incidental(md.content(), indent_size)
+        }
+        ListSpacingMode::Loose => {
+            cleanup_content_with_indent_loose_preserving_incidental(md.content(), indent_size)
+        }
+        ListSpacingMode::Normal => {
+            cleanup_content_with_indent_preserving_incidental(md.content(), indent_size)
+        }
+    };
+    *md.content_mut() = cleaned;
 }

@@ -78,21 +78,32 @@ impl Markdown {
         match operation {
             ComposeOperation::Cleanup => {
                 let original_content = self.content.clone();
+                if options.incidental_newline_mode == cleanup::IncidentalNewlineMode::Strip {
+                    self.content = cleanup::strip_incidental_newlines(&self.content);
+                }
                 self.content = match options.list_spacing {
                     cleanup::ListSpacingMode::Normal => {
-                        cleanup::cleanup_content_with_indent(&self.content, options.indent_size)
-                    }
-                    cleanup::ListSpacingMode::Compact => {
-                        cleanup::cleanup_content_with_indent_compact(
+                        cleanup::cleanup_content_with_indent_preserving_incidental(
                             &self.content,
                             options.indent_size,
                         )
                     }
-                    cleanup::ListSpacingMode::Loose => cleanup::cleanup_content_with_indent_loose(
-                        &self.content,
-                        options.indent_size,
-                    ),
+                    cleanup::ListSpacingMode::Compact => {
+                        cleanup::cleanup_content_with_indent_compact_preserving_incidental(
+                            &self.content,
+                            options.indent_size,
+                        )
+                    }
+                    cleanup::ListSpacingMode::Loose => {
+                        cleanup::cleanup_content_with_indent_loose_preserving_incidental(
+                            &self.content,
+                            options.indent_size,
+                        )
+                    }
                 };
+                if let Some(width) = options.fixed_width {
+                    self.content = cleanup::reflow_to_width(&self.content, width);
+                }
                 report.cleanup_changed = self.content != original_content;
                 Ok(())
             }

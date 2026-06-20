@@ -113,7 +113,7 @@ However, even in this example, we don't know how expensive the operation is unti
 
 ### 3. Inline Post
 
-- [Cleaning](./inline/cleaning.md) - makes the markdown as standard bearing and consistent as possible                    
+- [Cleaning](./inline/cleaning.md) - makes the markdown as standard bearing and consistent as possible. Cleanup strips incidental single newlines by default, then applies list spacing and indentation cleanup, and can finally reflow prose with `ComposeOptions::with_fixed_width(...)`. Programmatic callers can keep source single newlines with `ComposeOptions::with_incidental_newline_mode(IncidentalNewlineMode::Preserve)`.
 - [Normalization](./inline/structural-normalization.md) - ensures that the heading structure is valid and fixes where it is not
 
 ### 4. Finalization
