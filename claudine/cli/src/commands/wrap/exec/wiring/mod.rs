@@ -30,7 +30,7 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::Path;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -62,8 +62,8 @@ use super::{
 // - `dispatch`   — request classification, hook-event mapping, and the
 //                  canonical hook-dispatch glue (`handle_request_dispatch`).
 // - `writer`     — the single serialized `WireWriter` over child stdin.
-// - `session`    — `run_kimi_wire_session` lifecycle plus its cancellation
-//                  wait loop and the cfg-split SIGINT forwarder.
+// - `session`    — `run_kimi_wire_session` lifecycle plus its bridge into the
+//                  shared cross-platform termination wait loop.
 mod builders;
 mod dispatch;
 mod session;
