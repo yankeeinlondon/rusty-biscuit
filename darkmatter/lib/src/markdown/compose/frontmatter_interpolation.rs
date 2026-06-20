@@ -92,7 +92,7 @@ impl EvaluationLookup for FrontmatterSeedState {
 
         // ctx.* prefix
         if let Some(ctx_key) = path.strip_prefix("ctx.") {
-            return self.context.get(ctx_key).cloned();
+            return self.context.get_effective(ctx_key);
         }
 
         // env.* prefix
@@ -141,7 +141,7 @@ impl EvaluationLookup for FrontmatterSeedState {
         if CONTEXT_VARIABLE_DESCRIPTORS.iter().any(|d| d.name == name) {
             return true;
         }
-        self.context.get(name).is_some()
+        self.context.get_effective(name).is_some()
     }
 
     fn context_variable_names(&self) -> &[&'static str] {
