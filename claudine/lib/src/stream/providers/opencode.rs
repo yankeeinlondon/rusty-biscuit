@@ -23,6 +23,7 @@
 //! - `error` / `step_error` → [`SemanticEvent::Error`].
 //! - Anything else → [`SemanticEvent::ProviderExtension`].
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use serde_json::{Map, Value};
@@ -198,12 +199,18 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
         let Some(text) = event.resolved_text() else {
             return;
         };
+        // MiniMax-M2/M3 (and similar reasoning models) wrap their chain of
+        // thought in literal `<think>…</think>` sentinels. OpenCode routes the
+        // enclosed prose to `reasoning` events, but the boundary delimiter can
+        // leak out as a lone `text` delta. Drop those orphan sentinel lines so
+        // they neither render in the main output nor pollute `assistant_text`.
+        let text = strip_orphan_think_delimiters(&text);
         if text.is_empty() {
             return;
         }
         self.assistant_text.push_str(&text);
         self.sink.on_semantic_event(SemanticEvent::OutputText {
-            text,
+            text: text.into_owned(),
             extra: Value::Object(self.base_extra(raw_kind)),
         });
     }
@@ -561,6 +568,44 @@ impl<S: SemanticEventSink> SemanticStreamParser for OpenCodeSemanticStreamParser
         summary.badges = crate::stream::badges::derive_badges(&summary, Provider::OpenCode);
         summary
     }
+}
+
+/// Remove standalone reasoning-delimiter sentinels (`<think>` / `</think>`)
+/// from an OpenCode `text` payload.
+///
+/// Reasoning models such as MiniMax-M2/M3 emit their chain of thought wrapped
+/// in literal `<think>…</think>` tokens. OpenCode forwards the enclosed prose as
+/// `reasoning` events, but the boundary delimiter itself can arrive as its own
+/// `text` delta — which would otherwise render as a stray `</think>` line in
+/// assistant output. Only a sentinel that occupies an entire line (after
+/// trimming) is dropped, so prose that legitimately mentions the tag inline
+/// (for example, documentation about `<think>`) is preserved verbatim.
+fn strip_orphan_think_delimiters(text: &str) -> Cow<'_, str> {
+    // Cheap reject: no `think>` substring means nothing to strip.
+    if !text.contains("think>") {
+        return Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut stripped_any = false;
+    for segment in text.split_inclusive('\n') {
+        let body = segment.strip_suffix('\n').unwrap_or(segment);
+        if matches!(body.trim(), "<think>" | "</think>") {
+            stripped_any = true;
+            continue;
+        }
+        out.push_str(segment);
+    }
+    if !stripped_any {
+        return Cow::Borrowed(text);
+    }
+    // When the delta was nothing but the delimiter (optionally wrapped in
+    // whitespace), the leftover whitespace carries no content — collapse it so
+    // no empty OutputText is emitted. Real content keeps its surrounding
+    // blank lines intact.
+    if out.trim().is_empty() {
+        return Cow::Owned(String::new());
+    }
+    Cow::Owned(out)
 }
 
 /// Map an OpenCode error envelope onto a typed [`SemanticErrorKind`].
@@ -951,6 +996,74 @@ mod tests {
             "must not synthesize a ToolCall when only a completion was observed; got {kinds:?}"
         );
         assert_eq!(n_results, 1, "must emit exactly one ToolResult");
+    }
+
+    #[test]
+    fn orphan_think_close_delimiter_in_text_is_dropped() {
+        // MiniMax-M2/M3 leak the `</think>` boundary token into OpenCode's
+        // `text` channel after the reasoning prose was already routed to
+        // `reasoning` events. The lone delimiter must not surface as output.
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"text","text":"</think>"}"#)
+            .unwrap();
+        parser
+            .feed_line(r#"{"type":"text","text":"\n</think>\n"}"#)
+            .unwrap();
+        parser
+            .feed_line(r#"{"type":"text","text":"<think>"}"#)
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        assert!(
+            collected.is_empty(),
+            "standalone think delimiters must not emit OutputText; got {collected:?}"
+        );
+        let summary = parser.finish(0);
+        assert_eq!(
+            summary.assistant_text, "",
+            "leaked delimiters must not accumulate into assistant_text"
+        );
+    }
+
+    #[test]
+    fn think_delimiter_packed_with_content_strips_only_the_delimiter_line() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"text","text":"</think>\n\nNow I'll commit."}"#)
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        let texts: Vec<&str> = collected
+            .iter()
+            .filter_map(|e| match e {
+                SemanticEvent::OutputText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            texts,
+            vec!["\nNow I'll commit."],
+            "the standalone delimiter line (and its terminator) is removed; \
+             the following blank line and real content are preserved"
+        );
+    }
+
+    #[test]
+    fn inline_think_mention_in_text_is_preserved() {
+        // Prose that legitimately references the tag (e.g. when the agent is
+        // editing this very codebase) must pass through untouched.
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"text","text":"The </think> token closes a reasoning block."}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        match &collected[0] {
+            SemanticEvent::OutputText { text, .. } => {
+                assert_eq!(text, "The </think> token closes a reasoning block.");
+            }
+            other => panic!("expected OutputText, got {other:?}"),
+        }
     }
 
     #[test]
