@@ -664,6 +664,28 @@ mod tests {
     }
 
     #[test]
+    fn discovered_null_mode_defaults_to_append() {
+        let tmp = TempDir::new().unwrap();
+        let raw = "---\nmode: null\n---\n\nBody.";
+        let path = write_temp_file(tmp.path(), "prompt.md", raw);
+
+        let source = SystemPromptSource::StandardDiscovered {
+            path,
+            scope: StandardPromptScope::Repo,
+        };
+
+        let result = prepare_system_prompt(source, raw).unwrap();
+
+        match result {
+            ResolvedSystemPrompt::Ready(prepared) => {
+                assert_eq!(prepared.mode, SystemPromptMode::Append);
+                assert!(prepared.composed_markdown.contains("Body."));
+            }
+            other => panic!("Expected Ready, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn discovered_explicit_append_mode_resolves_append() {
         // Spec test 2.2: explicit `mode: append` resolves to Append.
         let tmp = TempDir::new().unwrap();
