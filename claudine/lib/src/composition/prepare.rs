@@ -862,28 +862,28 @@ mod tests {
     }
 
     #[test]
-    fn implement_suggestions_prompt_rejects_malformed_spec_path() {
-        // The shipped prompt's `spec_path` frontmatter is a malformed
-        // whole-value interpolation — `{{ dirname(review) + '/spec.md') }}`
-        // carries an unbalanced paren. A whole-value `{{ … }}` is executable
-        // state, so composition must now abort with a frontmatter interpolation
-        // parse error that names `spec_path`, instead of leaking the raw
-        // template downstream as a successful effective-frontmatter value.
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let prompt_path = manifest_dir.join("../../prompts/implement-suggestions.md");
-        let original_text = fs::read_to_string(&prompt_path)
-            .unwrap_or_else(|e| panic!("failed to read {}: {e}", prompt_path.display()));
-        let markdown: Markdown = original_text.clone().into();
-        let source = ResolvedCompositionSource {
-            original_ref: prompt_path.to_str().unwrap().to_string(),
-            resolved_path: prompt_path.clone(),
-            original_text,
-            markdown,
-        };
-
+    fn malformed_whole_value_spec_path_is_rejected() {
+        // Regression for the original `implement-suggestions.md` reproduction:
+        // a `spec_path` frontmatter value that is a malformed whole-value
+        // interpolation — `{{ dirname(review) + '/spec.md') }}` carries an
+        // unbalanced paren. A whole-value `{{ … }}` is executable state, so
+        // composition must abort with a frontmatter interpolation parse error
+        // that names `spec_path`, instead of leaking the raw template
+        // downstream as a successful effective-frontmatter value. The fixture
+        // is self-contained — it must not read the shipped prompt, whose shape
+        // is free to change without breaking this guard.
         let dir = TempDir::new().unwrap();
         let review_file = dir.path().join("review.md");
         fs::write(&review_file, "# Review\n").unwrap();
+
+        let source = make_source(
+            &dir,
+            &[
+                ("title", json!("Implement Suggestions")),
+                ("spec_path", json!("{{ dirname(review) + '/spec.md') }}")),
+            ],
+            "Implement the suggestions from {{ spec_path }}.",
+        );
 
         let options = PrepareOptions {
             set_overrides: Some(json!({ "review": review_file.to_str().unwrap() })),
