@@ -96,12 +96,19 @@ pub(crate) fn execute_harness_attempt(
                 .and_then(|value| value.as_str())
                 .map(str::to_string)
         });
-    let runaway_guards = crate::commands::wrap::runaway_guard::resolve_runaway_guards(
-        provider,
-        run_model.as_deref(),
-        env_context,
-        Some(&materialized.frontmatter),
+    // Resolve + validate the guard inputs once (model-independent), then
+    // compile the in-scope set for the launch-time `run_model`. The
+    // validated inputs are kept (as an `Arc`) so the structured-stream sink
+    // can re-scope the exit-expression set when the provider reports its
+    // actual model via `SessionStart`.
+    let guard_inputs = Arc::new(
+        crate::commands::wrap::runaway_guard::resolve_guard_inputs(
+            provider,
+            env_context,
+            Some(&materialized.frontmatter),
+        )?,
     );
+    let runaway_guards = guard_inputs.compile_for_model(run_model.as_deref())?;
 
     let (
         exit_code,
@@ -128,8 +135,11 @@ pub(crate) fn execute_harness_attempt(
         )
         .with_context_extra(dispatch_context.clone());
         // Arm the content detector (Phase 6) before plumbing so
-        // `build_structured_plumbing` can wire the trip channel.
+        // `build_structured_plumbing` can wire the trip channel, and wire
+        // the re-scope source so a provider-reported `SessionStart` model
+        // can bring agent/model-scoped exit expressions into scope.
         sink.set_content_detector(runaway_guards.detector);
+        sink.set_guard_rescope_source(guard_inputs.clone(), run_model.as_deref());
         let live_metrics = sink.live_metrics();
         let stream_output = sink.stream_output();
         let watchdog_state = Some(sink.watchdog_state());

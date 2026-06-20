@@ -24,6 +24,13 @@ impl SemanticEventSink for LiveSemanticSink {
         } = &event
         {
             self.update_session_state(session_id, model);
+            // Re-scope the content detector's exit-expression set to the
+            // provider-reported model. The detector was first compiled with
+            // only the launch-time model hint (CLI `--model` / `MODEL` env /
+            // frontmatter `model`), which is often absent — so an
+            // agent/model-scoped exit expression matching the actual model
+            // only becomes active here.
+            self.rescope_for_model(model.as_deref());
             self.claude_api_key_source = extra
                 .get("api_key_source")
                 .and_then(Value::as_str)

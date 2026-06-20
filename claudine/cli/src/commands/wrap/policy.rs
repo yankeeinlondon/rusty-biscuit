@@ -197,11 +197,14 @@ pub(crate) fn build_structured_plumbing(
     use claudine::stream::semantic::{ObservedSemanticSink, SharedSemanticSink};
     use std::sync::atomic::AtomicBool;
 
-    // Whether the sink carries an armed content detector (Phase 6). When it
-    // does, this function owns the unified early-termination channel: the
-    // detector's trip sender and (for OpenCode) the stderr bridge's sender
-    // are clones feeding one receiver the wait loop polls.
-    let detector_armed = sink.has_content_detector();
+    // Whether the run wants a content-detector trip channel (Phase 6). True
+    // when a detector is already armed OR when a re-scope source could arm
+    // one on a provider-reported `SessionStart` model (the launch-time
+    // compile can legitimately produce no detector yet still need a channel).
+    // When true, this function owns the unified early-termination channel:
+    // the detector's trip sender and (for OpenCode) the stderr bridge's
+    // sender are clones feeding one receiver the wait loop polls.
+    let detector_armed = sink.wants_content_channel();
 
     if provider == Provider::OpenCode {
         let shared = SharedSemanticSink::new(sink);

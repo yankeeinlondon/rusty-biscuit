@@ -58,10 +58,19 @@ pub(crate) fn run_structured_stream_session(
     )
     .with_context_extra(dispatch_context.clone());
     // Arm the runaway-output content detector (Phase 6). Direct wrappers
-    // have no frontmatter layer; the model comes from `--model`.
-    let runaway_guards =
-        super::runaway_guard::resolve_runaway_guards(provider, args.model.as_deref(), env_context, None);
+    // have no frontmatter layer; the launch-time model comes from `--model`
+    // (often absent). Resolve + validate the guard inputs once, compile the
+    // in-scope set for the launch model, then hand the validated inputs to
+    // the sink so it can re-scope when the provider reports its actual model
+    // via `SessionStart`.
+    let guard_inputs = std::sync::Arc::new(super::runaway_guard::resolve_guard_inputs(
+        provider,
+        env_context,
+        None,
+    )?);
+    let runaway_guards = guard_inputs.compile_for_model(args.model.as_deref())?;
     sink.set_content_detector(runaway_guards.detector);
+    sink.set_guard_rescope_source(guard_inputs, args.model.as_deref());
     let live_metrics = sink.live_metrics();
     let stream_output = sink.stream_output();
     let watchdog_state = Some(sink.watchdog_state());
