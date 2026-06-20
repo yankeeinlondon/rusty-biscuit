@@ -343,6 +343,38 @@ at the top of each `windows_wait_loop` call.
 > runtime behavior must be validated in CI or on a Windows host before
 > claiming full parity. This is a known, flagged risk.
 
+#### Verification record
+
+| Surface | Status | Where |
+|---|---|---|
+| Unix — OS-keyboard Ctrl+C terminates the wrapped child | **Verified on macOS** — OS keyboard injection via cliclick into a real WezTerm window, L3, `RUN_LEVEL3=1` | `level3_wrap_ctrl_c.rs::level3_ctrl_c_terminates_wrapped_child` |
+| Unix — OS-keyboard Ctrl+C terminates even with a wall-clock `timeout` configured | **Verified on macOS** — OS keyboard injection via cliclick into a real WezTerm window, L3, `RUN_LEVEL3=1` | `level3_wrap_ctrl_c.rs::level3_ctrl_c_terminates_wrapped_child_with_timeout_configured` |
+| Unix — multiplexer Ctrl+C terminates the wrapped child | **Verified on macOS** | `level2_wrap_ctrl_c_tmux.rs::level2_ctrl_c_terminates_wrapped_child` (tmux `send-keys C-c`, L2 multiplexer injection) |
+| Unix — multiplexer Ctrl+C terminates even with a wall-clock `timeout` configured | **Verified on macOS** | `level2_wrap_ctrl_c_tmux.rs::level2_ctrl_c_terminates_wrapped_child_with_timeout_configured` (L2 multiplexer injection) |
+| Unix — visible per-press feedback line renders in a real terminal | **Verified on macOS** | `level2_interrupt_feedback_capture.rs::level2_interrupt_feedback_renders_in_tmux` (L2, asserts the `interrupt received` substring in `frame.raw`) |
+| Unix — process-signal SIGINT during prep exits 130 with notice | **Verified on macOS** | `wrap_sigint.rs::slow_compose_sigint_during_prep_exits_130_with_notice` (lower-level, retained) |
+| Windows — console Ctrl+C / Ctrl+Break terminates the Job-Object child (incl. with `timeout`) | **NOT verified — awaits a Windows host / CI** | `level3_wrap_ctrl_c.rs::windows_ctrl_c_verification_record` (`#[cfg(windows)]`, `#[ignore]`d with reason) |
+
+Ctrl+C termination is verified at two distinct injection levels. The genuine
+**L3** proof (`level3_wrap_ctrl_c.rs`) synthesises a real OS Ctrl+C chord with
+`cliclick` into a focused WezTerm window: the terminal emulator's own input
+encoder translates the keystroke to ETX → `SIGINT`, exercising the exact path a
+physical keypress takes. The **L2** proof (`level2_wrap_ctrl_c_tmux.rs`) uses
+tmux `send-keys C-c`, which is multiplexer-level terminal-CLI byte injection —
+tmux writes ETX into the pane and the pane's line discipline raises `SIGINT`,
+without the terminal emulator's input encoder ever participating. Both skip
+cleanly when their backend is absent (the L3 tests are macOS-only, since
+`cliclick` is the only injector wired into the harness), so the default `just
+test` run stays green on a host without a terminal backend. Run the OS-keyboard
+suite with `just test-l3` and the multiplexer suite (plus the feedback capture)
+with `just test-l2`.
+
+Honest scope: the macOS host validates the Unix arm of the unified wait loop.
+The Windows arm (`windows_wait_loop`) shares the loop's structure but uses a
+distinct `#[cfg(not(unix))]` implementation; its runtime behavior is encoded by
+`windows_ctrl_c_verification_record` for execution on a Windows host and is
+**not** claimed as verified until that run happens.
+
 ### Spawn × wait × timeout matrix
 
 After the wait-path unification, Ctrl+C terminates the child on **every**
