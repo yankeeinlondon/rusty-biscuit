@@ -15,7 +15,7 @@ feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 start:
     message: "🏃 starting implementation #{{ file_index(review) }} of `{{ parent_dir(review) }}` review suggestions (_using_ {{ctx.agent}}/{{ctx.model}} _in_ {{ctx.area}})"
 success:
-    message: "✅  implemented suggestions from review #{{ file_index(review) }} of `{{ parent_dir(review) }}`\n> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;**area:** {{ctx.area}}, **agent:** {{ctx.agent}}/{{ctx.model}}, **when:** {{ctx.now}}"
+    message: "✅  implemented suggestions from review **#{{ file_index(review) }}** of `{{ parent_dir(review) }}` in **{{ctx.area}}** package area"
     say: "the review suggestions for {{ title_case(without_date(parent_dir(review))) }} in {{ctx.area}} completed successfully"
     effect: bong
 failure:
