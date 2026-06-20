@@ -18,7 +18,7 @@ success:
     effect: "small-group-cheer"
 failure:
     stderr: "Feature Review {{iteration}} in the {{ctx.area}} package area failed to complete!"
-    message: "Feature Review #{{iteration}} for `{{ctx.area}}/{{dir}}` failed to complete!"
+    message: "Feature Review #{{iteration}} for `{{parent_dir(spec)}}` in **{{ ctx.area }}** failed to complete!"
     effect: two-tone
 ---
 # Review of {{title_case(without_date(parent_dir(spec)))}}
