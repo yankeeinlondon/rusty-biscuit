@@ -2,11 +2,14 @@
 $schema:
     review: file(required)
     spec: file
+    design: file
 ready: "{{ review && file_exists(review) ? frontmatter(review, 'ready') : null }}"
 index: "{{ is_indexed_file(review) ? file_index(review) : '' }}"
 has_index: "{{ is_number(index) }}"
 spec_path: "{{ dirname(review) + '/spec.md') }}"
+design_path: "{{ dirname(review) + '/design.md') }}"
 spec: "{{ file_exists(spec_path) ? spec_path : null }}"
+design: "{{ file_exists(design_path) ? design_path : null }}"
 
 start:
     message: "🏃 starting the _implementation_ of the `{{ parent_dir(review) }}` review suggestions ({{ctx.area}}, iteration #{{ file_index(review) }}, {{ctx.agent}}/{{ctx.model}})"
@@ -18,22 +21,30 @@ failure:
     message: "❌ the review suggestions from **{{ title_case(parent_dir(review)) }}** failed to complete!"
     effect: phase-jump-3
 ---
-- use the '{{ctx.area}}' agent skill
-- use the 'rust' skill when writing code
-- use the 'rust-testing' skill when writing or debugging tests
+## Key Documents
 
-**Review:** {{review}}
-**Iteration:** {{file_index(review)}}
+- **Review:** {{review}}
 ::block when="spec"
-**Specification:** {{spec_path}}
+- **Specification:** {{spec_path}}
+- **Iteration:** {{file_index(review)}}
 
 > **Note:**
 >
 > The review who's suggestions you are tasked with implementing was based
-> on the detected delta between the specification file above and the
+> on the detected _delta_ between the specification file above and the
 > actual implementation source code.
-
+::block when="design"
+> 
+> The design document above was created as a complimentary document to the
+> specification file.
 ::end-block
+::end-block
+
+## Skill Selection
+
+- use the '{{ctx.area}}' agent skill
+- use the 'rust' skill when writing code
+- use the 'rust-testing' skill when writing or debugging tests
 
 ::block when="ready"
 The review was marked as being **production ready** so there is no longer a need to continue the review-to-implement loop.

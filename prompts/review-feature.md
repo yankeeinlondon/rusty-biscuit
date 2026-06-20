@@ -45,17 +45,15 @@ You are performing a review of the functionality defined by the following docume
 
 ::block when="And(spec, design)"
 Read both the specification and design documents and then perform a review on the implementation:
+
 ::end-block
 ::block when="spec"
 Read both the specification document and then perform a review on the implementation:
+
 ::end-block
 ::block when="design"
 Read both the specification document and then perform a review on the implementation:
-::end-block
 
-::block when="iteration != 1"
-> **Note:** this is _not_ the first review we've done on this functionality but the prior review's
-> suggestions have now all been implemented.
 ::end-block
 
 - look for gaps in functionality that were designed but not implemented
@@ -99,6 +97,10 @@ test is at the wrong level under "Findings" with severity at least "high".
     - set the `agent` frontmatter property to "{{ctx.agent}}/{{ctx.model}}" 
     - set the `created` frontmatter property to "{{ctx.now}}"
 - Set the spec file's ({{spec}}) `review_iterations` Frontmatter property to '{{iteration}}'
+
+::block when="iteration != 1"
+> **Note:** this is _not_ the first review we've done on this functionality but the prior review's suggestions have now all been implemented.
+::end-block
 
 **IMPORTANT:**
 
