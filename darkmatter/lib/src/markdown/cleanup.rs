@@ -2359,6 +2359,34 @@ mod tests {
     }
 
     #[test]
+    fn reflow_to_width_keeps_han_run_atomic_and_overflows() {
+        // A contiguous Han run is a single whitespace-free token. v1 treats it
+        // like a long URL: never split between ideographs, allowed to overflow.
+        let content = "\u{6F22}".repeat(10);
+        let width = 8;
+        assert!(UnicodeWidthStr::width(content.as_str()) > width);
+
+        let reflowed = cleanup_to_fixed_width(&content, width);
+
+        assert_eq!(reflowed, content);
+        assert!(!reflowed.contains('\n'));
+    }
+
+    #[test]
+    fn reflow_to_width_keeps_thai_run_atomic_and_overflows() {
+        // Thai is spaceless but non-Han; the atomic-overflow contract holds for
+        // the whole curated spaceless set, not just CJK ideographs.
+        let content = "\u{0E2A}\u{0E27}\u{0E31}\u{0E2A}\u{0E14}\u{0E35}\u{0E0A}\u{0E32}\u{0E27}\u{0E42}\u{0E25}\u{0E01}";
+        let width = 6;
+        assert!(UnicodeWidthStr::width(content) > width);
+
+        let reflowed = cleanup_to_fixed_width(content, width);
+
+        assert_eq!(reflowed, content);
+        assert!(!reflowed.contains('\n'));
+    }
+
+    #[test]
     fn reflow_to_width_handles_empty_document() {
         assert_eq!(cleanup_to_fixed_width("", 80), "");
     }
