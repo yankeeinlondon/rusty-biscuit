@@ -701,9 +701,10 @@ fn find_matching_warning_reason(
 /// Every bare variable reachable in the parsed expression tree is checked, not
 /// just spans that are exactly `{{ variable }}`: a missing operand buried in a
 /// function argument (`{{ parent_dir(missing) }}`), comparison, or arithmetic
-/// node is rejected the same way a top-level `{{ missing }}` is. Fallback
-/// (`{{ x || 'y' }}`) and ternary (`{{ x ? 'a' : 'b' }}`) subtrees intentionally
-/// tolerate undefined operands, so they are skipped wholesale. `ctx.*` /
+/// node is rejected the same way a top-level `{{ missing }}` is. A ternary
+/// condition (`{{ missing ? 'a' : 'b' }}`) is descended because it is evaluated,
+/// but the ternary branch operands and fallback (`{{ x || 'y' }}`) subtrees
+/// intentionally tolerate undefined operands, so they are skipped. `ctx.*` /
 /// `env.*` / `doc` references resolve from outside the frontmatter and are
 /// skipped — a bare name resolves only against top-level frontmatter keys.
 ///
@@ -768,9 +769,10 @@ pub fn validate_no_undefined_lifecycle_variables(
 /// Recursively walks `expr`, returning the first frontmatter-scoped bare
 /// variable whose root key is undefined in the composed frontmatter.
 ///
-/// Fallback (`||`) and ternary subtrees are not descended: those forms exist
-/// precisely to tolerate an undefined operand, so a miss inside them is
-/// intentional, not a leak. Every other node — function-call arguments,
+/// A ternary condition is descended because it is evaluated during composition,
+/// but the ternary branch operands and fallback (`||`) subtrees are not: those
+/// forms exist precisely to tolerate an undefined operand, so a miss inside them
+/// is intentional, not a leak. Every other node — function-call arguments,
 /// comparisons, arithmetic, indexing, member access, unary, parens — is
 /// descended so an undefined variable buried in `parent_dir(missing)` is caught
 /// like a top-level `{{ missing }}`. The returned reference borrows from `expr`.
