@@ -6,7 +6,7 @@ ready: "{{ review && file_exists(review) ? frontmatter(review, 'ready') : null }
 index: "{{ is_indexed_file(review) ? file_index(review) : '' }}"
 has_index: "{{ is_number(index) }}"
 spec_path: "{{ dirname(review) + '/spec.md') }}"
-spec: "{{ file_exists(spec_path) ? spec_path : '' }}"
+spec: "{{ file_exists(spec_path) ? spec_path : null }}"
 
 start:
     message: "🏃 starting the _implementation_ of the `{{ parent_dir(review) }}` review suggestions ({{ctx.area}}, iteration #{{ file_index(review) }})"
@@ -22,30 +22,36 @@ failure:
 - use the 'rust' skill when writing code
 - use the 'rust-testing' skill when writing or debugging tests
 
+**Review:** {{review}}
+**Iteration:** {{file_index(review)}}
+::block when="spec"
+**Specification:** {{spec_path}}
+
+> **Note:**
+>
+> The review who's suggestions you are tasked with implementing was based
+> on the detected delta between the specification file above and the
+> actual implementation source code.
+
+::end-block
+
 ::block when="ready"
-The review -- {{ review }} -- was marked as being **production ready** so there is no longer a need to continue the review-to-implement loop.
+The review was marked as being **production ready** so there is no longer a need to continue the review-to-implement loop.
 
 Explain this to the caller and then exit.
 ::end-block
 ::block when="!ready"
-The review {{ review }} has completed in the {{ctx.area}} package area with suggestions for implementation.
+The review file above has completed in the {{ctx.area}} package area with a number of suggestions for implementation.
 
 Your task is to:
 
-1. act as an orchestrator and iterate over each suggestions serially
-2. for each suggestion call a subagent to:
+1. Act as an orchestrator and iterate over each suggestion (serially)
+2. For each suggestion call a subagent to:
     - implement the suggestion,
     - add tests to provide full test coverage for the suggestion,
     - and make sure that the implementation passes all tests (just test)
     - and has no lints (just lint)
     - tell the subagent to use the 'rust', 'rust-testing', and '{{ctx.area}}' agent skills
-3. when all suggestions have been implemented set the `implemented` frontmatter property to `true` on the review file ({{review}})
+3. When all suggestions have been implemented, set the `implemented` frontmatter property to `true` on the review file: {{review}}
 
-::block when="spec_path"
-> **Note:**
->
-> - this review's suggestions were based on evaluating the current implementation of the spec file:
->
-> {{ directory + '/spec.md' }}
-::end-block
 ::end-block
