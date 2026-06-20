@@ -306,6 +306,44 @@ pub struct AttemptOutcome {
     pub termination: ProcessTermination,
     /// Captured stderr text, if available.
     pub stderr_text: Option<String>,
+    /// Honest per-guard label carried from the stream summary so the failure
+    /// handler payload can read it. Populated for guard-driven terminations
+    /// (`"exit_expression"`, `"runaway_repetition"`, `"runaway_volume"`) and
+    /// for the legacy timeout labels (`"timeout"`, `"step_timeout"`); `None`
+    /// for non-error outcomes and for terminations that did not synthesize a
+    /// summary error kind.
+    pub error_kind: Option<String>,
+    /// Structured detail for a content-guard trip (exit-expression pattern,
+    /// repetition cycle, or volume counters). At most the cluster relevant
+    /// to the trip is populated; the remaining fields stay `None`. `None`
+    /// for non-guard terminations.
+    pub guard_context: Option<GuardContext>,
+}
+
+/// Structured detail for a content-guard trip, threaded from the stream
+/// summary into [`AttemptOutcome`] so the programmatic failure handler can
+/// branch on the guard kind without re-parsing the message string.
+///
+/// Every field is optional; only the cluster relevant to the trip is
+/// populated:
+/// - exit-expression → `pattern` (+ optional `scope`);
+/// - runaway-repetition → `cycle_len` + `repeats`;
+/// - runaway-volume → `lines` + `bytes`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuardContext {
+    /// Matched exit-expression pattern (literal substring or regex source).
+    pub pattern: Option<String>,
+    /// Exit-expression scope the run was checked against
+    /// (e.g. `"opencode/kimi-for-coding/k2p7"`).
+    pub scope: Option<String>,
+    /// Detected repetition cycle length `L`.
+    pub cycle_len: Option<usize>,
+    /// Consecutive matching cycles observed at trip time.
+    pub repeats: Option<usize>,
+    /// Per-turn (streaming) or per-run (capture) line counter at breach.
+    pub lines: Option<u64>,
+    /// Per-turn (streaming) or per-run (capture) byte counter at breach.
+    pub bytes: Option<u64>,
 }
 
 /// How a child process terminated.
@@ -320,6 +358,14 @@ pub enum ProcessTermination {
     Interrupted,
     /// Process could not be spawned.
     LaunchFailed,
+    /// Killed by a claudine content guard — an exit-expression match, a
+    /// runaway-repetition trip, or a volume-cap breach. Distinct from
+    /// [`Self::TimedOut`] (which routes through the `handle_timeout:`
+    /// retry path) and from [`Self::Interrupted`] (a user cancel that
+    /// suppresses failure handling). [`crate::harness::classify_failure`]
+    /// maps this to [`FailureEvent::AgentFailure`] so a runaway triggers
+    /// the normal fail-fast handler, never a retry.
+    Aborted,
 }
 
 impl std::fmt::Display for ProcessTermination {
@@ -329,6 +375,7 @@ impl std::fmt::Display for ProcessTermination {
             Self::TimedOut => write!(f, "timeout"),
             Self::Interrupted => write!(f, "interrupted"),
             Self::LaunchFailed => write!(f, "launch_failed"),
+            Self::Aborted => write!(f, "aborted"),
         }
     }
 }
