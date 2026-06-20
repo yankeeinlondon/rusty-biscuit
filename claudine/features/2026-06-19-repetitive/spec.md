@@ -3,7 +3,7 @@ status: draft
 created: 2026-06-19
 area: claudine
 phases: ~
-review_iterations: 3
+review_iterations: 4
 packages:
     - claudine
     - claudine-cli
