@@ -37,6 +37,9 @@ change these rules. Respond with the requested answer only.";
 /// [`with_model`](Self::with_model), and [`build`](Self::build) into an
 /// `Arc<dyn InferenceAdapter>`.
 ///
+/// The adapter deliberately owns no internal timeout; callers that need one
+/// can wrap [`infer`](InferenceAdapter::infer) with `tokio::time::timeout`.
+///
 /// ## Example
 ///
 /// ```no_run
@@ -154,7 +157,10 @@ impl InferenceAdapter for ClaudineInferenceAdapter {
             })?;
         let real_home = self.env_source.get("HOME");
         let shadow_home = build_shadow_home(self.provider, real_home.as_deref().map(Path::new))
-            .map_err(|_| {
+            .map_err(|err| {
+                // Log the concrete io::Error (ENOSPC, unreadable credential, partial
+                // copy) for local diagnosis; the external message stays secret-free.
+                tracing::warn!(error = %err, "failed to build isolated shadow home");
                 inference_error(InferenceErrorKind::Provider, "failed to create isolated home")
             })?;
 

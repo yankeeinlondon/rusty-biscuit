@@ -34,6 +34,15 @@ leak-timeout = { period = "100ms", result = "fail" }
 filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# Proptest-driven acceptance test exploring many randomized compose conditions.
+# Finishes in ~7s isolated but is squeezed toward (and past) the default 30s
+# termination ceiling under full parallel `just test darkmatter` load. Give it
+# the same generous leash as the rate-limit pause test so contention never kills
+# a healthy run while a genuine hang still trips the longer window.
+[[profile.default.overrides]]
+filter = 'test(=execution_subset_of_approval_across_randomized_conditions)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
 # Browser-tier tests spawn real headless Chrome, whose multi-process teardown
 # (helper + crashpad processes that inherit the test's stdout) routinely takes
 # longer than the default 100ms leak window — producing spurious LEAK-FAILs even
@@ -67,6 +76,13 @@ junit = { path = "test-results.xml" }
 
 [[profile.ci.overrides]]
 filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
+# See the default-profile note: the randomized-conditions proptest can approach
+# the 30s termination ceiling under full parallel load. CI hosts may be slower
+# still, so the same generous leash applies.
+[[profile.ci.overrides]]
+filter = 'test(=execution_subset_of_approval_across_randomized_conditions)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # See the default-profile note: headless-Chrome teardown exceeds the 100ms leak

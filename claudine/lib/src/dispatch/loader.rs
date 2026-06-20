@@ -99,6 +99,16 @@ pub fn compile_canonical_runtime(
     _repo_root: Option<&Path>,
 ) -> Result<CanonicalRuntimeConfig> {
     // 1. Compile event bindings
+    let compiled_matchers: HashMap<AgenticEvent, Option<RuntimeMatcher>> = compile_many(
+        &config
+            .matchers
+            .iter()
+            .map(|(event, raw)| (*event, raw.as_str()))
+            .collect::<Vec<_>>(),
+    )
+    .into_iter()
+    .collect();
+
     let mut events = HashMap::new();
     for (event, actions) in &config.actions {
         let compiled_mappers = actions
@@ -106,10 +116,7 @@ pub fn compile_canonical_runtime(
             .map(|action| compile_canonical_action_mapper(action, *event))
             .collect::<Result<Vec<_>>>()?;
 
-        let matcher = config
-            .matchers
-            .get(event)
-            .and_then(|raw| RuntimeMatcher::compile(raw));
+        let matcher = compiled_matchers.get(event).and_then(|m| m.clone());
 
         events.insert(
             *event,
@@ -126,11 +133,11 @@ pub fn compile_canonical_runtime(
     // runtime binding so that future protect-only or logging-only flows
     // can honor the matcher. Today this is harmless: dispatch will skip
     // the actions block but still run protect/log paths.
-    for (event, raw) in &config.matchers {
+    for event in config.matchers.keys() {
         if events.contains_key(event) {
             continue;
         }
-        let matcher = RuntimeMatcher::compile(raw);
+        let matcher = compiled_matchers.get(event).and_then(|m| m.clone());
         events.insert(
             *event,
             RuntimeEventBinding {

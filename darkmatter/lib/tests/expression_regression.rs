@@ -642,10 +642,32 @@ Terminal: {{ terminal("<bold>x</bold>") }}"#;
 #[serial_test::serial(env_agent_model)]
 fn regression_ctx_agent_in_interpolation() {
     let content = r#"---
+---
 Agent: {{ ctx.agent }}"#;
     let md: Markdown = content.into();
     let (composed, _) = with_agent_env("opencode", || md.compose().unwrap());
     assert!(composed.content().contains("Agent: opencode"));
+}
+
+#[test]
+fn regression_ctx_agent_uses_compose_env_override() {
+    let content = r#"---
+---
+Agent: {{ ctx.agent }}
+Model: {{ ctx.model }}"#;
+    let md: Markdown = content.into();
+    let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
+    ctx.env_mut()
+        .insert("AGENT".to_string(), "  codex  ".to_string());
+    ctx.env_mut()
+        .insert("MODEL".to_string(), "  gpt-5  ".to_string());
+
+    let (composed, _) = md
+        .compose_with(ComposeOptions::new_with_context(ctx))
+        .unwrap();
+
+    assert!(composed.content().contains("Agent: codex"));
+    assert!(composed.content().contains("Model: gpt-5"));
 }
 
 #[test]

@@ -31,12 +31,15 @@ pub(crate) fn check_dirty_source_code(root: &Path, expect_dirty: bool) -> CheckR
         .map_err(|e| format!("failed to run git status: {e}"))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let dirty_files: Vec<&str> = stdout
+    let dirty_files: Vec<Vec<String>> = stdout
         .lines()
-        .filter(|line| {
-            // git status --porcelain format: XY filename
-            let filename = line.get(3..).unwrap_or("").trim();
-            is_source_file(filename)
+        .filter_map(|line| {
+            let paths = parse_porcelain_paths(line);
+            if paths.iter().any(|p| is_source_file(p)) {
+                Some(paths)
+            } else {
+                None
+            }
         })
         .collect();
 
@@ -53,11 +56,29 @@ pub(crate) fn check_dirty_source_code(root: &Path, expect_dirty: bool) -> CheckR
             "dirty source code found: {}",
             dirty_files
                 .iter()
-                .map(|l| l.get(3..).unwrap_or("").trim())
+                .map(|paths| paths.join(" -> "))
                 .collect::<Vec<_>>()
                 .join(", ")
         ))
     }
+}
+
+/// Parse a `git status --porcelain` line into one or more file paths.
+///
+/// Rename entries (`R  old -> new`) yield both paths. Quoted paths
+/// (`"path with spaces"`) have their surrounding double quotes stripped.
+fn parse_porcelain_paths(line: &str) -> Vec<String> {
+    let status = line.get(0..2).unwrap_or("");
+    let rest = line.get(3..).unwrap_or("").trim();
+    let raw_paths: Vec<&str> = if status.starts_with('R') {
+        rest.split(" -> ").collect()
+    } else {
+        vec![rest]
+    };
+    raw_paths
+        .into_iter()
+        .map(|p| p.trim_matches('"').to_string())
+        .collect()
 }
 
 fn is_source_file(path: &str) -> bool {
@@ -85,5 +106,52 @@ fn find_git_repo_root(start: &Path) -> Option<std::path::PathBuf> {
         if !current.pop() {
             return None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_regular_porcelain_line() {
+        assert_eq!(
+            parse_porcelain_paths(" M src/main.rs"),
+            vec!["src/main.rs".to_string()]
+        );
+    }
+
+    #[test]
+    fn parse_quoted_path_with_spaces() {
+        assert_eq!(
+            parse_porcelain_paths(" M \"src/my file.rs\""),
+            vec!["src/my file.rs".to_string()]
+        );
+    }
+
+    #[test]
+    fn parse_rename_line() {
+        assert_eq!(
+            parse_porcelain_paths("R  old_name.rs -> new_name.rs"),
+            vec!["old_name.rs".to_string(), "new_name.rs".to_string()]
+        );
+    }
+
+    #[test]
+    fn parse_rename_with_quoted_paths() {
+        assert_eq!(
+            parse_porcelain_paths("R  \"old name.rs\" -> \"new name.rs\""),
+            vec!["old name.rs".to_string(), "new name.rs".to_string()]
+        );
+    }
+
+    #[test]
+    fn is_source_file_recognizes_extensions_and_filenames() {
+        assert!(is_source_file("src/main.rs"));
+        assert!(is_source_file("lib.js"));
+        assert!(is_source_file("justfile"));
+        assert!(is_source_file("Cargo.toml"));
+        assert!(!is_source_file("README.md"));
+        assert!(!is_source_file("image.png"));
     }
 }

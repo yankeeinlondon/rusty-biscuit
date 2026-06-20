@@ -182,7 +182,8 @@ impl SyncService {
         expected_peer_node_id: &str,
     ) -> Result<SyncOutcome, SyncError> {
         let (send, recv) = connection.open_bi().await?;
-        self.run_session(send, recv, Some(expected_peer_node_id.to_string())).await
+        self.run_session(send, recv, Some(expected_peer_node_id.to_string()), None)
+            .await
     }
 
     /// Drive a sync session as the responder. Accepts a bidi stream
@@ -196,7 +197,23 @@ impl SyncService {
         send: SendStream,
         recv: RecvStream,
     ) -> Result<SyncOutcome, SyncError> {
-        self.run_session(send, recv, None).await
+        self.run_session(send, recv, None, None).await
+    }
+
+    /// Like [`SyncService::sync_responder`] but notifies `on_peer_identified`
+    /// once the peer's `node_id` has been authenticated. The registry uses
+    /// this to re-key an inbound placeholder record under the peer's real
+    /// identity.
+    pub async fn sync_responder_with_callback<F>(
+        &self,
+        send: SendStream,
+        recv: RecvStream,
+        on_peer_identified: F,
+    ) -> Result<SyncOutcome, SyncError>
+    where
+        F: FnOnce(String) + Send + 'static,
+    {
+        self.run_session(send, recv, None, Some(Box::new(on_peer_identified))).await
     }
 
     fn assert_paired(&self, peer_node_id: &str) -> Result<(), SyncError> {
@@ -318,6 +335,7 @@ impl SyncService {
         mut send: SendStream,
         mut recv: RecvStream,
         expected_peer_node_id: Option<String>,
+        on_peer_identified: Option<Box<dyn FnOnce(String) + Send>>,
     ) -> Result<SyncOutcome, SyncError> {
         let work = async {
             let mut outcome = SyncOutcome::default();
@@ -372,6 +390,9 @@ impl SyncService {
             } else {
                 // Responder path: require pre-existing pairing.
                 self.assert_paired(&peer_node_id_hex)?;
+            }
+            if let Some(callback) = on_peer_identified {
+                callback(peer_node_id_hex.clone());
             }
 
             // ---- Advertise phase (we send all chunks we have) ----
@@ -447,14 +468,22 @@ impl SyncService {
                 } else {
                     PayloadKind::Delta
                 };
-                let envelope = self.sealer.lock().seal(
-                    document_id.clone(),
-                    payload_kind,
-                    exported.bytes,
-                );
+                // Seal and capture the following counter inside the same
+                // lock scope so the persisted counter cannot lag behind
+                // a concurrent seal.
+                let (envelope, counter_to_persist) = {
+                    let mut sealer = self.sealer.lock();
+                    let envelope = sealer.seal(
+                        document_id.clone(),
+                        payload_kind,
+                        exported.bytes,
+                    );
+                    let counter = sealer.next_counter();
+                    (envelope, counter)
+                };
                 self.storage.save_outbound_counter(
                     &self.identity.node_id(),
-                    self.sealer.lock().next_counter(),
+                    counter_to_persist,
                 )?;
                 let frame = SyncFrame {
                     kind: Some(sync_frame::Kind::Delta(SyncDelta {
@@ -486,7 +515,6 @@ impl SyncService {
             send.finish().ok();
 
             // ---- Read remote deltas and apply them ---------------
-            let mut inbox = EnvelopeInbox::new();
             loop {
                 let (frame, received) = read_frame(&mut recv).await?;
                 outcome.received_bytes += received;
@@ -497,14 +525,29 @@ impl SyncService {
                             .envelope
                             .ok_or_else(|| SyncError::protocol("delta missing envelope"))?;
                         let envelope = wire.into_envelope()?;
-                        let advanced = self.receive_delta(
-                            &peer_node_id_hex,
-                            &chunk,
-                            &delta.chunk_id,
-                            &envelope,
-                            delta.is_snapshot,
-                            &mut inbox,
-                        )?;
+                        // Run the synchronous redb persistence off the
+                        // tokio worker thread.
+                        let advanced = tokio::task::spawn_blocking({
+                            let service = self.clone();
+                            let peer_node_id_hex = peer_node_id_hex.clone();
+                            let chunk = chunk.clone();
+                            let delta_chunk_id = delta.chunk_id.clone();
+                            let envelope = envelope.clone();
+                            let is_snapshot = delta.is_snapshot;
+                            move || {
+                                let mut inbox = EnvelopeInbox::new();
+                                service.receive_delta(
+                                    &peer_node_id_hex,
+                                    &chunk,
+                                    &delta_chunk_id,
+                                    &envelope,
+                                    is_snapshot,
+                                    &mut inbox,
+                                )
+                            }
+                        })
+                        .await
+                        .map_err(|e| SyncError::protocol(e.to_string()))??;
                         let entry = chunk_outcomes.entry(chunk.as_path()).or_insert(
                             SyncChunkOutcome {
                                 chunk_id: chunk.as_path(),

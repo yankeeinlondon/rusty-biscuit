@@ -374,8 +374,9 @@ impl CompositionKind {
             Self::Inline => {
                 // Captured once for frontmatter-excerpt enrichment of any inline
                 // contract error returned below; gates whether the YAML block is
-                // shown (TTY) or withheld (pipe/CI).
-                let stderr_is_tty = std::io::stderr().is_terminal();
+                // shown (TTY or FORCE_COLOR) or withheld (pipe/CI/NO_COLOR).
+                let stderr_is_tty = std::io::stderr().is_terminal()
+                    || std::env::var_os("FORCE_COLOR").is_some();
 
                 // -- Fail-fast: inline-compose / sequence mismatch ------------------
                 //

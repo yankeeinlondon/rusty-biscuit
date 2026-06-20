@@ -92,7 +92,7 @@ impl EvaluationLookup for FrontmatterSeedState {
 
         // ctx.* prefix
         if let Some(ctx_key) = path.strip_prefix("ctx.") {
-            return self.context.get(ctx_key).cloned();
+            return self.context.get_effective(ctx_key);
         }
 
         // env.* prefix
@@ -141,7 +141,7 @@ impl EvaluationLookup for FrontmatterSeedState {
         if CONTEXT_VARIABLE_DESCRIPTORS.iter().any(|d| d.name == name) {
             return true;
         }
-        self.context.get(name).is_some()
+        self.context.get_effective(name).is_some()
     }
 
     fn context_variable_names(&self) -> &[&'static str] {
@@ -174,8 +174,10 @@ fn rewrite_value<L: EvaluationLookup>(
 ) -> Result<(Value, usize, Vec<ComposeWarning>), MarkdownError> {
     match value {
         Value::String(s) => {
-            // Preserve scalar type when the whole value is one `{{ expr }}`
-            // (e.g. `{{ false }}` stays a boolean), else rewrite as a string.
+            // A whole-value `{{ expr }}` is executable state, not text: it is
+            // parsed and evaluated directly (preserving its typed result), and
+            // a parse/eval failure is fatal regardless of `fail_fast`. Mixed
+            // text rewrites leniently as a string. See [`interpolate_value`].
             interpolate_value(s, evaluator, fail_fast, "frontmatter-interpolation")
         }
         Value::Array(arr) => {
@@ -204,6 +206,19 @@ fn rewrite_value<L: EvaluationLookup>(
         }
         // Number, Bool, Null — pass through
         other => Ok((other.clone(), 0, vec![])),
+    }
+}
+
+/// Prepends the frontmatter key to a rewrite error so a whole-value
+/// interpolation failure names the offending key alongside the expression text
+/// the underlying error already carries. Non-`Transform` errors pass through
+/// untouched.
+fn key_scoped_error(key: &str, err: MarkdownError) -> MarkdownError {
+    match err {
+        MarkdownError::Transform(msg) => {
+            MarkdownError::Transform(format!("frontmatter key '{key}': {msg}"))
+        }
+        other => other,
     }
 }
 
@@ -237,6 +252,64 @@ pub(crate) fn interpolate_frontmatter(
     fail_fast: bool,
     defer_shell_pending: bool,
     resolution_context: Option<ResolutionContext>,
+) -> Result<FrontmatterInterpolationReport, MarkdownError> {
+    interpolate_frontmatter_impl(
+        frontmatter,
+        context,
+        fail_fast,
+        defer_shell_pending,
+        resolution_context,
+        false,
+    )
+}
+
+/// Best-effort variant for condition-blind pre-flight shell-command collection.
+///
+/// Identical to [`interpolate_frontmatter`] except that a per-key evaluation
+/// failure is swallowed for that one key instead of aborting the whole pass.
+/// The motivating case: pre-flight collection runs context-free
+/// (`resolution_context = None`), so a key invoking a filesystem function such
+/// as `frontmatter()` or `file_exists()` (which require a resolution context)
+/// errors. Aborting the pass on that error starves the post-main *fallback*
+/// pass — the only place a shell-pending `$(...)` key whose template is
+/// transitively blocked (e.g. `dir: "$(dirname '{{ spec || design }}')"` where
+/// `design` references `dir`) gets resolved. The collector would then approve
+/// the command with its raw `{{ … }}` template intact while execution runs the
+/// resolved form, producing a spurious "command not pre-approved" failure.
+///
+/// Tolerating per-key failures keeps the approval set a faithful superset of
+/// what execution will run; keys that legitimately cannot evaluate here are
+/// irrelevant to shell-command discovery, and the real run surfaces their
+/// errors with full diagnostics.
+pub(crate) fn interpolate_frontmatter_best_effort(
+    frontmatter: &mut Frontmatter,
+    context: &ComposeContext,
+    fail_fast: bool,
+    defer_shell_pending: bool,
+    resolution_context: Option<ResolutionContext>,
+) -> Result<FrontmatterInterpolationReport, MarkdownError> {
+    interpolate_frontmatter_impl(
+        frontmatter,
+        context,
+        fail_fast,
+        defer_shell_pending,
+        resolution_context,
+        true,
+    )
+}
+
+/// Shared implementation behind [`interpolate_frontmatter`] and
+/// [`interpolate_frontmatter_best_effort`]. When `best_effort` is `true`, a
+/// per-key rewrite error is skipped (the key is left unresolved) rather than
+/// propagated, so the remaining keys — including fallback-resolved shell-pending
+/// keys — still reach their final shape.
+fn interpolate_frontmatter_impl(
+    frontmatter: &mut Frontmatter,
+    context: &ComposeContext,
+    fail_fast: bool,
+    defer_shell_pending: bool,
+    resolution_context: Option<ResolutionContext>,
+    best_effort: bool,
 ) -> Result<FrontmatterInterpolationReport, MarkdownError> {
     let fm = frontmatter.as_map();
 
@@ -278,6 +351,15 @@ pub(crate) fn interpolate_frontmatter(
 
     let templated_set: HashSet<String> = templated_keys.iter().cloned().collect();
     let mut resolved: HashSet<String> = HashSet::new();
+    // Best-effort only: keys whose evaluation failed here (e.g. a context-free
+    // call to a filesystem function such as `file_exists`). A key that errors
+    // contributes no value to `seed_map`, so any sibling that references it must
+    // NOT be finalized — resolving it would substitute the errored key as
+    // empty/undefined and bake a value execution will never produce into the
+    // result (and, for a `$(...)` key, into the pre-flight approval set). Such
+    // dependents are propagated into this set and left unresolved, mirroring the
+    // shell-pending deferral.
+    let mut errored: HashSet<String> = HashSet::new();
     let mut total_replacements = 0;
     let mut all_warnings = Vec::new();
 
@@ -303,10 +385,38 @@ pub(crate) fn interpolate_frontmatter(
                 continue;
             }
 
+            // A dependency errored in best-effort mode: this key cannot resolve
+            // to a faithful value. Mark it errored too (so its own dependents
+            // defer transitively) and leave its original text in place. The
+            // dependency-order loop guarantees the errored ref is already known
+            // by the time this key becomes eligible.
+            if best_effort && refs.iter().any(|r| errored.contains(r)) {
+                errored.insert(key.clone());
+                resolved.insert(key.clone());
+                made_progress = true;
+                continue;
+            }
+
             let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone())
                 .with_resolution_context(resolution_context.clone());
             let evaluator = Evaluator::new(&seed_state);
-            let (new_value, count, mut warnings) = rewrite_value(original, &evaluator, fail_fast)?;
+            let (new_value, count, mut warnings) =
+                match rewrite_value(original, &evaluator, fail_fast)
+                    .map_err(|e| key_scoped_error(key, e))
+                {
+                    Ok(triple) => triple,
+                    Err(_) if best_effort => {
+                        // Record the failure and mark resolved so the fixpoint
+                        // loop makes progress and the fallback pass still runs
+                        // for the other keys; leave this key's original
+                        // (unresolved) value in place.
+                        errored.insert(key.clone());
+                        resolved.insert(key.clone());
+                        made_progress = true;
+                        continue;
+                    }
+                    Err(e) => return Err(e),
+                };
 
             for w in &mut warnings {
                 w.message = format!("key '{}': {}", key, w.message);
@@ -332,8 +442,12 @@ pub(crate) fn interpolate_frontmatter(
     // against expanded values. A direct-ref check is not enough: a key like
     // `review_path: "@{{area}}/{{review}}"` reaches a shell-pending `dir` only
     // through `review`, and finalizing it here would bake in an empty `review`.
-    let shell_blocked =
-        transitively_shell_blocked_keys(&templated_keys, &original_values, &shell_pending_keys);
+    let shell_blocked = transitively_shell_blocked_keys(
+        &templated_keys,
+        &original_values,
+        &shell_pending_keys,
+        &seed_map,
+    );
 
     for key in &templated_keys {
         if resolved.contains(key) {
@@ -349,10 +463,26 @@ pub(crate) fn interpolate_frontmatter(
             continue;
         }
 
+        // Same errored-dependency guard as the main loop: a key reaching the
+        // fallback that still references an errored key must stay raw rather
+        // than finalize with the errored key substituted as empty.
+        if best_effort && extract_frontmatter_key_refs(original).iter().any(|r| errored.contains(r)) {
+            errored.insert(key.clone());
+            continue;
+        }
+
         let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone())
             .with_resolution_context(resolution_context.clone());
         let evaluator = Evaluator::new(&seed_state);
-        let (new_value, count, mut warnings) = rewrite_value(original, &evaluator, fail_fast)?;
+        let (new_value, count, mut warnings) = match rewrite_value(original, &evaluator, fail_fast)
+            .map_err(|e| key_scoped_error(key, e))
+        {
+            Ok(triple) => triple,
+            // Best-effort: leave this key's original value in place and keep
+            // resolving the rest (see [`interpolate_frontmatter_best_effort`]).
+            Err(_) if best_effort => continue,
+            Err(e) => return Err(e),
+        };
 
         for w in &mut warnings {
             w.message = format!("key '{}': {}", key, w.message);
@@ -384,6 +514,7 @@ fn transitively_shell_blocked_keys(
     templated_keys: &[String],
     original_values: &HashMap<String, Value>,
     shell_pending_keys: &HashSet<String>,
+    seed_map: &HashMap<String, Value>,
 ) -> HashSet<String> {
     let mut blocked: HashSet<String> = HashSet::new();
     if shell_pending_keys.is_empty() {
@@ -399,7 +530,12 @@ fn transitively_shell_blocked_keys(
             let Some(original) = original_values.get(key) else {
                 continue;
             };
-            let is_blocked = extract_frontmatter_key_refs(original)
+            let is_blocked = extract_frontmatter_key_refs_for_shell_blocking(
+                original,
+                shell_pending_keys,
+                &blocked,
+                seed_map,
+            )
                 .iter()
                 .any(|r| shell_pending_keys.contains(r) || blocked.contains(r));
             if is_blocked {
@@ -413,6 +549,218 @@ fn transitively_shell_blocked_keys(
     }
 
     blocked
+}
+
+fn extract_frontmatter_key_refs_for_shell_blocking(
+    value: &Value,
+    shell_pending_keys: &HashSet<String>,
+    blocked_keys: &HashSet<String>,
+    seed_map: &HashMap<String, Value>,
+) -> Vec<String> {
+    let mut refs = Vec::new();
+    collect_frontmatter_key_refs_for_shell_blocking(
+        value,
+        &mut refs,
+        shell_pending_keys,
+        blocked_keys,
+        seed_map,
+    );
+    refs.sort();
+    refs.dedup();
+    refs
+}
+
+fn collect_frontmatter_key_refs_for_shell_blocking(
+    value: &Value,
+    refs: &mut Vec<String>,
+    shell_pending_keys: &HashSet<String>,
+    blocked_keys: &HashSet<String>,
+    seed_map: &HashMap<String, Value>,
+) {
+    match value {
+        Value::String(s) => {
+            for loc in ExpressionFinder::find_all_plain(s) {
+                let Ok(expr) = parse(&loc.expression) else {
+                    continue;
+                };
+                collect_variable_roots_for_shell_blocking(
+                    &expr,
+                    refs,
+                    shell_pending_keys,
+                    blocked_keys,
+                    seed_map,
+                );
+            }
+        }
+        Value::Array(arr) => arr.iter().for_each(|v| {
+            collect_frontmatter_key_refs_for_shell_blocking(
+                v,
+                refs,
+                shell_pending_keys,
+                blocked_keys,
+                seed_map,
+            )
+        }),
+        Value::Object(obj) => obj.values().for_each(|v| {
+            collect_frontmatter_key_refs_for_shell_blocking(
+                v,
+                refs,
+                shell_pending_keys,
+                blocked_keys,
+                seed_map,
+            )
+        }),
+        _ => {}
+    }
+}
+
+fn collect_variable_roots_for_shell_blocking(
+    expr: &Expr,
+    refs: &mut Vec<String>,
+    shell_pending_keys: &HashSet<String>,
+    blocked_keys: &HashSet<String>,
+    seed_map: &HashMap<String, Value>,
+) {
+    match expr {
+        Expr::Fallback { primary, fallback } => match static_truthiness(primary, seed_map) {
+            Some(true) => collect_variable_roots(primary, refs),
+            Some(false) => collect_variable_roots_for_shell_blocking(
+                fallback,
+                refs,
+                shell_pending_keys,
+                blocked_keys,
+                seed_map,
+            ),
+            None => {
+                let mut primary_refs = Vec::new();
+                collect_variable_roots(primary, &mut primary_refs);
+                let primary_depends_on_shell = primary_refs
+                    .iter()
+                    .any(|r| shell_pending_keys.contains(r) || blocked_keys.contains(r));
+                refs.extend(primary_refs);
+                if primary_depends_on_shell {
+                    collect_variable_roots_for_shell_blocking(
+                        fallback,
+                        refs,
+                        shell_pending_keys,
+                        blocked_keys,
+                        seed_map,
+                    );
+                } else {
+                    collect_variable_roots(fallback, refs);
+                }
+            }
+        },
+        Expr::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            collect_variable_roots_for_shell_blocking(
+                condition,
+                refs,
+                shell_pending_keys,
+                blocked_keys,
+                seed_map,
+            );
+            collect_variable_roots_for_shell_blocking(
+                then_branch,
+                refs,
+                shell_pending_keys,
+                blocked_keys,
+                seed_map,
+            );
+            collect_variable_roots_for_shell_blocking(
+                else_branch,
+                refs,
+                shell_pending_keys,
+                blocked_keys,
+                seed_map,
+            );
+        }
+        Expr::UnaryNot(inner)
+        | Expr::UnaryMinus(inner)
+        | Expr::Paren(inner)
+        | Expr::MemberAccess { base: inner, .. } => collect_variable_roots_for_shell_blocking(
+            inner,
+            refs,
+            shell_pending_keys,
+            blocked_keys,
+            seed_map,
+        ),
+        Expr::Comparison { left, right, .. } | Expr::Binary { left, right, .. } => {
+            collect_variable_roots_for_shell_blocking(
+                left,
+                refs,
+                shell_pending_keys,
+                blocked_keys,
+                seed_map,
+            );
+            collect_variable_roots_for_shell_blocking(
+                right,
+                refs,
+                shell_pending_keys,
+                blocked_keys,
+                seed_map,
+            );
+        }
+        Expr::Index { base, index } => {
+            collect_variable_roots_for_shell_blocking(
+                base,
+                refs,
+                shell_pending_keys,
+                blocked_keys,
+                seed_map,
+            );
+            collect_variable_roots_for_shell_blocking(
+                index,
+                refs,
+                shell_pending_keys,
+                blocked_keys,
+                seed_map,
+            );
+        }
+        Expr::FunctionCall { args, .. } => {
+            for arg in args {
+                collect_variable_roots_for_shell_blocking(
+                    arg,
+                    refs,
+                    shell_pending_keys,
+                    blocked_keys,
+                    seed_map,
+                );
+            }
+        }
+        _ => collect_variable_roots(expr, refs),
+    }
+}
+
+fn static_truthiness(expr: &Expr, seed_map: &HashMap<String, Value>) -> Option<bool> {
+    match expr {
+        Expr::StringLiteral(value) => Some(!value.is_empty()),
+        Expr::NumberLiteral(value) => Some(*value != 0.0),
+        Expr::BoolLiteral(value) => Some(*value),
+        Expr::Paren(inner) => static_truthiness(inner, seed_map),
+        Expr::Variable(path) => {
+            let root = path.strip_prefix("doc.").unwrap_or(path);
+            if root == "doc" || root.starts_with("ctx.") || root.starts_with("env.") {
+                return None;
+            }
+            let (root, rest) = root.split_once('.').unwrap_or((root, ""));
+            let value = seed_map.get(root)?;
+            if rest.is_empty() {
+                Some(super::expression::is_truthy(value))
+            } else {
+                get_nested(value, rest).map(|nested| super::expression::is_truthy(&nested))
+            }
+        }
+        Expr::Fallback { primary, fallback } => match static_truthiness(primary, seed_map) {
+            Some(true) => Some(true),
+            Some(false) => static_truthiness(fallback, seed_map),
+            None => None,
+        },
+        _ => None,
+    }
 }
 
 /// Extracts frontmatter-key references from a JSON value tree.
@@ -692,6 +1040,157 @@ mod tests {
             assert_eq!(fm.as_map().get("base"), Some(&json!("/path/to/something")));
         }
 
+        /// Frontmatter mirroring the `review-feature.md` shape that surfaced the
+        /// pre-flight "command not pre-approved" bug:
+        ///
+        /// - `dir` is a shell-pending `$(...)` directive whose template
+        ///   (`{{ spec || design }}`) is transitively blocked, so it resolves
+        ///   only in the post-main fallback pass;
+        /// - `iteration` invokes the `frontmatter()` filesystem function, which
+        ///   errors in a context-free pass (`resolution_context = None`).
+        fn review_feature_shape() -> Frontmatter {
+            fm_from_json(json!({
+                "spec": "fixes/x/spec.md",
+                "dir": "$(dirname '{{ spec || design }}')",
+                "design": "{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}",
+                "iteration": "{{ frontmatter(spec, 'review_iterations') ? frontmatter(spec, 'review_iterations') + 1 : 1 }}",
+            }))
+        }
+
+        #[test]
+        fn best_effort_resolves_shell_pending_when_unrelated_key_errors() {
+            // Regression: a context-requiring key (`iteration` -> `frontmatter()`)
+            // errors in the context-free pre-flight pass, but that must NOT abort
+            // before the fallback pass resolves the shell-pending `dir`. The
+            // command collector relies on `dir` reaching its final shape so the
+            // approval set matches what execution runs.
+            let mut fm = review_feature_shape();
+            interpolate_frontmatter_best_effort(&mut fm, &test_context(), false, true, None)
+                .expect("best-effort tolerates the per-key error");
+
+            // `dir`'s `{{ spec || design }}` is fully resolved — no template left.
+            assert_eq!(
+                fm.as_map().get("dir"),
+                Some(&json!("$(dirname 'fixes/x/spec.md')")),
+                "shell-pending dir must resolve via the fallback pass"
+            );
+            // The unrelated context-requiring key is left untouched (its real
+            // error is surfaced later by the context-bearing execution pass).
+            assert_eq!(
+                fm.as_map().get("iteration"),
+                Some(&json!(
+                    "{{ frontmatter(spec, 'review_iterations') ? frontmatter(spec, 'review_iterations') + 1 : 1 }}"
+                )),
+                "context-requiring key stays unresolved in best-effort mode"
+            );
+        }
+
+        #[test]
+        fn best_effort_does_not_finalize_command_depending_on_errored_key() {
+            // Regression (review-4): a context-requiring key (`exists` ->
+            // `file_exists`) errors in the context-free best-effort pass. A
+            // sibling shell-pending `$(...)` command interpolates that key
+            // (`{{ exists }}`). The best-effort pass must NOT substitute the
+            // errored key as empty/undefined — doing so would collect
+            // `$(echo '')` into the approval set while execution runs
+            // `$(echo 'true')`. The command must keep its raw template so the
+            // collector can reject it as a dynamic shape rather than approving a
+            // value execution will never produce.
+            let mut fm = fm_from_json(json!({
+                "exists": "{{ file_exists('existing.md') }}",
+                "cmd": "$(echo '{{ exists }}')",
+            }));
+            interpolate_frontmatter_best_effort(&mut fm, &test_context(), false, true, None)
+                .expect("best-effort tolerates the per-key error");
+
+            // The errored key is left untouched (its real error surfaces later
+            // with a resolution context).
+            assert_eq!(
+                fm.as_map().get("exists"),
+                Some(&json!("{{ file_exists('existing.md') }}")),
+                "context-requiring key stays unresolved in best-effort mode"
+            );
+            // The dependent command is NOT finalized with an empty `exists` —
+            // its template survives verbatim rather than collapsing to
+            // `$(echo '')`.
+            assert_eq!(
+                fm.as_map().get("cmd"),
+                Some(&json!("$(echo '{{ exists }}')")),
+                "command depending on an errored key must not substitute it as empty"
+            );
+        }
+
+        #[test]
+        fn best_effort_defers_transitive_dependent_of_errored_key() {
+            // The errored-dependency deferral is transitive: `mid` references the
+            // errored `exists`, and `cmd` references `mid`. Neither `mid` nor the
+            // `$(...)` command may finalize against the missing value.
+            let mut fm = fm_from_json(json!({
+                "exists": "{{ file_exists('existing.md') }}",
+                "mid": "{{ exists }}-suffix",
+                "cmd": "$(echo '{{ mid }}')",
+            }));
+            interpolate_frontmatter_best_effort(&mut fm, &test_context(), false, true, None)
+                .expect("best-effort tolerates the per-key error");
+
+            assert_eq!(
+                fm.as_map().get("mid"),
+                Some(&json!("{{ exists }}-suffix")),
+                "transitive dependent of an errored key must stay unresolved"
+            );
+            assert_eq!(
+                fm.as_map().get("cmd"),
+                Some(&json!("$(echo '{{ mid }}')")),
+                "command transitively depending on an errored key must not finalize"
+            );
+        }
+
+        #[test]
+        fn plain_interpolate_aborts_when_unrelated_key_errors() {
+            // The non-resilient variant must still propagate the per-key error
+            // (so the execution pipeline surfaces it). This guards against the
+            // best-effort behavior accidentally leaking into the default path.
+            let mut fm = review_feature_shape();
+            let result = interpolate_frontmatter(&mut fm, &test_context(), false, true, None);
+            let err = match result {
+                Ok(_) => panic!("plain variant must abort on the context-requiring key error"),
+                Err(e) => e,
+            };
+            assert!(
+                err.to_string().contains("frontmatter"),
+                "error should name the failing filesystem function; got: {err}"
+            );
+            // Because the pass aborted before the fallback, `dir` is left raw —
+            // exactly the state that produced the spurious approval mismatch.
+            assert_eq!(
+                fm.as_map().get("dir"),
+                Some(&json!("$(dirname '{{ spec || design }}')")),
+                "aborted pass leaves dir's template unresolved"
+            );
+        }
+
+        #[test]
+        fn best_effort_matches_plain_when_no_key_errors() {
+            // With no context-requiring key, best-effort and plain must agree:
+            // best-effort only changes behavior on a per-key evaluation error.
+            let make = || {
+                fm_from_json(json!({
+                    "spec": "fixes/x/spec.md",
+                    "dir": "$(dirname '{{ spec || design }}')",
+                    "design": "{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}",
+                }))
+            };
+            let mut a = make();
+            let mut b = make();
+            interpolate_frontmatter(&mut a, &test_context(), false, true, None).unwrap();
+            interpolate_frontmatter_best_effort(&mut b, &test_context(), false, true, None).unwrap();
+            assert_eq!(a.as_map().get("dir"), b.as_map().get("dir"));
+            assert_eq!(
+                a.as_map().get("dir"),
+                Some(&json!("$(dirname 'fixes/x/spec.md')"))
+            );
+        }
+
         #[test]
         fn no_templated_keys_returns_zero() {
             let mut fm = fm_from_json(json!({
@@ -847,12 +1346,55 @@ mod tests {
         }
 
         #[test]
-        fn non_fail_fast_records_warnings() {
+        fn whole_value_parse_failure_is_fatal_without_fail_fast() {
+            // A frontmatter value that is exactly one malformed `{{ … }}` is
+            // executable state: it must abort composition on a parse failure
+            // even when fail_fast is off, instead of leaking the raw template
+            // downstream. The error names the offending key and the expression.
             let mut fm = fm_from_json(json!({
                 "bad": "{{ > invalid }}"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
+            let result = interpolate_frontmatter(&mut fm, &test_context(), false, false, None);
+            let Err(err) = result else {
+                panic!("malformed whole-value interpolation must abort");
+            };
+            let msg = err.to_string();
+            assert!(msg.contains("'bad'"), "error must name the key, got: {msg}");
+            assert!(
+                msg.contains("Interpolation parse failed"),
+                "error must mention the parse failure, got: {msg}"
+            );
+        }
+
+        #[test]
+        fn mixed_malformed_interpolation_stays_warning_without_fail_fast() {
+            // A malformed `{{ … }}` embedded in surrounding text is NOT
+            // whole-value executable state, so it stays lenient when fail_fast
+            // is off: warn and leave the raw span in place.
+            let mut fm = fm_from_json(json!({
+                "note": "prefix {{ > invalid }}"
+            }));
+            let report =
+                interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
             assert!(!report.warnings.is_empty());
+            assert_eq!(
+                fm.as_map().get("note"),
+                Some(&json!("prefix {{ > invalid }}"))
+            );
+        }
+
+        #[test]
+        fn whole_value_array_reference_preserves_typed_value() {
+            // Decision: a whole-value `{{ expr }}` keeps its evaluated JSON type
+            // for arrays and objects too (not just scalars). A reference to a
+            // seed array resolves to that typed array rather than a stringified
+            // form.
+            let mut fm = fm_from_json(json!({
+                "tags": ["a", "b"],
+                "copy": "{{ tags }}",
+            }));
+            interpolate_frontmatter(&mut fm, &test_context(), false, false, None).unwrap();
+            assert_eq!(fm.as_map().get("copy"), Some(&json!(["a", "b"])));
         }
 
         #[test]
@@ -915,6 +1457,28 @@ mod tests {
                 Some(&json!("@area/features/x/review-1.md"))
             );
             assert!(report.replacements >= 2);
+        }
+
+        #[test]
+        fn fallback_with_truthy_seed_does_not_shell_block_primary_key() {
+            let mut fm = fm_from_json(json!({
+                "spec": "features/example/spec.md",
+                "dir": "$(dirname '{{spec || design}}')",
+                "design": "{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}"
+            }));
+
+            interpolate_frontmatter(&mut fm, &test_context(), false, true, None).unwrap();
+
+            assert_eq!(
+                fm.as_map().get("dir"),
+                Some(&json!("$(dirname 'features/example/spec.md')"))
+            );
+            assert_eq!(
+                fm.as_map().get("design"),
+                Some(&json!(
+                    "{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}"
+                ))
+            );
         }
 
         #[test]

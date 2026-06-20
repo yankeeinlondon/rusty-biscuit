@@ -2,6 +2,7 @@ use claudine::provider::Provider;
 use color_eyre::eyre::Result;
 use std::collections::HashMap;
 use std::ffi::OsString;
+use std::time::Duration;
 
 use super::{AttemptLaunch, HarnessPromptState, MaterializedHarnessPrompt};
 
@@ -50,10 +51,12 @@ pub(crate) fn build_harness_launch(
     let timeout_config = super::super::composition::resolve_timeouts(
         cli_timeout,
         plan_timeout,
-        cli_step_timeout,
+        cli_step_timeout.clone(),
         plan_step_timeout,
     )
     .with_provider(provider);
+    let step_timeout_user_configured =
+        step_timeout_user_configured(cli_step_timeout.as_deref(), plan_step_timeout);
 
     Ok(AttemptLaunch {
         args,
@@ -61,5 +64,105 @@ pub(crate) fn build_harness_launch(
         stdin_seed,
         wire_prompt,
         timeout_config,
+        step_timeout_user_configured,
     })
+}
+
+fn step_timeout_user_configured(cli: Option<&str>, frontmatter: Option<Duration>) -> bool {
+    if cli.is_some() || frontmatter.is_some() {
+        return true;
+    }
+    let Ok(raw) = std::env::var("CLAUDINE_STEP_TIMEOUT") else {
+        return false;
+    };
+    let trimmed = raw.trim();
+    !trimmed.is_empty()
+        && !is_zero_duration_literal(trimmed)
+        && claudine::harness::parse_timeout(trimmed, std::path::Path::new("<env>")).is_ok()
+}
+
+fn is_zero_duration_literal(value: &str) -> bool {
+    let trimmed = value.trim();
+    let digits_end = trimmed
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(trimmed.len());
+    if digits_end == 0 {
+        return false;
+    }
+    let (digits, _rest) = trimmed.split_at(digits_end);
+    digits.parse::<u64>().is_ok_and(|n| n == 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct EnvGuard {
+        key: &'static str,
+        original: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let original = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, original }
+        }
+
+        fn clear(key: &'static str) -> Self {
+            let original = std::env::var(key).ok();
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                if let Some(value) = &self.original {
+                    std::env::set_var(self.key, value);
+                } else {
+                    std::env::remove_var(self.key);
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn built_in_step_timeout_is_not_user_configured() {
+        let _guard = EnvGuard::clear("CLAUDINE_STEP_TIMEOUT");
+
+        assert!(!step_timeout_user_configured(None, None));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn cli_frontmatter_and_valid_env_step_timeout_are_user_configured() {
+        let _guard = EnvGuard::set("CLAUDINE_STEP_TIMEOUT", "5m");
+
+        assert!(step_timeout_user_configured(None, None));
+        assert!(step_timeout_user_configured(Some("30s"), None));
+        assert!(step_timeout_user_configured(
+            None,
+            Some(Duration::from_secs(45))
+        ));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn zero_or_invalid_env_step_timeout_is_not_user_configured() {
+        {
+            let _guard = EnvGuard::set("CLAUDINE_STEP_TIMEOUT", "0s");
+            assert!(!step_timeout_user_configured(None, None));
+        }
+        {
+            let _guard = EnvGuard::set("CLAUDINE_STEP_TIMEOUT", "not a duration");
+            assert!(!step_timeout_user_configured(None, None));
+        }
+    }
 }

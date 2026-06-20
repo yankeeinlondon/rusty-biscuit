@@ -53,6 +53,18 @@ libc = "0.2"
 shellexpand = "3"
 url = "2"
 
+[target.'cfg(windows)'.dependencies]
+# Q15 Ctrl+C / timeout parity: the unified wait loop targets the child tree
+# with a Job Object and console control events. Only the feature subsets the
+# `windows_wait_loop` uses are enabled (matches the `0.62` workspace convention
+# in biscuit-location / sniff / playa).
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
 [dev-dependencies]
 # Enable darkmatter's test-only effect instrumentation for tests only. Cargo
 # applies dev-dependency features when building tests/benches but not the
@@ -65,5 +77,6 @@ expectrl = "0.8"
 proptest = "1.4"
 serial_test = "3"
 rstest = "0.25"
+tracing-test = "0.2"
 test-toolkit = { path = "../../tools/test-toolkit" }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }

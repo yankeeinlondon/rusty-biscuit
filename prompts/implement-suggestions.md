@@ -13,13 +13,13 @@ design: "{{ file_exists(design_file) ? design_file : null }}"
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 
 start:
-    message: "🏃 starting the _implementation_ of the `{{ parent_dir(review) }}` review suggestions ({{ctx.area}}, iteration #{{ file_index(review) }}, {{ctx.agent}}/{{ctx.model}})"
+    message: "🏃 starting the _implementation_ of the `{{ parent_dir(review) }}` review suggestions\n\n    **area:** {{ctx.area}}, **iteration:** #{{ file_index(review) }}, **agent:** {{ctx.agent}}/{{ctx.model}}"
 success:
-    message: "✅ _implementation_ of suggestions from the #{{ file_index(review) }} review of `{{ parent_dir(review) }}`\n\n({{ctx.area}}, {{ctx.agent}}/{{ctx.model}}) completed"
+    message: "✅ successfully implemented all suggestions from #{{ file_index(review) }} review of `{{ parent_dir(review) }}`\n\n> **area:** {{ctx.area}}, **agent:** {{ctx.agent}}/{{ctx.model}}, **when:** {{ctx.now}}"
     say: "the review suggestions for {{ title_case(without_date(parent_dir(review))) }} in {{ctx.area}} completed successfully"
     effect: bong
 failure:
-    message: "❌ the review suggestions from **{{ title_case(parent_dir(review)) }}** failed to complete!"
+    message: "❌ implementation of the review suggestions from **{{ parent_dir(review) }}** failed to complete (_iteration #{{iteration}}_)!"
     effect: phase-jump-3
 ---
 # Implement Review Suggestions for {{title_case(without_date(parent_dir(spec)))}}

@@ -270,6 +270,7 @@ fn no_color_and_plain_suppress_ansi_output() {
         cargo_bin_cmd!("claudine")
             .env("HOME", &home)
             .env("NO_COLOR", "1")
+            .env_remove("FORCE_COLOR")
             .arg("providers")
             .assert()
             .success()
@@ -283,6 +284,7 @@ fn no_color_and_plain_suppress_ansi_output() {
     let plain_stdout = String::from_utf8(
         cargo_bin_cmd!("claudine")
             .env("HOME", &home)
+            .env_remove("FORCE_COLOR")
             .arg("--plain")
             .arg("providers")
             .assert()
@@ -299,6 +301,7 @@ fn no_color_and_plain_suppress_ansi_output() {
 fn force_color_enables_ansi_in_non_tty_context() {
     let output = cargo_bin_cmd!("claudine")
         .env("FORCE_COLOR", "1")
+        .env_remove("NO_COLOR")
         .args(["sequence", "/tmp/definitely-missing-sequence.md"])
         .assert()
         .failure()

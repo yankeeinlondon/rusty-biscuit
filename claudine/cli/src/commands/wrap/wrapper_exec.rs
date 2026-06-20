@@ -49,7 +49,7 @@ pub(crate) fn run_structured_stream_session(
     let parser_config = claudine::stream::ParserConfig {
         model: args.model.clone(),
     };
-    let sink = live_semantic_sink::LiveSemanticSink::with_default_wiring(
+    let mut sink = live_semantic_sink::LiveSemanticSink::with_default_wiring(
         provider,
         env_context.clone(),
         child_cwd,
@@ -57,6 +57,20 @@ pub(crate) fn run_structured_stream_session(
         summary_details.clone(),
     )
     .with_context_extra(dispatch_context.clone());
+    // Arm the runaway-output content detector (Phase 6). Direct wrappers
+    // have no frontmatter layer; the launch-time model comes from `--model`
+    // (often absent). Resolve + validate the guard inputs once, compile the
+    // in-scope set for the launch model, then hand the validated inputs to
+    // the sink so it can re-scope when the provider reports its actual model
+    // via `SessionStart`.
+    let guard_inputs = std::sync::Arc::new(super::runaway_guard::resolve_guard_inputs(
+        provider,
+        env_context,
+        None,
+    )?);
+    let runaway_guards = guard_inputs.compile_for_model(args.model.as_deref())?;
+    sink.set_content_detector(runaway_guards.detector);
+    sink.set_guard_rescope_source(guard_inputs, args.model.as_deref());
     let live_metrics = sink.live_metrics();
     let stream_output = sink.stream_output();
     let watchdog_state = Some(sink.watchdog_state());
@@ -65,7 +79,7 @@ pub(crate) fn run_structured_stream_session(
     // Codex-final-stdout emission uses this handle so every section
     // transition shares the same tracker state.
     let section_stream = sink.section_stream();
-    let (build_parser, stderr_bridge) =
+    let (build_parser, stderr_bridge, content_early_rx) =
         policy::build_structured_plumbing(provider, sink, parser_config);
     let mut _spawned = false;
     let stream_result = if let Some(wire_prompt) = wire_prompt.clone() {
@@ -78,6 +92,7 @@ pub(crate) fn run_structured_stream_session(
                 }
             };
         let _ = stderr_bridge;
+        let _ = content_early_rx;
         wire_io::run_kimi_wire_session(
             wire_io::WireSessionConfig {
                 binary: binary_path,
@@ -127,6 +142,7 @@ pub(crate) fn run_structured_stream_session(
             None,
             watchdog_state,
             Some(section_stream.tracker()),
+            content_early_rx,
         )?
     };
     let mut summary = stream_result.data;

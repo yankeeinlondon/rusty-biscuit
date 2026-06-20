@@ -701,9 +701,10 @@ fn find_matching_warning_reason(
 /// Every bare variable reachable in the parsed expression tree is checked, not
 /// just spans that are exactly `{{ variable }}`: a missing operand buried in a
 /// function argument (`{{ parent_dir(missing) }}`), comparison, or arithmetic
-/// node is rejected the same way a top-level `{{ missing }}` is. Fallback
-/// (`{{ x || 'y' }}`) and ternary (`{{ x ? 'a' : 'b' }}`) subtrees intentionally
-/// tolerate undefined operands, so they are skipped wholesale. `ctx.*` /
+/// node is rejected the same way a top-level `{{ missing }}` is. A ternary
+/// condition (`{{ missing ? 'a' : 'b' }}`) is descended because it is evaluated,
+/// but the ternary branch operands and fallback (`{{ x || 'y' }}`) subtrees
+/// intentionally tolerate undefined operands, so they are skipped. `ctx.*` /
 /// `env.*` / `doc` references resolve from outside the frontmatter and are
 /// skipped — a bare name resolves only against top-level frontmatter keys.
 ///
@@ -768,9 +769,10 @@ pub fn validate_no_undefined_lifecycle_variables(
 /// Recursively walks `expr`, returning the first frontmatter-scoped bare
 /// variable whose root key is undefined in the composed frontmatter.
 ///
-/// Fallback (`||`) and ternary subtrees are not descended: those forms exist
-/// precisely to tolerate an undefined operand, so a miss inside them is
-/// intentional, not a leak. Every other node — function-call arguments,
+/// A ternary condition is descended because it is evaluated during composition,
+/// but the ternary branch operands and fallback (`||`) subtrees are not: those
+/// forms exist precisely to tolerate an undefined operand, so a miss inside them
+/// is intentional, not a leak. Every other node — function-call arguments,
 /// comparisons, arithmetic, indexing, member access, unary, parens — is
 /// descended so an undefined variable buried in `parent_dir(missing)` is caught
 /// like a top-level `{{ missing }}`. The returned reference borrows from `expr`.
@@ -780,8 +782,10 @@ fn find_undefined_variable<'a>(
 ) -> Option<&'a str> {
     match expr {
         Expr::Variable(path) => undefined_bare_variable(path, defined),
-        // Fallback / ternary tolerate undefined operands by design.
-        Expr::Fallback { .. } | Expr::Ternary { .. } => None,
+        // Ternary conditions are evaluated, but the branches intentionally
+        // tolerate undefined operands by design.
+        Expr::Ternary { condition, .. } => find_undefined_variable(condition, defined),
+        Expr::Fallback { .. } => None,
         Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => None,
         Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) | Expr::Paren(inner) => {
             find_undefined_variable(inner, defined)
@@ -1799,6 +1803,92 @@ mod tests {
         let effective = json!({ "area": "claudine" });
 
         assert!(validate_no_undefined_lifecycle_variables(&raw, &effective, dummy_path()).is_ok());
+    }
+
+    #[test]
+    fn undefined_variable_in_ternary_condition_is_rejected() {
+        let raw = fm_from_json(json!({
+            "start": { "message": "{{ missing == 'x' ? 'a' : 'b' }}" }
+        }));
+        let effective = json!({});
+
+        let err =
+            validate_no_undefined_lifecycle_variables(&raw, &effective, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleUndefinedVariable {
+                property, variable, ..
+            } => {
+                assert_eq!(property, "start.message");
+                assert_eq!(variable, "missing");
+            }
+            other => panic!("expected LifecycleUndefinedVariable, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn undefined_variable_in_ternary_truthy_condition_is_rejected() {
+        let raw = fm_from_json(json!({
+            "start": { "message": "{{ missing ? 'a' : 'b' }}" }
+        }));
+        let effective = json!({});
+
+        let err =
+            validate_no_undefined_lifecycle_variables(&raw, &effective, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleUndefinedVariable {
+                property, variable, ..
+            } => {
+                assert_eq!(property, "start.message");
+                assert_eq!(variable, "missing");
+            }
+            other => panic!("expected LifecycleUndefinedVariable, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn defined_condition_with_undefined_branch_operands_passes() {
+        // Ternary branches intentionally tolerate undefined operands; only the
+        // condition is checked.
+        let raw = fm_from_json(json!({
+            "start": { "message": "{{ defined ? missing : also_missing }}" }
+        }));
+        let effective = json!({ "defined": true });
+
+        assert!(validate_no_undefined_lifecycle_variables(&raw, &effective, dummy_path()).is_ok());
+    }
+
+    #[test]
+    fn undefined_variable_in_index_is_rejected() {
+        let raw = fm_from_json(json!({
+            "start": { "message": "{{ missing[0] }}" }
+        }));
+        let effective = json!({});
+
+        let err =
+            validate_no_undefined_lifecycle_variables(&raw, &effective, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleUndefinedVariable { variable, .. } => {
+                assert_eq!(variable, "missing");
+            }
+            other => panic!("expected LifecycleUndefinedVariable, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn undefined_variable_in_member_access_is_rejected() {
+        let raw = fm_from_json(json!({
+            "start": { "message": "{{ missing.foo }}" }
+        }));
+        let effective = json!({});
+
+        let err =
+            validate_no_undefined_lifecycle_variables(&raw, &effective, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleUndefinedVariable { variable, .. } => {
+                assert_eq!(variable, "missing");
+            }
+            other => panic!("expected LifecycleUndefinedVariable, got: {other:?}"),
+        }
     }
 
     #[test]

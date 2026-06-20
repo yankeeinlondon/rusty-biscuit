@@ -42,8 +42,10 @@ pub use loop_driver::{drive_event_loop, drive_event_loop_with_chrome, drive_even
 
 use inline_viewport::{finalize_inline_viewport, run_inline_dynamic_with_chrome};
 use terminal_lifecycle::{
-    StdoutTtyRedirect, TerminalGuard, drain_pending_events, prepare_terminal, restore_terminal,
+    TerminalGuard, drain_pending_events, prepare_terminal, restore_terminal,
 };
+#[cfg(unix)]
+use terminal_lifecycle::StdoutTtyRedirect;
 
 /// State types that can be driven to completion by [`run_standalone`].
 ///
