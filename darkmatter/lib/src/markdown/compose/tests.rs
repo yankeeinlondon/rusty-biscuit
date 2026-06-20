@@ -7,6 +7,7 @@ use super::HeadingLevel;
 use super::*;
 use super::super::types::MarkdownError;
 use super::transclusion::TransclusionEngine;
+use biscuit_terminal::utils::UnicodeWidthStr;
 
 #[test]
 fn test_compose_returns_unchanged_document() {
@@ -59,6 +60,77 @@ fn test_compose_cleanup_stage() {
 
     // Cleanup should add blank line between header and paragraph
     assert!(composed.content().contains("\n\n"));
+    assert!(report.cleanup_changed);
+}
+
+#[test]
+fn test_compose_cleanup_strips_incidental_newlines_by_default() {
+    let content = "This paragraph was wrapped\nat a fixed column.";
+    let md: Markdown = content.into();
+
+    let options = ComposeOptions::new().only(&[ComposeOperation::Cleanup]);
+
+    let (composed, report) = md.compose_with(options).unwrap();
+
+    assert_eq!(
+        composed.content(),
+        "This paragraph was wrapped at a fixed column.\n"
+    );
+    assert!(report.cleanup_changed);
+}
+
+#[test]
+fn test_compose_cleanup_can_preserve_incidental_newlines() {
+    let content = "This paragraph keeps\nits single newline.\n";
+    let md: Markdown = content.into();
+
+    let options = ComposeOptions::new()
+        .only(&[ComposeOperation::Cleanup])
+        .with_incidental_newline_mode(crate::markdown::cleanup::IncidentalNewlineMode::Preserve);
+
+    let (composed, report) = md.compose_with(options).unwrap();
+
+    assert_eq!(composed.content(), content);
+    assert!(!report.cleanup_changed);
+}
+
+#[test]
+fn test_compose_cleanup_fixed_width_reflows_prose() {
+    let content = "This paragraph starts with incidental wrapping\nand should be reflowed into lines that fit.";
+    let md: Markdown = content.into();
+
+    let options = ComposeOptions::new()
+        .only(&[ComposeOperation::Cleanup])
+        .with_fixed_width(40);
+
+    let (composed, report) = md.compose_with(options).unwrap();
+
+    assert!(report.cleanup_changed);
+    assert!(composed.content().contains('\n'));
+    for line in composed.content().lines() {
+        assert!(
+            UnicodeWidthStr::width(line) <= 40,
+            "line exceeded fixed width: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn test_compose_cleanup_fixed_width_forces_strip_over_preserve() {
+    // `fixed_width` must reflow canonical unwrapped prose, so it overrides
+    // `Preserve` and strips the source's incidental newline before wrapping.
+    let content = "Short first line.\nShort second line.\n";
+    let md: Markdown = content.into();
+
+    let options = ComposeOptions::new()
+        .only(&[ComposeOperation::Cleanup])
+        .with_incidental_newline_mode(crate::markdown::cleanup::IncidentalNewlineMode::Preserve)
+        .with_fixed_width(80);
+
+    let (composed, report) = md.compose_with(options).unwrap();
+
+    // The two source lines collapse to a single line that fits within 80 columns.
+    assert_eq!(composed.content(), "Short first line. Short second line.\n");
     assert!(report.cleanup_changed);
 }
 

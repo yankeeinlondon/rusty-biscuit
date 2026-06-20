@@ -70,9 +70,19 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             indent,
             compact,
             loose,
+            fixed_width,
+            ignore_incidental_newlines,
         } => {
             let mode = clean::resolve_list_spacing(compact, loose);
-            run_clean(input.as_ref(), save, indent, mode, cli.verbose > 0)?;
+            run_clean(
+                input.as_ref(),
+                save,
+                indent,
+                mode,
+                fixed_width,
+                ignore_incidental_newlines,
+                cli.verbose > 0,
+            )?;
         }
         CliCommand::Compose {
             args,
