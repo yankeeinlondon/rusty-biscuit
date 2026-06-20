@@ -13,7 +13,7 @@ pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
 total_phases: "{{ frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') }}"
 spec_file: "{{ file_exists(spec) ? spec : file_exists(join(dirname, 'spec.md')) ? join(dirname, 'spec.md')  :  '' }}"
 start:
-    message: "🎬  starting the implementation of phase **#{{phase}}** of `{{parent_dir(plan)}}` in **{{ctx.area}}** (_{{ctx.agent}}/{{ctx.model}}_)"
+    message: "🎬  starting the implementation of phase **#{{phase}}** of `{{parent_dir(plan)}}`\n> &nbsp;&nbsp;&nbsp;&nbsp;**area:** {{ctx.area}}, **agent:** {{ctx.agent}}/{{ctx.model}}"
 success: 
     say: "Phase {{phase}} of the plan in the {{area}} package area, was implemented successfully"
     message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{area}}, {{ctx.agent}}/{{ctx.model}})"
@@ -34,6 +34,10 @@ loop:
 ::end-block
 
 Your task is to implement phase {{phase}} of the plan found in '@{{area}}/{{plan}}'.
+
+- check off tasks in the plan -- marked by GFM todos (aka., `[ ]`) -- once they are complete
+    - don't wait until the end of the phase
+    - marking tasks complete in real time allows graceful recovery of the implementation of the plan if anything were to go wrong with the initial implementation of the plan
 
 ::block when="memory"
 > **NOTE:** for context you should read the lessons learned discovered in earlier stages of this plan. You will find these lessons learned in memory/{{memory}}.md. 
