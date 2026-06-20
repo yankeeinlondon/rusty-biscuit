@@ -233,3 +233,212 @@ fn exit_expression_trip_carries_pattern_into_handler_payload() {
         "opencode/kimi-for-coding/k2p7"
     );
 }
+
+#[test]
+fn runaway_volume_trip_carries_counters_into_handler_payload() {
+    let guard_context = GuardContext {
+        lines: Some(50_000),
+        bytes: Some(33_554_432),
+        ..Default::default()
+    };
+    let outcome = AttemptOutcome {
+        attempt: 1,
+        session_id: None,
+        final_response: String::new(),
+        exit_code: 1,
+        termination: ProcessTermination::Aborted,
+        stderr_text: None,
+        error_kind: Some("runaway_volume".to_string()),
+        guard_context: Some(guard_context.clone()),
+    };
+    assert_eq!(classify_failure(&outcome), Some(FailureEvent::AgentFailure));
+
+    let out_dir = tempfile::tempdir().expect("create temp dir");
+    let payload_path = out_dir.path().join("payload.json");
+    let env_path = out_dir.path().join("env.txt");
+    let handler = capture_handler(&payload_path, &env_path);
+
+    let failure = build_agent_failure_context(
+        "opencode",
+        std::path::Path::new("/repo/prompts/runaway.md"),
+        FailureEvent::AgentFailure,
+        "output volume cap exceeded".to_string(),
+        1,
+        None,
+        Some(outcome),
+        Some("runaway_volume".to_string()),
+        Some(&guard_context),
+    );
+
+    resolve_handler(&failure, &HandlerTable::default(), Some(&handler))
+        .expect("handler resolves")
+        .expect("handler returns an action");
+
+    let env_kind = std::fs::read_to_string(&env_path).expect("read env capture");
+    assert_eq!(env_kind, "runaway_volume");
+
+    let payload_raw = std::fs::read_to_string(&payload_path).expect("read payload capture");
+    let payload: serde_json::Value =
+        serde_json::from_str(&payload_raw).expect("payload is valid JSON");
+    assert_eq!(payload["error_kind"], "runaway_volume");
+    assert_eq!(payload["guard_context"]["lines"], 50_000);
+    assert_eq!(payload["guard_context"]["bytes"], 33_554_432);
+}
+
+/// Regression for the loop-control call site (`loop_control.rs`): even when
+/// the explicit `error_kind` / `guard_context` arguments are `None`, the
+/// handler payload must still surface the guard detail the **outcome** already
+/// carries — the fallback that `execute_programmatic_handler` performs. This
+/// pins the contract that the attempt outcome alone is sufficient, so the
+/// fields never go inert if a call site forgets to forward them explicitly.
+#[test]
+fn handler_payload_falls_back_to_outcome_guard_context() {
+    let guard_context = GuardContext {
+        cycle_len: Some(6),
+        repeats: Some(42),
+        ..Default::default()
+    };
+    let outcome = AttemptOutcome {
+        attempt: 1,
+        session_id: None,
+        final_response: String::new(),
+        exit_code: 1,
+        termination: ProcessTermination::Aborted,
+        stderr_text: None,
+        error_kind: Some("runaway_repetition".to_string()),
+        guard_context: Some(guard_context),
+    };
+
+    let out_dir = tempfile::tempdir().expect("create temp dir");
+    let payload_path = out_dir.path().join("payload.json");
+    let env_path = out_dir.path().join("env.txt");
+    let handler = capture_handler(&payload_path, &env_path);
+
+    // Note the `None, None` explicit args — only the outcome carries detail.
+    let failure = build_agent_failure_context(
+        "opencode",
+        std::path::Path::new("/repo/prompts/runaway.md"),
+        FailureEvent::AgentFailure,
+        "runaway repetition detected".to_string(),
+        1,
+        None,
+        Some(outcome),
+        None,
+        None,
+    );
+
+    resolve_handler(&failure, &HandlerTable::default(), Some(&handler))
+        .expect("handler resolves")
+        .expect("handler returns an action");
+
+    let env_kind = std::fs::read_to_string(&env_path).expect("read env capture");
+    assert_eq!(
+        env_kind, "runaway_repetition",
+        "CLAUDINE_ERROR_KIND must fall back to the outcome's error_kind"
+    );
+
+    let payload_raw = std::fs::read_to_string(&payload_path).expect("read payload capture");
+    let payload: serde_json::Value =
+        serde_json::from_str(&payload_raw).expect("payload is valid JSON");
+    assert_eq!(payload["error_kind"], "runaway_repetition");
+    assert_eq!(payload["guard_context"]["cycle_len"], 6);
+    assert_eq!(payload["guard_context"]["repeats"], 42);
+}
+
+/// An ordinary non-zero agent failure (no content-guard trip) must yield a
+/// `null` `error_kind` and `null` `guard_context` in the payload, so a handler
+/// can reliably distinguish a guard trip from a plain failure.
+#[test]
+fn non_guard_agent_failure_yields_null_error_kind() {
+    let outcome = AttemptOutcome {
+        attempt: 1,
+        session_id: None,
+        final_response: String::new(),
+        exit_code: 1,
+        termination: ProcessTermination::Completed,
+        stderr_text: None,
+        error_kind: None,
+        guard_context: None,
+    };
+    assert_eq!(classify_failure(&outcome), Some(FailureEvent::AgentFailure));
+
+    let out_dir = tempfile::tempdir().expect("create temp dir");
+    let payload_path = out_dir.path().join("payload.json");
+    let env_path = out_dir.path().join("env.txt");
+    let handler = capture_handler(&payload_path, &env_path);
+
+    let failure = build_agent_failure_context(
+        "opencode",
+        std::path::Path::new("/repo/prompts/plain.md"),
+        FailureEvent::AgentFailure,
+        "agent exited with error code 1".to_string(),
+        1,
+        None,
+        Some(outcome),
+        None,
+        None,
+    );
+
+    resolve_handler(&failure, &HandlerTable::default(), Some(&handler))
+        .expect("handler resolves")
+        .expect("handler returns an action");
+
+    let env_kind = std::fs::read_to_string(&env_path).expect("read env capture");
+    assert_eq!(
+        env_kind, "",
+        "a non-guard failure must leave CLAUDINE_ERROR_KIND empty"
+    );
+
+    let payload_raw = std::fs::read_to_string(&payload_path).expect("read payload capture");
+    let payload: serde_json::Value =
+        serde_json::from_str(&payload_raw).expect("payload is valid JSON");
+    assert!(
+        payload["error_kind"].is_null(),
+        "non-guard failure must carry a null error_kind, got {}",
+        payload["error_kind"]
+    );
+    assert!(
+        payload["guard_context"].is_null(),
+        "non-guard failure must carry a null guard_context"
+    );
+}
+
+/// `build_attempt_outcome` must preserve the summary's synthesized
+/// `error_kind` (e.g. a guard label written by
+/// `apply_early_termination_to_summary`) rather than dropping it to `None`.
+#[test]
+fn build_attempt_outcome_preserves_summary_error_kind() {
+    let summary = StreamExecutionSummary {
+        exit_code: 1,
+        is_error: true,
+        error_kind: Some("runaway_repetition".to_string()),
+        ..Default::default()
+    };
+
+    let outcome = build_attempt_outcome(2, &summary, ProcessTermination::Aborted);
+
+    assert_eq!(outcome.attempt, 2);
+    assert_eq!(outcome.termination, ProcessTermination::Aborted);
+    assert_eq!(
+        outcome.error_kind.as_deref(),
+        Some("runaway_repetition"),
+        "build_attempt_outcome must carry the summary's error_kind"
+    );
+}
+
+/// `build_attempt_outcome` leaves `error_kind` `None` for an ordinary
+/// successful summary, so a clean run never reports a phantom guard label.
+#[test]
+fn build_attempt_outcome_leaves_error_kind_none_on_success() {
+    let summary = StreamExecutionSummary {
+        exit_code: 0,
+        is_error: false,
+        error_kind: None,
+        ..Default::default()
+    };
+
+    let outcome = build_attempt_outcome(1, &summary, ProcessTermination::Completed);
+
+    assert!(outcome.error_kind.is_none());
+    assert!(outcome.guard_context.is_none());
+}
