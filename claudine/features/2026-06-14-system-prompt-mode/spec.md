@@ -1,7 +1,7 @@
 ---
 clarified: claude/claude-opus-4-8
 reviewed: true
-review_iterations: 1
+review_iterations: 3
 status: ready for planning and implementation
 ---
 
