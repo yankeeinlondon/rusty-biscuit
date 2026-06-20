@@ -29,11 +29,14 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use biscuit_terminal::terminal::Terminal;
 use claudine::events::{AgenticEvent, EnvironmentContext, EventMeta as DispatchEventMeta};
 use claudine::provider::Provider;
+use claudine::runaway::ContentDetector;
+use claudine::stream::logs::EarlyTermination;
 use claudine::stream::progress::{self, LiveMetrics};
 use claudine::stream::semantic::{SemanticErrorKind, SemanticEvent};
 use claudine::stream::stderr::Verbosity;
@@ -177,6 +180,19 @@ pub(crate) struct LiveSemanticSink {
     /// request termination. The same `Arc<Mutex<_>>` is shared with
     /// `exec.rs` via [`Self::watchdog_state`].
     watchdog_state: Arc<Mutex<WatchdogState>>,
+    /// Runaway-output content detector (Phase 6). `None` when guards are
+    /// fully opted out, in which case `on_semantic_event` does no
+    /// detection work. Fed from `OutputText`/`Reasoning` text only (never
+    /// tool payloads — A2) and reset per turn on `TurnComplete`.
+    content_detector: Option<ContentDetector>,
+    /// Trip sender wired to the unified early-termination channel the
+    /// exec wait loop polls. Set by `build_structured_plumbing` so the
+    /// detector and (for OpenCode) the stderr bridge share one channel.
+    trip_sender: Option<Sender<EarlyTermination>>,
+    /// Set once a content trip has fired. Guards against a double-send (a
+    /// trip is terminal) and suppresses further output rendering so the
+    /// tail of a runaway is not echoed to the terminal (spec Part 1).
+    content_tripped: bool,
 }
 
 impl LiveSemanticSink {
@@ -214,6 +230,9 @@ impl LiveSemanticSink {
             at_blank_row: false,
             stdout_trailing_newlines: 0,
             watchdog_state: Arc::new(Mutex::new(WatchdogState::default())),
+            content_detector: None,
+            trip_sender: None,
+            content_tripped: false,
         }
     }
 
@@ -295,6 +314,9 @@ impl LiveSemanticSink {
             at_blank_row: false,
             stdout_trailing_newlines: 0,
             watchdog_state: Arc::new(Mutex::new(WatchdogState::default())),
+            content_detector: None,
+            trip_sender: None,
+            content_tripped: false,
         }
     }
 
@@ -361,6 +383,74 @@ impl LiveSemanticSink {
     /// holding the sink mutex during writes.
     pub(crate) fn watchdog_state(&self) -> Arc<Mutex<WatchdogState>> {
         self.watchdog_state.clone()
+    }
+
+    /// Arm the runaway-output content detector (Phase 6). Called by the
+    /// streaming wiring point before the sink is handed to
+    /// `build_structured_plumbing`. A `None` argument leaves the sink with
+    /// no detector (zero per-event overhead).
+    pub(crate) fn set_content_detector(&mut self, detector: Option<ContentDetector>) {
+        self.content_detector = detector;
+    }
+
+    /// Whether a content detector is armed. `build_structured_plumbing`
+    /// uses this to decide whether to create + wire the trip channel.
+    pub(crate) fn has_content_detector(&self) -> bool {
+        self.content_detector.is_some()
+    }
+
+    /// Wire the detector's trip sender to the unified early-termination
+    /// channel the exec wait loop polls. Set by `build_structured_plumbing`
+    /// (which owns the channel) after the detector is armed.
+    pub(crate) fn set_trip_sender(&mut self, sender: Sender<EarlyTermination>) {
+        self.trip_sender = Some(sender);
+    }
+
+    /// Feed assistant text to the content detector, firing a trip on the
+    /// first guard breach. No-op when no detector is armed or a trip has
+    /// already fired. Returns `true` when this call fired the trip so the
+    /// caller can suppress rendering of the tripping chunk.
+    fn feed_content_detector(&mut self, text: &str) -> bool {
+        if self.content_tripped {
+            return false;
+        }
+        let Some(detector) = self.content_detector.as_mut() else {
+            return false;
+        };
+        if let Some(trip) = detector.feed(text) {
+            self.fire_content_trip(trip);
+            return true;
+        }
+        false
+    }
+
+    /// Reset the detector's per-turn volume counters (`TurnComplete`).
+    fn reset_content_detector_turn(&mut self) {
+        if let Some(detector) = self.content_detector.as_mut() {
+            detector.reset_turn();
+        }
+    }
+
+    /// Send a content trip on the unified termination channel exactly once.
+    ///
+    /// A trip is terminal: the `content_tripped` flag guards against a
+    /// double-send and also suppresses further output rendering. The send
+    /// is best-effort — if the receiver has already hung up (the wait loop
+    /// killed the child), dropping the signal is fine.
+    fn fire_content_trip(&mut self, trip: claudine::runaway::Trip) {
+        if self.content_tripped {
+            return;
+        }
+        self.content_tripped = true;
+        if let Some(sender) = self.trip_sender.as_ref() {
+            let early = super::exec::termination::trip_to_early_termination(trip);
+            let _ = sender.send(early);
+        }
+    }
+
+    /// Whether a content trip has fired (rendering is then suppressed).
+    fn content_tripped(&self) -> bool {
+        self.content_tripped
     }
 
     fn should_render(&self) -> bool {
@@ -496,6 +586,7 @@ mod tests {
     // here for the `on_semantic_event` driver calls in the child suites.
     use claudine::stream::semantic::SemanticEventSink;
 
+    mod content_guard;
     mod dispatch_and_recording;
     mod golden_stderr;
     mod provider_extension_and_opencode;
