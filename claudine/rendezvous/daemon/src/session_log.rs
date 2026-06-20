@@ -218,6 +218,12 @@ struct ManagerInner {
     chunks: HashMap<String, ChunkState>,
     /// Session key (`session/{node}/{session}`) → cursor.
     sessions: HashMap<String, SessionCursor>,
+    /// Session key → per-session append serialization lock. Held for the
+    /// whole stage→persist→merge window of an append so two appends to
+    /// the same session cannot reserve the same sequence or stage from
+    /// the same base chunk. Different sessions get different locks, so
+    /// they still run concurrently across the redb fsync.
+    session_locks: HashMap<String, Arc<Mutex<()>>>,
 }
 
 /// Owner of the session-log in-memory state plus the redb storage handle
@@ -292,6 +298,7 @@ impl SessionLogManager {
             inner: Arc::new(Mutex::new(ManagerInner {
                 chunks: HashMap::new(),
                 sessions: HashMap::new(),
+                session_locks: HashMap::new(),
             })),
             storage,
             batcher,
@@ -370,6 +377,17 @@ impl SessionLogManager {
         Arc::clone(&self.sealer)
     }
 
+    /// Per-session append serialization lock, created on first use.
+    fn session_lock(&self, session_key: &str) -> Arc<Mutex<()>> {
+        let mut inner = self.inner.lock();
+        Arc::clone(
+            inner
+                .session_locks
+                .entry(session_key.to_string())
+                .or_insert_with(|| Arc::new(Mutex::new(()))),
+        )
+    }
+
     /// Append a new entry to the session, rotating chunks if required.
     pub fn append_entry(
         &self,
@@ -382,6 +400,18 @@ impl SessionLogManager {
     ) -> Result<AppendOutcome, SessionLogError> {
         let session_key = format!("session/{owner_node_id}/{session_id}");
         let now = self.clock.now_unix_ms();
+
+        // Serialize same-session appends across the entire
+        // stage→persist→merge window. The global `inner` lock alone is
+        // not enough: it is deliberately dropped across the redb fsync so
+        // unrelated sessions stay concurrent, which leaves a window where
+        // two appends to THIS session could clone the same cursor, reserve
+        // the same sequence, and stage from the same base chunk — then
+        // race their independent whole-snapshot redb writes and durably
+        // drop one entry. Holding the per-session lock for the whole call
+        // closes that window while preserving cross-session concurrency.
+        let append_guard = self.session_lock(&session_key);
+        let _append_guard = append_guard.lock();
 
         let mut inner = self.inner.lock();
 
@@ -1427,6 +1457,107 @@ mod tests {
 
         assert_eq!(harness.storage.snapshot_count().unwrap(), 1);
         harness.worker.shutdown();
+    }
+
+    #[test]
+    fn concurrent_appends_to_one_session_keep_unique_durable_sequences() {
+        use std::sync::Barrier;
+
+        let harness = build_harness(ChunkConfig::default());
+
+        // Force genuine contention on the stage→persist→merge window: a
+        // barrier releases both appends at once so, without per-session
+        // serialization, they would clone the same cursor, reserve the
+        // same sequence, and race their whole-snapshot redb writes.
+        let append_count = 8usize;
+        let barrier = Arc::new(Barrier::new(append_count));
+        let handles: Vec<_> = (0..append_count)
+            .map(|i| {
+                let manager = harness.manager.clone();
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    manager
+                        .append_entry(
+                            "node-a",
+                            "session-1",
+                            "test",
+                            "info",
+                            format!("message-{i}"),
+                            None,
+                        )
+                        .expect("concurrent append")
+                })
+            })
+            .collect();
+
+        let mut sequences: Vec<u64> = handles
+            .into_iter()
+            .map(|h| h.join().expect("append thread").sequence)
+            .collect();
+        sequences.sort_unstable();
+        let expected: Vec<u64> = (0..append_count as u64).collect();
+        assert_eq!(
+            sequences, expected,
+            "appends must hand out unique, gap-free sequences 0..N"
+        );
+
+        let chunk = ChunkId::new("node-a", "session-1", 0);
+
+        let in_memory = harness
+            .manager
+            .list_chunk_entries(&chunk)
+            .expect("list in-memory");
+        let mut in_memory_messages: Vec<String> =
+            in_memory.iter().map(|e| e.message.clone()).collect();
+        in_memory_messages.sort();
+        let expected_messages: Vec<String> =
+            (0..append_count).map(|i| format!("message-{i}")).collect();
+        assert_eq!(
+            in_memory_messages, expected_messages,
+            "every concurrent append must be present in memory"
+        );
+
+        harness.worker.shutdown();
+
+        // Reload a fresh manager from the same redb storage: the durable
+        // snapshot must already contain every entry. This is the part the
+        // sequential tests miss — a lost redb write would only surface
+        // after reload.
+        let projection2 = Projection::in_memory().expect("projection2");
+        let worker2 = spawn(projection2.clone(), BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        });
+        let manager2 = SessionLogManager::with_clock(
+            harness.storage.clone(),
+            worker2.handle(),
+            projection2,
+            ChunkConfig::default(),
+            Arc::new(NodeIdentity::from_seed([7u8; 32])),
+            Arc::new(FixedClock::new(10_000)),
+        )
+        .expect("reloaded manager");
+
+        let durable = manager2
+            .list_chunk_entries(&chunk)
+            .expect("list after reload");
+        let mut durable_messages: Vec<String> =
+            durable.iter().map(|e| e.message.clone()).collect();
+        durable_messages.sort();
+        assert_eq!(
+            durable_messages, expected_messages,
+            "every concurrent append must survive in durable redb storage"
+        );
+
+        let mut durable_sequences: Vec<u64> = durable.iter().map(|e| e.sequence).collect();
+        durable_sequences.sort_unstable();
+        assert_eq!(
+            durable_sequences, expected,
+            "durable entries must keep unique, gap-free sequences after reload"
+        );
+
+        worker2.shutdown();
     }
 
     #[test]
