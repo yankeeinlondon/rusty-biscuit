@@ -362,17 +362,19 @@ fn level3_ctrl_c_terminates_wrapped_child_with_timeout_configured() {
 /// subtree. (This is also what production does — `spawn.rs` sets the same flag.)
 ///
 /// Compiled only on Windows and `#[ignore]`d by default: it requires a real
-/// attached console to deliver console control events, which headless CI
-/// runners may lack. Run explicitly on a Windows host with an attached console:
+/// attached console to deliver console control events. Run the opt-in GitHub
+/// Actions workflow `claudine-windows-ctrl-c` or run explicitly on a Windows
+/// host with an attached console:
 ///
 /// ```text
 /// cargo test -p claudine-cli --test level3_wrap_ctrl_c -- --ignored \
 ///   windows_ctrl_c_verification_record
 /// ```
 ///
-/// Until that run is observed on a Windows host the path is **compile-checked,
-/// not runtime-verified** — this test is the executable harness that closes the
-/// gap, not a claim that it has already passed on Windows.
+/// Until a green Windows-host run is recorded the path is **compile-checked,
+/// not runtime-verified** — this test and the workflow are the executable
+/// harness that closes the gap, not a claim that it has already passed on
+/// Windows.
 #[cfg(windows)]
 #[test]
 #[ignore = "requires a Windows host with an attached console; cross-compile-checked but not runtime-run on the macOS dev host"]

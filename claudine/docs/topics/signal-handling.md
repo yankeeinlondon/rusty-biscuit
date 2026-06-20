@@ -339,9 +339,11 @@ at the top of each `windows_wait_loop` call.
 
 > **Verification gap (all-OS rule).** The development host is macOS. The
 > Windows path is **cross-compile-checked**
-> (`cargo check --target x86_64-pc-windows-gnu -p claudine-cli`) but its
-> runtime behavior must be validated in CI or on a Windows host before
-> claiming full parity. This is a known, flagged risk.
+> (`cargo check --target x86_64-pc-windows-gnu -p claudine-cli --test level3_wrap_ctrl_c`).
+> A Windows-host runtime workflow exists
+> (`.github/workflows/claudine-windows-ctrl-c.yml`), but full parity is not
+> claimed until that workflow or the equivalent manual command has a recorded
+> green run.
 
 #### Verification record
 
@@ -353,7 +355,7 @@ at the top of each `windows_wait_loop` call.
 | Unix — multiplexer Ctrl+C terminates even with a wall-clock `timeout` configured | **Verified on macOS** | `level2_wrap_ctrl_c_tmux.rs::level2_ctrl_c_terminates_wrapped_child_with_timeout_configured` (L2 multiplexer injection) |
 | Unix — visible per-press feedback line renders in a real terminal | **Verified on macOS** | `level2_interrupt_feedback_capture.rs::level2_interrupt_feedback_renders_in_tmux` (L2, asserts the `interrupt received` substring in `frame.raw`) |
 | Unix — process-signal SIGINT during prep exits 130 with notice | **Verified on macOS** | `wrap_sigint.rs::slow_compose_sigint_during_prep_exits_130_with_notice` (lower-level, retained) |
-| Windows — console Ctrl+Break to the wrapped child's process group terminates the Job-Object child | **Real automated test, cross-compile-checked for `x86_64-pc-windows-gnu` on macOS; NOT yet runtime-run on a Windows host / CI** | `level3_wrap_ctrl_c.rs::windows_ctrl_c_verification_record` (`#[cfg(windows)]`, `#[ignore]`d — needs an attached console) |
+| Windows — console Ctrl+Break to the wrapped child's process group terminates the Job-Object child | **Real automated test with opt-in Windows CI workflow; cross-compile-checked for `x86_64-pc-windows-gnu` on macOS; no recorded green Windows runtime run in this repo yet** | `level3_wrap_ctrl_c.rs::windows_ctrl_c_verification_record` (`#[cfg(windows)]`, `#[ignore]`d — needs an attached console); workflow: `.github/workflows/claudine-windows-ctrl-c.yml` |
 
 Ctrl+C termination is verified at two distinct injection levels. The genuine
 **L3** proof (`level3_wrap_ctrl_c.rs`) synthesises a real OS Ctrl+C chord with
@@ -402,16 +404,23 @@ its own group so the event never reaches the test runner.
 On the macOS dev host this test is **cross-compile-checked** for
 `x86_64-pc-windows-gnu`
 (`cargo check --target x86_64-pc-windows-gnu -p claudine-cli --test level3_wrap_ctrl_c`)
-but its **runtime pass has not yet been observed** — it stays `#[ignore]`d
-because it needs a real attached console, which headless CI runners may lack. It
-is therefore **compile-verified for Windows, not runtime-verified on Windows**;
-do not read the table row as a "Windows verified" claim. Run it on a Windows
-host with an attached console to close the gap:
+but its **runtime pass has not yet been recorded**. The test stays `#[ignore]`d
+in normal suites because it needs a Windows host with an attached console. Run
+the opt-in GitHub Actions workflow `claudine-windows-ctrl-c` or this command on
+a Windows host to close the gap:
 
 ```text
 cargo test -p claudine-cli --test level3_wrap_ctrl_c -- --ignored \
   windows_ctrl_c_verification_record
 ```
+
+Expected environment: Windows runner/host, stable Rust toolchain, repository
+checkout, and an attached console for `GenerateConsoleCtrlEvent`. A passing run
+means the fake `opencode.cmd` reached its loop, Claudine delivered
+`CTRL_BREAK_EVENT` to the wrapper child's process group, the Windows wait loop
+terminated the Job Object tree, and the wrapper process exited within 15s. Until
+that green run is recorded, the status is **Windows runtime-verification
+available, not Windows runtime-verified**.
 
 ### Spawn × wait × timeout matrix
 
