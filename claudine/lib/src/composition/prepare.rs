@@ -120,7 +120,15 @@ pub fn prepare_direct(
         &source.resolved_path,
         options.shell_working_directory.as_deref(),
     )
-    .with_perf(options.perf_enabled);
+    .with_perf(options.perf_enabled)
+    // The composed body is delivered verbatim to the agent and reported as the
+    // user prompt. Darkmatter's default strips incidental single newlines, which
+    // would collapse an author's line-structured prompt into one paragraph —
+    // altering the delivered text and defeating line-count-based report
+    // truncation. Preserve the source line breaks for prompt delivery.
+    .with_incidental_newline_mode(
+        darkmatter::markdown::cleanup::IncidentalNewlineMode::Preserve,
+    );
     if let Some(overrides) = options.set_overrides {
         compose_opts = compose_opts.with_set_overrides(overrides);
     }
@@ -229,7 +237,15 @@ pub fn prepare_inline(
         &source.resolved_path,
         options.shell_working_directory.as_deref(),
     )
-    .with_perf(options.perf_enabled);
+    .with_perf(options.perf_enabled)
+    // The composed body is delivered verbatim to the agent and reported as the
+    // user prompt. Darkmatter's default strips incidental single newlines, which
+    // would collapse an author's line-structured prompt into one paragraph —
+    // altering the delivered text and defeating line-count-based report
+    // truncation. Preserve the source line breaks for prompt delivery.
+    .with_incidental_newline_mode(
+        darkmatter::markdown::cleanup::IncidentalNewlineMode::Preserve,
+    );
     if let Some(overrides) = options.set_overrides {
         compose_opts = compose_opts.with_set_overrides(overrides);
     }
