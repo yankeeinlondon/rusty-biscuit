@@ -103,6 +103,34 @@ fn qwen_prompt_delivery_uses_equals_syntax_when_prompt_starts_with_dash() {
 }
 
 #[test]
+fn claude_interactive_prompt_starting_with_dash_is_separated_with_end_of_options() {
+    let p = profile(Provider::Claude);
+    let args = Vec::new();
+    let delivery = p
+        .prompt_delivery(&args, "- review the spec\n- ask questions", false)
+        .unwrap();
+    let mut applied = Vec::new();
+    delivery.apply_to(&mut applied);
+    assert_eq!(
+        applied,
+        vec![
+            "--".to_string(),
+            "- review the spec\n- ask questions".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn claude_interactive_prompt_without_dash_keeps_plain_positional_arg() {
+    let p = profile(Provider::Claude);
+    let args = Vec::new();
+    let delivery = p.prompt_delivery(&args, "review the spec", false).unwrap();
+    let mut applied = Vec::new();
+    delivery.apply_to(&mut applied);
+    assert_eq!(applied, vec!["review the spec"]);
+}
+
+#[test]
 fn opencode_non_interactive_prompt_body_uses_positional_arg() {
     let p = profile(Provider::OpenCode);
     let mut args = vec!["run".to_string()];

@@ -256,9 +256,15 @@ fn graph_instructions(
 /// Choose a default graph width based on how many commits are in the graph.
 fn default_graph_width(commit_count: usize, terminal_width: u32) -> ImageWidth {
     if commit_count <= 4 {
-        ImageWidth::Characters(60)
+        ImageWidth::Characters(40)
     } else if commit_count <= 8 {
         ImageWidth::Characters(80)
+    } else if commit_count <= 11 {
+        if terminal_width > 100 {
+            ImageWidth::Characters(100)
+        } else {
+            ImageWidth::Percent(100.0)
+        }
     } else if commit_count <= 15 {
         if terminal_width > 120 {
             ImageWidth::Characters(120)

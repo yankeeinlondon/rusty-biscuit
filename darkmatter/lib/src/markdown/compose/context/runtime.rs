@@ -215,9 +215,14 @@ impl ComposeContext {
         self.inner.values.get(key)
     }
 
+    /// Looks up a value after applying compose-time environment overrides.
+    pub(crate) fn get_effective(&self, key: &str) -> Option<serde_json::Value> {
+        self.values_with_env_agent_overrides().get(key).cloned()
+    }
+
     /// Returns the full context as a JSON object.
     pub fn as_object(&self) -> serde_json::Value {
-        serde_json::Value::Object(self.inner.values.clone())
+        serde_json::Value::Object(self.values_with_env_agent_overrides())
     }
 
     /// Returns diagnostics from the capture phase.
@@ -245,6 +250,23 @@ impl ComposeContext {
     /// [`ComposeOptions::new_with_context`].
     pub fn env_mut(&mut self) -> &mut HashMap<String, String> {
         &mut std::sync::Arc::make_mut(&mut self.inner).env
+    }
+
+    fn values_with_env_agent_overrides(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut values = self.inner.values.clone();
+        if let Some(agent) = normalized_env_value(&self.inner.env, "AGENT", "unknown") {
+            values.insert(
+                "agent".to_string(),
+                serde_json::Value::String(agent),
+            );
+        }
+        if let Some(model) = normalized_env_value(&self.inner.env, "MODEL", "default") {
+            values.insert(
+                "model".to_string(),
+                serde_json::Value::String(model),
+            );
+        }
+        values
     }
 
     /// Creates a context with fixed values for testing.
@@ -298,4 +320,19 @@ impl ComposeContext {
             }),
         }
     }
+}
+
+fn normalized_env_value(
+    env: &HashMap<String, String>,
+    key: &str,
+    default: &str,
+) -> Option<String> {
+    env.get(key).map(|value| {
+        let trimmed = value.trim_ascii();
+        if trimmed.is_empty() {
+            default.to_string()
+        } else {
+            trimmed.to_string()
+        }
+    })
 }

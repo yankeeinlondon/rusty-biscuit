@@ -1,5 +1,6 @@
 ---
 source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+assertion_line: 160
 expression: convert_yaml(yaml)
 ---
 {
@@ -7,10 +8,17 @@ expression: convert_yaml(yaml)
   "additionalProperties": true,
   "properties": {
     "rating": {
-      "default": 3,
-      "maximum": 5,
-      "minimum": 0,
-      "type": "number"
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "maximum": 5,
+          "minimum": 0,
+          "type": "number"
+        }
+      ],
+      "default": 3
     },
     "slug": {
       "pattern": "\\S",

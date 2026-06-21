@@ -102,9 +102,19 @@ pub mod baseline {
 
     /// Returns the directory holding the baseline JSON fixtures.
     pub fn dir() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        let features_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("..")
-            .join("features")
+            .join("features");
+        let active = features_dir
+            .join("2026-06-17-cli-atheist")
+            .join("baseline")
+            .join("json");
+        if active.exists() {
+            return active;
+        }
+
+        features_dir
+            .join("_completed")
             .join("2026-06-17-cli-atheist")
             .join("baseline")
             .join("json")

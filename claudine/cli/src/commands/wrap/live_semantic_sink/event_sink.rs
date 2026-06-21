@@ -24,6 +24,13 @@ impl SemanticEventSink for LiveSemanticSink {
         } = &event
         {
             self.update_session_state(session_id, model);
+            // Re-scope the content detector's exit-expression set to the
+            // provider-reported model. The detector was first compiled with
+            // only the launch-time model hint (CLI `--model` / `MODEL` env /
+            // frontmatter `model`), which is often absent — so an
+            // agent/model-scoped exit expression matching the actual model
+            // only becomes active here.
+            self.rescope_for_model(model.as_deref());
             self.claude_api_key_source = extra
                 .get("api_key_source")
                 .and_then(Value::as_str)
@@ -99,10 +106,29 @@ impl SemanticEventSink for LiveSemanticSink {
             }
         }
 
+        // 4b. Runaway-output content guard (Phase 6). Scan OutputText +
+        //     Reasoning text only — never tool payloads (A2) — and reset
+        //     the per-turn volume counters on TurnComplete (F2). The feed
+        //     happens before rendering so the tripping chunk itself can be
+        //     suppressed (the `content_tripped` flag gates step 5 below).
+        match &event {
+            SemanticEvent::OutputText { text, .. } | SemanticEvent::Reasoning { text, .. } => {
+                self.feed_content_detector(text);
+            }
+            SemanticEvent::TurnComplete { .. } => {
+                self.reset_content_detector_turn();
+            }
+            _ => {}
+        }
+
         // 5. Forward text/reasoning to their dedicated renderers before the
         //    status-line rendering so stdout writes happen in stream order.
+        //    Once a content trip has fired, output rendering is suppressed
+        //    so the tail of a runaway is not echoed to the terminal.
         match &event {
-            SemanticEvent::OutputText { text, .. } if self.emit_output_text.is_some() => {
+            SemanticEvent::OutputText { text, .. }
+                if self.emit_output_text.is_some() && !self.content_tripped() =>
+            {
                 // Route the transition into the FinalStdout section
                 // through the shared section tracker so the separator
                 // blank (between stderr events and final stdout) is
@@ -135,7 +161,7 @@ impl SemanticEventSink for LiveSemanticSink {
                 }
                 self.update_stdout_trailing_newlines(text);
             }
-            SemanticEvent::Reasoning { text, .. } => {
+            SemanticEvent::Reasoning { text, .. } if !self.content_tripped() => {
                 let block = render_thinking_block(text, &self.terminal);
                 if !block.is_empty() {
                     // Split the multi-line block render into lines so the

@@ -896,6 +896,29 @@ impl Writer<'_> {
         result
     }
 
+    /// Renders a single `node` through the full [`Self::render`] path with the
+    /// context narrowed to `width`.
+    ///
+    /// Mirrors [`Self::render_kind_in_width`] but keeps the layout/paint wrapper
+    /// (`render`, not `render_kind`). Used when a block child is about to be
+    /// indented (e.g. a nested list inside a list item): the child must wrap to
+    /// the width left *after* that indent, or its lines overrun the terminal by
+    /// the indent amount and the terminal hard-wraps the overflow.
+    fn render_in_width(&mut self, node: &RenderNode, width: u32) -> Result<String, RenderError> {
+        let mut narrowed = self.opts.clone();
+        narrowed.context.available_width = width;
+        narrowed.context.width = width;
+        narrowed.context.terminal.fixed_width = Some(width);
+        let mut sub = Writer {
+            opts: &narrowed,
+            diagnostics: Vec::new(),
+            inherited: self.inherited.clone(),
+        };
+        let result = sub.render(node);
+        self.diagnostics.append(&mut sub.diagnostics);
+        result
+    }
+
     /// Renders an unstyled block quote with a caller-supplied left-border
     /// `prefix` (the darkmatter `▐   ` bar) instead of the shared
     /// [`BlockQuote`] component's `│ ` border.
@@ -1600,8 +1623,17 @@ impl Writer<'_> {
                     prefix_used = true;
                 }
             } else {
-                // Block child: indent by `indent_children`, no prefix.
-                let body = self.render(child)?;
+                // Block child: indent by `indent_children`, no prefix. Render
+                // it at the width left *after* that indent so a nested list (or
+                // other block) wraps within bounds instead of overrunning the
+                // terminal by `indent_children` cells.
+                let inner_width = self
+                    .opts
+                    .context
+                    .available_width
+                    .saturating_sub(indent_children)
+                    .max(1);
+                let body = self.render_in_width(child, inner_width)?;
                 out.push_str(&indent_block(&body, indent_children));
                 idx += 1;
             }
@@ -3663,6 +3695,47 @@ mod render_tree_tests {
         // collapse to, and the closing word survives.
         assert!(stripped.contains("series"), "trailing text lost: {stripped:?}");
         assert!(stripped.lines().count() >= 3, "did not wrap: {stripped:?}");
+    }
+
+    #[test]
+    fn render_tree_nested_list_item_wraps_within_width() {
+        // A nested list item is indented by the parent's `indent_children` after
+        // it renders. Its content must wrap to the width left *after* that
+        // indent, or every line overruns the terminal by the indent amount and
+        // the terminal hard-wraps the overflow (the lone-`;` blemish). Regression
+        // for the implement-plan prompt nested frontmatter-property list.
+        let inner = RenderNode::list(
+            false,
+            None,
+            vec![RenderNode::list_item(
+                None,
+                vec![RenderNode::text(
+                    "set the source files frontmatter property to every file touched during this phase; put an empty list if none",
+                )],
+            )],
+        );
+        let outer_item = RenderNode::list_item(
+            None,
+            vec![
+                RenderNode::text("You must set the following Frontmatter properties:"),
+                inner,
+            ],
+        );
+        let node = RenderNode::list(false, None, vec![outer_item]);
+        let out = render_terminal_node(&node, &no_osc_opts(60)).expect("render");
+        let stripped = strip_escape_codes(&out.output);
+        for line in stripped.lines() {
+            assert!(
+                line.chars().count() <= 60,
+                "nested item overran width: {line:?}"
+            );
+        }
+        // The nested bullet is indented under the parent (not at column 0).
+        let nested = stripped
+            .lines()
+            .find(|l| l.contains("set the source files"))
+            .expect("nested line");
+        assert!(nested.starts_with("  "), "nested bullet not indented: {nested:?}");
     }
 
     #[test]

@@ -196,25 +196,19 @@ fn resolve_extra(extra: &HashMap<String, Value>, path: &str) -> Option<Value> {
     if head.is_empty() {
         return None;
     }
-    let mut current = extra.get(head)?.clone();
+    let mut current = extra.get(head)?;
     for part in parts {
-        current = match current {
-            Value::Object(map) => map.get(part).cloned()?,
-            _ => return None,
-        };
+        current = current.as_object()?.get(part)?;
     }
-    Some(current)
+    Some(current.clone())
 }
 
 fn nested_pointer(value: &Value, path: &str) -> Option<Value> {
-    let mut current = value.clone();
+    let mut current = value;
     for part in path.split('.') {
-        current = match current {
-            Value::Object(map) => map.get(part).cloned()?,
-            _ => return None,
-        };
+        current = current.as_object()?.get(part)?;
     }
-    Some(current)
+    Some(current.clone())
 }
 
 fn resolve_top_level(meta: &EventMeta, path: &str) -> Option<Value> {
@@ -622,6 +616,20 @@ mod tests {
             Some(json!(["fast", "urgent", "infrastructure"]))
         );
         assert_eq!(lookup.get("extra.missing"), None);
+    }
+
+    #[test]
+    fn nested_extra_walk_returns_leaf_without_cloning_intermediates() {
+        let meta = sample_meta();
+        let lookup = EventMetaExpressionLookup::new(&meta);
+
+        // Deep dotted path resolves to the scalar leaf.
+        assert_eq!(lookup.get("extra.nested.inner.depth"), Some(json!(7)));
+        // Partial path returns the subtree rooted at that node.
+        let subtree = lookup.get("extra.nested.inner").expect("inner resolves");
+        assert_eq!(subtree.pointer("/depth"), Some(&json!(7)));
+        // Missing intermediate key propagates None.
+        assert_eq!(lookup.get("extra.nested.missing.depth"), None);
     }
 
     #[test]

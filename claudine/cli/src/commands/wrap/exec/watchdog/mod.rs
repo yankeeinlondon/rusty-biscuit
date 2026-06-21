@@ -20,6 +20,7 @@ pub(crate) use breach::{
 pub(crate) use evaluate::{WatchdogTickResult, evaluate_timeout_tick};
 pub(crate) use spawn::{
     spawn_flush_if_idle_ticker, spawn_prompt_timing_monitor, spawn_timeout_watchdog_ticker,
+    spawn_wall_clock_timeout_ticker,
 };
 
 // Re-exported so the `tests/*.rs` suites reach these names through

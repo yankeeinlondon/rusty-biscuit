@@ -8,6 +8,15 @@ use crate::config::claudine_config::{ClaudineConfig, RepoOverrideConfig};
 /// - `canonical_provider`: repo overrides user if repo has `Some`.
 /// - `actions`: per-event replacement — if repo defines actions for an event,
 ///   that vector fully replaces the user's entry for the same event.
+/// - `matchers`: per-event replacement — same as `actions`.
+/// - `active_messenger`: repo overrides user's active config key only.
+/// - `exit_expressions`: repo replaces user's declaration (the resolver
+///   in `runaway::resolve_exit_expressions` interprets the repo's combine
+///   mode; here we just hand the repo's value through as the resolved
+///   "user-facing" view). If the repo did not declare `exit_expressions`,
+///   the user value is preserved.
+/// - `guard_settings`: repo fully replaces the user's scalar settings if
+///   the repo declares them.
 pub(crate) fn merge_repo_override(user: &mut ClaudineConfig, repo: &RepoOverrideConfig) {
     // canonical_provider: repo overrides user if set
     if repo.canonical_provider.is_some() {
@@ -29,6 +38,20 @@ pub(crate) fn merge_repo_override(user: &mut ClaudineConfig, repo: &RepoOverride
         && let Some(messenger) = &mut user.messenger
     {
         messenger.active_config = override_value.clone();
+    }
+
+    // exit_expressions: repo declaration replaces user's when present.
+    // (The three-layer resolver interprets the combine mode; the merge
+    // here only collapses user+repo into a single user-facing view that
+    // later phases treat as "the user layer" — frontmatter is added on
+    // top at run time.)
+    if repo.exit_expressions.is_some() {
+        user.exit_expressions = repo.exit_expressions.clone();
+    }
+
+    // guard_settings: repo fully replaces user's scalar settings.
+    if let Some(repo_guards) = &repo.guard_settings {
+        user.guard_settings = repo_guards.clone();
     }
 }
 

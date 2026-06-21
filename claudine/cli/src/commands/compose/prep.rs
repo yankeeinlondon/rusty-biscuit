@@ -122,8 +122,10 @@ pub(crate) fn run_composition_inner(
     let (source, inline_state) = kind.on_source_resolved(source, &shared)?;
 
     // Captured once for frontmatter-excerpt enrichment of any error rendered
-    // below; gates whether the YAML block is shown (TTY) or withheld (pipe/CI).
-    let stderr_is_tty = std::io::stderr().is_terminal();
+    // below; gates whether the YAML block is shown (TTY or FORCE_COLOR) or
+    // withheld (pipe/CI/NO_COLOR).
+    let stderr_is_tty = std::io::stderr().is_terminal()
+        || std::env::var_os("FORCE_COLOR").is_some();
 
     // Schema-aware pre-prepare validation. Runs BEFORE the preflight
     // compose pass so the user-visible error surface is Claudine's
@@ -470,8 +472,10 @@ fn execute_loop_or_single(
     let loop_options = build_loop_options(&shared);
 
     // Captured once for frontmatter-excerpt enrichment of any error rendered
-    // below; gates whether the YAML block is shown (TTY) or withheld (pipe/CI).
-    let stderr_is_tty = std::io::stderr().is_terminal();
+    // below; gates whether the YAML block is shown (TTY or FORCE_COLOR) or
+    // withheld (pipe/CI/NO_COLOR).
+    let stderr_is_tty = std::io::stderr().is_terminal()
+        || std::env::var_os("FORCE_COLOR").is_some();
 
     let file_for_loop = file.clone();
     let loop_prepare_options = PrepareOptions {

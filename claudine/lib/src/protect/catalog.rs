@@ -139,7 +139,7 @@ pub static CATALOG: &[RuleDefinition] = &[
         group: RuleGroup::FilesystemDestruction,
         rule_id: "rm_root",
         surface: ScanSurface::BashCommand,
-        pattern: r"(sudo\s+)?rm\s+-rf\s+/\s*$",
+        pattern: r"(sudo\s+)?\\?rm\s+-[a-zA-Z]*[rf][a-zA-Z]*[rf][a-zA-Z]*\s+/\s*$",
         platforms: PlatformApplicability::All,
         supports_allow_paths: true,
     },
@@ -147,7 +147,7 @@ pub static CATALOG: &[RuleDefinition] = &[
         group: RuleGroup::FilesystemDestruction,
         rule_id: "rm_root_glob",
         surface: ScanSurface::BashCommand,
-        pattern: r"(sudo\s+)?rm\s+-rf\s+/\*",
+        pattern: r"(sudo\s+)?\\?rm\s+-[a-zA-Z]*[rf][a-zA-Z]*[rf][a-zA-Z]*\s+/\*",
         platforms: PlatformApplicability::All,
         supports_allow_paths: true,
     },
@@ -157,7 +157,7 @@ pub static CATALOG: &[RuleDefinition] = &[
         surface: ScanSurface::BashCommand,
         pattern: r"find\s+.*\s+-delete",
         platforms: PlatformApplicability::All,
-        supports_allow_paths: true,
+        supports_allow_paths: false,
     },
     RuleDefinition {
         group: RuleGroup::FilesystemDestruction,
@@ -173,7 +173,7 @@ pub static CATALOG: &[RuleDefinition] = &[
         surface: ScanSurface::BashCommand,
         pattern: r"(sudo\s+)?chmod\s+-R\s+777\s+/",
         platforms: PlatformApplicability::All,
-        supports_allow_paths: true,
+        supports_allow_paths: false,
     },
     RuleDefinition {
         group: RuleGroup::FilesystemDestruction,
@@ -181,7 +181,7 @@ pub static CATALOG: &[RuleDefinition] = &[
         surface: ScanSurface::BashCommand,
         pattern: r"(sudo\s+)?chmod\s+-R\s+000\s+/",
         platforms: PlatformApplicability::All,
-        supports_allow_paths: true,
+        supports_allow_paths: false,
     },
     RuleDefinition {
         group: RuleGroup::FilesystemDestruction,
@@ -189,7 +189,7 @@ pub static CATALOG: &[RuleDefinition] = &[
         surface: ScanSurface::BashCommand,
         pattern: r"(sudo\s+)?chown\s+-R\s+.*\s+/\s*$",
         platforms: PlatformApplicability::All,
-        supports_allow_paths: true,
+        supports_allow_paths: false,
     },
     RuleDefinition {
         group: RuleGroup::FilesystemDestruction,

@@ -158,17 +158,17 @@ where
 
     let prompt_path = source.resolved_path.clone();
 
-    // Capture the launch CWD (and PWD) before any iteration runs so we can
-    // restore them between iterations. The wrap layer's
-    // `switch_process_cwd` mutates the process-global CWD to the detected
-    // repo/git root inside each iteration; without restoration, iteration
-    // 2's `prepare_direct_with_schema` resolves any CLI-supplied
-    // `file(required)` setter against the post-switch root rather than
-    // the user's original launch directory. A path that validated on
-    // iteration 1 then fails iteration 2 as `not a "darkmatter-file"`,
-    // even though nothing about the value changed.
+    // Capture the launch CWD before any iteration runs so we can restore it
+    // between iterations. The wrap layer's `switch_process_cwd` mutates the
+    // process-global CWD to the detected repo/git root inside each iteration;
+    // without restoration, iteration 2's `prepare_direct_with_schema` resolves
+    // any CLI-supplied `file(required)` setter against the post-switch root
+    // rather than the user's original launch directory. A path that validated
+    // on iteration 1 then fails iteration 2 as `not a "darkmatter-file"`, even
+    // though nothing about the value changed. `PWD` is injected onto the child
+    // `Command` env map in `build_child_env_with_launch`, so we do not need to
+    // mutate the process-global `PWD` here.
     let launch_cwd = std::env::current_dir().ok();
-    let launch_pwd = std::env::var_os("PWD");
 
     // The Ctrl+C SIGINT handler is installed at the top of the compose
     // subcommand (see `install_user_interrupt_guard`) so it covers the
@@ -186,19 +186,11 @@ where
                 },
             ));
         }
-        // Restore launch CWD/PWD before each iteration so per-iteration
-        // schema validation (which uses ambient CWD via
-        // `validate_file_reference`) sees the same root that the pre-loop
-        // validation saw. SAFETY: single-threaded loop driver — no other
-        // thread reads or writes `PWD` concurrently.
+        // Restore launch CWD before each iteration so per-iteration schema
+        // validation (which uses ambient CWD via `validate_file_reference`)
+        // sees the same root that the pre-loop validation saw.
         if let Some(ref cwd) = launch_cwd {
             let _ = std::env::set_current_dir(cwd);
-            unsafe {
-                match launch_pwd {
-                    Some(ref value) => std::env::set_var("PWD", value),
-                    None => std::env::remove_var("PWD"),
-                }
-            }
         }
         let output = executor(ctx)?;
         if crate::output::user_interrupt_observed() {

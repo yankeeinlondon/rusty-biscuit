@@ -55,4 +55,7 @@ pub(crate) struct AttemptLaunch {
     /// `kill_grace` and `interval` from `CLAUDINE_KILL_GRACE` /
     /// `CLAUDINE_WATCHDOG_INTERVAL`.
     pub(crate) timeout_config: super::super::subagent_watchdog::TimeoutConfig,
+    /// True when `step_timeout` came from CLI, frontmatter, or a valid env
+    /// value instead of Claudine's built-in default.
+    pub(crate) step_timeout_user_configured: bool,
 }

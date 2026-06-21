@@ -601,6 +601,14 @@ static USER_INTERRUPTED: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 /// Also raises the lib-side flag in [`claudine::interrupt`] so blocking
 /// post-execute work (lifecycle messenger sends, TTS playback, sound
 /// effects) short-circuits on the first Ctrl+C instead of after several.
+///
+/// # Signal-handler safety
+///
+/// This function is called from the `SIGINT` handler installed by
+/// `commands::wrap::interrupt`. It must remain async-signal-safe: it
+/// performs only atomic stores and calls [`claudine::interrupt::mark_interrupted`],
+/// which is also a pure atomic store. No `OnceLock`, `Mutex`, allocation,
+/// or non-reentrant libc calls are introduced on the store path.
 pub(crate) fn mark_user_interrupted() {
     USER_INTERRUPTED.store(true, std::sync::atomic::Ordering::SeqCst);
     claudine::interrupt::mark_interrupted();

@@ -667,6 +667,9 @@ fn prompt_delivery_stdin_or_append(
             .iter()
             .map(|s| s.to_string())
             .collect::<Vec<_>>();
+        if prompt.starts_with('-') {
+            args.push("--".to_string());
+        }
         args.push(prompt.to_string());
         PromptDelivery::AppendArgs(args)
     }

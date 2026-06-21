@@ -827,8 +827,10 @@ mod tests {
         match err {
             MarkdownError::SchemaValidationFailed { problems, .. } => {
                 assert!(
-                    problems.iter().any(|p| p.path.contains("/name")),
-                    "expected a problem under /config/name, got {problems:?}"
+                    problems
+                        .iter()
+                        .any(|p| p.path == "/config" || p.path.contains("/name")),
+                    "expected a problem under /config or /config/name, got {problems:?}"
                 );
             }
             other => panic!("expected SchemaValidationFailed, got {other:?}"),

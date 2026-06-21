@@ -1889,6 +1889,26 @@ mod tests {
     }
 
     #[test]
+    fn missing_discriminator_falls_through_to_provider_extension() {
+        let (sink, mut parser) = new_parser();
+        parser.feed_line(r#"{"payload":{"k":1}}"#).unwrap();
+        let events = sink.snapshot();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            SemanticEvent::ProviderExtension {
+                provider,
+                kind,
+                payload,
+            } => {
+                assert_eq!(*provider, Provider::Claude);
+                assert_eq!(kind, "");
+                assert_eq!(payload.get("payload"), Some(&json!({"k": 1})));
+            }
+            other => panic!("expected ProviderExtension, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn round_trip_fidelity_across_mixed_events() {
         // Replay a mixed fixture and confirm every emitted event survives a
         // serde round-trip with identical JSON.

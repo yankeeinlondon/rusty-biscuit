@@ -260,7 +260,7 @@ fn compose_interactive_claude_seeds_prompt_as_positional_arg() {
     seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("test.md");
-    fs::write(&md_file, "---\ntitle: test\n---\nHello Claude\n").unwrap();
+    fs::write(&md_file, "---\ntitle: test\n---\n- Hello Claude\n").unwrap();
 
     write_executable(
         &path_dir.join("claude"),
@@ -285,9 +285,18 @@ exit 0
         .success();
 
     let args = fs::read_to_string(&args_path).unwrap();
+    let lines = args.lines().collect::<Vec<_>>();
+    let separator_index = lines
+        .iter()
+        .position(|line| *line == "--")
+        .expect("interactive compose should separate leading-dash Claude prompts with --");
+    let prompt_index = lines
+        .iter()
+        .position(|line| *line == "- Hello Claude")
+        .expect("interactive compose should pass Claude the composed prompt as a positional arg");
     assert!(
-        args.lines().any(|line| line == "Hello Claude"),
-        "interactive compose should pass Claude the composed prompt as a positional arg; args: {args}"
+        separator_index < prompt_index,
+        "`--` should appear before the leading-dash prompt; args: {args}"
     );
 }
 

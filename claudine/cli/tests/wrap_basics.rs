@@ -9,7 +9,7 @@ use std::fs;
 use tempfile::tempdir;
 mod common;
 use common::wrap::*;
-use common::{strip_ansi, write_executable};
+use common::{strip_ansi, write_dry_run_provider_stub, write_executable};
 
 #[test]
 fn help_lists_wrapper_subcommands() {
@@ -522,6 +522,80 @@ exit 1
     assert!(plain.contains("DRY RUN"));
     assert!(plain.contains("Command:"));
     assert!(plain.contains("codex"));
+}
+
+#[test]
+fn codex_dry_run_discovered_replace_system_prompt_uses_model_instructions_file() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+    fs::write(
+        workspace.path().join("system-prompt.md"),
+        "---\nmode: replace\n---\n\nUse the replacement prompt.\n",
+    )
+    .unwrap();
+
+    write_dry_run_provider_stub(&path_dir, "codex");
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+        .current_dir(workspace.path())
+        .args(["codex", "--dry-run", "inspect the repo"])
+        .assert()
+        .success()
+        .stdout("");
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("model_instructions_file="),
+        "discovered mode: replace should use Codex replace delivery; stderr was:\n{plain}"
+    );
+    assert!(
+        !plain.contains("developer_instructions="),
+        "discovered mode: replace should not use Codex append delivery; stderr was:\n{plain}"
+    );
+}
+
+#[test]
+fn codex_dry_run_discovered_replace_system_prompt_reports_effective_mode() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+    fs::write(
+        workspace.path().join("system-prompt.md"),
+        "---\nmode: replace\n---\n\nUse the replacement prompt.\n",
+    )
+    .unwrap();
+
+    write_dry_run_provider_stub(&path_dir, "codex");
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+        .current_dir(workspace.path())
+        .args(["codex", "--dry-run", "inspect the repo"])
+        .assert()
+        .success()
+        .stdout("");
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("System prompt:"),
+        "dry-run output should include the system-prompt report; stderr was:\n{plain}"
+    );
+    assert!(
+        plain.contains("mode: replace"),
+        "dry-run output should report the effective replace mode; stderr was:\n{plain}"
+    );
 }
 
 #[cfg(unix)]

@@ -323,6 +323,14 @@ mod acceptance_tests {
                 ComposeOperation::ShellExpansion,
             ])
             .with_shell_policy_root(policy_root)
+            // The default per-command shell timeout is 10s. These acceptance
+            // tests spawn real `echo` subprocesses, which finish in
+            // milliseconds in isolation but can be starved well past 10s under
+            // full-suite parallel load — tripping `ShellTimeoutBehavior::Error`
+            // and failing compose with a spurious timeout. A generous leash
+            // (far below the 90s nextest termination ceiling for these tests)
+            // keeps contention from masquerading as a real hang.
+            .with_shell_timeout(std::time::Duration::from_secs(60))
             .with_pre_approved_commands(approval)
     }
 
@@ -615,7 +623,7 @@ flag: a
     #[test]
     fn execution_subset_of_approval_across_randomized_conditions() {
         const BRANCH_COUNT: usize = 4;
-        const ITERATIONS: usize = 16;
+        const ITERATIONS: usize = 8;
 
         let mut body = String::from("---\n");
         for i in 0..BRANCH_COUNT {

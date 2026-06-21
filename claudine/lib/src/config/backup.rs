@@ -63,6 +63,8 @@ fn cleanup_old_backups(backup_dir: &Path) -> Result<usize> {
     for path in bak_files.iter().take(to_delete) {
         if fs::remove_file(path).is_ok() {
             deleted += 1;
+        } else {
+            tracing::warn!(path = %path.display(), "failed to remove old backup");
         }
     }
 
@@ -82,6 +84,7 @@ mod tests {
     use std::fs;
 
     use tempfile::TempDir;
+    use tracing_test::traced_test;
 
     use super::*;
 
@@ -181,5 +184,35 @@ mod tests {
         // The rest should remain
         assert!(dir.join("20260201_000002.bak").exists());
         assert!(dir.join("20260201_000011.bak").exists());
+    }
+
+    #[traced_test]
+    #[test]
+    fn cleanup_warns_on_unremovable_backup() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path();
+
+        // Add extra backups that are directories and sort oldest; remove_file
+        // will fail on them so they produce warnings while being retained.
+        for i in 0..2 {
+            let name = format!("20260201_{:06}.bak", i);
+            fs::create_dir(dir.join(&name)).unwrap();
+        }
+        for i in 2..(MAX_BACKUPS + 2) {
+            let name = format!("20260201_{:06}.bak", i);
+            fs::write(dir.join(&name), format!("backup {i}")).unwrap();
+        }
+
+        let deleted = cleanup_old_backups(dir).unwrap();
+        assert_eq!(deleted, 0);
+
+        logs_assert(|logs| {
+            let warnings: Vec<_> = logs
+                .iter()
+                .filter(|l| l.contains("failed to remove old backup"))
+                .collect();
+            assert_eq!(warnings.len(), 2, "expected two warnings, got: {:?}", logs);
+            Ok(())
+        });
     }
 }

@@ -249,10 +249,23 @@ fn install_default_crypto_provider() {
 }
 
 /// rustls server-cert verifier that accepts any presented certificate.
-/// Acceptable for the Phase 4 POC because peer authenticity is
-/// enforced separately by the [`crate::session_log`] signed-envelope
-/// layer once data starts flowing. Replace before shipping to the
-/// public internet.
+///
+/// ## Why this is permissive
+///
+/// Every daemon generates a fresh self-signed certificate on startup.
+/// There is no CA or pinned certificate distribution in Phase 4, so the
+/// TLS layer cannot authenticate the peer. Instead, peer identity is
+/// established by the [`crate::session_log`] signed-envelope layer:
+/// each sync delta/snapshot is signed with the peer's long-term Ed25519
+/// identity key, and the receiver verifies the signature and checks that
+/// the sender owns the document namespace before accepting the payload.
+///
+/// ## Future hardening
+///
+/// Replace this verifier before exposing rendezvous to untrusted
+/// networks. Options include pinning the peer's certificate or public
+/// key after first use (TOFU), requiring invitations to carry a
+/// certificate fingerprint, or running a small internal CA for the mesh.
 #[derive(Debug)]
 struct AcceptAnyServerCert;
 
