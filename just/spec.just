@@ -249,8 +249,8 @@ fix name="":
     fi
 
 # adds a complimentary tech design to the specification file
-[arg("dir", long="dir")]
-[arg("spec", long="spec")]
+[arg("dir")]
+[arg("spec")]
 design filter="" spec="" dir="":
     #!/usr/bin/env bash
     set -euo pipefail

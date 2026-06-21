@@ -216,7 +216,7 @@ implement-review filter="":
 # implements the suggestions from a review of a feature or fix
 [arg("design")]
 [arg("review")]
-[arg("spec", long="spec")]
+[arg("spec")]
 implement-feature-review filter="" review="" spec="" design="" agent="":
     #!/usr/bin/env bash
     set -euo pipefail
