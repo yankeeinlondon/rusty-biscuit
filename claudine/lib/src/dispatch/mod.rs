@@ -16,8 +16,9 @@ use crate::actions::{HookDecision, HookResponse};
 use crate::adapters::{self, AdapterError};
 use crate::error::Result;
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, ResolvedHook};
-use crate::protect::decision::ProtectDecision;
-use crate::protect::observe::extract_protect_request;
+use crate::protect::catalog::{RuleGroup, ScanSurface};
+use crate::protect::decision::{ProtectDecision, ProtectMatch};
+use crate::protect::observe::{extract_protect_request, ProtectObservation};
 use crate::protect::report::format_blocked_message;
 use crate::provider::Provider;
 
@@ -261,13 +262,11 @@ pub async fn dispatch_canonical_with_runtime(
     let protect_pre = {
         let _span = info_span!("dispatch_protect_pre").entered();
         protect_service.and_then(|service| {
-            let request = extract_protect_request(&event, &meta)?;
-            let decision = service.evaluate(&request);
-            if decision.is_blocked() {
-                Some(decision)
-            } else {
-                None
-            }
+            evaluate_protect_observation(
+                service,
+                extract_protect_request(&event, &meta),
+                meta.tool_name.as_deref().unwrap_or(""),
+            )
         })
     };
 
@@ -357,12 +356,16 @@ pub async fn dispatch_canonical_with_runtime(
             ) {
                 return None;
             }
-            let request = extract_protect_request(&event, &meta)?;
-            let decision = service.evaluate(&request);
-            if decision.is_blocked() {
-                Some(decision)
-            } else {
-                None
+            match extract_protect_request(&event, &meta) {
+                ProtectObservation::Request(request) => {
+                    let decision = service.evaluate(&request);
+                    if decision.is_blocked() {
+                        Some(decision)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
             }
         })
     };
@@ -594,6 +597,53 @@ fn map_protect_block(decision: &ProtectDecision) -> HookResponse {
             }
         })),
     }
+}
+
+/// Evaluate a protect observation. Normal requests flow through the service.
+/// `Unparsed` command- or write-shaped observations are blocked defensively
+/// with a warning, reflecting the best-effort posture.
+fn evaluate_protect_observation(
+    service: &crate::protect::service::ProtectService,
+    observation: ProtectObservation<'_>,
+    tool_name: &str,
+) -> Option<ProtectDecision> {
+    match observation {
+        ProtectObservation::Request(request) => {
+            let decision = service.evaluate(&request);
+            if decision.is_blocked() {
+                Some(decision)
+            } else {
+                None
+            }
+        }
+        ProtectObservation::Unparsed { surface, reason } => {
+            warn!(
+                tool_name,
+                ?surface,
+                reason,
+                "protect could not parse command/write-shaped tool; blocking defensively"
+            );
+            Some(synthetic_unparsed_block(surface, reason))
+        }
+        ProtectObservation::NoOpinion => None,
+    }
+}
+
+fn synthetic_unparsed_block(surface: ScanSurface, reason: &'static str) -> ProtectDecision {
+    let rule_id = match surface {
+        ScanSurface::BashCommand => "unparsed_bash_command",
+        ScanSurface::WritePath => "unparsed_write_path",
+        ScanSurface::McpResponse => "unparsed_mcp_response",
+    };
+    ProtectDecision::blocked(ProtectMatch {
+        group: RuleGroup::Custom,
+        rule_id: rule_id.to_string(),
+        pattern: String::new(),
+        matched_text: reason.to_string(),
+        surface,
+        target_path: None,
+        config_key: "protect.rules.custom".to_string(),
+    })
 }
 
 fn runtime_repo_root(env: &EnvironmentContext) -> Option<&Path> {
@@ -1143,6 +1193,47 @@ mod tests {
         assert!(
             outcome.response.is_some(),
             "should produce provider-native block response"
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_protect_unparsed_bash_shaped_tool_is_blocked() {
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = true;
+
+        let runtime = loader::compile_canonical_runtime(config, None).unwrap();
+
+        let mut meta = EventMeta::new(Provider::Claude, AgenticEvent::BeforeTool);
+        meta.tool_name = Some("Bash".to_string());
+        meta.tool_input = Some(json!({ "args": ["rm", "-rf", "/"] }));
+        meta.env = EnvironmentContext::default();
+
+        let outcome = dispatch_canonical_with_runtime(
+            Provider::Claude,
+            AgenticEvent::BeforeTool,
+            meta,
+            &runtime,
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            outcome.protect_pre.as_ref().is_some_and(|d| d.is_blocked()),
+            "unparsed bash-shaped tool should be blocked defensively"
+        );
+        assert!(
+            outcome.response.is_some(),
+            "should produce provider-native deny response"
+        );
+        assert_eq!(
+            outcome
+                .protect_pre
+                .as_ref()
+                .unwrap()
+                .blocked
+                .as_ref()
+                .map(|m| m.rule_id.as_str()),
+            Some("unparsed_bash_command")
         );
     }
 

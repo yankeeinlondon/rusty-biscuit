@@ -1,6 +1,7 @@
 ---
 area: "{{ ctx.area }}"
-scope: "{{ctx.current_package_area == 'root' ? 'package' : 'package area' }}"
+scope: "{{ctx.area == 'root' ? 'package' : 'package area' }}"
+mode: "append"
 ---
 ## Context 
 

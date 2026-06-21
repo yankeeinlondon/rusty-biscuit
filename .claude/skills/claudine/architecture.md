@@ -369,6 +369,12 @@ All non-interactive runs follow a **9-section model** for rendered output, ensur
 
 Spacing is enforced at the sink level, with at most one blank line between any two sections.
 
+### Markdown rendering boundary (triage)
+
+The prose-bearing sections (System Prompt, **Agent Prompt**, Thinking Prose) render Markdown through `prompt_reporting::render_markdown_for_terminal`, which is **pure delegation** to darkmatter's `Markdown::as_terminal` — it only sets `max_width` and collapses blank lines. claudine owns **no** word-wrap, hanging-indent, or inline-style (code/bold/link) logic; all of that lives in darkmatter's fold + biscuit-terminal's render tree (`render_tree/render.rs`).
+
+So when rendered prompt output shows wrong wrapping, spurious newlines, lines bleeding past the width, or mis-styled inline spans, the defect is in **darkmatter / biscuit-terminal**, not claudine. Reproduce at that layer (`md.as_terminal` with a fixed `max_width`) rather than through the claudine CLI. Known gotcha: a CommonMark *tight* list item carries its content as a flat run of inline siblings (`[Text, InlineCode, Text]`) with no wrapping `Paragraph`, and the terminal renderer must coalesce that run before wrapping — the wrap is per-list-item, not per-inline-node.
+
 ### Provider Parsers (6)
 
 | Parser | Format | Summary source |

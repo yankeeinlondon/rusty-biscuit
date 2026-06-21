@@ -170,6 +170,59 @@ pub(crate) fn spawn_timeout_watchdog_ticker(
     (cancel, handle)
 }
 
+/// Spawn a minimal wall-clock-only timeout ticker for the non-streaming
+/// spawn paths (`run_child` / `run_child_capture`).
+///
+/// The full [`spawn_timeout_watchdog_ticker`] needs `LiveMetrics`, a
+/// `WatchdogState`, and a `StreamOutput` coordinator that only the structured
+/// streaming path owns. The direct and capture paths have no semantic stream,
+/// so only the wall-clock (`timeout`) rule applies. This ticker watches the
+/// elapsed time and, once the budget is exceeded, sends a single `Timeout`
+/// [`WatchdogTermination`](super::super::termination::WatchdogTermination) so
+/// the unified wait loop performs the same group-targeted SIGTERM→SIGKILL
+/// escalation every other path uses — closing the gap where a configured
+/// `timeout` silently disabled Ctrl+C on the capture path.
+///
+/// Elapsed time is compared with [`Instant::saturating_duration_since`] (not a
+/// precomputed deadline `Instant`), so an absurd budget such as `u64::MAX`
+/// seconds never overflows the clock — it simply never fires.
+pub(crate) fn spawn_wall_clock_timeout_ticker(
+    timeout: Duration,
+    started_at: Instant,
+    watchdog_tx: std::sync::mpsc::Sender<super::super::termination::WatchdogTermination>,
+) -> (TickerCancel, thread::JoinHandle<()>) {
+    use super::super::termination::{WatchdogTermination, WatchdogTerminationReason};
+
+    let cancel = TickerCancel::new();
+    let cancel_flag = cancel.clone();
+    let poll_interval = Duration::from_millis(100);
+
+    let handle = thread::spawn(move || {
+        loop {
+            if cancel_flag.is_cancelled() {
+                break;
+            }
+            let elapsed = Instant::now().saturating_duration_since(started_at);
+            if elapsed >= timeout {
+                let _ = watchdog_tx.send(WatchdogTermination {
+                    reason: WatchdogTerminationReason::Timeout,
+                    message: format!(
+                        "wall-clock budget exceeded after {}",
+                        format_duration(elapsed),
+                    ),
+                    stuck_subagents: Vec::new(),
+                });
+                break;
+            }
+            if cancel_flag.sleep(poll_interval) {
+                break;
+            }
+        }
+    });
+
+    (cancel, handle)
+}
+
 /// Spawn the prompt-scoped timing monitor.
 ///
 /// Emits the periodic timing header anchored on the prompt's start time

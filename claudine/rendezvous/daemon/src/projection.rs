@@ -204,6 +204,46 @@ impl Projection {
         conn.execute("DELETE FROM session_entries", [])?;
         Ok(())
     }
+
+    /// Atomically replace the entire projection table with `rows`.
+    ///
+    /// The truncate and inserts run inside a single DuckDB transaction;
+    /// if any insert fails, the previous contents remain intact.
+    pub fn replace_all_rows(&self, rows: &[ProjectionRow]) -> Result<(), ProjectionError> {
+        let conn = self.inner.lock();
+        conn.execute_batch("BEGIN TRANSACTION;")?;
+        if let Err(e) = conn.execute("DELETE FROM session_entries", []) {
+            let _ = conn.execute_batch("ROLLBACK;");
+            return Err(e.into());
+        }
+        for row in rows {
+            let chunk_index = i64::try_from(row.chunk.chunk_index).unwrap_or(i64::MAX);
+            let sequence = i64::try_from(row.sequence).unwrap_or(i64::MAX);
+            if let Err(e) = conn.execute(
+                "INSERT OR IGNORE INTO session_entries \
+                 (chunk_id, owner_node_id, session_id, chunk_index, sequence, \
+                  created_at_unix_ms, source, level, message, metadata_json) \
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                duckdb::params![
+                    row.chunk.as_path(),
+                    row.chunk.owner_node_id.as_str(),
+                    row.chunk.session_id.as_str(),
+                    chunk_index,
+                    sequence,
+                    row.created_at_unix_ms,
+                    row.source.as_str(),
+                    row.level.as_str(),
+                    row.message.as_str(),
+                    row.metadata_json.as_str(),
+                ],
+            ) {
+                let _ = conn.execute_batch("ROLLBACK;");
+                return Err(e.into());
+            }
+        }
+        conn.execute_batch("COMMIT;")?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

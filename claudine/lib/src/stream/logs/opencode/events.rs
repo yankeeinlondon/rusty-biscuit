@@ -83,7 +83,7 @@ pub enum ProviderLimitKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LogClassification {
     ProviderLimit {
-        status_code: u16,
+        status_code: Option<u16>,
         kind: ProviderLimitKind,
         reset_at: Option<DateTime<Utc>>,
         provider_id: Option<String>,

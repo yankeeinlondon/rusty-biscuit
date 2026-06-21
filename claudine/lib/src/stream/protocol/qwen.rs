@@ -355,11 +355,29 @@ mod tests {
         let QwenEvent::Result(result) = event else {
             panic!("expected Result");
         };
+        assert!(
+            result.extra.is_empty(),
+            "known result fields must not land in extra; extra={:?}",
+            result.extra
+        );
         let (usage, meta) = result.resolved_usage();
         assert_eq!(meta.duration_ms, Some(5000));
         let usage = usage.expect("usage");
         assert_eq!(usage.input_tokens, Some(300));
         assert_eq!(usage.output_tokens, Some(150));
+    }
+
+    #[test]
+    fn qwen_result_round_trips_through_json() {
+        let line = r#"{"type":"result","duration_ms":1200,"usage":{"input_tokens":10,"output_tokens":5},"cost_usd":0.0001}"#;
+        let event = parse(line);
+        let serialized = serde_json::to_string(&event).unwrap();
+        let reparsed: QwenEvent = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(
+            serde_json::to_string(&reparsed).unwrap(),
+            serialized,
+            "parse -> serialize -> parse should be stable for a known event"
+        );
     }
 
     #[test]

@@ -372,6 +372,12 @@ impl CompositionKind {
         match self {
             Self::Direct => Ok((source, None)),
             Self::Inline => {
+                // Captured once for frontmatter-excerpt enrichment of any inline
+                // contract error returned below; gates whether the YAML block is
+                // shown (TTY or FORCE_COLOR) or withheld (pipe/CI/NO_COLOR).
+                let stderr_is_tty = std::io::stderr().is_terminal()
+                    || std::env::var_os("FORCE_COLOR").is_some();
+
                 // -- Fail-fast: inline-compose / sequence mismatch ------------------
                 //
                 // A document authoring both a non-null `prompt` and a non-null
@@ -381,16 +387,10 @@ impl CompositionKind {
                 // prompt-property pre-validation, schema scrubbing, overrides,
                 // composition, provider selection, and execution.
                 if claudine::composition::is_inline_sequence_mismatch(&source) {
-                    let raw_yaml = claudine::composition::capture_frontmatter_yaml(
-                        &source.original_text,
-                    )
-                    .unwrap_or_default();
-                    let stderr_is_tty = std::io::stderr().is_terminal();
                     return Err(CompositionError::InlineComposeSequenceMismatch {
                         source_path: source.resolved_path.clone(),
-                        raw_yaml,
-                        stderr_is_tty,
-                    });
+                    }
+                    .enrich_frontmatter(&source, stderr_is_tty));
                 }
 
                 // -- Pre-validation: prompt frontmatter property --------------------
@@ -423,14 +423,16 @@ impl CompositionKind {
                 // missing `prompt` produces the right typed error before any
                 // schema scrubbing kicks in.
                 if !has_prompt {
-                    return Err(CompositionError::PromptPropertyMissing);
+                    return Err(CompositionError::PromptPropertyMissing
+                        .enrich_frontmatter(&source, stderr_is_tty));
                 }
                 if let Some(ref value) = prompt_value
                     && !matches!(value, serde_json::Value::String(_))
                 {
                     return Err(CompositionError::PromptPropertyWrongType(
                         json_type_name(value).to_string(),
-                    ));
+                    )
+                    .enrich_frontmatter(&source, stderr_is_tty));
                 }
 
                 Ok((

@@ -128,6 +128,18 @@ pub fn complete_indent_values(current: &OsStr) -> Vec<CompletionCandidate> {
     candidates
 }
 
+/// Completes common fixed-width wrapping targets.
+pub fn complete_fixed_width_values(current: &OsStr) -> Vec<CompletionCandidate> {
+    let current_str = current.to_string_lossy();
+    let mut candidates: Vec<_> = ["40", "60", "80", "100", "120"]
+        .into_iter()
+        .filter(|value| value.starts_with(current_str.as_ref()))
+        .map(CompletionCandidate::new)
+        .collect();
+    candidates.sort_by(|a, b| a.get_value().cmp(b.get_value()));
+    candidates
+}
+
 /// Completes theme names for `--theme` / `--code-theme`.
 ///
 /// Enumerates every available [`ThemePair`](ThemePair)
@@ -169,6 +181,15 @@ mod tests {
 
         let values = completion_values(complete_indent_values(OsStr::new("4")));
         assert_eq!(values, vec!["4"]);
+    }
+
+    #[test]
+    fn complete_fixed_width_values_lists_common_widths() {
+        let values = completion_values(complete_fixed_width_values(OsStr::new("")));
+        assert_eq!(values, vec!["100", "120", "40", "60", "80"]);
+
+        let values = completion_values(complete_fixed_width_values(OsStr::new("8")));
+        assert_eq!(values, vec!["80"]);
     }
 
     #[test]

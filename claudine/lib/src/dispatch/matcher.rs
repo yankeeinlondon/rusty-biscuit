@@ -45,8 +45,9 @@ impl RuntimeMatcher {
     ///
     /// The string is parsed as a Darkmatter condition first; on parse
     /// failure it is compiled as a regex. If neither succeeds, returns
-    /// `None` and emits a warning so the binding falls back to
-    /// unconditional matching rather than being silently dropped.
+    /// `None` silently. At config-load time callers should use
+    /// [`compile_many`] so invalid matchers are reported in one
+    /// aggregated warning rather than one log line per binding.
     ///
     /// ## Notes
     ///
@@ -76,18 +77,36 @@ impl RuntimeMatcher {
         // treated as a regex below so legacy `tool_name`-style matchers
         // keep their original semantics.
 
-        match Regex::new(trimmed) {
-            Ok(regex) => Some(Self::Regex(regex)),
-            Err(error) => {
-                warn!(
-                    matcher = %trimmed,
-                    %error,
-                    "Matcher is neither a valid Darkmatter condition nor a valid regex; binding will fire unconditionally"
-                );
-                None
-            }
-        }
+        Regex::new(trimmed).ok().map(Self::Regex)
     }
+}
+
+/// Compile matchers for multiple event bindings at load time.
+///
+/// Invalid matchers compile to `None` so the binding fires
+/// unconditionally. A single aggregated warning names every binding
+/// whose matcher failed, replacing the previous per-binding warnings.
+pub fn compile_many(bindings: &[(AgenticEvent, &str)]) -> Vec<(AgenticEvent, Option<RuntimeMatcher>)> {
+    let mut results = Vec::with_capacity(bindings.len());
+    let mut failed = Vec::new();
+
+    for (event, source) in bindings {
+        let trimmed = source.trim();
+        let compiled = RuntimeMatcher::compile(source);
+        if compiled.is_none() && !trimmed.is_empty() {
+            failed.push(format!("{} ({})", event, trimmed));
+        }
+        results.push((*event, compiled));
+    }
+
+    if !failed.is_empty() {
+        warn!(
+            bindings = %failed.join(", "),
+            "Matchers are neither valid Darkmatter conditions nor valid regexes; listed bindings will fire unconditionally"
+        );
+    }
+
+    results
 }
 
 /// Whether the parsed expression uses condition-grade features (operators,
@@ -183,6 +202,7 @@ mod tests {
     use chrono::Utc;
     use std::collections::HashMap;
     use std::path::PathBuf;
+    use tracing_test::traced_test;
 
     fn tool_meta(event: AgenticEvent, tool_name: Option<&str>) -> EventMeta {
         EventMeta {
@@ -406,5 +426,83 @@ mod tests {
     fn compile_returns_none_for_empty_string() {
         assert!(RuntimeMatcher::compile("").is_none());
         assert!(RuntimeMatcher::compile("   ").is_none());
+    }
+
+    #[traced_test]
+    #[test]
+    fn compile_many_aggregates_one_warning_for_invalid_matchers() {
+        let bindings = &[
+            (AgenticEvent::BeforeTool, "[invalid(regex"),
+            (AgenticEvent::AfterTool, "(also[bad"),
+        ];
+        let results = compile_many(bindings);
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|(_, m)| m.is_none()));
+
+        logs_assert(|logs| {
+            let matching: Vec<_> = logs
+                .iter()
+                .filter(|l| l.contains("listed bindings will fire unconditionally"))
+                .collect();
+            assert_eq!(
+                matching.len(),
+                1,
+                "expected exactly one aggregated warning, got: {:?}",
+                logs
+            );
+            let warning = matching[0];
+            assert!(warning.contains("before_tool"));
+            assert!(warning.contains("after_tool"));
+            assert!(warning.contains("[invalid(regex"));
+            assert!(warning.contains("(also[bad"));
+            Ok(())
+        });
+    }
+
+    #[traced_test]
+    #[test]
+    fn compile_many_emits_no_warning_for_valid_matchers() {
+        let bindings = &[
+            (AgenticEvent::BeforeTool, "Bash|Edit"),
+            (AgenticEvent::AfterTool, "tool_name == 'Bash'"),
+        ];
+        let results = compile_many(bindings);
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|(_, m)| m.is_some()));
+
+        logs_assert(|logs| {
+            let matching: Vec<_> = logs
+                .iter()
+                .filter(|l| l.contains("listed bindings will fire unconditionally"))
+                .collect();
+            assert!(
+                matching.is_empty(),
+                "expected no warnings, got: {:?}",
+                logs
+            );
+            Ok(())
+        });
+    }
+
+    #[traced_test]
+    #[test]
+    fn compile_many_skips_empty_matchers_in_warning() {
+        let bindings = &[
+            (AgenticEvent::BeforeTool, ""),
+            (AgenticEvent::AfterTool, "[invalid(regex"),
+        ];
+        compile_many(bindings);
+
+        logs_assert(|logs| {
+            let matching: Vec<_> = logs
+                .iter()
+                .filter(|l| l.contains("listed bindings will fire unconditionally"))
+                .collect();
+            assert_eq!(matching.len(), 1, "expected one warning, got: {:?}", logs);
+            let warning = matching[0];
+            assert!(!warning.contains("before_tool"));
+            assert!(warning.contains("after_tool"));
+            Ok(())
+        });
     }
 }

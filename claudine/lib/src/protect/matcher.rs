@@ -51,7 +51,7 @@ impl CompiledGroup {
         })
     }
 
-    fn compile_custom(patterns: &[CustomPattern]) -> Result<Self> {
+    fn compile_custom(patterns: &[&CustomPattern], surface: ScanSurface) -> Result<Self> {
         let regex_patterns: Vec<&str> = patterns.iter().map(|p| p.pattern.as_str()).collect();
         let rule_ids: Vec<String> = patterns.iter().map(|p| p.name.clone()).collect();
 
@@ -72,7 +72,7 @@ impl CompiledGroup {
 
         Ok(Self {
             group: RuleGroup::Custom,
-            surface: ScanSurface::BashCommand,
+            surface,
             regex_set,
             regexes,
             rule_ids,
@@ -114,7 +114,8 @@ impl CompiledGroup {
 pub struct CompiledCatalog {
     pub command_groups: Vec<CompiledGroup>,
     pub mcp_groups: Vec<CompiledGroup>,
-    pub custom_group: Option<CompiledGroup>,
+    pub custom_command_group: Option<CompiledGroup>,
+    pub custom_mcp_group: Option<CompiledGroup>,
 }
 
 impl CompiledCatalog {
@@ -180,16 +181,34 @@ impl CompiledCatalog {
             }
         }
 
-        let custom_group = if !config.custom_patterns.is_empty() {
-            Some(CompiledGroup::compile_custom(&config.custom_patterns)?)
-        } else {
-            None
-        };
+        let mut custom_command_group = None;
+        let mut custom_mcp_group = None;
+        if !config.custom_patterns.is_empty() {
+            let bash_patterns: Vec<&CustomPattern> = config
+                .custom_patterns
+                .iter()
+                .filter(|p| p.surface == ScanSurface::BashCommand)
+                .collect();
+            let mcp_patterns: Vec<&CustomPattern> = config
+                .custom_patterns
+                .iter()
+                .filter(|p| p.surface == ScanSurface::McpResponse)
+                .collect();
+        if !bash_patterns.is_empty() {
+            custom_command_group =
+                Some(CompiledGroup::compile_custom(bash_patterns.as_slice(), ScanSurface::BashCommand)?);
+        }
+        if !mcp_patterns.is_empty() {
+            custom_mcp_group =
+                Some(CompiledGroup::compile_custom(mcp_patterns.as_slice(), ScanSurface::McpResponse)?);
+        }
+        }
 
         Ok(Self {
             command_groups,
             mcp_groups,
-            custom_group,
+            custom_command_group,
+            custom_mcp_group,
         })
     }
 
@@ -202,7 +221,7 @@ impl CompiledCatalog {
                 return Some(m);
             }
         }
-        if let Some(custom) = &self.custom_group
+        if let Some(custom) = &self.custom_command_group
             && let Some((m, _)) = custom.find_match(command)
         {
             return Some(m);
@@ -210,7 +229,7 @@ impl CompiledCatalog {
         None
     }
 
-    /// Evaluate an MCP response payload against all MCP groups.
+    /// Evaluate an MCP response payload against all MCP groups and custom patterns.
     ///
     /// Returns the first match found, or `None` if the payload is clean.
     pub fn evaluate_mcp(&self, payload: &str) -> Option<ProtectMatch> {
@@ -218,6 +237,11 @@ impl CompiledCatalog {
             if let Some((m, _)) = group.find_match(payload) {
                 return Some(m);
             }
+        }
+        if let Some(custom) = &self.custom_mcp_group
+            && let Some((m, _)) = custom.find_match(payload)
+        {
+            return Some(m);
         }
         None
     }
@@ -296,6 +320,7 @@ mod tests {
             custom_patterns: vec![CustomPattern {
                 name: "no_deploy".to_string(),
                 pattern: "deploy.*production".to_string(),
+                surface: ScanSurface::BashCommand,
             }],
             ..Default::default()
         };
@@ -305,5 +330,38 @@ mod tests {
         let m = result.unwrap();
         assert_eq!(m.group, RuleGroup::Custom);
         assert_eq!(m.rule_id, "no_deploy");
+    }
+
+    #[test]
+    fn custom_mcp_pattern_blocks_mcp_payload() {
+        let config = ProtectConfig {
+            custom_patterns: vec![CustomPattern {
+                name: "no_deploy_token".to_string(),
+                pattern: r"deploy-token-[a-zA-Z0-9]+".to_string(),
+                surface: ScanSurface::McpResponse,
+            }],
+            ..Default::default()
+        };
+        let catalog = CompiledCatalog::new(&config, ProtectPlatform::current()).unwrap();
+        let result = catalog.evaluate_mcp("leaked deploy-token-x7y8z9");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().rule_id, "no_deploy_token");
+    }
+
+    #[test]
+    fn custom_pattern_default_surface_is_bash_command() {
+        let config: ProtectConfig = serde_json::from_value(serde_json::json!({
+            "custom_patterns": [
+                { "name": "no_deploy", "pattern": "deploy.*production" }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(
+            config.custom_patterns[0].surface,
+            ScanSurface::BashCommand,
+            "omitted surface should default to bash_command"
+        );
+        let catalog = CompiledCatalog::new(&config, ProtectPlatform::current()).unwrap();
+        assert!(catalog.evaluate_command("deploy to production").is_some());
     }
 }

@@ -156,6 +156,7 @@ CLI text derives the one-liner from `RepoInfo::primary_layer()`. The shared labe
 - **Staged filesystem**: git → repo → file inventory → formatting → docs; each stage reuses earlier work
 - **Shared repo inventory**: full repo detection returns its `FileInventory` alongside the `RepoInfo` via `detect_repo_with_inventory`, so the file-inventory stage skips rescanning
 - **Manifest Index**: single walk records every `Cargo.toml`/`package.json`/`pyproject.toml`/`go.mod` for full repo mode; structure mode skips it entirely
+- **Single-pass nested-marker walk**: `walk_for_nested_markers` matches marker filenames (`package.json`, `pnpm-workspace.yaml`, `*.sln`, …) in-memory against the entries the `ignore` walker already yields, instead of re-probing the filesystem per directory. This collapses a per-directory `exists()`/`read_dir` syscall storm (~21k syscalls on this repo) into the single batched walk. Gitignored markers are intentionally no longer detected (markers are conventionally committed); see `spec.md` "Intentional Behavior Change" in the `2026-06-20-faster-package-list` feature.
 - **Git status layers**: counts-only vs full file changes vs full unified diffs, selectable via `GitRequest` flags
 - **Parallel remote fetch**: deep git mode fetches multiple remotes concurrently with bounded parallelism; `GIT_TERMINAL_PROMPT=0` is preserved to avoid interactive hangs
 - **Ancestry-walk containment**: per-commit remote containment is computed with a single ancestry walk per remote, cached in a `HashMap<Oid, Vec<remote>>`

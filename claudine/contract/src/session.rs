@@ -21,13 +21,13 @@ use claudine::provider::{
 use claudine::provider_id::Provider;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 
-use crate::error::inference_error;
+use crate::error::{inference_error, map_spawn_error};
 use crate::profile::ResolvedReasoning;
 use crate::support::{auth_env_vars, non_interactive_entrypoint};
 
 /// A fully resolved non-interactive session, ready to spawn.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionPlan {
+pub(crate) struct SessionPlan {
     /// The provider this plan targets.
     pub provider: Provider,
     /// The program to execute (the provider binary).
@@ -233,11 +233,10 @@ fn companion_output_args(provider: Provider) -> Vec<String> {
 /// Codex has no deny-all equivalent: execution-rules (`forbidden`) only gate
 /// commands *escaping* the sandbox, cannot express a catch-all (a `pattern` is a
 /// command prefix), and a malformed rules file panics the binary. So the tightest
-/// pre-turn lever is `--sandbox read-only`, which blocks every write and network
-/// call (`exec` mode never prompts). A read-only command attempt is still
-/// possible, but it runs against the isolated empty CWD and shadow HOME, surfaces
-/// as a tool item in the JSONL stream, and is rejected post-hoc — so no tool can
-/// take effect or have its output trusted.
+/// pre-turn lever is `--sandbox read-only`, which blocks writes. Network denial
+/// is treated as a defense-in-depth assumption rather than a guarantee; any
+/// read-only command attempt runs against the isolated empty CWD and shadow HOME,
+/// surfaces as a tool item in the JSONL stream, and is rejected post-hoc.
 fn tool_denial_args(provider: Provider) -> Vec<String> {
     match provider {
         Provider::Claude => vec![
@@ -317,7 +316,7 @@ fn toml_basic_string(value: &str) -> String {
 
 /// Raw captured output of one provider session.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RawSession {
+pub(crate) struct RawSession {
     /// Stdout, split into lines, in order.
     pub stdout_lines: Vec<String>,
     /// Process exit code (`-1` if terminated by signal).
@@ -332,7 +331,7 @@ pub struct RawSession {
 /// fake that returns canned stdout, so the adapter is exercised without any
 /// agentic CLI installed.
 #[async_trait]
-pub trait SessionRunner: Send + Sync {
+pub(crate) trait SessionRunner: Send + Sync {
     /// Run the plan and return its raw captured output.
     async fn run(&self, plan: &SessionPlan) -> Result<RawSession, InferenceError>;
 }
@@ -358,17 +357,7 @@ impl SessionRunner for TokioSessionRunner {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
-        let mut child = command.spawn().map_err(|err| match err.kind() {
-            std::io::ErrorKind::NotFound => inference_error(
-                InferenceErrorKind::Unavailable,
-                format!("provider binary `{}` not found on PATH", plan.program),
-            ),
-            std::io::ErrorKind::PermissionDenied => inference_error(
-                InferenceErrorKind::Unavailable,
-                format!("provider binary `{}` is not executable", plan.program),
-            ),
-            _ => inference_error(InferenceErrorKind::Provider, "failed to spawn provider process"),
-        })?;
+        let mut child = command.spawn().map_err(|err| map_spawn_error(err, &plan.program))?;
 
         let stdout = child
             .stdout

@@ -16,6 +16,7 @@ use biscuit_contract::inference::{
 use claudine::provider::provider_info;
 use claudine::provider_id::Provider;
 use serde_json::json;
+use tracing_subscriber::layer::SubscriberExt;
 
 use crate::adapter::ClaudineInferenceAdapter;
 use crate::home::build_shadow_home;
@@ -429,6 +430,61 @@ fn shadow_home_codex_copies_only_auth_and_omits_state() {
     assert!(!home.join(".codex/rules/default.rules").exists());
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn shadow_home_copy_failure_logs_error_and_returns_secret_free_message() {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+
+    let capture = tracing_capture::Capture::new();
+    let subscriber = tracing_subscriber::registry().with(capture.clone());
+    let dispatch = tracing::Dispatch::new(subscriber);
+    let _tracing_guard = tracing::dispatcher::set_default(&dispatch);
+
+    let real_home = tempfile::tempdir().unwrap();
+    fs::create_dir_all(real_home.path().join(".claude")).unwrap();
+    let cred = real_home.path().join(".claude/.credentials.json");
+    fs::write(&cred, "super-secret-token").unwrap();
+
+    let original_mode = fs::metadata(&cred).unwrap().permissions().mode();
+    let mut perms = fs::metadata(&cred).unwrap().permissions();
+    perms.set_mode(0o000);
+    fs::set_permissions(&cred, perms).unwrap();
+
+    let mut source = HashMap::new();
+    source.insert("HOME".to_string(), real_home.path().to_string_lossy().into_owned());
+    source.insert("PATH".to_string(), "/usr/bin".to_string());
+
+    let runner = Arc::new(FakeRunner::new(&[INIT_LINE, &assistant_line("ok")], 0));
+    let error = ClaudineInferenceAdapter::new(Provider::Claude)
+        .with_runner(runner)
+        .with_env_source(EnvSource::Fixed(source))
+        .infer(prose_request("hi"))
+        .await
+        .unwrap_err();
+
+    // Restore permissions so the temp directory can be cleaned up.
+    let mut perms = fs::metadata(&cred).unwrap().permissions();
+    perms.set_mode(original_mode);
+    let _ = fs::set_permissions(&cred, perms);
+
+    assert_eq!(error.kind, InferenceErrorKind::Provider);
+    assert!(!error.message.contains("super-secret-token"));
+    assert!(!error.message.contains("PermissionDenied"));
+    assert!(!error.message.contains("permission denied"));
+
+    assert!(
+        capture.contains("failed to build isolated shadow home"),
+        "expected warning about shadow home failure, got: {:?}",
+        capture.events()
+    );
+    assert!(
+        capture.contains("error="),
+        "expected underlying io::Error in warning, got: {:?}",
+        capture.events()
+    );
+}
+
 // -- structured output -------------------------------------------------------
 
 fn name_schema(name_type: &str) -> serde_json::Value {
@@ -626,6 +682,88 @@ async fn stderr_timeout_maps_to_timeout() {
     assert_eq!(error.kind, InferenceErrorKind::Timeout);
 }
 
+#[test]
+fn spawn_not_found_maps_to_unavailable() {
+    let err = std::io::Error::new(std::io::ErrorKind::NotFound, "no such file");
+    let error = crate::error::map_spawn_error(err, "claude");
+    assert_eq!(error.kind, InferenceErrorKind::Unavailable);
+    assert!(error.message.contains("not found on PATH"));
+}
+
+#[test]
+fn spawn_permission_denied_maps_to_unavailable() {
+    let err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "permission denied");
+    let error = crate::error::map_spawn_error(err, "claude");
+    assert_eq!(error.kind, InferenceErrorKind::Unavailable);
+    assert!(error.message.contains("not executable"));
+}
+
+#[tokio::test]
+async fn non_zero_exit_with_valid_text_is_ok() {
+    let runner = Arc::new(FakeRunner::new(&[INIT_LINE, &assistant_line("ok")], 1));
+    let response = adapter(runner)
+        .infer(prose_request("hi"))
+        .await
+        .expect("valid assistant text is tolerated despite non-zero exit");
+    assert_eq!(response.data, InferenceData::Prose("ok".to_string()));
+}
+
+#[tokio::test]
+async fn rate_limit_retry_after_only_maps_to_rate_limited() {
+    let line = r#"{"type":"rate_limit_event","retry_after_ms":3000,"message":"Rate limited"}"#;
+    let runner = Arc::new(FakeRunner::new(&[INIT_LINE, line], 1));
+    let error = adapter(runner).infer(prose_request("hi")).await.unwrap_err();
+    assert_eq!(error.kind, InferenceErrorKind::RateLimited);
+    assert_eq!(error.retry_after, Some(std::time::Duration::from_millis(3000)));
+}
+
+#[tokio::test]
+async fn stderr_secret_is_redacted_from_error_message() {
+    let runner = Arc::new(
+        FakeRunner::new(&[], 1)
+            .with_stderr("Authentication failed: sk-abc123xyz super-secret-token"),
+    );
+    let error = adapter(runner).infer(prose_request("hi")).await.unwrap_err();
+    assert_eq!(error.kind, InferenceErrorKind::Unauthorized);
+    assert!(
+        !error.message.contains("sk-"),
+        "error message must not leak secret prefix: {}",
+        error.message
+    );
+    assert!(
+        !error.message.contains("abc123xyz"),
+        "error message must not leak secret: {}",
+        error.message
+    );
+    assert!(
+        !error.message.contains("super-secret-token"),
+        "error message must not leak token: {}",
+        error.message
+    );
+}
+
+#[test]
+fn stderr_diagnostics_auth_failure_maps_to_unauthorized() {
+    use claudine::stream::summary::{StderrDiagnostics, StreamExecutionSummary};
+
+    let summary = StreamExecutionSummary {
+        stderr_diagnostics: Some(StderrDiagnostics {
+            auth_failures: 1,
+            ..StderrDiagnostics::default()
+        }),
+        is_error: true,
+        ..StreamExecutionSummary::default()
+    };
+    let raw = RawSession {
+        stdout_lines: Vec::new(),
+        exit_code: 1,
+        stderr: None,
+    };
+    let error = crate::error::detect_failure(&summary, &raw).expect("detects failure");
+    assert_eq!(error.kind, InferenceErrorKind::Unauthorized);
+    assert_eq!(error.message, "provider authentication failed");
+}
+
 #[tokio::test]
 async fn unsupported_provider_is_rejected_before_running() {
     // Goose is not in the v1 tool-free allowlist.
@@ -698,6 +836,29 @@ fn support_matrix_enables_only_curated_providers() {
     assert_eq!(support_matrix().len(), 8);
 }
 
+#[test]
+fn auth_env_vars_are_explicit_for_all_providers() {
+    use crate::support::auth_env_vars;
+
+    assert_eq!(
+        auth_env_vars(Provider::Claude),
+        &["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"]
+    );
+    assert_eq!(auth_env_vars(Provider::Codex), &["OPENAI_API_KEY", "OPENAI_BASE_URL"]);
+    assert_eq!(auth_env_vars(Provider::Gemini), &["GEMINI_API_KEY", "GOOGLE_API_KEY"]);
+    assert!(auth_env_vars(Provider::Goose).is_empty());
+    assert_eq!(
+        auth_env_vars(Provider::KimiCode),
+        &["MOONSHOT_API_KEY", "KIMI_API_KEY"]
+    );
+    assert_eq!(auth_env_vars(Provider::OpenCode), &["OPENCODE_API_KEY"]);
+    assert_eq!(
+        auth_env_vars(Provider::QwenCode),
+        &["DASHSCOPE_API_KEY", "QWEN_API_KEY"]
+    );
+    assert!(auth_env_vars(Provider::RooCode).is_empty());
+}
+
 // -- process runner: concurrent pipe draining --------------------------------
 
 /// A provider that fills stderr while stdout stays open must not deadlock: the
@@ -741,4 +902,66 @@ fn level(info: &'static claudine::provider::ProviderInfo, effort: ReasoningEffor
 fn window_contains(args: &[String], needle: &[&str]) -> bool {
     args.windows(needle.len())
         .any(|window| window.iter().map(String::as_str).eq(needle.iter().copied()))
+}
+
+// -- tracing capture helper --------------------------------------------------
+
+#[cfg(test)]
+mod tracing_capture {
+    use std::sync::{Arc, Mutex};
+    use tracing::{Event, Subscriber, field::Visit};
+    use tracing_subscriber::layer::{Context, Layer};
+
+    #[derive(Clone)]
+    pub struct Capture {
+        events: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl Capture {
+        pub fn new() -> Self {
+            Self {
+                events: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        pub fn events(&self) -> Vec<String> {
+            self.events.lock().unwrap().clone()
+        }
+
+        pub fn contains(&self, needle: &str) -> bool {
+            self.events().iter().any(|event| event.contains(needle))
+        }
+    }
+
+    impl<S> Layer<S> for Capture
+    where
+        S: Subscriber,
+    {
+        fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+            let mut visitor = Visitor::default();
+            event.record(&mut visitor);
+            let mut parts = Vec::new();
+            if let Some(message) = visitor.message {
+                parts.push(message);
+            }
+            parts.extend(visitor.fields);
+            self.events.lock().unwrap().push(parts.join(" "));
+        }
+    }
+
+    #[derive(Default)]
+    struct Visitor {
+        message: Option<String>,
+        fields: Vec<String>,
+    }
+
+    impl Visit for Visitor {
+        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+            if field.name() == "message" {
+                self.message = Some(format!("{:?}", value));
+            } else {
+                self.fields.push(format!("{}={:?}", field.name(), value));
+            }
+        }
+    }
 }

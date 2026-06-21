@@ -26,7 +26,7 @@ pub(crate) fn execute_harness_attempt(
     launch: &AttemptLaunch,
     prompt_mode: HarnessPromptMode,
     prompt_state: &HarnessPromptState,
-    _materialized: &MaterializedHarnessPrompt,
+    materialized: &MaterializedHarnessPrompt,
     effective_non_interactive: bool,
     use_structured: bool,
     structured_codex_output: Option<&super::super::policy::StructuredCodexOutput>,
@@ -61,14 +61,16 @@ pub(crate) fn execute_harness_attempt(
     let launch = if !use_structured && launch.timeout_config.step_timeout.is_some() {
         use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::components::status::{Status, StatusState};
-        let rendered = Status::new(
-            "step_timeout is only enforced in structured-stream mode; \
-             ignoring for this capture/passthrough attempt"
-                .to_string(),
-        )
-        .state(StatusState::Warning)
-        .render(term);
-        eprintln!("{rendered}");
+        if launch.step_timeout_user_configured {
+            let rendered = Status::new(
+                "step_timeout is only enforced in structured-stream mode; \
+                 ignoring for this capture/passthrough attempt"
+                    .to_string(),
+            )
+            .state(StatusState::Warning)
+            .render(term);
+            eprintln!("{rendered}");
+        }
         let mut adjusted = launch.clone();
         adjusted.timeout_config.step_timeout = None;
         adjusted
@@ -76,13 +78,55 @@ pub(crate) fn execute_harness_attempt(
         launch.clone()
     };
     let launch = &launch;
-    let (exit_code, termination, session_id, final_response, stderr_text, perf, iteration_signals) = if use_structured
+
+    // Resolve the runaway-output guards once for this attempt (Phase 6).
+    // The model is taken from the `MODEL` env override or the frontmatter
+    // `model` key; an unknown model still matches global/agent scopes. The
+    // streaming branch consumes `detector`; the capture branch consumes
+    // `capture_volume_cap`.
+    let run_model = materialized
+        .env_overrides
+        .iter()
+        .find(|(key, _)| key == "MODEL")
+        .map(|(_, value)| value.clone())
+        .or_else(|| {
+            materialized
+                .frontmatter
+                .get("model")
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        });
+    // Resolve + validate the guard inputs once (model-independent), then
+    // compile the in-scope set for the launch-time `run_model`. The
+    // validated inputs are kept (as an `Arc`) so the structured-stream sink
+    // can re-scope the exit-expression set when the provider reports its
+    // actual model via `SessionStart`.
+    let guard_inputs = Arc::new(
+        crate::commands::wrap::runaway_guard::resolve_guard_inputs(
+            provider,
+            env_context,
+            Some(&materialized.frontmatter),
+        )?,
+    );
+    let runaway_guards = guard_inputs.compile_for_model(run_model.as_deref())?;
+
+    let (
+        exit_code,
+        termination,
+        session_id,
+        final_response,
+        stderr_text,
+        perf,
+        iteration_signals,
+        error_kind,
+        guard_context,
+    ) = if use_structured
     {
         let summary_details = Arc::new(Mutex::new(
             super::super::policy::StructuredSummaryDetails::default(),
         ));
         let parser_config = claudine::stream::ParserConfig::default();
-        let sink = super::super::live_semantic_sink::LiveSemanticSink::with_default_wiring(
+        let mut sink = super::super::live_semantic_sink::LiveSemanticSink::with_default_wiring(
             provider,
             env_context.clone(),
             child_cwd,
@@ -90,11 +134,17 @@ pub(crate) fn execute_harness_attempt(
             summary_details.clone(),
         )
         .with_context_extra(dispatch_context.clone());
+        // Arm the content detector (Phase 6) before plumbing so
+        // `build_structured_plumbing` can wire the trip channel, and wire
+        // the re-scope source so a provider-reported `SessionStart` model
+        // can bring agent/model-scoped exit expressions into scope.
+        sink.set_content_detector(runaway_guards.detector);
+        sink.set_guard_rescope_source(guard_inputs.clone(), run_model.as_deref());
         let live_metrics = sink.live_metrics();
         let stream_output = sink.stream_output();
         let watchdog_state = Some(sink.watchdog_state());
         let section_stream = sink.section_stream();
-        let (build_parser, stderr_bridge) =
+        let (build_parser, stderr_bridge, content_early_rx) =
             super::super::policy::build_structured_plumbing(provider, sink, parser_config);
         let stream_result = if let Some(wire_prompt) = launch.wire_prompt.clone() {
             let runtime_context =
@@ -125,6 +175,7 @@ pub(crate) fn execute_harness_attempt(
                     stream_output,
                     live_metrics,
                     runtime_context,
+                    content_early_rx,
                 },
                 child_spawned,
             )?
@@ -147,12 +198,16 @@ pub(crate) fn execute_harness_attempt(
                 prompt_timing,
                 watchdog_state,
                 Some(section_stream.tracker()),
+                content_early_rx,
             )?
         };
         let api_duration_ms = stream_result.data.duration_ms;
         let perf = Some(stream_result.telemetry.into_agent_perf(api_duration_ms));
         let termination = stream_result.termination;
         let captured_agent_pid = stream_result.agent_pid;
+        // Capture the structured guard context (Phase 6) before `data` is
+        // moved out below; `None` for non-content terminations.
+        let stream_guard_context = stream_result.guard_context.clone();
         let mut summary = stream_result.data;
         if let Some(codex_output) = structured_codex_output {
             codex_output.apply_to_summary(&mut summary);
@@ -210,6 +265,11 @@ pub(crate) fn execute_harness_attempt(
 
         let iteration_signals = Some(IterationSummarySignals::from_summary(&summary));
 
+        // Thread the honest per-guard `error_kind` (C3a) and structured
+        // guard context from the synthesized summary / process result into
+        // the attempt outcome.
+        let error_kind = summary.error_kind.clone();
+
         (
             summary.exit_code,
             termination,
@@ -218,6 +278,8 @@ pub(crate) fn execute_harness_attempt(
             summary.stderr_text.clone(),
             perf,
             iteration_signals,
+            error_kind,
+            stream_guard_context,
         )
     } else if effective_non_interactive {
         let capture = super::super::exec::run_child_capture(
@@ -226,15 +288,23 @@ pub(crate) fn execute_harness_attempt(
             &launch.env,
             child_cwd,
             launch.timeout_config.timeout.map(|d| d.as_secs()),
+            false,
             super::super::exec::ChildIoOptions {
                 stdout_noise_prefixes: stdout_noise,
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed: launch.stdin_seed.as_deref(),
             },
             child_spawned,
+            // Capture path gets the per-run volume cap only (F3).
+            Some(runaway_guards.capture_volume_cap.clone()),
         )?;
         let perf = Some(capture.telemetry.into_agent_perf(None));
         let termination = capture.termination;
+        // A capture-path content trip is always the volume cap (F3).
+        let capture_guard_context = capture.guard_context.clone();
+        let capture_error_kind = capture_guard_context
+            .as_ref()
+            .map(|_| "runaway_volume".to_string());
         let stdout = capture.data.stdout;
         let stderr = capture.data.stderr;
         let response = profile.parse_captured_output(&stdout);
@@ -267,6 +337,8 @@ pub(crate) fn execute_harness_attempt(
             (!stderr.trim().is_empty()).then_some(stderr),
             perf,
             None,
+            capture_error_kind,
+            capture_guard_context,
         )
     } else {
         // Interactive TUI path: inherit stdout/stderr directly so the
@@ -278,6 +350,7 @@ pub(crate) fn execute_harness_attempt(
             &launch.env,
             child_cwd,
             launch.timeout_config.timeout.map(|d| d.as_secs()),
+            true,
             super::super::exec::ChildIoOptions {
                 stdout_noise_prefixes: &[],
                 stderr_noise_prefixes: &[],
@@ -307,6 +380,8 @@ pub(crate) fn execute_harness_attempt(
             None,
             perf,
             None,
+            None,
+            None,
         )
     };
 
@@ -331,6 +406,8 @@ pub(crate) fn execute_harness_attempt(
             exit_code,
             termination,
             stderr_text,
+            error_kind,
+            guard_context,
         },
         perf,
         iteration_signals,

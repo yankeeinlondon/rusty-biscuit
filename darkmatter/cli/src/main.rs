@@ -152,6 +152,8 @@ fn run() -> Result<()> {
             true,
             None,
             darkmatter::markdown::cleanup::ListSpacingMode::Normal,
+            None,
+            false,
             cli.verbose > 0,
         )?;
         return Ok(());

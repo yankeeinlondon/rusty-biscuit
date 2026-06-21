@@ -22,16 +22,17 @@ use crate::markdown::compose::ComposeOperation;
 use crate::markdown::compose::ComposeOptions;
 use crate::markdown::compose::ComposeSource;
 use crate::markdown::compose::context::effective_state as state;
-use crate::markdown::compose::frontmatter_interpolation::interpolate_frontmatter;
+use crate::markdown::compose::frontmatter_interpolation::interpolate_frontmatter_best_effort;
 use crate::markdown::compose::frontmatter_shell_expansion::{
     directive_reachable_pipelines, parse_shell_value, scan_frontmatter,
 };
 use crate::markdown::compose::prepare_frontmatter_for_compose;
 use crate::markdown::compose::shell_expansion::alias::resolve_alias;
 use crate::markdown::compose::shell_expansion::parser::parse_directives;
+use crate::markdown::compose::expression::ExpressionFinder;
 use crate::markdown::compose::shell_expansion::policy::normalize_command;
 use crate::markdown::compose::shell_expansion::types::{
-    ShellCommandEntry, ShellCommandOrigin, ShellDirective, ShellExpansionError,
+    ShellCommandEntry, ShellCommandOrigin, ShellDirective, ShellExpansionError, frontmatter_key_line,
 };
 use crate::markdown::compose::transclusion;
 use crate::markdown::compose::remote_fetch;
@@ -513,7 +514,15 @@ fn scan_one_frontmatter(
         // pipelines for the approval workflow; it never performs expression
         // selection, so it stays context-free (no `ResolutionContext`). The real
         // run supplies the context.
-        let _ = interpolate_frontmatter(
+        //
+        // Best-effort: a context-free key that invokes a filesystem function
+        // (`frontmatter()`, `file_exists()`, …) errors here, and a non-resilient
+        // pass would abort before the fallback resolves a transitively-blocked
+        // shell-pending key (e.g. `dir: "$(dirname '{{ spec || design }}')"`).
+        // That left the command's `{{ … }}` template in the approval set while
+        // execution ran its resolved form, yielding a spurious "command not
+        // pre-approved" failure.
+        let _ = interpolate_frontmatter_best_effort(
             fm_clone.frontmatter_mut(),
             options.context(),
             false,
@@ -523,6 +532,19 @@ fn scan_one_frontmatter(
     }
 
     let scan_ctx = fm_clone.full_source_context_for_errors();
+
+    // ── Dynamic frontmatter command shape ──────────────────────────
+    // A top-level `$(...)` value that still carries `{{ … }}` after best-effort
+    // interpolation depends on a key that could not be resolved context-free —
+    // either a context-requiring function (`file_exists`, `frontmatter`, …) or
+    // another shell-pending `$(...)` sibling. Its executed shape (e.g.
+    // `echo true`) differs from any statically-collectable form, and collecting
+    // it verbatim would leak template syntax into the approval set. Reject it
+    // here with a clear dynamic-shape error rather than letting it surface later
+    // as the misleading "command not pre-approved … bug in the pre-flight
+    // scanner". This mirrors `detect_dynamic_command_shape` for body directives.
+    detect_dynamic_frontmatter_command_shape(fm_clone.frontmatter(), &scan_ctx)?;
+
     let candidates = scan_frontmatter(
         fm_clone.frontmatter(),
         pre_interpolation_snapshot.as_ref(),
@@ -596,6 +618,52 @@ fn scan_one_frontmatter(
         }
     }
 
+    Ok(())
+}
+
+/// Fails with [`ShellExpansionError::DynamicCommandShape`] when a top-level
+/// `$(...)` frontmatter value still carries a `{{ … }}` expression after
+/// best-effort interpolation.
+///
+/// Such a value depends on a key the context-free pre-flight pass could not
+/// resolve (a context-requiring function, or a shell-pending sibling), so its
+/// executed shape is not yet known. The error names the unresolved key the
+/// command depends on so the failure is actionable instead of surfacing later
+/// as a `NotPreApproved` "bug in the pre-flight scanner".
+fn detect_dynamic_frontmatter_command_shape(
+    frontmatter: &crate::markdown::frontmatter::Frontmatter,
+    ctx: &biscuit_terminal::errors::SourceContext,
+) -> MarkdownResult<()> {
+    for (key, value) in frontmatter.as_map().iter() {
+        let serde_json::Value::String(s) = value else {
+            continue;
+        };
+        if !s.trim_start().starts_with("$(") {
+            continue;
+        }
+        let locations = ExpressionFinder::find_all_plain(s);
+        let Some(first) = locations.first() else {
+            continue;
+        };
+        // Name the dependency root the surviving template references; fall back
+        // to the raw expression text when it is not a simple variable.
+        let dependency = first
+            .expression
+            .split(|c: char| !c.is_alphanumeric() && c != '_' && c != '.')
+            .find(|t| !t.is_empty())
+            .unwrap_or(first.expression.as_str())
+            .to_string();
+        return Err(ShellExpansionError::DynamicCommandShape {
+            ctx: Box::new(ctx.clone()),
+            command: s.clone(),
+            key: dependency,
+            origin: ShellCommandOrigin::Frontmatter {
+                key: key.clone(),
+                line: frontmatter_key_line(ctx, key),
+            },
+        }
+        .into());
+    }
     Ok(())
 }
 
@@ -748,6 +816,106 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].executable, "dirname");
         assert_eq!(entries[0].args, vec!["features/rough-edges/spec.md"]);
+    }
+
+    /// Regression for the `review-feature.md` "command not pre-approved" bug.
+    ///
+    /// `dir` is a shell-pending directive whose template (`{{ spec || design }}`)
+    /// is transitively blocked because `design` references `dir`, so it resolves
+    /// only in the post-main fallback pass. A sibling `iteration` key calls
+    /// `file_exists()` — a filesystem function that errors in the context-free
+    /// pre-flight pass. Before the fix, that error aborted the interpolation
+    /// before the fallback ran, so the command was collected with its raw
+    /// `{{ … }}` template; execution then ran the resolved form, yielding a
+    /// spurious "command not pre-approved". The collected argument must be the
+    /// resolved path.
+    #[test]
+    fn collects_resolved_command_despite_context_requiring_sibling_key() {
+        let content = "---\n\
+dir: \"$(dirname '{{ spec || design }}')\"\n\
+design: \"{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}\"\n\
+iteration: \"{{ file_exists('design.md') ? 2 : 1 }}\"\n\
+---\nbody\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new().with_set_overrides(serde_json::json!({
+            "spec": "fixes/x/spec.md",
+        }));
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 1, "exactly one shell command (dir)");
+        assert_eq!(entries[0].executable, "dirname");
+        assert_eq!(
+            entries[0].args,
+            vec!["fixes/x/spec.md"],
+            "must collect the resolved argument, not the raw {{{{ }}}} template"
+        );
+        assert!(
+            !entries[0].normalized.contains("{{"),
+            "no template syntax should survive into the approval set: {:?}",
+            entries[0].normalized
+        );
+    }
+
+    /// Regression for the review-4 "approves the WRONG command" bug.
+    ///
+    /// `cmd` is a `$(...)` directive whose argument interpolates `exists`, a
+    /// sibling that calls `file_exists()` — a context-requiring function that
+    /// errors in the context-free pre-flight pass. Before the fix, the
+    /// best-effort interpolation substituted the errored key as empty, so the
+    /// collector approved `echo` (empty arg) while execution ran `echo true`,
+    /// yielding the misleading "command not pre-approved … bug in the pre-flight
+    /// scanner". The collector must instead reject the command as a dynamic
+    /// shape and never put the wrong (or template-bearing) command in the
+    /// approval set.
+    #[test]
+    fn rejects_command_depending_on_context_requiring_sibling_key() {
+        let content = "---\n\
+exists: \"{{ file_exists('existing.md') }}\"\n\
+cmd: \"$(echo '{{ exists }}')\"\n\
+---\nbody\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let err = collect_shell_commands(&md, &options).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("frontmatter.cmd") && msg.contains("'exists'"),
+            "error must name the dynamic command and its dependency: {msg}"
+        );
+        assert!(
+            !msg.contains("not pre-approved"),
+            "must not surface as the late NotPreApproved scanner-bug error: {msg}"
+        );
+        assert!(
+            !msg.contains("bug in the pre-flight scanner"),
+            "must be a clear dynamic-shape error, not the misleading scanner-bug message: {msg}"
+        );
+    }
+
+    /// The dynamic-shape rejection must be scoped to keys that genuinely cannot
+    /// resolve context-free. A `$(...)` command whose argument interpolates a
+    /// sibling that IS context-free-resolvable (here a plain templated key that
+    /// folds to a literal) must still collect its fully-resolved command — the
+    /// fix must not over-reject.
+    #[test]
+    fn still_collects_command_depending_on_context_free_sibling_key() {
+        let content = "---\n\
+name: \"{{ 'wor' + 'ld' }}\"\n\
+cmd: \"$(echo '{{ name }}')\"\n\
+---\nbody\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+        assert_eq!(entries.len(), 1, "entries: {entries:?}");
+        assert_eq!(entries[0].executable, "echo");
+        assert_eq!(entries[0].args, vec!["world"]);
+        assert!(
+            !entries[0].normalized.contains("{{"),
+            "no template syntax should survive: {:?}",
+            entries[0].normalized
+        );
     }
 
     #[test]

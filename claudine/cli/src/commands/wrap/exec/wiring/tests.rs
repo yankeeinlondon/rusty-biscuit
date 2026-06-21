@@ -657,3 +657,121 @@ fn close_stdin_drops_underlying_writer_and_redirects_to_sink() {
         .send_value(&json!({"after_close": true}))
         .expect("send_value after close_stdin should succeed against sink");
 }
+
+#[cfg(unix)]
+#[test]
+fn kimi_wire_content_trip_aborts_child_and_preserves_guard_context() {
+    use crate::commands::wrap::live_semantic_sink::LiveSemanticSink;
+    use crate::commands::wrap::policy::StructuredSummaryDetails;
+    use crate::commands::wrap::stream_io::StreamOutput;
+    use claudine::events::{AgenticEvent, EnvironmentContext, EventMeta as DispatchEventMeta};
+    use claudine::harness::ProcessTermination;
+    use claudine::provider::Provider;
+    use claudine::runaway::{
+        CompiledExitExpressions, ContentDetector, DetectorConfig, ExitExpressionInput,
+        PatternKind,
+    };
+    use claudine::stream::stderr::Verbosity;
+    use std::collections::HashMap;
+    use std::ffi::OsString;
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::mpsc::channel;
+
+    let workspace = tempfile::tempdir().expect("temp workspace");
+    let fake_kimi = workspace.path().join("kimi");
+    std::fs::write(
+        &fake_kimi,
+        r#"#!/bin/sh
+read INIT_LINE
+printf '%s\n' '{"jsonrpc":"2.0","id":"init-1","result":{"protocol_version":"1.9","server":{"name":"kimi","version":"1.38.0"},"capabilities":{}}}'
+read PROMPT_LINE
+printf '%s\n' '{"jsonrpc":"2.0","method":"event","params":{"type":"ContentPart","payload":{"type":"text","text":"STOPWIRE\n"}}}'
+exec sleep 30
+"#,
+    )
+    .expect("write fake kimi");
+    let mut permissions = std::fs::metadata(&fake_kimi)
+        .expect("fake kimi metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&fake_kimi, permissions).expect("make fake kimi executable");
+
+    let compiled = CompiledExitExpressions::compile(&[ExitExpressionInput {
+        patterns: vec!["STOPWIRE".to_string()],
+        kind: PatternKind::Literal,
+        ignore_case: false,
+        scope: None,
+    }])
+    .expect("exit expression compiles");
+    let detector = ContentDetector::new(DetectorConfig::default(), compiled);
+    let (early_tx, early_rx) = channel();
+
+    let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
+    let mut sink = LiveSemanticSink::new(
+        Provider::KimiCode,
+        EnvironmentContext::default(),
+        workspace.path(),
+        Verbosity::Silent,
+        summary_details,
+        Box::new(|_event: AgenticEvent, _meta: DispatchEventMeta| {}),
+        Box::new(|_line: &str| {}),
+    );
+    sink.set_content_detector(Some(detector));
+    sink.set_trip_sender(early_tx);
+
+    let build_parser: SemanticParserBuilder = Box::new(move |output_cb, _reasoning_cb, agent_pid| {
+        let mut sink = sink.with_output_text_sink(output_cb);
+        sink.set_agent_pid(agent_pid);
+        claudine::stream::create_semantic_parser(
+            Provider::KimiCode,
+            sink,
+            claudine::stream::ParserConfig::default(),
+        )
+    });
+
+    let mut env = HashMap::new();
+    env.insert(
+        OsString::from("PATH"),
+        std::env::var_os("PATH").unwrap_or_default(),
+    );
+    env.insert(
+        OsString::from("HOME"),
+        workspace.path().as_os_str().to_os_string(),
+    );
+
+    let mut spawned = false;
+    let result = run_kimi_wire_session(
+        WireSessionConfig {
+            binary: &fake_kimi,
+            args: &[],
+            env: &env,
+            cwd: workspace.path(),
+            prompt: "hello".to_string(),
+            timeout: Some(std::time::Duration::from_secs(1)),
+            client_name: "claudine-test",
+            client_version: "0.0.0",
+            capabilities: WireClientCapabilities::default_for_claudine(),
+            env_context: EnvironmentContext::default(),
+        },
+        WireSessionWiring {
+            build_parser,
+            stream_output: StreamOutput::test_recorder(Arc::new(Mutex::new(Vec::new()))),
+            live_metrics: claudine::stream::progress::new_live_metrics(),
+            runtime_context: claudine::dispatch::DispatchRuntimeContext::default(),
+            content_early_rx: Some(early_rx),
+        },
+        &mut spawned,
+    )
+    .expect("wire session runs");
+
+    assert!(spawned, "fake kimi child should be spawned");
+    assert_eq!(result.termination, ProcessTermination::Aborted);
+    assert_eq!(result.data.exit_code, 1);
+    assert_eq!(result.data.error_kind.as_deref(), Some("exit_expression"));
+    let guard_context = result
+        .guard_context
+        .as_ref()
+        .expect("content trip should carry guard context");
+    assert_eq!(guard_context.pattern.as_deref(), Some("STOPWIRE"));
+    assert_eq!(guard_context.scope, None);
+}

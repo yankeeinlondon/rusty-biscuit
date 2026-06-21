@@ -433,9 +433,9 @@ impl Markdown {
 
     /// Cleans up markdown content by normalizing formatting.
     ///
-    /// This method performs two main operations:
-    /// 1. Injects blank lines between block elements (headers, paragraphs, code blocks, etc.)
-    /// 2. Aligns table columns for visual consistency
+    /// This method collapses incidental single newlines inside prose, injects
+    /// blank lines between block elements, and aligns table columns for visual
+    /// consistency.
     ///
     /// The cleanup operation mutates the content in place and returns a mutable
     /// reference to self for method chaining.
@@ -452,6 +452,18 @@ impl Markdown {
     /// ```
     pub fn cleanup(&mut self) -> &mut Self {
         self.content = cleanup::cleanup_content(&self.content);
+        self
+    }
+
+    /// Collapses incidental single newlines inside prose.
+    pub fn strip_incidental_newlines(&mut self) -> &mut Self {
+        self.content = cleanup::strip_incidental_newlines(&self.content);
+        self
+    }
+
+    /// Cleans up markdown content and wraps prose to a fixed display width.
+    pub fn cleanup_with_fixed_width(&mut self, width: usize) -> &mut Self {
+        self.content = cleanup::cleanup_to_fixed_width(&self.content, width);
         self
     }
 
@@ -1272,6 +1284,19 @@ title: Test
 
         assert!(md.content().contains("\n    - Child"));
         assert!(md.content().contains("\n        - Grandchild"));
+    }
+
+    #[test]
+    fn test_cleanup_with_fixed_width_method() {
+        let content = "This paragraph is long enough to wrap at a narrow display width.";
+        let mut md: Markdown = content.into();
+
+        md.cleanup_with_fixed_width(24);
+
+        assert_eq!(
+            md.content(),
+            "This paragraph is long\nenough to wrap at a\nnarrow display width."
+        );
     }
 
     #[test]

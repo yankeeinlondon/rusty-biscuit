@@ -208,6 +208,15 @@ md get doc.md title --json5
 # Normalize formatting (output to stdout)
 md clean README.md
 
+# Normalize formatting and collapse editor/LLM fixed-column prose wrapping
+md clean README.md
+
+# Collapse incidental wrapping, then re-wrap prose to 80 display columns
+md clean README.md --fixed-width 80
+
+# Preserve source single newlines while keeping the older cleanup behavior
+md clean README.md --ignore-incidental-newlines
+
 # Normalize formatting and force 4-space nested list indentation
 md clean README.md --indent 4
 
@@ -223,6 +232,15 @@ md clean README.md --save -v
 # Shorthand: top-level clean-and-save
 md README.md --save
 ```
+
+By default, `md clean` collapses incidental single newlines in prose before
+running the rest of cleanup. Blank lines, fenced and indented code blocks,
+tables, HTML blocks, transclusion directives, list markers, and blockquote
+prefixes are preserved. Use `--fixed-width <#>` when you want canonical cleanup
+followed by prose wrapping to a target display width, or
+`--ignore-incidental-newlines` when source line breaks must remain unchanged.
+`--fixed-width` and `--ignore-incidental-newlines` conflict because fixed-width
+reflow first needs the incidental source wrapping removed.
 
 Frontmatter manipulation is available through `md set` (modify individual properties) and `md compose --fm` (output frontmatter with composed content). The `--state` flag on `compose` fills in null/missing frontmatter keys with default values.
 

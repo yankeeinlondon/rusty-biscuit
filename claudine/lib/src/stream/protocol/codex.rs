@@ -610,14 +610,13 @@ impl CodexToolItemFields {
     }
 
     pub fn resolved_input(&self) -> Option<Value> {
-        if let Some(v) = self.input.as_ref() {
-            return Some(v.clone());
-        }
-        if let Some(v) = self.arguments.as_ref() {
-            return Some(v.clone());
-        }
-        if let Some(v) = self.parameters.as_ref() {
-            return Some(v.clone());
+        if let Some(source) = self
+            .input
+            .as_ref()
+            .or(self.arguments.as_ref())
+            .or(self.parameters.as_ref())
+        {
+            return Some(source.clone());
         }
         if let Some(cmd) = self.command.as_deref() {
             let trimmed = strip_shell_path_prefix(cmd);
@@ -627,19 +626,17 @@ impl CodexToolItemFields {
     }
 
     pub fn resolved_output(&self) -> Option<Value> {
-        if let Some(v) = self.output.as_ref() {
-            return Some(v.clone());
+        if let Some(source) = self
+            .output
+            .as_ref()
+            .or(self.result.as_ref())
+            .or(self.content.as_ref())
+        {
+            return Some(source.clone());
         }
-        if let Some(v) = self.result.as_ref() {
-            return Some(v.clone());
-        }
-        if let Some(v) = self.content.as_ref() {
-            return Some(v.clone());
-        }
-        if let Some(agg) = self.aggregated_output.as_ref() {
-            return Some(Value::String(agg.clone()));
-        }
-        None
+        self.aggregated_output
+            .as_ref()
+            .map(|agg| Value::String(agg.clone()))
     }
 
     /// Fold a previously-seen `item.started` snapshot into this completed
@@ -1089,6 +1086,33 @@ mod tests {
             input.get("command").and_then(Value::as_str),
             Some("-lc 'ls'"),
             "shell path prefix must be stripped from the synthesized command",
+        );
+    }
+
+    #[test]
+    fn item_completed_round_trips_through_json() {
+        let line = r#"{"type":"item.completed","item":{"id":"tu-1","type":"tool_use","tool_name":"bash","input":{"command":"ls"},"output":"ok"}}"#;
+        let event = parse(line);
+        let serialized = serde_json::to_string(&event).unwrap();
+        let reparsed: CodexEvent = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(
+            serde_json::to_string(&reparsed).unwrap(),
+            serialized,
+            "parse -> serialize -> parse should be stable for a known event"
+        );
+    }
+
+    #[test]
+    fn turn_completed_known_payload_keeps_extra_empty() {
+        let line = r#"{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5},"duration_ms":42,"status":"completed"}"#;
+        let event = parse(line);
+        let CodexEvent::TurnCompleted(tc) = event else {
+            panic!("expected TurnCompleted");
+        };
+        assert!(
+            tc.extra.is_empty(),
+            "known turn.completed fields must not land in extra; extra={:?}",
+            tc.extra
         );
     }
 

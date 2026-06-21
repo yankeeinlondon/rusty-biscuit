@@ -456,6 +456,12 @@ pub(crate) fn run_harness_loop(
                 attempt,
                 outcome.session_id.clone(),
                 Some(outcome.clone()),
+                // Forward the honest per-guard label + structured detail the
+                // attempt outcome already carries (content-guard trips) so
+                // the programmatic handler payload exposes them without
+                // parsing the human message string.
+                outcome.error_kind.clone(),
+                outcome.guard_context.as_ref(),
             );
             if let Some(next_plan) = super::super::resume::try_resolve_handler(
                 &[ctx],

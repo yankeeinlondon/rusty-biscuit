@@ -12,7 +12,8 @@ use chrono::{DateTime, Utc};
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
 
-use super::types::{ResolutionMode, SessionInteractivitySource};
+use super::frontmatter_excerpt::FrontmatterExcerpt;
+use super::types::{ResolutionMode, ResolvedCompositionSource, SessionInteractivitySource};
 use crate::provider::Provider;
 use thiserror::Error;
 
@@ -74,22 +75,15 @@ pub enum CompositionError {
     ///
     /// Detected against the *authored* frontmatter (not command-line overrides),
     /// before prompt-type validation, schema processing, composition, provider
-    /// selection, or execution. The rendered diagnostic is built from the
-    /// captured fields in [`BlockError::status_block`]; the `stderr_is_tty`
-    /// flag gates whether the authored YAML payload is shown (TTY) or withheld
-    /// (non-TTY) to avoid exposing frontmatter.
+    /// selection, or execution. The authored frontmatter is shown as a YAML
+    /// block by enriching this error via
+    /// [`enrich_frontmatter`](CompositionError::enrich_frontmatter); the block
+    /// is TTY-gated by the [`FrontmatterExcerpt`] like every other
+    /// frontmatter-rooted error.
     #[error("`inline-compose` cannot run a document configured as a sequence")]
     InlineComposeSequenceMismatch {
         /// The resolved absolute path to the source document.
         source_path: PathBuf,
-        /// The authored frontmatter YAML interior, captured verbatim to spec
-        /// boundaries (delimiter lines and the final delimiter-adjacent
-        /// line-ending excluded; interior line-endings preserved).
-        raw_yaml: String,
-        /// Whether the error output stream (stderr) was a TTY at detection
-        /// time. Captured here so rendering is deterministic and unit-testable
-        /// without a PTY.
-        stderr_is_tty: bool,
     },
 
     /// Darkmatter composition failed for a reason other than a known
@@ -618,6 +612,23 @@ pub enum CompositionError {
         /// conditions when the body collapsed to nothing.
         provided_overrides: Vec<String>,
     },
+
+    /// A frontmatter-rooted error carrying a captured source excerpt for
+    /// rendering.
+    ///
+    /// Produced at the render boundary by
+    /// [`enrich_frontmatter`](CompositionError::enrich_frontmatter), never at a
+    /// construction site, so control-flow `match`es upstream operate on the
+    /// unwrapped variant. `Display` delegates to `inner`. The CLI error walker
+    /// recognizes this wrapper, renders the deepest block from `inner`, and
+    /// appends the [`FrontmatterExcerpt`] after it.
+    #[error("{inner}")]
+    WithFrontmatter {
+        /// The original frontmatter-rooted error.
+        inner: Box<CompositionError>,
+        /// The captured frontmatter block, appended after the inner diagnostic.
+        excerpt: FrontmatterExcerpt,
+    },
 }
 
 /// A single required schema property that is missing from frontmatter.
@@ -826,9 +837,95 @@ pub struct SequenceSelectionFailure {
     pub installed: Vec<Provider>,
 }
 
+impl CompositionError {
+    /// Attach a captured frontmatter excerpt to a frontmatter-rooted error.
+    ///
+    /// Called at the render boundary — after all control-flow `match`es on the
+    /// unwrapped variant — so the wrapper never interferes with upstream
+    /// decision-making. For errors that do not relate to frontmatter, or when
+    /// `source` has no parseable frontmatter block, the error is returned
+    /// unchanged. Idempotent: an already-wrapped error is returned as-is.
+    pub fn enrich_frontmatter(
+        self,
+        source: &ResolvedCompositionSource,
+        stderr_is_tty: bool,
+    ) -> Self {
+        if matches!(self, CompositionError::WithFrontmatter { .. }) {
+            return self;
+        }
+        let Some(property) = self.frontmatter_block_spec() else {
+            return self;
+        };
+        match FrontmatterExcerpt::capture(&source.original_text, property.as_deref(), stderr_is_tty)
+        {
+            Some(excerpt) => CompositionError::WithFrontmatter {
+                inner: Box::new(self),
+                excerpt,
+            },
+            None => self,
+        }
+    }
+
+    /// The captured frontmatter excerpt, when this is a wrapped error.
+    pub fn frontmatter_excerpt(&self) -> Option<&FrontmatterExcerpt> {
+        match self {
+            CompositionError::WithFrontmatter { excerpt, .. } => Some(excerpt),
+            _ => None,
+        }
+    }
+
+    /// Whether this error should carry a frontmatter excerpt, and the dotted
+    /// property to highlight within it.
+    ///
+    /// Returns `None` to skip the excerpt entirely; `Some(None)` to show the
+    /// block with no highlighted line; `Some(Some(prop))` to highlight the
+    /// `prop` key. Body-composition errors (`ComposeFailed`,
+    /// `ShellExpansionFailed`) show the frontmatter as context with no
+    /// highlight, since their anchor is in the body.
+    fn frontmatter_block_spec(&self) -> Option<Option<String>> {
+        match self {
+            CompositionError::LifecycleInterpolationLeak { property, .. }
+            | CompositionError::LifecycleUndefinedVariable { property, .. }
+            | CompositionError::LifecycleInvalid { property, .. } => Some(Some(property.clone())),
+            CompositionError::LifecycleSayConflict(property)
+            | CompositionError::LifecycleUnknownEffect(property, _) => Some(Some(property.clone())),
+            CompositionError::PromptPropertyMissing
+            | CompositionError::PromptPropertyWrongType(_) => Some(Some("prompt".to_string())),
+            CompositionError::AgentHintWrongType(_)
+            | CompositionError::AgentResolutionFailed { .. } => Some(Some("agent".to_string())),
+            CompositionError::ModelHintWrongType(_) => Some(Some("model".to_string())),
+            CompositionError::InteractiveHintWrongType(_) => {
+                Some(Some("interactive".to_string()))
+            }
+            CompositionError::SchemaLoad { .. } => Some(Some("$schema".to_string())),
+            CompositionError::UnsupportedInteractiveSchema { property, .. } => {
+                Some(Some(property.clone()))
+            }
+            CompositionError::MissingProperties {
+                missing,
+                pointer_paths,
+                ..
+            } => match (missing.split_first(), pointer_paths.split_first()) {
+                (Some((only, [])), _) => Some(Some(only.name.clone())),
+                (_, Some((only, []))) => Some(Some(pointer_to_dotted(only))),
+                _ => Some(None),
+            },
+            CompositionError::SchemaValidation { problems, .. } => match problems.split_first() {
+                Some((only, [])) => Some(Some(pointer_to_dotted(only))),
+                _ => Some(None),
+            },
+            CompositionError::InlineComposeSequenceMismatch { .. }
+            | CompositionError::ComposeFailed(_)
+            | CompositionError::ShellExpansionFailed { .. } => Some(None),
+            _ => None,
+        }
+    }
+}
+
 impl BlockError for CompositionError {
     fn status_block(&self, term: &Terminal) -> StatusBlock {
         match self {
+            CompositionError::WithFrontmatter { inner, .. } => inner.status_block(term),
             CompositionError::LifecycleInvalid {
                 property,
                 source_file,
@@ -1033,11 +1130,9 @@ impl BlockError for CompositionError {
                          frontmatter.",
                     )
             }
-            CompositionError::InlineComposeSequenceMismatch {
-                source_path,
-                stderr_is_tty,
-                ..
-            } => render_inline_sequence_mismatch_block(source_path, *stderr_is_tty),
+            CompositionError::InlineComposeSequenceMismatch { source_path } => {
+                render_inline_sequence_mismatch_block(source_path)
+            }
             CompositionError::AgentResolutionFailed {
                 source_path,
                 state,
@@ -1111,66 +1206,45 @@ impl BlockError for CompositionError {
         }
     }
 
-    /// Appends the authored frontmatter YAML verbatim after the rendered
-    /// diagnostic for [`CompositionError::InlineComposeSequenceMismatch`].
+    /// Strips escape bytes from the rendered status block when the terminal has
+    /// no color depth.
     ///
-    /// The YAML is emitted outside the status block's `┃ `-bordered, Prose-
-    /// processed body so it is reproduced exactly as authored: no per-line
-    /// border prefix, no Prose markup interpretation of YAML characters
-    /// (`<`, `{`, backticks), and no word-wrap reflow. This keeps the spec's
-    /// fidelity contract (verbatim, no reserialization, interior line-endings
-    /// preserved). The block is shown only when stderr was a TTY at detection
-    /// time; otherwise the body already states it was withheld. A renderer-
-    /// added trailing newline is permitted by the spec. All other variants
-    /// keep the default `status_block(term).render(term)` behavior.
+    /// `StatusBlock`'s bespoke path (entered whenever the error header carries
+    /// `<b>` markup, i.e. every variant here) emits SGR styling and OSC 8 links
+    /// even at [`ColorDepth::None`]. On a piped / `NO_COLOR` / JSON terminal
+    /// those bytes must be removed so pipeable output stays plain text per the
+    /// error-formatting contract. Frontmatter YAML blocks are appended
+    /// separately by the CLI error walker (see `output::error_walker`).
+    ///
+    /// [`ColorDepth::None`]: biscuit_terminal::discovery::detection::ColorDepth::None
     fn report_block_error(&self, term: &Terminal) -> String {
-        match self {
-            CompositionError::ShellExpansionFailed { .. } => {
-                // The delegated status block contains OSC 8 links, SGR
-                // styling, and source gutters. When the terminal has no color
-                // depth (piped / NO_COLOR / JSON), those escape bytes must be
-                // stripped at the claudine boundary so pipeable output stays
-                // plain text per the error-formatting contract.
-                let mut out = self.status_block(term).render(term);
-                if matches!(
-                    term.color_depth,
-                    biscuit_terminal::discovery::detection::ColorDepth::None
-                ) {
-                    out = biscuit_terminal::utils::escape_codes::strip_escape_codes(&out);
-                }
-                out
-            }
-            CompositionError::InlineComposeSequenceMismatch {
-                raw_yaml,
-                stderr_is_tty,
-                ..
-            } => {
-                let mut out = self.status_block(term).render(term);
-                if *stderr_is_tty {
-                    while out.ends_with('\n') {
-                        out.pop();
-                    }
-                    out.push_str("\n\n");
-                    out.push_str(raw_yaml);
-                    out.push('\n');
-                }
-                // A terminal with no color depth cannot display SGR styling or
-                // OSC 8 hyperlinks, so the diagnostic must contain no escape
-                // bytes — otherwise redirected/`NO_COLOR` output is polluted
-                // (spec criterion 16). The `StatusBlock` bespoke path (entered
-                // because the error header carries `<b>` markup) does not yet
-                // honor `ColorDepth::None`, so strip at this boundary. The
-                // verbatim YAML payload is plain text and survives the strip.
-                if matches!(
-                    term.color_depth,
-                    biscuit_terminal::discovery::detection::ColorDepth::None
-                ) {
-                    out = biscuit_terminal::utils::escape_codes::strip_escape_codes(&out);
-                }
-                out
-            }
-            _ => self.status_block(term).render(term),
+        let out = self.status_block(term).render(term);
+        if matches!(
+            term.color_depth,
+            biscuit_terminal::discovery::detection::ColorDepth::None
+        ) {
+            biscuit_terminal::utils::escape_codes::strip_escape_codes(&out)
+        } else {
+            out
         }
+    }
+}
+
+/// Convert a JSON pointer (`/success/message`) or a bare property name into the
+/// dotted form (`success.message`) that
+/// [`locate_property_line`](super::frontmatter_excerpt::locate_property_line)
+/// expects. A leading `/` and any pointer escaping (`~1` → `/`, `~0` → `~`) are
+/// normalized; a value without a leading `/` is treated as already-dotted.
+fn pointer_to_dotted(pointer: &str) -> String {
+    let trimmed = pointer.trim_start_matches('/');
+    if pointer.starts_with('/') {
+        trimmed
+            .split('/')
+            .map(|seg| seg.replace("~1", "/").replace("~0", "~"))
+            .collect::<Vec<_>>()
+            .join(".")
+    } else {
+        trimmed.to_string()
     }
 }
 
@@ -1195,18 +1269,12 @@ fn render_file_link(path: &std::path::Path) -> String {
 /// Render the diagnostic block for
 /// [`CompositionError::InlineComposeSequenceMismatch`].
 ///
-/// Builds the spec's normative, blank-line-separated paragraph sequence:
-/// the opening statement; the explanation (document link, both property
-/// names, what `sequence` does, and the `claudine sequence` directive); the
-/// upcoming-`sections` note; and finally either the YAML introduction (TTY)
-/// or the withheld-for-privacy note (non-TTY). The verbatim YAML payload
-/// itself is appended outside this block by
-/// [`CompositionError::report_block_error`] so it is reproduced exactly as
-/// authored.
-fn render_inline_sequence_mismatch_block(
-    source_path: &std::path::Path,
-    stderr_is_tty: bool,
-) -> StatusBlock {
+/// Builds the blank-line-separated paragraph sequence: the opening statement;
+/// the explanation (document link, both property names, what `sequence` does,
+/// and the `claudine sequence` directive); and the upcoming-`sections` note.
+/// The authored frontmatter YAML block is appended after this diagnostic by the
+/// CLI error walker when the error is enriched with a [`FrontmatterExcerpt`].
+fn render_inline_sequence_mismatch_block(source_path: &std::path::Path) -> StatusBlock {
     let file_link = render_file_link(source_path);
 
     let opening =
@@ -1224,21 +1292,12 @@ fn render_inline_sequence_mismatch_block(
          sequence workflow and is not available yet.",
     );
 
-    let yaml_note = if stderr_is_tty {
-        Prose::new("Below is the full YAML definition of the document:")
-    } else {
-        Prose::new(
-            "The full YAML definition was withheld to avoid exposing frontmatter in \
-             non-interactive output.",
-        )
-    };
-
     StatusBlock::new(StatusState::Error)
         .error_header(ErrorHeader::new(
             "CompositionError",
             "inline-compose on a sequence",
         ))
-        .body(vec![opening, explanation, sections_note, yaml_note])
+        .body(vec![opening, explanation, sections_note])
         .hint("Run the document with `claudine sequence <file>`.")
 }
 
@@ -1402,6 +1461,56 @@ fn escape_prose_path(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn source_from(text: &str) -> ResolvedCompositionSource {
+        ResolvedCompositionSource {
+            original_ref: "review.md".to_string(),
+            resolved_path: PathBuf::from("review.md"),
+            original_text: text.to_string(),
+            markdown: text.to_string().into(),
+        }
+    }
+
+    #[test]
+    fn enrich_wraps_lifecycle_leak_with_excerpt() {
+        let source = source_from(
+            "---\nreview_file: x\nsuccess:\n    message: \"at {{review-file}}\"\n---\nbody\n",
+        );
+        let err = CompositionError::LifecycleInterpolationLeak {
+            source_path: PathBuf::from("review.md"),
+            property: "success.message".to_string(),
+            expression: "review-file".to_string(),
+            reason: String::new(),
+        }
+        .enrich_frontmatter(&source, true);
+
+        assert!(matches!(err, CompositionError::WithFrontmatter { .. }));
+        assert!(err.frontmatter_excerpt().is_some());
+        // Display still delegates to the inner leak diagnostic.
+        assert!(err.to_string().contains("interpolation leaked"), "got: {err}");
+    }
+
+    #[test]
+    fn enrich_is_noop_for_unrelated_error() {
+        let source = source_from("---\ntitle: x\n---\nbody\n");
+        let err = CompositionError::NoRunnableProviders.enrich_frontmatter(&source, true);
+        assert!(matches!(err, CompositionError::NoRunnableProviders));
+    }
+
+    #[test]
+    fn enrich_is_idempotent() {
+        let source = source_from("---\ntitle: x\n---\nbody\n");
+        let err = CompositionError::PromptPropertyMissing
+            .enrich_frontmatter(&source, true)
+            .enrich_frontmatter(&source, true);
+        // Wrapped exactly once — the inner is the bare missing-prompt error.
+        match err {
+            CompositionError::WithFrontmatter { inner, .. } => {
+                assert!(matches!(*inner, CompositionError::PromptPropertyMissing));
+            }
+            other => panic!("expected WithFrontmatter, got: {other:?}"),
+        }
+    }
 
     #[test]
     fn loop_iteration_failed_display_surfaces_reason_and_iteration() {
@@ -1777,24 +1886,18 @@ mod tests {
 
     use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 
-    const MISMATCH_YAML: &str = "# leading comment\nsequence: &seq\n  - name: Hello\nprompt: |-\n  multi\n  line\nalias: *seq";
-
-    fn mismatch_err(stderr_is_tty: bool) -> CompositionError {
+    fn mismatch_err() -> CompositionError {
         CompositionError::InlineComposeSequenceMismatch {
             source_path: PathBuf::from("prompts/greeting.md"),
-            raw_yaml: MISMATCH_YAML.to_string(),
-            stderr_is_tty,
         }
     }
 
     #[test]
-    fn mismatch_tty_render_includes_diagnostic_and_verbatim_yaml() {
-        // Criterion 11 (+ 13, 14 via the captured string): on a TTY the
-        // diagnostic names the document, both properties, the `claudine
-        // sequence` directive, the `sections` note, the YAML intro, and the
-        // verbatim YAML payload — contiguously, with no border prefix or
-        // reflow.
-        let err = mismatch_err(true);
+    fn mismatch_render_includes_diagnostic() {
+        // The diagnostic names the document, both properties, the `claudine
+        // sequence` directive, and the `sections` note. The authored YAML
+        // block is appended separately by the CLI walker (tested there).
+        let err = mismatch_err();
         let rendered = strip_escape_codes(err.report_block_error_optimistic(Some(80)));
         assert!(rendered.contains("greeting.md"), "document name: {rendered}");
         assert!(rendered.contains("prompt"), "names prompt: {rendered}");
@@ -1804,52 +1907,19 @@ mod tests {
             "sequence directive: {rendered}"
         );
         assert!(rendered.contains("sections"), "sections note: {rendered}");
-        assert!(
-            rendered.contains("Below is the full YAML definition"),
-            "yaml intro: {rendered}"
-        );
-        assert!(
-            rendered.contains(MISMATCH_YAML),
-            "verbatim YAML payload must appear contiguously: {rendered:?}"
-        );
-    }
-
-    #[test]
-    fn mismatch_non_tty_render_withholds_yaml() {
-        // Criterion 12: non-TTY output keeps the mismatch + `sections`
-        // guidance, omits the YAML intro and block, and states the YAML was
-        // withheld.
-        let err = mismatch_err(false);
-        let rendered = strip_escape_codes(err.report_block_error_optimistic(Some(80)));
-        assert!(rendered.contains("claudine sequence"), "got: {rendered}");
-        assert!(rendered.contains("sections"), "got: {rendered}");
-        assert!(rendered.contains("withheld"), "withheld note: {rendered}");
-        assert!(
-            !rendered.contains("Below is the full YAML definition"),
-            "intro must be omitted: {rendered}"
-        );
-        assert!(
-            !rendered.contains(MISMATCH_YAML),
-            "YAML block must be omitted: {rendered:?}"
-        );
-        // The unique alias token from the YAML must not leak in non-TTY mode.
-        assert!(!rendered.contains("*seq"), "got: {rendered}");
     }
 
     #[test]
     fn mismatch_plain_terminal_render_has_no_escape_bytes() {
-        // Criterion 16: a terminal with no color depth cannot display SGR
-        // styling or OSC 8 hyperlinks, so the rendered diagnostic must contain
-        // no escape byte at all — otherwise redirected / `NO_COLOR` output is
-        // polluted. Asserted on the RAW render (no `strip_escape_codes`), then
-        // confirmed still readable: the document name, directive, and verbatim
-        // YAML survive as plain text.
+        // A terminal with no color depth cannot display SGR styling or OSC 8
+        // hyperlinks, so the rendered diagnostic must contain no escape byte at
+        // all — otherwise redirected / `NO_COLOR` output is polluted.
         let mut term = Terminal::builder()
             .width(80)
             .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
             .build();
         term.is_nerd_font = Some(false);
-        let err = mismatch_err(true);
+        let err = mismatch_err();
         let rendered = err.report_block_error(&term);
         assert!(
             !rendered.contains('\x1b'),
@@ -1857,13 +1927,12 @@ mod tests {
         );
         assert!(rendered.contains("greeting.md"), "got: {rendered}");
         assert!(rendered.contains("claudine sequence"), "got: {rendered}");
-        assert!(rendered.contains(MISMATCH_YAML), "got: {rendered:?}");
     }
 
     #[test]
     fn mismatch_display_message_is_plain() {
         // The `#[error(...)]` summary is plain text with no rendering markup.
-        let err = mismatch_err(true);
+        let err = mismatch_err();
         let rendered = err.to_string();
         assert!(
             rendered.contains("cannot run a document configured as a sequence"),

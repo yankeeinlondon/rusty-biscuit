@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{ClaudineError, Result};
 
-use super::catalog::RuleGroup;
+use super::catalog::{RuleGroup, ScanSurface};
 
 /// Flat configuration for the Protect service.
 ///
@@ -30,6 +30,10 @@ impl Default for ProtectConfig {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_custom_surface() -> ScanSurface {
+    ScanSurface::BashCommand
 }
 
 impl<'de> Deserialize<'de> for ProtectConfig {
@@ -135,6 +139,11 @@ impl ProtectConfig {
                 pattern: cp.pattern.clone(),
                 source,
             })?;
+            if cp.surface == ScanSurface::WritePath {
+                return Err(ClaudineError::ConfigValidation(
+                    "custom pattern surface 'write_path' is not supported".to_string(),
+                ));
+            }
         }
 
         Ok(())
@@ -221,10 +230,22 @@ pub struct RuleGroupDetailedConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct CustomPattern {
     pub name: String,
     pub pattern: String,
+    #[serde(default = "default_custom_surface")]
+    pub surface: ScanSurface,
+}
+
+impl Default for CustomPattern {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            pattern: String::new(),
+            surface: ScanSurface::BashCommand,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -282,6 +303,32 @@ mod tests {
 
         assert_eq!(config.custom_patterns.len(), 1);
         assert_eq!(config.custom_patterns[0].name, "no_prod_deploy");
+        assert_eq!(config.custom_patterns[0].surface, ScanSurface::BashCommand);
+    }
+
+    #[test]
+    fn custom_pattern_mcp_surface_parses() {
+        let config: ProtectConfig = serde_json::from_value(serde_json::json!({
+            "custom_patterns": [
+                { "name": "no_webhook", "pattern": "webhook\\.site/.*", "surface": "mcp_response" }
+            ]
+        }))
+        .unwrap();
+
+        assert_eq!(config.custom_patterns[0].surface, ScanSurface::McpResponse);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_write_path_custom_surface() {
+        let config: ProtectConfig = serde_json::from_value(serde_json::json!({
+            "custom_patterns": [
+                { "name": "bad", "pattern": ".*", "surface": "write_path" }
+            ]
+        }))
+        .unwrap();
+
+        assert!(config.validate().is_err());
     }
 
     #[test]

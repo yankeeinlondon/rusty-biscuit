@@ -578,7 +578,7 @@ mod tests {
 
     #[test]
     fn ambiguous_string_still_reports_type_problem() {
-        let md = md_with_schema("$schema:\n  flag: boolean\nflag: \"yes\"\n");
+        let md = md_with_schema("$schema:\n  flag: boolean(required)\nflag: \"yes\"\n");
         let api = DarkmatterSchemas::new();
         let report = api.validate(&md).unwrap();
         assert!(!report.valid);

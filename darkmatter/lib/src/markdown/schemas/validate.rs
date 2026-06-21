@@ -18,7 +18,7 @@
 //! message, optional source line/column).
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex, OnceLock},
 };
 
@@ -192,7 +192,7 @@ pub fn collect_problems(
 ) -> Vec<ValidationProblem> {
     validator
         .iter_errors(instance)
-        .map(|err| build_problem(&err, positions, None))
+        .flat_map(|err| build_problems(&err, positions, None))
         .collect()
 }
 
@@ -215,7 +215,7 @@ pub fn collect_root_union_problems(
     for (idx, validator) in arm_validators.iter().enumerate() {
         let problems: Vec<ValidationProblem> = validator
             .iter_errors(instance)
-            .map(|err| build_problem(&err, positions, Some(idx)))
+            .flat_map(|err| build_problems(&err, positions, Some(idx)))
             .collect();
         if problems.is_empty() {
             // Instance satisfies this arm — overall validation passes.
@@ -231,6 +231,50 @@ pub fn collect_root_union_problems(
         .min_by_key(|(idx, problems)| (problems.len(), *idx))
         .map(|(_, problems)| problems)
         .unwrap_or_default()
+}
+
+/// Maps one `jsonschema::ValidationError` into one-or-more public problems.
+///
+/// Most errors map to a single problem. An `anyOf` failure is drilled into so
+/// the precise offending sub-path surfaces instead of the parent: when the
+/// `coerce`/`convert` pipeline wraps an optional typed property as
+/// `anyOf: [{ "type": "null" }, <typed-fragment>]` (see
+/// [`super::simplified::convert`]), a non-null value that fails the typed arm
+/// otherwise reports only at the wrapper path with the generic "is not valid
+/// under any of the schemas" message — pointing at the property instead of the
+/// field that actually failed. We recurse into the arm context, keeping only
+/// nested errors that drill *below* the wrapper path (this drops the `null`
+/// sentinel's same-path type error), so an author sees `/config/name` rather
+/// than `/config`. When no arm drills deeper (e.g. `[null, string]` against a
+/// wrong-typed scalar — every arm fails at the wrapper path) the original
+/// `anyOf` problem is kept.
+fn build_problems(
+    err: &jsonschema::ValidationError<'_>,
+    positions: &PositionMap,
+    arm_index: Option<usize>,
+) -> Vec<ValidationProblem> {
+    if let ValidationErrorKind::AnyOf { context } = err.kind() {
+        let parent = err.instance_path().as_str();
+        let mut deeper: Vec<ValidationProblem> = context
+            .iter()
+            .flat_map(|arm| arm.iter())
+            .filter(|nested| {
+                let path = nested.instance_path().as_str();
+                path.len() > parent.len() && path.starts_with(parent)
+            })
+            .flat_map(|nested| build_problems(nested, positions, arm_index))
+            .collect();
+        if !deeper.is_empty() {
+            // Distinct arms can fail identically against the same value (e.g.
+            // overlapping inline-object arms); collapse exact duplicates so the
+            // report points at each offending site once. Duplicates need not be
+            // adjacent, so dedup by a seen set rather than `dedup_by`.
+            let mut seen: HashSet<(String, String)> = HashSet::new();
+            deeper.retain(|p| seen.insert((p.path.clone(), p.message.clone())));
+            return deeper;
+        }
+    }
+    vec![build_problem(err, positions, arm_index)]
 }
 
 fn build_problem(
@@ -513,6 +557,53 @@ mod tests {
         );
         assert_eq!(problems.len(), 1, "expected one MinLength error: {problems:?}");
         assert_eq!(problems[0].kind, ValidationProblemKind::Invalid);
+    }
+
+    #[test]
+    fn nullable_any_of_surfaces_nested_failing_subpath() {
+        // Mirrors the `convert` output for an optional inline-object property:
+        // `anyOf: [{ "type": "null" }, <object with required string field>]`.
+        // A non-null value that fails the typed arm must report the nested
+        // `/config/name` site, not the wrapper path `/config`.
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "config": { "anyOf": [
+                    { "type": "null" },
+                    {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": { "name": { "type": "string" } },
+                        "required": ["name"]
+                    }
+                ] }
+            }
+        });
+        let v = build_validator(&schema).unwrap();
+        let instance = json!({ "config": { "name": ["Ada", "Lovelace"] } });
+        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        assert!(
+            problems.iter().any(|p| p.path == "/config/name"),
+            "expected a problem under /config/name, got {problems:?}"
+        );
+    }
+
+    #[test]
+    fn nullable_any_of_keeps_parent_when_no_arm_drills_deeper() {
+        // `[null, string]` against a wrong-typed scalar: every arm fails at the
+        // wrapper path itself, so there is no deeper site to point at. The
+        // original `anyOf` problem is preserved rather than dropped.
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "name": { "anyOf": [ { "type": "null" }, { "type": "string" } ] }
+            }
+        });
+        let v = build_validator(&schema).unwrap();
+        let instance = json!({ "name": 42 });
+        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        assert_eq!(problems.len(), 1, "expected the wrapper problem: {problems:?}");
+        assert_eq!(problems[0].path, "/name");
     }
 
     #[test]

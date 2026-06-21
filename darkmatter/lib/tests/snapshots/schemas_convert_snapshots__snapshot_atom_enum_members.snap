@@ -1,5 +1,6 @@
 ---
 source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+assertion_line: 120
 expression: "convert_atom(\"enum(red, green, blue)\")"
 ---
 {
@@ -7,10 +8,17 @@ expression: "convert_atom(\"enum(red, green, blue)\")"
   "additionalProperties": true,
   "properties": {
     "field": {
-      "enum": [
-        "red",
-        "green",
-        "blue"
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "enum": [
+            "red",
+            "green",
+            "blue"
+          ]
+        }
       ]
     }
   },

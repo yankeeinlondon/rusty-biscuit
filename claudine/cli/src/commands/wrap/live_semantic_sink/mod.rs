@@ -29,11 +29,14 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use biscuit_terminal::terminal::Terminal;
 use claudine::events::{AgenticEvent, EnvironmentContext, EventMeta as DispatchEventMeta};
 use claudine::provider::Provider;
+use claudine::runaway::ContentDetector;
+use claudine::stream::logs::EarlyTermination;
 use claudine::stream::progress::{self, LiveMetrics};
 use claudine::stream::semantic::{SemanticErrorKind, SemanticEvent};
 use claudine::stream::stderr::Verbosity;
@@ -177,6 +180,29 @@ pub(crate) struct LiveSemanticSink {
     /// request termination. The same `Arc<Mutex<_>>` is shared with
     /// `exec.rs` via [`Self::watchdog_state`].
     watchdog_state: Arc<Mutex<WatchdogState>>,
+    /// Runaway-output content detector (Phase 6). `None` when guards are
+    /// fully opted out, in which case `on_semantic_event` does no
+    /// detection work. Fed from `OutputText`/`Reasoning` text only (never
+    /// tool payloads — A2) and reset per turn on `TurnComplete`.
+    content_detector: Option<ContentDetector>,
+    /// Validated guard config kept so the in-scope exit-expression set can
+    /// be re-filtered when a provider reports its actual model via
+    /// `SessionStart`. `None` when no re-scope source was wired (e.g. unit
+    /// tests that arm a detector directly). See
+    /// [`Self::set_guard_rescope_source`].
+    guard_inputs: Option<Arc<super::runaway_guard::ResolvedGuardInputs>>,
+    /// Model the currently-compiled exit-expression set was filtered for
+    /// (the launch-time hint, possibly empty). A `SessionStart` model that
+    /// differs from this triggers a re-scope; an identical one is a no-op.
+    detector_scope_model: Option<String>,
+    /// Trip sender wired to the unified early-termination channel the
+    /// exec wait loop polls. Set by `build_structured_plumbing` so the
+    /// detector and (for OpenCode) the stderr bridge share one channel.
+    trip_sender: Option<Sender<EarlyTermination>>,
+    /// Set once a content trip has fired. Guards against a double-send (a
+    /// trip is terminal) and suppresses further output rendering so the
+    /// tail of a runaway is not echoed to the terminal (spec Part 1).
+    content_tripped: bool,
 }
 
 impl LiveSemanticSink {
@@ -214,6 +240,11 @@ impl LiveSemanticSink {
             at_blank_row: false,
             stdout_trailing_newlines: 0,
             watchdog_state: Arc::new(Mutex::new(WatchdogState::default())),
+            content_detector: None,
+            guard_inputs: None,
+            detector_scope_model: None,
+            trip_sender: None,
+            content_tripped: false,
         }
     }
 
@@ -295,6 +326,11 @@ impl LiveSemanticSink {
             at_blank_row: false,
             stdout_trailing_newlines: 0,
             watchdog_state: Arc::new(Mutex::new(WatchdogState::default())),
+            content_detector: None,
+            guard_inputs: None,
+            detector_scope_model: None,
+            trip_sender: None,
+            content_tripped: false,
         }
     }
 
@@ -361,6 +397,184 @@ impl LiveSemanticSink {
     /// holding the sink mutex during writes.
     pub(crate) fn watchdog_state(&self) -> Arc<Mutex<WatchdogState>> {
         self.watchdog_state.clone()
+    }
+
+    /// Arm the runaway-output content detector (Phase 6). Called by the
+    /// streaming wiring point before the sink is handed to
+    /// `build_structured_plumbing`. A `None` argument leaves the sink with
+    /// no detector (zero per-event overhead).
+    pub(crate) fn set_content_detector(&mut self, detector: Option<ContentDetector>) {
+        self.content_detector = detector;
+    }
+
+    /// Whether a content detector is armed. `build_structured_plumbing`
+    /// uses this to decide whether to create + wire the trip channel.
+    pub(crate) fn has_content_detector(&self) -> bool {
+        self.content_detector.is_some()
+    }
+
+    /// Wire the source needed to re-scope the exit-expression set when a
+    /// provider reports its actual model.
+    ///
+    /// `inputs` is the validated, model-independent guard config (the
+    /// expensive half of resolution, already run once before streaming);
+    /// `launch_model` is the launch-time model hint the currently-armed
+    /// detector was filtered for (CLI `--model` / `MODEL` env / frontmatter
+    /// `model`, possibly absent → `None`).
+    ///
+    /// When the active detector was filtered with no launch-time model hint
+    /// (`""`), an agent/model-scoped exit expression cannot match yet. If
+    /// the provider later reports a model via `SessionStart` that brings
+    /// such an expression into scope, [`Self::rescope_for_model`] re-filters
+    /// and recompiles the in-scope set and swaps it into the live detector
+    /// without losing volume / repetition state.
+    pub(crate) fn set_guard_rescope_source(
+        &mut self,
+        inputs: Arc<super::runaway_guard::ResolvedGuardInputs>,
+        launch_model: Option<&str>,
+    ) {
+        self.guard_inputs = Some(inputs);
+        self.detector_scope_model = Some(launch_model.unwrap_or("").to_string());
+    }
+
+    /// Whether the run wants a content-detector trip channel wired.
+    ///
+    /// True when a detector is already armed, OR when a re-scope source
+    /// carries an exit expression that could come into scope for this
+    /// provider under a model the provider has not yet reported. The latter
+    /// case matters because the launch-time compile can legitimately produce
+    /// **no** detector — every other guard off and the only exit expression
+    /// out of scope for the launch-time model — yet a `SessionStart` model
+    /// can still bring that expression into scope. `build_structured_plumbing`
+    /// uses this (not [`Self::has_content_detector`]) to decide whether to
+    /// own the trip channel so a re-scope-armed detector has somewhere to
+    /// send.
+    pub(crate) fn wants_content_channel(&self) -> bool {
+        self.content_detector.is_some()
+            || self
+                .guard_inputs
+                .as_ref()
+                .is_some_and(|inputs| inputs.has_provider_scoped_entries())
+    }
+
+    /// Re-scope the content detector's exit-expression set for a
+    /// provider-reported model, when it differs from the model the current
+    /// set was filtered for.
+    ///
+    /// A no-op when no re-scope source is wired or the reported model matches
+    /// the model already in force (so a `SessionStart` echoing the
+    /// launch-time model never rebuilds the set or drops state). When a
+    /// detector is already armed, only its compiled pattern set is swapped,
+    /// preserving the volume / repetition state. When the launch-time compile
+    /// produced no detector (every other guard off and the only exit
+    /// expression out of scope), a fresh detector is built and the existing
+    /// trip sender is re-attached so the newly in-scope expression can fire.
+    ///
+    /// The recompile stays fail-closed: re-filtering an already-validated
+    /// entry set should never produce a compile error, but if it somehow
+    /// does, the error is logged and the previous set is left in force rather
+    /// than silently disabling all exit expressions.
+    fn rescope_for_model(&mut self, reported_model: Option<&str>) {
+        let Some(inputs) = self.guard_inputs.clone() else {
+            return;
+        };
+        let reported = reported_model.unwrap_or("");
+        if self.detector_scope_model.as_deref() == Some(reported) {
+            return;
+        }
+
+        if self.content_detector.is_some() {
+            // Hot path: a detector already exists, so swap only the compiled
+            // pattern set and keep its accumulated state.
+            match inputs.compile_patterns_for_model(reported_model) {
+                Ok(compiled) => {
+                    if let Some(detector) = self.content_detector.as_mut() {
+                        detector.set_exit_expressions(compiled);
+                    }
+                    self.detector_scope_model = Some(reported.to_string());
+                }
+                Err(error) => Self::warn_rescope_failed(inputs.provider(), reported, &error),
+            }
+            return;
+        }
+
+        // No detector yet (launch-time set was empty and other guards off).
+        // Rebuild a full detector for the reported model; it is `None` again
+        // only if the reported model also brings nothing into scope.
+        match inputs.compile_for_model(reported_model) {
+            Ok(resolved) => {
+                // The trip sender lives on the sink (already wired by
+                // `build_structured_plumbing` because `wants_content_channel`
+                // reported `true`), so installing the detector is enough for
+                // it to fire.
+                self.content_detector = resolved.detector;
+                self.detector_scope_model = Some(reported.to_string());
+            }
+            Err(error) => Self::warn_rescope_failed(inputs.provider(), reported, &error),
+        }
+    }
+
+    fn warn_rescope_failed(provider: Provider, reported_model: &str, error: &claudine::error::ClaudineError) {
+        tracing::warn!(
+            %provider,
+            reported_model,
+            "failed to re-scope exit expressions for reported model: {error}; \
+             keeping the previous set"
+        );
+    }
+
+    /// Wire the detector's trip sender to the unified early-termination
+    /// channel the exec wait loop polls. Set by `build_structured_plumbing`
+    /// (which owns the channel) after the detector is armed.
+    pub(crate) fn set_trip_sender(&mut self, sender: Sender<EarlyTermination>) {
+        self.trip_sender = Some(sender);
+    }
+
+    /// Feed assistant text to the content detector, firing a trip on the
+    /// first guard breach. No-op when no detector is armed or a trip has
+    /// already fired. Returns `true` when this call fired the trip so the
+    /// caller can suppress rendering of the tripping chunk.
+    fn feed_content_detector(&mut self, text: &str) -> bool {
+        if self.content_tripped {
+            return false;
+        }
+        let Some(detector) = self.content_detector.as_mut() else {
+            return false;
+        };
+        if let Some(trip) = detector.feed(text) {
+            self.fire_content_trip(trip);
+            return true;
+        }
+        false
+    }
+
+    /// Reset the detector's per-turn volume counters (`TurnComplete`).
+    fn reset_content_detector_turn(&mut self) {
+        if let Some(detector) = self.content_detector.as_mut() {
+            detector.reset_turn();
+        }
+    }
+
+    /// Send a content trip on the unified termination channel exactly once.
+    ///
+    /// A trip is terminal: the `content_tripped` flag guards against a
+    /// double-send and also suppresses further output rendering. The send
+    /// is best-effort — if the receiver has already hung up (the wait loop
+    /// killed the child), dropping the signal is fine.
+    fn fire_content_trip(&mut self, trip: claudine::runaway::Trip) {
+        if self.content_tripped {
+            return;
+        }
+        self.content_tripped = true;
+        if let Some(sender) = self.trip_sender.as_ref() {
+            let early = super::exec::termination::trip_to_early_termination(trip);
+            let _ = sender.send(early);
+        }
+    }
+
+    /// Whether a content trip has fired (rendering is then suppressed).
+    fn content_tripped(&self) -> bool {
+        self.content_tripped
     }
 
     fn should_render(&self) -> bool {
@@ -496,6 +710,7 @@ mod tests {
     // here for the `on_semantic_event` driver calls in the child suites.
     use claudine::stream::semantic::SemanticEventSink;
 
+    mod content_guard;
     mod dispatch_and_recording;
     mod golden_stderr;
     mod provider_extension_and_opencode;

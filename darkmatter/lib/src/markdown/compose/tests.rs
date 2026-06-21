@@ -7,6 +7,7 @@ use super::HeadingLevel;
 use super::*;
 use super::super::types::MarkdownError;
 use super::transclusion::TransclusionEngine;
+use biscuit_terminal::utils::UnicodeWidthStr;
 
 #[test]
 fn test_compose_returns_unchanged_document() {
@@ -59,6 +60,77 @@ fn test_compose_cleanup_stage() {
 
     // Cleanup should add blank line between header and paragraph
     assert!(composed.content().contains("\n\n"));
+    assert!(report.cleanup_changed);
+}
+
+#[test]
+fn test_compose_cleanup_strips_incidental_newlines_by_default() {
+    let content = "This paragraph was wrapped\nat a fixed column.";
+    let md: Markdown = content.into();
+
+    let options = ComposeOptions::new().only(&[ComposeOperation::Cleanup]);
+
+    let (composed, report) = md.compose_with(options).unwrap();
+
+    assert_eq!(
+        composed.content(),
+        "This paragraph was wrapped at a fixed column.\n"
+    );
+    assert!(report.cleanup_changed);
+}
+
+#[test]
+fn test_compose_cleanup_can_preserve_incidental_newlines() {
+    let content = "This paragraph keeps\nits single newline.\n";
+    let md: Markdown = content.into();
+
+    let options = ComposeOptions::new()
+        .only(&[ComposeOperation::Cleanup])
+        .with_incidental_newline_mode(crate::markdown::cleanup::IncidentalNewlineMode::Preserve);
+
+    let (composed, report) = md.compose_with(options).unwrap();
+
+    assert_eq!(composed.content(), content);
+    assert!(!report.cleanup_changed);
+}
+
+#[test]
+fn test_compose_cleanup_fixed_width_reflows_prose() {
+    let content = "This paragraph starts with incidental wrapping\nand should be reflowed into lines that fit.";
+    let md: Markdown = content.into();
+
+    let options = ComposeOptions::new()
+        .only(&[ComposeOperation::Cleanup])
+        .with_fixed_width(40);
+
+    let (composed, report) = md.compose_with(options).unwrap();
+
+    assert!(report.cleanup_changed);
+    assert!(composed.content().contains('\n'));
+    for line in composed.content().lines() {
+        assert!(
+            UnicodeWidthStr::width(line) <= 40,
+            "line exceeded fixed width: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn test_compose_cleanup_fixed_width_forces_strip_over_preserve() {
+    // `fixed_width` must reflow canonical unwrapped prose, so it overrides
+    // `Preserve` and strips the source's incidental newline before wrapping.
+    let content = "Short first line.\nShort second line.\n";
+    let md: Markdown = content.into();
+
+    let options = ComposeOptions::new()
+        .only(&[ComposeOperation::Cleanup])
+        .with_incidental_newline_mode(crate::markdown::cleanup::IncidentalNewlineMode::Preserve)
+        .with_fixed_width(80);
+
+    let (composed, report) = md.compose_with(options).unwrap();
+
+    // The two source lines collapse to a single line that fits within 80 columns.
+    assert_eq!(composed.content(), "Short first line. Short second line.\n");
     assert!(report.cleanup_changed);
 }
 
@@ -3146,8 +3218,9 @@ mod remote_transclusion_tests {
     /// remote URL argument to a read-side function written in a frontmatter
     /// value must fail loudly rather than performing a network read — even
     /// when the run otherwise allows the host for body/transclusion fetches.
-    /// With the default (non-fail-fast) policy the loud failure surfaces as a
-    /// frontmatter-interpolation warning and the value is left unsubstituted.
+    /// The value here is a whole-value `{{ … }}`, which is executable state,
+    /// so the evaluation error aborts composition regardless of fail_fast —
+    /// the loud failure can never leave the raw template unsubstituted.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn frontmatter_value_remote_url_fails_loudly() {
         let server = MockServer::start().await;
@@ -3169,27 +3242,23 @@ mod remote_transclusion_tests {
         );
         std::fs::write(&root, &content).unwrap();
 
-        let (_, report) =
-            compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
-                .await
-                .unwrap();
+        let err = compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+            .await
+            .expect_err("a whole-value remote-URL read in frontmatter must abort composition");
 
-        // No network read occurred and a helpful diagnostic was emitted.
-        assert_eq!(report.remote_fetch_stats.unwrap().fetched, 0);
+        // The loud failure names the key, the local-only diagnostic, and the URL.
+        let msg = err.to_string();
+        assert!(msg.contains("status"), "error must name the key, got: {msg}");
         assert!(
-            report.warnings.iter().any(|w| {
-                w.stage == "frontmatter-interpolation"
-                    && w.message.contains("remote reads are not enabled")
-                    && w.message.contains(&url)
-            }),
-            "expected a local-only frontmatter diagnostic, got: {:?}",
-            report.warnings
+            msg.contains("remote reads are not enabled"),
+            "expected a local-only frontmatter diagnostic, got: {msg}"
         );
+        assert!(msg.contains(&url), "error must name the URL, got: {msg}");
     }
 
     /// Decision B also applies to `file_exists()`: a remote URL argument in
-    /// a frontmatter value must fail loudly rather than silently reporting
-    /// the URL as absent.
+    /// a whole-value `{{ … }}` frontmatter value must abort composition rather
+    /// than silently reporting the URL as absent or leaking the raw template.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn frontmatter_file_exists_remote_url_fails_loudly() {
         let server = MockServer::start().await;
@@ -3207,21 +3276,17 @@ mod remote_transclusion_tests {
         );
         std::fs::write(&root, &content).unwrap();
 
-        let (_, report) =
-            compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
-                .await
-                .unwrap();
+        let err = compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+            .await
+            .expect_err("a whole-value remote-URL file_exists in frontmatter must abort composition");
 
-        assert_eq!(report.remote_fetch_stats.unwrap().fetched, 0);
+        let msg = err.to_string();
+        assert!(msg.contains("present"), "error must name the key, got: {msg}");
         assert!(
-            report.warnings.iter().any(|w| {
-                w.stage == "frontmatter-interpolation"
-                    && w.message.contains("local-only")
-                    && w.message.contains(&url)
-            }),
-            "expected a local-only frontmatter diagnostic for file_exists, got: {:?}",
-            report.warnings
+            msg.contains("local-only"),
+            "expected a local-only frontmatter diagnostic for file_exists, got: {msg}"
         );
+        assert!(msg.contains(&url), "error must name the URL, got: {msg}");
     }
 
     /// Decision B covers the `$()` shell-ternary condition surface too: a
