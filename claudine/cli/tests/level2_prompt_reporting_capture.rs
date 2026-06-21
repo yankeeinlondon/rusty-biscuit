@@ -161,7 +161,10 @@ fn spawn_tmux_session(cols: u32, rows: u32) -> String {
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed)
     );
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+    // POSIX shell (bash/sh), not the developer's `$SHELL`: a custom login
+    // prompt (e.g. Starship's `❯`) never ends in `$`/`#`/`%`, so
+    // `wait_for_prompt` would never match and burn its full timeout.
+    let shell = biscuit_test_harness::detect_shell();
     let spawned = std::process::Command::new("tmux")
         .args([
             "new-session",
@@ -391,7 +394,24 @@ fn level2_prompt_reporting_system_link_osc8_in_wezterm() {
 
     let fx = Fixture::new(Some(SYSTEM_PROMPT_SHORT), USER_PROMPT_SHORT);
     let mut harness = WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm");
-    let frame = send_compose(&mut harness, &fx, 100, &[]);
+
+    // Clear the shared pane's screen *and* scrollback (`ESC[3J`) so the
+    // scrollback capture below sees only this run's output — the pane is
+    // reused across serial tests.
+    harness
+        .send_text(b"clear; printf '\\033[3J'\n")
+        .expect("clear shared pane");
+    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+
+    // Drive the compose, then read the scrollback rather than the returned
+    // viewport frame. claudine prepends its built-in system prompt, so the
+    // rendered System Prompt report is taller than the short shared pane and
+    // its OSC8 hyperlink (near the report's top) scrolls into history — the
+    // viewport-only capture never sees it.
+    let _ = send_compose(&mut harness, &fx, 100, &[]);
+    let frame = harness
+        .capture_scrollback(400)
+        .expect("scrollback capture failed");
 
     assert!(
         frame.raw.contains("\x1b]8;;file://"),

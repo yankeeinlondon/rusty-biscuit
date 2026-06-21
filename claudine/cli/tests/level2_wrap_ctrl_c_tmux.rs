@@ -104,7 +104,10 @@ fn ctrl_c_terminates(extra_env: &[(&str, &str)], deadline: Duration) -> (bool, S
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed)
     );
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+    // POSIX shell (bash/sh), not the developer's `$SHELL`: a custom login
+    // prompt (e.g. Starship's `❯`) never ends in `$`/`#`/`%`, so
+    // `wait_for_prompt` would never match and burn its full timeout.
+    let shell = biscuit_test_harness::detect_shell();
     // A wide-but-short pane: a unique sentinel below makes the prompt-return
     // check robust without needing scrollback.
     let spawned = std::process::Command::new("tmux")

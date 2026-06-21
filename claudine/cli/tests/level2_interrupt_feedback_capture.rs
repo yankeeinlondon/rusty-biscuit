@@ -91,7 +91,10 @@ while :; do /bin/sleep 1; done
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed)
     );
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+    // POSIX shell (bash/sh), not the developer's `$SHELL`: a custom login
+    // prompt (e.g. Starship's `❯`) never ends in `$`/`#`/`%`, so
+    // `wait_for_prompt` would never match and burn its full timeout.
+    let shell = biscuit_test_harness::detect_shell();
     let spawned = std::process::Command::new("tmux")
         .args([
             "new-session",
