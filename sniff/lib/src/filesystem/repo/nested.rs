@@ -213,6 +213,20 @@ struct Candidate {
 /// (`node_modules`, `target`, `dist`, `build`) the rest of the repo detection
 /// skips, so a JS monorepo's deeply-nested `node_modules` subtrees do not
 /// explode the candidate set.
+///
+/// Marker evidence is matched in-memory against the filenames the walker
+/// already yields, rather than re-probing the filesystem per directory. This
+/// collapses the per-directory `path.join(marker).exists()` + `read_dir`
+/// syscall storm into the single batched `ignore` walk, with two intentional
+/// deltas from the older probe-based loop:
+///
+/// - A gitignored marker file inside a non-gitignored directory is no longer
+///   detected (the walker honors `git_ignore` and skips it). Marker files are
+///   conventionally committed, so this is judged negligible; see the spec's
+///   "Intentional Behavior Change" section.
+/// - A directory whose name happens to match a marker file (e.g.
+///   `nested/package.json/`) is no longer treated as evidence. The loop now
+///   inspects non-directory entries only, which is the true marker contract.
 fn walk_for_nested_markers(root: &Path) -> Vec<Candidate> {
     let walker = WalkBuilder::new(root)
         .hidden(false)
@@ -232,44 +246,60 @@ fn walk_for_nested_markers(root: &Path) -> Vec<Candidate> {
 
     let mut by_root: HashMap<PathBuf, Vec<MonorepoStandard>> = HashMap::new();
     for entry in walker.filter_map(|entry| entry.ok()) {
-        if !entry.file_type().is_some_and(|ft| ft.is_dir()) {
+        // Marker evidence is a file contract: skip directories so a directory
+        // whose name happens to match a marker no longer counts as evidence.
+        if entry.file_type().is_some_and(|ft| ft.is_dir()) {
             continue;
         }
         let path = entry.path();
-        if path == root {
+        // Nested discovery is non-root only: skip entries whose parent is the
+        // repo root itself. The walker also yields `root`, whose parent is
+        // `Some("")`/`None`/`Some(parent_of_root)` — none of those equal
+        // `Some(root)`, so the root entry naturally fails this check too.
+        let Some(parent) = path.parent() else {
+            continue;
+        };
+        if parent == root {
             continue;
         }
 
-        let mut matched: Vec<MonorepoStandard> = Vec::new();
+        let Some(name) = entry.file_name().to_str() else {
+            // Non-Unicode filenames cannot be marker names: all
+            // `NESTED_MARKERS[*].file` literals are ASCII.
+            continue;
+        };
+
+        let mut matched_for_entry: Vec<MonorepoStandard> = Vec::new();
         for mapping in NESTED_MARKERS {
-            if path.join(mapping.file).exists() {
+            if marker_name_matches(name, mapping.file) {
                 for &standard in mapping.standards {
-                    if !matched.contains(&standard) {
-                        matched.push(standard);
+                    if !matched_for_entry.contains(&standard) {
+                        matched_for_entry.push(standard);
                     }
                 }
             }
         }
 
-        // .NET solution files have arbitrary names, so match by suffix.
-        if let Ok(entries) = std::fs::read_dir(path) {
-            for entry in entries.flatten() {
-                let name = entry.file_name();
-                let Some(name) = name.to_str() else { continue };
-                if (name.ends_with(SOLUTION_SUFFIX) || name.ends_with(".slnx"))
-                    && !matched.contains(&MonorepoStandard::DotNetSolution)
-                {
-                    matched.push(MonorepoStandard::DotNetSolution);
-                    break;
-                }
-            }
+        // Suffix match for .NET solution files. Intentionally case-sensitive
+        // even on Windows: this inspects names returned by the walker and
+        // preserves the historical byte-exact contract from the old
+        // `read_dir`-based loop.
+        if (name.ends_with(SOLUTION_SUFFIX) || name.ends_with(".slnx"))
+            && !matched_for_entry.contains(&MonorepoStandard::DotNetSolution)
+        {
+            matched_for_entry.push(MonorepoStandard::DotNetSolution);
         }
 
-        if !matched.is_empty() {
-            by_root
-                .entry(path.to_path_buf())
-                .or_default()
-                .extend(matched);
+        if !matched_for_entry.is_empty() {
+            // Dedup per parent root so multiple markers in the same directory
+            // (e.g. several `*.sln` files, or `package.json` next to
+            // `pnpm-workspace.yaml`) dispatch each detector at most once.
+            let standards = by_root.entry(parent.to_path_buf()).or_default();
+            for standard in matched_for_entry {
+                if !standards.contains(&standard) {
+                    standards.push(standard);
+                }
+            }
         }
     }
 
@@ -285,6 +315,24 @@ fn walk_for_nested_markers(root: &Path) -> Vec<Candidate> {
         .collect();
     candidates.sort_by(|a, b| a.root.cmp(&b.root));
     candidates
+}
+
+/// Marker-name equality for the fixed [`NESTED_MARKERS`] file literals.
+///
+/// On Unix-like platforms the comparison is byte-exact. On Windows it is
+/// ASCII case-insensitive, mirroring what the older
+/// `path.join(marker.file).exists()` lookup accepted on case-insensitive
+/// filesystems. All `NESTED_MARKERS[*].file` literals are ASCII, so
+/// case-folding is sound.
+///
+/// Intentionally **not** used for the `*.sln` / `*.slnx` suffix match, which
+/// preserves its historical byte-exact contract on every platform.
+fn marker_name_matches(name: &str, marker: &str) -> bool {
+    if cfg!(windows) {
+        name.eq_ignore_ascii_case(marker)
+    } else {
+        name == marker
+    }
 }
 
 /// Dispatch the detector for `standard` at `target`, folding any
@@ -345,4 +393,60 @@ fn collect_outcome(
     }
     packages.extend(outcome.packages.clone());
     outcomes.push(outcome);
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::TempDir;
+
+    use super::*;
+
+    /// Nested discovery is non-root only: a marker placed directly at the repo
+    /// root must not register the root itself as a candidate. With only the
+    /// root marker present (and no nested markers), the candidate set is exactly
+    /// empty — so this fails fast if the `parent == root` skip ever regresses.
+    #[test]
+    fn root_marker_does_not_register_a_candidate() {
+        let dir = TempDir::new().expect("create temp dir");
+        std::fs::write(
+            dir.path().join("pnpm-workspace.yaml"),
+            "packages:\n  - 'packages/*'\n",
+        )
+        .expect("write root marker");
+
+        let candidates = walk_for_nested_markers(dir.path());
+
+        assert!(
+            candidates.is_empty(),
+            "a marker at the repo root must not register a nested candidate, got {} candidate(s)",
+            candidates.len()
+        );
+    }
+
+    /// `marker_name_matches` is byte-exact on Unix and ASCII case-insensitive
+    /// on Windows, mirroring what the older `Path::exists()` lookup accepted
+    /// on case-insensitive filesystems. A path-like input never matches a bare
+    /// marker name on either platform.
+    #[test]
+    fn marker_name_matches_is_exact_on_unix_and_case_insensitive_on_windows() {
+        // Exact match succeeds on every platform.
+        assert!(marker_name_matches("package.json", "package.json"));
+
+        // A path-like input is never a marker name.
+        assert!(!marker_name_matches("packages/x", "package.json"));
+
+        // ASCII case-folding contract differs by platform.
+        let case_variant = marker_name_matches("Package.json", "package.json");
+        if cfg!(windows) {
+            assert!(
+                case_variant,
+                "Windows must accept ASCII case variants for fixed marker names"
+            );
+        } else {
+            assert!(
+                !case_variant,
+                "Unix-like platforms must compare marker names byte-exactly"
+            );
+        }
+    }
 }

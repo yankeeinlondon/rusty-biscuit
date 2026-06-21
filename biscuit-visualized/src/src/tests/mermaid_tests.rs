@@ -118,6 +118,38 @@ fn mermaid_renders_to_svg() {
     assert!(content.contains("<svg"), "Content should be valid SVG");
 }
 
+/// A `HIGHLIGHT` git-graph node (e.g. the worktree "+N" elision marker) must
+/// take its branch's color, not the inverse hue mermaid-rs-renderer defaults
+/// to. The second branch's color is yellow (`hsl(60, 100%`); its inverse is a
+/// blue (`rgb(0, 0, 160`) that must not appear.
+#[test]
+#[serial]
+fn mermaid_highlight_node_uses_branch_color() {
+    let _cache_dir = isolated_cache_dir();
+
+    let instructions = "gitGraph\n    commit id: \"a\"\n    branch feature\n    \
+         checkout feature\n    commit id: \"+3\" type: HIGHLIGHT\n    commit id: \"b\"";
+    let request = RenderRequest {
+        format: OutputFormat::Svg,
+        ..RenderRequest::default()
+    };
+
+    let artifact = MermaidDiagram::new(instructions)
+        .with_theme(MermaidTheme::Dark)
+        .render(&request)
+        .unwrap();
+    let svg = std::fs::read_to_string(artifact.path).unwrap();
+
+    assert!(
+        svg.contains("hsl(60, 100%"),
+        "highlight node should use the branch (yellow) color:\n{svg}"
+    );
+    assert!(
+        !svg.contains("rgb(0, 0, 160"),
+        "highlight node must not fall back to the inverse (blue) color:\n{svg}"
+    );
+}
+
 #[test]
 #[serial]
 fn mermaid_theme_changes_svg_output() {
