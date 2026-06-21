@@ -39,8 +39,12 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 # termination ceiling under full parallel `just test darkmatter` load. Give it
 # the same generous leash as the rate-limit pause test so contention never kills
 # a healthy run while a genuine hang still trips the longer window.
+#
+# NOTE: lib unit tests match in filtersets by their *full* module path, so a
+# bare-leaf `test(=execution_subset_…)` matches nothing. The full path is
+# required for this override to bind.
 [[profile.default.overrides]]
-filter = 'test(=execution_subset_of_approval_across_randomized_conditions)'
+filter = 'test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # Browser-tier tests spawn real headless Chrome, whose multi-process teardown
@@ -53,6 +57,18 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 [[profile.default.overrides]]
 filter = 'test(/browser_/)'
 leak-timeout = { period = "5s", result = "fail" }
+
+# The `preflight_graph_*` acceptance tests exercise preflight-graph reuse over
+# `::file` transclusion only — they spawn no subprocess at all (the echo-spawning
+# acceptance tests live under different names and are deliberately excluded). Yet
+# under full-suite parallel load nextest's post-test pipe-drain check occasionally
+# flags them with a spurious LEAK-FAIL (exits code 0, but the pipe read lags the
+# 100ms window). Same situation as the worktree note below: give a 1s grace
+# window; keep `result = "fail"` so a genuine leak still fails. The strict 100ms
+# window stays in force for the sibling acceptance tests that do spawn `echo`.
+[[profile.default.overrides]]
+filter = 'test(/markdown::compose::preflight::acceptance_tests::preflight_graph_/)'
+leak-timeout = { period = "1s", result = "fail" }
 
 # worktree's lib/CLI tests are fast and spawn only short-lived git children.
 # Under heavy parallel load nextest's post-test pipe-drain check occasionally
@@ -80,9 +96,10 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 
 # See the default-profile note: the randomized-conditions proptest can approach
 # the 30s termination ceiling under full parallel load. CI hosts may be slower
-# still, so the same generous leash applies.
+# still, so the same generous leash applies. Full module path required (see the
+# default-profile note: a bare-leaf filter matches no lib unit test).
 [[profile.ci.overrides]]
-filter = 'test(=execution_subset_of_approval_across_randomized_conditions)'
+filter = 'test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # See the default-profile note: headless-Chrome teardown exceeds the 100ms leak
@@ -90,6 +107,13 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 [[profile.ci.overrides]]
 filter = 'test(/browser_/)'
 leak-timeout = { period = "5s", result = "fail" }
+
+# See the default-profile note: the no-subprocess `preflight_graph_*` acceptance
+# tests draw spurious LEAK-FAILs under parallel load. CI hosts may be slower, so
+# the same 1s grace applies; `result = "fail"` still catches a genuine leak.
+[[profile.ci.overrides]]
+filter = 'test(/markdown::compose::preflight::acceptance_tests::preflight_graph_/)'
+leak-timeout = { period = "1s", result = "fail" }
 
 # See the default-profile note: spurious LEAK-FAILs on worktree's fast,
 # no-child tests under parallel load. CI hosts may be slower, so the same 1s
