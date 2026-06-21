@@ -29,7 +29,7 @@ When no explicit `-w` flag is provided, the graph width is chosen automatically 
 
 | Commits | Default Width |
 |---------|---------------|
-| 1--4    | 60 characters |
+| 1--4    | 40 characters |
 | 5--8    | 80 characters |
 | 9-15    | 120 characters (if terminal > 120 cols), otherwise 100% of terminal width |
 | 16+     | 160 characters (if terminal >= 160 cols), otherwise 100% of terminal width |
