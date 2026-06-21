@@ -24,6 +24,7 @@ Both _queuing_ and _scheduling_ of work map to the goal of doing some specified 
     - how many parallel streams can you run at once? it depends on the overlap in code and functionality across the set of specifications but there is a very real limit
     - in general most AI developers will have no more than 2-3 worktrees doing work at the same time; this might extend to 4-5 worktrees in cases where you are doing A/B testing and the various threads are just variants of the same thing.
 - In far few cases today, developers are running the specs on remote machines (physically remote or at least running in a virtual machine). This is done again to achieve **isolation** and because this form of isolation is done at the host level it has far greater isolation properties.
+    - If this 
 
 
 - While you're initially blocked, one of the things which has exploded in popularity recently is using git **worktrees**
