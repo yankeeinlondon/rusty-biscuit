@@ -4,12 +4,8 @@ prompt: |-
     error handling. You'll likely find references to pre-check and post-check validations.
 
     Write up a summary that focuses more on breadth the depth but does provide a few code examples to round out some of the depth.
-last_updated: 2026-06-18
+last_updated: 2026-06-21
 ---
-I'll start by loading the claudine skill and exploring the codebase structure.Let me read the relevant skill docs and explore the codebase structure.Now let me explore the source code directly, particularly the harness module, error.rs, and composition modules.Let me read the key error-handling files in parallel.Let me look at the harness module, validate logic, and the contract error handling.Let me read the validate module and related ones in parallel.Let me explore the validate directory, timeout, and report modules.Let me read the validate/mod.rs and related comparison files to understand how checks are evaluated.Let me read the timeout topic doc and look at the composition errors that the skill mentioned (schema validation).Let me look at the composition error module and the parse frontmatter module.Let me read the composition error module and look at the contract session/lib for the broader error handling picture.I have enough context now. Here is the summary as replacement Markdown body content:
-
----
-
 # Claudine Error Handling: Current State
 
 Claudine splits its error surface across three independent `thiserror` enums rather than one god-enum. Each one owns a distinct failure domain, and they meet only at the CLI's top-level reporting walker, which renders whichever one bubbles up.
@@ -24,7 +20,7 @@ A fourth, narrower surface lives in the contract crate (`claudine/contract/src/e
 
 ## Pre-checks and Post-checks (the harness)
 
-The harness is the most structured error-handling surface in claudine. It is scoped to `compose`, `inline-compose`, and wrapper passthrough prompts that resolve to Markdown with harness frontmatter (`pre_checks`, `post_checks`). It runs in three phases:
+The harness is the most structured error-handling surface in claudine. It is scoped to `compose`, `inline-compose`, `sequence` (each step runs the harness independently), and wrapper passthrough prompts that resolve to Markdown with harness frontmatter (`pre_checks`, `post_checks`). It runs in three phases:
 
 1. **Before (pre_checks)** — should the run even start? File/dir/JSON/YAML/TOML existence, write permissions, clean repo state, shell setup checks.
 2. **During** — normal provider execution. Non-zero exit or timeout becomes a failure event.
@@ -99,11 +95,11 @@ Passing checks render as a single compact `Status` line on stderr. Failing check
 3. **YAML snippet** — chrome-free, syntax-highlighted, four-space indented.
 4. **Reason line** — muted prose with the underlying diagnostic.
 
-A programmatic handler receives a rich `FailureContext` (`handlers.rs:18-40`) serialized as JSON on stdin, with parallel env vars (`CLAUDINE_PROVIDER`, `CLAUDINE_FAILURE_EVENT`, `CLAUDINE_FAILURE_PHASE`, `CLAUDINE_SESSION_ID`, `CLAUDINE_TERMINATION`, `CLAUDINE_SOURCE_FILE`, `CLAUDINE_ATTEMPT`). The response is parsed into a `HandlerAction`, with `resume` validated against provider support and an existing session ID (`validate_resume`, `handlers.rs:421-435`).
+A programmatic handler receives a rich `FailureContext` (`handlers.rs:18-40`) serialized as JSON on stdin, with parallel env vars (`CLAUDINE_PROVIDER`, `CLAUDINE_FAILURE_EVENT`, `CLAUDINE_FAILURE_PHASE`, `CLAUDINE_SESSION_ID`, `CLAUDINE_TERMINATION`, `CLAUDINE_ERROR_KIND`, `CLAUDINE_SOURCE_FILE`, `CLAUDINE_ATTEMPT`). The response is parsed into a `HandlerAction`, with `resume` validated against provider support and an existing session ID (`validate_resume`, `handlers.rs:421-435`).
 
 ## Library-wide errors (`ClaudineError`)
 
-The library enum (`claudine/lib/src/error.rs`) groups ~35 variants by subsystem, with structured fields where context matters:
+The library enum (`claudine/lib/src/error.rs`) groups ~39 variants by subsystem, with structured fields where context matters:
 
 ```rust
 #[error("MCP ambiguous match for `{query}`: {}", candidates.join(", "))]
@@ -127,11 +123,11 @@ Notable design choices:
 
 ## Composition errors (`CompositionError`)
 
-The composition enum (`claudine/lib/src/composition/error.rs`) is the largest — ~40 variants covering frontmatter problems, schema validation, sequence and loop pipelines, provider/model selection, atomic writes, and rate-limit handling. It implements `biscuit_terminal::errors::BlockError`, with bespoke `status_block` renderings for high-signal variants. Examples:
+The composition enum (`claudine/lib/src/composition/error.rs`) is the largest — ~58 variants covering frontmatter problems, schema validation, sequence and loop pipelines, provider/model selection, atomic writes, and rate-limit handling. It implements `biscuit_terminal::errors::BlockError`, with bespoke `status_block` renderings for high-signal variants. Examples:
 
 - `SchemaLoad`, `SchemaValidation`, `MissingProperties`, `UnsupportedInteractiveSchema` — schema validation tier, with structured `problems` and typed `MissingProperty` records (including `InteractiveShape` mapping for biscuit-tui prompts).
 - `SequenceMissingProperties` aggregates per-step failures so a multi-step sequence can be fixed in one edit pass.
-- `LoopIterationFailed` carries the structured `error_kind` from the iteration's `session_end` JSONL row (`step_timeout`, `wall_clock_timeout`, `signal`, …), so loop iteration errors surface the actual cause rather than a generic "loop failed" — see `claudine/docs/topics/timeouts.md:554-572`.
+- `LoopIterationFailed` carries the structured `exit_reason` from the iteration's `session_end` JSONL row (`extra.exit_reason`: `step_timeout`, `wall_clock_timeout`, `signal`, …), so loop iteration errors surface the actual cause rather than a generic "loop failed" — see `claudine/docs/topics/timeouts.md:554-572`.
 - `LoopRateLimited` maps to exit code `75` (`EX_TEMPFAIL`) so shell wrappers can distinguish transient rate-limit halts from generic non-zero exits (`composition/error.rs:26, 525-538`).
 
 `DroppedOptional` records (`composition/error.rs:699-732`) are warnings, not errors: schema-invalid optional values are dropped with attribution across three pipeline stages (`PreValidation`, `Composition`, `PostShellExpansion`).
@@ -142,7 +138,7 @@ The composition enum (`claudine/lib/src/composition/error.rs`) is the largest �
 
 ## Observations
 
-- **No `anyhow`** — every error is a typed enum variant, with `thiserror::Error` derives and `#[error("...")]` format strings. The `Display` impls are the user-facing contract.
+- **No `anyhow`** or `color-eyre` — every error is a typed enum variant, with `thiserror::Error` derives and `#[error("...")]` format strings. The `Display` impls are the user-facing contract.
 - **Bounded but unbounded-looking enums** — a prior review (`claudine/reviews/_completed/2026-04-17-comprehensive/review-glm.md:148`) flagged that `Display`/`Error` impls have no snapshot tests; a single format-string typo would go undetected.
 - **Phase-tagged failures** — the `FailurePhase` discriminator is threaded from rule evaluation through handler resolution through reporting, so a single `ValidationFailure` carries enough metadata for recovery, structured logging, and rich terminal rendering without re-derivation.
 - **Schema validation as composition concern** — schema errors live in `CompositionError`, not `HarnessError`, even though they are validation-shaped. The harness owns behavioral pre/post contracts; composition owns document-shape contracts.
