@@ -1,36 +1,169 @@
 # Lifecycle Formalization for Claudine Prompts & Late Binding Context
 
+## Introduction
 
+When Claudine _executes_ a Markdown document -- via `compose`, `inline-compose`, `sequence`, etc. -- it kicks off a "lifecycle" of events. Today we already have  
+four lifecycle events:
 
+- `start` and `blocked`
+- `success` and `failure`
+
+And at each of these stages of the lifecycle Claudine will take instructions on how the document author would like the prompt to communicate via the multiple messaging channels Claudine provides (TTS, Messaging App, Desktop Notification, and STDERR). 
+
+In this feature we will:
+
+- add additional lifecycle events
+- extend the number of lifecycle events we support
+- introduce the idea of _lazily loaded_ variables and shell execution
+- and increase the capabilities of a document author to effect what happens at each lifecycle event:
+    - you can still use the messaging features you're used to 
+    - but you can also:
+        - create side-effects (files, network messages, etc.)
+        - handle errors (if there are any)
+        - conditionally send messages (currently there is no "conditional" element)
+        - throw errors if the LLM completed but didn't actually do what you wanted
 
 ## The Prompt Lifecycle
 
-![lifecycle](./)
+![lifecycle](../../docs/getting-started/lifecycle.excalidraw.svg)
 
 A Claudine prompt document moves through a fixed set of lifecycle events. Today four of them exist as `LifecycleSignal` variants in `composition/lifecycle.rs` (`start`, `success`, `blocked`, `failure`), but they only support a handful of communication properties. This feature formalizes the full event set, introduces a unified per-event configuration model, and folds a pre-existing composition concerns (`loop`) into that model.
 
-> **Note:** the reference to "Next" as a lifecycle event in the picture needs to be removed as we're not going to add "Next" as an event
-
 ### Event Inventory
 
-| Event | New? | Fires when |
-|---|---|---|
-| `initialize` | **new** | Prompt file has been identified, immediately after pre-flight checks have completed |
-| `start` | existing | Pre-flight checks have all passed; about to invoke the agent |
-| `blocked` | existing | Pre-flight checks failed; agent will not be invoked |
-| `success` | existing | Agentic loop completed without error |
-| `failure` | existing | Agentic loop returned an error |
-| `loop` | **repurposed** | An iteration of a looping prompt boundary (see [Loop](#loop)) |
+| Event        | New?           | Fires when                                                                          |
+|--------------|----------------|-------------------------------------------------------------------------------------|
+| `initialize` | **new**        | Prompt file has been identified, immediately after pre-flight checks have completed |
+| `start`      | existing       | Pre-flight checks have all passed; about to invoke the agent                        |
+| `blocked`    | existing       | Pre-flight checks failed; agent will not be invoked                                 |
+| `success`    | existing       | Agentic loop completed without error                                                |
+| `failure`    | existing       | Agentic loop returned an error                                                      |
+| `finalize`   | **new**        | After other terminal states (blocked, success, failure) allows final error handling |
+| `loop`       | **repurposed** | An iteration of a looping prompt boundary (see [Loop](#loop))                       |
 
-### Event Purpose
+### A Lifecycle event's `stack`
 
-- **`initialize`** — quick communication, environment prep, or opt-out before the prompt commits to running. Cheap, runs even when pre-flight will fail.
-- **`start`** — best moment to announce *this* prompt is running. Pre-flight has passed; the agent will be invoked next.
-- **`blocked`** — communicate why the prompt was rejected; optionally proxy to a different prompt.
-- **`success`** — communicate completion, capture metrics, fire webhooks, advance a sequence.
-- **`failure`** — communicate failure, recover with `Retry` / `Resume` / `Requeue` / `Proxy`, or simply exit.
-- **`loop`** — per-iteration boundary inside a looping prompt; layers lifecycle-event behavior on top of the existing iteration controls.
-- **`finalize`** — called after success/failure, if in a loop then the finalize event is only called on the last iteration of the loop
+We'll get into this more later but for now it's important to know that each lifecycle event provides "a stack" of operations which can be run.
+
+- these operations take place _not_ when the document is first loaded but instead when the document reaches the particular stage of the lifecycle
+
+### Introduction to Lazily Loaded Variables, Functions and Side Effects
+
+All of the variables in `doc`, `ctx`, and `env` are calculated once at the beginning of a Markdown's lifecycle but as we move through time
+we will want to be able to react to state that is changing in the environment.
+
+When in a lifecycle event's "stack" your conditional expressions as well as actions can gain access to:
+
+- extended global variables (`err`, `timing`, `current`)
+- additional functions categorized as "side effects" (because they can mutate the state outside of the current document)
+
+> Note: if an interpolation expression in Frontmatter or the body of the document use any of these global variables they will be assumed to be the names of
+
+#### `err` global variable
+
+Maybe the most obvious things we will want to do is interrogate and describe any error which has taken place. Currently there is no way to do that 
+but we will introduce the `err` global variable.
+
+- when there is an error the `err` variable will look like this (pseudo code):
+
+    ```rust
+    enum ErrorKind {
+        ClaudineError(ClaudineError),
+        HarnessError(HarnessError),
+        CompositionError(CompositionError)
+    }
+    struct Err {
+        /// serialized ErrorKind
+        kind: String,
+        /// the variant name of the underlying 
+        variant: String,
+        /// a description of the specific error 
+        msg: String,
+    }
+    ```
+
+- most lifecycle events are known to have an error (Blocked, Failure),
+- some are also known to never have an error (initialize, start, success, loop),
+- only the `finalize` state can _optionally_ be in an error state
+
+If there is a reference to `err` in a lifecycle event which never has an error, this Markdown document should immediately halt execution and present an error.
+
+> Note: if the reference the user was intending to make was `doc.err` then they will need to explicitly write it that way to be clear. Our goal with treating `err` as the global `err` object even when you are in a state that can't have errors is to quickly identify faulty logic and help the user to only use this variable where it is available.
+
+#### `timing` global variable
+
+The `timing` global variable provides the following information (pseudo code):
+
+```rust
+struct SequenceStep {
+    name: String,
+    /// the duration of a step in the sequence (total time if looped)
+    duration: u32,
+    /// how many loops did this step take before completing
+    loops: u8,
+}
+
+struct TimingInfo {
+    /// the clock time since this document started executing (in seconds)
+    duration: u32,
+    /// the total clock time; will include all preceding steps in a sequence (if we're running inside one) or a loop (if we're running inside one)
+    total_duration: u32,
+    
+    /// timings broken up by steps in the sequence
+    sequence: Options<SequenceStep>
+}
+```
+
+#### `current` global variable
+
+Provides a structure of:
+
+```rust
+struct Current {
+    ctx: CurrentContext,
+    env: CurrentEnvironment,
+}
+```
+
+- `current.ctx` and `current.env` allows you to check the same things which `ctx` and `env` provided but the calculation will be done at the time the event state has been reached.
+
+### Events 
+
+- **`initialize`** 
+    - an early lifecycle state -- before schema validation and preflight checks -- to make sure everything is setup for success
+    - at this part in the lifecycle the `ctx` and `env` global variable are fully available, however
+    - the `doc` global variables which represent **state/frontmatter** are not completely formed yet:
+        - ✔ the merging of any passed in state into the document's static state is complete
+        - ✔ the 1st pass of interpolation has taken place on the Frontmatter
+        - however, the 2nd stage of interpolation has not been done yet place because that can't be done until _after_ we do pre-flight validation and shell-expansion
+    - Examples for usage might include:
+        - if a particular doc variable is set, proxying to a different prompt file which expects that variable
+        - fail fast if we know that the documents state or the ENV variables mean that this prompt can not succeed
+- **`start`**
+    - best moment to announce *this* prompt is running. 
+    - Pre-flight has passed; the agent will be invoked next.
+    - You may also want to "prep" the environment further than what was done in "initialize" now that you know we are going to run the agentic loop
+- **`blocked`**
+    - communicate why the prompt was rejected
+    - optionally proxy to a different prompt instead?
+- **`success`**
+    - communicate completion, capture metrics, fire webhooks, advance a sequence.
+    - you may also want to double check that the Agentic Loop that just completed actually did what it was supposed to
+- **`failure`**
+    - communicate failure, or
+    - recover from Agentic errors with `Retry` / `Resume` / `Requeue` / `Proxy`
+- **`finalize`** 
+    - called after success/failure, this is the only lifecycle state where you _might_ be in an error state but _might not_ be too
+    - it gives you a chance to:
+        - finalize things before exiting regardless of outcome
+        - one last chance to handle an error
+            - the errors that take place during the Agentic loop are probably most likely handled in the `Failure` lifecycle event but if the Agentic loops completes successfully and in `Success` you determine that in fact the Agentic loop did not complete successfully then you can handle those here
+    - if in a loop then the finalize event is only called on the last iteration of the loop
+- **`loop`** 
+    - once a document has been "finalized", if the document has defined the "loop" property this event will trigger
+    - documents that don't define the "loop" property will not receive a loop lifecycle event
+    - the "loop" property is structurally a little different than the other lifecycle hooks in that _looping_ is predicated on a condition up front
+    - however, the loop event allows for providing side effects both when the condition IS and IS NOT met
 
 ## Configuration Model
 
@@ -50,27 +183,31 @@ start:
           action: say
           message: "Using Claude provider"
         # conditional action, shorthand action
+
         - when: "env.AGENT == 'codex'"
           action: "say(using codex)"
         # unconditional actions, using shorthand form
+
         - action: "shell(git status --short)"
         - action: "echo 'hi there'"
+
         # conditional multi-action
+
         - when: "file_exists('/path/to/file.md') && "
 ```
 
 ### Top-Level Communication Properties
 
-Each event accepts the following shorthand properties at its top level. They are unconditional and execute **before** the stack, in the order written.
+Each event accepts the following shorthand properties at its top level. They are unconditional and execute **before** the stack.
 
-| Property | Purpose |
-|---|---|
-| `say`, `speak` | TTS via host's speech provider |
-| `effect` | Sound effect from the embedded library |
-| `message` | Send via configured messenger route (Slack, Discord, WhatsApp, Signal, Telegram) |
-| `notify` | OS desktop notification (replaces the deprecated `desktop:` alias) |
-| `stderr` | Plain string to STDERR |
-| `stdout` | Plain string to STDOUT |
+| Property       | Purpose                                                                          |
+|----------------|----------------------------------------------------------------------------------|
+| `say`, `speak` | TTS via host's speech provider                                                   |
+| `effect`       | Sound effect from the embedded library                                           |
+| `message`      | Send via configured messenger route (Slack, Discord, WhatsApp, Signal, Telegram) |
+| `notify`       | OS desktop notification (replaces the deprecated `desktop:` alias)               |
+| `stderr`       | string to STDERR (displayed as is)                                               |
+| `stdout`       | string to STDOUT (displayed as is)                                               |
 
 All values support [Darkmatter interpolation](@darkmatter/docs/topics/darkmatter-expressions.md).
 
@@ -103,7 +240,7 @@ If the stack runs to completion without a lifecycle action matching, the event e
 
 ## Actions
 
-An action is one of five categories. 
+An action is one of five categories.
 
 1. Lifecycle Actions
 2. Communication Actions
@@ -131,22 +268,21 @@ but if there is only one action to take that is completely fine too:
     action: say 'you did it'
 ```
 
-The one important consideration for cardinality of _actions_ is that only ONE "Lifecycle Action" is allowed per block. This is because a lifecycle action is
-always the LAST action to be executed. We _could_ allow other actions to follow a lifecycle action but this is effectively "dead code" and these actions would never be executed. For that reason, we feel it is better to just have a Markdown file with this type of configuration resolve to a well communicated error to let the document owner make changes.
+The one important consideration for cardinality of _actions_ is that only ONE "Lifecycle Action" is allowed per block. This is because a lifecycle action is always the LAST action to be executed. We _could_ allow other actions to follow a lifecycle action but this is effectively "dead code" and these actions would never be executed. For that reason, we feel it is better to just have a Markdown file with this type of configuration resolve to a well communicated error to let the document owner make changes.
 
 ### Lifecycle Actions
 
 These actions change what happens next. The first one whose `when:` matches **terminates stack processing** for the current event.
 
-| Action | Where valid | Effect |
-|---|---|---|
-| `Stop` | every event | End this event's stack cleanly. Composition continues. |
-| `Skip` | `initialize` only | Mark the prompt as skipped without running it. Pre-flight does not run. Emits an `INFO` log line indicating the skip. In a sequence, advances to the next step. |
-| `Error` | every event | Mark this event as failed with a reason. At `start`/`initialize` this prevents agent invocation; at `success` it converts the outcome to failure; at `blocked`/`failure` it short-circuits further recovery attempts. |
-| `Proxy` | `initialize`, `blocked`, `failure` | Hand off execution to another prompt document. The proxied document enters at its own `initialize` event — a fresh prompt run, including pre-flight. The target document's own opt-out logic (`Skip`/`Proxy`/`Error` at `initialize`) is respected. |
-| `Retry` | `blocked`, `failure` | Re-run the agentic loop from the last invocation. Parameters: `max_attempts` (default `1`), `backoff` (`fixed` \| `exponential`, default `fixed`), `delay` (duration, default `0s`). |
-| `Resume` | `failure` only | Resume the agent session with its context intact and a follow-up message. Parameters: `message` (the follow-up prompt, required), `max_attempts` (default `1`). |
-| `Requeue` | `blocked`, `failure` | Push this prompt onto the deferred-execution queue (via `rendezvous`). Parameters: `delay` (duration, required), `reason` (string, optional). |
+| Action    | Where valid                        | Effect                                                                                                                                                                                                                                              |
+|-----------|------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `Stop`    | every event                        | End this event's stack cleanly. Composition continues.                                                                                                                                                                                              |
+| `Skip`    | `initialize` only                  | Mark the prompt as skipped without running it. Pre-flight does not run. Emits an `INFO` log line indicating the skip. In a sequence, advances to the next step.                                                                                     |
+| `Error`   | every event                        | Mark this event as failed with a reason. At `start`/`initialize` this prevents agent invocation; at `success` it converts the outcome to failure; at `blocked`/`failure` it short-circuits further recovery attempts.                               |
+| `Proxy`   | `initialize`, `blocked`, `failure` | Hand off execution to another prompt document. The proxied document enters at its own `initialize` event — a fresh prompt run, including pre-flight. The target document's own opt-out logic (`Skip`/`Proxy`/`Error` at `initialize`) is respected. |
+| `Retry`   | `blocked`, `failure`               | Re-run the agentic loop from the last invocation. Parameters: `max_attempts` (default `1`), `backoff` (`fixed` \| `exponential`, default `fixed`), `delay` (duration, default `0s`).                                                                 |
+| `Resume`  | `failure` only                     | Resume the agent session with its context intact and a follow-up message. Parameters: `message` (the follow-up prompt, required), `max_attempts` (default `1`).                                                                                     |
+| `Requeue` | `blocked`, `failure`               | Push this prompt onto the deferred-execution queue (via `rendezvous`). Parameters: `delay` (duration, required), `reason` (string, optional).                                                                                                       |
 
 Short forms:
 
@@ -161,14 +297,14 @@ Short forms:
 
 The same channels as the top-level properties, but each is a discrete stack item (so it can be guarded by `when:`).
 
-| Action | Short form | Long form parameter |
-|---|---|---|
-| `say` / `speak` | `say("hi")` | `message:` |
-| `effect` | `effect(applause)` | `sound:` |
-| `message` | `message("done")` | `message:` (optionally `route:` to pin to a specific channel) |
-| `notify` | `notify("done")` | `message:` |
-| `stderr` | `stderr("warn")` | `message:` |
-| `stdout` | `stdout("ok")` | `message:` |
+| Action          | Short form         | Long form parameter                                           |
+|-----------------|--------------------|---------------------------------------------------------------|
+| `say` / `speak` | `say("hi")`        | `message:`                                                    |
+| `effect`        | `effect(applause)` | `sound:`                                                      |
+| `message`       | `message("done")`  | `message:` (optionally `route:` to pin to a specific channel) |
+| `notify`        | `notify("done")`   | `message:`                                                    |
+| `stderr`        | `stderr("warn")`   | `message:`                                                    |
+| `stdout`        | `stdout("ok")`     | `message:`                                                    |
 
 ```yaml
 success:
@@ -176,6 +312,7 @@ success:
         - when: "env.AGENT == 'claude'"
           action: say
           message: "Claude finished"
+
         - action: effect
           sound: applause
 ```
@@ -212,11 +349,11 @@ Bespoke shell commands invoked from the stack.
   no_error: false
 ```
 
-| Long-form parameter | Purpose |
-|---|---|
-| `command` | The shell command string (required) |
-| `on_error` | Message to emit when the command exits non-zero |
-| `no_error` | Boolean; when `true`, suppress error exit codes without altering STDOUT/STDERR |
+| Long-form parameter | Purpose                                                                        |
+|---------------------|--------------------------------------------------------------------------------|
+| `command`           | The shell command string (required)                                            |
+| `on_error`          | Message to emit when the command exits non-zero                                |
+| `no_error`          | Boolean; when `true`, suppress error exit codes without altering STDOUT/STDERR |
 
 **Pre-flight requirement:** every shell command in every reachable stack must pass Claudine's command whitelist during pre-flight, exactly like body-level shell expansions today.
 
@@ -257,14 +394,14 @@ The `loop` event is **both** an iteration-control configuration **and** a lifecy
 
 These keys govern *how* the prompt iterates:
 
-| Key | Type | Purpose | Default |
-|---|---|---|---|
-| `while` | expression | Continue while truthy. Mutually exclusive with `until`. | — |
-| `until` | expression | Continue until truthy. Mutually exclusive with `while`. | — |
-| `action` / `actions` | string or list | Per-iteration frontmatter mutations | — |
-| `max` | positive integer | Hard iteration cap | `100` |
-| `fail_fast` | boolean | Abort the loop on first iteration error | `true` |
-| `on_rate_limit` | enum: `pause` \| `abort` \| `continue` | Behavior on provider rate-limit | `pause` |
+| Key                  | Type                                 | Purpose                                                 | Default |
+|----------------------|--------------------------------------|---------------------------------------------------------|---------|
+| `while`              | expression                           | Continue while truthy. Mutually exclusive with `until`. | —       |
+| `until`              | expression                           | Continue until truthy. Mutually exclusive with `while`. | —       |
+| `action` / `actions` | string or list                       | Per-iteration frontmatter mutations                     | —       |
+| `max`                | positive integer                     | Hard iteration cap                                      | `100`   |
+| `fail_fast`          | boolean                              | Abort the loop on first iteration error                 | `true`  |
+| `on_rate_limit`      | enum: `pause` \| `abort` \| `continue` | Behavior on provider rate-limit                         | `pause` |
 
 Per-iteration `action` operations (existing DSL):
 
@@ -306,25 +443,25 @@ loop:
         - when: "_loop_is_first"
           action: notify
           message: "Build loop started"
+
         - when: "_loop_is_last"
           action: effect
           sound: applause
 ```
 
-
 ## Action Error Propagation
 
 When a side-effect, expression-function, or shell action errors during stack processing, what happens depends on which event is processing the stack.
 
-| Event | Default behavior on errored action |
-|---|---|
-| `initialize` | Stop the stack, log the error, transition to `failure` event |
-| `start` | Stop the stack, log the error, transition to `failure` event |
-| `blocked` | Stop the stack, log the error, transition to `failure` event |
-| `loop` (per-iteration) | Stop the stack, log the error, transition to `failure` event |
-| `success` | Stop the stack, log the error, **composition outcome unchanged** |
-| `failure` | Stop the stack, log the error, **composition outcome unchanged** |
-| `next` | Stop the stack, log the error, **composition outcome unchanged** |
+| Event                  | Default behavior on errored action                               |
+|------------------------|------------------------------------------------------------------|
+| `initialize`           | Stop the stack, log the error, transition to `failure` event     |
+| `start`                | Stop the stack, log the error, transition to `failure` event     |
+| `blocked`              | Stop the stack, log the error, transition to `failure` event     |
+| `loop` (per-iteration) | Stop the stack, log the error, transition to `failure` event     |
+| `success`              | Stop the stack, log the error, **composition outcome unchanged** |
+| `failure`              | Stop the stack, log the error, **composition outcome unchanged** |
+| `next`                 | Stop the stack, log the error, **composition outcome unchanged** |
 
 The split is intentional: setup-phase errors should propagate so the agent isn't invoked with a broken environment, but terminal-phase errors (a flaky webhook in `success.stack`) must never invert the composition's actual outcome.
 
@@ -336,6 +473,7 @@ start:
         - action: shell
           command: "git fetch --all"
           no_error: true       # never block agent invocation on fetch failure
+
         - "ensure_file(@out/log.md)"
 ```
 
@@ -356,8 +494,6 @@ failure:
 
 Adding `stack:` is purely additive. The top-level properties fire first, then the stack is processed.
 
-
-
 ## Late Binding Context
 
 ![lifecycle](../../docs/getting-started/lifecycle.excalidraw.svg)
@@ -370,8 +506,8 @@ Up to now we have relied on using the `doc` (aka, document frontmatter), `ctx`, 
         - from a timing perspective we're in a good position to "handle" a pre-flight check failing or a document's schema being invalid
         - however, to do that, we would need to be able to receive both the preflight state and the schema validation state
         - currently there is no way to get this
-    - The `failure` lifecycle event takes place when the prompt has failed
 
+    - The `failure` lifecycle event takes place when the prompt has failed
 
 ## Dependencies
 
