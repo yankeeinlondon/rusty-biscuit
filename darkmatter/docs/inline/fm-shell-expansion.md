@@ -131,6 +131,23 @@ Frontmatter shell expansion has **no error-recovery options**. Any non-zero exit
 
 Timeout failures follow the timeout behavior configured via `--allow-shell-timeout` (CLI) or `ComposeOptions::with_allow_shell_timeout()` (library).
 
+### Post-Expansion Leak Guard
+
+When frontmatter shell expansion is enabled, a final pass over every top-level
+string value rejects any value that *still* trims to a whole-value `$(...)`
+candidate after expansion has run. This closes the residual leaks the
+strict-start scan cannot catch: command output that reproduces `$( … )` (e.g.
+`$(echo '$(date)')`), and a whole-value `$(...)` hidden behind leading
+whitespace that the start-of-value scan skips. A surviving whole-value
+candidate is a hard compose error tagged with the offending frontmatter key and
+its source line.
+
+The guard runs only when shell expansion is enabled. When frontmatter shell
+expansion is **explicitly disabled**, `$(...)` values are deferred unchanged and
+the guard never runs. Mixed and trailing forms (`literal $(echo ok)`,
+`$(echo ok) trailing`) are outside the whole-value rule and pass the guard
+untouched.
+
 ## Output Normalization
 
 - Only `stdout` is written back into frontmatter. Successful `stderr` output is ignored for value storage.

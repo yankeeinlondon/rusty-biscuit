@@ -26,17 +26,27 @@ use super::exit::exit_code_from_status;
 use super::stream_capture::StreamCapture;
 use super::subagent_watchdog::WatchdogState;
 use super::termination::{
-    WatchdogTermination, apply_early_termination_to_summary, wait_with_signal_and_early_termination,
+    WatchdogTermination, apply_early_termination_to_summary, early_termination_guard_context,
+    early_termination_message, wait_with_signal_and_early_termination,
 };
-use super::timeouts::{TimeoutConfig, wait_with_timeout};
+use super::timeouts::TimeoutConfig;
 use super::watchdog::{
     spawn_flush_if_idle_ticker, spawn_prompt_timing_monitor, spawn_timeout_watchdog_ticker,
+    spawn_wall_clock_timeout_ticker,
 };
 use super::{
     ChildIoOptions, ErrorParser, OutputTextCallback, ProcessResult, ProcessTelemetry,
     ReasoningCallback, SemanticParserBuilder, StreamTextRenderer, join_with_timeout,
     join_with_timeout_or, kill_process_group, stop_timing_ticker,
 };
+
+/// Windows process-creation flag that puts the child in a new process group
+/// (the Win32 `CREATE_NEW_PROCESS_GROUP`). A new group is the prerequisite for
+/// targeting the child tree with `GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT,
+/// group)` from the unified wait loop. Defined locally to avoid pulling the
+/// `windows` crate into the `Command` build site.
+#[cfg(windows)]
+const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
 /// Spawn the provider child process and return its exit code.
 ///
@@ -50,13 +60,19 @@ use super::{
 ///
 /// ## Signal Handling
 ///
-/// If Claudine receives a second SIGINT (Ctrl-C) while waiting for the child,
-/// it sends SIGTERM to the child. A third SIGINT sends SIGKILL.
+/// The wait is delegated to the shared `wait_with_signal_and_early_termination`
+/// loop, so this path owns the same SIGINT ladder and group-targeted
+/// SIGTERM→SIGKILL escalation as every other spawn path. `interactive` selects
+/// the ladder: `true` keeps the full `SIGINT → SIGTERM → SIGKILL` (three
+/// presses to force-kill); `false` compresses it to `SIGTERM → SIGKILL` (F5).
 ///
 /// ## Timeout
 ///
-/// When `timeout` is `Some(seconds)`, the child is sent SIGTERM after the
-/// specified duration, followed by SIGKILL after a 5-second grace period.
+/// When `timeout` is `Some(seconds)`, a wall-clock ticker feeds the unified
+/// wait loop, which terminates the child's process group on breach (SIGTERM,
+/// escalating to SIGKILL after the configured `kill_grace`). Routing the
+/// timeout through the signal-aware loop is what keeps Ctrl+C effective even
+/// when a `timeout` is set.
 ///
 /// ## Stdout Filtering
 ///
@@ -64,12 +80,14 @@ use super::{
 /// filter that suppresses lines starting with any of the given prefixes.
 /// This is used in non-interactive mode to strip provider debug noise
 /// (e.g. Gemini CLI's hook execution logs) from the response.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn run_child(
     binary: &Path,
     args: &[String],
     env: &HashMap<OsString, OsString>,
     cwd: &Path,
     timeout: Option<u64>,
+    interactive: bool,
     io: ChildIoOptions<'_>,
     child_spawned: &mut bool,
 ) -> Result<ProcessResult<i32>> {
@@ -122,6 +140,15 @@ pub(crate) fn run_child(
     if isolate_process_group {
         use std::os::unix::process::CommandExt;
         command.process_group(0);
+    }
+
+    // Windows parity (Q15): isolate the child into a new process group so the
+    // unified wait loop's Job Object + `GenerateConsoleCtrlEvent` can target
+    // the whole tree. Mirrors the `process_group(0)` condition above.
+    #[cfg(windows)]
+    if isolate_process_group {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(CREATE_NEW_PROCESS_GROUP);
     }
 
     let spawned_at = Instant::now();
@@ -243,10 +270,35 @@ pub(crate) fn run_child(
         // Drop closes the pipe so the child sees EOF.
     }
 
-    let (exit_code, termination) = if let Some(seconds) = timeout {
-        wait_with_timeout(&mut child, seconds)?
-    } else {
-        wait_with_signal_handling(&mut child, isolate_process_group)?
+    // Every spawn path now routes through the one signal-aware wait loop
+    // (Phase 5): it owns the SIGINT ladder and group-targeted SIGTERM→SIGKILL
+    // escalation, so a configured `timeout` can no longer disable Ctrl+C. The
+    // direct path has no content guards, so the early-termination channel
+    // stays open but idle — keeping `_early_tx` alive avoids a per-poll
+    // disconnect warning. A configured wall-clock `timeout` is enforced by a
+    // minimal ticker feeding the same watchdog channel the streaming path uses.
+    let (exit_code, termination) = {
+        let kill_grace = TimeoutConfig::resolve(None, None).kill_grace;
+        let (_early_tx, early_rx) = std::sync::mpsc::channel::<EarlyTermination>();
+        let (timeout_ticker, watchdog_rx) = match timeout {
+            Some(seconds) => {
+                let (tx, rx) = std::sync::mpsc::channel();
+                let ticker =
+                    spawn_wall_clock_timeout_ticker(Duration::from_secs(seconds), spawned_at, tx);
+                (Some(ticker), Some(rx))
+            }
+            None => (None, None),
+        };
+        let (code, termination, _early) = wait_with_signal_and_early_termination(
+            &mut child,
+            isolate_process_group,
+            early_rx,
+            watchdog_rx,
+            kill_grace,
+            interactive,
+        )?;
+        stop_timing_ticker(timeout_ticker);
+        (code, termination)
     };
 
     if isolate_process_group {
@@ -277,6 +329,9 @@ pub(crate) fn run_child(
             first_response_latency: first_response,
         },
         agent_pid: Some(captured_pid),
+        // The direct path has no content guards (F3); a content trip can
+        // never originate here.
+        guard_context: None,
     })
 }
 
@@ -372,14 +427,17 @@ pub(crate) struct CapturedChildOutput {
 /// Behaves like `run_child()` but pipes stdout and stderr into strings
 /// instead of forwarding to the terminal. Noise filtering still applies
 /// to the captured output. No output is printed live.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn run_child_capture(
     binary: &Path,
     args: &[String],
     env: &HashMap<OsString, OsString>,
     cwd: &Path,
     timeout: Option<u64>,
+    interactive: bool,
     io: ChildIoOptions<'_>,
     child_spawned: &mut bool,
+    volume_cap: Option<claudine::runaway::CaptureVolumeCap>,
 ) -> Result<ProcessResult<CapturedChildOutput>> {
     debug_assert!(
         env.contains_key(&OsString::from("PATH")),
@@ -412,6 +470,14 @@ pub(crate) fn run_child_capture(
         command.process_group(0);
     }
 
+    // Windows parity (Q15): new process group so the unified wait loop can
+    // target the whole tree. Mirrors the `process_group(0)` block above.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+    }
+
     let spawned_at = Instant::now();
     let mut child = command.spawn()?;
     let captured_pid = child.id();
@@ -421,6 +487,14 @@ pub(crate) fn run_child_capture(
     // Shared first-response trackers (always piped in capture mode).
     let first_stdout_at = Arc::new(std::sync::Mutex::new(None));
     let first_stderr_at = Arc::new(std::sync::Mutex::new(None));
+
+    // Unified early-termination channel (Phase 6). The capture path runs no
+    // exit-expression or repetition detection (F3 — Ctrl+C + volume cap
+    // only); the per-run volume cap below is the sole content-driven sender,
+    // bounding the otherwise-unbounded capture `String`. Created before the
+    // reader threads so each can hold a sender clone. Kept alive on the main
+    // thread so the wait loop never sees a premature disconnect.
+    let (early_tx, early_rx) = std::sync::mpsc::channel::<EarlyTermination>();
 
     // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
 
@@ -435,26 +509,17 @@ pub(crate) fn run_child_capture(
         .map(|s| s.to_string())
         .collect();
     let first_stdout_at_clone = Arc::clone(&first_stdout_at);
+    let stdout_cap = volume_cap.clone();
+    let stdout_early_tx = early_tx.clone();
     let stdout_handle = thread::spawn(move || {
         let reader = BufReader::new(stdout_pipe);
-        let mut captured = String::new();
-        for line in reader.lines() {
-            let Ok(line) = line else { break };
-            if stdout_noise.iter().any(|p| line.starts_with(p.as_str())) {
-                continue;
-            }
-            {
-                let mut g = first_stdout_at_clone.lock().unwrap();
-                if g.is_none() {
-                    *g = Some(Instant::now());
-                }
-            }
-            if !captured.is_empty() {
-                captured.push('\n');
-            }
-            captured.push_str(&line);
-        }
-        captured
+        capture_stream_with_volume_cap(
+            reader,
+            &stdout_noise,
+            &first_stdout_at_clone,
+            stdout_cap.as_ref(),
+            &stdout_early_tx,
+        )
     });
 
     // Capture stderr into a string, applying noise filtering
@@ -468,26 +533,17 @@ pub(crate) fn run_child_capture(
         .map(|s| s.to_string())
         .collect();
     let first_stderr_at_clone = Arc::clone(&first_stderr_at);
+    let stderr_cap = volume_cap.clone();
+    let stderr_early_tx = early_tx.clone();
     let stderr_handle = thread::spawn(move || {
         let reader = BufReader::new(stderr_pipe);
-        let mut captured = String::new();
-        for line in reader.lines() {
-            let Ok(line) = line else { break };
-            if stderr_noise.iter().any(|p| line.starts_with(p.as_str())) {
-                continue;
-            }
-            {
-                let mut g = first_stderr_at_clone.lock().unwrap();
-                if g.is_none() {
-                    *g = Some(Instant::now());
-                }
-            }
-            if !captured.is_empty() {
-                captured.push('\n');
-            }
-            captured.push_str(&line);
-        }
-        captured
+        capture_stream_with_volume_cap(
+            reader,
+            &stderr_noise,
+            &first_stderr_at_clone,
+            stderr_cap.as_ref(),
+            &stderr_early_tx,
+        )
     });
 
     // Write stdin seed AFTER reader threads are spawned (see run_child deadlock note).
@@ -503,10 +559,38 @@ pub(crate) fn run_child_capture(
         }
     }
 
-    let (exit_code, termination) = if let Some(seconds) = timeout {
-        wait_with_timeout(&mut child, seconds)?
-    } else {
-        wait_with_signal_handling(&mut child, true)?
+    // Route through the unified signal-aware wait loop (Phase 5) so Ctrl+C
+    // terminates the child even with a `timeout` configured. The capture path
+    // always isolates the child into its own process group (above), so signals
+    // reach descendants. The reader threads above feed `early_rx` when the
+    // per-run volume cap trips (F3); the wall-clock `timeout` is enforced by a
+    // minimal ticker on the same loop.
+    let (exit_code, termination, guard_context) = {
+        let kill_grace = TimeoutConfig::resolve(None, None).kill_grace;
+        // Drop the main-thread sender so the channel disconnects once both
+        // reader threads finish — the reader-thread clones are the only
+        // senders that should keep it alive.
+        drop(early_tx);
+        let (timeout_ticker, watchdog_rx) = match timeout {
+            Some(seconds) => {
+                let (tx, rx) = std::sync::mpsc::channel();
+                let ticker =
+                    spawn_wall_clock_timeout_ticker(Duration::from_secs(seconds), spawned_at, tx);
+                (Some(ticker), Some(rx))
+            }
+            None => (None, None),
+        };
+        let (code, termination, early) = wait_with_signal_and_early_termination(
+            &mut child,
+            true,
+            early_rx,
+            watchdog_rx,
+            kill_grace,
+            interactive,
+        )?;
+        stop_timing_ticker(timeout_ticker);
+        let guard_context = early.as_ref().and_then(early_termination_guard_context);
+        (code, termination, guard_context)
     };
 
     kill_process_group(&mut child);
@@ -535,7 +619,69 @@ pub(crate) fn run_child_capture(
             first_response_latency: first_response,
         },
         agent_pid: Some(captured_pid),
+        guard_context,
     })
+}
+
+/// Read a captured stream line-by-line, applying noise filtering and the
+/// per-run volume cap (Phase 6, F3).
+///
+/// Returns the accumulated (noise-filtered) capture buffer. While the cap is
+/// under its thresholds, each kept line is appended and counted. The moment
+/// the running line/byte totals breach the cap, an
+/// [`EarlyTermination::RunawayVolume`] is sent once on `early_tx` (so the
+/// wait loop terminates the child) and the buffer **stops growing** — further
+/// lines are drained from the pipe but discarded, bounding memory. A `None`
+/// cap (or a disabled one) never trips and never sends.
+fn capture_stream_with_volume_cap<R: BufRead>(
+    reader: R,
+    noise_prefixes: &[String],
+    first_at: &Arc<std::sync::Mutex<Option<Instant>>>,
+    cap: Option<&claudine::runaway::CaptureVolumeCap>,
+    early_tx: &std::sync::mpsc::Sender<EarlyTermination>,
+) -> String {
+    let mut captured = String::new();
+    let mut lines: u64 = 0;
+    let mut bytes: u64 = 0;
+    let mut tripped = false;
+    for line in reader.lines() {
+        let Ok(line) = line else { break };
+        if noise_prefixes.iter().any(|p| line.starts_with(p.as_str())) {
+            continue;
+        }
+        {
+            let mut g = first_at.lock().unwrap();
+            if g.is_none() {
+                *g = Some(Instant::now());
+            }
+        }
+
+        // Once tripped, keep draining the pipe (so the child is not wedged
+        // on a full pipe before the SIGTERM lands) but never grow the buffer.
+        if tripped {
+            continue;
+        }
+
+        // Account volume before appending: count the line plus its implicit
+        // newline so the totals match the bytes the child emitted.
+        lines = lines.saturating_add(1);
+        bytes = bytes.saturating_add(line.len() as u64).saturating_add(1);
+
+        if let Some(cap) = cap
+            && let Some(trip) = cap.check(lines, bytes)
+        {
+            tripped = true;
+            let _ = early_tx.send(super::termination::trip_to_early_termination(trip));
+            // Drop this breaching line too — the buffer is now frozen.
+            continue;
+        }
+
+        if !captured.is_empty() {
+            captured.push('\n');
+        }
+        captured.push_str(&line);
+    }
+    captured
 }
 
 /// Spawn a provider child process with structured semantic stream parsing.
@@ -569,6 +715,7 @@ pub(crate) fn run_child_stream_semantic(
     prompt_timing: Option<PromptTimingContext>,
     watchdog_state: Option<Arc<std::sync::Mutex<WatchdogState>>>,
     section_tracker: Option<Arc<Mutex<SectionTracker>>>,
+    content_early_rx: Option<std::sync::mpsc::Receiver<EarlyTermination>>,
 ) -> Result<ProcessResult<StreamExecutionSummary>> {
     debug_assert!(env.contains_key(&OsString::from("PATH")));
     debug_assert!(env.contains_key(&OsString::from("HOME")));
@@ -595,6 +742,14 @@ pub(crate) fn run_child_stream_semantic(
     {
         use std::os::unix::process::CommandExt;
         command.process_group(0);
+    }
+
+    // Windows parity (Q15): new process group so the unified wait loop can
+    // target the whole tree. Mirrors the `process_group(0)` block above.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(CREATE_NEW_PROCESS_GROUP);
     }
 
     let mut child = command.spawn()?;
@@ -766,7 +921,7 @@ pub(crate) fn run_child_stream_semantic(
     let stderr_term = crate::log::terminal();
     let termination_term = stderr_term.clone();
     let stderr_span = Span::current();
-    let (mut bridge_for_thread, finalize_for_main, early_terminate_rx) = match stderr_bridge {
+    let (mut bridge_for_thread, finalize_for_main, bridge_early_rx) = match stderr_bridge {
         Some(StderrBridgeHandle {
             bridge,
             finalize,
@@ -774,6 +929,12 @@ pub(crate) fn run_child_stream_semantic(
         }) => (Some(bridge), Some(finalize), early_terminate),
         None => (None, None, None),
     };
+    // The content detector (Phase 6) feeds the same wait loop. For OpenCode
+    // it shares the bridge's channel (so `content_early_rx` is `None`); for
+    // every other provider the detector's dedicated receiver arrives here.
+    // The two are mutually exclusive by construction, so picking whichever
+    // is `Some` gives the wait loop the one receiver to poll.
+    let early_terminate_rx = bridge_early_rx.or(content_early_rx);
     let has_bridge = bridge_for_thread.is_some();
     let capture_always = has_bridge;
     let first_stderr_at_clone = Arc::clone(&first_stderr_at);
@@ -886,23 +1047,33 @@ pub(crate) fn run_child_stream_semantic(
         } else {
             None
         };
+        // Structured streaming is always a non-interactive run (it requires
+        // `effective_non_interactive`), so the compressed SIGTERM-first
+        // ladder (F5) applies: no human is mid-session to react to a SIGINT.
         wait_with_signal_and_early_termination(
             &mut child,
             true,
             rx,
             wd_rx,
             timeout_config.kill_grace,
+            false,
         )?
     } else {
         let (code, term) = wait_with_signal_handling(&mut child, true)?;
         (code, term, None)
     };
 
-    if let Some(
-        EarlyTermination::Timeout { message } | EarlyTermination::StepTimeout { message, .. },
-    ) = early_termination.as_ref()
+    // Surface the early-termination message as a styled `Warning` line on
+    // stderr so the user sees an immediate reason for the kill (the summary
+    // re-derives the same message via `apply_early_termination_to_summary`
+    // below). Every variant carries a message — the catch-all `Some(_)`
+    // arm keeps the match exhaustive as new variants are added without
+    // silently dropping the inline notification.
+    if let Some(message) = early_termination
+        .as_ref()
+        .and_then(early_termination_message)
     {
-        let rendered = Status::new(message)
+        let rendered = Status::new(&message)
             .state(StatusState::Warning)
             .render(&termination_term);
         stream_output.emit_stderr_line(&rendered);
@@ -962,6 +1133,12 @@ pub(crate) fn run_child_stream_semantic(
         started_at,
     );
 
+    // Structured guard detail for a content-guard trip (None for ordinary
+    // completions, timeouts, and rate-limit aborts).
+    let guard_context = early_termination
+        .as_ref()
+        .and_then(early_termination_guard_context);
+
     Ok(ProcessResult {
         data: summary,
         termination,
@@ -970,12 +1147,72 @@ pub(crate) fn run_child_stream_semantic(
             first_response_latency: first_response,
         },
         agent_pid: Some(captured_pid),
+        guard_context,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// VC-6.4: the per-run volume cap bounds the capture buffer and sends a
+    /// `RunawayVolume` trip once the running totals breach the threshold.
+    /// Feeds far more lines than the cap allows and asserts (a) a single trip
+    /// is sent, (b) the returned buffer stays bounded near the cap rather than
+    /// growing without limit.
+    #[test]
+    fn capture_volume_cap_trips_and_bounds_buffer() {
+        use std::io::Cursor;
+
+        // Cap at 50 lines; bytes effectively unbounded so the line cap fires.
+        let cap = claudine::runaway::CaptureVolumeCap::new(true, 50, u64::MAX);
+        let first_at = Arc::new(std::sync::Mutex::new(None));
+        let (tx, rx) = std::sync::mpsc::channel::<EarlyTermination>();
+
+        // 10_000 distinct lines — far past the 50-line cap.
+        let mut input = String::new();
+        for i in 0..10_000u32 {
+            input.push_str(&format!("line {i}\n"));
+        }
+        let captured = capture_stream_with_volume_cap(
+            Cursor::new(input.into_bytes()),
+            &[],
+            &first_at,
+            Some(&cap),
+            &tx,
+        );
+
+        // Exactly one trip, and it is a volume trip.
+        match rx.try_recv() {
+            Ok(EarlyTermination::RunawayVolume { lines, .. }) => {
+                assert!(lines > 50, "trip must carry the breaching line count: {lines}");
+            }
+            other => panic!("expected one RunawayVolume trip, got {other:?}"),
+        }
+        assert!(rx.try_recv().is_err(), "the cap must send exactly once");
+
+        // The buffer is frozen at the cap — only the first ~50 lines, never
+        // the full 10_000-line flood.
+        let buffered_lines = captured.lines().count();
+        assert!(
+            buffered_lines <= 51,
+            "buffer must stay bounded near the cap; got {buffered_lines} lines"
+        );
+    }
+
+    /// A disabled (or absent) cap never trips and captures everything.
+    #[test]
+    fn capture_volume_cap_disabled_captures_all() {
+        use std::io::Cursor;
+
+        let first_at = Arc::new(std::sync::Mutex::new(None));
+        let (tx, rx) = std::sync::mpsc::channel::<EarlyTermination>();
+        let input = "a\nb\nc\n".to_string();
+        let captured =
+            capture_stream_with_volume_cap(Cursor::new(input.into_bytes()), &[], &first_at, None, &tx);
+        assert!(rx.try_recv().is_err(), "no cap means no trip");
+        assert_eq!(captured, "a\nb\nc");
+    }
 
     /// Minimal env that satisfies the `PATH` / `HOME` debug-asserts inside
     /// every spawn function. Test-owned so we never depend on the host
@@ -1015,6 +1252,7 @@ mod tests {
             &env,
             cwd,
             None,
+            false,
             ChildIoOptions {
                 stdout_noise_prefixes: &[],
                 stderr_noise_prefixes: &[],
@@ -1046,12 +1284,14 @@ mod tests {
             &env,
             cwd,
             None,
+            false,
             ChildIoOptions {
                 stdout_noise_prefixes: &[],
                 stderr_noise_prefixes: &[],
                 stdin_seed: None,
             },
             &mut child_spawned,
+            None,
         )
         .expect("spawning /bin/echo must succeed on the test host");
 
@@ -1078,12 +1318,14 @@ mod tests {
             &env,
             cwd,
             None,
+            false,
             ChildIoOptions {
                 stdout_noise_prefixes: &[],
                 stderr_noise_prefixes: &[],
                 stdin_seed: None,
             },
             &mut child_spawned,
+            None,
         );
 
         assert!(
@@ -1117,12 +1359,14 @@ mod tests {
             &env,
             cwd,
             None,
+            false,
             ChildIoOptions {
                 stdout_noise_prefixes: &[],
                 stderr_noise_prefixes: &[],
                 stdin_seed: None,
             },
             &mut child_spawned,
+            None,
         )
         .expect("spawning /usr/bin/env must succeed on the test host");
 
@@ -1155,12 +1399,14 @@ mod tests {
             &env,
             cwd,
             None,
+            false,
             ChildIoOptions {
                 stdout_noise_prefixes: &[],
                 stderr_noise_prefixes: &[],
                 stdin_seed: None,
             },
             &mut child_spawned_a,
+            None,
         )
         .expect("first spawn must succeed");
 
@@ -1171,12 +1417,14 @@ mod tests {
             &env,
             cwd,
             None,
+            false,
             ChildIoOptions {
                 stdout_noise_prefixes: &[],
                 stderr_noise_prefixes: &[],
                 stdin_seed: None,
             },
             &mut child_spawned_b,
+            None,
         )
         .expect("second spawn must succeed");
 
@@ -1191,6 +1439,103 @@ mod tests {
             "consecutive spawns must produce distinct PIDs \
              (got pid_a={pid_a}, pid_b={pid_b}); \
              if they collide the per-attempt reset contract is broken"
+        );
+    }
+
+    /// Locate a `sleep`-equivalent for the wall-clock-timeout tests. macOS and
+    /// Linux both ship `/bin/sleep`; some Linux distros only have
+    /// `/usr/bin/sleep`.
+    #[cfg(unix)]
+    fn sleep_binary() -> &'static Path {
+        if Path::new("/bin/sleep").exists() {
+            Path::new("/bin/sleep")
+        } else {
+            Path::new("/usr/bin/sleep")
+        }
+    }
+
+    /// VC-5.2 / tasks 5.1+5.2: a configured wall-clock `timeout` now routes
+    /// through the unified signal-aware wait loop (via the dedicated
+    /// wall-clock ticker) on the capture path. A child that would otherwise
+    /// sleep far past the budget must be terminated promptly and reported as
+    /// `TimedOut` — proving the path no longer depends on the retired
+    /// `wait_with_timeout`.
+    #[cfg(unix)]
+    #[test]
+    fn run_child_capture_wall_clock_timeout_reaps_child() {
+        let env = minimal_env();
+        let cwd = Path::new("/tmp");
+        let mut child_spawned = false;
+
+        let start = Instant::now();
+        let result = run_child_capture(
+            sleep_binary(),
+            &["30".to_string()],
+            &env,
+            cwd,
+            Some(1),
+            false,
+            ChildIoOptions {
+                stdout_noise_prefixes: &[],
+                stderr_noise_prefixes: &[],
+                stdin_seed: None,
+            },
+            &mut child_spawned,
+            None,
+        )
+        .expect("spawning sleep must succeed on the test host");
+        let elapsed = start.elapsed();
+
+        assert!(child_spawned);
+        assert_eq!(
+            result.termination,
+            claudine::harness::ProcessTermination::TimedOut,
+            "a breached wall-clock timeout must report TimedOut"
+        );
+        assert!(
+            elapsed < Duration::from_secs(20),
+            "the wall-clock timeout must kill the child well before its own \
+             30s sleep elapses; took {elapsed:?}"
+        );
+    }
+
+    /// VC-5.2 / tasks 5.1+5.2: the same wall-clock routing for the direct
+    /// (`run_child`) path with inherited stdio. Proves both non-streaming
+    /// spawn paths share the one signal-aware wait loop.
+    #[cfg(unix)]
+    #[test]
+    fn run_child_wall_clock_timeout_reaps_child() {
+        let env = minimal_env();
+        let cwd = Path::new("/tmp");
+        let mut child_spawned = false;
+
+        let start = Instant::now();
+        let result = run_child(
+            sleep_binary(),
+            &["30".to_string()],
+            &env,
+            cwd,
+            Some(1),
+            false,
+            ChildIoOptions {
+                stdout_noise_prefixes: &[],
+                stderr_noise_prefixes: &[],
+                stdin_seed: None,
+            },
+            &mut child_spawned,
+        )
+        .expect("spawning sleep must succeed on the test host");
+        let elapsed = start.elapsed();
+
+        assert!(child_spawned);
+        assert_eq!(
+            result.termination,
+            claudine::harness::ProcessTermination::TimedOut,
+            "a breached wall-clock timeout must report TimedOut"
+        );
+        assert!(
+            elapsed < Duration::from_secs(20),
+            "the wall-clock timeout must kill the child promptly; took {elapsed:?}"
         );
     }
 }

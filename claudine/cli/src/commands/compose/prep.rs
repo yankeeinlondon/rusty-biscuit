@@ -15,6 +15,7 @@
 #![allow(clippy::result_large_err)]
 
 use std::collections::{BTreeMap, HashMap};
+use std::io::IsTerminal;
 use std::sync::{Arc, Mutex};
 
 use claudine::composition::{
@@ -42,6 +43,23 @@ use crate::commands::wrap::composition::{
     execute_composition_request, execute_composition_request_inner,
     install_agent_env_for_composition,
 };
+
+/// Enrich a `color_eyre::Report` with a frontmatter excerpt when its root
+/// cause is a frontmatter-rooted [`CompositionError`].
+///
+/// Used at boundaries that have already mapped the typed error into a `Report`
+/// (e.g. eager target resolution); typed-`CompositionError` boundaries call
+/// [`CompositionError::enrich_frontmatter`] directly instead.
+fn enrich_report(
+    err: color_eyre::Report,
+    source: &ResolvedCompositionSource,
+    stderr_is_tty: bool,
+) -> color_eyre::Report {
+    match err.downcast::<CompositionError>() {
+        Ok(typed) => typed.enrich_frontmatter(source, stderr_is_tty).into(),
+        Err(other) => other,
+    }
+}
 
 /// Shared implementation for `compose` and `inline-compose`.
 ///
@@ -103,6 +121,12 @@ pub(crate) fn run_composition_inner(
 
     let (source, inline_state) = kind.on_source_resolved(source, &shared)?;
 
+    // Captured once for frontmatter-excerpt enrichment of any error rendered
+    // below; gates whether the YAML block is shown (TTY or FORCE_COLOR) or
+    // withheld (pipe/CI/NO_COLOR).
+    let stderr_is_tty = std::io::stderr().is_terminal()
+        || std::env::var_os("FORCE_COLOR").is_some();
+
     // Schema-aware pre-prepare validation. Runs BEFORE the preflight
     // compose pass so the user-visible error surface is Claudine's
     // typed `CompositionError` rather than Darkmatter's raw
@@ -121,7 +145,8 @@ pub(crate) fn run_composition_inner(
             set_overrides.as_ref(),
             interactive_opts,
             &term,
-        )?;
+        )
+        .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
         emit_dropped_optional_warnings(&pre.dropped_optionals);
         (pre.source, pre.set_overrides)
     };
@@ -170,7 +195,8 @@ pub(crate) fn run_composition_inner(
             shared.model.as_deref(),
             shared.dry_run,
             &source.resolved_path,
-        )?
+        )
+        .map_err(|e| enrich_report(e, &source, stderr_is_tty))?
     };
 
     let mut env_overrides: BTreeMap<String, String> = BTreeMap::new();
@@ -445,6 +471,12 @@ fn execute_loop_or_single(
 ) -> Result<i32> {
     let loop_options = build_loop_options(&shared);
 
+    // Captured once for frontmatter-excerpt enrichment of any error rendered
+    // below; gates whether the YAML block is shown (TTY or FORCE_COLOR) or
+    // withheld (pipe/CI/NO_COLOR).
+    let stderr_is_tty = std::io::stderr().is_terminal()
+        || std::env::var_os("FORCE_COLOR").is_some();
+
     let file_for_loop = file.clone();
     let loop_prepare_options = PrepareOptions {
         set_overrides: set_overrides.clone(),
@@ -457,7 +489,7 @@ fn execute_loop_or_single(
 
     if !shared.dry_run
         && let Some(loop_result) =
-            run_loop_with_overrides(&source, &loop_prepare_options, loop_options, |ctx| {
+            run_loop_with_overrides(&source, &loop_prepare_options, loop_options, kind.mode(), |ctx| {
                 let prepared = {
                     let _span = match kind {
                         CompositionKind::Direct => {
@@ -537,7 +569,7 @@ fn execute_loop_or_single(
                 emit_rate_limit_halt(&error);
                 return Ok(claudine::composition::LOOP_RATE_LIMITED_EXIT_CODE);
             }
-            return Err(error.into());
+            return Err(error.enrich_frontmatter(&source, stderr_is_tty).into());
         }
         return Ok(loop_result.final_exit_code);
     }
@@ -564,7 +596,8 @@ fn execute_loop_or_single(
                     prep_context.launch_workspace.child_cwd.clone(),
                 ),
             },
-        )?
+        )
+        .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?
     };
     emit_dropped_optional_warnings(&prepared.dropped_optionals);
     emit_compose_warnings(&prepared.warnings, shared.silent);

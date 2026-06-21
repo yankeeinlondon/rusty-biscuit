@@ -230,22 +230,12 @@ async fn two_nodes_converge_across_namespaces() {
     }
 
     // After sync, Alice should have a replica of Bob's data.
-    let alice_replica_of_bob = collect_messages(&mut alice_client, &bob_node, "s1").await;
-    for i in 0..3 {
-        assert!(
-            alice_replica_of_bob.contains(&format!("b-{i}")),
-            "alice missing replica b-{i}; got {alice_replica_of_bob:?}",
-        );
-    }
+    let expected_bob: Vec<String> = (0..3).map(|i| format!("b-{i}")).collect();
+    wait_for_messages(&mut alice_client, &bob_node, "s1", &expected_bob).await;
 
     // After sync, Bob should have a replica of Alice's data.
-    let bob_replica_of_alice = collect_messages(&mut bob_client, &alice_node, "s1").await;
-    for i in 0..3 {
-        assert!(
-            bob_replica_of_alice.contains(&format!("a-{i}")),
-            "bob missing replica a-{i}; got {bob_replica_of_alice:?}",
-        );
-    }
+    let expected_alice: Vec<String> = (0..3).map(|i| format!("a-{i}")).collect();
+    wait_for_messages(&mut bob_client, &alice_node, "s1", &expected_alice).await;
 
     // Chunk catalogs for Alice's namespace must match.
     let alice_chunks = collect_chunk_ids(&mut alice_client, &alice_node, "s1").await;
@@ -512,7 +502,15 @@ async fn paired_peer_cannot_write_foreign_namespace() {
         .await
         .expect("alice sync");
 
-    // Bob now has Alice's data.
+    // Bob now has Alice's data (apply on the responder is asynchronous
+    // relative to the initiator's sync return, so poll briefly).
+    wait_for_messages(
+        &mut bob_client,
+        &alice_node,
+        "owned",
+        &["my-data".to_string()],
+    )
+    .await;
     let after = collect_messages(&mut bob_client, &alice_node, "owned").await;
     assert!(
         after.contains(&"my-data".to_string()),
@@ -549,12 +547,15 @@ async fn crash_recovery_replays_accepted_envelope() {
         .await
         .expect("alice sync");
 
-    // Bob has the entry.
-    let bob_msgs = collect_messages(&mut bob_client, &alice_node, "crash").await;
-    assert!(
-        bob_msgs.contains(&"before-crash".to_string()),
-        "bob should have alice's entry; got {bob_msgs:?}",
-    );
+    // Bob has the entry (responder apply is asynchronous relative to the
+    // initiator's sync return).
+    wait_for_messages(
+        &mut bob_client,
+        &alice_node,
+        "crash",
+        &["before-crash".to_string()],
+    )
+    .await;
 
     // Restart Alice — data should survive.
     drop(alice_client);

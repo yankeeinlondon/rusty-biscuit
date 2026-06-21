@@ -71,7 +71,16 @@ Outside a detected repo the local search collapses to:
 1. current working directory
 2. `~/.claudine/system-prompt.md`
 
-The standard discovered file is always treated as append-mode.
+### Discovered-file delivery mode
+
+A discovered `system-prompt.md` selects its own delivery mode with a `mode` frontmatter property:
+
+- absent / `null` / `append` → append (the default, and the prior behavior)
+- `replace` → the composed body replaces the provider's built-in default system prompt
+
+Any other value is rejected during compose by a baseline `SimplifiedSchema` claudine attaches to discovered files only; the failure surfaces as a `SystemPromptComposition` error (naming `mode` and the allowed values) rather than a silent fallback to append. The schema default is annotation-only — an absent `mode` key is never backfilled into the composed frontmatter, so claudine reads the mode back from the composed result and treats absence as append.
+
+Explicit `--append-system-prompt` / `--replace-system-prompt` files ignore `mode` entirely: the flag is authoritative, discovery is skipped, and the explicit path composes without the baseline schema. A document-owned `$schema` that redefines `mode` opts out of the baseline enum (Darkmatter merge rule: document-side-wins), but claudine does not invent additional delivery modes from it — any value other than `replace` still resolves to append.
 
 `LaunchContext` is built with `sniff` repo-structure detection and carries:
 

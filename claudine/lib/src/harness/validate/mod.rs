@@ -343,6 +343,8 @@ mod tests {
             exit_code: 0,
             termination: ProcessTermination::Completed,
             stderr_text: None,
+            error_kind: None,
+            guard_context: None,
         }
     }
 

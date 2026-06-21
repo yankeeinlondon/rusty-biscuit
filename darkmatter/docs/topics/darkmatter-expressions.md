@@ -372,7 +372,7 @@ The table below is generated from [`EXPRESSION_FUNCTION_DESCRIPTORS`](../../lib/
 | Filesystem | `decrement_file_index(file)` | Decrements the numeric index suffix, clamped at 0. | `decrement_file_index("review-2.md")` ⇒ `review-1.md` |
 | Filesystem | `basename(file)` | Returns the final path component including extension. | `basename("sub/note.md")` ⇒ `note.md` |
 | Filesystem | `basename_without_index(file)` | Returns the basename with any indexed suffix removed from the stem. | `basename_without_index("review-1.md")` ⇒ `review.md` |
-| Filesystem | `dir(file)` | Returns the directory portion of the display path. | `dir("sub/note.md")` ⇒ `sub` |
+| Filesystem | `dirname(file)` | Returns the directory portion of the display path. | `dirname("sub/note.md")` ⇒ `sub` |
 | Filesystem | `ext(file)` | Returns the final extension without the leading dot. | `ext("sub/note.md")` ⇒ `md` |
 | Filesystem | `parent_dir(file)` | Returns the directory segment immediately above the basename. | `parent_dir("sub/note.md")` ⇒ `sub` |
 | Filesystem | `file_trailing(file)` | Returns the last directory segment plus the basename. | `file_trailing("sub/note.md")` ⇒ `sub/note.md` |
@@ -459,7 +459,7 @@ one or more digits, where the hyphen is not preceded by another hyphen:
 | `decrement_file_index(file)` | decrements the index, clamped at `0`; non-indexed files start at `0` |
 | `basename(file)` | final component including extension |
 | `basename_without_index(file)` | basename with any indexed suffix removed from the stem |
-| `dir(file)` | directory portion of the display path |
+| `dirname(file)` | directory portion of the display path |
 | `ext(file)` | final extension without the leading dot; `""` when none |
 | `parent_dir(file)` | directory segment immediately above the basename |
 | `file_trailing(file)` | last directory segment plus basename |

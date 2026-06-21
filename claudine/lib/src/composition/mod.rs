@@ -14,6 +14,7 @@
 pub mod agent_message;
 pub mod closure;
 mod error;
+pub mod frontmatter_excerpt;
 mod guardrails;
 pub mod launch_workspace;
 pub mod lifecycle;
@@ -37,6 +38,7 @@ pub use error::{
     InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE, MissingProperty,
     SequenceMissingPropertiesStep, SequenceSelectionFailure, TextFormat,
 };
+pub use frontmatter_excerpt::FrontmatterExcerpt;
 pub use launch_workspace::{LaunchWorkspaceContext, PackageContext};
 #[allow(deprecated)]
 pub use lifecycle::{

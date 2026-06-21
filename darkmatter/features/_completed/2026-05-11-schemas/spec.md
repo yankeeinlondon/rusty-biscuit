@@ -60,7 +60,15 @@ For each property, the value follows one of four shapes:
 
 **Multiple constraints.** Constraints are separated by `;` inside the parentheses. The `;` may be surrounded by whitespace.
 
-**Optional by default.** All declared properties are optional unless the `required` constraint is present.
+**Optional by default.** All declared properties are optional unless the `required` constraint is present. An optional property also accepts `null` as a sentinel for absent, so a frontmatter value that resolves to `null` (for example, from a Darkmatter ternary `{{ file_exists('design.md') ? 'design.md' : null }}`) validates the same way as a missing key.
+
+```yaml
+$schema:
+    design: string
+# If design.md does not exist, `design` resolves to null and the document is valid.
+design: "{{ file_exists('design.md') ? 'design.md' : null }}"
+---
+```
 
 **Arrays.** Any type may be suffixed with `[]` to declare an array of that type. Constraints in the parentheses apply to *items*; array-level constraints are written before the brackets — see [Array Constraints](#array-constraints).
 

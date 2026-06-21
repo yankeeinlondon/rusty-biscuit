@@ -112,7 +112,6 @@ pub struct AppendOutcome {
 /// accepted envelope before committing the snapshot. Drop without
 /// calling [`SessionLogManager::commit_staged_update`] to discard.
 pub(crate) struct StagedRemoteUpdate {
-    advanced: bool,
     state: ChunkState,
 }
 
@@ -149,16 +148,7 @@ impl ChunkState {
 
     fn from_snapshot(snapshot: &[u8], metadata: ChunkMetadata) -> Result<Self, SessionLogError> {
         let doc = LoroDoc::from_snapshot(snapshot)?;
-        let list = doc.get_list(ENTRIES_CONTAINER);
-        let entry_count = list.len() as u64;
-        let mut byte_estimate = 0u64;
-        list.for_each(|value| {
-            if let Some(json) = value_to_string(&value)
-                && let Ok(entry) = serde_json::from_str::<Entry>(&json)
-            {
-                byte_estimate += entry.size_estimate();
-            }
-        });
+        let (entry_count, byte_estimate) = doc_entry_stats(&doc);
         Ok(Self {
             doc,
             metadata,
@@ -179,6 +169,12 @@ impl ChunkState {
 
     fn snapshot_bytes(&self) -> Result<Vec<u8>, SessionLogError> {
         Ok(self.doc.export(ExportMode::Snapshot)?)
+    }
+
+    fn recompute_stats(&mut self) {
+        let (count, bytes) = doc_entry_stats(&self.doc);
+        self.entry_count = count;
+        self.byte_estimate = bytes;
     }
 
     fn collect_entries(&self) -> Result<Vec<Entry>, SessionLogError> {
@@ -222,6 +218,12 @@ struct ManagerInner {
     chunks: HashMap<String, ChunkState>,
     /// Session key (`session/{node}/{session}`) → cursor.
     sessions: HashMap<String, SessionCursor>,
+    /// Session key → per-session append serialization lock. Held for the
+    /// whole stage→persist→merge window of an append so two appends to
+    /// the same session cannot reserve the same sequence or stage from
+    /// the same base chunk. Different sessions get different locks, so
+    /// they still run concurrently across the redb fsync.
+    session_locks: HashMap<String, Arc<Mutex<()>>>,
 }
 
 /// Owner of the session-log in-memory state plus the redb storage handle
@@ -296,6 +298,7 @@ impl SessionLogManager {
             inner: Arc::new(Mutex::new(ManagerInner {
                 chunks: HashMap::new(),
                 sessions: HashMap::new(),
+                session_locks: HashMap::new(),
             })),
             storage,
             batcher,
@@ -344,12 +347,20 @@ impl SessionLogManager {
             };
             bytes
         };
-        let envelope = self.sealer.lock().seal(
-            chunk.as_path(),
-            PayloadKind::Snapshot,
-            snapshot_bytes,
-        );
-        self.persist_sealer_counter()?;
+        // Capture the counter that follows the sealed envelope inside the
+        // same lock scope so a concurrent seal cannot advance the counter
+        // past the value we persist.
+        let (envelope, counter_to_persist) = {
+            let mut sealer = self.sealer.lock();
+            let envelope = sealer.seal(
+                chunk.as_path(),
+                PayloadKind::Snapshot,
+                snapshot_bytes,
+            );
+            let counter = sealer.next_counter();
+            (envelope, counter)
+        };
+        self.storage.save_outbound_counter(&self.node_id(), counter_to_persist)?;
         Ok(Some(envelope))
     }
 
@@ -366,12 +377,15 @@ impl SessionLogManager {
         Arc::clone(&self.sealer)
     }
 
-    /// Persist the sealer's current counter so a restarted daemon can
-    /// resume from it instead of resetting to zero.
-    fn persist_sealer_counter(&self) -> Result<(), SessionLogError> {
-        let counter = self.sealer.lock().next_counter();
-        self.storage.save_outbound_counter(&self.node_id(), counter)?;
-        Ok(())
+    /// Per-session append serialization lock, created on first use.
+    fn session_lock(&self, session_key: &str) -> Arc<Mutex<()>> {
+        let mut inner = self.inner.lock();
+        Arc::clone(
+            inner
+                .session_locks
+                .entry(session_key.to_string())
+                .or_insert_with(|| Arc::new(Mutex::new(()))),
+        )
     }
 
     /// Append a new entry to the session, rotating chunks if required.
@@ -386,6 +400,18 @@ impl SessionLogManager {
     ) -> Result<AppendOutcome, SessionLogError> {
         let session_key = format!("session/{owner_node_id}/{session_id}");
         let now = self.clock.now_unix_ms();
+
+        // Serialize same-session appends across the entire
+        // stage→persist→merge window. The global `inner` lock alone is
+        // not enough: it is deliberately dropped across the redb fsync so
+        // unrelated sessions stay concurrent, which leaves a window where
+        // two appends to THIS session could clone the same cursor, reserve
+        // the same sequence, and stage from the same base chunk — then
+        // race their independent whole-snapshot redb writes and durably
+        // drop one entry. Holding the per-session lock for the whole call
+        // closes that window while preserving cross-session concurrency.
+        let append_guard = self.session_lock(&session_key);
+        let _append_guard = append_guard.lock();
 
         let mut inner = self.inner.lock();
 
@@ -450,16 +476,22 @@ impl SessionLogManager {
         let chunk_path = chunk_id.as_path();
         let snapshot_bytes = staged_state.snapshot_bytes()?;
 
+        // Drop the lock before the synchronous redb fsync so unrelated
+        // sessions can keep making progress.
+        drop(inner);
+
         // Persist to redb BEFORE mutating the live in-memory state so a
         // storage failure cannot leave unacknowledged entries resident.
         self.storage.save_snapshot(&chunk_id, &snapshot_bytes)?;
 
-        // Persistence succeeded — swap the staged state into the live map.
+        // Re-acquire briefly to merge the staged snapshot into the live
+        // state. Importing is idempotent, so concurrent appends that
+        // raced ahead are preserved rather than overwritten.
+        let mut inner = self.inner.lock();
         match inner.chunks.get_mut(&chunk_path) {
             Some(existing) => {
-                existing.doc = staged_state.doc;
-                existing.entry_count = staged_state.entry_count;
-                existing.byte_estimate = staged_state.byte_estimate;
+                existing.doc.import(&snapshot_bytes)?;
+                existing.recompute_stats();
             }
             None => {
                 inner.chunks.insert(chunk_path.clone(), staged_state);
@@ -471,14 +503,18 @@ impl SessionLogManager {
                 .sessions
                 .get_mut(&session_key)
                 .expect("session cursor exists");
-            session_cursor.active_chunk_index = chunk_id.chunk_index;
+            if session_cursor.active_chunk_index < chunk_id.chunk_index {
+                session_cursor.active_chunk_index = chunk_id.chunk_index;
+            }
         }
 
         let session_cursor = inner
             .sessions
             .get_mut(&session_key)
             .expect("session cursor exists");
-        session_cursor.next_sequence = sequence + 1;
+        if sequence + 1 > session_cursor.next_sequence {
+            session_cursor.next_sequence = sequence + 1;
+        }
 
         drop(inner);
 
@@ -530,12 +566,16 @@ impl SessionLogManager {
         let Some(snapshot) = self.storage.load_snapshot(chunk)? else {
             return Ok(Vec::new());
         };
-        let metadata =
-            ChunkMetadata::initial(chunk.owner_node_id.clone(), chunk.session_id.clone(), 0);
-        let state = ChunkState::from_snapshot(&snapshot, ChunkMetadata {
-            chunk_index: chunk.chunk_index,
-            ..metadata
-        })?;
+        // Read the real metadata from the snapshot instead of fabricating
+        // a created_at value that would fail the crate's own validator.
+        let doc = LoroDoc::from_snapshot(&snapshot)?;
+        let metadata = validate_and_extract_metadata(
+            &doc,
+            &chunk.owner_node_id,
+            &chunk.session_id,
+            chunk.chunk_index,
+        )?;
+        let state = ChunkState::from_snapshot(&snapshot, metadata)?;
         state.collect_entries()
     }
 
@@ -647,36 +687,23 @@ impl SessionLogManager {
         let key = chunk.as_path();
         let inner = self.inner.lock();
 
-        let (advanced, staged_state) = if let Some(state) = inner.chunks.get(&key) {
+        let staged_state = if let Some(state) = inner.chunks.get(&key) {
             let pre_snapshot = state.snapshot_bytes()?;
             let staged_doc = LoroDoc::from_snapshot(&pre_snapshot)?;
             let original_entry_json = collect_entry_json_strings(&staged_doc)?;
-            let before = staged_doc.oplog_vv();
             staged_doc.import(update_bytes)?;
-            let after = staged_doc.oplog_vv();
-            let advanced = before != after;
 
             validate_metadata_unchanged(&staged_doc, &state.metadata)?;
             validate_remote_entries(&staged_doc, state.entry_count)?;
             validate_append_only_prefix(&staged_doc, &original_entry_json)?;
 
-            let list = staged_doc.get_list(ENTRIES_CONTAINER);
-            let mut bytes = 0u64;
-            let mut count = 0u64;
-            list.for_each(|value| {
-                if let Some(json) = value_to_string(&value)
-                    && let Ok(entry) = serde_json::from_str::<Entry>(&json)
-                {
-                    bytes += entry.size_estimate();
-                    count += 1;
-                }
-            });
-            (advanced, ChunkState {
+            let (count, bytes) = doc_entry_stats(&staged_doc);
+            ChunkState {
                 doc: staged_doc,
                 metadata: state.metadata.clone(),
                 entry_count: count,
                 byte_estimate: bytes,
-            })
+            }
         } else {
             let staged_doc = LoroDoc::new();
             staged_doc.import(update_bytes)?;
@@ -689,31 +716,21 @@ impl SessionLogManager {
                 chunk.chunk_index,
             )?;
 
-            let list = staged_doc.get_list(ENTRIES_CONTAINER);
-            let mut bytes = 0u64;
-            let mut count = 0u64;
-            list.for_each(|value| {
-                if let Some(json) = value_to_string(&value)
-                    && let Ok(entry) = serde_json::from_str::<Entry>(&json)
-                {
-                    bytes += entry.size_estimate();
-                    count += 1;
-                }
-            });
-            (true, ChunkState {
+            let (count, bytes) = doc_entry_stats(&staged_doc);
+            ChunkState {
                 doc: staged_doc,
                 metadata,
                 entry_count: count,
                 byte_estimate: bytes,
-            })
+            }
         };
 
         drop(inner);
-        Ok(StagedRemoteUpdate { advanced, state: staged_state })
+        Ok(StagedRemoteUpdate { state: staged_state })
     }
 
     /// Commit a previously staged remote update by persisting the
-    /// snapshot to redb and swapping the staged state into the live
+    /// snapshot to redb and merging the staged state into the live
     /// in-memory map. Returns whether the local chunk advanced.
     pub(crate) fn commit_staged_update(
         &self,
@@ -725,11 +742,25 @@ impl SessionLogManager {
 
         self.storage.save_snapshot(chunk, &snapshot_bytes)?;
 
+        // Merge rather than wholesale replace so concurrent inbound
+        // sync sessions on the same chunk cannot drop each other's
+        // entries.
         let mut inner = self.inner.lock();
-        inner.chunks.insert(key.clone(), staged.state);
+        let advanced = match inner.chunks.get_mut(&key) {
+            Some(existing) => {
+                let before_vv = existing.doc.oplog_vv();
+                existing.doc.import(&snapshot_bytes)?;
+                existing.recompute_stats();
+                existing.doc.oplog_vv() != before_vv
+            }
+            None => {
+                inner.chunks.insert(key.clone(), staged.state);
+                true
+            }
+        };
 
         let session_key = chunk.session_key();
-        let state = inner.chunks.get(&key).expect("just inserted");
+        let state = inner.chunks.get(&key).expect("just inserted or merged");
         let mut highest_seq = None;
         state
             .doc
@@ -754,7 +785,7 @@ impl SessionLogManager {
             cursor.next_sequence = seq + 1;
         }
 
-        Ok(staged.advanced)
+        Ok(advanced)
     }
 
     /// Apply a delta or snapshot received from a peer. The bytes are
@@ -816,15 +847,19 @@ impl SessionLogManager {
     /// Rebuild the DuckDB projection from every snapshot persisted in
     /// redb. Called once during startup so a restarted daemon with an
     /// empty DuckDB file can serve correct analytical queries.
+    ///
+    /// The truncate+repopulate is performed in a single DuckDB
+    /// transaction so a failure mid-rebuild cannot leave the projection
+    /// silently empty.
     fn rebuild_projection_from_storage(&self) -> Result<(), SessionLogError> {
-        self.projection.truncate()?;
-        let mut to_replay: Vec<(ChunkId, Vec<u8>)> = Vec::new();
+        let mut snapshots: Vec<(ChunkId, Vec<u8>)> = Vec::new();
         self.storage.iter_snapshots(|chunk, bytes| {
-            to_replay.push((chunk, bytes));
+            snapshots.push((chunk, bytes));
             Ok(())
         })?;
-        for (chunk_id, snapshot) in &to_replay {
-            let doc = LoroDoc::from_snapshot(snapshot)?;
+        let mut rows: Vec<ProjectionRow> = Vec::new();
+        for (chunk, bytes) in snapshots {
+            let doc = LoroDoc::from_snapshot(&bytes)?;
             let list = doc.get_list(ENTRIES_CONTAINER);
             list.for_each(|value| {
                 if let Some(json) = value_to_string(&value)
@@ -835,8 +870,8 @@ impl SessionLogManager {
                         .as_ref()
                         .map(|v| serde_json::to_string(v).unwrap_or_default())
                         .unwrap_or_default();
-                    let _ = self.batcher.submit(ProjectionRow {
-                        chunk: chunk_id.clone(),
+                    rows.push(ProjectionRow {
+                        chunk: chunk.clone(),
                         sequence: entry.sequence,
                         created_at_unix_ms: entry.created_at_unix_ms,
                         source: entry.source.clone(),
@@ -847,6 +882,7 @@ impl SessionLogManager {
                 }
             });
         }
+        self.projection.replace_all_rows(&rows)?;
         Ok(())
     }
 
@@ -1251,7 +1287,7 @@ fn validate_append_only_prefix(
 }
 
 fn hex_decode(hex: &str) -> Option<Vec<u8>> {
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         return None;
     }
     let mut bytes = Vec::with_capacity(hex.len() / 2);
@@ -1289,6 +1325,21 @@ fn value_to_string(value: &loro::ValueOrContainer) -> Option<String> {
         ValueOrContainer::Value(LoroValue::String(s)) => Some((**s).to_string()),
         _ => None,
     }
+}
+
+fn doc_entry_stats(doc: &loro::LoroDoc) -> (u64, u64) {
+    let list = doc.get_list(ENTRIES_CONTAINER);
+    let mut count = 0u64;
+    let mut bytes = 0u64;
+    list.for_each(|value| {
+        if let Some(json) = value_to_string(&value)
+            && let Ok(entry) = serde_json::from_str::<Entry>(&json)
+        {
+            count += 1;
+            bytes += entry.size_estimate();
+        }
+    });
+    (count, bytes)
 }
 
 #[cfg(test)]
@@ -1406,6 +1457,107 @@ mod tests {
 
         assert_eq!(harness.storage.snapshot_count().unwrap(), 1);
         harness.worker.shutdown();
+    }
+
+    #[test]
+    fn concurrent_appends_to_one_session_keep_unique_durable_sequences() {
+        use std::sync::Barrier;
+
+        let harness = build_harness(ChunkConfig::default());
+
+        // Force genuine contention on the stage→persist→merge window: a
+        // barrier releases both appends at once so, without per-session
+        // serialization, they would clone the same cursor, reserve the
+        // same sequence, and race their whole-snapshot redb writes.
+        let append_count = 8usize;
+        let barrier = Arc::new(Barrier::new(append_count));
+        let handles: Vec<_> = (0..append_count)
+            .map(|i| {
+                let manager = harness.manager.clone();
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    manager
+                        .append_entry(
+                            "node-a",
+                            "session-1",
+                            "test",
+                            "info",
+                            format!("message-{i}"),
+                            None,
+                        )
+                        .expect("concurrent append")
+                })
+            })
+            .collect();
+
+        let mut sequences: Vec<u64> = handles
+            .into_iter()
+            .map(|h| h.join().expect("append thread").sequence)
+            .collect();
+        sequences.sort_unstable();
+        let expected: Vec<u64> = (0..append_count as u64).collect();
+        assert_eq!(
+            sequences, expected,
+            "appends must hand out unique, gap-free sequences 0..N"
+        );
+
+        let chunk = ChunkId::new("node-a", "session-1", 0);
+
+        let in_memory = harness
+            .manager
+            .list_chunk_entries(&chunk)
+            .expect("list in-memory");
+        let mut in_memory_messages: Vec<String> =
+            in_memory.iter().map(|e| e.message.clone()).collect();
+        in_memory_messages.sort();
+        let expected_messages: Vec<String> =
+            (0..append_count).map(|i| format!("message-{i}")).collect();
+        assert_eq!(
+            in_memory_messages, expected_messages,
+            "every concurrent append must be present in memory"
+        );
+
+        harness.worker.shutdown();
+
+        // Reload a fresh manager from the same redb storage: the durable
+        // snapshot must already contain every entry. This is the part the
+        // sequential tests miss — a lost redb write would only surface
+        // after reload.
+        let projection2 = Projection::in_memory().expect("projection2");
+        let worker2 = spawn(projection2.clone(), BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        });
+        let manager2 = SessionLogManager::with_clock(
+            harness.storage.clone(),
+            worker2.handle(),
+            projection2,
+            ChunkConfig::default(),
+            Arc::new(NodeIdentity::from_seed([7u8; 32])),
+            Arc::new(FixedClock::new(10_000)),
+        )
+        .expect("reloaded manager");
+
+        let durable = manager2
+            .list_chunk_entries(&chunk)
+            .expect("list after reload");
+        let mut durable_messages: Vec<String> =
+            durable.iter().map(|e| e.message.clone()).collect();
+        durable_messages.sort();
+        assert_eq!(
+            durable_messages, expected_messages,
+            "every concurrent append must survive in durable redb storage"
+        );
+
+        let mut durable_sequences: Vec<u64> = durable.iter().map(|e| e.sequence).collect();
+        durable_sequences.sort_unstable();
+        assert_eq!(
+            durable_sequences, expected,
+            "durable entries must keep unique, gap-free sequences after reload"
+        );
+
+        worker2.shutdown();
     }
 
     #[test]

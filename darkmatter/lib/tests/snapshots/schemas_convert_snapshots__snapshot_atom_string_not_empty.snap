@@ -1,5 +1,6 @@
 ---
 source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+assertion_line: 50
 expression: "convert_atom(\"string(not-empty)\")"
 ---
 {
@@ -7,8 +8,15 @@ expression: "convert_atom(\"string(not-empty)\")"
   "additionalProperties": true,
   "properties": {
     "field": {
-      "pattern": "\\S",
-      "type": "string"
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "pattern": "\\S",
+          "type": "string"
+        }
+      ]
     }
   },
   "type": "object"

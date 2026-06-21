@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-8f3baf954d17f806
-last_updated: 2026-06-17
+hash: 87f17662fa397abe-e01ab31eb77bb5a0
+last_updated: 2026-06-19
 ---
 
 # darkmatter
@@ -31,6 +31,14 @@ Other entry points:
 
 - Use `darkmatter::markdown::Markdown` for document content.
 - Use the compose pipeline for source transformations before rendering.
+- Use `Markdown::cleanup`, `cleanup_compact`, `cleanup_loose`, and
+  `cleanup_with_indent*` for canonical cleanup. These strip incidental
+  single newlines in prose by default before the existing whitespace/list
+  cleanup. Use `Markdown::strip_incidental_newlines` directly for only that
+  pass, or `Markdown::cleanup_with_fixed_width(width)` to clean and then
+  reflow prose to a display-column width. The `md clean` CLI exposes the same
+  behavior with `--fixed-width <#>` and can preserve source single newlines
+  with `--ignore-incidental-newlines`; those two flags conflict.
 - Use `darkmatter::style` for document `style:` frontmatter.
 - Use `biscuit-terminal` components for rich terminal UI outside ordinary
   parsed Markdown rendering.
@@ -216,7 +224,11 @@ The compose pipeline runs in four phases:
 
 **Inline Post** (serial):
 
-- Cleanup and normalization.
+- Cleanup and normalization. Cleanup strips incidental single newlines by
+  default, applies list/indent normalization, and can reflow prose with
+  `ComposeOptions::with_fixed_width(...)`. Programmatic callers can preserve
+  source single newlines with
+  `ComposeOptions::with_incidental_newline_mode(IncidentalNewlineMode::Preserve)`.
 
 **Finalization** (root-only):
 
@@ -233,7 +245,7 @@ See `compose.md` for the full API, interpolation syntax, and transclusion detail
 
 ## Schema Validation
 
-Darkmatter defines, detects, and evaluates schemas for Markdown frontmatter via **SimplifiedSchema** — a single-line YAML grammar that compiles to Draft 2020-12 JSON Schema. Key surfaces:
+Darkmatter defines, detects, and evaluates schemas for Markdown frontmatter via **SimplifiedSchema** — a single-line YAML grammar that compiles to Draft 2020-12 JSON Schema. Optional properties are nullable: a frontmatter value that resolves to `null` validates the same way as a missing key. Key surfaces:
 
 - `$schema` frontmatter property (inline, file reference, or root-level union).
 - `md schema validate`, `md schema detect`, and `md schema about` CLI subcommands.

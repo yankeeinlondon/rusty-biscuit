@@ -493,6 +493,8 @@ mod tests {
             models: HashMap::new(),
             default_sounds: Default::default(),
             prompt_for_missing: true,
+            exit_expressions: None,
+            guard_settings: Default::default(),
         }
     }
 

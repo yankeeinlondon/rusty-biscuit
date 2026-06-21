@@ -30,7 +30,11 @@ Inline Pre, Transclusion, Inline Post, and Finalization.
 
 **Inline Post** (serial):
 
-- **Cleanup** - Normalizes markdown formatting
+- **Cleanup** - Normalizes markdown formatting. It strips incidental single
+  newlines by default, then applies list/indent cleanup, and can reflow prose
+  with `ComposeOptions::with_fixed_width(...)`. Use
+  `ComposeOptions::with_incidental_newline_mode(IncidentalNewlineMode::Preserve)`
+  to keep source single newlines.
 - **Normalization** - Adjusts heading levels
 
 **Finalization** (root-only serial):
@@ -64,6 +68,13 @@ let options = ComposeOptions::new()
 let baseline: darkmatter::markdown::schemas::SimplifiedSchema = /* ... */;
 let options = ComposeOptions::new()
     .with_baseline_schema(baseline);
+
+// Cleanup options
+let options = ComposeOptions::new()
+    .with_incidental_newline_mode(
+        darkmatter::markdown::cleanup::IncidentalNewlineMode::Preserve,
+    )
+    .with_fixed_width(80);
 
 // In-place mutation (no clone)
 let report = md.compose_mut()?;

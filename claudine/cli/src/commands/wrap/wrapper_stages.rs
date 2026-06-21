@@ -521,6 +521,7 @@ pub(crate) fn run_execution_stage(
             &env_plan.env,
             child_cwd,
             cli_timeout_duration.map(|d| d.as_secs()),
+            !effective_non_interactive,
             exec::ChildIoOptions {
                 stdout_noise_prefixes: stdout_noise,
                 stderr_noise_prefixes: stderr_noise,

@@ -12,21 +12,43 @@ fn is_prefix_match(path: &str, prefix: &str) -> bool {
 /// /System/Library is the actual macOS system directory; /System/Volumes/Data
 /// is the firmlink root for user data and should not be blocked.
 const SENSITIVE_PREFIXES: &[&str] = &[
-    "/etc",
-    "/var",
-    "/usr",
+    "/bin",
     "/boot",
     "/dev",
+    "/etc",
+    "/opt",
+    "/private/etc",
+    "/private/var",
     "/proc",
+    "/root",
+    "/sbin",
     "/sys",
     "/System/Library",
     "/System/Applications",
-    "/private/etc",
-    "/private/var",
+    "/Library/LaunchDaemons",
+    "/usr",
+    "/var",
 ];
 
 /// Home-relative sensitive prefixes (checked after ~ expansion).
-const SENSITIVE_HOME_PREFIXES: &[&str] = &[".ssh", ".gnupg"];
+const SENSITIVE_HOME_PREFIXES: &[&str] = &[
+    ".aws",
+    ".claude",
+    ".codex",
+    ".config/gh",
+    ".docker/config.json",
+    ".gemini",
+    ".git-credentials",
+    ".gnupg",
+    ".goose",
+    ".kube",
+    ".netrc",
+    ".npmrc",
+    ".opencode",
+    ".qwen",
+    ".roo",
+    ".ssh",
+];
 
 /// Checks whether a file path targets a sensitive system location.
 #[derive(Debug, Clone)]
@@ -170,16 +192,40 @@ pub fn all_targets_allowed(targets: &[String], allow_paths: &[String]) -> bool {
         .all(|target| is_path_allowed(target, allow_paths))
 }
 
-fn is_path_allowed(target: &str, allow_paths: &[String]) -> bool {
+/// Check whether `target` is allowed by any entry in `allow_paths`.
+///
+/// Relative allow entries are matched as an anchored component-sequence prefix
+/// of the target, so `node_modules` allows `node_modules/foo` but not
+/// `/etc/build/passwd`. Absolute allow entries use boundary-aware prefix
+/// semantics so `/var/tmp` does not allow `/var/tmpevil`.
+pub fn is_path_allowed(target: &str, allow_paths: &[String]) -> bool {
     let target = target.trim_start_matches("./");
+    let target_components: Vec<&str> = target.split('/').collect();
+
     for allowed in allow_paths {
+        let allowed = allowed.trim_start_matches("./");
         if allowed.starts_with('/') {
-            if target.starts_with(allowed.as_str()) {
+            let allowed_normalized = normalize_path(allowed);
+            let allowed_canonical = canonicalize_existing_ancestor(&allowed_normalized);
+            let allowed_str = allowed_canonical.to_string_lossy();
+            let target_normalized = if target.starts_with('/') {
+                canonicalize_existing_ancestor(&normalize_path(target))
+                    .to_string_lossy()
+                    .to_string()
+            } else {
+                target.to_string()
+            };
+            if target_normalized == allowed_str.as_ref()
+                || target_normalized.starts_with(&format!("{}/", allowed_str.as_ref()))
+            {
                 return true;
             }
         } else {
-            let parts: Vec<&str> = target.split('/').collect();
-            if parts.contains(&allowed.as_str()) {
+            let allowed_components: Vec<&str> = allowed.split('/').collect();
+            if allowed_components.is_empty() {
+                continue;
+            }
+            if target_components.starts_with(&allowed_components) {
                 return true;
             }
         }
@@ -266,13 +312,35 @@ mod tests {
     }
 
     #[test]
-    fn nested_allowed_path_matches() {
+    fn nested_allowed_path_matches_top_level_only() {
         let allow = vec!["node_modules".to_string()];
         assert!(all_targets_allowed(&["./node_modules".to_string()], &allow));
-        assert!(all_targets_allowed(
-            &["packages/foo/node_modules".to_string()],
-            &allow
-        ));
+        assert!(
+            !all_targets_allowed(
+                &["packages/foo/node_modules".to_string()],
+                &allow
+            ),
+            "relative allow entries must match as an anchored prefix"
+        );
+    }
+
+    #[test]
+    fn relative_allow_does_not_match_absolute_target() {
+        let allow = vec!["build".to_string()];
+        assert!(
+            !is_path_allowed("/etc/build/passwd", &allow),
+            "relative 'build' must not allow /etc/build/passwd"
+        );
+    }
+
+    #[test]
+    fn absolute_allow_respects_boundary() {
+        let allow = vec!["/var/tmp".to_string()];
+        assert!(is_path_allowed("/var/tmp/file.txt", &allow));
+        assert!(
+            !is_path_allowed("/var/tmpevil", &allow),
+            "absolute allow must use boundary-aware prefix matching"
+        );
     }
 
     #[test]
@@ -347,5 +415,36 @@ mod tests {
         let result =
             canonicalize_existing_ancestor(std::path::Path::new("/nonexistent/deeply/nested/path"));
         assert!(result.to_string_lossy().contains("nonexistent"));
+    }
+
+    #[test]
+    fn home_credential_paths_are_sensitive() {
+        let checker = SensitivePathChecker::new();
+        let home = dirs::home_dir().unwrap();
+        assert!(checker.is_sensitive(&format!("{}/.aws/credentials", home.display())));
+        assert!(checker.is_sensitive(&format!("{}/.kube/config", home.display())));
+        assert!(checker.is_sensitive(&format!("{}/.docker/config.json", home.display())));
+        assert!(checker.is_sensitive(&format!("{}/.netrc", home.display())));
+        assert!(checker.is_sensitive(&format!("{}/.npmrc", home.display())));
+        assert!(checker.is_sensitive(&format!("{}/.git-credentials", home.display())));
+        assert!(checker.is_sensitive(&format!("{}/.config/gh/hosts.yml", home.display())));
+        assert!(checker.is_sensitive(&format!("{}/.claude/config.json", home.display())));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn unix_absolute_sensitive_paths_are_detected() {
+        let checker = SensitivePathChecker::new();
+        assert!(checker.is_sensitive("/bin/bash"));
+        assert!(checker.is_sensitive("/sbin/init"));
+        assert!(checker.is_sensitive("/root/.bashrc"));
+        assert!(checker.is_sensitive("/opt/someapp/config"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_launch_daemon_path_is_sensitive() {
+        let checker = SensitivePathChecker::new();
+        assert!(checker.is_sensitive("/Library/LaunchDaemons/com.example.plist"));
     }
 }

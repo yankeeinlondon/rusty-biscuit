@@ -15,8 +15,11 @@ use super::path::{
 /// Evaluation request for the protect service.
 #[derive(Debug)]
 pub enum ProtectRequest<'a> {
-    BashCommand { command: &'a str },
-    WritePath { path: &'a str, cwd: Option<&'a str> },
+    BashCommand { command: Cow<'a, str> },
+    WritePath {
+        paths: Vec<&'a str>,
+        cwd: Option<&'a str>,
+    },
     McpResponse { payloads: Vec<Cow<'a, str>> },
 }
 
@@ -59,8 +62,8 @@ impl ProtectService {
         }
 
         let decision = match request {
-            ProtectRequest::BashCommand { command } => self.evaluate_bash_command(command),
-            ProtectRequest::WritePath { path, cwd } => self.evaluate_write_path(path, *cwd),
+            ProtectRequest::BashCommand { command } => self.evaluate_bash_command(command.as_ref()),
+            ProtectRequest::WritePath { paths, cwd } => self.evaluate_write_path(paths, *cwd),
             ProtectRequest::McpResponse { payloads } => self.evaluate_mcp_response(payloads),
         };
 
@@ -74,11 +77,11 @@ impl ProtectService {
     }
 
     fn evaluate_bash_command(&self, command: &str) -> ProtectDecision {
-        let _span = info_span!(
-            "protect_bash",
-            command_truncated = &command[..command.len().min(80)]
-        )
-        .entered();
+        let command_truncated = command
+            .char_indices()
+            .nth(80)
+            .map_or(command, |(i, _)| &command[..i]);
+        let _span = info_span!("protect_bash", command_truncated).entered();
         for group in &self.catalog.command_groups {
             if let Some((m, rule_supports_allow_paths)) = group.find_match(command) {
                 if rule_supports_allow_paths
@@ -104,7 +107,7 @@ impl ProtectService {
             }
         }
 
-        if let Some(custom) = &self.catalog.custom_group
+        if let Some(custom) = &self.catalog.custom_command_group
             && let Some((m, _)) = custom.find_match(command)
         {
             debug!(
@@ -119,12 +122,25 @@ impl ProtectService {
         ProtectDecision::allow()
     }
 
-    fn evaluate_write_path(&self, path: &str, cwd: Option<&str>) -> ProtectDecision {
-        let _span = info_span!("protect_write", path).entered();
+    fn evaluate_write_path(&self, paths: &[&str], cwd: Option<&str>) -> ProtectDecision {
+        let _span = info_span!("protect_write", path_count = paths.len()).entered();
         if !self.config.is_group_enabled(RuleGroup::SensitivePaths) {
             return ProtectDecision::allow();
         }
 
+        // Any sensitive path blocks the whole write; a benign first entry must
+        // not shadow a later sensitive one.
+        for path in paths {
+            let decision = self.evaluate_single_write_path(path, cwd);
+            if decision.is_blocked() {
+                return decision;
+            }
+        }
+
+        ProtectDecision::allow()
+    }
+
+    fn evaluate_single_write_path(&self, path: &str, cwd: Option<&str>) -> ProtectDecision {
         // Resolve relative paths against cwd
         let resolved = match cwd {
             Some(cwd) if !path.starts_with('/') && !path.starts_with('~') => {
@@ -140,18 +156,7 @@ impl ProtectService {
         if self.path_checker.is_sensitive(&resolved_str) {
             // Check allow_paths suppression
             if let Some(allow_paths) = self.config.get_allow_paths(RuleGroup::SensitivePaths)
-                && allow_paths.iter().any(|allowed| {
-                    if allowed.starts_with('/') {
-                        let allowed_normalized = normalize_path(allowed);
-                        let allowed_canonical =
-                            super::path::canonicalize_existing_ancestor(&allowed_normalized);
-                        let allowed_str = allowed_canonical.to_string_lossy();
-                        resolved_str == allowed_str
-                            || resolved_str.starts_with(&format!("{allowed_str}/"))
-                    } else {
-                        resolved_str.split('/').any(|part| part == allowed.as_str())
-                    }
-                })
+                && super::path::is_path_allowed(&resolved_str, allow_paths)
             {
                 debug!(path = %resolved_str, "sensitive path suppressed by allow_paths");
                 return ProtectDecision::allow();
@@ -202,7 +207,7 @@ mod tests {
     fn bash_rm_rf_root_is_blocked() {
         let service = default_service();
         let decision = service.evaluate(&ProtectRequest::BashCommand {
-            command: "rm -rf /",
+            command: Cow::Borrowed("rm -rf /"),
         });
         assert!(decision.is_blocked());
         assert_eq!(
@@ -227,7 +232,7 @@ mod tests {
             }));
         let service = ProtectService::new(config, ProtectPlatform::current()).unwrap();
         let decision = service.evaluate(&ProtectRequest::BashCommand {
-            command: "rm -rf node_modules",
+            command: Cow::Borrowed("rm -rf node_modules"),
         });
         assert!(!decision.is_blocked());
     }
@@ -236,7 +241,7 @@ mod tests {
     fn bash_safe_command_is_allowed() {
         let service = default_service();
         let decision = service.evaluate(&ProtectRequest::BashCommand {
-            command: "cargo test -p claudine",
+            command: Cow::Borrowed("cargo test -p claudine"),
         });
         assert!(!decision.is_blocked());
     }
@@ -247,7 +252,7 @@ mod tests {
         let home = dirs::home_dir().unwrap();
         let ssh_path = format!("{}/.ssh/config", home.display());
         let decision = service.evaluate(&ProtectRequest::WritePath {
-            path: &ssh_path,
+            paths: vec![&ssh_path],
             cwd: None,
         });
         assert!(decision.is_blocked());
@@ -255,10 +260,27 @@ mod tests {
     }
 
     #[test]
+    fn write_paths_array_blocks_when_any_path_is_sensitive() {
+        let service = default_service();
+        let home = dirs::home_dir().unwrap();
+        let ssh_path = format!("{}/.ssh/config", home.display());
+        // First entry is benign; the sensitive second entry must still block.
+        let decision = service.evaluate(&ProtectRequest::WritePath {
+            paths: vec!["src/generated.txt", &ssh_path],
+            cwd: None,
+        });
+        assert!(
+            decision.is_blocked(),
+            "a benign first path must not shadow a later sensitive path"
+        );
+        assert_eq!(decision.blocked.unwrap().group, RuleGroup::SensitivePaths);
+    }
+
+    #[test]
     fn write_inside_repo_is_allowed() {
         let service = default_service();
         let decision = service.evaluate(&ProtectRequest::WritePath {
-            path: "src/main.rs",
+            paths: vec!["src/main.rs"],
             cwd: None,
         });
         assert!(!decision.is_blocked());
@@ -320,12 +342,13 @@ mod tests {
             custom_patterns: vec![CustomPattern {
                 name: "no_terraform_destroy".to_string(),
                 pattern: r"terraform\s+destroy".to_string(),
+                surface: ScanSurface::BashCommand,
             }],
             ..Default::default()
         };
         let service = ProtectService::new(config, ProtectPlatform::current()).unwrap();
         let decision = service.evaluate(&ProtectRequest::BashCommand {
-            command: "terraform destroy -auto-approve",
+            command: Cow::Borrowed("terraform destroy -auto-approve"),
         });
         assert!(decision.is_blocked());
         assert_eq!(decision.blocked.unwrap().rule_id, "no_terraform_destroy");
@@ -339,7 +362,7 @@ mod tests {
         };
         let service = ProtectService::new(config, ProtectPlatform::current()).unwrap();
         let decision = service.evaluate(&ProtectRequest::BashCommand {
-            command: "rm -rf /",
+            command: Cow::Borrowed("rm -rf /"),
         });
         assert!(!decision.is_blocked());
     }
@@ -354,7 +377,7 @@ mod tests {
             }));
         let service = ProtectService::new(config, ProtectPlatform::current()).unwrap();
         let decision = service.evaluate(&ProtectRequest::BashCommand {
-            command: "sudo rm -rf /boot",
+            command: Cow::Borrowed("sudo rm -rf /boot"),
         });
         assert!(
             decision.is_blocked(),
@@ -374,7 +397,7 @@ mod tests {
         let home = dirs::home_dir().unwrap();
         let cwd = format!("{}/projects/myapp", home.display());
         let decision = service.evaluate(&ProtectRequest::WritePath {
-            path: "../../.ssh/config",
+            paths: vec!["../../.ssh/config"],
             cwd: Some(&cwd),
         });
         assert!(
@@ -387,7 +410,7 @@ mod tests {
     fn relative_path_traversal_to_etc_is_blocked() {
         let service = default_service();
         let decision = service.evaluate(&ProtectRequest::WritePath {
-            path: "../../../../../etc/hosts",
+            paths: vec!["../../../../../etc/hosts"],
             cwd: Some("/home/user/project/src"),
         });
         assert!(
@@ -400,7 +423,7 @@ mod tests {
     fn relative_path_inside_repo_is_allowed() {
         let service = default_service();
         let decision = service.evaluate(&ProtectRequest::WritePath {
-            path: "../lib/src/main.rs",
+            paths: vec!["../lib/src/main.rs"],
             cwd: Some("/home/user/project/cli"),
         });
         assert!(
@@ -427,6 +450,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn long_command_truncation_respects_char_boundaries() {
+        test_toolkit::init_test_tracing();
+        let service = default_service();
+        // 78 ASCII bytes, then a 4-byte emoji, then more ASCII. Byte 80 is
+        // inside the emoji, so a byte-index slice at 80 would panic.
+        let prefix = "x".repeat(78);
+        let command = format!("{prefix}😀echo hello");
+        assert!(command.len() > 80);
+        let decision = service.evaluate(&ProtectRequest::BashCommand {
+            command: Cow::Borrowed(command.as_str()),
+        });
+        assert!(
+            !decision.is_blocked(),
+            "safe long command should be allowed without panicking"
+        );
+    }
+
     // Task 3 tests - allow_paths for sensitive_paths
     #[test]
     fn write_to_allowed_sensitive_path_is_permitted() {
@@ -437,7 +478,7 @@ mod tests {
         }));
         let service = ProtectService::new(config, ProtectPlatform::current()).unwrap();
         let decision = service.evaluate(&ProtectRequest::WritePath {
-            path: "/etc/resolv.conf",
+            paths: vec!["/etc/resolv.conf"],
             cwd: None,
         });
         assert!(
@@ -455,7 +496,7 @@ mod tests {
         }));
         let service = ProtectService::new(config, ProtectPlatform::current()).unwrap();
         let decision = service.evaluate(&ProtectRequest::WritePath {
-            path: "/etc/passwd",
+            paths: vec!["/etc/passwd"],
             cwd: None,
         });
         assert!(
@@ -480,7 +521,7 @@ mod tests {
         // Lexical: tmp/home-link/.ssh/config — NOT under $HOME/.ssh
         // Canonical: $HOME/.ssh/config — IS under $HOME/.ssh
         let decision = service.evaluate(&ProtectRequest::WritePath {
-            path: ".ssh/config",
+            paths: vec![".ssh/config"],
             cwd: Some(&cwd_str),
         });
         assert!(

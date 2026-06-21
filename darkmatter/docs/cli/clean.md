@@ -18,6 +18,12 @@ md clean README.md
 md clean -
 cat README.md | md clean
 
+# Collapse incidental fixed-column wrapping, then re-wrap prose to 80 columns
+md clean README.md --fixed-width 80
+
+# Preserve source single-newline wrapping
+md clean README.md --ignore-incidental-newlines
+
 # Clean and enforce 4-space nested list indentation
 md clean README.md --indent 4
 
@@ -36,11 +42,18 @@ md README.md --save
 - `[INPUT]`: Markdown file path (supports `@` file references). Use `-` for stdin. If omitted, reads from stdin.
 - `--save`: Clean in place and print a delta-style change report (same report format used by `md delta`).
 - `--indent <#>`: Normalize nested list indentation width to a consistent number of spaces (`2`, `4`, or `8`).
+- `--fixed-width <#>`: Collapse incidental single newlines, then re-wrap prose to the target display width.
+- `--ignore-incidental-newlines`: Preserve source single newlines instead of collapsing fixed-column wrapping.
+
+`--fixed-width` and `--ignore-incidental-newlines` cannot be used together.
+Fixed-width reflow starts by removing the source wrapping that
+`--ignore-incidental-newlines` preserves.
 
 Shell completion notes:
 
 - `[INPUT]` completes markdown files (`.md`, `.dm`) and traversable directories.
 - `--indent` completes to `2`, `4`, or `8`.
+- `--fixed-width` completes common prose widths (`40`, `60`, `80`, `100`, `120`) and accepts any value from `1` through `1000`.
 
 ### Output Modes
 
@@ -69,25 +82,94 @@ Shell completion notes:
 
 The cleanup process applies these transformations:
 
-1. **Blank Lines**: Ensures one blank line between block elements
-2. **List Markers**: Preserves original unordered markers (`*`, `-`, `+`)
-3. **Table Alignment**: Pads table cells for aligned columns
-4. **Emphasis Preservation**:
+1. **Incidental Newlines**: Collapses single newlines in prose by default
+2. **Blank Lines**: Ensures one blank line between block elements
+3. **List Markers**: Preserves original unordered markers (`*`, `-`, `+`)
+4. **Table Alignment**: Pads table cells for aligned columns
+5. **Emphasis Preservation**:
     - Preserves original emphasis markers (`*` vs `_`)
     - `PREFER_ITALICS` can influence emphasis marker style
     - Strong/bold markers are preserved
-5. **Fenced Code Blocks**: Adds `text` language when fence language is missing
-6. **Blockquote Formatting**:
+6. **Fenced Code Blocks**: Adds `text` language when fence language is missing
+7. **Blockquote Formatting**:
     - Fixes leading-space issues before `>`
     - Removes invalid empty leading blockquote lines
     - Normalizes nested blockquote spacing
-7. **List Indentation**:
+8. **List Indentation**:
     - Default: preserves source indentation style
     - With `--indent`: enforces a consistent indentation width at every nested level
-8. **Unnecessary Escapes**:
+9. **Fixed-Width Reflow**: With `--fixed-width`, wraps prose to the requested display width after cleanup
+10. **Unnecessary Escapes**:
    - Unescapes `\_` and `\*` outside code/emphasis
    - Unescapes bracket literals when not part of links
-9. **File Ending**: Ensures non-empty output ends with exactly one trailing newline
+11. **File Ending**: Ensures non-empty output ends with exactly one trailing newline
+
+## Cleanup Modes
+
+### Default
+
+Input:
+
+```markdown
+This paragraph was wrapped by an editor at a fixed column
+even though Markdown treats it as one paragraph.
+```
+
+Command:
+
+```bash
+md clean -
+```
+
+Output:
+
+```markdown
+This paragraph was wrapped by an editor at a fixed column even though Markdown treats it as one paragraph.
+```
+
+### Fixed Width
+
+Input:
+
+```markdown
+This paragraph was wrapped by an editor at a fixed column
+and should be collapsed before being wrapped to the requested display width.
+```
+
+Command:
+
+```bash
+md clean --fixed-width 80 -
+```
+
+Output:
+
+```markdown
+This paragraph was wrapped by an editor at a fixed column and should be collapsed
+before being wrapped to the requested display width.
+```
+
+### Preserve Incidental Newlines
+
+Input:
+
+```markdown
+This paragraph was wrapped by an editor at a fixed column
+and the source wrapping needs to stay visible.
+```
+
+Command:
+
+```bash
+md clean --ignore-incidental-newlines -
+```
+
+Output:
+
+```markdown
+This paragraph was wrapped by an editor at a fixed column
+and the source wrapping needs to stay visible.
+```
 
 ### Color and Styling
 

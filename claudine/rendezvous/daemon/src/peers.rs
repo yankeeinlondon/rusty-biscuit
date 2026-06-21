@@ -7,6 +7,7 @@
 //! [`PeerRegistry::connect`] (or an inbound handshake) flips its
 //! connection state.
 
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -308,38 +309,53 @@ impl PeerRegistry {
     }
 
     fn record_inbound(&self, conn: InboundConnection) {
-        let mut map = self.inner.peers.write();
-        let key = format!("inbound:{}", conn.remote_addr);
+        let temp_key = format!("inbound:{}", conn.remote_addr);
         let now = unix_now_ms();
-        let entry = map.entry(key.clone()).or_insert_with(|| PeerRecord {
-            node_id: key.clone(),
-            socket_addr: conn.remote_addr,
-            source: PeerSource::Inbound,
-            state: PeerConnectionState::Connected,
-            last_seen_unix_ms: now,
-            last_error: None,
-            connection: None,
-        });
-        entry.socket_addr = conn.remote_addr;
-        entry.state = PeerConnectionState::Connected;
-        entry.last_seen_unix_ms = now;
-        entry.last_error = None;
-        entry.connection = Some(conn.connection.clone());
-        drop(map);
+        {
+            let mut map = self.inner.peers.write();
+            let entry = map.entry(temp_key.clone()).or_insert_with(|| PeerRecord {
+                node_id: temp_key.clone(),
+                socket_addr: conn.remote_addr,
+                source: PeerSource::Inbound,
+                state: PeerConnectionState::Connected,
+                last_seen_unix_ms: now,
+                last_error: None,
+                connection: None,
+            });
+            entry.socket_addr = conn.remote_addr;
+            entry.state = PeerConnectionState::Connected;
+            entry.last_seen_unix_ms = now;
+            entry.last_error = None;
+            entry.connection = Some(conn.connection.clone());
+        }
 
         // Spawn a sync-responder loop that drains any bidirectional
-        // streams the peer opens for sync sessions. If sync is not
-        // configured, drop the connection.
+        // streams the peer opens for sync sessions. Each successful
+        // handshake tells us the peer's real node_id, so we re-key the
+        // placeholder record under that identity.
         let sync_service = self.inner.sync_service.read().clone();
         if let Some(service) = sync_service {
             let connection = conn.connection.clone();
+            let registry = self.clone();
+            let temp_key = temp_key.clone();
             tokio::spawn(async move {
                 loop {
                     match connection.accept_bi().await {
                         Ok((send, recv)) => {
                             let service = service.clone();
+                            let registry = registry.clone();
+                            let temp_key = temp_key.clone();
                             tokio::spawn(async move {
-                                if let Err(error) = service.sync_responder(send, recv).await {
+                                if let Err(error) = service
+                                    .sync_responder_with_callback(
+                                        send,
+                                        recv,
+                                        move |real_node_id| {
+                                            registry.rekey_inbound(&temp_key, &real_node_id);
+                                        },
+                                    )
+                                    .await
+                                {
                                     tracing::debug!(
                                         target: "rendezvous_daemon::peers",
                                         %error,
@@ -419,6 +435,38 @@ impl PeerRegistry {
                 last_seen_unix_ms: unix_now_ms(),
                 last_error: String::from("peer not found in registry"),
             })
+    }
+
+    /// Promote an inbound placeholder record (keyed by socket address)
+    /// to the peer's real `node_id` once the sync handshake has
+    /// authenticated it. If a record for the real `node_id` already
+    /// exists, its connection is replaced by the authenticated inbound
+    /// one and the placeholder is removed.
+    pub fn rekey_inbound(&self, temp_key: &str, real_node_id: &str) {
+        if temp_key == real_node_id {
+            return;
+        }
+        let mut map = self.inner.peers.write();
+        let Some(mut record) = map.remove(temp_key) else {
+            return;
+        };
+        record.node_id = real_node_id.to_string();
+        record.source = PeerSource::Inbound;
+        let now = unix_now_ms();
+        match map.entry(real_node_id.to_string()) {
+            Entry::Occupied(mut entry) => {
+                let existing = entry.get_mut();
+                existing.connection = record.connection;
+                existing.state = PeerConnectionState::Connected;
+                existing.last_seen_unix_ms = now;
+                existing.last_error = None;
+            }
+            Entry::Vacant(entry) => {
+                record.last_seen_unix_ms = now;
+                record.last_error = None;
+                entry.insert(record);
+            }
+        }
     }
 
     /// Take the QUIC endpoint out so callers can shut it down during

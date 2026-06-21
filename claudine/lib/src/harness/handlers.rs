@@ -11,7 +11,7 @@ use tracing::{debug, info_span};
 use crate::harness::error::HarnessError;
 use crate::harness::model::{
     ApprovedRuntimeCommand, AttemptOutcome, FailureCheck, FailureEvent, FailurePhase,
-    HandlerAction, HandlerTable, ProcessTermination, ValidationFailure,
+    GuardContext, HandlerAction, HandlerTable, ProcessTermination, ValidationFailure,
 };
 
 /// Context describing a failure event for handler resolution.
@@ -37,6 +37,17 @@ pub struct FailureContext {
     pub session_id: Option<String>,
     /// The attempt outcome, if available.
     pub outcome: Option<AttemptOutcome>,
+    /// Honest per-guard label forwarded to the programmatic handler payload
+    /// (e.g. `"exit_expression"`, `"runaway_repetition"`, `"runaway_volume"`,
+    /// `"timeout"`). `None` for validation/audit failures and for
+    /// terminations that did not synthesize an error kind. Populated by
+    /// [`build_agent_failure_context`]; also reachable via
+    /// `outcome.error_kind` when an outcome is attached.
+    pub error_kind: Option<String>,
+    /// Structured content-guard detail forwarded to the programmatic handler
+    /// payload so handlers can branch on the guard kind without parsing the
+    /// message string. `None` for non-guard failures.
+    pub guard_context: Option<GuardContext>,
 }
 
 /// Resolve a handler for the given failure context.
@@ -91,6 +102,17 @@ pub fn resolve_handler(
 }
 
 /// Map `ProcessTermination` and `AttemptOutcome` to a `FailureEvent`.
+///
+/// ## Notes
+///
+/// `ProcessTermination::Aborted` (a claudine content-guard trip —
+/// exit-expression, runaway-repetition, or volume-cap) deliberately maps
+/// to [`FailureEvent::AgentFailure`] rather than [`FailureEvent::Timeout`]:
+/// the timeout-retry path would re-run the provider and reproduce the
+/// runaway. It also deliberately does **not** map to `None` the way
+/// [`ProcessTermination::Interrupted`] does, because a guard trip is a
+/// genuine failure the operator's `handle:` / `failure:` handlers must
+/// observe — suppressing it would silently swallow a runaway kill.
 pub fn classify_failure(outcome: &AttemptOutcome) -> Option<FailureEvent> {
     let _span = info_span!(
         "harness_classify_failure",
@@ -103,6 +125,7 @@ pub fn classify_failure(outcome: &AttemptOutcome) -> Option<FailureEvent> {
         ProcessTermination::TimedOut => Some(FailureEvent::Timeout),
         ProcessTermination::Interrupted => None, // User canceled, no handler
         ProcessTermination::LaunchFailed => Some(FailureEvent::AgentFailure),
+        ProcessTermination::Aborted => Some(FailureEvent::AgentFailure),
         ProcessTermination::Completed => {
             if outcome.exit_code != 0 {
                 Some(FailureEvent::AgentFailure)
@@ -138,6 +161,8 @@ pub fn build_validation_failure_context(
             attempt,
             session_id: session_id.clone(),
             outcome: outcome.clone(),
+            error_kind: None,
+            guard_context: None,
         })
         .collect()
 }
@@ -173,6 +198,19 @@ fn execute_programmatic_handler(
         })
     });
 
+    // Prefer the context's honest per-guard label; fall back to the outcome's
+    // (the streaming path populates both, but only the outcome carries it on
+    // some paths). This lets a handler branch on `runaway_repetition` vs a
+    // generic `agent_failure` (C3a).
+    let error_kind = failure
+        .error_kind
+        .clone()
+        .or_else(|| failure.outcome.as_ref().and_then(|o| o.error_kind.clone()));
+    let guard_context = failure
+        .guard_context
+        .clone()
+        .or_else(|| failure.outcome.as_ref().and_then(|o| o.guard_context.clone()));
+
     // Build JSON payload
     let payload = serde_json::json!({
         "provider": failure.provider,
@@ -185,6 +223,8 @@ fn execute_programmatic_handler(
         "message": failure.message,
         "check": check,
         "response": response,
+        "error_kind": error_kind,
+        "guard_context": guard_context,
     });
 
     let exe = which::which(&command.executable).map_err(|_| HarnessError::HandlerFailed {
@@ -206,6 +246,7 @@ fn execute_programmatic_handler(
             failure.session_id.as_deref().unwrap_or(""),
         )
         .env("CLAUDINE_TERMINATION", termination.as_deref().unwrap_or(""))
+        .env("CLAUDINE_ERROR_KIND", error_kind.as_deref().unwrap_or(""))
         .env(
             "CLAUDINE_SOURCE_FILE",
             failure
@@ -435,6 +476,13 @@ pub fn validate_resume(
 }
 
 /// Build a `FailureContext` from an agent failure or timeout.
+///
+/// `error_kind` and `guard_context` forward the honest per-guard label and
+/// structured detail onto the context so [`execute_programmatic_handler`]
+/// can surface them in the handler payload (env var + JSON). Today both
+/// are `None` at the call site; Phase 6 populates them from the stream
+/// summary when a content guard trips.
+#[allow(clippy::too_many_arguments)]
 pub fn build_agent_failure_context(
     provider: &str,
     source_file: &Path,
@@ -443,6 +491,8 @@ pub fn build_agent_failure_context(
     attempt: u32,
     session_id: Option<String>,
     outcome: Option<AttemptOutcome>,
+    error_kind: Option<String>,
+    guard_context: Option<&GuardContext>,
 ) -> FailureContext {
     FailureContext {
         provider: provider.to_string(),
@@ -455,6 +505,8 @@ pub fn build_agent_failure_context(
         attempt,
         session_id,
         outcome,
+        error_kind,
+        guard_context: guard_context.cloned(),
     }
 }
 
@@ -493,6 +545,8 @@ pub fn build_audit_failure_context(
                 attempt,
                 session_id: None,
                 outcome: None,
+                error_kind: None,
+                guard_context: None,
             }
         })
         .collect()
@@ -523,6 +577,8 @@ mod tests {
             attempt: 1,
             session_id: None,
             outcome: None,
+            error_kind: None,
+            guard_context: None,
         }
     }
 
@@ -668,6 +724,8 @@ mod tests {
             exit_code: 143,
             termination: ProcessTermination::TimedOut,
             stderr_text: None,
+            error_kind: None,
+            guard_context: None,
         };
         assert_eq!(classify_failure(&outcome), Some(FailureEvent::Timeout));
     }
@@ -681,6 +739,8 @@ mod tests {
             exit_code: 1,
             termination: ProcessTermination::Completed,
             stderr_text: None,
+            error_kind: None,
+            guard_context: None,
         };
         assert_eq!(classify_failure(&outcome), Some(FailureEvent::AgentFailure));
     }
@@ -694,6 +754,8 @@ mod tests {
             exit_code: 0,
             termination: ProcessTermination::Completed,
             stderr_text: None,
+            error_kind: None,
+            guard_context: None,
         };
         assert_eq!(classify_failure(&outcome), None);
     }
@@ -707,7 +769,51 @@ mod tests {
             exit_code: 130,
             termination: ProcessTermination::Interrupted,
             stderr_text: None,
+            error_kind: None,
+            guard_context: None,
         };
         assert_eq!(classify_failure(&outcome), None);
+    }
+
+    #[test]
+    fn classify_aborted_returns_agent_failure() {
+        // A content-guard trip (exit-expression / runaway-repetition /
+        // runaway-volume) maps to AgentFailure — never Timeout (which would
+        // trigger the handle_timeout retry path and reproduce the runaway)
+        // and never None (which would suppress failure handling).
+        let outcome = AttemptOutcome {
+            attempt: 1,
+            session_id: None,
+            final_response: String::new(),
+            exit_code: 1,
+            termination: ProcessTermination::Aborted,
+            stderr_text: None,
+            error_kind: Some("runaway_repetition".to_string()),
+            guard_context: None,
+        };
+        assert_eq!(
+            classify_failure(&outcome),
+            Some(FailureEvent::AgentFailure)
+        );
+    }
+
+    #[test]
+    fn process_termination_aborted_display_renders_snake_case() {
+        assert_eq!(
+            ProcessTermination::Aborted.to_string(),
+            "aborted",
+            "Display for Aborted must render the snake_case label"
+        );
+    }
+
+    #[test]
+    fn process_termination_aborted_serde_round_trips_snake_case() {
+        // The variant is persisted (JSONL metrics, serialized outcomes) so
+        // the snake_case form must round-trip and stay forward-compatible.
+        let json = serde_json::to_string(&ProcessTermination::Aborted).expect("serialize Aborted");
+        assert_eq!(json, "\"aborted\"", "serde must emit the snake_case label");
+        let back: ProcessTermination =
+            serde_json::from_str(&json).expect("deserialize Aborted");
+        assert_eq!(back, ProcessTermination::Aborted);
     }
 }

@@ -128,17 +128,26 @@ impl Rendezvous for RendezvousService {
         let metadata = parse_optional_json(&body.metadata_json)
             .map_err(|err| Status::invalid_argument(format!("metadata_json: {err}")))?;
         let owner_node_id = self.identity.node_id();
-        let outcome = self
-            .session_log
-            .append_entry(
-                &owner_node_id,
-                &body.session_id,
-                body.source,
-                body.level,
-                body.message,
-                metadata,
-            )
-            .map_err(internal)?;
+        let outcome = tokio::task::spawn_blocking({
+            let session_log = self.session_log.clone();
+            let session_id = body.session_id;
+            let source = body.source;
+            let level = body.level;
+            let message = body.message;
+            move || {
+                session_log.append_entry(
+                    &owner_node_id,
+                    &session_id,
+                    source,
+                    level,
+                    message,
+                    metadata,
+                )
+            }
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(internal)?;
         Ok(Response::new(AppendEntryResponse {
             chunk_id: outcome.chunk.as_path(),
             chunk_index: outcome.chunk.chunk_index,
@@ -159,10 +168,14 @@ impl Rendezvous for RendezvousService {
             .map_err(|err: rendezvous_core::ChunkIdParseError| {
                 Status::invalid_argument(err.to_string())
             })?;
-        let entries = self
-            .session_log
-            .list_chunk_entries(&chunk)
-            .map_err(internal)?;
+        let chunk_for_closure = chunk.clone();
+        let entries = tokio::task::spawn_blocking({
+            let session_log = self.session_log.clone();
+            move || session_log.list_chunk_entries(&chunk_for_closure)
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(internal)?;
         let proto_entries = entries
             .into_iter()
             .map(|e| {
@@ -194,10 +207,15 @@ impl Rendezvous for RendezvousService {
         request: Request<ListSessionChunksRequest>,
     ) -> Result<Response<ListSessionChunksResponse>, Status> {
         let body = request.into_inner();
-        let chunks = self
-            .session_log
-            .list_session_chunks(&body.owner_node_id, &body.session_id)
-            .map_err(internal)?;
+        let chunks = tokio::task::spawn_blocking({
+            let session_log = self.session_log.clone();
+            let owner = body.owner_node_id;
+            let session = body.session_id;
+            move || session_log.list_session_chunks(&owner, &session)
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(internal)?;
         Ok(Response::new(ListSessionChunksResponse {
             chunk_ids: chunks.into_iter().map(|c| c.as_path()).collect(),
         }))
@@ -275,9 +293,15 @@ impl Rendezvous for RendezvousService {
         let body = request.into_inner();
         let node_id = normalize_node_id(&body.node_id)?;
         let now = unix_now_ms();
-        self.storage
-            .upsert_pairing(&node_id, now, &body.note)
-            .map_err(internal)?;
+        let node_id_for_closure = node_id.clone();
+        tokio::task::spawn_blocking({
+            let storage = self.storage.clone();
+            let note = body.note.clone();
+            move || storage.upsert_pairing(&node_id_for_closure, now, &note)
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(internal)?;
         Ok(Response::new(ApprovePeerResponse {
             pairing: Some(PairingInfo {
                 node_id,
@@ -293,7 +317,13 @@ impl Rendezvous for RendezvousService {
     ) -> Result<Response<RevokePeerResponse>, Status> {
         let body = request.into_inner();
         let node_id = normalize_node_id(&body.node_id)?;
-        let removed = self.storage.remove_pairing(&node_id).map_err(internal)?;
+        let removed = tokio::task::spawn_blocking({
+            let storage = self.storage.clone();
+            move || storage.remove_pairing(&node_id)
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(internal)?;
         Ok(Response::new(RevokePeerResponse { removed }))
     }
 
@@ -301,7 +331,13 @@ impl Rendezvous for RendezvousService {
         &self,
         _request: Request<ListPairingsRequest>,
     ) -> Result<Response<ListPairingsResponse>, Status> {
-        let listed = self.storage.list_pairings().map_err(internal)?;
+        let listed = tokio::task::spawn_blocking({
+            let storage = self.storage.clone();
+            move || storage.list_pairings()
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(internal)?;
         let pairings = listed
             .into_iter()
             .map(|(node_id, value)| PairingInfo {
@@ -356,10 +392,15 @@ impl Rendezvous for RendezvousService {
         request: Request<QueryProjectionRequest>,
     ) -> Result<Response<QueryProjectionResponse>, Status> {
         let body = request.into_inner();
-        let rows = self
-            .projection
-            .entries_for_session(&body.owner_node_id, &body.session_id)
-            .map_err(internal)?;
+        let owner_node_id = body.owner_node_id;
+        let session_id = body.session_id;
+        let rows = tokio::task::spawn_blocking({
+            let projection = self.projection.clone();
+            move || projection.entries_for_session(&owner_node_id, &session_id)
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(internal)?;
         let proto_rows = rows
             .into_iter()
             .map(|row| ProtoProjectionRow {

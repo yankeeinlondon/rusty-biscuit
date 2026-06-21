@@ -2,8 +2,9 @@ use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
 use crate::args::{
     CodeBlockOutput, HashKind, OutputFormat, RemoteFreshness, SchemaTarget, ValidateTarget,
-    complete_compose_args, complete_indent_values, complete_markdown_files, complete_theme_names,
-    parse_indent_size, parse_theme_name,
+    complete_compose_args, complete_fixed_width_values, complete_indent_values,
+    complete_markdown_files, complete_theme_names, parse_fixed_width, parse_indent_size,
+    parse_theme_name,
 };
 use darkmatter::markdown::highlighting::ThemePair;
 use std::path::PathBuf;
@@ -61,6 +62,24 @@ pub enum Command {
         /// Add blank lines between all list items
         #[arg(long, conflicts_with = "compact")]
         loose: bool,
+
+        /// Re-wrap prose to the specified display width in columns
+        #[arg(
+            long,
+            value_name = "#",
+            value_parser = parse_fixed_width,
+            conflicts_with = "ignore_incidental_newlines",
+            add = ArgValueCompleter::new(complete_fixed_width_values)
+        )]
+        fixed_width: Option<usize>,
+
+        /// Preserve source single newlines instead of collapsing incidental wrapping
+        ///
+        /// The original spec proposed `--ignore-incidental-carraige-returns`;
+        /// this ships as `--ignore-incidental-newlines` because Markdown uses
+        /// line feeds semantically and the original spelling had a typo.
+        #[arg(long, conflicts_with = "fixed_width")]
+        ignore_incidental_newlines: bool,
     },
 
     /// Compose a document through the compose pipeline.

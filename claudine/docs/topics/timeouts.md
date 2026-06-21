@@ -381,6 +381,102 @@ built-in default), so simply leaving `timeout` out of frontmatter does
 **not** disable it — that just means "use whatever lower-priority source
 is configured."
 
+## Content guards (runaway-output)
+
+The two timeout rules above are *time*-driven: they catch a child that has
+gone **silent**. They cannot catch the opposite failure — a child that
+floods the stream with degenerate output and never stops. A
+non-interactive run that enters a tight token-level repetition loop keeps
+the byte heartbeat alive (bytes are flowing), so `step_timeout` never
+fires, and `timeout` is opt-in. The **content guards** are the
+*volume*-driven backstop for exactly this class.
+
+Three guards scan the typed semantic stream — `OutputText` and
+`Reasoning` text only, **never** tool-call / tool-result payloads — as it
+flows:
+
+| Guard | `error_kind` | Trips when | Built-in default | Kill-switch |
+|---|---|---|---|---|
+| Exit expression | `exit_expression` | A completed line matches a user-authored literal/regex pattern in scope | none declared (off) | omit / empty list |
+| Runaway repetition | `runaway_repetition` | A group-cycle of length `L ≤ 16` repeats `≥ 30` full times | on (30 cycles) | `guard_settings.repetition.enabled: false` |
+| Runaway volume | `runaway_volume` | A turn exceeds `50_000` lines **or** `32 MiB` | on | `guard_settings.volume.enabled: false` |
+
+The repetition guard counts the smallest repeating group, so single-line
+spam is just the `L = 1` case. Volume is counted **per turn** on the
+streaming path (reset on `TurnComplete`) and **per run** on the
+capture path; the capture path gets *only* the volume cap plus Ctrl+C,
+not exit-expression or repetition detection.
+
+### Aborted, not timed out
+
+All three guards converge on the same SIGTERM → SIGKILL plumbing the
+timeouts use (see [Termination path](#termination-path)), but they
+synthesize a distinct termination:
+[`ProcessTermination::Aborted`](../../lib/src/harness/model.rs), **not**
+`TimedOut`. This is deliberate — `Aborted` maps to
+`FailureEvent::AgentFailure` (fail-fast), so a guard trip **never** takes
+the `handle_timeout:` retry path that would re-run the provider and
+reproduce the runaway. It is also never `Interrupted` (which would
+suppress failure handling like a user cancel). The honest per-guard
+`error_kind` is carried through the summary into `AttemptOutcome.error_kind`
+and forwarded to a programmatic `handle` command as the
+`CLAUDINE_ERROR_KIND` env var plus an `error_kind` / `guard_context`
+field in the JSON payload, so a handler can branch on
+`runaway_repetition` versus a generic `agent_failure`.
+
+| Termination | `error_kind` | Failure event | Retry path |
+|---|---|---|---|
+| `TimedOut` | `timeout` / `step_timeout` | `Timeout` | `handle_timeout:` |
+| `Aborted` | `exit_expression` / `runaway_repetition` / `runaway_volume` | `AgentFailure` | `failure:` (fail-fast) |
+
+### Configuration surface
+
+`exit_expressions` is declared per layer (user config, repo
+`.claudine` config, and document frontmatter) and accepts either a bare
+array or an explicit `{ mode, rules }` object. Each entry takes a single
+`pattern:` or a `patterns:` array, an optional `kind: literal | regex`
+(default `literal`, to avoid metacharacter surprises like the regex
+`STOP.` matching `STOPS`), an optional `ignore_case` (literal-only), and
+an optional `scope` (`{agent}` or `{agent}/{model}`; absent = global).
+Scopes are **additive** — a run is checked against the union of every
+matching entry. Invalid regex, an unknown agent in a `scope`, and an
+empty `patterns` are rejected at config-load, never mid-stream.
+
+```yaml
+---
+exit_expressions:
+    - pattern: "I have completed the task"     # literal, global
+    - patterns: ["FATAL", "unrecoverable"]
+      kind: regex
+      scope: opencode/kimi-for-coding/k2p7     # only this agent+model
+guard_settings:
+    repetition:
+        enabled: true
+        max_repeats: 30        # full cycles before trip
+        max_cycle_length: 16   # largest group L the detector recognizes
+    volume:
+        enabled: true
+        max_lines: 50000       # per-turn line cap
+        max_bytes: 33554432    # per-turn byte cap (32 MiB)
+---
+```
+
+The repetition/volume scalar settings use last-writer precedence
+(frontmatter > repo > user > built-in), like `timeout` / `step_timeout`.
+Only the list-typed `exit_expressions` carries a per-layer combine mode
+(repo defaults to `override`, frontmatter to `merge`).
+
+### False-positive posture
+
+The thresholds are deliberately conservative — a *wrongful* kill of an
+honest run is the worst outcome, far worse than letting a real runaway
+stream a few thousand extra lines before the cap. Repetition uses
+**exact** line equality (no fuzzy matching) and requires 30 full cycles;
+the volume cap sits at 50k lines / 32 MiB. Do not tune these down
+without a real false-positive incident. The wall-clock `timeout` remains
+opt-in and unchanged; the volume cap is the always-on content backstop
+that bounds the unbounded capture buffer even when no timeout is set.
+
 ## Provider-specific stream variants
 
 Claudine's `step_timeout` rule and its in-flight gate both depend on the

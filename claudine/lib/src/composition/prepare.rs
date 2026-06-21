@@ -120,7 +120,15 @@ pub fn prepare_direct(
         &source.resolved_path,
         options.shell_working_directory.as_deref(),
     )
-    .with_perf(options.perf_enabled);
+    .with_perf(options.perf_enabled)
+    // The composed body is delivered verbatim to the agent and reported as the
+    // user prompt. Darkmatter's default strips incidental single newlines, which
+    // would collapse an author's line-structured prompt into one paragraph —
+    // altering the delivered text and defeating line-count-based report
+    // truncation. Preserve the source line breaks for prompt delivery.
+    .with_incidental_newline_mode(
+        darkmatter::markdown::cleanup::IncidentalNewlineMode::Preserve,
+    );
     if let Some(overrides) = options.set_overrides {
         compose_opts = compose_opts.with_set_overrides(overrides);
     }
@@ -229,7 +237,15 @@ pub fn prepare_inline(
         &source.resolved_path,
         options.shell_working_directory.as_deref(),
     )
-    .with_perf(options.perf_enabled);
+    .with_perf(options.perf_enabled)
+    // The composed body is delivered verbatim to the agent and reported as the
+    // user prompt. Darkmatter's default strips incidental single newlines, which
+    // would collapse an author's line-structured prompt into one paragraph —
+    // altering the delivered text and defeating line-count-based report
+    // truncation. Preserve the source line breaks for prompt delivery.
+    .with_incidental_newline_mode(
+        darkmatter::markdown::cleanup::IncidentalNewlineMode::Preserve,
+    );
     if let Some(overrides) = options.set_overrides {
         compose_opts = compose_opts.with_set_overrides(overrides);
     }
@@ -634,6 +650,40 @@ mod tests {
         assert!(prepared.lifecycle.failure.is_none());
     }
 
+    /// Regression: Darkmatter's `normalize_list_spacing` used to insert a
+    /// blank line between a tight parent list item and the first child of a
+    /// nested unordered list. That blank line was mis-rendered as an indented
+    /// code block by downstream renderers, corrupting prompts like the
+    /// `## Closure` section of `prompts/review-feature.md`.
+    #[test]
+    fn direct_composition_preserves_tight_nested_list() {
+        let dir = TempDir::new().unwrap();
+        let body = r#"## Closure
+
+- Save your review suggestions to a file
+- Save the following frontmatter properties on "review.md":
+    - based on your review suggestions indicate whether you think this feature is **ready for production**
+    - set the `agent` frontmatter property to claude
+    - set the `model` frontmatter property to some-model
+    - set the `created` frontmatter property to today
+
+**bold:**
+"#;
+        let source = make_source(&dir, &[("title", json!("Test"))], body);
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert!(
+            prepared.prompt.contains("properties on \"review.md\":\n    - based on"),
+            "parent item must be immediately followed by its first child; got:\n{}",
+            prepared.prompt
+        );
+        assert!(
+            !prepared.prompt.contains("properties on \"review.md\":\n\n    - "),
+            "tight nested list must not gain a blank line between parent and child; got:\n{}",
+            prepared.prompt
+        );
+    }
+
     #[test]
     fn inline_composition_parses_lifecycle_config() {
         let dir = TempDir::new().unwrap();
@@ -669,12 +719,18 @@ mod tests {
 
     #[test]
     fn malformed_lifecycle_interpolation_fails_preparation() {
+        // A *mixed* lifecycle string (literal text plus a malformed `{{ … }}`)
+        // is not whole-value executable state, so Darkmatter leaves it lenient
+        // and the claudine leak guard is the layer that rejects it. (A
+        // whole-value malformed span is caught earlier by Darkmatter's strict
+        // frontmatter interpolation — see
+        // `implement_suggestions_prompt_rejects_malformed_spec_path`.)
         let dir = TempDir::new().unwrap();
         let source = make_source(
             &dir,
             &[
                 ("title", json!("Test")),
-                ("start", json!({"message": "{{ parent_dir(review)) }}"})),
+                ("start", json!({"message": "leak {{ parent_dir(review)) }}"})),
             ],
             "Content",
         );
@@ -798,12 +854,16 @@ mod tests {
     #[test]
     fn lifecycle_leak_reported_for_first_field_in_deterministic_order() {
         let dir = TempDir::new().unwrap();
+        // Mixed lifecycle strings stay lenient in Darkmatter and surface
+        // through the claudine leak guard, which reports the first leaking
+        // field in deterministic order. Whole-value malformed spans would
+        // instead be rejected earlier by Darkmatter's strict interpolation.
         let source = make_source(
             &dir,
             &[
                 ("title", json!("Test")),
-                ("start", json!({"message": "{{ parent_dir(review)) }}"})),
-                ("failure", json!({"say": "{{ broken( }}"})),
+                ("start", json!({"message": "leak {{ parent_dir(review)) }}"})),
+                ("failure", json!({"say": "leak {{ broken( }}"})),
             ],
             "Content",
         );
@@ -818,57 +878,44 @@ mod tests {
     }
 
     #[test]
-    fn implement_suggestions_prompt_composes_without_lifecycle_leak() {
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let prompt_path = manifest_dir.join("../../prompts/implement-suggestions.md");
-        let original_text = fs::read_to_string(&prompt_path)
-            .unwrap_or_else(|e| panic!("failed to read {}: {e}", prompt_path.display()));
-        let markdown: Markdown = original_text.clone().into();
-        let source = ResolvedCompositionSource {
-            original_ref: prompt_path.to_str().unwrap().to_string(),
-            resolved_path: prompt_path.clone(),
-            original_text,
-            markdown,
-        };
-
+    fn malformed_whole_value_spec_path_is_rejected() {
+        // Regression for the original `implement-suggestions.md` reproduction:
+        // a `spec_path` frontmatter value that is a malformed whole-value
+        // interpolation — `{{ dirname(review) + '/spec.md') }}` carries an
+        // unbalanced paren. A whole-value `{{ … }}` is executable state, so
+        // composition must abort with a frontmatter interpolation parse error
+        // that names `spec_path`, instead of leaking the raw template
+        // downstream as a successful effective-frontmatter value. The fixture
+        // is self-contained — it must not read the shipped prompt, whose shape
+        // is free to change without breaking this guard.
         let dir = TempDir::new().unwrap();
         let review_file = dir.path().join("review.md");
         fs::write(&review_file, "# Review\n").unwrap();
+
+        let source = make_source(
+            &dir,
+            &[
+                ("title", json!("Implement Suggestions")),
+                ("spec_path", json!("{{ dirname(review) + '/spec.md') }}")),
+            ],
+            "Implement the suggestions from {{ spec_path }}.",
+        );
 
         let options = PrepareOptions {
             set_overrides: Some(json!({ "review": review_file.to_str().unwrap() })),
             ..Default::default()
         };
 
-        let prepared = prepare_direct(&source, options).unwrap();
-        let notifications = [
-            prepared.lifecycle.start.as_ref(),
-            prepared.lifecycle.success.as_ref(),
-            prepared.lifecycle.blocked.as_ref(),
-            prepared.lifecycle.failure.as_ref(),
-        ];
-
-        for notification in notifications.into_iter().flatten() {
-            for text in [
-                notification.say.as_deref(),
-                notification.say_first.as_deref(),
-                notification.message.as_deref(),
-                notification.stderr.as_deref(),
-                notification.notify.as_deref(),
-            ]
-            .into_iter()
-            .flatten()
-            {
-                assert!(
-                    !text.contains("{{"),
-                    "lifecycle string contains unresolved '{{': {text}"
-                );
-                assert!(
-                    !text.contains("}}"),
-                    "lifecycle string contains unresolved '}}': {text}"
-                );
-            }
-        }
+        let err = prepare_direct(&source, options).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("spec_path"),
+            "error must name the offending key, got: {msg}"
+        );
+        assert!(
+            msg.contains("Interpolation parse failed"),
+            "error must report the interpolation parse failure, got: {msg}"
+        );
     }
 
     #[test]
@@ -890,6 +937,33 @@ mod tests {
 
         let prepared = prepare_direct(&source, options).unwrap();
         assert!(prepared.prompt.contains("FAIL_FAST is false"));
+    }
+
+    #[test]
+    fn direct_lifecycle_ctx_agent_uses_env_overrides() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[(
+                "start",
+                json!({
+                    "message": "{{ctx.agent}}/{{ctx.model}}"
+                }),
+            )],
+            "Prompt",
+        );
+
+        let options = PrepareOptions {
+            env_overrides: std::collections::BTreeMap::from([
+                ("AGENT".to_string(), "codex".to_string()),
+                ("MODEL".to_string(), "gpt-5".to_string()),
+            ]),
+            ..Default::default()
+        };
+
+        let prepared = prepare_direct(&source, options).unwrap();
+        let start = prepared.lifecycle.start.as_ref().unwrap();
+        assert_eq!(start.message.as_deref(), Some("codex/gpt-5"));
     }
 
     #[test]

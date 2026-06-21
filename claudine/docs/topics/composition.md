@@ -170,10 +170,63 @@ frontmatter keys are available to inspect.
 
 The diagnostic identifies the resolved document (OSC8-linked when supported),
 names both `prompt` and `sequence`, points to `claudine sequence`, and notes the
-upcoming `sections` feature. When the error output stream is a TTY it also
-echoes the authored frontmatter YAML verbatim; when stderr is not a TTY the YAML
-is withheld (to avoid exposing frontmatter) and the diagnostic says so. There is
-no flag to reveal the YAML in non-TTY output.
+upcoming `sections` feature. Like every frontmatter-rooted composition error, it
+appends the authored frontmatter as a syntax-highlighted, line-numbered YAML
+block (see [Frontmatter YAML blocks in errors](#frontmatter-yaml-blocks-in-errors)).
+When stderr is not a TTY the block is withheld to avoid exposing frontmatter,
+and there is no flag to reveal it.
+
+## Whole-Value Frontmatter Expansion Is Executable State
+
+A frontmatter value whose trimmed content is *exactly one* expansion form —
+either a single `{{ ... }}` interpolation span or a single `$(...)` shell
+expression — is not ordinary text. It is executable state that downstream
+pipeline stages (and the provider prompt) consume as a resolved value, so it
+must parse and resolve successfully. Such a value must never leak into the
+effective frontmatter as raw expansion syntax.
+
+- **Whole-value `{{ ... }}` interpolation** must parse and evaluate
+  successfully. A parse failure (e.g. the malformed `spec_path: "{{ dirname(review) + '/spec.md') }}"`)
+  or an evaluation failure aborts composition with a precise
+  `Interpolation parse failed` / `Interpolation evaluation failed` diagnostic
+  naming the frontmatter key — **even when `fail_fast` is off**. Undefined
+  variables remain lenient: a bare `{{ missing }}` still resolves to `null`
+  rather than aborting.
+- **Whole-value `$(...)` shell expansion** must parse and expand when
+  frontmatter shell expansion is enabled. If shell expansion is explicitly
+  disabled, the `$(...)` value is deferred unchanged. When enabled, a value
+  that still trims to a whole-value `$(...)` candidate after the expansion pass
+  is rejected as a leak.
+
+This strictness is scoped to whole-value expansion only. **Mixed strings**
+(`"prefix {{ x }} suffix"`, `"literal $(echo ok)"`) and **body prose**
+interpolation are unchanged: when `fail_fast` is off they keep their lenient
+behavior, leaving an unresolved span in place and recording a warning rather
+than aborting. The enforcement lives in Darkmatter composition; see
+[Frontmatter Interpolation](../../../darkmatter/docs/inline/fm-interpolation.md)
+and [Frontmatter Shell Expansion](../../../darkmatter/docs/inline/fm-shell-expansion.md).
+
+## Frontmatter YAML blocks in errors
+
+Every composition error rooted in a prompt file's YAML frontmatter appends the
+authored frontmatter — delimiters included — as a `CodeBlock`: syntax
+highlighted, line-numbered so block line N equals source-file line N, and with
+the offending line highlighted when the error's property maps to a locatable
+key. This covers the lifecycle guards (interpolation leak, undefined variable,
+say/effect/shape errors), the prompt/agent/model/interactive type errors, the
+schema errors (load, validation, missing, unsupported-interactive), the
+inline-compose / sequence mismatch, and body-composition failures
+(`ComposeFailed`, `ShellExpansionFailed`, which show the block as context with no
+highlight).
+
+The block is **TTY-gated**: it is rendered only when stderr is a TTY, and
+withheld in piped / `NO_COLOR` / CI output so frontmatter is never exposed into
+logs. Capture happens at the render boundary — after all control-flow handling —
+so the wrapper never interferes with upstream decisions; the CLI error walker
+renders the deepest typed diagnostic and appends the YAML block after it. The
+motivating case: a `success.message` referencing `{{review-file}}` (hyphen) when
+the variable is `review_file` (underscore) now shows the frontmatter with the
+offending line highlighted, instead of an opaque "interpolation leaked" message.
 
 ## Provider Selection
 
@@ -322,6 +375,7 @@ For each property declared in `$schema`, claudine routes the validation outcome 
 | Outcome                | Required                                                            | Optional                                                                                |
 | ---------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | Present and valid      | continue                                                            | continue                                                                                |
+| Present as `null`      | hard `SchemaValidation` abort                                       | treated as absent (valid)                                                               |
 | Missing                | prompt in Interactive Mode when allowed; otherwise `MissingProperties` | continue                                                                                |
 | Present but invalid    | hard `SchemaValidation` abort (no prompt, no recovery)              | the value is dropped from the prompt context, a `tracing::warn!` fires, composition retries once |
 

@@ -113,3 +113,9 @@ These frontmatter properties are used in the cross-provider skill/command/agent 
 | Property | Description | Details | Symbols |
 |----------|-------------|---------|---------|
 | `verbosity` | Controls prompt reporting output verbosity on `system-prompt.md` documents. Accepts `silent`, `quiet`, or `verbose`, mapping to `ReportMode` variants. Combined with CLI flags and env vars through a precedence chain. | [system-prompt.md](system-prompt.md) | [`parse_frontmatter_verbosity`](../../lib/src/prompt_reporting/frontmatter.rs) · [`ReportMode`](../../lib/src/prompt_reporting/types.rs) |
+
+## System Prompt
+
+| Property | Description | Details | Symbols |
+|----------|-------------|---------|---------|
+| `mode` | Controls delivery mode for **automatically discovered** `system-prompt.md` files only. Accepts `append` or `replace`; absent / `null` defaults to `append`. Invalid values are rejected during compose by a baseline `SimplifiedSchema` and surface as a `SystemPromptComposition` error. Explicit `--append-system-prompt` / `--replace-system-prompt` files ignore this key entirely — the flag is authoritative and the explicit path composes without the baseline schema. | [system-prompt.md](system-prompt.md) | [`SystemPromptMode`](../../lib/src/system_prompt/types.rs) · [`mode_from_composed`](../../lib/src/system_prompt/prepare.rs) · [`effective_mode`](../../lib/src/system_prompt/prepare.rs) · [`discovered_baseline_schema`](../../lib/src/system_prompt/prepare.rs) |
