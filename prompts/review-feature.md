@@ -14,7 +14,7 @@ start:
     message: "👓 starting {{feature_or_fix}} review #{{iteration}} of `{{parent_dir(spec)}}` (_in the **{{ctx.area}}** package area_)"
 success:
     stderr: "{{feature_or_fix}} review {{iteration}} in the {{ctx.area}} package area has completed successfully"
-    message: "✅  review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area (_{{feature_or_fix}}_) completed successfully"
+    message: "✅  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed successfully"
     effect: "small-group-cheer"
 failure:
     stderr: "{{feature_or_fix}} review {{iteration}} for `{{parent_dir(spec)}}` in the {{ctx.area}} package area failed to complete!"
