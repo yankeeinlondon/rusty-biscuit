@@ -168,3 +168,24 @@ pub fn write_executable(path: &Path, content: &str) {
         write(path, content);
     }
 }
+
+pub fn write_dry_run_provider_stub(bin_dir: &Path, binary: &str) {
+    ensure_test_tracing_initialized();
+    #[cfg(unix)]
+    {
+        write_executable(
+            &bin_dir.join(binary),
+            r#"#!/bin/sh
+echo "SHOULD NOT RUN"
+exit 1
+"#,
+        );
+    }
+    #[cfg(windows)]
+    {
+        write(
+            &bin_dir.join(format!("{binary}.cmd")),
+            "@echo off\r\necho SHOULD NOT RUN\r\nexit /b 1\r\n",
+        );
+    }
+}

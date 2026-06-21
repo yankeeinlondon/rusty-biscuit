@@ -46,6 +46,15 @@ pub(crate) struct WatchdogTermination {
     pub(crate) stuck_subagents: Vec<super::subagent_watchdog::ActiveSubagentSnapshot>,
 }
 
+/// Request sent when the wrapper has already received the successful final
+/// response but the provider keeps its transport process alive.
+///
+/// The wait loop still terminates the child tree through the same signal /
+/// Job Object path used for watchdog and content-guard termination, but the
+/// resulting process outcome remains `Completed`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CompletionTermination;
+
 /// Visible feedback line emitted on each counted interrupt (Q14).
 ///
 /// One static byte string per rung so the write stays async-signal-safe
@@ -142,6 +151,31 @@ pub(crate) fn wait_with_signal_and_early_termination(
     claudine::harness::ProcessTermination,
     Option<EarlyTermination>,
 )> {
+    wait_with_signal_early_termination_and_completion(
+        child,
+        child_in_own_pgroup,
+        early_rx,
+        watchdog_rx,
+        None,
+        kill_grace,
+        interactive,
+    )
+}
+
+#[cfg(unix)]
+pub(crate) fn wait_with_signal_early_termination_and_completion(
+    child: &mut Child,
+    child_in_own_pgroup: bool,
+    early_rx: Receiver<EarlyTermination>,
+    watchdog_rx: Option<Receiver<WatchdogTermination>>,
+    completion_rx: Option<Receiver<CompletionTermination>>,
+    kill_grace: Duration,
+    interactive: bool,
+) -> Result<(
+    i32,
+    claudine::harness::ProcessTermination,
+    Option<EarlyTermination>,
+)> {
     use std::sync::atomic::{AtomicBool, AtomicU8};
 
     let interrupt_count = Arc::new(AtomicU8::new(0));
@@ -178,6 +212,8 @@ pub(crate) fn wait_with_signal_and_early_termination(
     let mut grace_deadline: Option<Instant> = None;
     let mut reap_deadline: Option<Instant> = None;
     let mut watchdog_rx = watchdog_rx;
+    let mut completion_rx = completion_rx;
+    let mut completion_requested = false;
     let poll_interval = Duration::from_millis(75);
     let grace_period = kill_grace;
 
@@ -186,10 +222,16 @@ pub(crate) fn wait_with_signal_and_early_termination(
             // Mark the PID as reaped before the grace window's signal guard
             // can drop so we never signal a recycled PID.
             child_exited.store(true, Ordering::SeqCst);
-            let code = exit_code_from_status(status);
+            let code = if completion_requested {
+                0
+            } else {
+                exit_code_from_status(status)
+            };
             let was_interrupted = interrupt_count.load(Ordering::SeqCst) > 0;
             let termination = if was_interrupted {
                 claudine::harness::ProcessTermination::Interrupted
+            } else if completion_requested {
+                claudine::harness::ProcessTermination::Completed
             } else if early_termination.is_some() {
                 early_termination_process_outcome(early_termination.as_ref())
             } else {
@@ -234,6 +276,29 @@ pub(crate) fn wait_with_signal_and_early_termination(
                     tracing::warn!(
                         "early-termination channel disconnected; early-exit signals will no longer be processed"
                     );
+                }
+            }
+        }
+
+        if early_termination.is_none()
+            && !completion_requested
+            && let Some(ref done_rx) = completion_rx
+        {
+            match done_rx.try_recv() {
+                Ok(CompletionTermination) => {
+                    if child.try_wait()?.is_none() {
+                        tracing::info!(
+                            child_pid,
+                            "completion termination received; sending SIGTERM to child process group",
+                        );
+                        send_signal_to_child(child_pid, child_in_own_pgroup, libc::SIGTERM);
+                        completion_requested = true;
+                        grace_deadline = Some(Instant::now() + grace_period);
+                    }
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    completion_rx = None;
                 }
             }
         }
@@ -297,7 +362,7 @@ pub(crate) fn wait_with_signal_and_early_termination(
 /// child is targeted. The caller must re-check `child.try_wait()`
 /// immediately before this call to avoid signaling a recycled PID.
 #[cfg(unix)]
-fn send_signal_to_child(child_pid: u32, child_in_own_pgroup: bool, signal: i32) {
+pub(crate) fn send_signal_to_child(child_pid: u32, child_in_own_pgroup: bool, signal: i32) {
     let kill_pid = if child_in_own_pgroup {
         -(child_pid as i32)
     } else {
@@ -321,11 +386,37 @@ pub(crate) fn wait_with_signal_and_early_termination(
     claudine::harness::ProcessTermination,
     Option<EarlyTermination>,
 )> {
+    wait_with_signal_early_termination_and_completion(
+        child,
+        child_in_own_pgroup,
+        early_rx,
+        watchdog_rx.take(),
+        None,
+        kill_grace,
+        interactive,
+    )
+}
+
+#[cfg(not(unix))]
+pub(crate) fn wait_with_signal_early_termination_and_completion(
+    child: &mut Child,
+    child_in_own_pgroup: bool,
+    early_rx: Receiver<EarlyTermination>,
+    mut watchdog_rx: Option<Receiver<WatchdogTermination>>,
+    completion_rx: Option<Receiver<CompletionTermination>>,
+    kill_grace: Duration,
+    interactive: bool,
+) -> Result<(
+    i32,
+    claudine::harness::ProcessTermination,
+    Option<EarlyTermination>,
+)> {
     windows_wait_loop(
         child,
         child_in_own_pgroup,
         early_rx,
         watchdog_rx.take(),
+        completion_rx,
         kill_grace,
         interactive,
     )
@@ -418,6 +509,7 @@ fn windows_wait_loop(
     child_in_own_pgroup: bool,
     early_rx: Receiver<EarlyTermination>,
     watchdog_rx: Option<Receiver<WatchdogTermination>>,
+    completion_rx: Option<Receiver<CompletionTermination>>,
     kill_grace: Duration,
     _interactive: bool,
 ) -> Result<(
@@ -484,16 +576,24 @@ fn windows_wait_loop(
     let mut grace_deadline: Option<Instant> = None;
     let mut reap_deadline: Option<Instant> = None;
     let mut watchdog_rx = watchdog_rx;
+    let mut completion_rx = completion_rx;
+    let mut completion_requested = false;
     let mut last_emitted_count: u8 = 0;
     let poll_interval = Duration::from_millis(75);
     let grace_period = kill_grace;
 
     loop {
         if let Some(status) = child.try_wait()? {
-            let code = exit_code_from_status(status);
+            let code = if completion_requested {
+                0
+            } else {
+                exit_code_from_status(status)
+            };
             let pressed = CONSOLE_INTERRUPT_COUNT.load(Ordering::SeqCst) > 0;
             let termination = if pressed {
                 claudine::harness::ProcessTermination::Interrupted
+            } else if completion_requested {
+                claudine::harness::ProcessTermination::Completed
             } else if early_termination.is_some() {
                 early_termination_process_outcome(early_termination.as_ref())
             } else {
@@ -584,6 +684,26 @@ fn windows_wait_loop(
                     tracing::warn!(
                         "early-termination channel disconnected; early-exit signals will no longer be processed"
                     );
+                }
+            }
+        }
+
+        if early_termination.is_none()
+            && !completion_requested
+            && let Some(ref done_rx) = completion_rx
+        {
+            match done_rx.try_recv() {
+                Ok(CompletionTermination) => {
+                    if child.try_wait()?.is_none() {
+                        let _ = unsafe { TerminateJobObject(job, 0) };
+                        CONSOLE_FORCE_KILL_SENT.store(true, Ordering::SeqCst);
+                        completion_requested = true;
+                        grace_deadline = Some(Instant::now() + grace_period);
+                    }
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    completion_rx = None;
                 }
             }
         }
@@ -1439,6 +1559,45 @@ mod tests {
         assert!(code != 0, "child should have been terminated; got {code}");
     }
 
+    /// Kimi wire mode uses completion termination after receiving the final
+    /// prompt response: the child tree must still be terminated through the
+    /// shared signal-aware path, but the wrapper outcome remains Completed.
+    #[cfg(unix)]
+    #[test]
+    fn completion_termination_reaps_child_and_reports_completed() {
+        use std::os::unix::process::CommandExt;
+        use std::process::Command;
+        use std::sync::mpsc::channel;
+
+        let mut child = Command::new("sleep")
+            .arg("10")
+            .process_group(0)
+            .spawn()
+            .expect("sleep must be available on PATH");
+        let (_early_tx, early_rx) = channel::<EarlyTermination>();
+        let (completion_tx, completion_rx) = channel::<CompletionTermination>();
+
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            let _ = completion_tx.send(CompletionTermination);
+        });
+
+        let result = wait_with_signal_early_termination_and_completion(
+            &mut child,
+            true,
+            early_rx,
+            None,
+            Some(completion_rx),
+            Duration::from_millis(100),
+            false,
+        );
+
+        let (code, termination, early) = result.expect("wait loop must return");
+        assert_eq!(code, 0);
+        assert_eq!(termination, claudine::harness::ProcessTermination::Completed);
+        assert!(early.is_none(), "completion is not an error path: {early:?}");
+    }
+
     /// VC-5.4: the non-interactive ladder is SIGTERM-first (F5). A single
     /// counted press on a non-interactive run must escalate straight to
     /// SIGTERM (no human is mid-session to react to a graceful SIGINT), while
@@ -1484,5 +1643,45 @@ mod tests {
         let (code, termination, _) = result.expect("wait loop must return when child exits");
         assert_eq!(code, 0);
         assert_eq!(termination, claudine::harness::ProcessTermination::Completed);
+    }
+
+    /// Windows-specific coverage for Kimi's prompt-finished fallback: the
+    /// child is spawned in a new process group and completion termination
+    /// travels through the Job Object wait loop rather than `Child::kill`.
+    #[cfg(windows)]
+    #[test]
+    fn windows_completion_termination_uses_job_object_path() {
+        use std::os::windows::process::CommandExt;
+        use std::process::Command;
+        use std::sync::mpsc::channel;
+
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        let mut child = Command::new("cmd")
+            .args(["/C", "timeout /T 30 /nobreak >nul"])
+            .creation_flags(CREATE_NEW_PROCESS_GROUP)
+            .spawn()
+            .expect("cmd must be available");
+        let (_early_tx, early_rx) = channel::<EarlyTermination>();
+        let (completion_tx, completion_rx) = channel::<CompletionTermination>();
+
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            let _ = completion_tx.send(CompletionTermination);
+        });
+
+        let result = wait_with_signal_early_termination_and_completion(
+            &mut child,
+            true,
+            early_rx,
+            None,
+            Some(completion_rx),
+            Duration::from_millis(100),
+            false,
+        );
+
+        let (code, termination, early) = result.expect("wait loop must return");
+        assert_eq!(code, 0);
+        assert_eq!(termination, claudine::harness::ProcessTermination::Completed);
+        assert!(early.is_none(), "completion is not an error path: {early:?}");
     }
 }

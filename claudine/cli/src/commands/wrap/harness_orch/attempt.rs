@@ -157,9 +157,6 @@ pub(crate) fn execute_harness_attempt(
                 };
             let _ = stderr_bridge;
             let _ = prompt_timing;
-            // The Kimi wire transport has no structured stdout stream to
-            // scan, so the content-detector receiver is unused here.
-            let _ = content_early_rx;
             super::super::wire_io::run_kimi_wire_session(
                 super::super::wire_io::WireSessionConfig {
                     binary: binary_path,
@@ -178,6 +175,7 @@ pub(crate) fn execute_harness_attempt(
                     stream_output,
                     live_metrics,
                     runtime_context,
+                    content_early_rx,
                 },
                 child_spawned,
             )?

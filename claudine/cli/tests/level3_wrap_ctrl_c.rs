@@ -328,7 +328,9 @@ fn level3_ctrl_c_terminates_wrapped_child_with_timeout_configured() {
 // executable test. The dev host is macOS, so its runtime pass must be observed
 // on a Windows host / CI; on macOS it is *cross-compile-checked* for
 // `x86_64-pc-windows-gnu`, which is the maximum honest verification from this
-// host. The prose counterpart lives in
+// host. The Windows-host gates are the path-filtered
+// `.github/workflows/claudine-windows-ctrl-c.yml` workflow and
+// `just test-windows-ctrl-c`. The prose counterpart lives in
 // `claudine/docs/topics/signal-handling.md` ("Windows parity" →
 // "Verification record"), kept honest about compile-checked vs. runtime-run.
 
@@ -362,17 +364,18 @@ fn level3_ctrl_c_terminates_wrapped_child_with_timeout_configured() {
 /// subtree. (This is also what production does — `spawn.rs` sets the same flag.)
 ///
 /// Compiled only on Windows and `#[ignore]`d by default: it requires a real
-/// attached console to deliver console control events, which headless CI
-/// runners may lack. Run explicitly on a Windows host with an attached console:
+/// attached console to deliver console control events. The path-filtered
+/// `.github/workflows/claudine-windows-ctrl-c.yml` workflow runs it in CI for
+/// relevant changes; to run the same gate manually on a Windows host:
 ///
 /// ```text
-/// cargo test -p claudine-cli --test level3_wrap_ctrl_c -- --ignored \
-///   windows_ctrl_c_verification_record
+/// just test-windows-ctrl-c
 /// ```
 ///
-/// Until that run is observed on a Windows host the path is **compile-checked,
-/// not runtime-verified** — this test is the executable harness that closes the
-/// gap, not a claim that it has already passed on Windows.
+/// Until a green Windows-host run is recorded the path is **compile-checked,
+/// not runtime-verified** — this test and `just test-windows-ctrl-c` are the
+/// executable harness that closes the gap, not a claim that it has already
+/// passed on Windows.
 #[cfg(windows)]
 #[test]
 #[ignore = "requires a Windows host with an attached console; cross-compile-checked but not runtime-run on the macOS dev host"]
