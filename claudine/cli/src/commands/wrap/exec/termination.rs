@@ -178,6 +178,11 @@ pub(crate) fn wait_with_signal_early_termination_and_completion(
 )> {
     use std::sync::atomic::{AtomicBool, AtomicU8};
 
+    // While this loop runs, the child-targeted SIGINT→SIGTERM→SIGKILL ladder
+    // below owns escalation, so the compose-scoped Ctrl+C guard must defer to
+    // it rather than force-exiting the wrapper. Cleared on every exit path.
+    let _wait_loop_active = crate::output::WaitLoopActiveGuard::new();
+
     let interrupt_count = Arc::new(AtomicU8::new(0));
     let child_exited = Arc::new(AtomicBool::new(false));
     let child_pid = child.id();
@@ -520,6 +525,11 @@ fn windows_wait_loop(
     use std::os::windows::io::AsRawHandle;
     use std::sync::atomic::Ordering;
 
+    // Mirror the Unix loop: while this loop owns the child's interrupt
+    // escalation, the compose-scoped Ctrl+C guard must not force-exit the
+    // wrapper. Cleared on every exit path.
+    let _wait_loop_active = crate::output::WaitLoopActiveGuard::new();
+
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::System::Console::{
         CTRL_BREAK_EVENT, GenerateConsoleCtrlEvent, SetConsoleCtrlHandler,
@@ -825,6 +835,12 @@ pub(crate) fn apply_early_termination_to_summary(
             summary.error_kind = Some("runaway_volume".into());
             summary.error_message = Some(render_runaway_volume_message(*lines, *bytes));
         }
+        EarlyTermination::RepeatedStreamError { count } => {
+            summary.exit_code = 1;
+            summary.is_error = true;
+            summary.error_kind = Some("repeated_stream_error".into());
+            summary.error_message = Some(render_repeated_stream_error_message(*count));
+        }
     }
 }
 
@@ -848,6 +864,9 @@ pub(crate) fn early_termination_message(termination: &EarlyTermination) -> Optio
         }
         EarlyTermination::RunawayVolume { lines, bytes } => {
             Some(render_runaway_volume_message(*lines, *bytes))
+        }
+        EarlyTermination::RepeatedStreamError { count } => {
+            Some(render_repeated_stream_error_message(*count))
         }
     }
 }
@@ -878,6 +897,15 @@ fn render_runaway_volume_message(lines: u64, bytes: u64) -> String {
     format!(
         "output volume cap exceeded ({lines} lines, {bytes} bytes); \
          terminated to bound the runaway"
+    )
+}
+
+/// Render the error message for an [`EarlyTermination::RepeatedStreamError`]
+/// trip, naming the consecutive-failure count at the moment of breach.
+fn render_repeated_stream_error_message(count: u32) -> String {
+    format!(
+        "provider stream failed {count} times with no progress; \
+         terminated to stop the retry loop"
     )
 }
 
@@ -919,10 +947,15 @@ pub(crate) fn early_termination_process_outcome(
         // runaway-volume) map to `Aborted` so `classify_failure` yields
         // `AgentFailure` — never `TimedOut` (which would trigger the
         // handle_timeout retry path and reproduce the runaway).
+        //
+        // The repeated-stream-error backstop is also a fail-fast abort: the
+        // provider failed every retry, so retrying via `handle_timeout` would
+        // only reproduce the loop.
         Some(
             EarlyTermination::ExitExpression { .. }
             | EarlyTermination::RunawayRepetition { .. }
-            | EarlyTermination::RunawayVolume { .. },
+            | EarlyTermination::RunawayVolume { .. }
+            | EarlyTermination::RepeatedStreamError { .. },
         ) => claudine::harness::ProcessTermination::Aborted,
         None => claudine::harness::ProcessTermination::Completed,
     }
@@ -984,7 +1017,8 @@ pub(crate) fn early_termination_guard_context(
         }),
         EarlyTermination::RateLimit { .. }
         | EarlyTermination::Timeout { .. }
-        | EarlyTermination::StepTimeout { .. } => None,
+        | EarlyTermination::StepTimeout { .. }
+        | EarlyTermination::RepeatedStreamError { .. } => None,
     }
 }
 
