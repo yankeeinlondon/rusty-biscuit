@@ -1,9 +1,14 @@
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::lifecycle::LifecycleSignal;
+use claudine::composition::lifecycle_context::{LifecycleCurrent, LifecycleErrorInfo, LifecycleTiming};
+use claudine::composition::lifecycle_executor::{
+    LifecycleEventOutcome, StackControl, StackExecutionContext, SystemShellRunner,
+};
 use claudine::events::EnvironmentContext;
 use claudine::provider::Provider;
 use claudine::stream::stderr::Verbosity;
 use color_eyre::eyre::{Result, eyre};
+use darkmatter::effects::EffectEngine;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::Path;
@@ -14,6 +19,224 @@ use super::{
     CachedHarnessLoopContext, HarnessPromptState, MaterializedHarnessPrompt, build_harness_launch,
     execute_harness_attempt, harness_prompt_mode_label, materialize_harness_prompt, HarnessPromptMode,
 };
+
+/// Execute a terminal lifecycle event, converting an explicit `Error` control
+/// action into `Failure` for events that would otherwise record a successful
+/// or blocked outcome.
+///
+/// `Success` and `Blocked` run their stack **exactly once** (stack-only, before
+/// any top-level communication). If that stack terminates with
+/// `StackControl::Error`, the run is routed to the `Failure` event — its
+/// top-level communication and stack fire — and the guard records `Failure` as
+/// the terminal signal; the success/blocked top-level communication never
+/// fires. Otherwise the success/blocked top-level communication fires after the
+/// already-run stack and that signal is recorded. This preserves the spec rule
+/// that an explicit `error()` action in a success/blocked stack downgrades the
+/// run, without running the stack twice.
+#[allow(clippy::too_many_arguments)]
+fn execute_terminal_event(
+    guard: &mut claudine::composition::LifecycleRunGuard<'_>,
+    signal: LifecycleSignal,
+    materialized: &MaterializedHarnessPrompt,
+    source_path: &Path,
+    repo_root: Option<&Path>,
+    term: &Terminal,
+    effect_engine: &EffectEngine,
+    err: Option<&LifecycleErrorInfo>,
+) -> LifecycleEventOutcome {
+    if matches!(signal, LifecycleSignal::Success | LifecycleSignal::Blocked) {
+        // Run the success/blocked stack exactly once (no top-level comm yet).
+        let outcome = run_lifecycle_stack_only(
+            guard,
+            signal,
+            materialized,
+            source_path,
+            repo_root,
+            term,
+            effect_engine,
+            err,
+        );
+        if matches!(outcome.control, Some(StackControl::Error { .. })) {
+            // The stack downgraded the run: record `Failure` as the terminal
+            // signal and fire the failure event (top-level comm + failure
+            // stack). The success/blocked top-level comm is intentionally
+            // skipped.
+            return run_lifecycle_event(
+                guard,
+                LifecycleSignal::Failure,
+                materialized,
+                source_path,
+                repo_root,
+                term,
+                effect_engine,
+                err,
+            );
+        }
+        // Stack stayed success/blocked: emit only the top-level comm (the
+        // stack already ran) and record this signal as terminal.
+        emit_lifecycle_top_level_only(
+            guard,
+            signal,
+            materialized,
+            source_path,
+            repo_root,
+            term,
+            effect_engine,
+            err,
+        );
+        return outcome;
+    }
+    run_lifecycle_event(
+        guard,
+        signal,
+        materialized,
+        source_path,
+        repo_root,
+        term,
+        effect_engine,
+        err,
+    )
+}
+
+/// Record `signal` as the terminal signal and emit only its top-level
+/// communication properties (no stack).
+///
+/// Used by [`execute_terminal_event`] after a success/blocked stack has already
+/// run once: this fires the communication surface without re-running the stack.
+/// If the terminal slot was already taken (another terminal signal won),
+/// nothing is emitted.
+#[allow(clippy::too_many_arguments)]
+fn emit_lifecycle_top_level_only(
+    guard: &mut claudine::composition::LifecycleRunGuard<'_>,
+    signal: LifecycleSignal,
+    materialized: &MaterializedHarnessPrompt,
+    source_path: &Path,
+    repo_root: Option<&Path>,
+    term: &Terminal,
+    effect_engine: &EffectEngine,
+    err: Option<&LifecycleErrorInfo>,
+) {
+    if !guard.record_event_emission(signal) {
+        return;
+    }
+    let ctx = build_lifecycle_stack_context_for_materialized(
+        signal,
+        materialized,
+        source_path,
+        repo_root,
+        term,
+        guard.emitter(),
+        guard.context().settings,
+        guard.context().messaging,
+        effect_engine,
+        err,
+    );
+    ctx.emit_top_level_for_signal(guard.config());
+}
+
+/// Run one lifecycle event (top-level + stack), recording emission state in
+/// `guard` and returning the event outcome.
+///
+/// The helper is careful to release the mutable borrow used for state recording
+/// before building the [`StackExecutionContext`] that immutably borrows the
+/// guard's emitter.
+#[allow(clippy::too_many_arguments)]
+fn run_lifecycle_event(
+    guard: &mut claudine::composition::LifecycleRunGuard<'_>,
+    signal: LifecycleSignal,
+    materialized: &MaterializedHarnessPrompt,
+    source_path: &Path,
+    repo_root: Option<&Path>,
+    term: &Terminal,
+    effect_engine: &EffectEngine,
+    err: Option<&LifecycleErrorInfo>,
+) -> LifecycleEventOutcome {
+    if !guard.record_event_emission(signal) {
+        return LifecycleEventOutcome::default();
+    }
+    let ctx = build_lifecycle_stack_context_for_materialized(
+        signal,
+        materialized,
+        source_path,
+        repo_root,
+        term,
+        guard.emitter(),
+        guard.context().settings,
+        guard.context().messaging,
+        effect_engine,
+        err,
+    );
+    guard.run_event_stack(signal, &ctx)
+}
+
+/// Run only the stack for `signal` (no top-level communication).
+///
+/// Used to preview success/blocked stacks for explicit `Error` control actions
+/// before committing to the terminal signal.
+#[allow(clippy::too_many_arguments)]
+fn run_lifecycle_stack_only(
+    guard: &claudine::composition::LifecycleRunGuard<'_>,
+    signal: LifecycleSignal,
+    materialized: &MaterializedHarnessPrompt,
+    source_path: &Path,
+    repo_root: Option<&Path>,
+    term: &Terminal,
+    effect_engine: &EffectEngine,
+    err: Option<&LifecycleErrorInfo>,
+) -> LifecycleEventOutcome {
+    let ctx = build_lifecycle_stack_context_for_materialized(
+        signal,
+        materialized,
+        source_path,
+        repo_root,
+        term,
+        guard.emitter(),
+        guard.context().settings,
+        guard.context().messaging,
+        effect_engine,
+        err,
+    );
+    ctx.execute_stack_for_signal(guard.config())
+}
+
+/// Build a stack context from a materialized prompt and guard-derived routes.
+#[allow(clippy::too_many_arguments)]
+fn build_lifecycle_stack_context_for_materialized<'a>(
+    signal: LifecycleSignal,
+    materialized: &'a MaterializedHarnessPrompt,
+    source_path: &'a Path,
+    repo_root: Option<&'a Path>,
+    term: &'a Terminal,
+    emitter: &'a dyn claudine::composition::LifecycleEmitter,
+    settings: &'a claudine::events::GlobalSettings,
+    messaging: &'a claudine::messaging::RuntimeMessagingSettings,
+    effect_engine: &'a EffectEngine,
+    err: Option<&'a LifecycleErrorInfo>,
+) -> StackExecutionContext<'a> {
+    static EMPTY_FRONTMATTER: std::sync::OnceLock<serde_json::Map<String, serde_json::Value>> =
+        std::sync::OnceLock::new();
+    let fm_map = materialized
+        .frontmatter
+        .as_object()
+        .unwrap_or_else(|| EMPTY_FRONTMATTER.get_or_init(serde_json::Map::new));
+    let base_dir = source_path.parent().or(repo_root);
+    StackExecutionContext {
+        signal,
+        frontmatter: fm_map,
+        err,
+        timing: None,
+        current: None,
+        base_dir,
+        effect_engine,
+        shell_runner: &SystemShellRunner,
+        emitter,
+        term,
+        source_path,
+        repo_root,
+        messaging,
+        settings,
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
 #[allow(unused_assignments)]
@@ -42,9 +265,7 @@ pub(crate) fn run_harness_loop(
     dispatch_context: &HashMap<String, serde_json::Value>,
     initial_materialized: Option<MaterializedHarnessPrompt>,
     term: &Terminal,
-    lifecycle: &claudine::composition::LifecycleConfig,
-    lifecycle_ctx: &claudine::composition::LifecycleRuntimeContext<'_>,
-    lifecycle_emitter: &dyn claudine::composition::LifecycleEmitter,
+    lifecycle_guard: &mut claudine::composition::LifecycleRunGuard<'_>,
     // When `true`, every structured-stream attempt in the harness loop
     // emits the prompt-scoped timing header and — if the parsed plan
     // carries `timeout_warn` / `step_timeout_warn` — their fire-once
@@ -54,8 +275,11 @@ pub(crate) fn run_harness_loop(
     emit_prompt_timing: bool,
 ) -> Result<(i32, Option<crate::perf::AgentExecutionPerf>, Option<IterationSummarySignals>)> {
     const DEFAULT_MAX_RETRIES: u32 = 3;
-    let mut guard =
-        claudine::composition::LifecycleRunGuard::new(lifecycle, lifecycle_ctx, lifecycle_emitter);
+    let mutation_root = repo_root.unwrap_or(child_cwd).to_path_buf();
+    let effect_engine = EffectEngine::builder()
+        .mutation_root(&mutation_root)
+        .auto_rehash(false)
+        .build();
     let permission_probe = super::super::policy::WrapperHarnessPermissionProbe::new(
         provider,
         base_args.to_vec(),
@@ -91,8 +315,9 @@ pub(crate) fn run_harness_loop(
                 source_path = %prompt_state.source_path.display(),
             )
             .in_scope(|| materialize_harness_prompt(prompt_state, repo_root, child_cwd))
-            .map_err(|e| guard.emit_blocked_or_err(e))?
+            .map_err(|e| lifecycle_guard.emit_blocked_or_err(e))?
         };
+
         let resolve_ctx = harness_context.resolve_context();
         let plan = info_span!(
             "harness_plan_parse",
@@ -106,7 +331,7 @@ pub(crate) fn run_harness_loop(
                 &resolve_ctx,
             )
         })
-        .map_err(|e| guard.emit_blocked_or_err(e))?;
+        .map_err(|e| lifecycle_guard.emit_blocked_or_err(e))?;
 
         // Source-file existence reporting
         if show_checks {
@@ -123,7 +348,26 @@ pub(crate) fn run_harness_loop(
                     term,
                 );
             }
-            guard.emit_blocked_or_failure();
+            run_lifecycle_event(
+                lifecycle_guard,
+                LifecycleSignal::Blocked,
+                &materialized,
+                &prompt_state.source_path,
+                repo_root,
+                term,
+                &effect_engine,
+                None,
+            );
+            run_lifecycle_event(
+                lifecycle_guard,
+                LifecycleSignal::Finalize,
+                &materialized,
+                &prompt_state.source_path,
+                repo_root,
+                term,
+                &effect_engine,
+                None,
+            );
             return Err(eyre!(
                 "source file does not exist: {}",
                 prompt_state.source_path.display()
@@ -202,7 +446,26 @@ pub(crate) fn run_harness_loop(
                             term,
                         );
                     }
-                    guard.emit_blocked_or_failure();
+                    run_lifecycle_event(
+                        lifecycle_guard,
+                        LifecycleSignal::Blocked,
+                        &materialized,
+                        &prompt_state.source_path,
+                        repo_root,
+                        term,
+                        &effect_engine,
+                        None,
+                    );
+                    run_lifecycle_event(
+                        lifecycle_guard,
+                        LifecycleSignal::Finalize,
+                        &materialized,
+                        &prompt_state.source_path,
+                        repo_root,
+                        term,
+                        &effect_engine,
+                        None,
+                    );
                     return Err(eyre!(
                         "shell audit failed: {} denied directive(s) in source page",
                         source_failures.len()
@@ -241,7 +504,26 @@ pub(crate) fn run_harness_loop(
                     if show_checks {
                         claudine::harness::report::report_unhandled_failure(&msg, term);
                     }
-                    guard.emit_blocked_or_failure();
+                    run_lifecycle_event(
+                        lifecycle_guard,
+                        LifecycleSignal::Blocked,
+                        &materialized,
+                        &prompt_state.source_path,
+                        repo_root,
+                        term,
+                        &effect_engine,
+                        None,
+                    );
+                    run_lifecycle_event(
+                        lifecycle_guard,
+                        LifecycleSignal::Finalize,
+                        &materialized,
+                        &prompt_state.source_path,
+                        repo_root,
+                        term,
+                        &effect_engine,
+                        None,
+                    );
                     return Err(eyre!("shell audit failed"));
                 }
             }
@@ -310,12 +592,118 @@ pub(crate) fn run_harness_loop(
             if show_checks {
                 claudine::harness::report::report_unhandled_failure(&fail_msg, term);
             }
-            guard.emit_blocked_or_failure();
+            run_lifecycle_event(
+                lifecycle_guard,
+                LifecycleSignal::Blocked,
+                &materialized,
+                &prompt_state.source_path,
+                repo_root,
+                term,
+                &effect_engine,
+                None,
+            );
+            run_lifecycle_event(
+                lifecycle_guard,
+                LifecycleSignal::Finalize,
+                &materialized,
+                &prompt_state.source_path,
+                repo_root,
+                term,
+                &effect_engine,
+                None,
+            );
             return Err(eyre!("{fail_msg}"));
         }
 
         // Emit start lifecycle signal before the first provider launch.
-        guard.emit_start_once();
+        let start_outcome = run_lifecycle_event(
+            lifecycle_guard,
+            LifecycleSignal::Start,
+            &materialized,
+            &prompt_state.source_path,
+            repo_root,
+            term,
+            &effect_engine,
+            None,
+        );
+        if let Some(ref control) = start_outcome.control {
+            match control {
+                StackControl::Error { reason } => {
+                    run_lifecycle_event(
+                        lifecycle_guard,
+                        LifecycleSignal::Failure,
+                        &materialized,
+                        &prompt_state.source_path,
+                        repo_root,
+                        term,
+                        &effect_engine,
+                        None,
+                    );
+                    run_lifecycle_event(
+                        lifecycle_guard,
+                        LifecycleSignal::Finalize,
+                        &materialized,
+                        &prompt_state.source_path,
+                        repo_root,
+                        term,
+                        &effect_engine,
+                        None,
+                    );
+                    let msg = reason
+                        .clone()
+                        .unwrap_or_else(|| "lifecycle start error".to_string());
+                    return Err(eyre!(msg));
+                }
+                StackControl::Stop => {}
+                _ => {
+                    return Err(eyre!(
+                        "lifecycle control action {control:?} is not valid at start"
+                    ));
+                }
+            }
+        }
+        if start_outcome.routes_to_failure(LifecycleSignal::Start) {
+            let failure_ctx = start_outcome
+                .action_error
+                .as_ref()
+                .map(|e| build_lifecycle_stack_context_for_materialized(
+                    LifecycleSignal::Failure,
+                    &materialized,
+                    &prompt_state.source_path,
+                    repo_root,
+                    term,
+                    lifecycle_guard.emitter(),
+                    lifecycle_guard.context().settings,
+                    lifecycle_guard.context().messaging,
+                    &effect_engine,
+                    Some(e),
+                ));
+            if let Some(ctx) = failure_ctx.as_ref() {
+                lifecycle_guard.run_event_stack(LifecycleSignal::Failure, ctx);
+            } else {
+                run_lifecycle_event(
+                    lifecycle_guard,
+                    LifecycleSignal::Failure,
+                    &materialized,
+                    &prompt_state.source_path,
+                    repo_root,
+                    term,
+                    &effect_engine,
+                    None,
+                );
+            }
+            run_lifecycle_event(
+                lifecycle_guard,
+                LifecycleSignal::Finalize,
+                &materialized,
+                &prompt_state.source_path,
+                repo_root,
+                term,
+                &effect_engine,
+                start_outcome.action_error.as_ref(),
+            );
+            return Err(eyre!("lifecycle start failed"));
+        }
 
         let snapshot = info_span!(
             "harness_pre_snapshot",
@@ -399,7 +787,7 @@ pub(crate) fn run_harness_loop(
         // any post-spawn error — so the guard correctly classifies
         // subsequent failures as `Failure` rather than `Blocked`.
         if child_spawned {
-            guard.mark_provider_launched();
+            lifecycle_guard.mark_provider_launched();
         }
         let (outcome, perf, iteration_signals) = attempt_result?;
         if let Some(p) = perf {
@@ -430,7 +818,26 @@ pub(crate) fn run_harness_loop(
             // close: without this the wrapper would silently return 130
             // and the operator has no feedback that Claudine noticed.
             eprintln!("{}", crate::output::format_user_interrupt_status());
-            guard.emit_terminal(LifecycleSignal::Failure);
+            execute_terminal_event(
+                lifecycle_guard,
+                LifecycleSignal::Failure,
+                &materialized,
+                &prompt_state.source_path,
+                repo_root,
+                term,
+                &effect_engine,
+                None,
+            );
+            run_lifecycle_event(
+                lifecycle_guard,
+                LifecycleSignal::Finalize,
+                &materialized,
+                &prompt_state.source_path,
+                repo_root,
+                term,
+                &effect_engine,
+                None,
+            );
             terminal_signals = iteration_signals;
             return Ok((outcome.exit_code, harness_perf, terminal_signals));
         }
@@ -482,7 +889,26 @@ pub(crate) fn run_harness_loop(
             if show_checks {
                 claudine::harness::report::report_unhandled_failure(&message, term);
             }
-            guard.emit_terminal(LifecycleSignal::Failure);
+            execute_terminal_event(
+                lifecycle_guard,
+                LifecycleSignal::Failure,
+                &materialized,
+                &prompt_state.source_path,
+                repo_root,
+                term,
+                &effect_engine,
+                None,
+            );
+            run_lifecycle_event(
+                lifecycle_guard,
+                LifecycleSignal::Finalize,
+                &materialized,
+                &prompt_state.source_path,
+                repo_root,
+                term,
+                &effect_engine,
+                None,
+            );
             // For provider-level failures, preserve the exit code at the
             // boundary rather than converting it into an `eyre` error. This
             // lets callers (e.g. `compose --loop`) inspect the terminal
@@ -543,7 +969,26 @@ pub(crate) fn run_harness_loop(
             if show_checks {
                 claudine::harness::report::report_unhandled_failure(&fail_msg, term);
             }
-            guard.emit_terminal(LifecycleSignal::Failure);
+            execute_terminal_event(
+                lifecycle_guard,
+                LifecycleSignal::Failure,
+                &materialized,
+                &prompt_state.source_path,
+                repo_root,
+                term,
+                &effect_engine,
+                None,
+            );
+            run_lifecycle_event(
+                lifecycle_guard,
+                LifecycleSignal::Finalize,
+                &materialized,
+                &prompt_state.source_path,
+                repo_root,
+                term,
+                &effect_engine,
+                None,
+            );
             return Err(eyre!("{fail_msg}"));
         }
 
@@ -573,7 +1018,26 @@ pub(crate) fn run_harness_loop(
         }
 
         if post_report.all_passed() {
-            guard.emit_terminal(LifecycleSignal::Success);
+            execute_terminal_event(
+                lifecycle_guard,
+                LifecycleSignal::Success,
+                &materialized,
+                &prompt_state.source_path,
+                repo_root,
+                term,
+                &effect_engine,
+                None,
+            );
+            run_lifecycle_event(
+                lifecycle_guard,
+                LifecycleSignal::Finalize,
+                &materialized,
+                &prompt_state.source_path,
+                repo_root,
+                term,
+                &effect_engine,
+                None,
+            );
             terminal_signals = iteration_signals;
             return Ok((outcome.exit_code, harness_perf, terminal_signals));
         }
@@ -615,7 +1079,329 @@ pub(crate) fn run_harness_loop(
         if show_checks {
             claudine::harness::report::report_unhandled_failure(&fail_msg, term);
         }
-        guard.emit_terminal(LifecycleSignal::Failure);
+        execute_terminal_event(
+            lifecycle_guard,
+            LifecycleSignal::Failure,
+            &materialized,
+            &prompt_state.source_path,
+            repo_root,
+            term,
+            &effect_engine,
+            None,
+        );
+        run_lifecycle_event(
+            lifecycle_guard,
+            LifecycleSignal::Finalize,
+            &materialized,
+            &prompt_state.source_path,
+            repo_root,
+            term,
+            &effect_engine,
+            None,
+        );
         return Err(eyre!("{fail_msg}"));
+    }
+}
+
+#[cfg(test)]
+mod terminal_event_tests {
+    use super::*;
+    use claudine::composition::{
+        LifecycleConfig, LifecycleEmitter, LifecycleRunGuard, LifecycleRuntimeContext,
+        parse_lifecycle_config,
+    };
+    use claudine::events::GlobalSettings;
+    use claudine::messaging::RuntimeMessagingSettings;
+    use std::sync::Mutex;
+
+    /// One emitted top-level communication, recorded by [`RecordingEmitter`].
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum Emitted {
+        Stderr(LifecycleSignal, String),
+        Message(String),
+        Speech(String),
+    }
+
+    /// Lifecycle emitter test double that records every emission.
+    #[derive(Default)]
+    struct RecordingEmitter {
+        events: Mutex<Vec<Emitted>>,
+    }
+
+    impl RecordingEmitter {
+        fn events(&self) -> Vec<Emitted> {
+            self.events.lock().unwrap().clone()
+        }
+    }
+
+    impl LifecycleEmitter for RecordingEmitter {
+        fn emit_stderr(&self, signal: LifecycleSignal, text: &str, _term: &Terminal) {
+            self.events
+                .lock()
+                .unwrap()
+                .push(Emitted::Stderr(signal, text.to_string()));
+        }
+        fn emit_message(
+            &self,
+            text: &str,
+            _source_path: &Path,
+            _repo_root: Option<&Path>,
+            _messaging: &RuntimeMessagingSettings,
+        ) {
+            self.events
+                .lock()
+                .unwrap()
+                .push(Emitted::Message(text.to_string()));
+        }
+        fn emit_speech(&self, text: &str, _config: biscuit_speaks::TtsConfig) {
+            self.events
+                .lock()
+                .unwrap()
+                .push(Emitted::Speech(text.to_string()));
+        }
+        fn emit_effect(&self, _name: &str) {}
+        fn emit_notification(&self, _title: &str) {}
+    }
+
+    fn materialized(frontmatter: serde_json::Value) -> MaterializedHarnessPrompt {
+        MaterializedHarnessPrompt {
+            frontmatter,
+            prompt: String::new(),
+            env_overrides: Vec::new(),
+            inline_closure_plan: None,
+        }
+    }
+
+    /// Number of lines a stack's `append_line` side effect wrote — i.e. the
+    /// number of times the stack actually executed its side effects.
+    fn line_count(path: &Path) -> usize {
+        std::fs::read_to_string(path)
+            .map(|s| s.lines().count())
+            .unwrap_or(0)
+    }
+
+    struct Fixture {
+        _dir: tempfile::TempDir,
+        log_path: PathBuf,
+        config: LifecycleConfig,
+        settings: GlobalSettings,
+        messaging: RuntimeMessagingSettings,
+        term: Terminal,
+        source_path: PathBuf,
+        materialized: MaterializedHarnessPrompt,
+    }
+
+    use std::path::PathBuf;
+
+    /// Build a fixture whose `success` and `blocked` stacks each append one
+    /// line to `events.log` (a side-effect counter) and carry a top-level
+    /// `stderr` communication. When `with_error` is set, the named event's
+    /// stack ends in `error('downgraded')` so it routes to `failure`.
+    fn fixture(frontmatter: serde_json::Value) -> Fixture {
+        let dir = tempfile::tempdir().unwrap();
+        let source_path = dir.path().join("prompt.md");
+        let log_path = dir.path().join("events.log");
+        let config = parse_lifecycle_config(&frontmatter, &source_path).unwrap();
+        Fixture {
+            _dir: dir,
+            log_path,
+            config,
+            settings: GlobalSettings::default(),
+            messaging: RuntimeMessagingSettings {
+                user: None,
+                repo: None,
+            },
+            term: Terminal::default(),
+            source_path,
+            materialized: materialized(frontmatter),
+        }
+    }
+
+    fn engine(root: &Path) -> EffectEngine {
+        EffectEngine::builder()
+            .mutation_root(root)
+            .auto_rehash(false)
+            .build()
+    }
+
+    #[test]
+    fn success_stack_side_effects_run_exactly_once() {
+        let fx = fixture(serde_json::json!({
+            "success": {
+                "stderr": "succeeded",
+                "stack": [{"action": "append_line('events.log', 'ran')"}]
+            }
+        }));
+        let emitter = RecordingEmitter::default();
+        let ctx = LifecycleRuntimeContext {
+            settings: &fx.settings,
+            messaging: &fx.messaging,
+            term: &fx.term,
+            source_path: &fx.source_path,
+            repo_root: Some(fx._dir.path()),
+        };
+        let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
+        guard.mark_provider_launched();
+        let eng = engine(fx._dir.path());
+
+        let outcome = execute_terminal_event(
+            &mut guard,
+            LifecycleSignal::Success,
+            &fx.materialized,
+            &fx.source_path,
+            Some(fx._dir.path()),
+            &fx.term,
+            &eng,
+            None,
+        );
+
+        assert!(outcome.control.is_none());
+        // The stack's side effect fired exactly once (was twice before the fix).
+        assert_eq!(line_count(&fx.log_path), 1, "stack ran exactly once");
+        // Top-level success communication fired (the stack stayed success).
+        assert_eq!(
+            emitter.events(),
+            vec![Emitted::Stderr(LifecycleSignal::Success, "succeeded".to_string())]
+        );
+        assert_eq!(guard.terminal_signal(), Some(LifecycleSignal::Success));
+    }
+
+    #[test]
+    fn success_stack_error_routes_to_failure_runs_once_and_skips_success_comm() {
+        let fx = fixture(serde_json::json!({
+            "success": {
+                "stderr": "succeeded",
+                "stack": [{"action": ["append_line('events.log', 'ran')", "error('downgraded')"]}]
+            },
+            "failure": {
+                "stderr": "failed",
+                "stack": [{"action": "append_line('events.log', 'failure-ran')"}]
+            }
+        }));
+        let emitter = RecordingEmitter::default();
+        let ctx = LifecycleRuntimeContext {
+            settings: &fx.settings,
+            messaging: &fx.messaging,
+            term: &fx.term,
+            source_path: &fx.source_path,
+            repo_root: Some(fx._dir.path()),
+        };
+        let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
+        guard.mark_provider_launched();
+        let eng = engine(fx._dir.path());
+
+        let outcome = execute_terminal_event(
+            &mut guard,
+            LifecycleSignal::Success,
+            &fx.materialized,
+            &fx.source_path,
+            Some(fx._dir.path()),
+            &fx.term,
+            &eng,
+            None,
+        );
+
+        // Outcome reflects the failure event's run (no Error control surviving).
+        assert!(outcome.control.is_none());
+        // Success stack ran once (append + error), failure stack ran once.
+        let lines = std::fs::read_to_string(&fx.log_path).unwrap();
+        assert_eq!(
+            lines.lines().collect::<Vec<_>>(),
+            vec!["ran", "failure-ran"],
+            "success stack and failure stack each ran exactly once"
+        );
+        // Failure top-level comm fired; success top-level comm did NOT.
+        assert_eq!(
+            emitter.events(),
+            vec![Emitted::Stderr(LifecycleSignal::Failure, "failed".to_string())]
+        );
+        // Guard recorded the downgraded terminal signal as Failure.
+        assert_eq!(guard.terminal_signal(), Some(LifecycleSignal::Failure));
+    }
+
+    #[test]
+    fn blocked_stack_side_effects_run_exactly_once() {
+        let fx = fixture(serde_json::json!({
+            "blocked": {
+                "stderr": "blocked",
+                "stack": [{"action": "append_line('events.log', 'ran')"}]
+            }
+        }));
+        let emitter = RecordingEmitter::default();
+        let ctx = LifecycleRuntimeContext {
+            settings: &fx.settings,
+            messaging: &fx.messaging,
+            term: &fx.term,
+            source_path: &fx.source_path,
+            repo_root: Some(fx._dir.path()),
+        };
+        let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
+        let eng = engine(fx._dir.path());
+
+        let outcome = execute_terminal_event(
+            &mut guard,
+            LifecycleSignal::Blocked,
+            &fx.materialized,
+            &fx.source_path,
+            Some(fx._dir.path()),
+            &fx.term,
+            &eng,
+            None,
+        );
+
+        assert!(outcome.control.is_none());
+        assert_eq!(line_count(&fx.log_path), 1, "blocked stack ran exactly once");
+        assert_eq!(
+            emitter.events(),
+            vec![Emitted::Stderr(LifecycleSignal::Blocked, "blocked".to_string())]
+        );
+        assert_eq!(guard.terminal_signal(), Some(LifecycleSignal::Blocked));
+    }
+
+    #[test]
+    fn blocked_stack_error_routes_to_failure_runs_once_and_skips_blocked_comm() {
+        let fx = fixture(serde_json::json!({
+            "blocked": {
+                "stderr": "blocked",
+                "stack": [{"action": ["append_line('events.log', 'ran')", "error('downgraded')"]}]
+            },
+            "failure": {
+                "stderr": "failed",
+                "stack": [{"action": "append_line('events.log', 'failure-ran')"}]
+            }
+        }));
+        let emitter = RecordingEmitter::default();
+        let ctx = LifecycleRuntimeContext {
+            settings: &fx.settings,
+            messaging: &fx.messaging,
+            term: &fx.term,
+            source_path: &fx.source_path,
+            repo_root: Some(fx._dir.path()),
+        };
+        let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
+        let eng = engine(fx._dir.path());
+
+        execute_terminal_event(
+            &mut guard,
+            LifecycleSignal::Blocked,
+            &fx.materialized,
+            &fx.source_path,
+            Some(fx._dir.path()),
+            &fx.term,
+            &eng,
+            None,
+        );
+
+        let lines = std::fs::read_to_string(&fx.log_path).unwrap();
+        assert_eq!(
+            lines.lines().collect::<Vec<_>>(),
+            vec!["ran", "failure-ran"],
+            "blocked stack and failure stack each ran exactly once"
+        );
+        assert_eq!(
+            emitter.events(),
+            vec![Emitted::Stderr(LifecycleSignal::Failure, "failed".to_string())]
+        );
+        assert_eq!(guard.terminal_signal(), Some(LifecycleSignal::Failure));
     }
 }

@@ -291,6 +291,8 @@ fn run_phase_1c_attempt(
             Some(&compose_options),
             None,
             &approval_options,
+            None,
+            None,
         )?;
         cumulative_approved.extend(template_preflight.approved_commands.iter().cloned());
 
@@ -359,6 +361,8 @@ fn run_phase_1c_attempt(
                 None,
                 Some(&harness_plan),
                 &approval_options,
+                None,
+                None,
             )
             .map_err(|e| eyre!("{e}"))?;
             cumulative_approved.extend(harness_preflight.approved_commands.iter().cloned());

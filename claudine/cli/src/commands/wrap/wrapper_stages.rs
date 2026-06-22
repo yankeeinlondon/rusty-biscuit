@@ -378,6 +378,8 @@ pub(crate) fn detect_wrapper_harness(
                 None,
                 Some(&plan),
                 &shell_options,
+                None,
+                None,
             )
             .map_err(|e| eyre!("{e}"))?;
 
@@ -456,6 +458,11 @@ pub(crate) fn run_execution_stage(
             repo_root: env_plan.repo_root.as_deref(),
         };
         let default_lifecycle_emitter = claudine::composition::DefaultLifecycleEmitter;
+        let mut lifecycle_guard = claudine::composition::LifecycleRunGuard::new(
+            &default_lifecycle,
+            &default_lifecycle_ctx,
+            &default_lifecycle_emitter,
+        );
 
         let (harness_code, harness_perf, _harness_signals) = harness_orch::run_harness_loop(
             provider,
@@ -482,9 +489,7 @@ pub(crate) fn run_execution_stage(
             dispatch_context,
             Some(initial_materialized),
             term,
-            &default_lifecycle,
-            &default_lifecycle_ctx,
-            &default_lifecycle_emitter,
+            &mut lifecycle_guard,
             true,
         )?;
         if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {
