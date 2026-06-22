@@ -944,43 +944,98 @@ fn tts_config_from_settings(tts: Option<&TtsSettings>) -> TtsConfig {
     config
 }
 
-/// Play a sound effect synchronously (blocking).
-fn play_effect_blocking(name: &str) {
-    let Some(effect) = playa::SoundEffect::from_name(name) else {
-        warn!(%name, "Unknown sound effect in lifecycle notification");
-        return;
-    };
-    match playa::Playa::from_bytes(effect.bytes().to_vec()) {
-        Ok(player) => {
-            if let Err(e) = player.play() {
-                warn!(%e, "Lifecycle sound effect playback failed");
-            }
+/// Maximum wall-clock time a single lifecycle TTS playback may block the
+/// composition thread before it is abandoned.
+///
+/// A wedged TTS provider (a stalled network voice, a contended audio device,
+/// a hung `say` subprocess) must never freeze a compose run — the danger is
+/// acute *between* loop iterations, where no child wait loop is installed and
+/// the Ctrl+C interrupt flag cannot reach a synchronous call. Generous enough
+/// for a long sentence, short enough that a hang can't wedge the run.
+const TTS_PLAYBACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Maximum wall-clock time a single lifecycle sound effect may block.
+const EFFECT_PLAYBACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Run a blocking side effect on a detached worker thread, bounding how long
+/// the caller waits for it.
+///
+/// Returns once the work finishes or `timeout` elapses, whichever comes first.
+/// On timeout the worker is detached (it may keep running harmlessly in the
+/// background) and a warning is logged. This is the lifecycle analogue of the
+/// wrapper's `join_with_timeout`: the only safe way to bound an arbitrary
+/// blocking call (subprocess wait, audio device, network voice) from outside
+/// is to stop waiting on it.
+fn run_blocking_with_timeout<F>(label: &'static str, timeout: std::time::Duration, work: F)
+where
+    F: FnOnce() + Send + 'static,
+{
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        work();
+        // A closed receiver (timed-out caller already moved on) is expected;
+        // the send is best-effort.
+        let _ = tx.send(());
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(()) => {}
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            warn!(
+                label,
+                ?timeout,
+                "lifecycle side effect exceeded its time budget; detaching and continuing"
+            );
         }
-        Err(e) => warn!(%e, "Failed to construct sound effect player"),
+        // The worker dropped its sender without signaling (e.g. it panicked).
+        // There is nothing left to wait for, and no timeout was breached.
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {}
     }
 }
 
-/// Speak text synchronously using the Tokio runtime.
-///
-/// Uses `block_in_place` to avoid panicking when called from within a
-/// Tokio async context (e.g. `#[tokio::main]`).
-fn say_blocking(text: &str, config: TtsConfig) {
-    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        let text = text.to_string();
-        tokio::task::block_in_place(|| {
-            handle.block_on(async move {
-                if let Err(e) = biscuit_speaks::Speak::new(text)
-                    .with_config(config)
-                    .play()
-                    .await
-                {
-                    warn!(%e, "Lifecycle TTS playback failed");
+/// Play a sound effect synchronously (blocking), bounded by
+/// [`EFFECT_PLAYBACK_TIMEOUT`].
+fn play_effect_blocking(name: &str) {
+    let name = name.to_string();
+    run_blocking_with_timeout("effect", EFFECT_PLAYBACK_TIMEOUT, move || {
+        let Some(effect) = playa::SoundEffect::from_name(&name) else {
+            warn!(%name, "Unknown sound effect in lifecycle notification");
+            return;
+        };
+        match playa::Playa::from_bytes(effect.bytes().to_vec()) {
+            Ok(player) => {
+                if let Err(e) = player.play() {
+                    warn!(%e, "Lifecycle sound effect playback failed");
                 }
-            });
-        });
-    } else {
+            }
+            Err(e) => warn!(%e, "Failed to construct sound effect player"),
+        }
+    });
+}
+
+/// Speak text using the Tokio runtime, bounded by [`TTS_PLAYBACK_TIMEOUT`].
+///
+/// The playback runs on a detached worker thread that drives the async
+/// `play()` future via the current runtime's `Handle` (cloned in before the
+/// thread is spawned, since `Handle::block_on` works from any thread). This
+/// both bounds the wait and avoids `block_in_place`, which would panic off a
+/// runtime worker thread.
+fn say_blocking(text: &str, config: TtsConfig) {
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
         warn!("No Tokio runtime available for lifecycle TTS");
-    }
+        return;
+    };
+    let text = text.to_string();
+    run_blocking_with_timeout("tts", TTS_PLAYBACK_TIMEOUT, move || {
+        handle.block_on(async move {
+            if let Err(e) = biscuit_speaks::Speak::new(text)
+                .with_config(config)
+                .play()
+                .await
+            {
+                warn!(%e, "Lifecycle TTS playback failed");
+            }
+        });
+    });
 }
 
 /// Emit a lifecycle signal with deterministic audio ordering.
@@ -1055,6 +1110,51 @@ mod tests {
 
     fn dummy_path() -> &'static Path {
         Path::new("test.md")
+    }
+
+    /// A blocking lifecycle side effect that wedges (never returns) must not
+    /// be able to freeze the composition thread: `run_blocking_with_timeout`
+    /// has to return after roughly its budget, not after the work finishes.
+    /// This is the core of fix #1 — a hung TTS / sound provider between loop
+    /// iterations used to lock the run with no way for Ctrl+C to break in.
+    #[test]
+    fn run_blocking_with_timeout_returns_when_work_hangs() {
+        use std::time::{Duration, Instant};
+
+        let start = Instant::now();
+        run_blocking_with_timeout("test-hang", Duration::from_millis(100), || {
+            // Simulate a wedged audio device / network voice.
+            std::thread::sleep(Duration::from_secs(30));
+        });
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "must abandon the wedged side effect near the 100ms budget, \
+             not wait out the 30s sleep; took {elapsed:?}"
+        );
+    }
+
+    /// The happy path must still run the work to completion and return its
+    /// result — bounding the wait must not turn into fire-and-forget for work
+    /// that finishes within budget.
+    #[test]
+    fn run_blocking_with_timeout_runs_work_to_completion_within_budget() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::time::Duration;
+
+        let done = Arc::new(AtomicBool::new(false));
+        let done_clone = Arc::clone(&done);
+        run_blocking_with_timeout("test-quick", Duration::from_secs(5), move || {
+            std::thread::sleep(Duration::from_millis(20));
+            done_clone.store(true, Ordering::SeqCst);
+        });
+
+        assert!(
+            done.load(Ordering::SeqCst),
+            "work that finishes within budget must complete before the call returns"
+        );
     }
 
     #[test]
