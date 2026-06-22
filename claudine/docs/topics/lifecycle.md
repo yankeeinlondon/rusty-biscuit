@@ -1,17 +1,22 @@
 # Composition Lifecycle Notifications
 
-Claudine compositions support **lifecycle notifications** declared in Markdown frontmatter. These notifications emit side effects—TTS speech, sound effects, terminal messages, and outbound messaging—at four key moments during a composition run.
+Claudine compositions support **lifecycle notifications** declared in Markdown frontmatter. These notifications emit side effects—TTS speech, sound effects, terminal messages, and outbound messaging—at key moments during a composition run.
 
 ## Lifecycle Properties
 
-Four frontmatter properties control lifecycle behavior. Each accepts an object with notification fields:
+Seven frontmatter properties control lifecycle behavior. Each accepts an object with notification fields and an optional ordered `stack:` of actions:
 
 | Property | Emitted when |
 |----------|-------------|
-| `start` | Composition begins |
-| `success` | Composition completes successfully |
-| `blocked` | Composition exits before the provider child is spawned (e.g., pre-flight denial, user cancellation) |
-| `failure` | Composition exits after the provider child is spawned (e.g., provider error, crash) |
+| `initialize` | Prompt file has been identified and frontmatter has parsed, before schema validation and shell pre-flight |
+| `start` | Pre-flight checks have passed; immediately before provider invocation |
+| `success` | The provider session completed without error |
+| `blocked` | Composition exited before the provider child was spawned (e.g., pre-flight denial, schema validation failure) |
+| `failure` | The provider session exited with an error |
+| `finalize` | Once per iteration, immediately after `success`/`blocked`/`failure` |
+| `loop` | Post-`finalize` gate that evaluates the loop's `while`/`until` condition and can run additional lifecycle concerns |
+
+Legacy prompts that only configure `start`, `success`, `blocked`, and `failure` continue to work unchanged.
 
 ## Notification Fields
 
@@ -25,6 +30,11 @@ Each lifecycle property is an object containing any of these fields:
 | `message` | string | Message dispatched via the configured messaging route (Discord, Slack, Signal, WhatsApp, or webhooks). |
 | `notify` | string | Local desktop notification title. Zero-config; does not require a messaging route. |
 | `stderr` | string | Styled status line written to stderr. |
+| `info` | string | Status line rendered with an info style. |
+| `warn` | string | Status line rendered with a warning style. |
+| `stack` | list | Ordered list of conditional actions (see [Stacks](#stacks)). |
+
+Lifecycle output is intentionally written to stderr, messaging routes, or desktop notifications only. There is **no `stdout` lifecycle channel** because stdout is reserved for pipeable command output.
 
 ### Audio Ordering
 
@@ -34,6 +44,185 @@ When both speech and an effect are configured, the order depends on which speech
 - `say_first` + `effect` → **speech first, then effect**
 
 This lets you choose whether a sound effect acts as an introduction (`say_first`) or a conclusion (`say`) to the spoken message.
+
+## Stacks
+
+A `stack` is an ordered list of conditional actions executed after the top-level notification fields. Each stack item can include:
+
+- `when` — an optional Darkmatter condition expression. Omitted means the item always runs.
+- `action` — a single action or a list of actions.
+- `no_error` — when `true`, an errored action is logged but does not stop the stack or change the composition outcome.
+
+```yaml
+success:
+  stack:
+    - when: "env.SEND_MESSAGE == 'true'"
+      action: message("Build passed on main")
+    - action: [say("Done"), effect("confirmation")]
+```
+
+Actions run in order. The first lifecycle control action (`skip`, `stop`, `error`, etc.) terminates the stack for that event.
+
+### Action Forms
+
+Actions can be written in short form or long form.
+
+**Short form:** `verb(args)`
+
+```yaml
+success:
+  stack:
+    - action: say('All done')
+    - action: effect('confirmation')
+    - action: shell('git tag release-{{version}}')
+```
+
+Arguments are Darkmatter expressions. Multi-word strings must be quoted:
+
+```yaml
+success:
+  stack:
+    - action: say('hello world')  # ok
+    # - action: say(hello world)  # ERROR: unquoted multi-word literal
+```
+
+**Long form:** an object with an `action` verb key plus named parameters.
+
+```yaml
+success:
+  stack:
+    - action: shell
+      command: "git push origin HEAD"
+      on_error: "push failed"
+      no_error: true
+    - action: message
+      message: "Deployed {{version}}"
+      route: "deployments"
+```
+
+When `action` is a scalar string, sibling keys are the action's parameters. When `action` is an array, each element is self-contained and sibling parameters are not allowed.
+
+### Control Actions
+
+Lifecycle control actions terminate the current event's stack and influence runtime flow:
+
+| Action | Valid in | Effect |
+|--------|----------|--------|
+| `stop` | every event | End this event's stack cleanly; composition continues with the current outcome |
+| `skip` | `initialize` only | Whole-document opt-out: no provider invocation, no `finalize`, no `loop` |
+| `error("reason")` | every event | Mark this event as failed; at `success`/`finalize` it converts success to failure |
+| `proxy("@other.md")` | `initialize`, `blocked`, `failure` | Hand off to another prompt document (currently unsupported; raises a typed error) |
+| `retry(N)` | `blocked`, `failure` | Retry the current prompt N additional times |
+| `resume("message")` | `failure` only | Resume the agent session with a follow-up message |
+| `requeue("5m")` | `blocked`, `failure` | Push this prompt onto the deferred-execution queue (unsupported without a queue integration) |
+
+At most one control action may appear in a stack item, and it must be the last action.
+
+### Shell Actions
+
+The `shell` action runs an approved shell command. Commands are collected during pre-flight shell approval alongside `::shell` directives and `$(...)` frontmatter expressions.
+
+```yaml
+start:
+  stack:
+    - action: shell
+      command: "npm run typecheck"
+      on_error: "typecheck failed"
+```
+
+A non-zero exit code is an action error unless `no_error: true` is set.
+
+### Side-Effect Actions
+
+Any Darkmatter side-effect verb can be invoked by name:
+
+```yaml
+start:
+  stack:
+    - action: set_frontmatter('state.md', 'status', 'in-progress')
+success:
+  stack:
+    - action: set_frontmatter('state.md', 'status', 'done')
+```
+
+Long-form side-effect actions accept named parameters that are reordered into the verb's positional signature:
+
+```yaml
+success:
+  stack:
+    - action: http_post
+      url: "https://example.com/hook"
+      body: "{{payload}}"
+```
+
+### Expression-Function Actions
+
+Any Darkmatter read-only expression function can be invoked for its result. The result is logged in the lifecycle/status style.
+
+```yaml
+start:
+  stack:
+    - action: file_exists('@docs/plan.md')
+```
+
+### `no_error`
+
+The `no_error` flag can be set on any action category. When `true`, an unintentional action error is logged but does not stop the stack or change the composition outcome.
+
+```yaml
+start:
+  stack:
+    - action: shell
+      command: "git status --short"
+      no_error: true
+    - action: info('continuing')
+```
+
+## Lifecycle Context
+
+Stack expressions have access to three lifecycle-only globals in addition to frontmatter, `ctx.*`, `env.*`, and `doc.*`:
+
+| Global | Available in | Fields |
+|--------|--------------|--------|
+| `err` | `blocked`, `failure`, `finalize` | `kind`, `variant`, `msg` |
+| `timing` | every event | `document_ms`, `total_ms`, `step_ms` (all optional) |
+| `current` | every event | `current.ctx.*`, `current.env.*` (lazy snapshots at event time) |
+
+`err` is only meaningful in events that can carry an error. Using bare `err` (or `err.*`) in `initialize`, `start`, `success`, or `loop` is rejected at parse time.
+
+```yaml
+failure:
+  stack:
+    - when: "err.variant == 'ShellCommandDenied'"
+      action: notify("Shell command was denied")
+```
+
+### `doc.err` Escape Hatch
+
+A frontmatter property literally named `err` can still be reached through the `doc` namespace. This is the only way to reference an `err` value in no-error events.
+
+```yaml
+err: "user-configured reason"
+start:
+  stack:
+    - action: stderr('{{doc.err}}')
+```
+
+## Loop Gate Concerns
+
+The `loop` property carries both iteration controls (`while`/`until`, `action`/`actions`, `max`, `fail_fast`) and lifecycle concerns (`say`, `stack`, etc.). Lifecycle concerns inside `loop` fire on every gate pass, including the terminal pass that exits the loop.
+
+```yaml
+loop:
+  while: "iteration < max_iterations"
+  actions:
+    - increment(iteration)
+  stderr: "checking loop condition"
+  stack:
+    - action: info('loop gate reached')
+```
+
+Loop execution runs `initialize` once at the start, then re-enters each iteration at `start` without re-running `initialize`, schema validation, or shell pre-flight. `success`, `failure`, and `finalize` fire once per iteration. The loop condition is evaluated **after** lifecycle concerns and **before** per-iteration mutations are applied.
 
 ## Examples
 
@@ -64,46 +253,72 @@ failure:
 ---
 ```
 
-### Speech before effect
+### Initialize and finalize
 
 ```yaml
 ---
+initialize:
+  stderr: "Setting up workspace"
+start:
+  stderr: "Running agent"
 success:
-  say_first: "All done"
-  effect: "confirmation"
+  stderr: "Agent finished"
+finalize:
+  stderr: "Cleaning up"
 ---
 ```
 
-This speaks "All done" and then plays the confirmation sound.
-
-### Messaging integration
+### Conditional stack with `err`
 
 ```yaml
 ---
-success:
-  message: "Build passed on main"
 failure:
-  message: "Build failed on main"
-  say: "The build has failed"
+  stack:
+    - when: "err.kind == 'CompositionError'"
+      action: notify("Composition failed")
+    - action: say('Something went wrong')
 ---
 ```
 
-The `message` field dispatches through the messaging system configured in `claudine.toml` (see [Configuring Actions](configuring-actions.md)).
-
-### Concurrent message and desktop notification
+### Short-form expression arguments
 
 ```yaml
 ---
-success:
-  message: "Production deployment finished"
-  notify: "Deployment Successful"
-failure:
-  message: "Production deployment failed"
-  notify: "Deployment Failed"
+start:
+  stack:
+    - action: info('running {{agent}}')
+    - action: shell('git fetch origin {{branch}}')
 ---
 ```
 
-The `message` field sends a remote message through the active messaging route, while `notify` emits a local desktop notification. Both are independent and non-fatal. Desktop notifications are zero-config and do not appear in `claudine config`.
+### `no_error` shell action
+
+```yaml
+---
+start:
+  stack:
+    - action: shell
+      command: "which optional-tool"
+      no_error: true
+    - action: info('continuing')
+---
+```
+
+### Loop lifecycle concerns
+
+```yaml
+---
+iteration: 1
+max_iterations: 3
+loop:
+  while: "iteration <= max_iterations"
+  actions:
+    - increment(iteration)
+  stderr: "loop gate"
+  stack:
+    - action: info('iteration {{_loop_count}}')
+---
+```
 
 ## Sound Effects
 
@@ -141,10 +356,13 @@ Claudine uses a `LifecycleRunGuard` to enforce correct state transitions and gua
 
 | Signal | Terminal Status | stderr Style |
 |--------|----------------|--------------|
+| `Initialize` | Non-terminal | Info |
 | `Start` | Non-terminal | Info |
 | `Success` | Terminal | Success |
 | `Blocked` | Terminal | Error |
 | `Failure` | Terminal | Error |
+| `Finalize` | Non-terminal | Info |
+| `Loop` | Non-terminal | Info |
 
 ### Drop Safety-Net
 
@@ -162,10 +380,13 @@ This ensures compositions that panic or exit unexpectedly still report a termina
 
 Code using the guard can:
 
+- Call `emit_initialize_once()` to emit `initialize` (idempotent; fires exactly once across a loop run)
 - Call `emit_start_once()` to emit `start` (idempotent)
 - Call `mark_provider_launched()` after the provider child spawns
 - Call `emit_terminal(signal)` to emit a terminal signal and suppress the drop safety-net
 - Call `emit_blocked_or_failure()` to emit `Blocked` (pre-launch) or `Failure` (post-launch)
+- Call `emit_finalize_once()` to emit `finalize` once after a terminal signal
+- Call `reset_for_next_iteration()` to reset per-iteration state for the next loop iteration
 - Call `defuse()` to suppress the drop safety-net without emitting anything
 
 ## Validation
@@ -201,6 +422,43 @@ start:
   unknown_field: "value"  # ERROR: unknown field
 ```
 
+### `LifecycleInterpolationLeak`
+
+A rendered lifecycle string still contains a `{{ … }}` span after composition. This guards against unresolved template syntax reaching user-visible side effects.
+
+```yaml
+success:
+  stderr: "Done: {{missing_var}}"  # ERROR: interpolation leaked
+```
+
+### `LifecycleUndefinedVariable`
+
+A lifecycle string references a bare variable that is undefined after composition. Darkmatter resolves unknown bare variables to an empty string silently, so this guard inspects raw lifecycle strings before composition.
+
+```yaml
+success:
+  stderr: "Done: {{undefined_key}}"  # ERROR: undefined variable
+```
+
+### `LifecycleErrNotAvailable`
+
+A bare `err` reference appears in an event that never carries an error (`initialize`, `start`, `success`, `loop`).
+
+```yaml
+start:
+  stack:
+    - action: stderr('{{err.msg}}')  # ERROR: err not available in start
+```
+
+### `LifecycleStdoutRejected`
+
+A `stdout` field or `stdout(...)` action was authored. stdout is reserved for pipeable command output.
+
+```yaml
+start:
+  stdout: "hello"  # ERROR: stdout rejected
+```
+
 ### Empty String Normalization
 
 Empty strings and whitespace-only strings are normalized to `null`, so these are equivalent:
@@ -222,11 +480,12 @@ If the frontmatter is not an object (e.g., a bare string or list), lifecycle par
 - **TTS**: Uses the global TTS configuration from `claudine.toml` (voice, rate, provider). If no TTS settings are configured, uses system defaults.
 - **Messaging**: Requires a configured messaging route. See [Configuring Actions](configuring-actions.md).
 - **Desktop notifications**: Zero-config. Emitted via `notify` independently of messaging routes. Failures are non-fatal.
-- **stderr**: Rendered as a styled status badge using the terminal's capability detection (circular theme with color-coded state).
+- **stderr/info/warn**: Rendered as styled status badges using the terminal's capability detection (circular theme with color-coded state).
 - **Audio playback**: Blocking. Sound effects and TTS play sequentially, not in parallel, to avoid overlapping audio.
+- **No stdout channel**: Lifecycle chatter never writes to stdout so `claudine compose <file> | other-tool` remains unambiguous.
 
 ## Related Topics
 
-- [Composition](composition.md) — the five-stage composition pipeline
+- [Composition](composition.md) — the composition pipeline and loop behavior
 - [Configuring Actions](configuring-actions.md) — messaging routes and action configuration
 - [Non-Interactive Sessions](non-interactive-sessions.md) — stderr rendering and terminal output
