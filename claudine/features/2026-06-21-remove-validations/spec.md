@@ -1,6 +1,7 @@
 ---
-status: draft for review
+status: ready for planning and implementation
 depends_on: ../2026-05-12-lifecycle/spec.md
+reviewed: true
 ---
 
 # Retire the Harness Pre/Post Validation & Handler DSL
@@ -20,6 +21,12 @@ ships, so authors have exactly one way to gate a run and one way to recover from
 failure. It deliberately **keeps** the harness infrastructure the lifecycle model
 still depends on — shell audit, timeouts, runaway guards, and agent-failure
 classification.
+
+Reader note: this spec changes the current `.claude/skills/claudine/validations-and-handlers.md`
+contract on purpose. The existing validation/handler DSL is not being repaired or
+documented further; it is being replaced by lifecycle stacks after the lifecycle
+dependency lands. The removal must still leave compatibility diagnostics in
+place so old prompt files fail clearly.
 
 > This is a follow-up to the lifecycle feature, not a parallel one. It must not
 > land until the lifecycle `stack` model (and its `initialize`/`success`/
@@ -60,6 +67,13 @@ surfaces that are *not* part of the removed DSL:
 A `blocked` outcome after this change is produced by a shell-audit denial or a
 schema-validation failure — never by a removed `pre_checks` rule.
 
+The `timeout`, `timeout_warn`, `step_timeout`, and `step_timeout_warn`
+frontmatter keys are not pre-flight validation rules and must remain accepted.
+Their parse-time relational checks (`timeout_warn < timeout`,
+`step_timeout_warn < step_timeout`, and `step_timeout <= timeout` when both are
+set) stay intact because they are part of timeout configuration, not the removed
+validation DSL.
+
 ## Scope: Remove
 
 The following are removed (or reduced to whatever the kept surfaces still need).
@@ -75,6 +89,11 @@ Exact file boundaries are an implementation concern; this is the contract.
   generic handlers (`handle_timeout`, `handle_agent_failure`, …), the
   programmatic `handle:` command, and `deviate:`.
 
+Compatibility diagnostics must reject only the removed keys. The existing
+lifecycle notification keys (`start`, `blocked`, `success`, `failure`) and new
+lifecycle keys from the dependency (`initialize`, `finalize`, `loop`) continue
+to parse through lifecycle validation.
+
 ### Library surface (`claudine/lib/src/harness/`)
 
 - `validate/` (`compare.rs`, `fs.rs`, `git.rs`, `mod.rs`, `render.rs`) —
@@ -87,7 +106,9 @@ Exact file boundaries are an implementation concern; this is the contract.
   `HandlerTable` portions of `model.rs`.
 - `failure.rs`'s validation-specific taxonomy (`ValidationEvent` ~20 variants,
   `FailurePhase::{PreCheck, PostCheck}`, `ValidationFailure`) — to the extent it
-  is no longer referenced by the kept surfaces.
+  is no longer referenced by the kept surfaces. Do not remove the non-validation
+  attempt outcome and process-termination taxonomy needed by lifecycle failure
+  routing.
 - `resolve.rs` (document-centric path resolution for validation rules) — unless a
   kept surface still needs it.
 - The validation-specific four-section reporting in `report.rs`
@@ -105,6 +126,8 @@ Exact file boundaries are an implementation concern; this is the contract.
 - The `validation_reporter` PTY harness bin
   (`claudine/cli/src/bin/validation_reporter_pty_harness.rs`) and its fixture,
   unless re-pointed at lifecycle behavior.
+- Any CLI help, shell-completion, or frontmatter-completion metadata that
+  advertises `pre_checks`, `post_checks`, `handle_*`, `handle:`, or `deviate:`.
 
 ## Scope: Keep
 
@@ -123,6 +146,10 @@ on. They stay, possibly relocated, but are **not** removed:
   `ProcessTermination`, `FailureEvent`, `classify_failure`). The lifecycle router
   consumes this to decide `success` vs `failure`; only the *handler-based recovery*
   on top of it is removed.
+- **Lifecycle notification validation** — `LifecycleSayConflict`,
+  `LifecycleUnknownEffect`, `LifecycleInvalid`, the lifecycle interpolation leak
+  guard, and the lifecycle undefined-variable guard stay. These are not harness
+  validations; they protect the lifecycle surface that replaces the removed DSL.
 - **Speech helper** — `speech.rs` (`speak_when_able`), if still used by lifecycle
   communication actions.
 - **Inline-compose frontmatter restoration** — `composition/closure.rs`
@@ -191,6 +218,9 @@ DSL.
   recovery actions (`Retry`/`Resume`/`Requeue`/`Proxy`) must be live before the
   harness `resolve_handler` path is deleted, or agent-failure recovery regresses
   to "terminal failure, no retry."
+- **Compatibility gate:** before deletion, lifecycle parsing must own typed
+  diagnostics for the removed DSL keys. Removing parser support without this gate
+  would downgrade authored prompts to generic unknown-field errors.
 - **Proof step:** before deletion, port the one validation fixture
   (`validation_reporter/missing_file.md`) and any internal prompts to the
   lifecycle `stack` model and confirm equivalent behavior end-to-end.
@@ -204,6 +234,28 @@ DSL.
   document still declaring `pre_checks` / `post_checks` / handler keys after this
   change must produce a typed, actionable `CompositionError` pointing at the
   lifecycle equivalent — not a silent ignore and not an `unknown field` dump.
+- Add a new removed-DSL diagnostic variant rather than overloading
+  `LifecycleInvalid`. It should carry the source path, offending key, and the
+  recommended replacement surface. The frontmatter excerpt renderer should
+  highlight the removed key when stderr is a TTY, matching existing
+  frontmatter-rooted composition errors.
+- The removed-key scan must happen before generic lifecycle unknown-field
+  validation, and it must include:
+  - exact top-level keys: `pre_checks`, `post_checks`, `handle`, `deviate`
+  - handler-prefix keys: `handle_` followed by any non-empty suffix
+  This avoids accidentally rejecting lifecycle keys while still catching every
+  old handler form, including `handle_inline_response_empty` and
+  `handle_inline_body_unchanged`.
+- Suggested diagnostic mapping:
+
+  | Removed key | Replacement |
+  |-------------|-------------|
+  | `pre_checks` | `initialize` or `start` stack with `Error`, `Skip`, or `Proxy` |
+  | `post_checks` | `success` or `finalize` stack with `Error` |
+  | `handle_*` | `blocked` or `failure` recovery stack actions |
+  | `handle` | `blocked` or `failure` stack with a shell/action bridge |
+  | `deviate` | lifecycle stack shell action followed by `Retry`, `Resume`, `Requeue`, or `Proxy` |
+
 - Provide a short mapping table in the lifecycle/composition docs:
   `pre_checks` → `initialize`/`start` stack + `Error`/`Skip`/`Proxy`;
   `post_checks` → `success`/`finalize` stack + `Error`;
@@ -211,12 +263,19 @@ DSL.
 - Remove `harness`-validation references from the claudine skill docs
   (`validations-and-handlers.md`) and the composition topic doc, replacing them
   with lifecycle pointers.
+- Update the skill catalog docs after implementation. The current
+  `.claude/skills/claudine/SKILL.md` module map describes `harness` as "Typed
+  pre/post validations, timeouts, handler resolution, recovery actions"; that
+  summary must change to the kept harness responsibilities or the new lifecycle
+  owner after code is moved.
 
 ## Acceptance Criteria
 
 - No frontmatter key `pre_checks`, `post_checks`, `handle_*`, `handle:`, or
   `deviate:` is accepted; each yields a typed `CompositionError` naming the
   lifecycle replacement.
+- Removed-key errors include the frontmatter excerpt/highlight in TTY-capable
+  output and remain escape-free in non-color output.
 - `evaluate_pre_checks` / `evaluate_post_checks` / `capture_pre_run_snapshot` /
   `resolve_handler` and their call sites no longer exist in the wrap orchestration.
 - Shell audit, timeouts, runaway guards, schema validation, and agent-failure
@@ -227,22 +286,30 @@ DSL.
   end-to-end test.
 - The harness snapshot/diff (`capture_pre_run_snapshot`, `PreRunSnapshot`,
   `file_changed`/`file_unchanged`/`frontmatter_prop_changed`) is removed, and an
-  L2 test confirms `inline-compose` still reverts an agent-modified `prompt`
-  frontmatter property to its original value (closure path, unaffected).
+  end-to-end regression confirms `inline-compose` still reverts an
+  agent-modified `prompt` frontmatter property to its original value (closure
+  path, unaffected).
 - The `validation_reporter` bin/fixture is either removed or re-pointed at
   lifecycle behavior; the test suite is green with no dangling references.
-- Skill docs and the composition topic doc no longer describe the validation/
-  handler DSL.
+- Skill docs, CLI reference/help/completion metadata, `frontmatter-properties.md`,
+  `validations-and-handlers.md`, `pre-flight-checks.md`, and the composition
+  topic doc no longer describe the validation/handler DSL as an accepted surface.
 
 ## Test Strategy
 
 - **L1:** parser rejects the removed frontmatter keys with the typed,
-  did-you-mean `CompositionError`; kept surfaces (shell audit, timeout parsing,
-  failure classification) retain their existing unit coverage.
+  did-you-mean `CompositionError`; the diagnostic includes source path, key, and
+  replacement guidance. Add focused regression coverage for `pre_checks`,
+  `post_checks`, `handle`, `handle_timeout`, `handle_inline_body_unchanged`, and
+  `deviate`.
+- **L1:** kept surfaces retain coverage: shell audit over lifecycle stacks,
+  timeout parsing and timeout relational validation, lifecycle notification
+  validation, runaway/failure classification, and inline closure frontmatter
+  restoration.
 - **L2:** end-to-end wrap/compose run where (a) a shell-audit denial routes to
   `blocked`, (b) an agent failure recovers via a lifecycle `failure` `Retry`/
-  `Resume` action, and (c) an `inline-compose` run whose agent mutates the
-  `prompt` frontmatter property still reverts it to the original value (proving
-  the closure path is independent of the removed snapshot/diff).
+  `Resume` action, and (c) an `inline-compose` run through the CLI whose agent
+  mutates the `prompt` frontmatter property still reverts it to the original
+  value (proving the closure path is independent of the removed snapshot/diff).
 - **Regression sweep:** `rg` confirms no remaining references to the removed
   symbols across `claudine/lib`, `claudine/cli`, and docs.
