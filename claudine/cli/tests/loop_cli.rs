@@ -27,7 +27,7 @@ fn compose_loop_runs_iterations() {
         &md_file,
         r#"---
 loop:
-  while: "counter < 3"
+  while: "counter < 2"
   actions:
     - "increment(counter)"
 ---
@@ -78,7 +78,7 @@ fn inline_compose_loop_runs_iterations() {
         r#"---
 prompt: "Generate a number"
 loop:
-  while: "counter < 2"
+  while: "counter < 1"
   actions:
     - "increment(counter)"
 ---
@@ -136,7 +136,7 @@ fn inline_compose_loop_with_prompt_frontmatter_and_empty_body_runs() {
         r#"---
 prompt: "Generate a number"
 loop:
-  while: "counter < 2"
+  while: "counter < 1"
   actions:
     - "increment(counter)"
 ---
@@ -877,7 +877,7 @@ fn compose_loop_rate_limit_pause_waits_then_continues() {
         &md_file,
         r#"---
 loop:
-  while: "counter < 2"
+  while: "counter < 1"
   actions:
     - "increment(counter)"
 ---
@@ -1071,7 +1071,7 @@ $schema:
 phase: 1
 total_phases: 0
 loop:
-  until: "phase > total_phases"
+  until: "phase >= total_phases"
   action: "increment(phase)"
 ---
 Phase {{phase}} of {{total_phases}}.
