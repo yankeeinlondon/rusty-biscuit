@@ -1,5 +1,7 @@
 ---
 clarified: claude/opus-4-8
+reviewed: true
+status: ready for planning and implementation
 ---
 
 # Lifecycle Formalization for Claudine Prompts & Late Binding Context
@@ -12,14 +14,14 @@ four lifecycle events:
 - `start` and `blocked`
 - `success` and `failure`
 
-And at each of these stages of the lifecycle Claudine will take instructions on how the document author would like the prompt to communicate via the multiple messaging channels Claudine provides (TTS, Messaging App, Desktop Notification, and STDERR). 
+At each of these stages, Claudine accepts instructions for how the prompt should communicate through the channels Claudine provides: TTS, messaging apps, desktop notifications, and stderr.
 
 In this feature we will:
 
 - add additional lifecycle events
 - extend the number of lifecycle events we support
 - introduce the idea of _lazily loaded_ variables and shell execution
-- and increase the capabilities of a document author to effect what happens at each lifecycle event:
+- and increase the document author's ability to affect what happens at each lifecycle event:
     - you can still use the messaging features you're used to 
     - but you can also:
         - create side-effects (files, network messages, etc.)
@@ -31,13 +33,13 @@ In this feature we will:
 
 ![lifecycle](../../docs/getting-started/lifecycle.excalidraw.svg)
 
-A Claudine prompt document moves through a fixed set of lifecycle events. Today four of them exist as `LifecycleSignal` variants in `composition/lifecycle.rs` (`start`, `success`, `blocked`, `failure`), but they only support a handful of communication properties. This feature formalizes the full event set, introduces a unified per-event configuration model, and folds a pre-existing composition concerns (`loop`) into that model.
+A Claudine prompt document moves through a fixed set of **composition lifecycle signals**. These are not the provider hook events modeled by `AgenticEvent` (`session_start`, `before_tool`, `turn_complete`, etc.); they are prompt-document execution milestones owned by `composition/lifecycle.rs`. Today four of them exist as `LifecycleSignal` variants (`start`, `success`, `blocked`, `failure`), but they only support a handful of communication properties. This feature formalizes the full composition-lifecycle signal set, introduces a unified per-event configuration model, and folds the pre-existing composition `loop` concern into that model.
 
 ### Event Inventory
 
 | Event        | New?           | Fires when                                                                          |
 |--------------|----------------|-------------------------------------------------------------------------------------|
-| `initialize` | **new**        | Prompt file has been identified, before schema validation and pre-flight checks    |
+| `initialize` | **new**        | Prompt file has been identified and frontmatter has parsed, before user `$schema` validation and shell pre-flight checks |
 | `start`      | existing       | Pre-flight checks have all passed; about to invoke the agent                        |
 | `blocked`    | existing       | Pre-flight checks failed; agent will not be invoked                                 |
 | `success`    | existing       | Agentic loop completed without error                                                |
@@ -144,7 +146,7 @@ struct Current {
 ### Events 
 
 - **`initialize`** 
-    - an early lifecycle state -- before schema validation and preflight checks -- to make sure everything is setup for success
+    - an early lifecycle state -- before schema validation and preflight checks -- to make sure everything is set up for success
     - at this part in the lifecycle the `ctx` and `env` global variable are fully available, however
     - the `doc` global variables which represent **state/frontmatter** are not completely formed yet:
         - ✔ the merging of any passed in state into the document's static state is complete
@@ -206,16 +208,18 @@ start:
           action: "say('using codex')"
         # unconditional actions, using shorthand form
 
-        - action: "shell(git status --short)"
-        - action: "stdout('hi there')"   # stdout, the simplest emit action; there is no `echo` action
+        - action: "shell('git status --short')"
+        - action: "info('pre-flight status captured')"
 
         # conditional multi-action
 
         - when: "file_exists('@state.md')"
           action:
             - "say('state file present')"
-            - "stdout('continuing')"
+            - "info('continuing')"
 ```
+
+> Reviewer note: the draft originally included a lifecycle `stdout` channel. That has been removed from this feature. Claudine's composition commands reserve stdout for pipeable command data (notably the provider/composed output), while status and user-facing progress belong on stderr via `TerminalRenderable` components. A lifecycle `stdout` side effect would make `claudine compose <file> | other-tool` ambiguous and would be hard to mitigate consistently across `compose`, `inline-compose`, and `sequence`. Authors who need machine-readable lifecycle output should write JSONL or frontmatter through Darkmatter side effects instead of printing lifecycle chatter to stdout.
 
 ### Top-Level Communication Properties
 
@@ -223,15 +227,18 @@ Each event accepts the following shorthand properties at its top level. They are
 
 | Property       | Purpose                                                                          |
 |----------------|----------------------------------------------------------------------------------|
-| `say`, `speak` | TTS via host's speech provider                                                   |
+| `say`, `speak` | TTS via host's speech provider, after `effect` when both are present             |
+| `say_first`    | TTS via host's speech provider, before `effect` when both are present            |
 | `effect`       | Sound effect from the embedded library                                           |
-| `message`      | Send via configured messenger route (Slack, Discord, WhatsApp, Signal, Telegram) |
+| `message`      | Send via configured messenger route (Slack, Discord, WhatsApp, Signal, webhooks) |
 | `notify`       | OS desktop notification (replaces the deprecated `desktop:` alias)               |
-| `stderr`       | string to STDERR (displayed as is)                                               |
-| `stdout`       | string to STDOUT (displayed as is)                                               |
+| `stderr`       | Styled status line to STDERR                                                     |
 | `info` (new)   | string presented using the Status::Info style                                    |
 | `warn` (new)   | string presented using the Status::Warn style                                    |
 
+`say` and `say_first` remain mutually exclusive. This preserves the existing `LifecycleSayConflict` contract and the current audio-ordering behavior.
+
+`stderr`, `info`, and `warn` must render through `biscuit-terminal` `TerminalRenderable` components, not raw `eprintln!` formatting. This keeps lifecycle output aligned with Claudine's existing terminal-output contract.
 
 All values support [Darkmatter interpolation](@darkmatter/docs/topics/darkmatter-expressions.md) but also get to use the new global variables provided to lifecycle events.
 
@@ -309,7 +316,7 @@ The short form is `verb(args)`. The arguments inside the parentheses are **not**
 - `say('hello')` passes the literal string `hello` (string literals must be quoted)
 - `say(ctx.user || 'anon')` is an expression with a fallback
 - `retry(3)` passes the integer `3`
-- `proxy(@foo.md)` passes a file reference
+- `proxy('@foo.md')` passes a file reference
 
 Because args are expressions, a bare unquoted multi-word string (e.g. `say(using codex)`) is **invalid** — quote it (`say('using codex')`) or write a real expression.
 
@@ -326,22 +333,22 @@ These actions change what happens next. The first one whose `when:` matches **te
 
 | Action    | Where valid                        | Effect                                                                                                                                                                                                                                              |
 |-----------|------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `Stop`    | every event                        | End this event's stack cleanly. Composition continues.                                                                                                                                                                                              |
+| `Stop`    | every event                        | End this event's stack cleanly. Composition continues with the current outcome unchanged.                                                                                                                                                           |
 | `Skip`    | `initialize` only                  | Whole-document opt-out. Ends the run immediately — no agent invocation, no `finalize`, no `loop` gate, no iterations (looping a skipped prompt is incoherent). Pre-flight does not run. Emits an `INFO` log line indicating the skip. In a sequence, advances to the next step. |
-| `Error`   | every event                        | Mark this event as failed with a reason. At `start`/`initialize` this prevents agent invocation; at `success` it converts the outcome to failure; at `blocked`/`failure` it short-circuits further recovery attempts.                               |
+| `Error`   | every event                        | Mark this event as failed with a reason. At `initialize`/`start` this prevents agent invocation and routes to `failure`; at `success` it routes to `failure` before `finalize`; at `finalize` it converts the final outcome to failure without re-entering `failure`; at `blocked`/`failure` it short-circuits further recovery attempts. |
 | `Proxy`   | `initialize`, `blocked`, `failure` | Hand off execution to another prompt document. The proxied document enters at its own `initialize` event — a fresh prompt run, including pre-flight. The target document's own opt-out logic (`Skip`/`Proxy`/`Error` at `initialize`) is respected. |
-| `Retry`   | `blocked`, `failure`               | Re-run the agentic loop from the last invocation. Parameters: `max_attempts` (the number of additional re-invocations beyond the original attempt, default `1`), `backoff` (`fixed` \| `exponential`, default `fixed`), `delay` (duration, default `0s`).                                                                 |
+| `Retry`   | `blocked`, `failure`               | Try the current prompt again. From `blocked`, retry re-runs the pre-flight/start path because no provider invocation exists yet. From `failure`, retry re-runs the agentic loop from the last invocation. Parameters: `max_attempts` (the number of additional attempts beyond the original attempt, default `1`), `backoff` (`fixed` \| `exponential`, default `fixed`), `delay` (duration, default `0s`). |
 | `Resume`  | `failure` only                     | Resume the agent session with its context intact and a follow-up message. Parameters: `message` (the follow-up prompt, required), `max_attempts` (default `1`). In short form, `resume("...message...")` binds its string argument to the required `message:` parameter.                                                                                     |
 | `Requeue` | `blocked`, `failure`               | Push this prompt onto the deferred-execution queue (via `rendezvous`). Parameters: `delay` (duration, required), `reason` (string, optional).                                                                                                       |
 
 Short forms:
 
 - `"stop"`, `"skip"`
-- `"proxy(@prompts/foo.md)"`
+- `"proxy('@prompts/foo.md')"`
 - `"error(\"reason\")"`
-- `"retry"`, `"retry(3)"` — count shorthand: `retry(N)` sets `max_attempts = N` (the number of additional re-invocations beyond the original attempt), so bare `retry` / `retry(1)` means one retry
+- `"retry"`, `"retry(3)"` — count shorthand: `retry(N)` sets `max_attempts = N` (the number of additional attempts beyond the original attempt), so bare `retry` / `retry(1)` means one retry
 - `"resume(\"please set the production_ready frontmatter\")"` — binds the string argument to the required `message:` parameter
-- `"requeue(5m)"`
+- `"requeue('5m')"`
 
 ### Communication Actions
 
@@ -350,11 +357,12 @@ The same channels as the top-level properties, but each is a discrete stack item
 | Action          | Short form         | Long form parameter                                           |
 |-----------------|--------------------|---------------------------------------------------------------|
 | `say` / `speak` | `say("hi")`        | `message:`                                                    |
-| `effect`        | `effect(applause)` | `sound:`                                                      |
+| `effect`        | `effect("applause")` | `sound:`                                                    |
 | `message`       | `message("done")`  | `message:` (optionally `route:` to pin to a specific channel) |
 | `notify`        | `notify("done")`   | `message:`                                                    |
 | `stderr`        | `stderr("warn")`   | `message:`                                                    |
-| `stdout`        | `stdout("ok")`     | `message:`                                                    |
+| `info`          | `info("status")`   | `message:`                                                    |
+| `warn`          | `warn("careful")`  | `message:`                                                    |
 
 ```yaml
 success:
@@ -374,7 +382,7 @@ Mutating operations (file creation, frontmatter updates, HTTP POSTs, etc.) are p
 ```yaml
 start:
     stack:
-        - "ensure_file(@prompts/state.md)"
+        - action: "ensure_file('@prompts/state.md')"
         - action: set_frontmatter
           file: "@spec.md"
           prop: "status"
@@ -396,7 +404,7 @@ Read-only [Darkmatter expression functions](@darkmatter/docs/topics/darkmatter-e
 Bespoke shell commands invoked from the stack.
 
 ```yaml
-- "shell(git status --short)"
+- "shell('git status --short')"
 - action: shell
   command: "git push origin HEAD"
   on_error: "Push failed; check network"
@@ -422,7 +430,7 @@ Runs as soon as the prompt file is identified. Pre-flight checks have **not** ru
 - Proxying to a different prompt via `Proxy` (e.g., route based on env)
 - Preparing the environment via side effects so pre-flight checks will succeed
 
-**`initialize` is a timing slot, not a validation phase.** It cannot "fail itself" — pre-flight (owned by `start`) remains the single validation surface. The only way `initialize` alters flow is by a stack item evaluating a lifecycle action (`Skip`, `Proxy`, `Error`, `Stop`). An `Error` raised here routes through the normal `failure` event path, same as anywhere else.
+**`initialize` is a timing slot, not a validation phase.** It runs after the prompt file and its frontmatter have parsed, after CLI/frontmatter override merging, and before user `$schema` validation and shell pre-flight. It cannot "fail itself" — pre-flight (owned by `start`) remains the single validation surface. The only way `initialize` alters flow is by a stack item evaluating a lifecycle action (`Skip`, `Proxy`, `Error`, `Stop`). An `Error` raised here routes through the normal `failure` event path, same as anywhere else.
 
 ### `start`
 
@@ -449,7 +457,7 @@ Use for:
 - Cleanup that must run **regardless of outcome** (close handles, flush logs, remove scratch files)
 - A last-chance error handler — e.g., the agentic loop reported success but `finalize` inspects `current` state, decides the work was not actually done, and raises an `Error`
 
-> Note: this is not in tension with the [Action Error Propagation](#action-error-propagation) table's "composition outcome unchanged" rule for `finalize`. That rule governs an action that *unintentionally* errors. The last-chance handler here uses the **explicit `Error` lifecycle action**, which (per the [Lifecycle Actions](#lifecycle-actions) "Where valid" matrix) is a deliberate author choice and **does** convert success → failure — exactly as `Error` already does at `success`.
+> Note: this is not in tension with the [Action Error Propagation](#action-error-propagation) table's "composition outcome unchanged" rule for `finalize`. That rule governs an action that *unintentionally* errors. The last-chance handler here uses the **explicit `Error` lifecycle action**, which (per the [Lifecycle Actions](#lifecycle-actions) "Where valid" matrix) is a deliberate author choice and **does** convert success → failure. Because `finalize` is already the last terminal boundary, an `Error` raised there updates the final outcome and does **not** re-enter the `failure` event.
 
 `finalize` has no special relationship to looping. In a looping document it fires every iteration, exactly like `success`/`failure`.
 
@@ -489,7 +497,7 @@ Ambient variables exposed inside each iteration:
 
 #### Lifecycle Concerns
 
-In addition to iteration controls, the `loop` block accepts the standard lifecycle-event properties (`say`, `notify`, `effect`, `message`, `stderr`, `stdout`, `stack`).
+In addition to iteration controls, the `loop` block accepts the standard lifecycle-event properties (`say`, `say_first`, `notify`, `effect`, `message`, `stderr`, `info`, `warn`, `stack`).
 
 **Firing model:** looping **wraps the whole document** — each iteration is a complete execution of the lifecycle. The `loop` event is a **single unified gate** that runs after `finalize` and decides whether to iterate again.
 
@@ -497,10 +505,11 @@ In addition to iteration controls, the `loop` block accepts the standard lifecyc
 - **Later iterations re-enter at `start`** (not `initialize`): `start` → (`success` | `failure`) → `finalize` → `loop` gate.
 - `initialize`, pre-flight checks, and schema validation run **only once** (first iteration). They are **not** repeated on later iterations.
 - `success`, `failure`, and `finalize` fire **per iteration**. A document that loops 5 times fires 5 `success`/`failure` events and 5 `finalize` events.
+- `fail_fast` is evaluated after terminal handling for the iteration. When `fail_fast: true` and the iteration ends in unrecovered `blocked`/`failure`, Claudine still emits `finalize` but exits before the `loop` gate. When `fail_fast: false`, the `loop` gate runs after failed iterations too.
 
 **At the gate**, in this order:
 
-1. The loop block's **lifecycle concerns** fire (`say`/`notify`/`effect`/`message`/`stderr`/`stdout`/`stack`) against the **just-completed iteration's** frontmatter state — i.e. *before* the per-iteration `action` mutation is applied. Because this runs after `finalize`, the lifecycle concerns describe the iteration that just finished, not the one about to start.
+1. The loop block's **lifecycle concerns** fire (`say`/`say_first`/`notify`/`effect`/`message`/`stderr`/`info`/`warn`/`stack`) against the **just-completed iteration's** frontmatter state — i.e. *before* the per-iteration `action` mutation is applied. Because this runs after `finalize`, the lifecycle concerns describe the iteration that just finished, not the one about to start.
 2. The condition (`while`/`until`) is evaluated.
 3. If continuing, the per-iteration `action` mutations (`increment`/`set`/`append`/etc.) are applied and control re-enters at `start`. If stopping, the document exits.
 
@@ -542,7 +551,7 @@ Use the ambient variables `_loop_is_first` and `_loop_is_last` in `when:` clause
 
 There is **no** separate outer-vs-inner terminal event: terminal events (`success`/`failure`/`finalize`) fire once per iteration, full stop.
 
-**Blocked first iteration:** if pre-flight fails on the first iteration the document routes to `blocked`. The intended behavior is that a blocked iteration still reaches `finalize` → `loop` gate: `finalize` fires, and the `loop` gate still applies (it may re-enter at `start` on a later iteration if the condition says to continue).
+**Blocked first iteration:** if pre-flight fails on the first iteration the document routes to `blocked`. The intended behavior is that a blocked iteration always reaches `finalize`. It reaches the `loop` gate only when the blocked state was recovered or `fail_fast: false`; with the default `fail_fast: true`, an unrecovered blocked first iteration exits after `finalize`.
 
 ```yaml
 phase: 1
@@ -588,6 +597,18 @@ The split is intentional: setup-phase errors should propagate so the agent isn't
 
 **An action that errors vs. the explicit `Error` lifecycle action.** This table governs **unintentional** action errors — a side-effect, shell, or expression action that happens to fail. At terminal-phase events (`success`/`failure`/`finalize`/`loop`) those never invert the outcome. An explicit `Error` **lifecycle action**, by contrast, is a deliberate author choice and **does** change the outcome (success → failure) wherever the [Lifecycle Actions](#lifecycle-actions) "Where valid" matrix permits it. The two are governed by different tables: "an action that errored" by this propagation table, "the explicit `Error` action" by the Lifecycle Actions table.
 
+**Explicit lifecycle-action transitions:**
+
+| Current event | `Error` transition | `Proxy` transition | `Retry` transition |
+|---------------|--------------------|--------------------|--------------------|
+| `initialize` | route to `failure`, then `finalize`, then optional `loop` gate | replace the current run with the target prompt at its `initialize` | not valid |
+| `start`      | route to `failure`, then `finalize`, then optional `loop` gate | not valid | not valid |
+| `blocked`    | keep blocked/failure outcome, skip remaining recovery actions, then `finalize`, then optional `loop` gate | replace the current run with the target prompt at its `initialize` | retry pre-flight/start path |
+| `success`    | route to `failure`, then `finalize`, then optional `loop` gate | not valid | not valid |
+| `failure`    | keep failure outcome, skip remaining recovery actions, then `finalize`, then optional `loop` gate | replace the current run with the target prompt at its `initialize` | retry provider invocation path |
+| `finalize`   | convert final outcome to failure; do not re-enter `failure` | not valid | not valid |
+| `loop`       | convert final outcome to failure and exit the loop | not valid | not valid |
+
 **Per-action escape hatch:** any action accepts a `no_error: true` parameter to suppress error propagation. When set, errors are logged but the stack continues to the next item, and the composition outcome is unchanged regardless of which event is processing the stack.
 
 ```yaml
@@ -597,7 +618,7 @@ start:
           command: "git fetch --all"
           no_error: true       # never block agent invocation on fetch failure
 
-        - "ensure_file(@out/log.md)"
+        - action: "ensure_file('@out/log.md')"
 ```
 
 This extends the existing `no_error` flag (previously defined only for `shell`) to all action categories.
@@ -624,14 +645,17 @@ Each item is a concrete, checkable assertion derived from the decisions above.
 - All 7 events (`initialize`, `start`, `blocked`, `success`, `failure`, `finalize`, `loop`) parse and dispatch in the defined order.
 - Later loop iterations re-enter at `start` and do **not** re-run `initialize`, pre-flight, or schema validation.
 - `finalize` fires once per iteration after `success`/`failure` (or `blocked`); an N-iteration loop fires exactly N `finalize` events.
-- At the `loop` gate, lifecycle concerns fire before the condition is evaluated, and the per-iteration `action` mutation is applied only on continue (and only after the concerns fired) — so the concerns observe pre-mutation frontmatter.
+- When the `loop` gate is reached, lifecycle concerns fire before the condition is evaluated, and the per-iteration `action` mutation is applied only on continue (and only after the concerns fired) — so the concerns observe pre-mutation frontmatter.
+- With `fail_fast: true`, an unrecovered `blocked`/`failure` iteration still emits `finalize` but exits before the `loop` gate; with `fail_fast: false`, failed iterations can reach the `loop` gate.
 - Short-form action args parse as Darkmatter expressions; an unquoted multi-word literal (e.g. `say(using codex)`) is a **parse-time** error.
 - Cardinality (at most one Lifecycle Action per block) and "Where valid" violations are reported as typed `CompositionError` variants at **parse time**, never at runtime.
 - Referencing the global `err` in a no-error event (`initialize`/`start`/`success`/`loop`) halts at parse time; `doc.err` is exempt from the scan.
 - A bare `err`/`timing`/`current` in body or frontmatter interpolation resolves as an ordinary identifier (no special meaning), with normal undefined-variable handling if absent.
 - Top-level communication properties fire before the stack for every event.
+- `say_first` remains supported and mutually exclusive with `say` for every lifecycle event.
+- Lifecycle output does not write to stdout; progress/status output uses `stderr`, `info`, or `warn`, and machine-readable side effects use files/frontmatter/JSONL.
 - An action carrying `no_error: true` logs its error and continues to the next stack item, leaving the composition outcome unchanged regardless of event.
-- An unintentional action error at a terminal-phase event (`success`/`failure`/`finalize`/`loop`) does not invert the composition outcome; an explicit `Error` lifecycle action at `success`/`finalize` does convert success → failure.
+- An unintentional action error at a terminal-phase event (`success`/`failure`/`finalize`/`loop`) does not invert the composition outcome; an explicit `Error` lifecycle action at `success`/`finalize` does convert success → failure, with `finalize` doing so without re-entering `failure`.
 - Existing top-level-only prompts (`say`/`effect`/`message` at `start`/`success`/`failure`) continue to work unchanged.
 
 ## Test Strategy
@@ -644,14 +668,16 @@ Tests follow the existing `composition/lifecycle.rs` patterns and the monorepo L
     - expression-argument parsing for action args
     - cardinality (one Lifecycle Action per block) and "Where valid" validation
     - `err` static-scan (halts in no-error events; `doc.err` exempt)
+    - no lifecycle `stdout` field or action parses; unknown-field errors stay typed and include frontmatter excerpts
     - lifecycle interpolation-leak / undefined-variable guards extended to the new events (`initialize`/`finalize`/`loop`)
     - action error-propagation defaults per event
+    - `fail_fast` interaction with failed iterations (`finalize` always fires; `loop` gate only runs for failed iterations when `fail_fast: false` or the failure was recovered)
     - the `no_error: true` escape hatch
 - **L2 (`just test-l2`, integration):**
     - end-to-end lifecycle dispatch ordering across the full event set
     - loop gate flow: re-enter at `start`, per-iteration `finalize` count, concerns-before-condition-before-mutation ordering
     - `Proxy` / `Retry` / `Resume` / `Requeue` control flow
-    - the blocked-first-iteration edge case (`blocked` → `finalize` → `loop` gate)
+    - the blocked-first-iteration edge case (`blocked` → `finalize`, then exit for unrecovered `fail_fast: true` or reach the `loop` gate for recovered / `fail_fast: false`)
 - **L3 (optional, real terminal / provider):**
     - a real provider wrap exercising `start` → `success` → `finalize` with a trivial prompt
 
@@ -659,9 +685,9 @@ Tests follow the existing `composition/lifecycle.rs` patterns and the monorepo L
 
 > Draft for author review. The intended direction is **extend, not replace** — consistent with the "Adding `stack:` is purely additive" and Backward Compatibility statements above. The internal-type sketch below states only the additive contract; do not read it as a committed refactor of internal types.
 
-- Today's `LifecycleConfig` / `LifecycleNotification` gain new **optional** fields (`stack`, `info`, `warn`, `stdout`) rather than being replaced. Their `#[serde(deny_unknown_fields)]` must be updated to admit the new keys.
+- Today's `LifecycleConfig` / `LifecycleNotification` gain new **optional** fields (`stack`, `info`, `warn`) rather than being replaced. Their `#[serde(deny_unknown_fields)]` must be updated to admit the new keys while continuing to reject accidental fields such as `stdout`.
 - The `LifecycleSignal` enum gains `Initialize`, `Finalize`, and `Loop` variants (today only `start`/`success`/`blocked`/`failure` exist).
-- The existing `LoopConfig` block gains the lifecycle-concern keys (`say`/`notify`/`effect`/`message`/`stderr`/`stdout`/`stack`) alongside its iteration controls.
+- The existing `LoopConfig` block gains the lifecycle-concern keys (`say`/`say_first`/`notify`/`effect`/`message`/`stderr`/`info`/`warn`/`stack`) alongside its iteration controls.
 - Existing prompts using only top-level communication properties continue to parse and behave identically — no breaking change.
 
 ## Dependencies
