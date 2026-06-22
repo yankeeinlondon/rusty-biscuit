@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
 use serde_json::Value;
+use tracing::warn;
 
 use crate::events::{AgenticEvent, EventMeta, ToolName};
 
@@ -86,6 +87,19 @@ fn extract_before_tool_request<'a>(meta: &'a EventMeta) -> ProtectObservation<'a
     ProtectObservation::NoOpinion
 }
 
+/// Caps applied when scanning untrusted MCP response payloads.
+///
+/// The built-in deny patterns run in linear time — Rust's `regex` has no
+/// catastrophic backtracking — but the cost is still
+/// `O(payload_bytes × pattern_count)` per response. A hostile MCP server can
+/// return a multi-megabyte body, so these caps bound the work per response: at
+/// most [`MAX_SCAN_LEAVES`] string leaves totalling [`MAX_SCAN_BYTES`], with any
+/// single leaf truncated to [`MAX_LEAF_BYTES`]. Truncation only shortens what is
+/// scanned; a match in the surviving prefix still blocks.
+const MAX_SCAN_LEAVES: usize = 10_000;
+const MAX_SCAN_BYTES: usize = 1024 * 1024;
+const MAX_LEAF_BYTES: usize = 64 * 1024;
+
 fn extract_mcp_response_request<'a>(meta: &'a EventMeta) -> Option<ProtectRequest<'a>> {
     // Only scan responses from MCP-backed tools
     let tool_name = meta.tool_name.as_deref()?;
@@ -94,35 +108,101 @@ fn extract_mcp_response_request<'a>(meta: &'a EventMeta) -> Option<ProtectReques
     }
 
     let response = meta.tool_response.as_ref()?;
-    match response {
-        Value::String(s) => Some(ProtectRequest::McpResponse {
-            payloads: vec![Cow::Borrowed(s.as_str())],
-        }),
-        _ => {
-            let mut strings = Vec::new();
-            collect_json_strings(response, &mut strings);
-            if strings.is_empty() {
-                return None;
-            }
-            Some(ProtectRequest::McpResponse {
-                payloads: strings.into_iter().map(Cow::Borrowed).collect(),
-            })
+    let mut collector = LeafCollector::new();
+    collect_json_strings(response, &mut collector);
+    if collector.leaves.is_empty() {
+        return None;
+    }
+    if collector.truncated {
+        warn!(
+            tool_name,
+            leaves = collector.leaves.len(),
+            scanned_bytes = collector.bytes,
+            "MCP response exceeded protect scan cap; scanning a truncated prefix"
+        );
+    }
+    Some(ProtectRequest::McpResponse {
+        payloads: collector.leaves.into_iter().map(Cow::Borrowed).collect(),
+    })
+}
+
+/// Bounded accumulator for the string leaves of an MCP response.
+///
+/// Stops collecting once the leaf-count or total-byte cap is reached and
+/// truncates any single leaf to [`MAX_LEAF_BYTES`] (or the remaining total
+/// budget, whichever is smaller). `truncated` records whether any cap clipped
+/// the input so the caller can log it.
+struct LeafCollector<'a> {
+    leaves: Vec<&'a str>,
+    bytes: usize,
+    truncated: bool,
+}
+
+impl<'a> LeafCollector<'a> {
+    fn new() -> Self {
+        Self {
+            leaves: Vec::new(),
+            bytes: 0,
+            truncated: false,
         }
+    }
+
+    fn is_full(&self) -> bool {
+        self.leaves.len() >= MAX_SCAN_LEAVES || self.bytes >= MAX_SCAN_BYTES
+    }
+
+    fn push(&mut self, s: &'a str) {
+        if self.is_full() {
+            self.truncated = true;
+            return;
+        }
+        let budget = MAX_LEAF_BYTES.min(MAX_SCAN_BYTES - self.bytes);
+        let slice = if s.len() > budget {
+            self.truncated = true;
+            truncate_on_char_boundary(s, budget)
+        } else {
+            s
+        };
+        self.bytes += slice.len();
+        self.leaves.push(slice);
     }
 }
 
-/// Recursively collect all string leaves from a JSON value.
-fn collect_json_strings<'a>(value: &'a Value, out: &mut Vec<&'a str>) {
+/// Truncate `s` to at most `max_bytes`, backing up to the nearest UTF-8
+/// character boundary so the result is always a valid `&str`.
+fn truncate_on_char_boundary(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+/// Recursively collect string leaves from a JSON value into a bounded collector,
+/// stopping early once a cap is reached.
+fn collect_json_strings<'a>(value: &'a Value, collector: &mut LeafCollector<'a>) {
+    if collector.is_full() {
+        return;
+    }
     match value {
-        Value::String(s) => out.push(s.as_str()),
+        Value::String(s) => collector.push(s.as_str()),
         Value::Array(arr) => {
             for item in arr {
-                collect_json_strings(item, out);
+                if collector.is_full() {
+                    break;
+                }
+                collect_json_strings(item, collector);
             }
         }
         Value::Object(map) => {
             for v in map.values() {
-                collect_json_strings(v, out);
+                if collector.is_full() {
+                    break;
+                }
+                collect_json_strings(v, collector);
             }
         }
         _ => {}
@@ -495,6 +575,62 @@ mod tests {
                 assert!(payloads.iter().any(|p| p == "previous instructions"));
             }
             other => panic!("expected McpResponse with payloads, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mcp_response_leaf_count_is_capped() {
+        let arr: Vec<Value> = (0..(MAX_SCAN_LEAVES + 5_000))
+            .map(|i| json!(format!("leaf-{i}")))
+            .collect();
+        let meta = meta_with_mcp_json_response(Value::Array(arr));
+        let obs = extract_protect_request(&AgenticEvent::AfterTool, &meta);
+        match obs {
+            ProtectObservation::Request(ProtectRequest::McpResponse { payloads }) => {
+                assert!(
+                    payloads.len() <= MAX_SCAN_LEAVES,
+                    "leaf count {} should be capped at {MAX_SCAN_LEAVES}",
+                    payloads.len()
+                );
+            }
+            other => panic!("expected McpResponse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mcp_oversized_leaf_is_truncated() {
+        let huge = "a".repeat(MAX_LEAF_BYTES + 10_000);
+        let meta = meta_with_mcp_json_response(json!({ "blob": huge }));
+        let obs = extract_protect_request(&AgenticEvent::AfterTool, &meta);
+        match obs {
+            ProtectObservation::Request(ProtectRequest::McpResponse { payloads }) => {
+                assert_eq!(payloads.len(), 1);
+                assert!(
+                    payloads[0].len() <= MAX_LEAF_BYTES,
+                    "leaf of {} bytes should be truncated to <= {MAX_LEAF_BYTES}",
+                    payloads[0].len()
+                );
+            }
+            other => panic!("expected McpResponse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mcp_total_scan_bytes_are_capped() {
+        let leaf = "b".repeat(MAX_LEAF_BYTES);
+        let count = (MAX_SCAN_BYTES / MAX_LEAF_BYTES) + 10;
+        let arr: Vec<Value> = (0..count).map(|_| json!(leaf.clone())).collect();
+        let meta = meta_with_mcp_json_response(Value::Array(arr));
+        let obs = extract_protect_request(&AgenticEvent::AfterTool, &meta);
+        match obs {
+            ProtectObservation::Request(ProtectRequest::McpResponse { payloads }) => {
+                let total: usize = payloads.iter().map(|p| p.len()).sum();
+                assert!(
+                    total <= MAX_SCAN_BYTES,
+                    "total scanned bytes {total} should be capped at {MAX_SCAN_BYTES}"
+                );
+            }
+            other => panic!("expected McpResponse, got {other:?}"),
         }
     }
 
