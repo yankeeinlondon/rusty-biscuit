@@ -427,7 +427,13 @@ field in the JSON payload, so a handler can branch on
 | Termination | `error_kind` | Failure event | Retry path |
 |---|---|---|---|
 | `TimedOut` | `timeout` / `step_timeout` | `Timeout` | `handle_timeout:` |
-| `Aborted` | `exit_expression` / `runaway_repetition` / `runaway_volume` | `AgentFailure` | `failure:` (fail-fast) |
+| `Aborted` | `exit_expression` / `runaway_repetition` / `runaway_volume` / `repeated_stream_error` | `AgentFailure` | `failure:` (fail-fast) |
+
+`repeated_stream_error` is an OpenCode-specific stderr backstop: consecutive
+`message="stream error"` records crossing `MAX_CONSECUTIVE_STREAM_ERRORS` (5)
+with no step advance abort the run, bounding OpenCode's unbounded backoff
+retries when the provider fails every attempt. It is fail-fast (`Aborted`),
+never the `handle_timeout:` retry that would reproduce the failure loop.
 
 ### Configuration surface
 
