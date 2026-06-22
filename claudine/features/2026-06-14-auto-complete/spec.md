@@ -18,6 +18,39 @@ Shell completions are extremely important for Claudine:
 
 ### Autocomplete
 
-We already try to help the user by providing an interactive dialog when a caller has not provided a required frontmatter property (per the schema).
+We already try to help the user by providing an interactive dialog when a caller has not provided a required frontmatter property (per the schema). But in addition we will now:
 
-When a caller passes in the value for a
+- when a user passes in the value for a frontmatter property who's type is `file` we will first try to resolve it with `FileReference` struct but if that fails we will offer the user a select dialog of files we think they meant
+
+## Shell Completions
+
+### `compose` operation
+
+When a user types `claudine compose ` they are now ready to specify the Markdown file that they will be using as a prompt.
+
+- by default the glob pattern which is used to identify possible completions for the file is:
+    - in a monorepo:
+        - `{package-root}/prompts/**/*.md}`
+        - `{package-area-root}/prompts/**/*.md}`
+    - `{repo-root}/prompts/**/*.md}`
+    - `{repo-root}/.claudine/prompts/**/*.md`
+    - `~/.claudine/prompts/**/*.md`
+    - all gitignore files will always be excluded
+    - all files inside of a `node_modules` or `target` directory will be excluded
+    - all files or files in a directory starting with `_` will be ignored
+    - this glob pattern can be replaced by putting a replacement glob pattern into the repo's configuration at: `files.prompts.default_glob` in config file.
+- because we support magic paths (e.g., those with a leading '@') it means that a single path reference by the user could possibly reference more than one valid completion ... however, the completion which is "closest" will always be the one which is resolved. This precedence is supported out of the box by `FileReference` but the main point in shell completions is to complete a "magic path" which is valid not a full file path:
+    - if the user typed `claudine compose @plan` and pressed tab
+    - assuming that both `~/.claudine/prompts/plan.md` and `{repo-root}/prompts/plan.md` existed
+    - shell completions would recognize that the user wants to use the magic path syntax and that `@prompts/plan.md` is a valid completion
+    - once the user presses ENTER and the claudine process kicks off it will do the final resolution to a single file
+
+### Frontmatter completion in `compose`
+
+- the `SimpleSchema` grammar defined in Darkmatter gives us a constraint for file based inputs which will help to scope the possible set of documents that should be autocompleted.
+
+
+### `inline-compose` operation
+
+
+## Autocomplete
