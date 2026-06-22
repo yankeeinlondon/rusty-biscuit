@@ -18,6 +18,9 @@ pub mod frontmatter_excerpt;
 mod guardrails;
 pub mod launch_workspace;
 pub mod lifecycle;
+mod lifecycle_actions;
+pub mod lifecycle_context;
+pub mod lifecycle_executor;
 pub mod loop_actions;
 pub mod loop_config;
 pub mod loop_engine;
@@ -46,6 +49,17 @@ pub use lifecycle::{
     LifecycleRunGuard, LifecycleRuntimeContext, LifecycleRuntimeState, LifecycleSignal,
     emit_lifecycle_signal, parse_lifecycle_config,
 };
+pub use lifecycle_actions::{
+    CommunicationAction, CommunicationChannel, ExpressionFunctionAction, LifecycleAction,
+    LifecycleActionKind, LifecycleControlAction, LifecycleStackItem, RetryBackoff, ShellAction,
+    SideEffectAction, is_known_side_effect, side_effect_signature,
+};
+pub use lifecycle_context::{
+    LifecycleCurrent, LifecycleErrorInfo, LifecycleLookup, LifecycleTiming,
+};
+pub use lifecycle_executor::{
+    LifecycleEventOutcome, ShellRunner, StackControl, StackExecutionContext, SystemShellRunner,
+};
 pub use loop_config::{
     extract_control_variables, resolve_fail_fast_from_env, resolve_loop_config,
     resolve_max_iterations_from_env, resolve_pause_reset_margin_from_env,
@@ -53,6 +67,7 @@ pub use loop_config::{
 pub use loop_engine::{
     DEFAULT_MAX_ITERATIONS, LoopExecutionOptions, LoopExecutionResult, LoopIterationContext,
     LoopIterationOutput, build_loop_seed, execute_loop, execute_loop_with_config,
+    execute_loop_with_lifecycle,
 };
 pub use loop_expression::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
 pub use mismatch::{capture_frontmatter_yaml, is_inline_sequence_mismatch};

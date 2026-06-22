@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value};
 
 use super::error::CompositionError;
+use super::lifecycle::{LifecycleConfig, LifecycleEmitter, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal};
+use super::lifecycle_executor::{ShellRunner, StackExecutionContext};
 use super::loop_actions::ActionStaging;
 use super::loop_config::{extract_control_variables, resolve_loop_config};
 use super::loop_expression::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
@@ -87,6 +89,11 @@ pub struct LoopIterationOutput {
     pub exit_code: i32,
     /// Optional execution error associated with the exit code.
     pub error: Option<CompositionError>,
+    /// Terminal lifecycle signal emitted by this iteration, if any.
+    ///
+    /// Used by the loop engine to apply `fail_fast` semantics and to
+    /// sequence the post-`finalize` loop gate.
+    pub terminal_signal: Option<LifecycleSignal>,
     /// Rate-limit signal observed during this iteration, when present.
     ///
     /// Read by the engine between iterations to apply the configured
@@ -118,6 +125,7 @@ impl LoopIterationOutput {
             output: output.into(),
             exit_code: 0,
             error: None,
+            terminal_signal: Some(LifecycleSignal::Success),
             rate_limit: None,
             exit_reason: None,
             provider_id: None,
@@ -131,6 +139,7 @@ impl LoopIterationOutput {
             output: output.into(),
             exit_code,
             error: Some(error),
+            terminal_signal: Some(LifecycleSignal::Failure),
             rate_limit: None,
             exit_reason: None,
             provider_id: None,
@@ -161,6 +170,13 @@ impl LoopIterationOutput {
     #[must_use]
     pub fn with_exit_reason(mut self, exit_reason: Option<String>) -> Self {
         self.exit_reason = exit_reason;
+        self
+    }
+
+    /// Attach the terminal lifecycle signal emitted by the iteration.
+    #[must_use]
+    pub fn with_terminal_signal(mut self, signal: Option<LifecycleSignal>) -> Self {
+        self.terminal_signal = signal;
         self
     }
 }
@@ -511,6 +527,330 @@ pub fn execute_loop_with_config(
         last_output,
         last_exit_code,
     ))
+}
+
+/// Execute a loop with integrated lifecycle events.
+///
+/// This is the Phase 6 loop-gate driver. It emits `initialize` exactly once
+/// before the first iteration, delegates `start`/terminal/`finalize` emission
+/// to the provided executor, and runs the post-`finalize` loop gate in the
+/// required order:
+///
+/// 1. Loop lifecycle concerns (against pre-mutation frontmatter).
+/// 2. Evaluate `while`/`until` condition (against pre-mutation frontmatter).
+/// 3. Apply per-iteration mutations only when continuing.
+///
+/// Loop concerns run on every gate pass, including the terminal pass that
+/// exits. Under `fail_fast: true`, iterations ending in `blocked` or `failure`
+/// emit `finalize` through the executor and then exit before the loop gate.
+/// Under `fail_fast: false`, failed iterations reach the loop gate.
+#[allow(clippy::too_many_arguments)]
+pub fn execute_loop_with_lifecycle<E>(
+    prompt_path: &Path,
+    config: &LoopConfig,
+    initial_frontmatter: Map<String, Value>,
+    options: LoopExecutionOptions,
+    lifecycle_config: &LifecycleConfig,
+    lifecycle_ctx: &LifecycleRuntimeContext<'_>,
+    effect_engine: &darkmatter::effects::EffectEngine,
+    shell_runner: &dyn ShellRunner,
+    emitter: &dyn LifecycleEmitter,
+    mut executor: E,
+) -> Result<LoopExecutionResult, CompositionError>
+where
+    E: FnMut(
+        LoopIterationContext,
+        &mut LifecycleRunGuard<'_>,
+    ) -> Result<LoopIterationOutput, CompositionError>,
+{
+    let max_iterations = options
+        .max_iterations
+        .or(config.max_iterations)
+        .unwrap_or(DEFAULT_MAX_ITERATIONS);
+    let fail_fast = options.fail_fast.or(config.fail_fast).unwrap_or(true);
+    let on_rate_limit = options
+        .on_rate_limit
+        .or(config.on_rate_limit)
+        .unwrap_or_default();
+
+    let base_dir = prompt_path.parent();
+
+    let mut guard = LifecycleRunGuard::new(lifecycle_config, lifecycle_ctx, emitter);
+
+    // Emit initialize once before any iteration runs.
+    let init_ctx = build_loop_stack_context(
+        LifecycleSignal::Initialize,
+        &initial_frontmatter,
+        lifecycle_ctx,
+        effect_engine,
+        shell_runner,
+        emitter,
+        base_dir,
+    );
+    guard.execute_event(LifecycleSignal::Initialize, &init_ctx);
+
+    let mut frontmatter = initial_frontmatter;
+    let mut iteration_count = 0usize;
+    let mut last_output = String::new();
+    let mut last_exit_code = 0i32;
+
+    for iteration in 1..=max_iterations {
+        // Under post-finalize checking the current frontmatter is the
+        // pre-mutation state for this iteration. `_loop_is_last` should be
+        // true exactly when the loop will exit after this iteration, which
+        // is when the condition is falsy against the current frontmatter.
+        let is_last = if iteration == max_iterations {
+            true
+        } else {
+            let pre_mutation_ambient = LoopAmbient::new(
+                iteration,
+                iteration == 1,
+                false,
+                last_output.clone(),
+                last_exit_code,
+            );
+            let pre_mutation_lookup =
+                LoopExpressionLookup::new(&frontmatter, &pre_mutation_ambient)
+                    .with_base_dir(base_dir);
+            !evaluate_condition(&config.condition, &pre_mutation_lookup)?
+        };
+        let ambient = LoopAmbient::new(
+            iteration,
+            iteration == 1,
+            is_last,
+            last_output.clone(),
+            last_exit_code,
+        );
+
+        let context = LoopIterationContext {
+            iteration,
+            frontmatter: frontmatter.clone(),
+            ambient,
+        };
+
+        // The executor is responsible for emitting start, the terminal event,
+        // and finalize through the shared guard.
+        let output = match executor(context, &mut guard) {
+            Ok(output) => output,
+            Err(error) => {
+                last_output.clear();
+                last_exit_code = 1;
+                iteration_count += 1;
+                if fail_fast {
+                    return Ok(LoopExecutionResult::failure(
+                        frontmatter,
+                        iteration_count,
+                        last_output,
+                        last_exit_code,
+                        error,
+                    ));
+                }
+                guard.reset_for_next_iteration();
+                continue;
+            }
+        };
+
+        last_output = output.output;
+        last_exit_code = output.exit_code;
+        iteration_count += 1;
+        let iteration_rate_limit = output.rate_limit.clone();
+        let iteration_provider = output.provider_id.clone();
+        let iteration_model = output.model_id.clone();
+        let exit_reason = output.exit_reason.clone();
+
+        let terminal_signal = output
+            .terminal_signal
+            .or_else(|| if output.error.is_some() || output.exit_code != 0 {
+                Some(LifecycleSignal::Failure)
+            } else {
+                Some(LifecycleSignal::Success)
+            });
+        let terminal_failed = matches!(
+            terminal_signal,
+            Some(LifecycleSignal::Blocked) | Some(LifecycleSignal::Failure)
+        );
+
+        if terminal_failed && fail_fast {
+            return Ok(LoopExecutionResult::failure(
+                frontmatter,
+                iteration_count,
+                last_output,
+                last_exit_code,
+                output.error.unwrap_or_else(|| {
+                    CompositionError::LoopIterationFailed {
+                        iteration,
+                        prompt_path: prompt_path.to_path_buf(),
+                        exit_code: last_exit_code,
+                        reason: "iteration failed".to_string(),
+                        exit_reason,
+                    }
+                }),
+            ));
+        }
+
+        // Rate-limit policy is consulted between iterations, before the loop gate.
+        if !is_last {
+            match decide_rate_limit_action(
+                iteration_rate_limit.as_ref(),
+                on_rate_limit,
+                prompt_path,
+                iteration,
+                iteration_provider,
+                iteration_model,
+                options.interrupt_check,
+                options.pause_reset_margin.unwrap_or(PAUSE_RESET_MARGIN),
+            ) {
+                RateLimitOutcome::Proceed => {}
+                RateLimitOutcome::Interrupted => {}
+                RateLimitOutcome::Abort(error) => {
+                    return Ok(LoopExecutionResult::failure(
+                        frontmatter,
+                        iteration_count,
+                        last_output,
+                        last_exit_code,
+                        error,
+                    ));
+                }
+            }
+        }
+
+        // Post-finalize loop gate: concerns → condition → mutations.
+        let gate_ambient = LoopAmbient::new(
+            iteration,
+            iteration == 1,
+            is_last,
+            last_output.clone(),
+            last_exit_code,
+        );
+    match run_loop_gate(
+        config,
+        &frontmatter,
+        &gate_ambient,
+        base_dir,
+        &mut guard,
+        lifecycle_ctx,
+        effect_engine,
+        shell_runner,
+        emitter,
+    )? {
+            LoopGateOutcome::Exit => {
+                return Ok(LoopExecutionResult::success(
+                    frontmatter,
+                    iteration_count,
+                    last_output,
+                    last_exit_code,
+                ));
+            }
+            LoopGateOutcome::Continue(next_frontmatter) => {
+                frontmatter = next_frontmatter;
+            }
+        }
+
+        guard.reset_for_next_iteration();
+
+        if iteration == max_iterations
+            && should_continue_after_cap(
+                config,
+                &frontmatter,
+                iteration + 1,
+                &last_output,
+                last_exit_code,
+                base_dir,
+            )?
+        {
+            return Ok(LoopExecutionResult::failure(
+                frontmatter,
+                iteration_count,
+                last_output,
+                last_exit_code,
+                CompositionError::LoopLimitExceeded {
+                    cap: max_iterations,
+                    prompt_path: PathBuf::from(prompt_path),
+                    iteration,
+                },
+            ));
+        }
+    }
+
+    Ok(LoopExecutionResult::success(
+        frontmatter,
+        iteration_count,
+        last_output,
+        last_exit_code,
+    ))
+}
+
+/// Outcome of the post-finalize loop gate.
+enum LoopGateOutcome {
+    /// The condition is satisfied; continue with the mutated frontmatter.
+    Continue(Map<String, Value>),
+    /// The condition stopped the loop; do not apply mutations.
+    Exit,
+}
+
+/// Run the post-finalize loop gate.
+///
+/// Executes loop lifecycle concerns against pre-mutation frontmatter, then
+/// evaluates the `while`/`until` condition, then applies mutations only if
+/// the loop should continue.
+#[allow(clippy::too_many_arguments)]
+fn run_loop_gate(
+    config: &LoopConfig,
+    frontmatter: &Map<String, Value>,
+    ambient: &LoopAmbient,
+    base_dir: Option<&Path>,
+    guard: &mut LifecycleRunGuard<'_>,
+    lifecycle_ctx: &LifecycleRuntimeContext<'_>,
+    effect_engine: &darkmatter::effects::EffectEngine,
+    shell_runner: &dyn ShellRunner,
+    emitter: &dyn LifecycleEmitter,
+) -> Result<LoopGateOutcome, CompositionError> {
+    let loop_ctx = build_loop_stack_context(
+        LifecycleSignal::Loop,
+        frontmatter,
+        lifecycle_ctx,
+        effect_engine,
+        shell_runner,
+        emitter,
+        base_dir,
+    );
+    guard.execute_event(LifecycleSignal::Loop, &loop_ctx);
+
+    let lookup = LoopExpressionLookup::new(frontmatter, ambient).with_base_dir(base_dir);
+    if !evaluate_condition(&config.condition, &lookup)? {
+        return Ok(LoopGateOutcome::Exit);
+    }
+
+    let next_frontmatter = apply_actions(config, frontmatter, ambient.iteration, Some(&lookup))?;
+    Ok(LoopGateOutcome::Continue(next_frontmatter))
+}
+
+/// Build a stack execution context for loop lifecycle events.
+fn build_loop_stack_context<'a>(
+    signal: LifecycleSignal,
+    frontmatter: &'a Map<String, Value>,
+    lifecycle_ctx: &'a LifecycleRuntimeContext<'a>,
+    effect_engine: &'a darkmatter::effects::EffectEngine,
+    shell_runner: &'a dyn ShellRunner,
+    emitter: &'a dyn LifecycleEmitter,
+    base_dir: Option<&'a Path>,
+) -> StackExecutionContext<'a> {
+    StackExecutionContext {
+        signal,
+        frontmatter,
+        err: None,
+        timing: None,
+        current: None,
+        base_dir,
+        effect_engine,
+        shell_runner,
+        emitter,
+        term: lifecycle_ctx.term,
+        source_path: lifecycle_ctx.source_path,
+        repo_root: lifecycle_ctx.repo_root,
+        messaging: lifecycle_ctx.messaging,
+        settings: lifecycle_ctx.settings,
+    }
 }
 
 /// Outcome of consulting the rate-limit policy after an iteration.

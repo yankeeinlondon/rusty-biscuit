@@ -237,13 +237,45 @@ fn is_reserved_identifier(name: &str) -> bool {
         || name.starts_with("_loop_")
 }
 
-/// Recognized keys under the `loop:` frontmatter object.
+/// Recognized iteration-control keys under the `loop:` frontmatter object.
 ///
 /// `action` is the canonical key for action mutators; `actions` is accepted
-/// as an alias for backwards compatibility. Any other key is rejected at
-/// parse time so silent typos surface as a clear error rather than being
-/// ignored.
+/// as an alias for backwards compatibility. Any other iteration-control key
+/// is rejected at parse time so silent typos surface as a clear error rather
+/// than being ignored.
+///
+/// The lifecycle-concern keys (`say`, `say_first`, `effect`, `message`,
+/// `stderr`, `notify`, `info`, `warn`, `stack`) are also accepted but
+/// skipped by this parser — they are validated and stored by
+/// [`super::lifecycle::parse_lifecycle_config`], which extracts them as a
+/// `LifecycleNotification` on `LifecycleConfig::loop_concerns`. The two
+/// parsers operate on disjoint key sets inside the same `loop:` block.
 const KNOWN_LOOP_KEYS: &[&str] = &[
+    "while",
+    "until",
+    "action",
+    "actions",
+    "max",
+    "fail_fast",
+    "on_rate_limit",
+    // Lifecycle-concern keys — parsed by `parse_lifecycle_config` into
+    // `LifecycleConfig::loop_concerns`. Listed here so this parser does
+    // not reject them as unknown keys.
+    "say",
+    "say_first",
+    "effect",
+    "message",
+    "stderr",
+    "notify",
+    "info",
+    "warn",
+    "stack",
+];
+
+/// Iteration-control keys only, for diagnostic listings. The lifecycle
+/// concerns are valid keys too but are surfaced through a different error
+/// path (see [`super::lifecycle::parse_lifecycle_config`]).
+const ITERATION_CONTROL_KEYS: &[&str] = &[
     "while",
     "until",
     "action",
@@ -264,7 +296,7 @@ fn reject_unknown_loop_keys(
                 .unwrap_or_default();
             return Err(CompositionError::LoopInvalid(format!(
                 "unknown `loop.{key}` key{suggestion_hint}; valid keys are: {}",
-                KNOWN_LOOP_KEYS.join(", ")
+                ITERATION_CONTROL_KEYS.join(", ")
             )));
         }
     }
@@ -494,7 +526,15 @@ fn parse_dsl_value(raw: &str) -> serde_json::Value {
     )
 }
 
-fn split_action_args(input: &str) -> Result<Vec<String>, CompositionError> {
+/// Split a `verb(arg1, arg2, …)` argument list on top-level commas.
+///
+/// Balanced-delimiter and quote-aware: commas inside `()`, `[]`, `{}`, `'…'`,
+/// or `"…"` are preserved. An unbalanced delimiter or unterminated quote is
+/// reported as a `LoopInvalid`.
+///
+/// Shared between the loop-action DSL parser (this module) and the lifecycle
+/// short-form action parser (`super::lifecycle`).
+pub(super) fn split_action_args(input: &str) -> Result<Vec<String>, CompositionError> {
     let mut args = Vec::new();
     let mut current = String::new();
     let mut quote: Option<char> = None;
