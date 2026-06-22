@@ -7,7 +7,7 @@ In this feature we will add two headline features:
 1. **Shell Completions**
 2. **Autocomplete**
 
-Claudine already does do _shell completions_ but it's quite sub-optimal and this feature attempts to take it to a production ready state.
+Claudine already has _shell completions_ but we will optimize it substantially.
 
 ### Shell Extensions
 
@@ -18,3 +18,6 @@ Shell completions are extremely important for Claudine:
 
 ### Autocomplete
 
+We already try to help the user by providing an interactive dialog when a caller has not provided a required frontmatter property (per the schema).
+
+When a caller passes in the value for a
