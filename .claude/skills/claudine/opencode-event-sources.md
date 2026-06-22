@@ -1,5 +1,6 @@
 ---
-hash: 39a0c5d58ef53df2-dc0521dad5458b1b
+hash: ef46db3751d8e999-34278ee005d403b5
+last_updated: 2026-06-21
 ---
 
 # OpenCode Event Sources
@@ -97,16 +98,36 @@ variant with a four-kind model that distinguishes **provider capacity** from
 The classifier applies these rules in strict priority order inside
 `classify_llm_failure`:
 
-1. **Cap with context** — `has_cap` ( `"code":"1308"`, `exceeded_current_quota_error`, or `"Usage limit reached"` ) **AND** the record carries an `error` tag → `UsageCap`.
+1. **Cap with context** — `has_cap` ( `"code":"1308"`, `exceeded_current_quota_error`, or `"Usage limit reached"` ) **AND** the record carries an error-context tag → `UsageCap`.
 2. **Retry exhaustion** — `status_code == 429` AND (`AI_RetryError` OR `maxRetriesExceeded`) → `RetriesExhausted`.
-3. **Cap without context** — `has_cap` but NO `error` tag → non-fatal `ApiFailure` (advisory path).
+3. **Cap without context** — `has_cap` but no error-context tag → non-fatal `ApiFailure` (advisory path).
 4. **Plain overload** — `status_code == 429` AND `is_overload` (case-insensitive match for `overload` / `engine_overloaded_error`) → `Overloaded`.
 5. **Plain rate limit** — `status_code == 429` with none of the above → `RateLimited`.
 
-The **error-context gate** (`record.tags.get("error").is_some()`) is the
-primary defense against false-positive termination. Only the presence of an
-`error` tag proves the line came from an OpenCode error envelope rather than
-echoed or quoted text.
+The failure path runs whenever the **effective** service is `llm`/`provider` —
+the literal `service=` tag, or, when absent, the value inferred from the
+`message` tag. OpenCode **1.17.8** emits stream failures as `message="stream
+error"` with no `service=` tag and the payload nested under `error.error="…"`
+(a flat string, not the legacy `error={JSON}` envelope), so both the
+service-inference and the error-context lookup must cover that shape.
+
+The **error-context gate** (`error_context(record).is_some()`, checking `error`,
+`error.error`, then `err`) is the primary defense against false-positive
+termination. Only the presence of an error-context tag proves the line came
+from an OpenCode error envelope rather than echoed or quoted text.
+
+### Repeated-stream-error backstop
+
+Independent of classification, the bridge counts consecutive `message="stream
+error"` records with no intervening step advance. Crossing
+`MAX_CONSECUTIVE_STREAM_ERRORS` (5) emits a terminal
+`Error { "provider stream failed N times…" }` and fires
+`EarlyTermination::RepeatedStreamError` (`error_kind = "repeated_stream_error"`,
+maps to `ProcessTermination::Aborted` → fail-fast `AgentFailure`). This bounds
+OpenCode's unbounded backoff retries so a *future* error vocabulary the
+classifier does not recognize as terminal still degrades to a bounded abort
+rather than an indefinite hang. The counter resets on any genuine step
+transition. See [`fixes/2026-06-21-opencode-log-fix`](../../../claudine/fixes/2026-06-21-opencode-log-fix/spec.md).
 
 ### The `kimi-for-coding` gap
 
