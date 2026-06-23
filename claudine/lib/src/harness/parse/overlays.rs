@@ -6,8 +6,7 @@ use indexmap::IndexMap;
 use serde_json::Value;
 
 use crate::harness::error::HarnessError;
-use crate::harness::model::{ApprovedRuntimeCommand, FailureEvent, ValidationEvent};
-use crate::harness::resolve::{HarnessResolutionContext, resolve_harness_path};
+use crate::harness::model::{ApprovedRuntimeCommand, FailureEvent};
 
 /// Parse an optional `set` overlay from a handler object.
 pub(super) fn parse_set_overlay(
@@ -18,36 +17,12 @@ pub(super) fn parse_set_overlay(
         .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
 }
 
-/// Normalize a handler subject key using the same path resolution as
-/// validation subjects. For path-based events, resolve through
-/// `resolve_harness_path`; for non-path events, return as-is.
-pub(super) fn normalize_handler_subject_key(
-    raw: &str,
-    event: &FailureEvent,
-    ctx: &HarnessResolutionContext<'_>,
-) -> String {
-    let is_path_event = matches!(
-        event,
-        FailureEvent::Validation(
-            ValidationEvent::FileExists
-                | ValidationEvent::DirExists
-                | ValidationEvent::JsonFileExists
-                | ValidationEvent::YamlFileExists
-                | ValidationEvent::TomlFileExists
-                | ValidationEvent::HasWritePermission
-                | ValidationEvent::FileChanged
-                | ValidationEvent::FileUnchanged
-                | ValidationEvent::NoDirtySourceCode
-                | ValidationEvent::HasDirtySourceCode
-        )
-    );
-    if is_path_event {
-        resolve_harness_path(raw, ctx)
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|_| raw.to_string())
-    } else {
-        raw.to_string()
-    }
+/// Normalize a handler subject key.
+///
+/// Validation path events have been removed, so subject keys are kept as
+/// authored for the remaining handler events.
+pub(super) fn normalize_handler_subject_key(raw: &str, _event: &FailureEvent) -> String {
+    raw.to_string()
 }
 
 /// Tokenize a raw command string into an `ApprovedRuntimeCommand`.

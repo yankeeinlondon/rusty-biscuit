@@ -10,8 +10,8 @@ use tracing::{debug, info_span};
 
 use crate::harness::error::HarnessError;
 use crate::harness::model::{
-    ApprovedRuntimeCommand, AttemptOutcome, FailureCheck, FailureEvent, FailurePhase,
-    GuardContext, HandlerAction, HandlerTable, ProcessTermination, ValidationFailure,
+    ApprovedRuntimeCommand, AttemptOutcome, FailureEvent, FailurePhase, GuardContext,
+    HandlerAction, HandlerTable, ProcessTermination,
 };
 
 /// Context describing a failure event for handler resolution.
@@ -25,8 +25,6 @@ pub struct FailureContext {
     pub event: FailureEvent,
     /// Which phase reported the failure.
     pub failure_phase: FailurePhase,
-    /// Validation-specific details, when applicable.
-    pub check: Option<FailureCheck>,
     /// Subject key for subject-specific matching (e.g. a file path).
     pub subject_key: Option<String>,
     /// Human-readable failure message.
@@ -136,37 +134,6 @@ pub fn classify_failure(outcome: &AttemptOutcome) -> Option<FailureEvent> {
     }
 }
 
-/// Build a `FailureContext` from validation failures.
-pub fn build_validation_failure_context(
-    failures: &[ValidationFailure],
-    provider: &str,
-    source_file: &Path,
-    attempt: u32,
-    session_id: Option<String>,
-    outcome: Option<AttemptOutcome>,
-) -> Vec<FailureContext> {
-    failures
-        .iter()
-        .map(|f| FailureContext {
-            provider: provider.to_string(),
-            source_file: Some(source_file.to_path_buf()),
-            event: FailureEvent::Validation(f.event.clone()),
-            failure_phase: f.phase,
-            check: Some(FailureCheck {
-                name: f.event.clone(),
-                subject_key: f.subject_key.clone(),
-            }),
-            subject_key: f.subject_key.clone(),
-            message: f.message.clone(),
-            attempt,
-            session_id: session_id.clone(),
-            outcome: outcome.clone(),
-            error_kind: None,
-            guard_context: None,
-        })
-        .collect()
-}
-
 /// Execute a programmatic `handle` command with failure context on stdin.
 ///
 /// The command receives a JSON payload on stdin with all failure context.
@@ -191,12 +158,6 @@ fn execute_programmatic_handler(
         .as_ref()
         .filter(|outcome| !outcome.final_response.is_empty())
         .map(|outcome| serde_json::json!({ "text": outcome.final_response }));
-    let check = failure.check.as_ref().map(|check| {
-        serde_json::json!({
-            "name": check.name.to_string(),
-            "subject_key": check.subject_key,
-        })
-    });
 
     // Prefer the context's honest per-guard label; fall back to the outcome's
     // (the streaming path populates both, but only the outcome carries it on
@@ -221,7 +182,6 @@ fn execute_programmatic_handler(
         "failure_event": failure.event.to_string(),
         "failure_phase": failure.failure_phase.to_string(),
         "message": failure.message,
-        "check": check,
         "response": response,
         "error_kind": error_kind,
         "guard_context": guard_context,
@@ -347,20 +307,14 @@ fn parse_programmatic_response(
                 .get("prompt")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| HarnessError::HandlerFailed {
-                    action: "handle".to_string(),
+                    action: "resume".to_string(),
                     detail: "resume action requires a 'prompt' field".to_string(),
                 })?;
             Ok(Some(HandlerAction::Resume {
                 prompt: prompt.to_string(),
                 set: parse_set_from_value(value),
-                msg: value
-                    .get("msg")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-                say: value
-                    .get("say")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
+                msg: value.get("msg").and_then(|v| v.as_str()).map(String::from),
+                say: value.get("say").and_then(|v| v.as_str()).map(String::from),
                 retries: value
                     .get("retries")
                     .and_then(|v| v.as_u64())
@@ -370,21 +324,15 @@ fn parse_programmatic_response(
         "redirect" => {
             let file = value.get("file").and_then(|v| v.as_str()).ok_or_else(|| {
                 HarnessError::HandlerFailed {
-                    action: "handle".to_string(),
+                    action: "redirect".to_string(),
                     detail: "redirect action requires a 'file' field".to_string(),
                 }
             })?;
             Ok(Some(HandlerAction::Redirect {
                 file: file.to_string(),
                 set: parse_set_from_value(value),
-                msg: value
-                    .get("msg")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-                say: value
-                    .get("say")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
+                msg: value.get("msg").and_then(|v| v.as_str()).map(String::from),
+                say: value.get("say").and_then(|v| v.as_str()).map(String::from),
                 resume: value
                     .get("resume")
                     .and_then(|v| v.as_bool())
@@ -499,7 +447,6 @@ pub fn build_agent_failure_context(
         source_file: Some(source_file.to_path_buf()),
         event,
         failure_phase: FailurePhase::Agent,
-        check: None,
         subject_key: None,
         message,
         attempt,
@@ -512,9 +459,9 @@ pub fn build_agent_failure_context(
 
 /// Build `FailureContext` values from shell-audit failures.
 ///
-/// Only non-source failures (pre-check, post-check, programmatic, declarative)
-/// are converted. Source-page `::shell` failures are terminal in v1 and should
-/// be handled separately before calling this function.
+/// Only non-source failures (programmatic, declarative) are converted.
+/// Source-page `::shell` failures are terminal in v1 and should be handled
+/// separately before calling this function.
 pub fn build_audit_failure_context(
     failures: &[&crate::harness::model::ShellAuditOutcome],
     provider: &str,
@@ -527,10 +474,10 @@ pub fn build_audit_failure_context(
         .iter()
         .map(|outcome| {
             let subject_key = match &outcome.command.source {
-                AuditedCommandSource::PreCheck(id) => Some(format!("pre_check_{}", id.0)),
-                AuditedCommandSource::PostCheck(id) => Some(format!("post_check_{}", id.0)),
                 AuditedCommandSource::ProgrammaticHandle => Some("handle".to_string()),
-                AuditedCommandSource::DeclarativeHandler { subject_key, .. } => subject_key.clone(),
+                AuditedCommandSource::DeclarativeHandler { subject_key, .. } => {
+                    subject_key.clone()
+                }
                 AuditedCommandSource::ComposeSourceLine { .. } => None,
             };
 
@@ -539,7 +486,6 @@ pub fn build_audit_failure_context(
                 source_file: Some(source_file.to_path_buf()),
                 event: FailureEvent::ShellAuditDenied,
                 failure_phase: FailurePhase::ShellAudit,
-                check: None,
                 subject_key,
                 message: outcome.message.clone(),
                 attempt,
@@ -555,7 +501,7 @@ pub fn build_audit_failure_context(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::harness::model::{HandlerRule, ProcessTermination, ValidationEvent};
+    use crate::harness::model::{HandlerRule, ProcessTermination};
 
     fn make_handler_table(exact: Vec<HandlerRule>, generic: Vec<HandlerRule>) -> HandlerTable {
         HandlerTable { exact, generic }
@@ -570,8 +516,7 @@ mod tests {
             provider: "codex".to_string(),
             source_file: Some(PathBuf::from("/repo/prompts/test.md")),
             event,
-            failure_phase: FailurePhase::PostCheck,
-            check: None,
+            failure_phase: FailurePhase::Agent,
             subject_key,
             message: message.to_string(),
             attempt: 1,
@@ -586,7 +531,7 @@ mod tests {
     fn subject_specific_handler_matched() {
         let table = make_handler_table(
             vec![HandlerRule {
-                event: FailureEvent::Validation(ValidationEvent::FileExists),
+                event: FailureEvent::AgentFailure,
                 subject_key: Some("/repo/docs/output.md".to_string()),
                 action: HandlerAction::Retry {
                     prompt_suffix: Some("Create the file.".to_string()),
@@ -600,7 +545,7 @@ mod tests {
         );
 
         let failure = test_failure_context(
-            FailureEvent::Validation(ValidationEvent::FileExists),
+            FailureEvent::AgentFailure,
             Some("/repo/docs/output.md".to_string()),
             "file not found",
         );
@@ -647,7 +592,7 @@ mod tests {
     fn subject_specific_takes_precedence_over_generic() {
         let table = make_handler_table(
             vec![HandlerRule {
-                event: FailureEvent::Validation(ValidationEvent::FileExists),
+                event: FailureEvent::AgentFailure,
                 subject_key: Some("/specific.md".to_string()),
                 action: HandlerAction::Retry {
                     prompt_suffix: Some("specific retry".to_string()),
@@ -658,7 +603,7 @@ mod tests {
                 },
             }],
             vec![HandlerRule {
-                event: FailureEvent::Validation(ValidationEvent::FileExists),
+                event: FailureEvent::AgentFailure,
                 subject_key: None,
                 action: HandlerAction::Retry {
                     prompt_suffix: Some("generic retry".to_string()),
@@ -671,7 +616,7 @@ mod tests {
         );
 
         let failure = test_failure_context(
-            FailureEvent::Validation(ValidationEvent::FileExists),
+            FailureEvent::AgentFailure,
             Some("/specific.md".to_string()),
             "file not found",
         );
