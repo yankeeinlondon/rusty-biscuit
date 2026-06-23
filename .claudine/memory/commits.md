@@ -112,6 +112,10 @@ This is the single biggest source of wasted time and outright hangs in this work
 - Prefer `sort_by_key` over `sort_by(|a, b| key(a).cmp(&key(b)))` for single-key sorts.
 - Prefer guard clauses (`if condition =>`) in match arms over nested `if` blocks.
 
+## Claudine Lifecycle Architecture
+
+- **Lifecycle-key rejections must live in both the loop execution path AND the composition path when the parsing order splits them (2026-06-22 claudine lifecycle batch, `loop.stdout` rejection).** In the claudine lifecycle parser, `resolve_loop_config` (`claudine/lib/src/composition/loop_config.rs`) runs **before** lifecycle parsing in the loop execution path — so a top-level `loop.stdout` would otherwise fall through to `reject_unknown_loop_keys` and surface the generic `LoopInvalid` unknown-key error instead of the dedicated `CompositionError::LifecycleStdoutRejected` that fires on every other event block. The fix lives in BOTH `loop_config.rs` (loop path) and `lifecycle.rs`'s `parse_lifecycle_config` (composition path) so that either invocation gets the typed diagnostic. When staging a sibling-aware rejection like this, verify both call sites with L1 tests that assert the typed variant (not just "any error") — `claudine/lib/src/composition/loop_config.rs::loop_stdout_is_rejected_as_lifecycle_stdout_not_loop_invalid` and `claudine/lib/src/composition/lifecycle.rs::rejects_stdout_field_on_loop_block` are the canonical patterns, and the lesson generalizes: any "must surface a specific typed diagnostic on every code path" rule requires (a) a call-site audit of the parser order and (b) a paired test in each path.
+
 ## Testing Terminal-Rendering CLIs
 
 - Non-TTY test contexts default to 80-column width, which can be too narrow for some tables. Tests should also accept the "could not be rendered" (or equivalent) error rather than only asserting a successful render, so they stay robust across CI environments.
