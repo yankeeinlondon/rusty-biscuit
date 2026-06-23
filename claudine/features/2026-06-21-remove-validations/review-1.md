@@ -2,6 +2,7 @@
 ready: false
 agent: codex/default
 created: 2026-06-23T08:21:53
+implemented: true
 ---
 
 # Review: Remove Validations

@@ -2,7 +2,7 @@
 status: ready for planning and implementation
 depends_on: ../2026-05-12-lifecycle/spec.md
 reviewed: true
-review_iterations: 1
+review_iterations: 3
 ---
 
 # Retire the Harness Pre/Post Validation & Handler DSL

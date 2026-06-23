@@ -266,7 +266,7 @@ Sub-modules:
 - `resolve` — source resolution via `biscuit-file::FileReference` with read/write permission validation
 - `prepare` — builds a `PreparedComposition` (effective frontmatter, composed body, pre-execution hashes) via `prepare_direct()` / `prepare_inline()` with `PrepareOptions`
 - `select` — deterministic provider selection (explicit flag → single-installed → frontmatter hint → config favorite → interactive chooser)
-- `preflight` — shell approval collection and execution for `::shell` directives, top-level frontmatter `$(...)` expressions, `shell_command` validations, and `deviate`/`handle` commands
+- `preflight` — shell approval collection and execution for source `::shell` directives and lifecycle stack `shell` actions
 - `closure` — inline closure plan that merges provider-returned content back into the source file atomically (preserves frontmatter, updates `last_updated`)
 - `sequence` — sequence plan parser, normalizer, and per-step overlay builder for `claudine sequence`
 - `lifecycle` — `LifecycleEmitter` trait and `LifecycleRunGuard` RAII guard that emit lifecycle signals (start/success/failure) to external observers; includes `DefaultLifecycleEmitter` and programmatic handler hook integration
