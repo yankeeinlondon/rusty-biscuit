@@ -192,6 +192,13 @@ pub enum CompositionError {
     #[error("invalid inline composition response: {0}")]
     InvalidInlineResponse(String),
 
+    /// The document's existing `hash` frontmatter property is malformed.
+    ///
+    /// Carries the typed `MarkdownError` so the CLI's top-level walker renders
+    /// Darkmatter's `MalformedStoredHash` block instead of a flat string.
+    #[error("malformed stored `hash` property: {0}")]
+    InlineHashMalformed(#[source] MarkdownError),
+
     /// Atomic file write failed during inline composition.
     #[error("atomic write failed: {0}")]
     AtomicWriteFailed(String),
@@ -898,6 +905,7 @@ impl CompositionError {
                 Some(Some("interactive".to_string()))
             }
             CompositionError::SchemaLoad { .. } => Some(Some("$schema".to_string())),
+            CompositionError::InlineHashMalformed(_) => Some(Some("hash".to_string())),
             CompositionError::UnsupportedInteractiveSchema { property, .. } => {
                 Some(Some(property.clone()))
             }

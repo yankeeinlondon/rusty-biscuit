@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposePerfReport, ComposeWarning};
+use darkmatter::markdown::hash::ComputedHash;
 use serde::{Deserialize, Serialize};
 
 use super::launch_workspace::LaunchWorkspaceContext;
@@ -539,8 +540,12 @@ pub enum CompositionClosurePlan {
 pub struct InlineClosurePlan {
     /// The original on-disk document text (frontmatter + body).
     pub original_document_text: String,
-    /// Hash of the original body (for unchanged-body detection).
-    pub original_body_hash: u64,
+    /// Full pre-run hash of the document, always [`MdHashKind::Simple`].
+    ///
+    /// Computed with `hash` and `last_updated` excluded via
+    /// [`inline_hash_options`][crate::composition::closure::inline_hash_options],
+    /// so the managed properties cannot influence the unchanged-body check.
+    pub original_hash: ComputedHash,
 }
 
 /// Universal output format for composed provider execution.

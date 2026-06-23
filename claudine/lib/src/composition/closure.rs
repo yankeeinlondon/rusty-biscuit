@@ -7,6 +7,8 @@
 
 use std::path::Path;
 
+use darkmatter::markdown::MarkdownResult;
+use darkmatter::markdown::hash::{ComputedHash, MdHashKind, MdHashOptions, StoredHash};
 use indexmap::IndexMap;
 
 use crate::composition::error::CompositionError;
@@ -46,6 +48,11 @@ pub struct InlineClosureResult {
     pub new_properties: Vec<String>,
     /// Keys that were modified by the agent and reverted to original values.
     pub reverted_properties: Vec<String>,
+    /// Whether the frontmatter segment differed from the pre-run baseline.
+    ///
+    /// `hash` and `last_updated` are excluded from this comparison, so the
+    /// stamp itself cannot pollute the signal.
+    pub frontmatter_changed: bool,
 }
 
 /// Validate the replacement body, reconstruct the document preserving
@@ -64,7 +71,8 @@ pub fn apply_inline_closure(
     }
 
     let replacement_markdown: darkmatter::markdown::Markdown = replacement_body.to_string().into();
-    if replacement_markdown.hash_body(false) == plan.original_body_hash {
+    let post_hash = replacement_markdown.compute_hash(MdHashKind::Simple, &inline_hash_options());
+    if simple_body(&post_hash) == simple_body(&plan.original_hash) {
         return Err(CompositionError::InvalidInlineResponse(
             "replacement body is unchanged".into(),
         ));
@@ -93,12 +101,48 @@ pub fn apply_inline_closure(
     )
     .map_err(CompositionError::InvalidInlineResponse)?;
 
-    crate::config::atomic::atomic_write(target_path, doc_string.as_bytes())
+    // Stamp a Darkmatter Simple hash into the `hash:` frontmatter property
+    // in the same atomic write that persists the body.
+    //
+    // We avoid parsing `doc_string` directly into `Markdown` because
+    // Darkmatter's frontmatter parser splits on `lines()` and rejoins with
+    // `\n`, which strips trailing newlines and normalizes CRLF. Instead, parse
+    // only the frontmatter block and build the Markdown with the verbatim body.
+    let md = if let Some(parts) = split_frontmatter_parts(&doc_string) {
+        let fm_only = format!("{}{}{}", parts.opening, parts.yaml, parts.closing);
+        let fm_md: darkmatter::markdown::Markdown = fm_only.into();
+        let body_start = parts.opening.len() + parts.yaml.len() + parts.closing.len();
+        let body = &doc_string[body_start..];
+        darkmatter::markdown::Markdown::with_frontmatter(fm_md.frontmatter().clone(), body)
+    } else {
+        doc_string.into()
+    };
+
+    let opts = inline_hash_options();
+    let stored = parse_inline_stored_hash(&md, &opts)
+        .map_err(CompositionError::InlineHashMalformed)?;
+    let decision = md
+        .plan_hash_save(stored.as_ref(), &opts)
+        .map_err(CompositionError::InlineHashMalformed)?;
+    let final_text = md
+        .apply_hash_save(&decision, &opts, today)
+        .unwrap_or_else(|| md.as_string());
+
+    crate::config::atomic::atomic_write(target_path, final_text.as_bytes())
         .map_err(|e| CompositionError::AtomicWriteFailed(e.to_string()))?;
+
+    // Compute the post-write fm-segment-change signal for tooling that wants
+    // to distinguish frontmatter drift from body drift. The `hash` and
+    // `last_updated` managed keys are excluded by `inline_hash_options()`, so
+    // the stamp itself cannot influence the comparison.
+    let final_md: darkmatter::markdown::Markdown = final_text.clone().into();
+    let final_hash = final_md.compute_hash(MdHashKind::Simple, &opts);
+    let frontmatter_changed = simple_fm(&final_hash) != simple_fm(&plan.original_hash);
 
     Ok(InlineClosureResult {
         new_properties,
         reverted_properties,
+        frontmatter_changed,
     })
 }
 
@@ -135,6 +179,60 @@ pub fn rewrite_inline_document(
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
+
+/// Hash options used for every inline-compose hash computation.
+///
+/// Forces [`MdHashKind::Simple`] so any pre-existing `structured` or `detailed`
+/// stored hash is normalized to the `Simple` shape on the next run. Excludes
+/// the managed `hash` and `last_updated` keys from the frontmatter segment so
+/// the stamp itself cannot influence the hash.
+pub fn inline_hash_options() -> MdHashOptions {
+    MdHashOptions {
+        forced_kind: Some(MdHashKind::Simple),
+        ..MdHashOptions::default()
+    }
+}
+
+/// Returns the body segment of a [`ComputedHash::Simple`] value.
+///
+/// # Panics
+///
+/// Panics if `hash` is not `Simple`. The inline closure only ever stores
+/// `Simple` hashes, so this is an unreachable invariant violation.
+fn simple_body(hash: &ComputedHash) -> &str {
+    match hash {
+        ComputedHash::Simple { body, .. } => body,
+        _ => unreachable!("inline closure hashes are always ComputedHash::Simple"),
+    }
+}
+
+/// Returns the frontmatter segment of a [`ComputedHash::Simple`] value.
+///
+/// # Panics
+///
+/// Panics if `hash` is not `Simple`. The inline closure only ever stores
+/// `Simple` hashes, so this is an unreachable invariant violation.
+fn simple_fm(hash: &ComputedHash) -> &str {
+    match hash {
+        ComputedHash::Simple { fm, .. } => fm,
+        _ => unreachable!("inline closure hashes are always ComputedHash::Simple"),
+    }
+}
+
+/// Parses the document's stored `hash` property, or returns `None` when it is
+/// absent or null.
+///
+/// Mirrors the CLI pattern in `darkmatter/cli/src/commands/hash.rs:115` so
+/// inline-compose shares the same stored-hash contract as `md hash --save`.
+fn parse_inline_stored_hash(
+    md: &darkmatter::markdown::Markdown,
+    opts: &MdHashOptions,
+) -> MarkdownResult<Option<StoredHash>> {
+    match md.frontmatter().as_map().get(opts.property.as_str()) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(value) => StoredHash::parse(value, &opts.property).map(Some),
+    }
+}
 
 /// Strip a leading frontmatter block (```---\n...\n---\n```) from text,
 /// returning only the body that follows.
@@ -375,9 +473,11 @@ mod tests {
     fn apply_inline_closure_rejects_unchanged_body() {
         let original = "---\nprompt: write\n---\nOriginal body\n";
         let original_markdown: darkmatter::markdown::Markdown = original.to_string().into();
+        let original_hash = original_markdown
+            .compute_hash(MdHashKind::Simple, &inline_hash_options());
         let plan = InlineClosurePlan {
             original_document_text: original.to_string(),
-            original_body_hash: original_markdown.hash_body(false),
+            original_hash,
         };
 
         let err = apply_inline_closure(
@@ -391,6 +491,11 @@ mod tests {
 
         assert!(matches!(err, CompositionError::InvalidInlineResponse(_)));
         assert!(err.to_string().contains("unchanged"));
+
+        // Port verification: the captured body segment is a non-empty 16-hex string.
+        assert_eq!(simple_body(&plan.original_hash).len(), 16);
+        assert!(!simple_body(&plan.original_hash).is_empty());
+        assert!(simple_body(&plan.original_hash).chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[test]
@@ -509,9 +614,13 @@ mod tests {
 
     #[test]
     fn apply_closure_rejects_empty_body() {
+        let original = "---\nprompt: test\n---\nOld\n";
+        let original_markdown: darkmatter::markdown::Markdown = original.to_string().into();
+        let original_hash = original_markdown
+            .compute_hash(MdHashKind::Simple, &inline_hash_options());
         let plan = InlineClosurePlan {
-            original_document_text: "---\nprompt: test\n---\nOld\n".into(),
-            original_body_hash: 0,
+            original_document_text: original.into(),
+            original_hash,
         };
         let err = apply_inline_closure(
             &plan,
@@ -714,9 +823,11 @@ mod tests {
         std::fs::write(&file, original).unwrap();
 
         let original_markdown: darkmatter::markdown::Markdown = original.to_string().into();
+        let original_hash = original_markdown
+            .compute_hash(MdHashKind::Simple, &inline_hash_options());
         let plan = InlineClosurePlan {
             original_document_text: original.to_string(),
-            original_body_hash: original_markdown.hash_body(false),
+            original_hash,
         };
 
         // Simulate post-run state: title changed, tags added
@@ -762,9 +873,11 @@ mod tests {
         std::fs::write(&file, original).unwrap();
 
         let original_markdown: darkmatter::markdown::Markdown = original.to_string().into();
+        let original_hash = original_markdown
+            .compute_hash(MdHashKind::Simple, &inline_hash_options());
         let plan = InlineClosurePlan {
             original_document_text: original.to_string(),
-            original_body_hash: original_markdown.hash_body(false),
+            original_hash,
         };
 
         let result =
@@ -788,9 +901,11 @@ mod tests {
         std::fs::write(&file, original).unwrap();
 
         let original_markdown: darkmatter::markdown::Markdown = original.to_string().into();
+        let original_hash = original_markdown
+            .compute_hash(MdHashKind::Simple, &inline_hash_options());
         let plan = InlineClosurePlan {
             original_document_text: original.to_string(),
-            original_body_hash: original_markdown.hash_body(false),
+            original_hash,
         };
 
         let dirty_body = "# Generated\nNo blank line before paragraph\n";
@@ -815,6 +930,354 @@ mod tests {
             "cleaned body must insert blank line between header and paragraph; got:\n{cleaned}"
         );
         let _ = fm_prefix;
+    }
+
+    #[test]
+    fn apply_closure_writes_simple_hash() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.md");
+        let original = "---\nprompt: test\nlast_updated: 2026-01-01\n---\nOld body\n";
+        std::fs::write(&file, original).unwrap();
+
+        let original_markdown: darkmatter::markdown::Markdown = original.to_string().into();
+        let original_hash = original_markdown
+            .compute_hash(MdHashKind::Simple, &inline_hash_options());
+        let plan = InlineClosurePlan {
+            original_document_text: original.to_string(),
+            original_hash,
+        };
+
+        apply_inline_closure(&plan, "New body\n", &file, "2026-04-02", None).unwrap();
+
+        let written = std::fs::read_to_string(&file).unwrap();
+        let written_md: darkmatter::markdown::Markdown = written.clone().into();
+        let hash_value = written_md
+            .frontmatter()
+            .as_map()
+            .get("hash")
+            .expect("hash property should be stamped");
+        let hash_str = hash_value.as_str().expect("hash should be a string");
+
+        let parts: Vec<&str> = hash_str.split('-').collect();
+        assert_eq!(parts.len(), 2, "hash should have two 16-hex segments: {hash_str}");
+        assert_eq!(parts[0].len(), 16);
+        assert_eq!(parts[1].len(), 16);
+        assert!(
+            parts.iter().all(|p| p.bytes().all(|b| b.is_ascii_hexdigit())),
+            "hash segments should be lowercase hex: {hash_str}"
+        );
+
+        // The managed keys are excluded from the fm segment, so the hash remains
+        // stable across save round-trips.
+        assert!(written.contains("last_updated: 2026-04-02\n"));
+        assert!(written.contains("New body\n"));
+    }
+
+    #[test]
+    fn apply_closure_hash_is_self_referentially_stable() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.md");
+        let original = "---\nprompt: test\nlast_updated: 2026-01-01\n---\nOld body\n";
+        std::fs::write(&file, original).unwrap();
+
+        let original_markdown: darkmatter::markdown::Markdown = original.to_string().into();
+        let opts = inline_hash_options();
+        let original_hash = original_markdown.compute_hash(MdHashKind::Simple, &opts);
+        let plan = InlineClosurePlan {
+            original_document_text: original.to_string(),
+            original_hash,
+        };
+
+        apply_inline_closure(&plan, "New body\n", &file, "2026-04-02", None).unwrap();
+
+        let written = std::fs::read_to_string(&file).unwrap();
+        let written_md: darkmatter::markdown::Markdown = written.into();
+        let stored = parse_inline_stored_hash(&written_md, &opts)
+            .unwrap()
+            .expect("written file should carry a stored hash");
+        let computed = written_md.compute_hash(MdHashKind::Simple, &opts);
+
+        assert_eq!(stored.kind, MdHashKind::Simple);
+        assert_eq!(
+            computed.to_stored_value(),
+            stored.value,
+            "re-computed hash must equal the stored value byte-for-byte"
+        );
+    }
+
+    #[test]
+    fn apply_closure_downgrades_structured_hash_to_simple() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.md");
+        // Valid structured stored hash, but the forced-Simple closure must
+        // normalize it to the Simple shorthand on the next run.
+        let original = concat!(
+            "---\n",
+            "prompt: test\n",
+            "last_updated: 2026-01-01\n",
+            "hash:\n",
+            "  kind: structured\n",
+            "  value: a000000000000000-b000000000000000-c000000000000000-d000000000000000\n",
+            "---\n",
+            "Old body\n",
+        );
+        std::fs::write(&file, original).unwrap();
+
+        let original_markdown: darkmatter::markdown::Markdown = original.to_string().into();
+        let opts = inline_hash_options();
+        let original_hash = original_markdown.compute_hash(MdHashKind::Simple, &opts);
+        let plan = InlineClosurePlan {
+            original_document_text: original.to_string(),
+            original_hash,
+        };
+
+        apply_inline_closure(&plan, "New body\n", &file, "2026-04-02", None).unwrap();
+
+        let written = std::fs::read_to_string(&file).unwrap();
+        let written_md: darkmatter::markdown::Markdown = written.into();
+        let stored = parse_inline_stored_hash(&written_md, &opts)
+            .unwrap()
+            .expect("written file should carry a stored hash");
+
+        assert_eq!(
+            stored.kind,
+            MdHashKind::Simple,
+            "non-Simple stored hash should be downgraded to Simple"
+        );
+        assert!(
+            matches!(stored.value, darkmatter::markdown::hash::StoredHashValue::Flat(_)),
+            "Simple hash should serialize as a flat shorthand string"
+        );
+
+        // Equivalent to `md hash --diff` exiting 0.
+        let comparison = written_md.compare_hash(&stored, &opts).unwrap();
+        assert!(
+            !comparison.frontmatter_changed && !comparison.body_changed,
+            "stored Simple hash should match the written document"
+        );
+    }
+
+    #[test]
+    fn apply_closure_rejects_malformed_hash_and_preserves_file() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.md");
+        let original = "---\nprompt: test\nhash: not-a-hash\nlast_updated: 2026-01-01\n---\nOld body\n";
+        std::fs::write(&file, original).unwrap();
+
+        let original_markdown: darkmatter::markdown::Markdown = original.to_string().into();
+        let original_hash = original_markdown
+            .compute_hash(MdHashKind::Simple, &inline_hash_options());
+        let plan = InlineClosurePlan {
+            original_document_text: original.to_string(),
+            original_hash,
+        };
+
+        let err = apply_inline_closure(&plan, "New body\n", &file, "2026-04-02", None).unwrap_err();
+
+        assert!(
+            matches!(err, CompositionError::InlineHashMalformed(_)),
+            "expected InlineHashMalformed, got: {err}"
+        );
+
+        // The failure path runs before atomic_write, so the file must be unchanged.
+        let on_disk = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(
+            on_disk, original,
+            "malformed hash must abort before writing to disk"
+        );
+    }
+
+    // -- frontmatter-changed signal (Phase 3) --------------------------------
+
+    #[test]
+    fn apply_closure_reports_frontmatter_changed_when_new_key_added() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.md");
+        let original = "---\nprompt: original prompt\ntitle: My Doc\n---\nOld body\n";
+        std::fs::write(&file, original).unwrap();
+
+        let original_markdown: darkmatter::markdown::Markdown = original.to_string().into();
+        let original_hash = original_markdown
+            .compute_hash(MdHashKind::Simple, &inline_hash_options());
+        let plan = InlineClosurePlan {
+            original_document_text: original.to_string(),
+            original_hash,
+        };
+
+        let mut post_run_fm = indexmap::IndexMap::new();
+        post_run_fm.insert("prompt".to_string(), serde_json::json!("original prompt"));
+        post_run_fm.insert("title".to_string(), serde_json::json!("My Doc"));
+        post_run_fm.insert("tags".to_string(), serde_json::json!("research"));
+
+        let result = apply_inline_closure(
+            &plan,
+            "Brand new body content\n",
+            &file,
+            "2026-04-02",
+            Some(&post_run_fm),
+        )
+        .unwrap();
+
+        assert!(result.frontmatter_changed, "adding a new key should flip frontmatter_changed");
+    }
+
+    #[test]
+    fn apply_closure_reports_frontmatter_unchanged_when_modified_key_reverted() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.md");
+        let original = "---\nprompt: original prompt\ntitle: My Doc\n---\nOld body\n";
+        std::fs::write(&file, original).unwrap();
+
+        let original_markdown: darkmatter::markdown::Markdown = original.to_string().into();
+        let original_hash = original_markdown
+            .compute_hash(MdHashKind::Simple, &inline_hash_options());
+        let plan = InlineClosurePlan {
+            original_document_text: original.to_string(),
+            original_hash,
+        };
+
+        // Agent tried to change `title`, but the closure reverts it to the
+        // original value. No other keys are added or removed.
+        let mut post_run_fm = indexmap::IndexMap::new();
+        post_run_fm.insert("prompt".to_string(), serde_json::json!("original prompt"));
+        post_run_fm.insert("title".to_string(), serde_json::json!("Changed Title"));
+
+        let result = apply_inline_closure(
+            &plan,
+            "Brand new body content\n",
+            &file,
+            "2026-04-02",
+            Some(&post_run_fm),
+        )
+        .unwrap();
+
+        assert!(
+            !result.frontmatter_changed,
+            "reverting a modified key should leave frontmatter_changed false"
+        );
+        assert_eq!(result.reverted_properties, vec!["title"]);
+    }
+
+    #[test]
+    fn apply_closure_hash_save_is_idempotent_when_stored_hash_matches() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.md");
+        let original = "---\nprompt: test\nlast_updated: 2026-01-01\n---\nOld body\n";
+        std::fs::write(&file, original).unwrap();
+
+        let original_md: darkmatter::markdown::Markdown = original.to_string().into();
+        let opts = inline_hash_options();
+        let original_hash = original_md.compute_hash(MdHashKind::Simple, &opts);
+
+        // Pre-compute and write a valid Simple hash that matches the document.
+        let baseline = original_md.compute_hash(MdHashKind::Simple, &opts);
+        let doc_with_hash = format!(
+            "---\nprompt: test\nhash: {}\nlast_updated: 2026-01-01\n---\nOld body\n",
+            baseline.flat_string().unwrap()
+        );
+        std::fs::write(&file, &doc_with_hash).unwrap();
+
+        let plan = InlineClosurePlan {
+            original_document_text: doc_with_hash.clone(),
+            original_hash,
+        };
+
+        // A body-only change would normally bump last_updated, but if the
+        // replacement body equals the original body the closure rejects before
+        // writing. Directly verify the save decision is idempotent when the
+        // stored hash already matches the document.
+        let md: darkmatter::markdown::Markdown = doc_with_hash.clone().into();
+        let parsed = parse_inline_stored_hash(&md, &opts).unwrap();
+        let decision = md.plan_hash_save(parsed.as_ref(), &opts).unwrap();
+        assert!(
+            decision.new_stored.is_none(),
+            "matching stored hash should not rewrite the file"
+        );
+        assert!(
+            !decision.bump_last_updated,
+            "matching stored hash should not bump last_updated"
+        );
+
+        // Also verify the closure rejection path leaves the file untouched.
+        let err = apply_inline_closure(&plan, "Old body", &file, "2026-04-02", None).unwrap_err();
+        assert!(matches!(err, CompositionError::InvalidInlineResponse(_)));
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            doc_with_hash,
+            "unchanged-body rejection must not mutate the file"
+        );
+    }
+
+    #[test]
+    fn apply_closure_is_deterministic_for_fixed_inputs() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.md");
+        let original = "---\nprompt: test\nlast_updated: 2026-01-01\n---\nOld body\n";
+        std::fs::write(&file, original).unwrap();
+
+        let original_md: darkmatter::markdown::Markdown = original.to_string().into();
+        let opts = inline_hash_options();
+        let original_hash = original_md.compute_hash(MdHashKind::Simple, &opts);
+
+        let run = || {
+            let plan = InlineClosurePlan {
+                original_document_text: original.to_string(),
+                original_hash: original_hash.clone(),
+            };
+            apply_inline_closure(&plan, "New body\n", &file, "2026-04-02", None).unwrap();
+            let bytes = std::fs::read_to_string(&file).unwrap();
+            std::fs::write(&file, original).unwrap();
+            bytes
+        };
+
+        let first = run();
+        let second = run();
+        assert_eq!(
+            first, second,
+            "two apply_inline_closure invocations with identical inputs must be byte-identical"
+        );
+    }
+
+    #[test]
+    fn apply_closure_reports_frontmatter_unchanged_for_body_only_change() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.md");
+        let original = "---\nprompt: test\nlast_updated: 2026-01-01\n---\nOld body\n";
+        std::fs::write(&file, original).unwrap();
+
+        let original_markdown: darkmatter::markdown::Markdown = original.to_string().into();
+        let original_hash = original_markdown
+            .compute_hash(MdHashKind::Simple, &inline_hash_options());
+        let plan = InlineClosurePlan {
+            original_document_text: original.to_string(),
+            original_hash,
+        };
+
+        let result =
+            apply_inline_closure(&plan, "Updated body\n", &file, "2026-04-02", None).unwrap();
+
+        assert!(
+            !result.frontmatter_changed,
+            "a body-only change should leave frontmatter_changed false"
+        );
     }
 
     fn split_frontmatter(text: &str) -> (&str, &str) {
