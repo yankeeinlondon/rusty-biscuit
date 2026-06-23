@@ -452,15 +452,6 @@ start:
     - action: stderr('{{err.msg}}')  # ERROR: err not available in start
 ```
 
-### `LifecycleStdoutRejected`
-
-A `stdout` field or `stdout(...)` action was authored. stdout is reserved for pipeable command output.
-
-```yaml
-start:
-  stdout: "hello"  # ERROR: stdout rejected
-```
-
 ### Empty String Normalization
 
 Empty strings and whitespace-only strings are normalized to `null`, so these are equivalent:
@@ -484,7 +475,7 @@ If the frontmatter is not an object (e.g., a bare string or list), lifecycle par
 - **Desktop notifications**: Zero-config. Emitted via `notify` independently of messaging routes. Failures are non-fatal.
 - **stderr/info/warn**: Rendered as styled status badges using the terminal's capability detection (circular theme with color-coded state).
 - **Audio playback**: Blocking. Sound effects and TTS play sequentially, not in parallel, to avoid overlapping audio.
-- **No stdout channel**: Lifecycle chatter never writes to stdout so `claudine compose <file> | other-tool` remains unambiguous.
+- **stdout**: The lone lifecycle channel that writes to stdout (all others target stderr, messaging, or desktop notifications). Because stdout is otherwise reserved for pipeable command output, lifecycle `stdout` text interleaves with the composed/provider output on that stream — opt in deliberately when a pipeline (`claudine compose <file> | other-tool`) should see the text.
 
 ## Related Topics
 
