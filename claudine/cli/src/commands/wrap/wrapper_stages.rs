@@ -490,6 +490,7 @@ pub(crate) fn run_execution_stage(
             Some(initial_materialized),
             term,
             &mut lifecycle_guard,
+            None,
             true,
         )?;
         if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {

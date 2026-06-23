@@ -22,7 +22,7 @@ use claudine::composition::{
     CompositionError, CompositionExecutionRequest, CompositionMode, DefaultLifecycleEmitter,
     LifecycleRuntimeContext, LoopExecutionOptions, LoopExecutionResult, PrepareOptions,
     PreparedComposition, ResolvedCompositionSource, ResolvedExecutionTarget, SharedApprovalCache,
-    SystemShellRunner, build_loop_seed, parse_lifecycle_config, resolve_loop_config,
+    SystemShellRunner, build_loop_seed_with_lifecycle, resolve_loop_config,
 };
 use claudine::system_prompt::SystemPromptArgs;
 use color_eyre::eyre::{Result, eyre};
@@ -419,17 +419,19 @@ fn build_and_run_loop(
         return Ok(None);
     };
 
-    let initial_frontmatter = build_loop_seed(
+    // Build the seed AND parse lifecycle from the document's full composed
+    // frontmatter. The seed lifts only iteration-control variables, so parsing
+    // lifecycle from it would drop every event block and leave the loop with no
+    // `initialize`/`start`/terminal/`finalize` or `loop:` gate concerns. The
+    // non-loop path parses lifecycle from `prepared.lifecycle`; this matches it.
+    let loop_seed = build_loop_seed_with_lifecycle(
         source,
         &config,
         loop_prepare_options.clone(),
         kind.mode(),
     )?;
-
-    let lifecycle_config = parse_lifecycle_config(
-        &serde_json::Value::Object(initial_frontmatter.clone()),
-        &source.resolved_path,
-    )?;
+    let initial_frontmatter = loop_seed.seed;
+    let lifecycle_config = loop_seed.lifecycle;
 
     let effective_repo_root = prep_context.source_repo_root.as_deref();
     let (lifecycle_settings, lifecycle_messaging) = if lifecycle_config.is_empty() {
@@ -507,6 +509,17 @@ fn build_and_run_loop(
             };
 
             emit_compose_warnings(&prepared.warnings, shared.silent);
+
+            // Repoint the guard at THIS iteration's freshly composed lifecycle.
+            // The guard was built from the seed (iteration-1) lifecycle, whose
+            // `{{ }}` interpolations are frozen at the seed frontmatter. Each
+            // iteration re-composes with the live frontmatter, so its
+            // `prepared.lifecycle` carries the current iteration's values
+            // (e.g. a `loop:` gate `'gate:{{phase}}'` resolves to the live
+            // `phase`). The loop gate fires through this same guard after the
+            // executor returns, so swapping here keeps both the per-iteration
+            // terminal events and the post-finalize gate on live state.
+            guard.set_config(prepared.lifecycle.clone());
 
             let request = build_execution_request(
                 shared,

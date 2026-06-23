@@ -16,7 +16,8 @@ use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::lifecycle::{
-    DefaultLifecycleEmitter, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal,
+    DefaultLifecycleEmitter, LifecycleEmitter, LifecycleRunGuard, LifecycleRuntimeContext,
+    LifecycleSignal,
 };
 use claudine::composition::lifecycle_executor::{
     LifecycleEventOutcome, StackControl, StackExecutionContext, SystemShellRunner,
@@ -135,6 +136,83 @@ fn enforce_repo_launch_detection(
         ));
     }
     Ok(())
+}
+
+/// Run the `blocked` and `finalize` lifecycle events (top-level
+/// communication **and** typed stack) for a composition preflight failure.
+///
+/// The spec requires a blocked iteration to reach `blocked` then `finalize`,
+/// each firing both its top-level communication surface and its typed stack
+/// (`spec.md:436`, `spec.md:650`, `spec.md:652`). Pre-flight failures
+/// (harness-plan parse, shell-approval denial, dry-run pre-check) used to
+/// call [`LifecycleRunGuard::emit_blocked_or_failure`], which only fires the
+/// legacy top-level subset (`stderr`/`message`/`notify`/audio) and skips both
+/// the typed stacks and `finalize`. That left documents relying on
+/// `blocked.stack` / `finalize.stack` side effects (e.g.
+/// `append_line('events.log', 'blocked')`) without either marker.
+///
+/// This helper mirrors the [`StackExecutionContext`] pattern the
+/// `initialize` event uses (see `init_ctx` in
+/// [`execute_composition_request_inner_with_guard`]): the context borrows
+/// the *local* `emitter`/`settings`/etc. — not the guard — so
+/// [`LifecycleRunGuard::execute_event`] can take `&mut guard` without a
+/// borrow conflict. `execute_event` records the emission and runs the
+/// top-level + stack in one call, and sets `terminal_emitted = true` so the
+/// guard's `Drop` safety-net cannot double-emit.
+///
+/// `err_info` should faithfully describe which preflight failed
+/// (e.g. `from_action_failure("harness_plan", msg)`) so a user-authored
+/// `blocked.stack` can reference `{{ err.msg }}` meaningfully.
+#[allow(clippy::too_many_arguments)]
+fn emit_preflight_blocked_and_finalize(
+    guard: &mut LifecycleRunGuard<'_>,
+    effect_engine: &EffectEngine,
+    emitter: &dyn LifecycleEmitter,
+    settings: &claudine::events::GlobalSettings,
+    messaging: &claudine::messaging::RuntimeMessagingSettings,
+    term: &Terminal,
+    source_path: &Path,
+    repo_root: Option<&Path>,
+    base_dir: Option<&Path>,
+    frontmatter: &serde_json::Map<String, serde_json::Value>,
+    document_start: std::time::Instant,
+    err_info: claudine::composition::LifecycleErrorInfo,
+) {
+    let timing = claudine::composition::LifecycleTiming::from_instants(
+        document_start,
+        None,
+        std::time::Instant::now(),
+    );
+    let current_anchor = base_dir.unwrap_or(source_path);
+    let current =
+        claudine::composition::LifecycleCurrent::capture_at_event(current_anchor);
+
+    let blocked_ctx = StackExecutionContext {
+        signal: LifecycleSignal::Blocked,
+        frontmatter,
+        err: Some(&err_info),
+        timing: Some(&timing),
+        current: Some(&current),
+        base_dir,
+        effect_engine,
+        shell_runner: &SystemShellRunner,
+        emitter,
+        term,
+        source_path,
+        repo_root,
+        messaging,
+        settings,
+    };
+    guard.execute_event(LifecycleSignal::Blocked, &blocked_ctx);
+
+    // The finalize stack reuses the same frontmatter / globals / side-effect
+    // routes as the blocked stack; only the signal differs. `with_signal`
+    // borrows `blocked_ctx` by shared reference, which does not conflict with
+    // the `&mut guard` `execute_event` requires because the guard and the
+    // context borrow from disjoint locals (emitter/settings/... passed in as
+    // arguments, not pulled out of the guard).
+    let finalize_ctx = blocked_ctx.with_signal(LifecycleSignal::Finalize);
+    guard.execute_event(LifecycleSignal::Finalize, &finalize_ctx);
 }
 
 /// Result of executing a single composition step through the wrapper pipeline.
@@ -342,6 +420,11 @@ fn execute_composition_request_inner_with_guard(
     // headline is the threaded wall-clock baseline sampled at report build,
     // not this mid-flight timer (TM-1).
     let mut last_checkpoint = std::time::Instant::now();
+    // Stable anchor for lifecycle `timing.document_ms`: the moment this
+    // document's execution began. Unlike `last_checkpoint` (reset by every
+    // sub-stage record), this is never advanced, so `document_ms` measures
+    // elapsed time since the document started, not since the last sub-stage.
+    let document_start = last_checkpoint;
     /// Helper to record a named sub-stage timing and reset the checkpoint.
     fn record_substage(
         collector: &mut Option<crate::perf::CommandPerfCollector>,
@@ -1017,6 +1100,51 @@ fn execute_composition_request_inner_with_guard(
         request.yolo,
     );
 
+    // --- Lifecycle notification setup ------------------------------------
+    // Constructed up here (rather than just before the guard) so the
+    // `run_body` closure below can capture these by reference and route
+    // composition-preflight failures through the stack-aware event runner
+    // (`emit_preflight_blocked_and_finalize`). Pre-flight failures must fire
+    // `blocked.stack` + `finalize.stack`, which requires the same emitter /
+    // settings / messaging / effect-engine the post-closure `initialize`
+    // event uses — so the bindings are hoisted to a single shared
+    // construction site.
+    let lifecycle = &request.prepared.lifecycle;
+    let emitter = DefaultLifecycleEmitter;
+
+    // Skip runtime config loading when no lifecycle notifications are configured.
+    let (lifecycle_settings, lifecycle_messaging) = if lifecycle.is_empty() {
+        (
+            claudine::events::GlobalSettings::default(),
+            claudine::messaging::RuntimeMessagingSettings {
+                user: None,
+                repo: None,
+            },
+        )
+    } else {
+        match claudine::dispatch::loader::load_claudine_config(None, effective_repo_root) {
+            Ok(config) => (
+                claudine::dispatch::loader::bridge_tts_settings(&config),
+                claudine::dispatch::loader::bridge_messaging_settings(&config),
+            ),
+            Err(_) => (
+                claudine::events::GlobalSettings::default(),
+                claudine::messaging::RuntimeMessagingSettings {
+                    user: None,
+                    repo: None,
+                },
+            ),
+        }
+    };
+
+    // Build an effect engine for lifecycle side effects / expression functions.
+    // Writes are confined to the repo root when known, otherwise the launch cwd.
+    let lifecycle_mutation_root = effective_repo_root.unwrap_or(launch_cwd.as_path());
+    let lifecycle_effect_engine = EffectEngine::builder()
+        .mutation_root(lifecycle_mutation_root)
+        .auto_rehash(false)
+        .build();
+
     // Common execution body used both when the caller provides an external
     // lifecycle guard (loop re-entry) and when this function owns the guard
     // (single-run / first loop iteration). The closure captures the prep
@@ -1024,11 +1152,24 @@ fn execute_composition_request_inner_with_guard(
     let run_body = |
         guard: &mut claudine::composition::LifecycleRunGuard<'_>,
         skip_preflight: bool,
+        proxy_source: Option<&Path>,
     | -> Result<SingleCompositionOutcome> {
         let resolve_ctx = claudine::harness::HarnessResolutionContext {
             source_path: &request.prepared.resolved_path,
             repo_root: effective_repo_root,
         };
+        // Composed frontmatter / source-derived base dir, reused by every
+        // composition-preflight failure path so the blocked+finalize stacks
+        // see the same `frontmatter` and `base_dir` namespaces the
+        // post-closure `initialize` event does.
+        let fm_map = request.prepared.effective_frontmatter.as_object();
+        let empty_frontmatter = serde_json::Map::new();
+        let frontmatter = fm_map.unwrap_or(&empty_frontmatter);
+        let base_dir = request
+            .prepared
+            .resolved_path
+            .parent()
+            .or(effective_repo_root);
         // Validate that the harness plan can be parsed before proceeding.
         let plan = claudine::harness::parse_harness_plan(
             &request.prepared.effective_frontmatter,
@@ -1036,7 +1177,26 @@ fn execute_composition_request_inner_with_guard(
             &resolve_ctx,
         )
         .map_err(|e| {
-            guard.emit_blocked_or_failure();
+            // Route through the stack-aware runner so `blocked.stack` and
+            // `finalize.stack` fire (spec.md:436/650/652), not just the
+            // legacy top-level surface.
+            emit_preflight_blocked_and_finalize(
+                guard,
+                &lifecycle_effect_engine,
+                &emitter,
+                &lifecycle_settings,
+                &lifecycle_messaging,
+                &term,
+                &request.prepared.resolved_path,
+                effective_repo_root,
+                base_dir,
+                frontmatter,
+                document_start,
+                claudine::composition::LifecycleErrorInfo::from_action_failure(
+                    "harness_plan",
+                    e.to_string(),
+                ),
+            );
             eyre!("{e}")
         })?;
 
@@ -1064,7 +1224,27 @@ fn execute_composition_request_inner_with_guard(
                 Some(&request.prepared.resolved_path),
             )
             .map_err(|e| {
-                guard.emit_blocked_or_failure();
+                // Shell-audit denial (or any other shell-approval failure)
+                // is a composition-preflight blocked path: route through
+                // the stack-aware runner so `blocked.stack` and
+                // `finalize.stack` fire.
+                emit_preflight_blocked_and_finalize(
+                    guard,
+                    &lifecycle_effect_engine,
+                    &emitter,
+                    &lifecycle_settings,
+                    &lifecycle_messaging,
+                    &term,
+                    &request.prepared.resolved_path,
+                    effective_repo_root,
+                    base_dir,
+                    frontmatter,
+                    document_start,
+                    claudine::composition::LifecycleErrorInfo::from_action_failure(
+                        "shell_approval",
+                        e.to_string(),
+                    ),
+                );
                 eyre!("{e}")
             })?;
 
@@ -1115,11 +1295,36 @@ fn execute_composition_request_inner_with_guard(
             let pre_report = claudine::harness::evaluate_pre_checks(&plan, Some(&permission_probe));
             if !pre_report.all_passed() {
                 let failures = pre_report.failures();
-                guard.emit_blocked_or_failure();
+                // Dry-run pre-check failure (e.g. inline source is not
+                // writable) is a composition-preflight blocked path: route
+                // through the stack-aware runner so `blocked.stack` and
+                // `finalize.stack` fire.
+                let failure_count = failures.len();
+                emit_preflight_blocked_and_finalize(
+                    guard,
+                    &lifecycle_effect_engine,
+                    &emitter,
+                    &lifecycle_settings,
+                    &lifecycle_messaging,
+                    &term,
+                    &request.prepared.resolved_path,
+                    effective_repo_root,
+                    base_dir,
+                    frontmatter,
+                    document_start,
+                    claudine::composition::LifecycleErrorInfo::from_action_failure(
+                        "pre_check",
+                        format!(
+                            "pre-check validation failed ({} {})",
+                            failure_count,
+                            if failure_count == 1 { "failure" } else { "failures" }
+                        ),
+                    ),
+                );
                 return Err(eyre!(
                     "pre-check validation failed ({} {})",
-                    failures.len(),
-                    if failures.len() == 1 {
+                    failure_count,
+                    if failure_count == 1 {
                         "failure"
                     } else {
                         "failures"
@@ -1273,10 +1478,30 @@ fn execute_composition_request_inner_with_guard(
             HarnessPromptMode::Compose
         };
 
+        // When an `initialize` Proxy redirected to a different document, the
+        // harness loop re-materializes (re-composes frontmatter + body) from
+        // `source_path` each attempt, so swapping the path here runs the
+        // target document — its body, frontmatter, harness pre-checks, and
+        // its `start`/`success`/`failure`/`finalize` lifecycle. Seed
+        // `initial_materialized = None` so the loop composes the target rather
+        // than reusing the proxying document's prepared prompt.
+        let (effective_source, effective_ref, seed_materialized) = match proxy_source {
+            Some(target) => (
+                target.to_path_buf(),
+                target.display().to_string(),
+                None,
+            ),
+            None => (
+                request.prepared.resolved_path.clone(),
+                request.file_ref.clone(),
+                Some(materialized_harness_prompt_from_prepared(&request.prepared)),
+            ),
+        };
+
         let mut prompt_state = HarnessPromptState {
             mode: harness_mode,
-            source_path: request.prepared.resolved_path.clone(),
-            original_ref: request.file_ref.clone(),
+            source_path: effective_source,
+            original_ref: effective_ref,
             base_prompt: None,
             overlay: indexmap::IndexMap::new(),
             prompt_tail: Vec::new(),
@@ -1312,9 +1537,10 @@ fn execute_composition_request_inner_with_guard(
             detail_requested,
             &env_context,
             &dispatch_context,
-            Some(materialized_harness_prompt_from_prepared(&request.prepared)),
+            seed_materialized,
             &term,
             guard,
+            proxy_source,
             true,
         )?;
         if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {
@@ -1346,38 +1572,11 @@ fn execute_composition_request_inner_with_guard(
     // emitted `initialize` and owns the lifecycle runtime context. Run only
     // the per-iteration body and return.
     if let Some(guard) = external_guard {
-        return run_body(guard, skip_preflight);
+        return run_body(guard, skip_preflight, None);
     }
 
-    // --- Lifecycle notification setup ------------------------------------
-    let lifecycle = &request.prepared.lifecycle;
-    let emitter = DefaultLifecycleEmitter;
-
-    // Skip runtime config loading when no lifecycle notifications are configured.
-    let (lifecycle_settings, lifecycle_messaging) = if lifecycle.is_empty() {
-        (
-            claudine::events::GlobalSettings::default(),
-            claudine::messaging::RuntimeMessagingSettings {
-                user: None,
-                repo: None,
-            },
-        )
-    } else {
-        match claudine::dispatch::loader::load_claudine_config(None, effective_repo_root) {
-            Ok(config) => (
-                claudine::dispatch::loader::bridge_tts_settings(&config),
-                claudine::dispatch::loader::bridge_messaging_settings(&config),
-            ),
-            Err(_) => (
-                claudine::events::GlobalSettings::default(),
-                claudine::messaging::RuntimeMessagingSettings {
-                    user: None,
-                    repo: None,
-                },
-            ),
-        }
-    };
-
+    // Bundle the shared lifecycle bindings (constructed above the closure)
+    // into the runtime context the guard drives.
     let lifecycle_ctx = LifecycleRuntimeContext {
         settings: &lifecycle_settings,
         messaging: &lifecycle_messaging,
@@ -1385,14 +1584,6 @@ fn execute_composition_request_inner_with_guard(
         source_path: &request.prepared.resolved_path,
         repo_root: effective_repo_root,
     };
-
-    // Build an effect engine for lifecycle side effects / expression functions.
-    // Writes are confined to the repo root when known, otherwise the launch cwd.
-    let lifecycle_mutation_root = effective_repo_root.unwrap_or(launch_cwd.as_path());
-    let lifecycle_effect_engine = EffectEngine::builder()
-        .mutation_root(lifecycle_mutation_root)
-        .auto_rehash(false)
-        .build();
 
     // --- Initialize lifecycle event --------------------------------------
     // Fires after prompt/frontmatter resolution and CLI/frontmatter override
@@ -1405,12 +1596,26 @@ fn execute_composition_request_inner_with_guard(
         .resolved_path
         .parent()
         .or(effective_repo_root);
+    // Lifecycle stack-only globals for the `initialize` event (and its
+    // `with_signal`/`with_error` derivations, which copy these references).
+    // `current.env`/`current.ctx` are captured now, so a side effect or
+    // external change since `prepare` is observable through `current.*`. The
+    // document-start instant anchors `timing.document_ms` at this event.
+    let lifecycle_current =
+        claudine::composition::lifecycle_context::LifecycleCurrent::capture_at_event(
+            base_dir.unwrap_or(launch_cwd.as_path()),
+        );
+    let lifecycle_timing = claudine::composition::lifecycle_context::LifecycleTiming::from_instants(
+        document_start,
+        None,
+        std::time::Instant::now(),
+    );
     let init_ctx = StackExecutionContext {
         signal: LifecycleSignal::Initialize,
         frontmatter: fm_map.unwrap_or(&empty_frontmatter),
         err: None,
-        timing: None,
-        current: None,
+        timing: Some(&lifecycle_timing),
+        current: Some(&lifecycle_current),
         base_dir,
         effect_engine: &lifecycle_effect_engine,
         shell_runner: &SystemShellRunner,
@@ -1422,6 +1627,10 @@ fn execute_composition_request_inner_with_guard(
         settings: &lifecycle_settings,
     };
     let init_outcome = guard.execute_event(LifecycleSignal::Initialize, &init_ctx);
+    // Set by an `initialize` Proxy control: the resolved target document the
+    // run is handed off to. Threaded into `run_body` so the harness loop
+    // re-composes and runs the target instead of the original document.
+    let mut init_proxy_target: Option<std::path::PathBuf> = None;
     if let Some(ref control) = init_outcome.control {
         match control {
             StackControl::Skip => {
@@ -1437,23 +1646,50 @@ fn execute_composition_request_inner_with_guard(
                 });
             }
             StackControl::Error { reason } => {
-                guard.execute_event(
-                    LifecycleSignal::Failure,
-                    &init_ctx.with_signal(LifecycleSignal::Failure),
-                );
-                guard.execute_event(
-                    LifecycleSignal::Finalize,
-                    &init_ctx.with_signal(LifecycleSignal::Finalize),
-                );
                 let msg = reason
                     .clone()
                     .unwrap_or_else(|| "lifecycle initialize error".to_string());
+                let action_error =
+                    claudine::composition::lifecycle_context::LifecycleErrorInfo::from_action_failure(
+                        "error",
+                        msg.clone(),
+                    );
+                guard.execute_event(
+                    LifecycleSignal::Failure,
+                    &init_ctx.with_error(&action_error),
+                );
+                guard.execute_event(
+                    LifecycleSignal::Finalize,
+                    &init_ctx.with_error(&action_error).with_signal(LifecycleSignal::Finalize),
+                );
                 return Err(eyre!(msg));
             }
             StackControl::Proxy { target } => {
-                return Err(eyre!(
-                    "lifecycle proxy is not yet implemented (target: {target})"
-                ));
+                // Hand off to the target document. Resolve the reference
+                // (`@repo/…`, relative, or absolute) against the source so
+                // `run_body` runs the target via the harness loop's
+                // re-materialize path. The harness loop resets the lifecycle
+                // guard and re-emits the target's own `initialize` before its
+                // pre-flight / start / terminal / finalize lifecycle runs.
+                let resolved = claudine::composition::resolve_proxy_target(
+                    target,
+                    &request.prepared.resolved_path,
+                    effective_repo_root,
+                )
+                .map_err(|e| eyre!("lifecycle initialize proxy: {e}"))?;
+                if !claudine::composition::proxy_handoff_allowed(
+                    std::slice::from_ref(&request.prepared.resolved_path),
+                    &resolved,
+                ) {
+                    return Err(CompositionError::LifecycleProxyCycle {
+                        source_path: request.prepared.resolved_path.clone(),
+                        target: target.clone(),
+                        chain: vec![request.prepared.resolved_path.display().to_string()],
+                        limit: claudine::composition::MAX_PROXY_HOPS,
+                    }
+                    .into());
+                }
+                init_proxy_target = Some(resolved);
             }
             StackControl::Retry { .. }
             | StackControl::Resume { .. }
@@ -1476,7 +1712,7 @@ fn execute_composition_request_inner_with_guard(
         return Err(eyre!("lifecycle initialize failed"));
     }
 
-    run_body(&mut guard, false)
+    run_body(&mut guard, false, init_proxy_target.as_deref())
 }
 
 // -- Config loading -------------------------------------------------------
