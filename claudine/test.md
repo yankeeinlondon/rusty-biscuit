@@ -1,14 +1,14 @@
 ---
 initialize: 
-    stderr: "initialized"
+    stderr: "initialized event"
 start:
-    stderr: "start"
+    stderr: "start event"
 success:
-    stderr: "success"
+    stderr: "success event"
 failure:
-    stderr: "failure"
+    stderr: "failure event"
 finalize:
-    stderr: "finalized"
+    stderr: "finalized event"
 ---
 
 Tell a funny joke
