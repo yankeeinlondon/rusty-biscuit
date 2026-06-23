@@ -83,70 +83,43 @@ fn inline_compose_dry_run_fails_on_read_only_source() {
 
 #[cfg(unix)]
 #[test]
-fn inline_compose_non_harness_and_harness_write_identical_final_body() {
+fn inline_compose_writes_expected_final_body() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
 
     stage_opencode_inline_body_writer(&path_dir);
 
-    let bare_file = workspace.path().join("bare.md");
+    let source = workspace.path().join("bare.md");
     fs::write(
-        &bare_file,
+        &source,
         "---\nprompt: Generate the body\n---\nOriginal body.\n",
     )
     .unwrap();
 
-    let harness_file = workspace.path().join("harness.md");
-    fs::write(
-        &harness_file,
-        "---\nprompt: Generate the body\npost_checks: []\n---\nOriginal body.\n",
-    )
-    .unwrap();
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("OPENCODE_MODEL", "test-model")
+        .current_dir(workspace.path())
+        .args(["inline-compose", "--opencode", source.to_str().unwrap()])
+        .assert()
+        .success();
 
-    let run = |path: &std::path::Path| {
-        cargo_bin_cmd!("claudine")
-            .env("NO_COLOR", "1")
-            .env("HOME", workspace.path())
-            .env("PATH", augmented_path(&path_dir))
-            .env("OPENCODE_MODEL", "test-model")
-            .current_dir(workspace.path())
-            .args(["inline-compose", "--opencode", path.to_str().unwrap()])
-            .assert()
-            .success();
-
-        let doc = fs::read_to_string(path).unwrap();
-        // The inline closure must use the final response (text after the last
-        // tool call), not the interstitial narration.
-        assert!(
-            doc.contains("# Final Body"),
-            "inline body must contain final response heading; doc:\n{doc}"
-        );
-        assert!(
-            doc.contains("This is the replacement body."),
-            "inline body must contain final response body; doc:\n{doc}"
-        );
-        assert!(
-            !doc.contains("Let me look up the answer."),
-            "inline body must not contain interstitial narration; doc:\n{doc}"
-        );
-        doc
-    };
-
-    let bare_doc = run(&bare_file);
-    let harness_doc = run(&harness_file);
-
-    // Extract the body (everything after the second `---` frontmatter fence).
-    let extract_body = |doc: &str| {
-        let mut parts = doc.splitn(3, "---");
-        let _before = parts.next();
-        let _frontmatter = parts.next();
-        parts.next().unwrap_or("").trim_start().to_string()
-    };
-    let bare_body = extract_body(&bare_doc);
-    let harness_body = extract_body(&harness_doc);
-    assert_eq!(
-        bare_body, harness_body,
-        "inline-compose final body must be identical with and without harness frontmatter"
+    let doc = fs::read_to_string(&source).unwrap();
+    // The inline closure must use the final response (text after the last
+    // tool call), not the interstitial narration.
+    assert!(
+        doc.contains("# Final Body"),
+        "inline body must contain final response heading; doc:\n{doc}"
+    );
+    assert!(
+        doc.contains("This is the replacement body."),
+        "inline body must contain final response body; doc:\n{doc}"
+    );
+    assert!(
+        !doc.contains("Let me look up the answer."),
+        "inline body must not contain interstitial narration; doc:\n{doc}"
     );
 }

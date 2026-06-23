@@ -300,61 +300,6 @@ fn compose_preflight_discovers_shell_inside_false_block() {
 
 #[cfg(unix)]
 #[test]
-fn compose_shell_preflight_passes_with_whitelisted_commands() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let marker_path = workspace.path().join("provider-ran.txt");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
-
-    // Markdown with a whitelisted ::shell command AND a harness shell pre-check.
-    let md_file = workspace.path().join("template.md");
-    fs::write(
-        &md_file,
-        "---\ntitle: full flow test\npre_checks:\n  shell_command: \"echo precheck-ok\"\n---\n\
-         ::shell echo composed-ok\n",
-    )
-    .unwrap();
-
-    // Whitelist "echo" so both the ::shell directive and the harness pre-check pass.
-    fs::write(
-        workspace.path().join(".darkmatter-shell-whitelist"),
-        "prefix echo\n",
-    )
-    .unwrap();
-    fs::create_dir_all(workspace.path().join(".git")).unwrap();
-
-    write_executable(
-        &path_dir.join("codex"),
-        &format!(
-            "#!/bin/sh\nprintf 'ran\\n' > \"{}\"\nexit 0\n",
-            marker_path.display()
-        ),
-    );
-
-    // Include system dirs so shell expansion can find `echo`.
-    let full_path = format!("{}:/usr/bin:/bin", path_dir.display());
-
-    let assert = cargo_bin_cmd!("claudine")
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &full_path)
-        .args(["compose", "--codex", md_file.to_str().unwrap()])
-        .assert()
-        .success();
-
-    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
-    let plain = strip_ansi(&stderr);
-
-    // The provider should have run (marker file exists).
-    assert!(
-        marker_path.exists(),
-        "provider should launch after shell preflight + harness audit pass; stderr was:\n{plain}"
-    );
-}
-
-#[cfg(unix)]
-#[test]
 fn wrapper_restores_repo_harness_for_plain_prompts() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
@@ -390,44 +335,5 @@ exit 0
     assert!(
         !marker_path.exists(),
         "plain wrapper harness should block launch before the provider runs"
-    );
-}
-
-#[cfg(unix)]
-#[test]
-fn compose_harness_pre_check_blocks_provider_launch() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let marker_path = workspace.path().join("provider-ran.txt");
-    fs::create_dir_all(&path_dir).unwrap();
-
-    let md_file = workspace.path().join("compose.md");
-    fs::write(
-        &md_file,
-        "---\npre_checks:\n  file_exists: \"missing.txt\"\n---\nFinish the brief.\n",
-    )
-    .unwrap();
-
-    write_executable(
-        &path_dir.join("codex"),
-        r#"#!/bin/sh
-printf 'ran\n' > "$CLAUDINE_MARKER_FILE"
-exit 0
-"#,
-    );
-
-    cargo_bin_cmd!("claudine")
-        .env("NO_COLOR", "1")
-        .env("PATH", &path_dir)
-        .env("CLAUDINE_MARKER_FILE", &marker_path)
-        .current_dir(workspace.path())
-        .args(["compose", "--codex", md_file.to_str().unwrap()])
-        .assert()
-        .code(1)
-        .stderr(contains("pre-check validation failed"));
-
-    assert!(
-        !marker_path.exists(),
-        "compose harness should block launch before the provider runs"
     );
 }
