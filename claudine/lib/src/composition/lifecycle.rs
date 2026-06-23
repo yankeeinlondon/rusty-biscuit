@@ -15,7 +15,7 @@ use std::path::Path;
 
 use biscuit_speaks::{SpeedLevel, TtsConfig, TtsFailoverStrategy};
 use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
-use biscuit_terminal::prelude::TerminalRenderable;
+use biscuit_terminal::prelude::{Prose, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::markdown::compose::expression::{
     Expr, ExpressionFinder, parse, parse_condition,
@@ -47,6 +47,7 @@ const LIFECYCLE_COMM_FIELDS: &[&str] = &[
     "notify",
     "info",
     "warn",
+    "success",
 ];
 
 /// A single lifecycle notification configuration.
@@ -90,6 +91,9 @@ pub struct LifecycleNotification {
 
     /// Status line rendered with `Status::Warn` style.
     pub warn: Option<String>,
+
+    /// Status line rendered with `Status::Success` style.
+    pub success: Option<String>,
 
     /// Raw stack items, captured at deserialize time and parsed into typed
     /// [`LifecycleStackItem`] values by [`parse_lifecycle_config`] (which
@@ -246,7 +250,11 @@ pub struct LifecycleRuntimeState {
 /// Injectable to allow test doubles that capture emissions without hitting
 /// real stderr, messaging, TTS, or sound playback.
 pub trait LifecycleEmitter {
-    /// Write a styled status line to stderr.
+    /// Write a plain prose line (no status glyph) to stderr.
+    ///
+    /// `stderr` is the statusless channel: rich text and links are honored, but
+    /// no `Status` decoration is applied. Status decoration is reserved for
+    /// [`emit_info`](Self::emit_info) and [`emit_warn`](Self::emit_warn).
     fn emit_stderr(&self, signal: LifecycleSignal, text: &str, term: &Terminal);
 
     /// Dispatch a message via the configured messaging route.
@@ -291,17 +299,28 @@ pub trait LifecycleEmitter {
             .render(term);
         eprintln!("{rendered}");
     }
+
+    /// Write a styled `Success` status line to stderr.
+    ///
+    /// The status state is fixed to [`StatusState::Success`] regardless of the
+    /// owning lifecycle event.
+    fn emit_success(&self, text: &str, term: &Terminal) {
+        let rendered = Status::from_prose(text)
+            .state(StatusState::Success)
+            .theme(StatusTheme::Circular)
+            .render(term);
+        eprintln!("{rendered}");
+    }
 }
 
 /// Production emitter that performs real side effects.
 pub struct DefaultLifecycleEmitter;
 
 impl LifecycleEmitter for DefaultLifecycleEmitter {
-    fn emit_stderr(&self, signal: LifecycleSignal, text: &str, term: &Terminal) {
-        let rendered = Status::from_prose(text)
-            .state(signal.status_state())
-            .theme(StatusTheme::Circular)
-            .render(term);
+    fn emit_stderr(&self, _signal: LifecycleSignal, text: &str, term: &Terminal) {
+        // `stderr` carries no status: it is plain prose (rich text/links honored)
+        // routed to STDERR. Status glyphs belong to `info`/`warn` only.
+        let rendered = Prose::new(text).render(term);
         eprintln!("{rendered}");
     }
 
@@ -1041,6 +1060,19 @@ pub fn parse_lifecycle_config(
             });
         };
 
+        // Reject `loop.stdout` with the dedicated typed diagnostic. The
+        // concern-key extraction below never copies `stdout`, so without this
+        // guard a top-level `loop.stdout` would fall through to
+        // `resolve_loop_config`'s generic unknown-key `LoopInvalid` instead of
+        // the lifecycle stdout rejection that fires on every other event block.
+        if loop_obj.contains_key("stdout") {
+            return Err(CompositionError::LifecycleStdoutRejected {
+                source_path: source_file.to_path_buf(),
+                property: "loop.stdout".to_string(),
+                kind: "field".to_string(),
+            });
+        }
+
         let mut concerns_obj = serde_json::Map::new();
         for key in LIFECYCLE_CONCERN_KEYS {
             if let Some(value) = loop_obj.get(*key) {
@@ -1078,6 +1110,7 @@ pub(crate) const LIFECYCLE_CONCERN_KEYS: &[&str] = &[
     "notify",
     "info",
     "warn",
+    "success",
     "stack",
 ];
 
@@ -1137,6 +1170,7 @@ fn parse_event_block(
     normalize_empty_string(&mut notification.notify);
     normalize_empty_string(&mut notification.info);
     normalize_empty_string(&mut notification.warn);
+    normalize_empty_string(&mut notification.success);
 
     // Validate mutual exclusivity of say and say_first.
     if notification.say.is_some() && notification.say_first.is_some() {
@@ -2233,7 +2267,7 @@ pub fn validate_no_interpolation_leaks(
             continue;
         };
 
-        let fields: [(&str, Option<&String>); 7] = [
+        let fields: [(&str, Option<&String>); 8] = [
             ("say", notification.say.as_ref()),
             ("say_first", notification.say_first.as_ref()),
             ("message", notification.message.as_ref()),
@@ -2241,6 +2275,7 @@ pub fn validate_no_interpolation_leaks(
             ("notify", notification.notify.as_ref()),
             ("info", notification.info.as_ref()),
             ("warn", notification.warn.as_ref()),
+            ("success", notification.success.as_ref()),
         ];
 
         for (field_name, value) in fields {
@@ -2945,6 +2980,7 @@ pub(crate) const LIFECYCLE_NOTIFICATION_FIELDS: &[&str] = &[
     "notify",
     "info",
     "warn",
+    "success",
 ];
 
 /// Extract the text inside the `n`th pair of backticks in `s`.
@@ -3082,12 +3118,9 @@ pub fn emit_lifecycle_signal(
 
     // --- Non-audio fan-out (immediate) ---
 
-    // stderr
+    // stderr — plain prose, no status glyph (see DefaultLifecycleEmitter::emit_stderr)
     if let Some(stderr_text) = &notification.stderr {
-        let rendered = Status::from_prose(stderr_text)
-            .state(signal.status_state())
-            .theme(StatusTheme::Circular)
-            .render(ctx.term);
+        let rendered = Prose::new(stderr_text).render(ctx.term);
         eprintln!("{rendered}");
     }
 
@@ -4477,10 +4510,11 @@ mod tests {
     }
 
     #[test]
-    fn parses_info_and_warn_top_level_fields() {
+    fn parses_info_warn_and_success_top_level_fields() {
         let fm = json!({
             "start": { "info": "composing" },
-            "failure": { "warn": "watch out" }
+            "failure": { "warn": "watch out" },
+            "success": { "success": "all done" }
         });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
         assert_eq!(
@@ -4490,6 +4524,10 @@ mod tests {
         assert_eq!(
             config.failure.as_ref().unwrap().warn.as_deref(),
             Some("watch out")
+        );
+        assert_eq!(
+            config.success.as_ref().unwrap().success.as_deref(),
+            Some("all done")
         );
     }
 
@@ -4953,6 +4991,25 @@ mod tests {
         match err {
             CompositionError::LifecycleStdoutRejected { kind, .. } => {
                 assert_eq!(kind, "action");
+            }
+            other => panic!("expected LifecycleStdoutRejected, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_stdout_field_on_loop_block() {
+        // A top-level `loop.stdout` must fail through the dedicated lifecycle
+        // diagnostic (`LifecycleStdoutRejected`), not the generic loop parser's
+        // `LoopInvalid` unknown-key path. The `while` key keeps the loop block
+        // otherwise valid so the rejection is isolated to `stdout`.
+        let fm = json!({
+            "loop": {"while": "true", "stdout": "hello"}
+        });
+        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleStdoutRejected { property, kind, .. } => {
+                assert_eq!(property, "loop.stdout");
+                assert_eq!(kind, "field");
             }
             other => panic!("expected LifecycleStdoutRejected, got: {other:?}"),
         }

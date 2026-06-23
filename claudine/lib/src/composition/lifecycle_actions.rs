@@ -257,6 +257,8 @@ pub enum CommunicationChannel {
     Info,
     /// Status line rendered with `Status::Warn` style.
     Warn,
+    /// Status line rendered with `Status::Success` style.
+    Success,
 }
 
 impl CommunicationChannel {
@@ -271,6 +273,7 @@ impl CommunicationChannel {
             Self::Stderr => "stderr",
             Self::Info => "info",
             Self::Warn => "warn",
+            Self::Success => "success",
         }
     }
 
@@ -285,6 +288,7 @@ impl CommunicationChannel {
             "stderr" => Some(Self::Stderr),
             "info" => Some(Self::Info),
             "warn" => Some(Self::Warn),
+            "success" => Some(Self::Success),
             _ => None,
         }
     }
@@ -491,6 +495,7 @@ mod tests {
             CommunicationChannel::Stderr,
             CommunicationChannel::Info,
             CommunicationChannel::Warn,
+            CommunicationChannel::Success,
         ] {
             let verb = channel.verb();
             assert_eq!(

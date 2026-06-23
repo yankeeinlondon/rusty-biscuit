@@ -317,10 +317,10 @@ impl StackExecutionContext<'_> {
 
     /// Emit the top-level communication properties for one notification.
     ///
-    /// Order: stderr, info, warn, message, notify, then the audio phases
-    /// (`say`/`say_first` and `effect`, in their deterministic order). These
-    /// strings were resolved during composition, so they are emitted verbatim
-    /// (no further expression evaluation).
+    /// Order: stderr, info, warn, success, message, notify, then the audio
+    /// phases (`say`/`say_first` and `effect`, in their deterministic order).
+    /// These strings were resolved during composition, so they are emitted
+    /// verbatim (no further expression evaluation).
     fn emit_top_level(&self, n: &LifecycleNotification) {
         if let Some(text) = &n.stderr {
             self.emitter.emit_stderr(self.signal, text, self.term);
@@ -330,6 +330,9 @@ impl StackExecutionContext<'_> {
         }
         if let Some(text) = &n.warn {
             self.emitter.emit_warn(text, self.term);
+        }
+        if let Some(text) = &n.success {
+            self.emitter.emit_success(text, self.term);
         }
         if let Some(text) = &n.message {
             self.emitter
@@ -498,6 +501,7 @@ impl StackExecutionContext<'_> {
             }
             CommunicationChannel::Info => self.emitter.emit_info(message, self.term),
             CommunicationChannel::Warn => self.emitter.emit_warn(message, self.term),
+            CommunicationChannel::Success => self.emitter.emit_success(message, self.term),
         }
     }
 
@@ -687,6 +691,7 @@ mod tests {
         Stderr(String),
         Info(String),
         Warn(String),
+        Success(String),
         Message(String),
         Notify(String),
         Speech(String),
@@ -734,6 +739,9 @@ mod tests {
         }
         fn emit_warn(&self, text: &str, _term: &Terminal) {
             self.push(Emitted::Warn(text.to_string()));
+        }
+        fn emit_success(&self, text: &str, _term: &Terminal) {
+            self.push(Emitted::Success(text.to_string()));
         }
     }
 
@@ -861,6 +869,46 @@ mod tests {
             vec![
                 Emitted::Stderr("top-level first".to_string()),
                 Emitted::Info("then the stack".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn success_channel_top_level_and_stack_route_to_emit_success() {
+        let config = parse_lifecycle_config(
+            &json!({
+                "success": {
+                    "success": "top-level success",
+                    "stack": [{"action": "success('stack success')"}]
+                }
+            }),
+            Path::new("test.md"),
+        )
+        .unwrap();
+
+        let fm = map(json!({}));
+        let (_dir, engine) = temp_engine();
+        let shell = MockShell::new(0);
+        let recorder = Recorder::default();
+        let harness = Harness::default();
+        let context = ctx(
+            LifecycleSignal::Success,
+            &fm,
+            None,
+            &engine,
+            &shell,
+            &recorder,
+            &harness,
+            Path::new("test.md"),
+        );
+
+        let outcome = context.execute_event(&config);
+        assert_eq!(outcome, LifecycleEventOutcome::default());
+        assert_eq!(
+            recorder.events(),
+            vec![
+                Emitted::Success("top-level success".to_string()),
+                Emitted::Success("stack success".to_string()),
             ]
         );
     }

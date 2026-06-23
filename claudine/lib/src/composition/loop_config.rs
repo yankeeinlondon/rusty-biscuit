@@ -70,6 +70,19 @@ pub fn resolve_loop_config(
         ))
     })?;
 
+    // `resolve_loop_config` runs before lifecycle parsing in the loop execution
+    // path, so a top-level `loop.stdout` must be rejected with the dedicated
+    // typed diagnostic here too — otherwise `reject_unknown_loop_keys` below
+    // would win and report the generic `LoopInvalid` unknown-key error instead
+    // of the lifecycle stdout rejection that fires on every other event surface.
+    if loop_map.contains_key("stdout") {
+        return Err(CompositionError::LifecycleStdoutRejected {
+            source_path: source.resolved_path.clone(),
+            property: "loop.stdout".to_string(),
+            kind: "field".to_string(),
+        });
+    }
+
     reject_unknown_loop_keys(loop_map)?;
 
     let condition = parse_condition(loop_map)?;
@@ -269,6 +282,7 @@ const KNOWN_LOOP_KEYS: &[&str] = &[
     "notify",
     "info",
     "warn",
+    "success",
     "stack",
 ];
 
@@ -703,6 +717,24 @@ mod tests {
     fn no_loop_returns_none() {
         let source = make_source(&[("title", json!("No loop"))]);
         assert!(resolve_loop_config(&source).unwrap().is_none());
+    }
+
+    #[test]
+    fn loop_stdout_is_rejected_as_lifecycle_stdout_not_loop_invalid() {
+        // `resolve_loop_config` runs before lifecycle parsing in the loop
+        // execution path, so it owns the `loop.stdout` rejection. It must use
+        // the dedicated `LifecycleStdoutRejected` diagnostic, not the generic
+        // unknown-key `LoopInvalid`. The `while` key keeps the block valid so
+        // the rejection is isolated to `stdout`.
+        let source = make_source(&[("loop", json!({"while": "true", "stdout": "hello"}))]);
+        let err = resolve_loop_config(&source).unwrap_err();
+        match err {
+            CompositionError::LifecycleStdoutRejected { property, kind, .. } => {
+                assert_eq!(property, "loop.stdout");
+                assert_eq!(kind, "field");
+            }
+            other => panic!("expected LifecycleStdoutRejected, got: {other:?}"),
+        }
     }
 
     #[test]
