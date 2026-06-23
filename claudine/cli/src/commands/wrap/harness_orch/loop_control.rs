@@ -897,10 +897,10 @@ fn dispatch_terminal_control(
             }
         }
         ControlDispatch::Resume { message } => {
-            // Honor the provider's resume capability. `validate_resume`
-            // surfaces a typed error when the provider cannot resume or the
+            // Honor the provider's resume capability. The CLI-side resume gate
+            // surfaces a clear error when the provider cannot resume or the
             // session id is missing.
-            if let Err(e) = claudine::harness::validate_resume(
+            if let Err(e) = super::super::resume::check_resume_support(
                 &profile.provider().to_string(),
                 profile.supports_resume(),
                 session_id,
@@ -1064,7 +1064,6 @@ pub(crate) fn run_harness_loop(
     // pass `true`.
     emit_prompt_timing: bool,
 ) -> Result<(i32, Option<crate::perf::AgentExecutionPerf>, Option<IterationSummarySignals>)> {
-    const DEFAULT_MAX_RETRIES: u32 = 3;
     let mutation_root = repo_root.unwrap_or(child_cwd).to_path_buf();
     let effect_engine = EffectEngine::builder()
         .mutation_root(&mutation_root)
@@ -1348,7 +1347,7 @@ pub(crate) fn run_harness_loop(
             let source_text = std::fs::read_to_string(&prompt_state.source_path).ok();
 
             let auditable =
-                claudine::harness::collect_auditable_commands(&plan, source_text.as_deref())?;
+                claudine::harness::collect_auditable_commands(source_text.as_deref())?;
 
             let audit_report = info_span!(
                 "harness_shell_audit",
@@ -1369,115 +1368,40 @@ pub(crate) fn run_harness_loop(
 
             if !audit_report.all_passed() {
                 let failed = audit_report.failures();
-                let (source_failures, harness_failures): (Vec<_>, Vec<_>) =
-                    failed.into_iter().partition(|o| {
-                        matches!(
-                            o.command.source,
-                            claudine::harness::AuditedCommandSource::ComposeSourceLine { .. }
-                        )
-                    });
-
-                // Source-page ::shell failures are terminal in v1 — no recovery.
-                if !source_failures.is_empty() {
-                    if show_checks {
-                        claudine::harness::report::report_unhandled_failure(
-                            "shell audit failed for source-page directives — cannot proceed",
-                            term,
-                        );
-                    }
-                    let err_info = LifecycleErrorInfo::from_action_failure(
-                        "shell_audit",
-                        format!(
-                            "shell audit failed: {} denied directive(s) in source page",
-                            source_failures.len()
-                        ),
-                    );
-                    run_lifecycle_event(
-                        lifecycle_guard,
-                        LifecycleSignal::Blocked,
-                        &materialized,
-                        &prompt_state.source_path,
-                        repo_root,
+                let msg = format!(
+                    "shell audit failed: {} denied directive(s) in source page",
+                    failed.len()
+                );
+                if show_checks {
+                    claudine::harness::report::report_unhandled_failure(
+                        "shell audit failed for source-page directives — cannot proceed",
                         term,
-                        &effect_engine,
-                        Some(&err_info),
-                        loop_start,
                     );
-                    run_lifecycle_event(
-                        lifecycle_guard,
-                        LifecycleSignal::Finalize,
-                        &materialized,
-                        &prompt_state.source_path,
-                        repo_root,
-                        term,
-                        &effect_engine,
-                        Some(&err_info),
-                        loop_start,
-                    );
-                    return Err(eyre!(
-                        "shell audit failed: {} denied directive(s) in source page",
-                        source_failures.len()
-                    ));
                 }
-
-                // Non-source failures flow through handler resolution.
-                if !harness_failures.is_empty() {
-                    let contexts = claudine::harness::build_audit_failure_context(
-                        &harness_failures,
-                        provider.as_slug(),
-                        plan.source_path.as_path(),
-                        attempt,
-                    );
-                    if let Some(next_plan) = super::super::resume::try_resolve_handler(
-                        &contexts,
-                        &plan,
-                        attempt,
-                        DEFAULT_MAX_RETRIES,
-                        profile,
-                        None,
-                        &prompt_state.source_path,
-                        repo_root,
-                        show_checks,
-                        term,
-                    )? {
-                        attempt = next_plan.next_attempt;
-                        continue;
-                    }
-
-                    let msg = format!(
-                        "shell audit failed: {} command(s) denied. \
-                         No handler available to resolve.",
-                        harness_failures.len()
-                    );
-                    if show_checks {
-                        claudine::harness::report::report_unhandled_failure(&msg, term);
-                    }
-                    let err_info =
-                        LifecycleErrorInfo::from_action_failure("shell_audit", &msg);
-                    run_lifecycle_event(
-                        lifecycle_guard,
-                        LifecycleSignal::Blocked,
-                        &materialized,
-                        &prompt_state.source_path,
-                        repo_root,
-                        term,
-                        &effect_engine,
-                        Some(&err_info),
-                        loop_start,
-                    );
-                    run_lifecycle_event(
-                        lifecycle_guard,
-                        LifecycleSignal::Finalize,
-                        &materialized,
-                        &prompt_state.source_path,
-                        repo_root,
-                        term,
-                        &effect_engine,
-                        Some(&err_info),
-                        loop_start,
-                    );
-                    return Err(eyre!("shell audit failed"));
-                }
+                let err_info = LifecycleErrorInfo::from_action_failure("shell_audit", &msg);
+                run_lifecycle_event(
+                    lifecycle_guard,
+                    LifecycleSignal::Blocked,
+                    &materialized,
+                    &prompt_state.source_path,
+                    repo_root,
+                    term,
+                    &effect_engine,
+                    Some(&err_info),
+                    loop_start,
+                );
+                run_lifecycle_event(
+                    lifecycle_guard,
+                    LifecycleSignal::Finalize,
+                    &materialized,
+                    &prompt_state.source_path,
+                    repo_root,
+                    term,
+                    &effect_engine,
+                    Some(&err_info),
+                    loop_start,
+                );
+                return Err(eyre!(msg));
             }
         }
 
@@ -1773,37 +1697,6 @@ pub(crate) fn run_harness_loop(
                 }
                 _ => format!("failure on attempt {attempt}"),
             };
-            let ctx = claudine::harness::build_agent_failure_context(
-                provider.as_slug(),
-                plan.source_path.as_path(),
-                failure_event,
-                message.clone(),
-                attempt,
-                outcome.session_id.clone(),
-                Some(outcome.clone()),
-                // Forward the honest per-guard label + structured detail the
-                // attempt outcome already carries (content-guard trips) so
-                // the programmatic handler payload exposes them without
-                // parsing the human message string.
-                outcome.error_kind.clone(),
-                outcome.guard_context.as_ref(),
-            );
-            if let Some(next_plan) = super::super::resume::try_resolve_handler(
-                &[ctx],
-                &plan,
-                attempt,
-                DEFAULT_MAX_RETRIES,
-                profile,
-                outcome.session_id.as_deref(),
-                &prompt_state.source_path,
-                repo_root,
-                show_checks,
-                term,
-            )? {
-                attempt = next_plan.next_attempt;
-                super::super::resume::apply_next_attempt_plan(prompt_state, &next_plan);
-                continue;
-            }
             if show_checks {
                 claudine::harness::report::report_unhandled_failure(&message, term);
             }

@@ -279,7 +279,6 @@ pub(crate) fn run_composition_inner(
         claudine::composition::resolve_shell_approvals(
             Some(&source.markdown),
             Some(&compose_options),
-            None,
             &approval_options,
             None,
             None,

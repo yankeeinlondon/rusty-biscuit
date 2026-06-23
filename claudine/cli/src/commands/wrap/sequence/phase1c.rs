@@ -17,7 +17,7 @@ use claudine::composition::{
     self, CompositionError, MissingProperty, PrepareOptions, PreparedComposition,
     ResolvedCompositionSource, SequenceMissingPropertiesStep, SequencePlan,
 };
-use claudine::harness::{has_harness_properties, parse_harness_plan};
+use claudine::harness::ShellApprovalOptions;
 use color_eyre::eyre::{Result, eyre};
 
 use crate::commands::compose::SharedComposeArgs;
@@ -289,7 +289,6 @@ fn run_phase_1c_attempt(
         let template_preflight = composition::resolve_shell_approvals(
             Some(&step_source.markdown),
             Some(&compose_options),
-            None,
             &approval_options,
             None,
             None,
@@ -343,24 +342,6 @@ fn run_phase_1c_attempt(
             }
             Err(other) => return Err(other.into()),
         };
-
-        if has_harness_properties(&prepared.effective_frontmatter) {
-            let harness_plan = parse_harness_plan(
-                &prepared.effective_frontmatter,
-                &prepared.resolved_path,
-            )
-            .map_err(|e| eyre!("{e}"))?;
-            let harness_preflight = composition::resolve_shell_approvals(
-                None,
-                None,
-                Some(&harness_plan),
-                &approval_options,
-                None,
-                None,
-            )
-            .map_err(|e| eyre!("{e}"))?;
-            cumulative_approved.extend(harness_preflight.approved_commands.iter().cloned());
-        }
 
         step_contexts.push(StepContext {
             env_overrides,

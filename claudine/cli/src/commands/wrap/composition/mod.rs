@@ -1063,9 +1063,9 @@ fn execute_composition_request_inner_with_guard(
     }
 
     // --dry-run no longer exits here. The seam now sits *after* the harness
-    // preflight block below, so harness shell-approval + writability
-    // pre-checks participate in the dry-run gate before the composed output
-    // is rendered. See the `request.dry_run` early-return after preflight.
+    // shell-approval preflight block below, so shell-approval decisions
+    // participate in the dry-run gate before the composed output is rendered.
+    // See the `request.dry_run` early-return after preflight.
 
     switch_process_cwd(child_cwd)?;
 
@@ -1086,9 +1086,9 @@ fn execute_composition_request_inner_with_guard(
     // -- Harness plan preflight -------------------------------------------
     // Every non-dry-run document is parsed into a harness plan. Documents
     // lacking harness frontmatter yield the bare (all-empty) plan; the loop
-    // re-parses from the materialized frontmatter on retry attempts. Inline
-    // composition gets a system-owned writability pre-check injected here
-    // so handler recovery paths can respond to permission failures.
+    // re-parses from the materialized frontmatter on retry attempts. The plan
+    // now carries only timeout configuration; the removed pre/post validation
+    // checks and handler recovery DSL are no longer evaluated.
 
     let shell_options = apply_composition_shell_overrides(
         build_harness_shell_options_with_cache(
@@ -1204,7 +1204,6 @@ fn execute_composition_request_inner_with_guard(
             let _harness_preflight = claudine::composition::resolve_shell_approvals(
                 None, // template commands already approved during compose
                 None,
-                Some(&plan),
                 &shell_options,
                 Some(&request.prepared.lifecycle),
                 Some(&request.prepared.resolved_path),

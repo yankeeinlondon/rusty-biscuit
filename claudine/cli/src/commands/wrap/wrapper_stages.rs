@@ -362,23 +362,6 @@ pub(crate) fn detect_wrapper_harness(
                 &source_path,
                 env_plan.repo_root.as_deref(),
             );
-            let plan = claudine::harness::parse_harness_plan(
-                &seed.frontmatter,
-                &source_path,
-            )
-            .map_err(|e| eyre!("{e}"))?;
-
-            let _harness_preflight = claudine::composition::resolve_shell_approvals(
-                None,
-                None,
-                Some(&plan),
-                &shell_options,
-                None,
-                None,
-            )
-            .map_err(|e| eyre!("{e}"))?;
-
-            drop(plan);
 
             Ok(Some((source_path, base_prompt, seed, shell_options)))
         } else {
