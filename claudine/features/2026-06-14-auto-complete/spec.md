@@ -47,7 +47,17 @@ When a user types `claudine compose ` they are now ready to specify the Markdown
 
 ### Frontmatter completion in `compose`
 
-- the `SimpleSchema` grammar defined in Darkmatter gives us a constraint for file based inputs which will help to scope the possible set of documents that should be autocompleted.
+- once a caller has typed `claudine compose <file> ` the remainder of the things that go into the call will be a combination of:
+    - CLI Switches
+        - all CLI switches start with the typical `--{switch}`/`-{short-name}` syntax
+        - I believe today we do a good job of providing autocomplete for these CLI switches
+    - Frontmatter Parameters
+        - A user can use the syntax `{prop}={value}` to set Frontmatter properties in the referenced prompt file
+        - We need to know what properties are defined in the referenced document's `$schema` property
+            - `number`, and `boolean` types will just autocomplete the `{prop}=` portion
+            - `string` types are similar but include a quote mark: `{prop}="`
+            - 
+        - the `SimpleSchema` grammar defined in Darkmatter gives us a constraint for file based inputs which will help to scope the possible set of documents that should be autocompleted.
 
 
 ### `inline-compose` operation
