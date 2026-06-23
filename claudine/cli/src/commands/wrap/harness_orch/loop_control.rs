@@ -38,6 +38,19 @@ use super::{
 /// it. Otherwise the success/blocked signal stays terminal. This preserves the
 /// spec rule that an explicit `error()` in a success/blocked stack downgrades
 /// the run, without running the success/blocked stack twice.
+/// Result of running a terminal lifecycle event via [`execute_terminal_event`].
+#[derive(Default)]
+struct TerminalEventOutcome {
+    /// The control + action-error the (possibly downgraded) event reported.
+    /// For a `success`/`blocked` stack that downgraded via `error()`, this is
+    /// the *failure* event's outcome (so its recovery control is dispatchable).
+    outcome: LifecycleEventOutcome,
+    /// Present when a `success`/`blocked` stack downgraded the run to failure
+    /// via an explicit `error()`. This is the `err` the subsequent `finalize`
+    /// must carry so a `finalize.stack` can branch on `err` and recover.
+    downgrade_err: Option<LifecycleErrorInfo>,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn execute_terminal_event(
     guard: &mut claudine::composition::LifecycleRunGuard<'_>,
@@ -49,13 +62,13 @@ fn execute_terminal_event(
     effect_engine: &EffectEngine,
     err: Option<&LifecycleErrorInfo>,
     loop_start: std::time::Instant,
-) -> LifecycleEventOutcome {
+) -> TerminalEventOutcome {
     if matches!(signal, LifecycleSignal::Success | LifecycleSignal::Blocked) {
         // Take the terminal slot and fire the top-level communication FIRST
         // (before the stack), per the spec's top-level-before-stack contract.
         // If the slot was already taken by another terminal signal, do nothing.
         if !guard.record_event_emission(signal) {
-            return LifecycleEventOutcome::default();
+            return TerminalEventOutcome::default();
         }
         emit_lifecycle_top_level_already_recorded(
             guard,
@@ -94,7 +107,7 @@ fn execute_terminal_event(
                 "error",
                 reason.clone().unwrap_or_default(),
             );
-            return run_failure_event_for_downgrade(
+            let failure_outcome = run_failure_event_for_downgrade(
                 guard,
                 materialized,
                 source_path,
@@ -104,20 +117,30 @@ fn execute_terminal_event(
                 &action_error,
                 loop_start,
             );
+            return TerminalEventOutcome {
+                outcome: failure_outcome,
+                downgrade_err: Some(action_error),
+            };
         }
-        return outcome;
+        return TerminalEventOutcome {
+            outcome,
+            downgrade_err: None,
+        };
     }
-    run_lifecycle_event(
-        guard,
-        signal,
-        materialized,
-        source_path,
-        repo_root,
-        term,
-        effect_engine,
-        err,
-        loop_start,
-    )
+    TerminalEventOutcome {
+        outcome: run_lifecycle_event(
+            guard,
+            signal,
+            materialized,
+            source_path,
+            repo_root,
+            term,
+            effect_engine,
+            err,
+            loop_start,
+        ),
+        downgrade_err: None,
+    }
 }
 
 /// Run the `Failure` event (top-level communication + stack) when a
@@ -1023,6 +1046,65 @@ fn dispatch_terminal_control(
     }
 }
 
+/// Run the `finalize` event, then dispatch any recovery control action its
+/// stack ended in (`retry`/`resume`/`requeue`/`proxy`).
+///
+/// `finalize` is the optional-error terminal event, so it doubles as a
+/// last-chance recovery surface: a `finalize.stack` that decides the work was
+/// not actually done (typically guarded by `when: "err"`) can recover exactly
+/// as the `failure` event can. The returned [`TerminalControlAction`] tells the
+/// caller whether to re-enter the loop (`Continue`), propagate a hard error
+/// (`Abort`), or proceed to its normal terminal return (`Fallthrough`).
+///
+/// On a recovery re-entry the dispatch resets the guard's per-iteration state,
+/// so the next attempt emits its own `start`/terminal/`finalize` signals.
+#[allow(clippy::too_many_arguments)]
+fn run_finalize_with_recovery(
+    lifecycle_guard: &mut claudine::composition::LifecycleRunGuard<'_>,
+    materialized: &MaterializedHarnessPrompt,
+    repo_root: Option<&Path>,
+    term: &Terminal,
+    effect_engine: &EffectEngine,
+    err: Option<&LifecycleErrorInfo>,
+    loop_start: std::time::Instant,
+    attempt: u32,
+    budgets: &mut ControlBudgets,
+    session_id: Option<&str>,
+    profile: &dyn super::super::profile::WrapperProfile,
+    provider: Provider,
+    prompt_state: &mut HarnessPromptState,
+    proxy: &mut ProxyTracking,
+    show_checks: bool,
+) -> TerminalControlAction {
+    let finalize_outcome = run_lifecycle_event(
+        lifecycle_guard,
+        LifecycleSignal::Finalize,
+        materialized,
+        &prompt_state.source_path,
+        repo_root,
+        term,
+        effect_engine,
+        err,
+        loop_start,
+    );
+    dispatch_terminal_control(
+        LifecycleSignal::Finalize,
+        &finalize_outcome,
+        attempt,
+        budgets,
+        session_id,
+        profile,
+        provider,
+        prompt_state,
+        materialized,
+        repo_root,
+        lifecycle_guard,
+        proxy,
+        term,
+        show_checks,
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 #[allow(unused_assignments)]
 pub(crate) fn run_harness_loop(
@@ -1718,7 +1800,8 @@ pub(crate) fn run_harness_loop(
                 &effect_engine,
                 Some(&err_info),
                 loop_start,
-            );
+            )
+            .outcome;
             // A `failure.stack` may end in a lifecycle control action
             // (retry/resume/requeue/proxy). Dispatch it before finalizing so a
             // re-entry skips finalize for this iteration.
@@ -1758,17 +1841,32 @@ pub(crate) fn run_harness_loop(
                 }
                 TerminalControlAction::Fallthrough => {}
             }
-            run_lifecycle_event(
+            // `finalize` is a last-chance recovery surface: its stack may
+            // recover (retry/resume/requeue/proxy) when `failure` did not.
+            match run_finalize_with_recovery(
                 lifecycle_guard,
-                LifecycleSignal::Finalize,
                 &materialized,
-                &prompt_state.source_path,
                 repo_root,
                 term,
                 &effect_engine,
                 Some(&err_info),
                 loop_start,
-            );
+                attempt,
+                &mut control_budgets,
+                outcome.session_id.as_deref(),
+                profile,
+                provider,
+                prompt_state,
+                &mut proxy_tracking,
+                show_checks,
+            ) {
+                TerminalControlAction::Continue { next_attempt } => {
+                    attempt = next_attempt;
+                    continue;
+                }
+                TerminalControlAction::Abort(err) => return Err(err),
+                TerminalControlAction::Fallthrough => {}
+            }
             // For provider-level failures, preserve the exit code at the
             // boundary rather than converting it into an `eyre` error. This
             // lets callers (e.g. `compose --loop`) inspect the terminal
@@ -1811,7 +1909,8 @@ pub(crate) fn run_harness_loop(
                 &effect_engine,
                 Some(&err_info),
                 loop_start,
-            );
+            )
+            .outcome;
             match dispatch_terminal_control(
                 LifecycleSignal::Failure,
                 &failure_outcome,
@@ -1848,23 +1947,39 @@ pub(crate) fn run_harness_loop(
                 }
                 TerminalControlAction::Fallthrough => {}
             }
-            run_lifecycle_event(
+            match run_finalize_with_recovery(
                 lifecycle_guard,
-                LifecycleSignal::Finalize,
                 &materialized,
-                &prompt_state.source_path,
                 repo_root,
                 term,
                 &effect_engine,
                 Some(&err_info),
                 loop_start,
-            );
+                attempt,
+                &mut control_budgets,
+                outcome.session_id.as_deref(),
+                profile,
+                provider,
+                prompt_state,
+                &mut proxy_tracking,
+                show_checks,
+            ) {
+                TerminalControlAction::Continue { next_attempt } => {
+                    attempt = next_attempt;
+                    continue;
+                }
+                TerminalControlAction::Abort(err) => return Err(err),
+                TerminalControlAction::Fallthrough => {}
+            }
             return Err(eyre!("{fail_msg}"));
         }
 
         // Post-check validation has been removed; a successful provider run
-        // proceeds directly to the success lifecycle event.
-        execute_terminal_event(
+        // proceeds directly to the success lifecycle event. A `success.stack`
+        // may still verify the run and downgrade it via `error()`, which routes
+        // through the `failure` event (run inside `execute_terminal_event`) and
+        // carries an `err` into `finalize`.
+        let success = execute_terminal_event(
             lifecycle_guard,
             LifecycleSignal::Success,
             &materialized,
@@ -1875,17 +1990,72 @@ pub(crate) fn run_harness_loop(
             None,
             loop_start,
         );
-        run_lifecycle_event(
+        // When the success stack downgraded to failure, give the failure
+        // event's own recovery stack a chance before finalize (parity with a
+        // provider failure routing through `failure`).
+        if success.downgrade_err.is_some() {
+            match dispatch_terminal_control(
+                LifecycleSignal::Failure,
+                &success.outcome,
+                attempt,
+                &mut control_budgets,
+                outcome.session_id.as_deref(),
+                profile,
+                provider,
+                prompt_state,
+                &materialized,
+                repo_root,
+                lifecycle_guard,
+                &mut proxy_tracking,
+                term,
+                show_checks,
+            ) {
+                TerminalControlAction::Continue { next_attempt } => {
+                    attempt = next_attempt;
+                    continue;
+                }
+                TerminalControlAction::Abort(err) => {
+                    run_lifecycle_event(
+                        lifecycle_guard,
+                        LifecycleSignal::Finalize,
+                        &materialized,
+                        &prompt_state.source_path,
+                        repo_root,
+                        term,
+                        &effect_engine,
+                        success.downgrade_err.as_ref(),
+                        loop_start,
+                    );
+                    return Err(err);
+                }
+                TerminalControlAction::Fallthrough => {}
+            }
+        }
+        // `finalize` carries the downgrade `err` (if any) and may recover.
+        match run_finalize_with_recovery(
             lifecycle_guard,
-            LifecycleSignal::Finalize,
             &materialized,
-            &prompt_state.source_path,
             repo_root,
             term,
             &effect_engine,
-            None,
+            success.downgrade_err.as_ref(),
             loop_start,
-        );
+            attempt,
+            &mut control_budgets,
+            outcome.session_id.as_deref(),
+            profile,
+            provider,
+            prompt_state,
+            &mut proxy_tracking,
+            show_checks,
+        ) {
+            TerminalControlAction::Continue { next_attempt } => {
+                attempt = next_attempt;
+                continue;
+            }
+            TerminalControlAction::Abort(err) => return Err(err),
+            TerminalControlAction::Fallthrough => {}
+        }
         terminal_signals = iteration_signals;
         return Ok((outcome.exit_code, harness_perf, terminal_signals));
     }
@@ -2088,7 +2258,7 @@ mod terminal_event_tests {
         guard.mark_provider_launched();
         let eng = engine(fx._dir.path());
 
-        let outcome = execute_terminal_event(
+        let TerminalEventOutcome { outcome, .. } = execute_terminal_event(
             &mut guard,
             LifecycleSignal::Success,
             &fx.materialized,
@@ -2135,7 +2305,7 @@ mod terminal_event_tests {
         guard.mark_provider_launched();
         let eng = engine(fx._dir.path());
 
-        let outcome = execute_terminal_event(
+        let TerminalEventOutcome { outcome, .. } = execute_terminal_event(
             &mut guard,
             LifecycleSignal::Success,
             &fx.materialized,
@@ -2190,7 +2360,7 @@ mod terminal_event_tests {
         let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
         let eng = engine(fx._dir.path());
 
-        let outcome = execute_terminal_event(
+        let TerminalEventOutcome { outcome, .. } = execute_terminal_event(
             &mut guard,
             LifecycleSignal::Blocked,
             &fx.materialized,
@@ -2233,7 +2403,7 @@ mod terminal_event_tests {
         guard.mark_provider_launched();
         let eng = engine(fx._dir.path());
 
-        let outcome = execute_terminal_event(
+        let TerminalEventOutcome { outcome, .. } = execute_terminal_event(
             &mut guard,
             LifecycleSignal::Success,
             &fx.materialized,
@@ -2277,7 +2447,7 @@ mod terminal_event_tests {
         let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
         let eng = engine(fx._dir.path());
 
-        let outcome = execute_terminal_event(
+        let TerminalEventOutcome { outcome, .. } = execute_terminal_event(
             &mut guard,
             LifecycleSignal::Blocked,
             &fx.materialized,
@@ -2594,6 +2764,99 @@ mod terminal_event_tests {
         }
         // Guard was reset so the retried attempt can emit a fresh terminal.
         assert_eq!(guard.terminal_signal(), None);
+    }
+
+    #[test]
+    fn dispatch_retry_from_finalize_continues_and_resets_guard() {
+        // `finalize` is a last-chance recovery surface: a `finalize.stack`
+        // ending in `retry` must re-enter the loop exactly as `failure` does.
+        let fx = fixture(serde_json::json!({}));
+        let emitter = RecordingEmitter::default();
+        let ctx = LifecycleRuntimeContext {
+            settings: &fx.settings,
+            messaging: &fx.messaging,
+            term: &fx.term,
+            source_path: &fx.source_path,
+            repo_root: Some(fx._dir.path()),
+        };
+        let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
+        guard.mark_provider_launched();
+        // Model the live call site: a terminal signal and `finalize` already
+        // fired this iteration before the finalize stack's control dispatches.
+        assert!(guard.record_event_emission(LifecycleSignal::Failure));
+        assert!(guard.record_event_emission(LifecycleSignal::Finalize));
+        let mut state = prompt_state(&fx.source_path);
+        let mut budgets = ControlBudgets::default();
+
+        let outcome = outcome_with(StackControl::Retry {
+            max_attempts: 1,
+            backoff: RetryBackoff::Fixed,
+            delay: "0s".to_string(),
+        });
+        let action = dispatch_terminal_control(
+            LifecycleSignal::Finalize,
+            &outcome,
+            1,
+            &mut budgets,
+            Some("sess-1"),
+            resume_capable_profile(),
+            Provider::Goose,
+            &mut state,
+            &fx.materialized,
+            Some(fx._dir.path()),
+            &mut guard,
+            &mut ProxyTracking::default(),
+            &fx.term,
+            false,
+        );
+        match action {
+            TerminalControlAction::Continue { next_attempt } => assert_eq!(next_attempt, 2),
+            other => panic!("expected Continue, got {other:?}"),
+        }
+        // Guard was reset so the retried attempt can emit a fresh terminal.
+        assert_eq!(guard.terminal_signal(), None);
+    }
+
+    #[test]
+    fn dispatch_resume_from_finalize_seeds_prompt_state() {
+        // `resume` is valid at `finalize` too (parity with `failure`).
+        let fx = fixture(serde_json::json!({}));
+        let emitter = RecordingEmitter::default();
+        let ctx = LifecycleRuntimeContext {
+            settings: &fx.settings,
+            messaging: &fx.messaging,
+            term: &fx.term,
+            source_path: &fx.source_path,
+            repo_root: Some(fx._dir.path()),
+        };
+        let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
+        guard.mark_provider_launched();
+        let mut state = prompt_state(&fx.source_path);
+        let mut budgets = ControlBudgets::default();
+
+        let outcome = outcome_with(StackControl::Resume {
+            message: "finish the task".to_string(),
+            max_attempts: 1,
+        });
+        let action = dispatch_terminal_control(
+            LifecycleSignal::Finalize,
+            &outcome,
+            1,
+            &mut budgets,
+            Some("sess-1"),
+            resume_capable_profile(),
+            Provider::Goose,
+            &mut state,
+            &fx.materialized,
+            Some(fx._dir.path()),
+            &mut guard,
+            &mut ProxyTracking::default(),
+            &fx.term,
+            false,
+        );
+        assert!(matches!(action, TerminalControlAction::Continue { .. }));
+        assert_eq!(state.next_prompt_override.as_deref(), Some("finish the task"));
+        assert_eq!(state.next_resume_session_id.as_deref(), Some("sess-1"));
     }
 
     #[test]
