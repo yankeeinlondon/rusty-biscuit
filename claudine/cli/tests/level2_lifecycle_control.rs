@@ -43,6 +43,26 @@
 //!   and respects target-side `Skip`/`Proxy`/`Error` controls, including nested
 //!   proxy cycle detection.
 //!
+//! - **Retry from `blocked`** — a failing pre-check drives `blocked`; the
+//!   `blocked.stack` creates the missing pre-check file via the `ensure_file`
+//!   side effect, then ends in `retry`. The retried pre-flight passes, `start`
+//!   fires, the provider runs once and succeeds, and `finalize` fires. Asserts
+//!   the provider ran exactly once (only after the successful retry) and that
+//!   the run left the blocked state. (Review 8: blocked-side runtime wiring of
+//!   `Retry`/`Proxy`/`Requeue` was L1-only; these three add the missing L2.)
+//!
+//! - **Proxy from `blocked`** — a failing pre-check drives `blocked`; the
+//!   `blocked.stack` ends in `proxy('@target.md')`. The source provider never
+//!   launches (it was blocked pre-flight); the target runs its OWN lifecycle
+//!   (`start`/`success`/`finalize`) once with a clean provider exit, and the
+//!   source's own `finalize` does NOT fire. Asserted via the ordered
+//!   `events.log` markers (no re-proxy loop).
+//!
+//! - **Requeue from `blocked`** — a failing pre-check drives `blocked`; the
+//!   `blocked.stack` ends in `requeue`. The materialized prompt is recorded in
+//!   rendezvous, the provider never launches, then `finalize` fires. Asserted
+//!   via the rendezvous source-of-truth chunk read path.
+//!
 //! - **Top-level-before-stack ordering** — for `success` and `blocked`, top-level
 //!   communication properties (`stderr`, `info`, `warn`, etc.) fire before any
 //!   `stack:` side effects in the captured terminal output.
@@ -924,6 +944,241 @@ Body
     assert!(
         lines.iter().any(|l| l == "finalize"),
         "finalize must fire; got {lines:?}"
+    );
+}
+
+/// Review 8: Retry from `blocked` re-runs pre-flight after a side effect fixes
+/// the blocking condition.
+///
+/// A failing `file_exists` pre-check drives the first attempt to `blocked`. The
+/// `blocked.stack` records a marker, creates the missing pre-check file via the
+/// `ensure_file` side effect, then ends in a bare `retry` (one retry). The
+/// retried pre-flight now passes, `start` fires, the (succeeding) provider runs
+/// exactly once, and `finalize` fires.
+///
+/// ## Path resolution
+///
+/// The pre-check `file_exists: "retry-gate.txt"` and the
+/// `ensure_file('retry-gate.txt')` side effect must resolve to the same path on
+/// disk or the retried pre-flight stays blocked. Both anchor on the staged
+/// workspace: the pre-check resolves a bare relative path against the source
+/// document's parent directory (`<workspace>/doc.md` → `<workspace>`), and the
+/// side-effect engine resolves a bare relative path against its `mutation_root`
+/// (the repo root, which equals `<workspace>` because the workspace is
+/// git-init'd). They coincide, so the file `ensure_file` creates is the one the
+/// retried pre-check checks.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_blocked_retry_reruns_preflight_after_side_effect() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let doc = r#"---
+title: blocked retry
+pre_checks:
+  - file_exists: "retry-gate.txt"
+blocked:
+  stack:
+    - action: "append_line('events.log', 'blocked')"
+    - action: "ensure_file('retry-gate.txt')"
+    - action: "retry"
+finalize:
+  stack:
+    - action: "append_line('events.log', 'finalize')"
+---
+Body
+"#;
+    let staged = stage_success(doc);
+    let pane = run_in_tmux(&staged);
+
+    let lines = event_lines(&staged);
+    let blocked = lines.iter().filter(|l| **l == "blocked").count();
+    let provider_runs = lines.iter().filter(|l| **l == "provider-ran").count();
+    let finalizes = lines.iter().filter(|l| **l == "finalize").count();
+
+    // The first attempt was blocked (pre-check failed) and recorded the marker.
+    assert!(
+        blocked >= 1,
+        "the blocked stack must fire at least once before the retry; \
+         got {lines:?}; pane:\n{pane}"
+    );
+    // The provider runs exactly once — only on the retried attempt, after the
+    // side effect created the pre-check file so pre-flight passed.
+    assert_eq!(
+        provider_runs, 1,
+        "the provider must run exactly once, after the retried pre-flight passes; \
+         got {lines:?}; pane:\n{pane}"
+    );
+    // Reaching the provider proves the retried pre-flight was NOT blocked.
+    assert!(
+        provider_runs >= 1,
+        "the retried pre-flight must pass and launch the provider (not stay blocked); \
+         got {lines:?}; pane:\n{pane}"
+    );
+    assert_eq!(
+        finalizes, 1,
+        "finalize fires exactly once after the successful retry; \
+         got {lines:?}; pane:\n{pane}"
+    );
+    // Ordering: the terminal finalize is the last marker, and the blocked
+    // marker precedes the provider run (block happened before the retry).
+    assert_eq!(
+        lines.last().map(|s| s.as_str()),
+        Some("finalize"),
+        "finalize is the terminal marker; got {lines:?}; pane:\n{pane}"
+    );
+    let blocked_pos = lines.iter().position(|l| l == "blocked").expect("blocked");
+    let provider_pos = lines
+        .iter()
+        .position(|l| l == "provider-ran")
+        .expect("provider-ran");
+    assert!(
+        blocked_pos < provider_pos,
+        "the block must precede the retried provider run; got {lines:?}; pane:\n{pane}"
+    );
+}
+
+/// Review 8: Proxy from `blocked` runs the target document's lifecycle.
+///
+/// A failing `file_exists` pre-check drives the source to `blocked` before the
+/// provider launches. The `blocked.stack` ends in `proxy('@target.md')`, handing
+/// off to the target, which runs its OWN lifecycle (`start`/`success`/`finalize`)
+/// once with a clean provider exit. The source's own `finalize` must NOT fire,
+/// and the source provider is never invoked (it was blocked pre-flight). The
+/// source's blocked/proxy stack must not re-fire (no re-proxy loop).
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_blocked_proxy_runs_target_document() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    // Source: a failing pre-check blocks before launch; the blocked stack records
+    // a marker then proxies to the target. The source's own finalize must not
+    // fire (the run hands off before reaching it).
+    let source_doc = "---\ntitle: blocked proxy source\npre_checks:\n  \
+         - file_exists: \"missing-file.txt\"\nblocked:\n  stack:\n    \
+         - action: \"append_line('events.log', 'source-blocked')\"\n    \
+         - action: \"proxy('@target.md')\"\nfinalize:\n  stack:\n    \
+         - action: \"append_line('events.log', 'source-finalize')\"\n---\nsource body\n";
+    // Target: its own start/success/finalize fire once; the (succeeding) provider
+    // runs exactly once for the target.
+    let target_doc = "---\ntitle: blocked proxy target\nstart:\n  stack:\n    \
+         - action: \"append_line('events.log', 'target-start')\"\nsuccess:\n  stack:\n    \
+         - action: \"append_line('events.log', 'target-success')\"\nfinalize:\n  stack:\n    \
+         - action: \"append_line('events.log', 'target-finalize')\"\n---\ntarget body\n";
+    let staged = stage_proxy_pair(source_doc, target_doc, true);
+    let pane = run_in_tmux_for(&staged, "target-finalize");
+
+    let lines = event_lines(&staged);
+
+    // The source blocked once and proxied once — its blocked stack must not
+    // re-fire (no re-proxy loop).
+    assert_eq!(
+        lines.iter().filter(|l| **l == "source-blocked").count(),
+        1,
+        "the source blocked stack must fire exactly once (no re-proxy loop); \
+         got {lines:?}; pane:\n{pane}"
+    );
+    // The target's own lifecycle fired.
+    assert!(
+        lines.iter().any(|l| l == "target-start"),
+        "the target's own start must fire after proxy hand-off; got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        lines.iter().any(|l| l == "target-success"),
+        "the target's own success must fire (its provider exits 0); got {lines:?}; pane:\n{pane}"
+    );
+    assert_eq!(
+        lines.iter().filter(|l| **l == "target-finalize").count(),
+        1,
+        "the target finalize fires exactly once; got {lines:?}; pane:\n{pane}"
+    );
+    // The source's terminal finalize must NOT fire — the run handed off before
+    // the source reached its own finalize.
+    assert!(
+        !lines.iter().any(|l| l == "source-finalize"),
+        "the source finalize must not fire after handing off via proxy; \
+         got {lines:?}; pane:\n{pane}"
+    );
+    // The provider ran exactly once: only for the succeeding target. The source
+    // was blocked pre-flight, so its provider never launched.
+    assert_eq!(
+        lines.iter().filter(|l| **l == "provider-ran").count(),
+        1,
+        "the provider runs exactly once (target only; the source was blocked \
+         pre-flight); got {lines:?}; pane:\n{pane}"
+    );
+}
+
+/// Review 8: Requeue from `blocked` records the deferred prompt without
+/// launching the provider.
+///
+/// A failing `file_exists` pre-check drives the source to `blocked` before the
+/// provider launches. The `blocked.stack` records a marker then ends in a
+/// long-form `requeue` (with `delay` and `reason`), which records the
+/// materialized prompt in rendezvous; the provider is never invoked, then
+/// `finalize` fires.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_blocked_requeue_records_deferred_prompt() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let doc = r#"---
+title: blocked requeue
+pre_checks:
+  - file_exists: "missing-file.txt"
+blocked:
+  stack:
+    - action: "append_line('events.log', 'blocked')"
+    - action: requeue
+      delay: 5m
+      reason: pre-check blocked
+finalize:
+  stack:
+    - action: "append_line('events.log', 'finalize')"
+---
+Body to defer through rendezvous
+"#;
+    let mut staged = stage(doc);
+    let queue = RendezvousQueue::spawn(staged.workspace.path());
+    staged.rendezvous_socket = Some(queue.socket.clone());
+    let pane = run_in_tmux(&staged);
+
+    let lines = event_lines(&staged);
+    assert_eq!(
+        lines.iter().filter(|l| **l == "provider-ran").count(),
+        0,
+        "requeue from blocked must not launch the provider (it was blocked \
+         pre-flight); got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        lines.iter().any(|l| l == "blocked") && lines.iter().any(|l| l == "finalize"),
+        "blocked then finalize must both fire; got {lines:?}; pane:\n{pane}"
+    );
+
+    let entries = queue.entries();
+    assert_eq!(
+        entries.len(),
+        1,
+        "requeue must append exactly one deferred prompt entry; got {entries:?}; pane:\n{pane}"
+    );
+    let entry = &entries[0];
+    assert_eq!(entry.source, "claudine.lifecycle.requeue");
+    assert_eq!(entry.level, "info");
+    assert!(
+        entry.message.contains("doc.md") && entry.message.contains("5m"),
+        "entry message should identify the prompt and delay; entry: {entry:?}"
+    );
+    let metadata: serde_json::Value =
+        serde_json::from_str(&entry.metadata_json).expect("metadata json");
+    assert_eq!(metadata["kind"], "claudine.lifecycle.requeue");
+    assert_eq!(metadata["provider"], "goose");
+    assert_eq!(metadata["delay"], "5m");
+    assert_eq!(metadata["reason"], "pre-check blocked");
+    assert_eq!(metadata["prompt"], "Body to defer through rendezvous\n");
+    assert!(
+        metadata["source_path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("doc.md")),
+        "metadata should record source_path; metadata: {metadata}"
     );
 }
 
