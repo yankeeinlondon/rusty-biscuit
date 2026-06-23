@@ -1,20 +1,22 @@
 ---
 sequence: "@claudine/docs/providers.yaml"
-success: 
-    say: "Completed research for {{state.name}}"
-error:
-    say: "Error during research of {{state.name}}"
 operation: "research"
-skip_when:
-    file_exists:
-        file: "{{state.file}}"
-        say: "The research on non-interactive sessions for {{state.name}} is already in place. Skipping."
-        stderr: "The research on non-interactive sessions for <b>{{state.name}}</b> is already in place. Skipping."
-post_checks:
-    file_exists:
-        file: "{{state.file}}"
-        say: "The research on {{state.name}} was completed but the file is missing!"
-        stderr: "The research on {{state.name}} was completed but the file is missing! Expected results to be saved to <b>{{state.file}}</b>."
+initialize:
+    stack:
+        - when: "file_exists('{{state.file}}')"
+          say: "The research on non-interactive sessions for {{state.name}} is already in place. Skipping."
+          stderr: "The research on non-interactive sessions for <b>{{state.name}}</b> is already in place. Skipping."
+          action: skip
+success:
+    say: "Completed research for {{state.name}}"
+failure:
+    say: "Error during research of {{state.name}}"
+finalize:
+    stack:
+        - when: "!file_exists('{{state.file}}')"
+          say: "The research on {{state.name}} was completed but the file is missing!"
+          stderr: "The research on {{state.name}} was completed but the file is missing! Expected results to be saved to <b>{{state.file}}</b>."
+          action: "error('research file missing')"
 ---
 
 # Non-Interactive Sessions with Agents in Claudine
