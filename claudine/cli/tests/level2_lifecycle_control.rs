@@ -1214,3 +1214,114 @@ fn level2_lifecycle_proxy_target_lifecycle_parse_failure_routes_blocked_finalize
         "the proxying document's finalize must fire; got {lines:?}; pane:\n{pane}"
     );
 }
+
+/// Review-6: a **post-`start`** setup failure must reach `failure` AND
+/// `finalize` with `err` available — not just the legacy
+/// `LifecycleRunGuard::drop` path, which never runs the typed stacks nor emits
+/// `finalize`.
+///
+/// ## Post-start error injected and why it is genuinely triggerable
+///
+/// The frontmatter declares a runaway `exit_expressions` entry of `kind: regex`
+/// whose pattern `[` is an unclosed character class. `start` and the pre-flight
+/// pre-checks pass (the regex is not touched there), so the lifecycle reaches
+/// `start`. The provider launch is then constructed and `execute_harness_attempt`
+/// runs `resolve_guard_inputs` → `validate_exit_expressions`, which compiles the
+/// regex and aborts with a typed `ConfigValidation` error **before any child is
+/// spawned** (`runaway_guard.rs`'s "present-but-invalid = abort" contract). That
+/// `Err` surfaces at the post-spawn `attempt_result?` site in
+/// `run_harness_loop`, which the fix routes through
+/// `emit_failure_finalize_with_err` (terminal is always `Failure` because
+/// pre-flight already passed). The site wraps the underlying error via
+/// `from_action_failure("harness_attempt", ...)`, so the stacks observe
+/// `err.kind = "LifecycleAction"` / `err.variant = "harness_attempt"`.
+///
+/// Asserts the ordered markers prove: `start` fired → the provider never ran
+/// (pre-spawn error) → `failure.stack` fired with the `err` interpolated →
+/// `finalize.stack` fired with `err.msg`.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_post_start_setup_failure_routes_failure_finalize_with_err() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    // `exit_expressions` with a malformed regex (`[` = unterminated character
+    // class) validates-and-aborts inside `execute_harness_attempt`, after
+    // `start` has fired and before the provider spawns.
+    let doc = r#"---
+title: post-start setup failure
+exit_expressions:
+  - patterns:
+      - "["
+    kind: regex
+start:
+  stack:
+    - action: "append_line('events.log', 'start')"
+failure:
+  stack:
+    - action: "append_line('events.log', 'failure-kind=' + err.kind)"
+    - action: "append_line('events.log', 'failure-variant=' + err.variant)"
+finalize:
+  stack:
+    - when: "err"
+      action: "append_line('events.log', 'finalize-msg=' + err.msg)"
+    - action: "append_line('events.log', 'finalize')"
+---
+Body
+"#;
+    let staged = stage(doc);
+    let pane = run_in_tmux(&staged);
+
+    let lines = event_lines(&staged);
+
+    // `start` fired before the setup failure.
+    assert!(
+        lines.iter().any(|l| l == "start"),
+        "start must fire before the post-start setup failure; got {lines:?}; pane:\n{pane}"
+    );
+    // The error happens before the child spawns, so the provider never runs.
+    assert_eq!(
+        lines.iter().filter(|l| **l == "provider-ran").count(),
+        0,
+        "a pre-spawn guard-validation failure must not launch the provider; \
+         got {lines:?}; pane:\n{pane}"
+    );
+    // The failure stack fired with the typed err payload (NOT the legacy
+    // drop path, which never runs the failure stack). The post-spawn
+    // `attempt_result?` site wraps the underlying error via
+    // `from_action_failure("harness_attempt", ...)`, so err.kind is
+    // `LifecycleAction` and err.variant is the `harness_attempt` verb.
+    assert!(
+        lines.iter().any(|l| l == "failure-kind=LifecycleAction"),
+        "failure.stack must fire and observe err.kind='LifecycleAction'; \
+         got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        lines.iter().any(|l| l == "failure-variant=harness_attempt"),
+        "failure.stack must observe err.variant='harness_attempt'; \
+         got {lines:?}; pane:\n{pane}"
+    );
+    // The finalize stack fired and its `when: "err"` guard was truthy.
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("finalize-msg=") && l.len() > "finalize-msg=".len()),
+        "finalize.stack `when: err` must be truthy and observe a non-empty err.msg; \
+         got {lines:?}; pane:\n{pane}"
+    );
+    assert!(
+        lines.iter().any(|l| l == "finalize"),
+        "the terminal finalize must fire; got {lines:?}; pane:\n{pane}"
+    );
+    // Ordering: start precedes failure precedes finalize.
+    let pos = |needle: &str| lines.iter().position(|l| l == needle);
+    let start_pos = pos("start").expect("start marker");
+    let failure_pos = lines
+        .iter()
+        .position(|l| l.starts_with("failure-kind="))
+        .expect("failure marker");
+    let finalize_pos = pos("finalize").expect("finalize marker");
+    assert!(
+        start_pos < failure_pos && failure_pos < finalize_pos,
+        "expected start → failure → finalize ordering; got {lines:?}; pane:\n{pane}"
+    );
+}
