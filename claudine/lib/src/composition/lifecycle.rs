@@ -4998,6 +4998,25 @@ mod tests {
     }
 
     #[test]
+    fn accepts_recovery_actions_in_finalize() {
+        // `finalize` is the optional-error terminal event and a last-chance
+        // recovery surface, so retry/resume/requeue/proxy all parse there
+        // (parity with the `failure` event).
+        for action in [
+            "retry(1)",
+            "resume('finish the task')",
+            "requeue('5m')",
+            "proxy('@other.md')",
+        ] {
+            let fm = json!({
+                "finalize": {"stack": [{"when": "err", "action": action}]}
+            });
+            parse_lifecycle_config(&fm, dummy_path())
+                .unwrap_or_else(|e| panic!("finalize `{action}` should parse, got: {e:?}"));
+        }
+    }
+
+    #[test]
     fn rejects_multiple_lifecycle_actions_in_one_item() {
         let fm = json!({
             "blocked": {

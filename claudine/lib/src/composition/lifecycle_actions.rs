@@ -176,23 +176,33 @@ impl LifecycleControlAction {
     ///
     /// - `Stop` and `Error` are valid in every event.
     /// - `Skip` is valid only in `initialize`.
-    /// - `Proxy` is valid in `initialize`, `blocked`, `failure`.
-    /// - `Retry` is valid in `blocked`, `failure`.
-    /// - `Resume` is valid only in `failure`.
-    /// - `Requeue` is valid in `blocked`, `failure`.
+    /// - `Proxy` is valid in `initialize`, `blocked`, `failure`, `finalize`.
+    /// - `Retry` is valid in `blocked`, `failure`, `finalize`.
+    /// - `Resume` is valid in `failure`, `finalize`.
+    /// - `Requeue` is valid in `blocked`, `failure`, `finalize`.
+    ///
+    /// `finalize` is the optional-error terminal event, so it doubles as a
+    /// last-chance recovery surface: a `finalize.stack` that detects an
+    /// unmet contract (typically guarded by `when: "err"`) can `retry`,
+    /// `resume`, `requeue`, or `proxy` exactly as `failure` can.
     pub fn is_valid_for(&self, event: LifecycleSignal) -> bool {
         match self {
             Self::Stop | Self::Error { .. } => true,
             Self::Skip => matches!(event, LifecycleSignal::Initialize),
             Self::Proxy { .. } => matches!(
                 event,
-                LifecycleSignal::Initialize | LifecycleSignal::Blocked | LifecycleSignal::Failure
+                LifecycleSignal::Initialize
+                    | LifecycleSignal::Blocked
+                    | LifecycleSignal::Failure
+                    | LifecycleSignal::Finalize
             ),
             Self::Retry { .. } | Self::Requeue { .. } => matches!(
                 event,
-                LifecycleSignal::Blocked | LifecycleSignal::Failure
+                LifecycleSignal::Blocked | LifecycleSignal::Failure | LifecycleSignal::Finalize
             ),
-            Self::Resume { .. } => matches!(event, LifecycleSignal::Failure),
+            Self::Resume { .. } => {
+                matches!(event, LifecycleSignal::Failure | LifecycleSignal::Finalize)
+            }
         }
     }
 }
@@ -414,56 +424,57 @@ mod tests {
             assert!(!A::Skip.is_valid_for(event), "Skip in {event:?}");
         }
 
-        // Proxy: Initialize, Blocked, Failure.
+        // Proxy: Initialize, Blocked, Failure, Finalize.
         let proxy = A::Proxy {
             target: Expr::StringLiteral("@other.md".into()),
         };
-        for event in [S::Initialize, S::Blocked, S::Failure] {
+        for event in [S::Initialize, S::Blocked, S::Failure, S::Finalize] {
             assert!(proxy.is_valid_for(event), "Proxy in {event:?}");
         }
-        for event in [S::Start, S::Success, S::Finalize, S::Loop] {
+        for event in [S::Start, S::Success, S::Loop] {
             assert!(!proxy.is_valid_for(event), "Proxy in {event:?}");
         }
 
-        // Retry: Blocked, Failure.
+        // Retry: Blocked, Failure, Finalize.
         let retry = A::Retry {
             max_attempts: None,
             backoff: None,
             delay: None,
         };
-        for event in [S::Blocked, S::Failure] {
+        for event in [S::Blocked, S::Failure, S::Finalize] {
             assert!(retry.is_valid_for(event), "Retry in {event:?}");
         }
-        for event in [S::Initialize, S::Start, S::Success, S::Finalize, S::Loop] {
+        for event in [S::Initialize, S::Start, S::Success, S::Loop] {
             assert!(!retry.is_valid_for(event), "Retry in {event:?}");
         }
 
-        // Resume: Failure only.
+        // Resume: Failure, Finalize.
         let resume = A::Resume {
             message: Expr::StringLiteral("please retry".into()),
             max_attempts: None,
         };
-        assert!(resume.is_valid_for(S::Failure));
+        for event in [S::Failure, S::Finalize] {
+            assert!(resume.is_valid_for(event), "Resume in {event:?}");
+        }
         for event in [
             S::Initialize,
             S::Start,
             S::Success,
             S::Blocked,
-            S::Finalize,
             S::Loop,
         ] {
             assert!(!resume.is_valid_for(event), "Resume in {event:?}");
         }
 
-        // Requeue: Blocked, Failure.
+        // Requeue: Blocked, Failure, Finalize.
         let requeue = A::Requeue {
             delay: Expr::StringLiteral("5m".into()),
             reason: None,
         };
-        for event in [S::Blocked, S::Failure] {
+        for event in [S::Blocked, S::Failure, S::Finalize] {
             assert!(requeue.is_valid_for(event), "Requeue in {event:?}");
         }
-        for event in [S::Initialize, S::Start, S::Success, S::Finalize, S::Loop] {
+        for event in [S::Initialize, S::Start, S::Success, S::Loop] {
             assert!(!requeue.is_valid_for(event), "Requeue in {event:?}");
         }
     }

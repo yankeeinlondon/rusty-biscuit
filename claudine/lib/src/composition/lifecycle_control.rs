@@ -106,7 +106,10 @@ pub fn decide_control(
             backoff,
             delay,
         } => {
-            if !matches!(signal, LifecycleSignal::Blocked | LifecycleSignal::Failure) {
+            if !matches!(
+                signal,
+                LifecycleSignal::Blocked | LifecycleSignal::Failure | LifecycleSignal::Finalize
+            ) {
                 return ControlDispatch::Stop;
             }
             // `control_budget` carries the absolute attempt ceiling derived
@@ -136,7 +139,7 @@ pub fn decide_control(
             message,
             max_attempts,
         } => {
-            if !matches!(signal, LifecycleSignal::Failure) {
+            if !matches!(signal, LifecycleSignal::Failure | LifecycleSignal::Finalize) {
                 return ControlDispatch::Stop;
             }
             let budget = if control_budget == 0 {
@@ -157,7 +160,10 @@ pub fn decide_control(
         StackControl::Proxy { target } => {
             if !matches!(
                 signal,
-                LifecycleSignal::Initialize | LifecycleSignal::Blocked | LifecycleSignal::Failure
+                LifecycleSignal::Initialize
+                    | LifecycleSignal::Blocked
+                    | LifecycleSignal::Failure
+                    | LifecycleSignal::Finalize
             ) {
                 return ControlDispatch::Stop;
             }
@@ -166,7 +172,10 @@ pub fn decide_control(
             }
         }
         StackControl::Requeue { delay, reason } => {
-            if !matches!(signal, LifecycleSignal::Blocked | LifecycleSignal::Failure) {
+            if !matches!(
+                signal,
+                LifecycleSignal::Blocked | LifecycleSignal::Failure | LifecycleSignal::Finalize
+            ) {
                 return ControlDispatch::Stop;
             }
             ControlDispatch::Requeue {
@@ -489,6 +498,52 @@ mod tests {
             decide_control(LifecycleSignal::Success, &control, 1, 0, false),
             ControlDispatch::Stop
         );
+    }
+
+    #[test]
+    fn recovery_controls_valid_at_finalize() {
+        // `finalize` is the optional-error terminal event and doubles as a
+        // last-chance recovery surface, so retry/resume/requeue/proxy all
+        // dispatch there exactly as they do at `failure`.
+        assert!(matches!(
+            decide_control(
+                LifecycleSignal::Finalize,
+                &retry(1, RetryBackoff::Fixed, "0s"),
+                1,
+                0,
+                false,
+            ),
+            ControlDispatch::Retry {
+                from_blocked: false,
+                ..
+            }
+        ));
+
+        let resume = StackControl::Resume {
+            message: "continue".to_string(),
+            max_attempts: 1,
+        };
+        assert!(matches!(
+            decide_control(LifecycleSignal::Finalize, &resume, 1, 0, true),
+            ControlDispatch::Resume { .. }
+        ));
+
+        let proxy = StackControl::Proxy {
+            target: "@x.md".to_string(),
+        };
+        assert!(matches!(
+            decide_control(LifecycleSignal::Finalize, &proxy, 1, 0, false),
+            ControlDispatch::Proxy { .. }
+        ));
+
+        let requeue = StackControl::Requeue {
+            delay: "5m".to_string(),
+            reason: None,
+        };
+        assert!(matches!(
+            decide_control(LifecycleSignal::Finalize, &requeue, 1, 0, false),
+            ControlDispatch::Requeue { .. }
+        ));
     }
 
     #[test]
