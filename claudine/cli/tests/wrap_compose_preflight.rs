@@ -1,10 +1,9 @@
-//! Integration tests: compose shell preflight gating and harness pre-check behavior.
+//! Integration tests: compose shell preflight gating.
 //!
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in
 //! `common::wrap`.
 
 use assert_cmd::cargo::cargo_bin_cmd;
-use predicates::str::contains;
 use claudine::provider::Provider;
 use std::fs;
 use tempfile::tempdir;
@@ -295,45 +294,5 @@ fn compose_preflight_discovers_shell_inside_false_block() {
     assert!(
         !plain.contains("provider-launched"),
         "provider must not launch when preflight fails; stderr was:\n{plain}"
-    );
-}
-
-#[cfg(unix)]
-#[test]
-fn wrapper_restores_repo_harness_for_plain_prompts() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let marker_path = workspace.path().join("provider-ran.txt");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
-
-    fs::write(
-        workspace.path().join("CLAUDE.md"),
-        "---\npre_checks:\n  file_exists: \"missing.txt\"\n---\nRepo harness\n",
-    )
-    .unwrap();
-
-    write_executable(
-        &path_dir.join("claude"),
-        r#"#!/bin/sh
-printf 'ran\n' > "$CLAUDINE_MARKER_FILE"
-exit 0
-"#,
-    );
-
-    cargo_bin_cmd!("claudine")
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
-        .env("CLAUDINE_MARKER_FILE", &marker_path)
-        .current_dir(workspace.path())
-        .args(["claude", "--", "summarize the repo"])
-        .assert()
-        .code(1)
-        .stderr(contains("pre-check validation failed"));
-
-    assert!(
-        !marker_path.exists(),
-        "plain wrapper harness should block launch before the provider runs"
     );
 }

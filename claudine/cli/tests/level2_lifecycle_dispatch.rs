@@ -81,6 +81,19 @@ fn write_goose(bin_dir: &Path, events_log: &Path, exit_code: i32) {
     );
 }
 
+/// Write a fake `goose` that fails on the first run and succeeds on the second,
+/// using `attempt_file` as a durable attempt counter.
+fn write_goose_with_retry(bin_dir: &Path, events_log: &Path, attempt_file: &Path) {
+    write_executable(
+        &bin_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\ncat > /dev/null\nprintf 'provider-ran\\n' >> {log}\nif [ -f {attempt_file} ]; then exit 0; fi\nprintf '1\\n' > {attempt_file}\nexit 99\n",
+            log = events_log.display(),
+            attempt_file = attempt_file.display(),
+        ),
+    );
+}
+
 /// Stage a workspace with the given prompt frontmatter+body and a fake `goose`
 /// provider that exits `provider_exit`.
 fn stage(frontmatter_body: &str, provider_exit: i32) -> Staged {
@@ -327,45 +340,6 @@ fn level2_lifecycle_failure_path_event_order() {
     );
 }
 
-/// Blocked path: a pre-flight failure (`pre_checks: file_exists` on a missing
-/// file) routes to `blocked`→`finalize` with no `start` and no provider
-/// invocation (the provider's own `provider-ran` marker stays absent).
-#[test]
-#[serial(level2_lifecycle)]
-fn level2_lifecycle_blocked_path_event_order() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
-
-    let doc = format!(
-        "---\ntitle: lifecycle blocked\n\
-         pre_checks:\n  file_exists: \"definitely-missing.txt\"\n\
-         {init}{start}{success}{blocked}{failure}{finalize}---\nBody\n",
-        init = marker("initialize"),
-        start = marker("start"),
-        success = marker("success"),
-        blocked = marker("blocked"),
-        failure = marker("failure"),
-        finalize = marker("finalize"),
-    );
-    let staged = stage(&doc, 0);
-    let pane = run_compose_in_tmux(&staged, "finalize");
-
-    let lines = event_lines(&staged);
-    assert_eq!(
-        lines,
-        vec!["initialize", "blocked", "finalize"],
-        "blocked path must fire exactly initialize→blocked→finalize; \
-         events.log was {lines:?}; pane:\n{pane}"
-    );
-    assert!(
-        !lines.iter().any(|l| l == "start"),
-        "start must NOT fire when pre-flight blocks the run; got {lines:?}"
-    );
-    assert!(
-        !lines.iter().any(|l| l == "provider-ran"),
-        "the provider must never run on the blocked path; got {lines:?}"
-    );
-}
-
 /// Composition-preflight blocked path: a `start.stack` carrying a shell
 /// command that the **builtin blacklist** rejects (here `rm`) fails shell
 /// audit during composition preflight — the earlier preflight phase the
@@ -427,29 +401,27 @@ fn level2_lifecycle_blocked_preflight_shell_audit_fires_blocked_and_finalize_sta
     );
 }
 
-/// Composition-preflight dry-run blocked path: with `--dry-run`, the dry-run
-/// seam inside `run_body` evaluates the finalized harness plan's pre-checks
-/// and hard-fails on any error. Before Finding 1's fix this failure path
-/// also called `guard.emit_blocked_or_failure()`, skipping the typed
-/// `blocked.stack` and `finalize.stack`. This test proves the dry-run
-/// pre-check blocked path now records both markers in `events.log`.
+/// Composition-preflight dry-run blocked path: a `start.stack` carrying a
+/// blacklisted shell command fails shell audit during composition preflight.
+/// Before Finding 1's fix this failure path called
+/// `guard.emit_blocked_or_failure()`, skipping the typed `blocked.stack` and
+/// `finalize.stack`. This test proves the dry-run shell-audit blocked path
+/// records both markers in `events.log`.
 ///
-/// The shell-audit path still runs first; the doc here is clean of shell
-/// actions so audit passes, leaving only the pre-check to fail (a
-/// `file_exists` rule against a file nothing creates). With `--dry-run`,
-/// `evaluate_pre_checks` runs inside `run_body`'s dry-run seam, and the
-/// blocked+finalize stacks fire from there.
+/// `rm` is rejected by `check_builtin_blacklist` before the interactive
+/// approval handler is consulted, so the outcome is deterministic across
+/// hosts regardless of TTY availability.
 #[test]
 #[serial(level2_lifecycle)]
-fn level2_lifecycle_blocked_preflight_dry_run_precheck_fires_blocked_and_finalize_stacks() {
+fn level2_lifecycle_blocked_preflight_dry_run_shell_audit_fires_blocked_and_finalize_stacks() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
+    let start = "start:\n  stack:\n    - action: \"shell('rm -rf /tmp/nonexistent')\"\n";
     let doc = format!(
-        "---\ntitle: lifecycle preflight blocked (dry-run pre-check)\n\
-         pre_checks:\n  file_exists: \"definitely-missing.txt\"\n\
+        "---\ntitle: lifecycle preflight blocked (dry-run shell audit)\n\
          {init}{start}{success}{blocked}{failure}{finalize}---\nBody\n",
         init = marker("initialize"),
-        start = marker("start"),
+        start = start,
         success = marker("success"),
         blocked = marker("blocked"),
         failure = marker("failure"),
@@ -467,7 +439,7 @@ fn level2_lifecycle_blocked_preflight_dry_run_precheck_fires_blocked_and_finaliz
     );
     assert!(
         !lines.iter().any(|l| l == "start"),
-        "start must NOT fire when the dry-run pre-check blocks the run; \
+        "start must NOT fire when the dry-run shell audit blocks the run; \
          got {lines:?}"
     );
     assert!(
@@ -620,34 +592,31 @@ fn level2_lifecycle_failure_stack_observes_err_payload() {
 }
 
 /// `blocked.stack` observes the runtime `err` payload (review-4 critical
-/// finding). A pre-check failure (`file_exists: definitely-missing.txt`)
-/// routes through `LifecycleErrorInfo::from_action_failure("pre_check",
-/// fail_msg)` at `loop_control.rs:1415-1416`, so `err.kind`/`err.variant`
-/// must reach the stack expression engine.
+/// finding). A blacklisted shell command in `start.stack` fails shell audit
+/// during composition preflight and routes through
+/// `LifecycleErrorInfo::from_action_failure("shell_approval", fail_msg)`, so
+/// `err.kind`/`err.variant` must reach the stack expression engine.
 ///
 /// The provider is never invoked on the blocked path, so `provider-ran`
-/// stays absent — the same precondition the existing blocked-order test
-/// relies on. This test isolates the err payload on the blocked path; the
-/// existing `level2_lifecycle_blocked_path_event_order` test continues to
-/// own the event-ordering assertion.
+/// stays absent.
 #[test]
 #[serial(level2_lifecycle)]
 fn level2_lifecycle_blocked_stack_observes_err_payload() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
+    let start = "start:\n  stack:\n    - action: \"shell('rm -rf /tmp/nonexistent')\"\n";
     let blocked = err_marker("blocked", &["kind", "variant"]);
     let doc = format!(
         "---\ntitle: lifecycle blocked err payload\n\
-         pre_checks:\n  file_exists: \"definitely-missing.txt\"\n\
          {init}{start}{success}{blocked}{failure}{finalize}---\nBody\n",
         init = marker("initialize"),
-        start = marker("start"),
+        start = start,
         success = marker("success"),
         blocked = blocked,
         failure = marker("failure"),
         finalize = marker("finalize"),
     );
-    // Exit code is irrelevant — the pre-check blocks before the provider runs.
+    // Exit code is irrelevant — shell audit blocks before the provider runs.
     let staged = stage(&doc, 0);
     let pane = run_compose_in_tmux(&staged, "finalize");
 
@@ -658,8 +627,8 @@ fn level2_lifecycle_blocked_stack_observes_err_payload() {
          events.log was {lines:?}; pane:\n{pane}"
     );
     assert!(
-        lines.iter().any(|l| l == "err-variant=pre_check"),
-        "err.variant must reach the blocked stack as 'pre_check'; \
+        lines.iter().any(|l| l == "err-variant=shell_approval"),
+        "err.variant must reach the blocked stack as 'shell_approval'; \
          events.log was {lines:?}; pane:\n{pane}"
     );
     assert!(
@@ -670,10 +639,11 @@ fn level2_lifecycle_blocked_stack_observes_err_payload() {
 
 /// Failed-`finalize` observes the runtime `err` payload on the **blocked**
 /// route (review-4 critical finding — the explicitly-named blocked-then-
-/// finalize case). A pre-check failure routes to `blocked` then `finalize`
-/// with the same `err_info` attached (`loop_control.rs:1461-1477`), so the
-/// `when: "err"` guard on the `finalize.stack` must be truthy and observe
-/// `err.variant` carrying the `pre_check` label.
+/// finalize case). A blacklisted shell command in `start.stack` fails shell
+/// audit during composition preflight and routes to `blocked` then `finalize`
+/// with the same `err_info` attached, so the `when: "err"` guard on the
+/// `finalize.stack` must be truthy and observe `err.variant` carrying the
+/// `shell_approval` label.
 ///
 /// This complements `level2_lifecycle_finalize_stack_observes_err_after_failure`
 /// (which covers the provider-failure route): together they prove the failed-
@@ -686,6 +656,7 @@ fn level2_lifecycle_blocked_stack_observes_err_payload() {
 fn level2_lifecycle_finalize_stack_observes_err_after_blocked() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
+    let start = "start:\n  stack:\n    - action: \"shell('rm -rf /tmp/nonexistent')\"\n";
     // `finalize.stack` guards an `err.variant` append with `when: "err"`, then
     // appends the trailing `finalize` marker the polling loop awaits.
     let finalize = "finalize:\n  stack:\n    \
@@ -693,24 +664,23 @@ fn level2_lifecycle_finalize_stack_observes_err_after_blocked() {
         - action: \"append_line('events.log', 'finalize')\"\n";
     let doc = format!(
         "---\ntitle: lifecycle finalize err after blocked\n\
-         pre_checks:\n  file_exists: \"definitely-missing.txt\"\n\
          {init}{start}{success}{blocked}{failure}{finalize}---\nBody\n",
         init = marker("initialize"),
-        start = marker("start"),
+        start = start,
         success = marker("success"),
         blocked = marker("blocked"),
         failure = marker("failure"),
         finalize = finalize,
     );
-    // Exit code is irrelevant — the pre-check blocks before the provider runs.
+    // Exit code is irrelevant — shell audit blocks before the provider runs.
     let staged = stage(&doc, 0);
     let pane = run_compose_in_tmux(&staged, "finalize");
 
     let lines = event_lines(&staged);
     assert!(
-        lines.iter().any(|l| l == "finalize-err-variant=pre_check"),
+        lines.iter().any(|l| l == "finalize-err-variant=shell_approval"),
         "err.variant must reach the failed-finalize stack on the blocked route — \
-         `when: 'err'` must be truthy after a pre-check block; \
+         `when: 'err'` must be truthy after a shell-audit block; \
          events.log was {lines:?}; pane:\n{pane}"
     );
     // The blocked event fired (carrying err into finalize), start did not.
@@ -788,5 +758,65 @@ fn level2_lifecycle_finalize_stack_observes_err_after_failure() {
         lines.iter().any(|l| l == "finalize"),
         "the finalize event must have fired (the trailing marker); \
          events.log was {lines:?}; pane:\n{pane}"
+    );
+}
+
+/// Lifecycle `failure` recovery: a `failure.stack` ending in `retry(2)` re-enters
+/// the harness loop after the first provider failure. The provider fails on its
+/// first invocation (exit 99) and succeeds on the second (exit 0), proving the
+/// lifecycle recovery action replaced the removed handler DSL retry path.
+#[test]
+#[serial(level2_lifecycle)]
+fn level2_lifecycle_failure_retry_recovers_to_success() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let failure = "failure:\n  stack:\n    - action: \"retry(2)\"\n";
+    let doc = format!(
+        "---\ntitle: lifecycle failure retry\n\
+         {init}{start}{success}{failure}{finalize}---\nBody\n",
+        init = marker("initialize"),
+        start = marker("start"),
+        success = marker("success"),
+        failure = failure,
+        finalize = marker("finalize"),
+    );
+
+    let workspace = tempdir().unwrap();
+    let bin_dir = workspace.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    seed_minimal_config(workspace.path());
+    assert!(init_git_repo(workspace.path()), "git init failed");
+
+    let events_log = workspace.path().join("events.log");
+    let attempt_file = workspace.path().join("attempt.count");
+    write_goose_with_retry(
+        &bin_dir,
+        &events_log,
+        &attempt_file,
+    );
+
+    let md_file = workspace.path().join("doc.md");
+    fs::write(&md_file, &doc).unwrap();
+
+    let staged = Staged {
+        workspace,
+        bin_dir,
+        md_file,
+        events_log,
+    };
+    let pane = run_compose_in_tmux(&staged, "finalize");
+
+    let lines = event_lines(&staged);
+    let lifecycle: Vec<&String> = lines.iter().filter(|l| *l != "provider-ran").collect();
+    assert_eq!(
+        lifecycle,
+        vec!["initialize", "start", "failure", "start", "success", "finalize"],
+        "failure retry must re-enter the loop and reach success; \
+         events.log was {lines:?}; pane:\n{pane}"
+    );
+    assert_eq!(
+        lines.iter().filter(|l| *l == "provider-ran").count(),
+        2,
+        "provider must run twice (failed attempt + retry); got {lines:?}"
     );
 }

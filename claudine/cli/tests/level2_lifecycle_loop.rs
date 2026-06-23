@@ -267,10 +267,11 @@ Phase {{phase}}
     );
 }
 
-/// Coverage #4: a looping document whose pre-flight fails on iteration 1 routes
-/// to `blocked` → `finalize`, then with the default `fail_fast: true` exits
-/// before the loop gate. Assert: `blocked` and `finalize` present, NO loop-gate
-/// marker, exactly one `finalize`, no `start`, no provider invocation.
+/// Coverage #4: a looping document whose pre-flight shell audit fails on
+/// iteration 1 routes to `blocked` → `finalize`, then with the default
+/// `fail_fast: true` exits before the loop gate. Assert: `blocked` and
+/// `finalize` present, NO loop-gate marker, exactly one `finalize`, no
+/// `start`, no provider invocation.
 #[test]
 #[serial(level2_lifecycle_loop)]
 fn level2_lifecycle_loop_blocked_first_iteration_exits_before_gate() {
@@ -279,8 +280,9 @@ fn level2_lifecycle_loop_blocked_first_iteration_exits_before_gate() {
     let doc = r#"---
 title: lifecycle loop blocked
 phase: 1
-pre_checks:
-  file_exists: "definitely-missing.txt"
+start:
+  stack:
+    - action: "shell('rm -rf /tmp/nonexistent')"
 loop:
   until: "phase > 2"
   action: "increment(phase)"
@@ -290,9 +292,6 @@ loop:
 initialize:
   stack:
     - action: "append_line('events.log', 'initialize')"
-start:
-  stack:
-    - action: "append_line('events.log', 'start')"
 blocked:
   stack:
     - action: "append_line('events.log', 'blocked')"

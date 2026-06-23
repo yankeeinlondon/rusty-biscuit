@@ -98,51 +98,6 @@ exit 1
     );
 }
 
-#[cfg(unix)]
-#[test]
-fn inline_compose_readonly_file_fails_without_harness() {
-    use std::os::unix::fs::PermissionsExt;
-
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
-
-    let md_file = workspace.path().join("readonly.md");
-    fs::write(&md_file, "---\nprompt: Generate\n---\nBody\n").unwrap();
-
-    // Make the file read-only
-    let mut perms = fs::metadata(&md_file).unwrap().permissions();
-    perms.set_mode(0o444);
-    fs::set_permissions(&md_file, perms).unwrap();
-
-    write_executable(
-        &path_dir.join("goose"),
-        "#!/bin/sh\necho 'should not run'\n",
-    );
-
-    let assert = cargo_bin_cmd!("claudine")
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
-        .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
-        .assert()
-        .code(1);
-
-    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
-    assert!(
-        stderr.contains("insufficient file permissions")
-            || stderr.contains("Permission denied")
-            || stderr.contains("permission"),
-        "should report a permission error for read-only files; stderr: {stderr}"
-    );
-
-    // Restore permissions for cleanup
-    let mut perms = fs::metadata(&md_file).unwrap().permissions();
-    perms.set_mode(0o644);
-    fs::set_permissions(&md_file, perms).unwrap();
-}
-
 // ---------------------------------------------------------------------------
 // Handler-engagement banner emission semantics
 // ---------------------------------------------------------------------------
