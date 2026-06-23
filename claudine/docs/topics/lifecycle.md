@@ -111,10 +111,10 @@ Lifecycle control actions terminate the current event's stack and influence runt
 | `stop` | every event | End this event's stack cleanly; composition continues with the current outcome |
 | `skip` | `initialize` only | Whole-document opt-out: no provider invocation, no `finalize`, no `loop` |
 | `error("reason")` | every event | Mark this event as failed; at `success`/`finalize` it converts success to failure |
-| `proxy("@other.md")` | `initialize`, `blocked`, `failure` | Hand off to another prompt document (currently unsupported; raises a typed error) |
+| `proxy("@other.md")` | `initialize`, `blocked`, `failure` | Hand off to another prompt document, entering the target at its own `initialize` |
 | `retry(N)` | `blocked`, `failure` | Retry the current prompt N additional times |
 | `resume("message")` | `failure` only | Resume the agent session with a follow-up message |
-| `requeue("5m")` | `blocked`, `failure` | Push this prompt onto the deferred-execution queue (unsupported without a queue integration) |
+| `requeue("5m")` | `blocked`, `failure` | Push this prompt onto the deferred-execution queue. Daemon-first over rendezvous (UDS on Unix, named pipe on Windows); on any daemon-unreachable failure, durably appends the prompt to a local fallback file (`<config_dir>/claudine/rendezvous/deferred-queue.jsonl`, overridable via `CLAUDINE_RENDEZVOUS_FALLBACK_DIR`) so the prompt is never lost. The run still proceeds to `finalize` normally. |
 
 At most one control action may appear in a stack item, and it must be the last action.
 
