@@ -282,12 +282,14 @@ fn provider_extension_kimi_unknown_kinds_still_surface() {
 #[test]
 fn provider_extension_claude_system_hook_kinds_are_silent() {
     // Task 2a.2 parser emits hook events with kinds `system/hook_started`,
-    // `system/hook_response`, `system/hook_progress`. The sink allowlist
-    // must suppress all three so subscription users don't see hook noise.
+    // `system/hook_response`, `system/hook_progress`; newer Claude builds add
+    // `system/thinking_tokens` telemetry. The sink allowlist must suppress all
+    // of them so subscription users don't see this per-turn system noise.
     for kind in [
         "system/hook_started",
         "system/hook_response",
         "system/hook_progress",
+        "system/thinking_tokens",
     ] {
         let lines = Arc::new(StdMutex::new(Vec::new()));
         let dispatched = Arc::new(StdMutex::new(Vec::new()));

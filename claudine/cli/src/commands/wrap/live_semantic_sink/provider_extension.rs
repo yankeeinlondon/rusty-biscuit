@@ -142,6 +142,14 @@ const SILENT_PROVIDER_EXTENSION_KINDS: &[(Provider, &str)] = &[
     (Provider::Claude, "system/hook_started"),
     (Provider::Claude, "system/hook_response"),
     (Provider::Claude, "system/hook_progress"),
+    // Claude: per-turn thinking-token telemetry. Newer Claude Code builds
+    // emit `{"type":"system","subtype":"thinking_tokens",...}` several times
+    // per assistant turn. Claudine has no typed model for it, so the parser
+    // falls back to a `system/thinking_tokens` ProviderExtension; the running
+    // count is redundant with the thinking deltas already streamed as
+    // Reasoning, so suppress the stderr line. The raw event still flows
+    // through dispatch and the JSONL log.
+    (Provider::Claude, "system/thinking_tokens"),
     // Codex: unknown/unmodeled item lifecycle markers. When the inner
     // `item.type` is something Claudine does not classify (new Codex
     // builds, experimental item types), the parser falls back to a
