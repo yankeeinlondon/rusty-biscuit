@@ -1,3 +1,6 @@
+---
+hash: ef46db3751d8e999-c3d2924067dee01d
+---
 # Claudine Composition
 
 Claudine supports the ability to _compose_ content by leveraging the Darkmatter library's powerful composition features and routing the result through a wrapper-grade execution pipeline.
@@ -122,13 +125,41 @@ Steps:
    - If the provider modified an existing frontmatter property, Claudine reverts it to the original value and emits a warning
    - If the provider added a new frontmatter property, Claudine merges it into the document (inserted before `last_updated`)
    - `last_updated` is set to today's date (local time, `YYYY-MM-DD`)
-   - The file is written atomically
-   - A cleanup pass normalizes the body markdown without touching frontmatter
+    - The file is written atomically
+    - A cleanup pass normalizes the body markdown without touching frontmatter
+
+### `hash` property (auto-stamped)
+
+Every successful `inline-compose` closure stamps a Darkmatter `Simple` content
+hash into the `hash:` frontmatter property as part of the same atomic write
+that persists the body.
+
+- **Format** — `<16-hex-fm>-<16-hex-body>` (for example,
+  `hash: a1b2c3d4e5f60718-9a0b1c2d3e4f5061`).
+- **Kind is forced to `Simple`** — even if the document previously held a valid
+  `structured` or `detailed` hash, the next `inline-compose` run normalizes it
+  to the `Simple` shorthand.
+- **Self-reference stability** — `hash` and `last_updated` are excluded from the
+  frontmatter segment when the hash is computed, so re-running `inline-compose`
+  on an already-stamped, otherwise-unchanged document does not perturb the
+  stored value. You can verify this with `md hash --diff <file>`, which exits
+  `0` when the file matches its stored hash.
+- **Malformed existing hash** — if the source file contains a malformed
+  `hash:` value, the closure fails with `CompositionError::InlineHashMalformed`
+  before any write occurs, leaving the file on disk untouched.
+
+This behavior is implemented by [`apply_inline_closure`] in the closure module,
+using `inline_hash_options`, `parse_inline_stored_hash`, `plan_hash_save`, and
+`apply_hash_save`.
+
+[`apply_inline_closure`]: ../../lib/src/composition/closure.rs
 
 ### Inline Conventions
 
+
 - **`prompt`** (required) — the prompt text; composed through Darkmatter before execution
 - **`last_updated`** — auto-updated by Claudine on each successful write
+- **`hash`** — auto-stamped Darkmatter `Simple` content hash on each successful write (see [`hash` property (auto-stamped)](#hash-property-auto-stamped))
 - **`agent`** — optional provider hint (see Provider Selection)
 - **`policy`** — content freshness policy (coming soon)
 - **`blast_radius`** — list of source files that trigger re-generation when changed

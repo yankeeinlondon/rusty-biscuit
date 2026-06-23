@@ -1,3 +1,6 @@
+---
+hash: ef46db3751d8e999-5728da59c9d5b7c8
+---
 # Validations and Handlers
 
 The `harness` module provides a typed job harness for Markdown-backed prompts in Claudine's composition pipeline. It lets a document describe prerequisites, success criteria, timeouts, and recovery strategies in frontmatter.
@@ -476,7 +479,7 @@ handle_response_includes:
 
 ## Inline Composition
 
-`inline-compose` is the most stateful mode: checks body changes, preserves/restores frontmatter layout, updates `last_updated`, and can recover+retry inside the harness loop. The built-in events `inline_response_empty` and `inline_body_unchanged` fire automatically when the provider fails to modify the document.
+`inline-compose` is the most stateful mode: checks body changes, preserves/restores frontmatter layout, updates `last_updated`, stamps a Darkmatter `Simple` hash into `hash:` (see [Composition — `hash` property](../../../claudine/docs/topics/composition.md#hash-property-auto-stamped)), and can recover+retry inside the harness loop. The built-in events `inline_response_empty` and `inline_body_unchanged` fire automatically when the provider fails to modify the document.
 
 ```yaml
 ---

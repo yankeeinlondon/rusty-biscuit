@@ -1,13 +1,14 @@
 ---
 prompt: |-
-    Review the execution flow of the 'claudine compose', 'claudine inline-compose', 'claudine sequence'.
+  Review the execution flow of the 'claudine compose', 'claudine inline-compose', 'claudine sequence'.
 
-    - identify the precise steps that each command takes to produce it's results
-    - describe each step in the process
-    - identify what CLI switches or prompt frontmatter has an impact on each step and what that impact is
+  - identify the precise steps that each command takes to produce it's results
+  - describe each step in the process
+  - identify what CLI switches or prompt frontmatter has an impact on each step and what that impact is
 
-    After fully documenting the flows add a section called `## Future Improvements` and add any improvements you think could be made to the current flow
+  After fully documenting the flows add a section called `## Future Improvements` and add any improvements you think could be made to the current flow
 last_updated: 2026-04-27
+hash: 7738d51f4cfa73e2-df885c4261e55f67
 ---
 Let me explore the composition-related source code and documentation to trace the exact execution flows.Now let me read the existing composition topic doc and the key source files for precision:Now let me read the critical execution pipeline files:Now let me read the remaining portions of the composition executor to get the full execution pipeline:Now I have a comprehensive understanding of all three flows. Let me compose the complete Markdown body.Now I have all the details needed. Let me produce the comprehensive Markdown body content:Now I have all the details. Let me compose the full Markdown document body:
 
@@ -456,9 +457,9 @@ Identical to compose Step 3.
 4. Calls `temp_md.compose_with(compose_opts)` through Darkmatter on the temporary document
 5. Extracts effective frontmatter, agent/model hints, lifecycle config
 6. **Appends guardrails** via `load_or_create_guardrails(source_repo_root)` — adds instructions like "Return the replacement Markdown body content only". Guardrails are loaded from `.claudine/inline-compose.md` in the repo root (created on first use), falling back to a built-in default.
-7. **Captures pre-execution body hash** via `source.markdown.hash_body(false)` for closure validation
+7. **Captures pre-execution Simple hash** via `source.markdown.compute_hash(MdHashKind::Simple, &inline_hash_options())` for closure validation
 
-**Returns:** `PreparedComposition { mode: InlineFrontmatterPrompt, ..., closure: Inline(InlineClosurePlan { original_document_text, original_body_hash }) }`
+**Returns:** `PreparedComposition { mode: InlineFrontmatterPrompt, ..., closure: Inline(InlineClosurePlan { original_document_text, original_hash }) }`
 
 **Affected by:**
 
@@ -518,12 +519,13 @@ After the provider completes, the inline closure pipeline rewrites the target fi
 
 `closure::apply_inline_closure(plan, body, path, today, post_run_fm)`:
 
-1. Validates replacement body is non-empty and hash differs from original
+1. Validates replacement body is non-empty and the **body segment** of the Simple hash differs from the original
 2. Compares frontmatter to detect new and modified properties
 3. Calls `rewrite_inline_document()`:
 
     - Splits frontmatter from source text (preserving byte-for-byte layout including block scalars)
     - Updates `last_updated` to today's date (local time, `YYYY-MM-DD`)
+    - Stamps a Darkmatter `Simple` content hash into the `hash:` frontmatter property (see [Composition — `hash` property](composition.md#hash-property-auto-stamped))
     - Merges new frontmatter properties from agent (inserted before `last_updated`)
     - Preserves original frontmatter values (reverts agent modifications with a warning)
 
@@ -546,6 +548,7 @@ Summary is deferred until after closure validation messages (unlike compose whic
 | Input                      | Impact                                                                                            |
 |----------------------------|---------------------------------------------------------------------------------------------------|
 | Frontmatter `last_updated` | Auto-updated by Claudine on each successful write                                                 |
+| Frontmatter `hash`         | Auto-stamped Darkmatter `Simple` content hash on each successful write                            |
 | Provider output            | Must be replacement body content only (no frontmatter); guardrails instruct the agent accordingly |
 | `--silent`                 | Suppresses check/validation messages                                                              |
 

@@ -1,8 +1,8 @@
 ---
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Roo), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
-last_updated: 2026-06-19
-hash: bbb32528c11dc53d-51f928dc8169d44b
+last_updated: 2026-06-22
+hash: bbb32528c11dc53d-a09bd56ef857d7f4
 ---
 
 ## Overview
@@ -82,7 +82,7 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 | Command | Description |
 |---------|-------------|
 | `claudine compose <file> [key=value ...]` | Compose a Markdown file and send the result as a prompt (no file mutation) |
-| `claudine inline-compose <file> [key=value ...]` | Use frontmatter `prompt` to generate content and replace the body; preserves frontmatter, updates `last_updated` |
+| `claudine inline-compose <file> [key=value ...]` | Use frontmatter `prompt` to generate content and replace the body; preserves frontmatter, updates `last_updated`, stamps a Darkmatter `Simple` `hash:` |
 | `claudine sequence <file> [key=value ...]` | Run a serial sequence of composition steps with shared shell approval cache and `FAIL_FAST` propagation |
 
 **Administration**
