@@ -24,6 +24,74 @@ docs_updated_during_phase_2:
   - claudine/features/2026-06-21-remove-validations/plan.md
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/cli/Cargo.toml
+  - claudine/cli/src/commands/wrap/composition/mod.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+  - claudine/cli/src/commands/wrap/harness_orch/shell_options.rs
+  - claudine/cli/src/commands/wrap/inline.rs
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/src/commands/wrap/policy.rs
+  - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
+  - claudine/cli/tests/inline_compose_cli.rs
+  - claudine/cli/tests/level2_lifecycle_control.rs
+  - claudine/cli/tests/level2_lifecycle_dispatch.rs
+  - claudine/cli/tests/level2_lifecycle_loop.rs
+  - claudine/cli/tests/wrap_compose_preflight.rs
+  - claudine/cli/tests/wrap_inline_compose_interactive.rs
+  - claudine/lib/src/composition/preflight.rs
+  - claudine/lib/src/harness/mod.rs
+  - claudine/lib/src/harness/model.rs
+  - claudine/lib/src/harness/parse/handlers.rs
+  - claudine/lib/src/harness/parse/mod.rs
+  - claudine/lib/src/harness/report.rs
+docs_updated_during_phase_3:
+  - claudine/lib/README.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/claudine/SKILL.md
+source_files_during_phase_4:
+  - claudine/cli/src/commands/compose/prep.rs
+  - claudine/cli/src/commands/wrap/composition/mod.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/src/commands/wrap/resume.rs
+  - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
+  - claudine/cli/tests/level2_lifecycle_dispatch.rs
+  - claudine/lib/src/composition/lifecycle_context.rs
+  - claudine/lib/src/composition/preflight.rs
+  - claudine/lib/src/harness/audit.rs
+  - claudine/lib/src/harness/error.rs
+  - claudine/lib/src/harness/mod.rs
+  - claudine/lib/src/harness/model.rs
+  - claudine/lib/src/harness/parse/mod.rs
+  - claudine/lib/src/harness/report.rs
+  - claudine/lib/src/harness/runtime.rs
+  - claudine/lib/src/harness/shell.rs
+  - claudine/lib/src/harness/handlers.rs
+  - claudine/lib/src/harness/parse/handlers.rs
+  - claudine/lib/src/harness/parse/overlays.rs
+  - claudine/lib/tests/runaway_handler_payload.rs
+docs_updated_during_phase_4:
+  - claudine/features/2026-06-21-remove-validations/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - claudine/cli/tests/inline_compose_cli.rs
+  - claudine/cli/tests/level2_lifecycle_control.rs
+  - claudine/cli/tests/level2_lifecycle_dispatch.rs
+  - claudine/cli/tests/level2_lifecycle_loop.rs
+  - claudine/cli/tests/wrap_compose_preflight.rs
+  - claudine/cli/tests/wrap_inline_compose_interactive.rs
+docs_updated_during_phase_5:
+  - claudine/lib/README.md
+  - claudine/features/2026-06-21-remove-validations/plan.md
+  - claudine/features/2026-06-21-remove-validations/spec.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/claudine/SKILL.md
 packages:
   - claudine
 ---
@@ -57,41 +125,41 @@ Parallelizable: diagnostic tests for individual removed keys can be authored ind
 
 ## Phase 3: Remove Validation Models and Evaluation
 
-- [ ] Delete or reduce `claudine/lib/src/harness/validate/` so `evaluate_pre_checks`, `evaluate_post_checks`, `capture_pre_run_snapshot`, `PreRunSnapshot`, and `check_write_permission` no longer exist unless a kept surface still proves a dependency.
-- [ ] Remove `claudine/lib/src/harness/parse/validations.rs`.
-- [ ] Remove `ValidationRule`, `ValidationKind`, and validation-only `HandlerTable` fields from harness model types.
-- [ ] Remove validation-specific path-resolution code in `claudine/lib/src/harness/resolve.rs` unless shell audit or timeout infrastructure still needs a narrow helper.
-- [ ] Trim `claudine/lib/src/harness/failure.rs` to retain process termination, attempt outcome, `FailureEvent`, and failure classification while removing validation-only event, phase, and failure taxonomy.
-- [ ] Remove validation-specific report rendering from `claudine/lib/src/harness/report.rs`, including pre/post validation sections and rule-source reporting.
-- [ ] Update harness module exports so removed validation APIs are no longer public or reachable.
-- [ ] Validation checkpoint: `rg "evaluate_pre_checks|evaluate_post_checks|capture_pre_run_snapshot|PreRunSnapshot|ValidationRule|ValidationKind|ValidationFailure|FailurePhase::PreCheck|FailurePhase::PostCheck" claudine/lib` returns no active code references.
+- [x] Delete or reduce `claudine/lib/src/harness/validate/` so `evaluate_pre_checks`, `evaluate_post_checks`, `capture_pre_run_snapshot`, `PreRunSnapshot`, and `check_write_permission` no longer exist unless a kept surface still proves a dependency.
+- [x] Remove `claudine/lib/src/harness/parse/validations.rs`.
+- [x] Remove `ValidationRule`, `ValidationKind`, and validation-only `HandlerTable` fields from harness model types.
+- [x] Remove validation-specific path-resolution code in `claudine/lib/src/harness/resolve.rs` unless shell audit or timeout infrastructure still needs a narrow helper.
+- [x] Trim `claudine/lib/src/harness/failure.rs` to retain process termination, attempt outcome, `FailureEvent`, and failure classification while removing validation-only event, phase, and failure taxonomy.
+- [x] Remove validation-specific report rendering from `claudine/lib/src/harness/report.rs`, including pre/post validation sections and rule-source reporting.
+- [x] Update harness module exports so removed validation APIs are no longer public or reachable.
+- [x] Validation checkpoint: `rg "evaluate_pre_checks|evaluate_post_checks|capture_pre_run_snapshot|PreRunSnapshot|ValidationRule|ValidationKind|ValidationFailure|FailurePhase::PreCheck|FailurePhase::PostCheck" claudine/lib` returns no active code references.
 
 Parallelizable: model cleanup, failure taxonomy cleanup, and report cleanup can proceed in parallel after the removed-key diagnostics are in place.
 
 ## Phase 4: Remove Handler Recovery DSL
 
-- [ ] Delete or reduce `claudine/lib/src/harness/handlers.rs` and `claudine/lib/src/harness/parse/handlers.rs` so `resolve_handler`, `FailureContext`, `HandlerAction`, `execute_deviate_command`, `validate_resume`, and `build_*_failure_context` are gone.
-- [ ] Remove handler table parsing for subject-specific handlers, generic handlers, `handle:`, and `deviate:`.
-- [ ] Replace `try_resolve_handler` recovery branches in `claudine/cli/src/commands/wrap/resume.rs` with lifecycle `failure` or `blocked` event recovery routing.
-- [ ] Replace handler recovery branches in `claudine/cli/src/commands/wrap/harness_orch/loop_control.rs` with lifecycle recovery action execution.
-- [ ] Preserve agent-failure classification inputs needed by lifecycle recovery, including timeout, interruption, abort, exit status, and stream failure details.
-- [ ] Add or update an end-to-end test proving a provider failure recovers through a lifecycle `failure` `Retry` or `Resume` action.
-- [ ] Validation checkpoint: `rg "resolve_handler|try_resolve_handler|HandlerAction|FailureContext|execute_deviate_command|validate_resume|handle_agent_failure|handle_timeout" claudine/lib claudine/cli` finds no removed recovery path in active code.
+- [x] Delete or reduce `claudine/lib/src/harness/handlers.rs` and `claudine/lib/src/harness/parse/handlers.rs` so `resolve_handler`, `FailureContext`, `HandlerAction`, `execute_deviate_command`, `validate_resume`, and `build_*_failure_context` are gone.
+- [x] Remove handler table parsing for subject-specific handlers, generic handlers, `handle:`, and `deviate:`.
+- [x] Replace `try_resolve_handler` recovery branches in `claudine/cli/src/commands/wrap/resume.rs` with lifecycle `failure` or `blocked` event recovery routing.
+- [x] Replace handler recovery branches in `claudine/cli/src/commands/wrap/harness_orch/loop_control.rs` with lifecycle recovery action execution.
+- [x] Preserve agent-failure classification inputs needed by lifecycle recovery, including timeout, interruption, abort, exit status, and stream failure details.
+- [x] Add or update an end-to-end test proving a provider failure recovers through a lifecycle `failure` `Retry` or `Resume` action.
+- [x] Validation checkpoint: `rg "resolve_handler|try_resolve_handler|HandlerAction|FailureContext|execute_deviate_command|validate_resume|handle_agent_failure|handle_timeout" claudine/lib claudine/cli` finds no removed recovery path in active code.
 
 Parallelizable: parser removal and CLI recovery replacement can be developed separately once lifecycle recovery APIs are confirmed.
 
 ## Phase 5: Update Wrap and Composition Orchestration
 
-- [ ] Remove pre-check evaluation from `claudine/cli/src/commands/wrap/harness_orch/loop_control.rs`.
-- [ ] Remove post-check evaluation from `claudine/cli/src/commands/wrap/harness_orch/loop_control.rs`.
-- [ ] Remove harness snapshot capture from `claudine/cli/src/commands/wrap/harness_orch/loop_control.rs` and `claudine/cli/src/commands/wrap/composition/mod.rs`.
-- [ ] Confirm shell audit still runs during pre-flight and walks every reachable lifecycle stack shell command.
-- [ ] Confirm schema validation still produces `blocked` behavior where required by lifecycle orchestration.
-- [ ] Confirm timeout parsing and relational checks still accept `timeout`, `timeout_warn`, `step_timeout`, and `step_timeout_warn`.
-- [ ] Confirm runaway guards and `ProcessTermination::Aborted` continue routing to lifecycle failure without invoking removed handler retry logic.
-- [ ] Remove or repoint `claudine/cli/src/bin/validation_reporter_pty_harness.rs` and `claudine/cli/tests/fixtures/validation_reporter/missing_file.md` to lifecycle behavior.
-- [ ] Add or update an inline-compose regression proving an agent-modified `prompt` frontmatter property is reverted by `composition/closure.rs` after harness snapshot removal.
-- [ ] Validation checkpoint: shell audit denial still routes to `blocked`, timeout configuration still validates, and inline-compose frontmatter restoration still works.
+- [x] Remove pre-check evaluation from `claudine/cli/src/commands/wrap/harness_orch/loop_control.rs`.
+- [x] Remove post-check evaluation from `claudine/cli/src/commands/wrap/harness_orch/loop_control.rs`.
+- [x] Remove harness snapshot capture from `claudine/cli/src/commands/wrap/harness_orch/loop_control.rs` and `claudine/cli/src/commands/wrap/composition/mod.rs`.
+- [x] Confirm shell audit still runs during pre-flight and walks every reachable lifecycle stack shell command.
+- [x] Confirm schema validation still produces `blocked` behavior where required by lifecycle orchestration.
+- [x] Confirm timeout parsing and relational checks still accept `timeout`, `timeout_warn`, `step_timeout`, and `step_timeout_warn`.
+- [x] Confirm runaway guards and `ProcessTermination::Aborted` continue routing to lifecycle failure without invoking removed handler retry logic.
+- [x] Remove or repoint `claudine/cli/src/bin/validation_reporter_pty_harness.rs` and `claudine/cli/tests/fixtures/validation_reporter/missing_file.md` to lifecycle behavior.
+- [x] Add or update an inline-compose regression proving an agent-modified `prompt` frontmatter property is reverted by `composition/closure.rs` after harness snapshot removal.
+- [x] Validation checkpoint: shell audit denial still routes to `blocked`, timeout configuration still validates, and inline-compose frontmatter restoration still works.
 
 Parallelizable: orchestration call-site deletion, validation reporter cleanup, and inline-compose regression coverage can proceed in parallel after Phases 3 and 4 land.
 

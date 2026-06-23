@@ -16,7 +16,7 @@ claudine/lib/src/
 ├── config/         → Agent detection and hook registration
 ├── dispatch/       → Event processing pipeline
 ├── events/         → Normalized 16-event lifecycle model (`AgenticEvent`, `EventMeta`, matrices)
-├── harness/        → Typed pre/post validations, timeouts, handlers, and shell policy
+├── harness/        → Timeouts, shell audit, programmatic handlers, and attempt classification
 ├── linking/        → Cross-provider skill and command synchronization
 ├── messaging/      → Outbound messaging routes, resolution, and provider dispatch
 ├── mcp/            → MCP catalog, defaults, import/export, session, and injection
@@ -273,7 +273,7 @@ Sub-modules:
 - `guardrails` — inline composition guardrails appended to prompts to constrain output shape
 - `types` — shared types including `PreparedComposition`, `SelectedProvider`, `SequencePlan`, `SequenceStep`, `SharedApprovalCache`, `CompositionMode`, and `SystemPromptInput`
 
-Execution parity note (2026-06-16): the CLI-side execution of `compose` and `inline-compose` now flows through a single `run_harness_loop` path with `HarnessPromptMode::Compose` or `HarnessPromptMode::Inline`. Bare documents (no harness frontmatter) yield the empty plan; inline documents get the system-owned writability pre-check injected once by `finalize_effective_plan`. The loop handles structured streaming, captured/non-structured fallback, inline closure, summary emission, and handler-driven recovery in one place.
+Execution parity note (2026-06-16): the CLI-side execution of `compose` and `inline-compose` flows through a single `run_harness_loop` path with `HarnessPromptMode::Compose` or `HarnessPromptMode::Inline`. Bare documents (no harness frontmatter) yield the empty plan. The loop handles structured streaming, captured/non-structured fallback, inline closure, summary emission, and lifecycle-driven recovery in one place.
 
 ### Badges (`badges`)
 
@@ -331,13 +331,13 @@ Library-first reporting over Claudine's JSONL event logs:
 
 ### Harness (`harness`)
 
-Typed pre/post validations, timeouts, handler resolution, and shell policy for composed prompt pipelines:
+Timeouts, shell policy, and runtime attempt classification for composed prompt pipelines:
 
-- `model` — core data types: `HarnessPlan`, `ValidationRule`, `ValidationKind` (19 validation types), `HandlerAction` (retry/resume/redirect/deviate), `HandlerTable`, `ProcessTermination`, `AttemptOutcome`
+- `model` — core data types: `HarnessPlan`, `HandlerTable` (kept for programmatic `handle`), `ProcessTermination`, `AttemptOutcome`, `FailureEvent`
 - `error` — `HarnessError` enum covering parse, runtime, handler, shell, and path resolution failures
-- `parse` — frontmatter-to-plan parser with phase constraint enforcement; accepts list and map forms for checks
-- `validate` — pre/post-check execution engine with BLAKE3 file fingerprinting, git status integration, and template-based message rendering
-- `handlers` — handler resolution (subject-specific > generic > programmatic), failure classification, programmatic handler execution with JSON stdin/stdout protocol, and deviate command execution
+- `parse` — frontmatter-to-plan parser accepting `timeout`, `step_timeout`, `timeout_warn`, `step_timeout_warn`, and `handle`
+- `audit` — shell command collection across lifecycle stacks and harness handlers for pre-flight approval
+- `handlers` — programmatic `handle` command resolution and execution; the legacy subject-specific handler DSL is retired in favor of lifecycle `blocked`/`failure` recovery actions
 - `shell` — shell policy adapter reusing Darkmatter's tokenizer, blacklist/whitelist, and approval handler infrastructure
 - `resolve` — source-relative path resolution (`@repo/path`, `./local`, `/absolute`)
 - `timeout` — human-friendly duration parser (`30s`, `5m`, `2h`)

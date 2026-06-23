@@ -2,7 +2,7 @@
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Roo), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
 last_updated: 2026-06-22
-hash: bbb32528c11dc53d-d1ec45ac69f76003
+hash: bbb32528c11dc53d-9682f3abb8972da4
 ---
 
 ## Overview
@@ -32,7 +32,7 @@ Twenty modules plus the shared error type and the flat `provider_id` leaf. Full 
 | `config` | Agent detection, hook registration, atomic writes, backups |
 | `dispatch` | Event processing pipeline, templates, matchers, expression bridge |
 | `events` | The normalized 16-event lifecycle model |
-| `harness` | Typed pre/post validations, timeouts, handler resolution, recovery actions |
+| `harness` | Timeouts, shell audit, runtime attempt classification, and lifecycle recovery infrastructure |
 | `linking` | Cross-provider resource sync with portability classification |
 | `mcp` | Catalog, defaults, provider-state, import/export, runtime injectors |
 | `messaging` | Outbound routes (Discord/Slack/Signal/WhatsApp); desktop notifications are separate and zero-config |

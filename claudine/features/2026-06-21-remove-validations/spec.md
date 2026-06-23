@@ -35,9 +35,10 @@ place so old prompt files fail clearly.
 
 ## Motivation
 
-- **Zero real adoption.** Across the repo only **one** document uses the DSL —
-  the test fixture `claudine/cli/tests/fixtures/validation_reporter/missing_file.md`.
-  No production prompt declares `pre_checks`, `post_checks`, or handler frontmatter.
+- **Zero real adoption.** No production prompt declares `pre_checks`,
+  `post_checks`, or handler frontmatter; the only test fixture that previously
+  exercised the DSL (`validation_reporter/missing_file.md`) has been removed
+  along with the DSL.
 - **Duplicated recovery surface.** The harness recovery tiers
   (`retry` / `resume` / `redirect` / `deviate`, resolved by
   `resolve_handler`, `harness/handlers.rs:49`) are a near-exact duplicate of the
@@ -124,8 +125,8 @@ to parse through lifecycle validation.
   (the agent-failure/timeout recovery branches), **replaced** by lifecycle
   `failure`-event recovery actions.
 - The `validation_reporter` PTY harness bin
-  (`claudine/cli/src/bin/validation_reporter_pty_harness.rs`) and its fixture,
-  unless re-pointed at lifecycle behavior.
+  (`claudine/cli/src/bin/validation_reporter_pty_harness.rs`) and its fixture
+  were removed with the DSL; no re-pointing was required.
 - Any CLI help, shell-completion, or frontmatter-completion metadata that
   advertises `pre_checks`, `post_checks`, `handle_*`, `handle:`, or `deviate:`.
 
@@ -221,9 +222,10 @@ DSL.
 - **Compatibility gate:** before deletion, lifecycle parsing must own typed
   diagnostics for the removed DSL keys. Removing parser support without this gate
   would downgrade authored prompts to generic unknown-field errors.
-- **Proof step:** before deletion, port the one validation fixture
-  (`validation_reporter/missing_file.md`) and any internal prompts to the
-  lifecycle `stack` model and confirm equivalent behavior end-to-end.
+- **Proof step:** port any remaining internal prompts that still referenced the
+  removed DSL to the lifecycle `stack` model and confirm equivalent behavior
+  end-to-end. The only validation fixture (`validation_reporter/missing_file.md`)
+  was removed with the DSL.
 - **Spec edit:** tighten the lifecycle spec's `start`/`blocked`/"pre-flight"
   wording to mean *shell audit + schema validation only* (see
   [What "pre-flight" means](#what-pre-flight-means-after-this-change)).
