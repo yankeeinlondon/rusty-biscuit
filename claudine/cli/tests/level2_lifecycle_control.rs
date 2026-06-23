@@ -15,6 +15,13 @@
 //!   retries), `failure` fires each attempt, the budget exhausts, then
 //!   `finalize` fires once. Asserted via the `provider-ran` / `failure` line
 //!   counts in `events.log`.
+//! - **Retry from `finalize` (verify in `success`, recover in `finalize`)** — a
+//!   `success.stack` raises `error()` on a missing artifact, which routes
+//!   through `failure` and carries an `err` into `finalize`; the `finalize.stack`
+//!   `retry`s. The fake provider produces the artifact on its second invocation,
+//!   so the retried attempt verifies clean and the terminal `finalize` runs its
+//!   no-`err` branch. Exercises the `finalize` recovery surface and the
+//!   success-downgrade `err` plumbing.
 //! - **Resume from `failure` without a session id** — surfaces the typed
 //!   `CompositionError::LifecycleResumeWithoutSession` (not a silent no-op),
 //!   then `finalize` fires and the run exits. The fake provider never reports a
@@ -439,6 +446,86 @@ Body
         lines.last().map(|s| s.as_str()),
         Some("finalize"),
         "finalize is the terminal marker; got {lines:?}"
+    );
+}
+
+/// Verify-in-`success`, recover-in-`finalize`: a `success.stack` that detects a
+/// missing artifact raises `error()`, which routes through the `failure` event
+/// and carries an `err` into `finalize`; the `finalize.stack` then `retry`s the
+/// whole run. The fake provider creates the awaited artifact on its **second**
+/// invocation, so the retried attempt verifies clean and the run ends in a
+/// no-`err` `finalize`. Proves the `finalize` recovery surface and the
+/// success-downgrade `err` plumbing end-to-end.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_finalize_retry_recovers_success_verification_failure() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let doc = r#"---
+title: verify in success, recover in finalize
+success:
+  stack:
+    - when: "!file_exists('attempt2.flag')"
+      action:
+        - "append_line('events.log', 'verify-failed')"
+        - "error('artifact missing')"
+finalize:
+  stack:
+    - when: "err"
+      action:
+        - "append_line('events.log', 'finalize-retry')"
+        - "retry(1)"
+    - action: "append_line('events.log', 'finalize-done')"
+---
+Body
+"#;
+    let staged = stage_success(doc);
+    // Replace the plain succeeding provider with one that creates the awaited
+    // `attempt2.flag` on its SECOND invocation, so attempt 1 fails verification
+    // (→ finalize retry) and attempt 2 verifies clean.
+    let counter = staged.workspace.path().join(".attempt_counter");
+    let flag = staged.workspace.path().join("attempt2.flag");
+    write_executable(
+        &staged.bin_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\ncat > /dev/null\nprintf 'provider-ran\\n' >> {log}\n\
+             if [ -f {counter} ]; then : > {flag}; fi\n: > {counter}\nexit 0\n",
+            log = staged.events_log.display(),
+            counter = counter.display(),
+            flag = flag.display(),
+        ),
+    );
+
+    let pane = run_in_tmux_for(&staged, "finalize-done");
+    let lines = event_lines(&staged);
+    let provider_runs = lines.iter().filter(|l| **l == "provider-ran").count();
+    let verify_failed = lines.iter().filter(|l| **l == "verify-failed").count();
+    let finalize_retry = lines.iter().filter(|l| **l == "finalize-retry").count();
+    let finalize_done = lines.iter().filter(|l| **l == "finalize-done").count();
+
+    assert_eq!(
+        provider_runs, 2,
+        "finalize retry(1) re-runs the provider exactly once (original + 1 retry); \
+         got {lines:?}; pane:\n{pane}"
+    );
+    assert_eq!(
+        verify_failed, 1,
+        "the success verification fails only on the first attempt; got {lines:?}; pane:\n{pane}"
+    );
+    assert_eq!(
+        finalize_retry, 1,
+        "finalize recovers via retry exactly once (when `err` is present); \
+         got {lines:?}; pane:\n{pane}"
+    );
+    assert_eq!(
+        finalize_done, 1,
+        "the retried attempt verifies clean, so the terminal finalize runs the \
+         no-`err` branch once; got {lines:?}; pane:\n{pane}"
+    );
+    assert_eq!(
+        lines.last().map(|s| s.as_str()),
+        Some("finalize-done"),
+        "the clean finalize is the terminal marker; got {lines:?}"
     );
 }
 
