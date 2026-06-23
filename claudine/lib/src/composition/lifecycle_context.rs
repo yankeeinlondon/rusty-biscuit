@@ -155,6 +155,33 @@ pub struct LifecycleTiming {
 }
 
 impl LifecycleTiming {
+    /// Build a timing snapshot from wall-clock `Instant`s captured at run
+    /// start.
+    ///
+    /// `document_start` is sampled when the current document began executing
+    /// (one per `initialize`/run); `run_start` is sampled when the enclosing
+    /// run began and includes preceding sequence steps / loop iterations when
+    /// present. Both elapse against the same monotonic clock at event time.
+    ///
+    /// `document_ms` is always populated. `total_ms` is populated only when a
+    /// run-level `run_start` is supplied (it defaults to `document_start` when
+    /// the two coincide). `step_ms` is left `None`; the harness loop has no
+    /// sequence-step clock to measure here, so the field is honestly omitted
+    /// rather than synthesized.
+    pub fn from_instants(
+        document_start: std::time::Instant,
+        run_start: Option<std::time::Instant>,
+        at: std::time::Instant,
+    ) -> Self {
+        let document_ms = at.saturating_duration_since(document_start).as_millis() as u64;
+        let total_ms = run_start.map(|s| at.saturating_duration_since(s).as_millis() as u64);
+        Self {
+            document_ms: Some(document_ms),
+            total_ms,
+            step_ms: None,
+        }
+    }
+
     /// Render the snapshot as a JSON object for evaluation lookups.
     pub fn to_value(&self) -> Value {
         let mut obj = serde_json::Map::new();
@@ -188,6 +215,51 @@ pub struct LifecycleCurrent {
 }
 
 impl LifecycleCurrent {
+    /// Capture the process environment into a JSON object snapshot.
+    ///
+    /// Reads `std::env::vars()` **at call time**, so a side effect or external
+    /// change between `prepare` and a later lifecycle event is observable via
+    /// `current.env.<NAME>`. This is the late-binding behavior the spec
+    /// promises: unlike `doc`/`ctx`/`env` which are computed once at
+    /// composition start, `current.env` reflects the environment as it stands
+    /// when the event fires.
+    pub fn capture_env() -> Value {
+        let mut env = Map::new();
+        for (key, value) in std::env::vars() {
+            env.insert(key, Value::String(value));
+        }
+        Value::Object(env)
+    }
+
+    /// Build a `current` snapshot with the `env` namespace captured at event
+    /// time and an empty `ctx` namespace.
+    ///
+    /// Used at sites where the runtime `ctx.*` namespace is not readily
+    /// reconstructable but the late-bound environment snapshot must still be
+    /// exposed.
+    pub fn capture_env_only() -> Self {
+        Self {
+            ctx: Value::Object(Map::new()),
+            env: Self::capture_env(),
+        }
+    }
+
+    /// Build a `current` snapshot with both namespaces captured at event time.
+    ///
+    /// `env` is the live process environment (see [`Self::capture_env`]).
+    /// `ctx` is Darkmatter's full `ctx.*` namespace captured against
+    /// `base_dir`, keyed by the bare context name (e.g. `agent`, `model`,
+    /// `repo`, `today`) so `current.ctx.<name>` resolves. Agent/model derive
+    /// from the `AGENT`/`MODEL` environment variables, so they too reflect
+    /// event-time state.
+    pub fn capture_at_event(base_dir: &std::path::Path) -> Self {
+        let ctx = darkmatter::markdown::compose::ComposeContext::capture_for_dir(base_dir);
+        Self {
+            ctx: Value::Object(ctx.values().clone()),
+            env: Self::capture_env(),
+        }
+    }
+
     /// Render the snapshot as a JSON object for evaluation lookups.
     pub fn to_value(&self) -> Value {
         let mut obj = serde_json::Map::new();
@@ -565,5 +637,108 @@ mod tests {
         let fm = map(json!({"config": {"retries": 3}}));
         let lookup = LifecycleLookup::new(&fm);
         assert_eq!(lookup.get("config.retries"), Some(json!(3)));
+    }
+
+    #[test]
+    #[serial_test::serial(env_lifecycle_current)]
+    fn capture_env_reflects_live_process_environment() {
+        let key = "CLAUDINE_TEST_CAPTURE_ENV_LIVE";
+        // SAFETY: serialized via #[serial]; no other thread reads this var.
+        unsafe { std::env::set_var(key, "live-value") };
+        let env = LifecycleCurrent::capture_env();
+        unsafe { std::env::remove_var(key) };
+        assert_eq!(env.get(key), Some(&json!("live-value")));
+    }
+
+    #[test]
+    fn capture_env_only_leaves_ctx_empty() {
+        let current = LifecycleCurrent::capture_env_only();
+        assert_eq!(current.ctx, json!({}));
+        assert!(current.env.is_object(), "env is a JSON object snapshot");
+    }
+
+    #[test]
+    fn capture_at_event_populates_ctx_and_env() {
+        let current = LifecycleCurrent::capture_at_event(std::path::Path::new("."));
+        // `ctx.today` is always captured (date/time group, zero I/O).
+        assert!(
+            current.ctx.get("today").and_then(|v| v.as_str()).is_some(),
+            "ctx snapshot carries today: {:?}",
+            current.ctx
+        );
+        assert!(current.env.is_object());
+    }
+
+    #[test]
+    fn timing_from_instants_populates_document_ms_and_total_ms() {
+        let start = std::time::Instant::now();
+        let run_start = start;
+        // Spin until at least 1ms elapsed so the conversion is observably > 0.
+        let at = loop {
+            let now = std::time::Instant::now();
+            if now.duration_since(start).as_millis() >= 1 {
+                break now;
+            }
+        };
+        let timing = LifecycleTiming::from_instants(start, Some(run_start), at);
+        let doc = timing.document_ms.expect("document_ms is populated");
+        let total = timing.total_ms.expect("total_ms populated with run_start");
+        assert!(doc >= 1, "document_ms is monotonic non-decreasing: {doc}");
+        assert_eq!(doc, total, "document and run start coincide here");
+        assert!(timing.step_ms.is_none(), "step_ms stays None outside a sequence");
+    }
+
+    #[test]
+    fn timing_from_instants_omits_total_ms_without_run_start() {
+        let start = std::time::Instant::now();
+        let timing = LifecycleTiming::from_instants(start, None, std::time::Instant::now());
+        assert!(timing.document_ms.is_some());
+        assert!(timing.total_ms.is_none());
+    }
+
+    /// Late-binding contract: a stack `when:` clause reacts to an environment
+    /// value present in `current.env` at context-construction time, distinct
+    /// from a value snapshotted at "prepare" time. This is the spec's required
+    /// "reacts to an environment value changed after prepare" behavior, proven
+    /// at the population layer (the snapshot the production builders attach).
+    #[test]
+    #[serial_test::serial(env_lifecycle_current)]
+    fn when_clause_reacts_to_env_changed_after_prepare() {
+        use darkmatter::markdown::compose::expression::{evaluate, is_truthy, parse};
+
+        let key = "CLAUDINE_TEST_LATE_BINDING_MYVAR";
+        // SAFETY: serialized via #[serial]; no other thread reads this var.
+
+        // "Prepare time": the variable holds an old value. A `current.env`
+        // snapshot captured now would carry `old`.
+        unsafe { std::env::set_var(key, "old") };
+        let prepare_snapshot = LifecycleCurrent::capture_env_only();
+
+        // A side effect / external change happens AFTER prepare.
+        unsafe { std::env::set_var(key, "x") };
+        // The production builders capture `current` at EVENT time, so they see
+        // the post-change value.
+        let event_snapshot = LifecycleCurrent::capture_env_only();
+        unsafe { std::env::remove_var(key) };
+
+        let fm = Map::new();
+        let expr = parse(&format!("current.env.{key} == 'x'")).expect("parses");
+
+        // Against the event-time snapshot, the guard fires (late binding).
+        let event_lookup = LifecycleLookup::new(&fm).with_current(&event_snapshot);
+        let event_value = evaluate(&expr, &event_lookup).expect("evaluates");
+        assert!(
+            is_truthy(&event_value),
+            "when clause fires on the value present at event time"
+        );
+
+        // Against the prepare-time snapshot, the same guard does NOT fire,
+        // proving the reaction is to the late-bound value, not the prepare one.
+        let prepare_lookup = LifecycleLookup::new(&fm).with_current(&prepare_snapshot);
+        let prepare_value = evaluate(&expr, &prepare_lookup).expect("evaluates");
+        assert!(
+            !is_truthy(&prepare_value),
+            "the prepare-time snapshot still holds the old value"
+        );
     }
 }

@@ -361,7 +361,10 @@ impl LifecycleEmitter for DefaultLifecycleEmitter {
 /// [`emit_blocked_or_failure`](Self::emit_blocked_or_failure), or
 /// [`defuse`](Self::defuse) suppress the Drop emission.
 pub struct LifecycleRunGuard<'a> {
-    config: &'a LifecycleConfig,
+    // `Cow` so a `proxy` hand-off can repoint the guard at the target
+    // document's lifecycle (an owned, re-parsed config) without the borrowed
+    // original's lifetime. The common case stays a zero-cost borrow.
+    config: std::borrow::Cow<'a, LifecycleConfig>,
     ctx: &'a LifecycleRuntimeContext<'a>,
     emitter: &'a dyn LifecycleEmitter,
     initialize_emitted: bool,
@@ -380,7 +383,7 @@ impl<'a> LifecycleRunGuard<'a> {
         emitter: &'a dyn LifecycleEmitter,
     ) -> Self {
         Self {
-            config,
+            config: std::borrow::Cow::Borrowed(config),
             ctx,
             emitter,
             initialize_emitted: false,
@@ -486,6 +489,33 @@ impl<'a> LifecycleRunGuard<'a> {
         true
     }
 
+    /// Re-designate an already-recorded `Success`/`Blocked` terminal signal to
+    /// `Failure` so a routed-to `failure` event (and the subsequent `finalize`)
+    /// can still fire.
+    ///
+    /// A `success`/`blocked` stack that ends in an explicit `error(...)` action
+    /// downgrades the run to `failure`. The success/blocked top-level
+    /// communication has **already** fired (top-level fires before the stack, per
+    /// the spec) and that emission must remain — so the terminal slot was already
+    /// taken by `Success`/`Blocked`. This overwrites only [`Self::terminal_signal`]
+    /// to `Failure` while keeping [`Self::terminal_emitted`] true, letting the
+    /// caller run the `failure` event's top-level + stack directly (without
+    /// [`Self::record_event_emission`], which would refuse the taken slot) and
+    /// keeping [`Self::emit_finalize_once`] enabled.
+    ///
+    /// No-op (returns `false`) unless the currently recorded terminal signal is
+    /// `Success` or `Blocked`; the existing slot is otherwise authoritative.
+    pub fn redesignate_terminal_to_failure(&mut self) -> bool {
+        if !matches!(
+            self.terminal_signal,
+            Some(LifecycleSignal::Success) | Some(LifecycleSignal::Blocked)
+        ) {
+            return false;
+        }
+        self.terminal_signal = Some(LifecycleSignal::Failure);
+        true
+    }
+
     /// Run the top-level notification + typed stack for `signal` using the
     /// provided context.
     ///
@@ -496,7 +526,7 @@ impl<'a> LifecycleRunGuard<'a> {
         signal: LifecycleSignal,
         stack_ctx: &super::lifecycle_executor::StackExecutionContext<'_>,
     ) -> super::lifecycle_executor::LifecycleEventOutcome {
-        stack_ctx.with_signal(signal).execute_event(self.config)
+        stack_ctx.with_signal(signal).execute_event(&self.config)
     }
 
     /// Execute the full lifecycle event (top-level notification + stack) for
@@ -545,6 +575,23 @@ impl<'a> LifecycleRunGuard<'a> {
         self.terminal_signal = None;
     }
 
+    /// Reset **all** per-run state, including `initialize_emitted`, so the
+    /// guard can drive a fresh prompt run from `initialize`.
+    ///
+    /// Unlike [`Self::reset_for_next_iteration`] (which preserves
+    /// `initialize_emitted` because loop iterations re-enter at `start`), a
+    /// `Proxy` hand-off replaces the running document with another prompt
+    /// that must run its own `initialize`/pre-flight. The proxied document is
+    /// a distinct run, so every signal — including `initialize` — fires again.
+    pub fn reset_for_proxy(&mut self) {
+        self.initialize_emitted = false;
+        self.start_emitted = false;
+        self.provider_launched = false;
+        self.terminal_emitted = false;
+        self.finalize_emitted = false;
+        self.terminal_signal = None;
+    }
+
     /// Suppress the Drop emission without emitting any signal.
     ///
     /// Use when transferring lifecycle responsibility elsewhere.
@@ -584,7 +631,18 @@ impl<'a> LifecycleRunGuard<'a> {
 
     /// The lifecycle configuration this guard is driving.
     pub fn config(&self) -> &LifecycleConfig {
-        self.config
+        &self.config
+    }
+
+    /// Repoint the guard at a different lifecycle config (owned).
+    ///
+    /// A `proxy` hand-off replaces the running document with a different
+    /// prompt. The target document is a distinct run with its own lifecycle
+    /// blocks, so the guard must drive **its** events, not the proxying
+    /// document's. Pair this with [`Self::reset_for_proxy`] so every signal —
+    /// including `initialize` — fires again for the target.
+    pub fn set_config(&mut self, config: LifecycleConfig) {
+        self.config = std::borrow::Cow::Owned(config);
     }
 
     /// Emit a single lifecycle signal through the injected emitter.
@@ -5574,6 +5632,105 @@ mod tests {
             &emitter,
         );
         assert!(!guard.record_event_emission(LifecycleSignal::Finalize));
+    }
+
+    /// Regression for the setup-stack failure path: `run_event_stack` records
+    /// nothing, so running the `Failure` stack alone leaves `terminal_emitted`
+    /// false and `Finalize` stays a no-op. Only `record_event_emission(Failure)`
+    /// flips the flag so the subsequent `Finalize` fires. This is the
+    /// bookkeeping invariant the `routes_to_failure` fix depends on.
+    #[test]
+    fn finalize_requires_recorded_terminal_not_just_stack_run() {
+        let config = test_config();
+        let (settings, messaging, term) = test_ctx();
+        let emitter = RecordingEmitter::new();
+        let ctx = LifecycleRuntimeContext {
+            settings: &settings,
+            messaging: &messaging,
+            term: &term,
+            source_path: dummy_path(),
+            repo_root: None,
+        };
+
+        // Running the failure stack via a context (without record) does not
+        // touch the guard's terminal flag, so Finalize is still skipped.
+        let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
+        let stack_ctx = crate::composition::lifecycle_executor::StackExecutionContext {
+            signal: LifecycleSignal::Failure,
+            frontmatter: &serde_json::Map::new(),
+            err: None,
+            timing: None,
+            current: None,
+            base_dir: None,
+            effect_engine: &darkmatter::effects::EffectEngine::builder()
+                .mutation_root(std::env::current_dir().unwrap())
+                .auto_rehash(false)
+                .build(),
+            shell_runner: &crate::composition::lifecycle_executor::SystemShellRunner,
+            emitter: &emitter,
+            term: &term,
+            source_path: dummy_path(),
+            repo_root: None,
+            messaging: &messaging,
+            settings: &settings,
+        };
+        guard.run_event_stack(LifecycleSignal::Failure, &stack_ctx);
+        assert!(
+            !guard.record_event_emission(LifecycleSignal::Finalize),
+            "Finalize must be a no-op when no terminal signal was recorded"
+        );
+
+        // Recording Failure first flips terminal_emitted, so Finalize fires.
+        let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
+        assert!(guard.record_event_emission(LifecycleSignal::Failure));
+        assert!(
+            guard.record_event_emission(LifecycleSignal::Finalize),
+            "Finalize must fire once the terminal Failure signal is recorded"
+        );
+    }
+
+    /// `redesignate_terminal_to_failure` overwrites a recorded `Success`/
+    /// `Blocked` terminal slot with `Failure` while keeping `terminal_emitted`
+    /// true — so a `success`/`blocked` stack's `error()` downgrade can run the
+    /// `failure` event and still reach `finalize`. The success/blocked top-level
+    /// emission stays fired (it happened before the stack), and re-designation
+    /// is a no-op for any other slot.
+    #[test]
+    fn redesignate_terminal_to_failure_overwrites_success_keeps_finalize() {
+        let config = test_config();
+        let (settings, messaging, term) = test_ctx();
+        let emitter = RecordingEmitter::new();
+        let ctx = LifecycleRuntimeContext {
+            settings: &settings,
+            messaging: &messaging,
+            term: &term,
+            source_path: dummy_path(),
+            repo_root: None,
+        };
+
+        // Success slot → re-designate to Failure → finalize still fires.
+        let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
+        assert!(guard.record_event_emission(LifecycleSignal::Success));
+        assert_eq!(guard.terminal_signal(), Some(LifecycleSignal::Success));
+        assert!(guard.redesignate_terminal_to_failure());
+        assert_eq!(guard.terminal_signal(), Some(LifecycleSignal::Failure));
+        assert!(
+            guard.record_event_emission(LifecycleSignal::Finalize),
+            "finalize must still fire after a success→failure re-designation"
+        );
+
+        // Blocked slot re-designates too.
+        let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
+        assert!(guard.record_event_emission(LifecycleSignal::Blocked));
+        assert!(guard.redesignate_terminal_to_failure());
+        assert_eq!(guard.terminal_signal(), Some(LifecycleSignal::Failure));
+
+        // No-op when the recorded slot is already Failure (or unset).
+        let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
+        assert!(!guard.redesignate_terminal_to_failure());
+        assert!(guard.record_event_emission(LifecycleSignal::Failure));
+        assert!(!guard.redesignate_terminal_to_failure());
+        assert_eq!(guard.terminal_signal(), Some(LifecycleSignal::Failure));
     }
 
     #[test]

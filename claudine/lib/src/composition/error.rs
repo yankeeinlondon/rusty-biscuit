@@ -473,6 +473,105 @@ pub enum CompositionError {
         kind: String,
     },
 
+    /// A `failure` stack requested `resume(...)` but the agentic loop did
+    /// not surface a provider session id, so there is nothing to resume.
+    ///
+    /// Raised at runtime (not parse time): whether a session id exists is
+    /// only known after the provider runs. Surfacing it as a typed error
+    /// keeps the control from silently no-opping.
+    #[error(
+        "lifecycle `resume` at `failure` requires a provider session to resume, \
+         but none was captured ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleResumeWithoutSession {
+        /// The prompt file whose `failure` stack requested resume.
+        source_path: PathBuf,
+    },
+
+    /// A lifecycle stack requested `requeue(...)`, but the runtime could not
+    /// record the prompt in the deferred-execution queue.
+    #[error(
+        "lifecycle `requeue` (delay `{delay}`{reason}) could not enqueue the \
+         prompt via rendezvous: {message} ({source_path})",
+        reason = match reason {
+            Some(r) => format!(", reason `{r}`"),
+            None => String::new(),
+        },
+        source_path = source_path.display()
+    )]
+    LifecycleRequeueEnqueueFailed {
+        /// The prompt file whose stack requested requeue.
+        source_path: PathBuf,
+        /// The requested delay duration string.
+        delay: String,
+        /// The optional authored reason.
+        reason: Option<String>,
+        /// Human-readable enqueue failure.
+        message: String,
+    },
+
+    /// A lifecycle `proxy(...)` hand-off would re-enter a document already on
+    /// the active proxy chain (a self-proxy or an A→B→A cycle), or exceeded the
+    /// maximum proxy hop count.
+    ///
+    /// Surfaced as a typed error rather than looping forever: a `failure`
+    /// stack that proxies back to a document whose own `failure` stack proxies
+    /// again has no terminal state, so the runtime stops the chain loudly.
+    #[error(
+        "lifecycle `proxy` hand-off to `{target}` forms a cycle or exceeds the \
+         proxy hop limit ({limit}); active chain: {chain} ({source_path})",
+        chain = chain.join(" -> "),
+        source_path = source_path.display()
+    )]
+    LifecycleProxyCycle {
+        /// The prompt file whose stack requested the cyclic proxy.
+        source_path: PathBuf,
+        /// The proxy target that would close the cycle or overflow the limit.
+        target: String,
+        /// The active proxy chain (resolved paths, in hand-off order).
+        chain: Vec<String>,
+        /// The maximum number of proxy hops permitted.
+        limit: usize,
+    },
+
+    /// A lifecycle `initialize` stack raised an explicit `error(...)` (or an
+    /// unintentional action error routed to `failure`), so the run aborts
+    /// before any iteration runs.
+    ///
+    /// Mirrors the non-loop path's `eyre!("...")` failure at initialize: the
+    /// `failure` and `finalize` events fire through the lifecycle guard before
+    /// this error is returned, so callers should not double-emit them.
+    #[error(
+        "lifecycle `initialize` raised an error: {reason} ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleInitializeFailed {
+        /// The prompt file whose `initialize` stack raised the error.
+        source_path: PathBuf,
+        /// Evaluated reason (explicit `error(...)` argument or captured
+        /// action-error message).
+        reason: String,
+    },
+
+    /// A `loop:` gate stack raised an explicit `error(...)`, converting the
+    /// loop's final outcome to failure and exiting the loop.
+    ///
+    /// Only the **explicit** `Error` lifecycle action lands here. The `loop`
+    /// gate is a terminal-phase event, so an *unintentional* action error there
+    /// leaves the composition outcome unchanged (per the action error-
+    /// propagation table) and never produces this variant.
+    #[error(
+        "lifecycle `loop` gate raised an error: {reason} ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleLoopGateFailed {
+        /// The prompt file whose `loop:` gate stack raised the error.
+        source_path: PathBuf,
+        /// Evaluated reason (explicit `error(...)` argument).
+        reason: String,
+    },
+
     // -- Sequence errors -------------------------------------------------------
     /// The `sequence` frontmatter value is not a valid type (must be a list or a string).
     #[error("invalid sequence definition: {0}")]
