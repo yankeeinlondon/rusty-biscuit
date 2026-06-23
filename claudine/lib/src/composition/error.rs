@@ -294,6 +294,27 @@ pub enum CompositionError {
         variable: String,
     },
 
+    /// A removed harness validation or handler DSL key was found in the
+    /// frontmatter.
+    ///
+    /// The `pre_checks`, `post_checks`, `handle`, `deviate`, and
+    /// `handle_<subject>` DSL keys were retired when the lifecycle stack model
+    /// replaced the harness validation and handler execution layers. This
+    /// variant surfaces a typed, actionable diagnostic that names the offending
+    /// key and points to the lifecycle surface that replaces it.
+    #[error(
+        "removed validation/handler key `{key}` in {source_path}: {replacement}",
+        source_path = source_path.display()
+    )]
+    RemovedValidationKey {
+        /// The prompt file whose frontmatter contained the removed key.
+        source_path: PathBuf,
+        /// The removed key exactly as authored (e.g. `"pre_checks"`).
+        key: String,
+        /// Human-readable replacement guidance.
+        replacement: String,
+    },
+
     /// A lifecycle stack item has an invalid shape (not an object, missing
     /// `action` key, unknown key, etc.).
     ///
@@ -1153,6 +1174,7 @@ impl CompositionError {
             }
             CompositionError::LifecycleSayConflict(property)
             | CompositionError::LifecycleUnknownEffect(property, _) => Some(Some(property.clone())),
+            CompositionError::RemovedValidationKey { key, .. } => Some(Some(key.clone())),
             CompositionError::PromptPropertyMissing
             | CompositionError::PromptPropertyWrongType(_) => Some(Some("prompt".to_string())),
             CompositionError::AgentHintWrongType(_)
@@ -1280,6 +1302,31 @@ impl BlockError for CompositionError {
                     .hint(
                         "Define the variable in frontmatter, prefix a runtime value with \
                          `ctx.`/`env.`, or supply a fallback (`{{ var || 'default' }}`).",
+                    )
+            }
+            CompositionError::RemovedValidationKey {
+                source_path,
+                key,
+                replacement,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "The validation/handler key <cyan>`{}`</cyan> in {file_link} has been \
+                     removed. Use the lifecycle stack model instead.\n\n\
+                     <b>Replacement:</b> {}",
+                    escape_prose_path(key),
+                    escape_prose_path(replacement)
+                );
+
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "removed validation/handler key",
+                    ))
+                    .body(body)
+                    .hint(
+                        "See the lifecycle documentation for `initialize`, `start`, `success`, \
+                         `blocked`, `failure`, `finalize`, and `loop` stacks.",
                     )
             }
             CompositionError::LifecycleStackInvalidShape {

@@ -4,32 +4,54 @@ phases: 7
 created: 2026-06-22
 start_phase: 1
 yolo: true
+source_files_during_phase_1: []
+docs_updated_during_phase_1:
+  - claudine/features/2026-06-21-remove-validations/plan.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - claudine/lib/src/composition/error.rs
+  - claudine/lib/src/composition/lifecycle.rs
+  - claudine/lib/src/composition/prepare.rs
+  - claudine/cli/tests/compose_cli.rs
+  - claudine/cli/tests/inline_compose_cli.rs
+  - claudine/cli/tests/loop_cli.rs
+  - claudine/cli/tests/wrap_compose_agent.rs
+  - claudine/cli/tests/wrap_compose_preflight.rs
+  - claudine/cli/tests/wrap_inline_compose.rs
+  - claudine/cli/tests/wrap_inline_compose_interactive.rs
+docs_updated_during_phase_2:
+  - claudine/features/2026-06-21-remove-validations/plan.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+packages:
+  - claudine
 ---
 
 # Remove Harness Validations and Handlers Execution Plan
 
 ## Phase 1: Lifecycle Readiness Gate
 
-- [ ] Confirm the lifecycle dependency from `claudine/features/2026-05-12-lifecycle/spec.md` is implemented and merged, including `initialize`, `success`, `failure`, `finalize`, lifecycle `stack`, `Error`, `Skip`, `Proxy`, `Retry`, `Resume`, and `Requeue`.
-- [ ] Verify lifecycle `blocked` and `failure` recovery actions are covered by existing tests or add minimal missing coverage before removing `resolve_handler`.
-- [ ] Confirm lifecycle parsing already owns typed diagnostics for lifecycle keys so the removed-key diagnostic can run before generic unknown-field validation.
-- [ ] Identify the current owner modules for lifecycle frontmatter validation, lifecycle error variants, frontmatter excerpt enrichment, shell audit collection, timeout parsing, runaway guards, and attempt classification.
-- [ ] Run `rg "pre_checks|post_checks|handle_|handle:|deviate|evaluate_pre_checks|evaluate_post_checks|capture_pre_run_snapshot|resolve_handler|PreRunSnapshot|ValidationRule|ValidationKind|HandlerTable" claudine` and save the hit list as the deletion checklist.
-- [ ] Validation checkpoint: no deletion starts until lifecycle recovery behavior can replace `handle_timeout` and `handle_agent_failure` without losing retry/resume coverage.
+- [x] Confirm the lifecycle dependency from `claudine/features/2026-05-12-lifecycle/spec.md` is implemented and merged, including `initialize`, `success`, `failure`, `finalize`, lifecycle `stack`, `Error`, `Skip`, `Proxy`, `Retry`, `Resume`, and `Requeue`.
+- [x] Verify lifecycle `blocked` and `failure` recovery actions are covered by existing tests or add minimal missing coverage before removing `resolve_handler`.
+- [x] Confirm lifecycle parsing already owns typed diagnostics for lifecycle keys so the removed-key diagnostic can run before generic unknown-field validation.
+- [x] Identify the current owner modules for lifecycle frontmatter validation, lifecycle error variants, frontmatter excerpt enrichment, shell audit collection, timeout parsing, runaway guards, and attempt classification.
+- [x] Run `rg "pre_checks|post_checks|handle_|handle:|deviate|evaluate_pre_checks|evaluate_post_checks|capture_pre_run_snapshot|resolve_handler|PreRunSnapshot|ValidationRule|ValidationKind|HandlerTable" claudine` and save the hit list as the deletion checklist.
+- [x] Validation checkpoint: no deletion starts until lifecycle recovery behavior can replace `handle_timeout` and `handle_agent_failure` without losing retry/resume coverage.
 
 Parallelizable: lifecycle readiness review, symbol inventory, and doc inventory can run in parallel.
 
 ## Phase 2: Compatibility Diagnostics
 
-- [ ] Add a dedicated `CompositionError` variant for removed validation/handler DSL keys carrying source path, offending key, and replacement guidance.
-- [ ] Implement the removed-key scanner before generic lifecycle unknown-field validation.
-- [ ] Reject exact top-level keys `pre_checks`, `post_checks`, `handle`, and `deviate`.
-- [ ] Reject any top-level key matching `handle_` plus a non-empty suffix, including subject-specific keys such as `handle_timeout` and `handle_inline_body_unchanged`.
-- [ ] Map diagnostics to the replacement surfaces: `pre_checks` to `initialize` or `start` stack, `post_checks` to `success` or `finalize` stack, `handle_*` to `blocked` or `failure` recovery actions, `handle` to lifecycle shell/action bridge, and `deviate` to lifecycle shell action plus recovery action.
-- [ ] Wire the new error through existing frontmatter excerpt enrichment so TTY-capable output highlights the removed key.
-- [ ] Confirm non-color and piped output strips escapes and still includes source path, key, and replacement guidance.
-- [ ] Add L1 tests for `pre_checks`, `post_checks`, `handle`, `handle_timeout`, `handle_inline_body_unchanged`, and `deviate`.
-- [ ] Validation checkpoint: removed keys fail with typed, actionable errors rather than being accepted, ignored, or reported as generic unknown fields.
+- [x] Add a dedicated `CompositionError` variant for removed validation/handler DSL keys carrying source path, offending key, and replacement guidance.
+- [x] Implement the removed-key scanner before generic lifecycle unknown-field validation.
+- [x] Reject exact top-level keys `pre_checks`, `post_checks`, `handle`, and `deviate`.
+- [x] Reject any top-level key matching `handle_` plus a non-empty suffix, including subject-specific keys such as `handle_timeout` and `handle_inline_body_unchanged`.
+- [x] Map diagnostics to the replacement surfaces: `pre_checks` to `initialize` or `start` stack, `post_checks` to `success` or `finalize` stack, `handle_*` to `blocked` or `failure` recovery actions, `handle` to lifecycle shell/action bridge, and `deviate` to lifecycle shell action plus recovery action.
+- [x] Wire the new error through existing frontmatter excerpt enrichment so TTY-capable output highlights the removed key.
+- [x] Confirm non-color and piped output strips escapes and still includes source path, key, and replacement guidance.
+- [x] Add L1 tests for `pre_checks`, `post_checks`, `handle`, `handle_timeout`, `handle_inline_body_unchanged`, and `deviate`.
+- [x] Validation checkpoint: removed keys fail with typed, actionable errors rather than being accepted, ignored, or reported as generic unknown fields.
 
 Parallelizable: diagnostic tests for individual removed keys can be authored independently after the scanner contract is defined.
 

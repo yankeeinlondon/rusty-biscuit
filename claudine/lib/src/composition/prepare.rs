@@ -111,6 +111,15 @@ pub fn prepare_direct(
     options: PrepareOptions,
 ) -> Result<PreparedComposition, CompositionError> {
     let override_keys = top_level_override_keys(options.set_overrides.as_ref());
+    if let Some((key, replacement)) =
+        super::lifecycle::scan_removed_validation_keys(&frontmatter_to_value(source.markdown.frontmatter()))
+    {
+        return Err(CompositionError::RemovedValidationKey {
+            source_path: source.resolved_path.clone(),
+            key,
+            replacement: replacement.to_string(),
+        });
+    }
     let mut ctx = ComposeContext::capture();
     for (key, value) in &options.env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
@@ -150,6 +159,15 @@ pub fn prepare_direct(
     }
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
+    if let Some((key, replacement)) =
+        super::lifecycle::scan_removed_validation_keys(&effective_frontmatter)
+    {
+        return Err(CompositionError::RemovedValidationKey {
+            source_path: source.resolved_path.clone(),
+            key,
+            replacement: replacement.to_string(),
+        });
+    }
     let agent_full = composed
         .frontmatter()
         .as_map()
@@ -213,6 +231,15 @@ pub fn prepare_inline(
 ) -> Result<PreparedComposition, CompositionError> {
     let override_keys = top_level_override_keys(options.set_overrides.as_ref());
     let fm = source.markdown.frontmatter();
+    if let Some((key, replacement)) =
+        super::lifecycle::scan_removed_validation_keys(&frontmatter_to_value(fm))
+    {
+        return Err(CompositionError::RemovedValidationKey {
+            source_path: source.resolved_path.clone(),
+            key,
+            replacement: replacement.to_string(),
+        });
+    }
 
     let prompt_value = fm
         .as_map()
@@ -259,6 +286,15 @@ pub fn prepare_inline(
         .map_err(|e| map_compose_error(&source.resolved_path, e))?;
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
+    if let Some((key, replacement)) =
+        super::lifecycle::scan_removed_validation_keys(&effective_frontmatter)
+    {
+        return Err(CompositionError::RemovedValidationKey {
+            source_path: source.resolved_path.clone(),
+            key,
+            replacement: replacement.to_string(),
+        });
+    }
     let agent_full = composed
         .frontmatter()
         .as_map()

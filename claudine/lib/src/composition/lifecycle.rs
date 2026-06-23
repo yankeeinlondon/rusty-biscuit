@@ -957,6 +957,61 @@ impl LifecycleConfig {
     }
 }
 
+/// Removed harness validation/handler DSL keys and their lifecycle
+/// replacements.
+///
+/// These top-level frontmatter keys were retired when the lifecycle stack
+/// model replaced the harness validation and handler execution layers.
+const REMOVED_VALIDATION_KEYS: &[(&str, &str)] = &[
+    (
+        "pre_checks",
+        "use the `initialize` or `start` lifecycle stack instead",
+    ),
+    (
+        "post_checks",
+        "use the `success` or `finalize` lifecycle stack instead",
+    ),
+    (
+        "handle",
+        "use a lifecycle `shell` action or other lifecycle action instead",
+    ),
+    (
+        "deviate",
+        "use a lifecycle `shell` action plus a recovery action (`retry`, `resume`, etc.) instead",
+    ),
+];
+
+/// Prefix used for subject-specific handler keys that are also removed.
+const HANDLE_PREFIX: &str = "handle_";
+
+/// Scan frontmatter top-level keys for removed validation/handler DSL keys.
+///
+/// Returns the lexicographically first removed key found together with its
+/// replacement guidance. This is called from composition preparation before
+/// lifecycle event blocks are parsed so the diagnostic names the removed DSL
+/// key rather than falling through to generic unknown-field handling.
+pub(crate) fn scan_removed_validation_keys(
+    frontmatter: &serde_json::Value,
+) -> Option<(String, &'static str)> {
+    let obj = frontmatter.as_object()?;
+    let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    for key in keys {
+        if let Some((_, replacement)) = REMOVED_VALIDATION_KEYS.iter().find(|(k, _)| *k == key) {
+            return Some((key.to_string(), *replacement));
+        }
+        if let Some(suffix) = key.strip_prefix(HANDLE_PREFIX) {
+            if !suffix.is_empty() {
+                return Some((
+                    key.to_string(),
+                    "use the `blocked` or `failure` lifecycle recovery actions instead",
+                ));
+            }
+        }
+    }
+    None
+}
+
 /// Parses lifecycle configuration from composition frontmatter.
 ///
 /// Walks every event block (`initialize`, `start`, `success`, `blocked`,
@@ -3241,6 +3296,90 @@ mod tests {
         let success = config.success.as_ref().unwrap();
         assert_eq!(success.say.as_deref(), Some("All done!"));
         assert_eq!(success.effect.as_deref(), Some("confirmation"));
+    }
+
+    #[test]
+    fn scan_rejects_pre_checks_removed_key() {
+        let frontmatter = json!({
+            "pre_checks": [{"command": "test"}],
+            "start": { "message": "ok" }
+        });
+        let (key, replacement) = scan_removed_validation_keys(&frontmatter).unwrap();
+        assert_eq!(key, "pre_checks");
+        assert!(replacement.contains("initialize"), "replacement: {replacement}");
+    }
+
+    #[test]
+    fn scan_rejects_post_checks_removed_key() {
+        let frontmatter = json!({
+            "post_checks": [{"command": "test"}],
+            "success": { "message": "ok" }
+        });
+        let (key, replacement) = scan_removed_validation_keys(&frontmatter).unwrap();
+        assert_eq!(key, "post_checks");
+        assert!(replacement.contains("success"), "replacement: {replacement}");
+    }
+
+    #[test]
+    fn scan_rejects_handle_removed_key() {
+        let frontmatter = json!({
+            "handle": "shell('fix')",
+            "start": { "message": "ok" }
+        });
+        let (key, replacement) = scan_removed_validation_keys(&frontmatter).unwrap();
+        assert_eq!(key, "handle");
+        assert!(replacement.contains("shell"), "replacement: {replacement}");
+    }
+
+    #[test]
+    fn scan_rejects_deviate_removed_key() {
+        let frontmatter = json!({
+            "deviate": "shell('fix')",
+            "start": { "message": "ok" }
+        });
+        let (key, replacement) = scan_removed_validation_keys(&frontmatter).unwrap();
+        assert_eq!(key, "deviate");
+        assert!(replacement.contains("retry"), "replacement: {replacement}");
+    }
+
+    #[test]
+    fn scan_rejects_handle_timeout_removed_key() {
+        let frontmatter = json!({
+            "handle_timeout": [{"action": "retry"}],
+            "failure": { "message": "ok" }
+        });
+        let (key, replacement) = scan_removed_validation_keys(&frontmatter).unwrap();
+        assert_eq!(key, "handle_timeout");
+        assert!(replacement.contains("blocked"), "replacement: {replacement}");
+    }
+
+    #[test]
+    fn scan_rejects_handle_inline_body_unchanged_removed_key() {
+        let frontmatter = json!({
+            "handle_inline_body_unchanged": [{"action": "retry"}],
+            "failure": { "message": "ok" }
+        });
+        let (key, replacement) = scan_removed_validation_keys(&frontmatter).unwrap();
+        assert_eq!(key, "handle_inline_body_unchanged");
+        assert!(replacement.contains("failure"), "replacement: {replacement}");
+    }
+
+    #[test]
+    fn scan_allows_handle_underscore_without_suffix() {
+        // `handle_` with no suffix is not one of the removed keys; only exact
+        // `handle` and `handle_<non-empty>` are rejected.
+        let frontmatter = json!({
+            "handle_": { "message": "ok" }
+        });
+        assert!(scan_removed_validation_keys(&frontmatter).is_none());
+    }
+
+    #[test]
+    fn scan_returns_none_for_clean_frontmatter() {
+        let frontmatter = json!({
+            "start": { "message": "ok" }
+        });
+        assert!(scan_removed_validation_keys(&frontmatter).is_none());
     }
 
     #[test]
