@@ -45,22 +45,42 @@ When a user types `claudine compose ` they are now ready to specify the Markdown
     - shell completions would recognize that the user wants to use the magic path syntax and that `@prompts/plan.md` is a valid completion
     - once the user presses ENTER and the claudine process kicks off it will do the final resolution to a single file
 
-### Frontmatter completion in `compose`
 
-- once a caller has typed `claudine compose <file> ` the remainder of the things that go into the call will be a combination of:
+
+### `inline-compose` operation
+
+
+### Frontmatter Completion in `compose` / `inline-compose` / `sequence`
+
+- once a caller has typed `claudine {compose|inline-compose|sequence} <file> ` the remainder of the things that go into the call will be a combination of:
     - CLI Switches
         - all CLI switches start with the typical `--{switch}`/`-{short-name}` syntax
         - I believe today we do a good job of providing autocomplete for these CLI switches
     - Frontmatter Parameters
         - A user can use the syntax `{prop}={value}` to set Frontmatter properties in the referenced prompt file
-        - We need to know what properties are defined in the referenced document's `$schema` property
-            - `number`, and `boolean` types will just autocomplete the `{prop}=` portion
-            - `string` types are similar but include a quote mark: `{prop}="`
-            - 
-        - the `SimpleSchema` grammar defined in Darkmatter gives us a constraint for file based inputs which will help to scope the possible set of documents that should be autocompleted.
+        - We need to know what properties are defined in the referenced document's `$schema` property (which uses `SimpleSchema` to define types)
+        - `number`, and `boolean` types will just autocomplete the `{prop}=` portion
+        - `string` types are similar but include a quote mark: `{prop}="`
+        - however, when the type of a frontmatter property is `file` we can offer a lot more help:
+            - by default the glob pattern which will be used for identifying the possible file targets is: 
+                - all Markdown files in the repo
+                    - if not in a repo then all markdown files in the directory tree rooted in ${CWD}
+                - all `.gitignore` files are excluded
+                - all files in the "prompt" directories are ignored:
+                    - 
+                - all files inside a _directory_ starting with `_` are ignored
 
+                    > **Note:** all files within a _directory_ starting with `_` are ignored but files with a leading `_` will still match
 
-### `inline-compose` operation
+            - the default glob pattern is used unless the document's schema not only expresses a property to be of the type `file` but also adds the a glob pattern for this file reference:
+
+                ```yaml
+                $schema: 
+                    uses_default_glob: file
+                    just_images: file(match('*.gif','*.jpg','*.png'))
+                    spec_files: file(match('**/{features|fixes}/*spec.md'))
+                ```
+
 
 
 ## Autocomplete
