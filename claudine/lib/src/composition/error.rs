@@ -449,30 +449,6 @@ pub enum CompositionError {
         event: String,
     },
 
-    /// A lifecycle event authored a `stdout` field or `stdout(...)` action.
-    ///
-    /// Claudine's composition commands reserve stdout for pipeable command
-    /// data (notably the provider/composed output). A lifecycle `stdout`
-    /// channel would make `claudine compose <file> | other-tool` ambiguous.
-    /// Authors who need machine-readable lifecycle output should write JSONL
-    /// or frontmatter through Darkmatter side effects instead. This variant
-    /// is raised at parse time so the rejection is consistent across every
-    /// event surface.
-    #[error(
-        "lifecycle property `{property}` uses rejected `stdout` {kind}; \
-         stdout is reserved for pipeable command data ({source_path})",
-        source_path = source_path.display()
-    )]
-    LifecycleStdoutRejected {
-        /// The prompt file whose lifecycle frontmatter held the stdout use.
-        source_path: PathBuf,
-        /// Dotted lifecycle key path, e.g. `"start.stdout"` or `"start.stack[0].action"`.
-        property: String,
-        /// Where the stdout reference appeared: `"field"` for a top-level
-        /// communication field, `"action"` for a `stdout(...)` action.
-        kind: String,
-    },
-
     /// A `failure` stack requested `resume(...)` but the agentic loop did
     /// not surface a provider session id, so there is nothing to resume.
     ///
@@ -1172,8 +1148,7 @@ impl CompositionError {
             | CompositionError::LifecycleMultipleLifecycleActions { property, .. }
             | CompositionError::LifecycleActionOrder { property, .. }
             | CompositionError::LifecycleInvalidArgs { property, .. }
-            | CompositionError::LifecycleErrNotAvailable { property, .. }
-            | CompositionError::LifecycleStdoutRejected { property, .. } => {
+            | CompositionError::LifecycleErrNotAvailable { property, .. } => {
                 Some(Some(property.clone()))
             }
             CompositionError::LifecycleSayConflict(property)
@@ -1470,28 +1445,6 @@ impl BlockError for CompositionError {
                         "Use `err` only in `blocked`, `failure`, or `finalize` (where it is \
                          optional). To reference a frontmatter property named `err`, write \
                          `doc.err` explicitly.",
-                    )
-            }
-            CompositionError::LifecycleStdoutRejected {
-                source_path,
-                property,
-                kind,
-            } => {
-                let file_link = render_file_link(source_path);
-                let body = format!(
-                    "Lifecycle property <cyan>`{property}`</cyan> in {file_link} uses a rejected \
-                     <cyan>`stdout`</cyan> {kind}."
-                );
-                StatusBlock::new(StatusState::Error)
-                    .error_header(ErrorHeader::new(
-                        "CompositionError",
-                        "stdout is reserved for pipeable output",
-                    ))
-                    .body(body)
-                    .hint(
-                        "Lifecycle chatter must stay off stdout. Use `stderr`, `info`, or \
-                         `warn` for terminal status, or write JSONL / frontmatter through a \
-                         Darkmatter side effect for machine-readable output.",
                     )
             }
             CompositionError::LoopIterationFailed {

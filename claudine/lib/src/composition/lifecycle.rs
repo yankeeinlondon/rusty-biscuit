@@ -48,6 +48,7 @@ const LIFECYCLE_COMM_FIELDS: &[&str] = &[
     "info",
     "warn",
     "success",
+    "stdout",
 ];
 
 /// A single lifecycle notification configuration.
@@ -94,6 +95,9 @@ pub struct LifecycleNotification {
 
     /// Status line rendered with `Status::Success` style.
     pub success: Option<String>,
+
+    /// Plain text written to stdout (no status glyph).
+    pub stdout: Option<String>,
 
     /// Raw stack items, captured at deserialize time and parsed into typed
     /// [`LifecycleStackItem`] values by [`parse_lifecycle_config`] (which
@@ -310,6 +314,16 @@ pub trait LifecycleEmitter {
             .theme(StatusTheme::Circular)
             .render(term);
         eprintln!("{rendered}");
+    }
+
+    /// Write a plain prose line (no status glyph) to **stdout**.
+    ///
+    /// The only lifecycle channel that targets stdout. Inline styling and links
+    /// are honored, but no status decoration is applied. Authors opt into this
+    /// knowing stdout is otherwise reserved for pipeable command data.
+    fn emit_stdout(&self, text: &str, term: &Terminal) {
+        let rendered = Prose::new(text).render(term);
+        println!("{rendered}");
     }
 }
 
@@ -958,9 +972,8 @@ impl LifecycleConfig {
 /// lifecycle control action per item; it must be last) and the per-event
 /// "Where valid" matrix for control actions.
 ///
-/// Validates mutual exclusivity of `say` and `say_first`, validates sound
-/// effect names against the embedded `playa` catalog, and rejects any
-/// `stdout` field or action.
+/// Validates mutual exclusivity of `say` and `say_first` and validates sound
+/// effect names against the embedded `playa` catalog.
 ///
 /// ## Returns
 ///
@@ -984,8 +997,6 @@ impl LifecycleConfig {
 ///   appears in an event where the spec's "Where valid" matrix forbids it.
 /// - [`CompositionError::LifecycleMultipleLifecycleActions`] /
 ///   [`CompositionError::LifecycleActionOrder`]: Cardinality violation.
-/// - [`CompositionError::LifecycleStdoutRejected`]: A `stdout` field or
-///   `stdout(...)` action was authored.
 ///
 /// ## Examples
 ///
@@ -1060,19 +1071,6 @@ pub fn parse_lifecycle_config(
             });
         };
 
-        // Reject `loop.stdout` with the dedicated typed diagnostic. The
-        // concern-key extraction below never copies `stdout`, so without this
-        // guard a top-level `loop.stdout` would fall through to
-        // `resolve_loop_config`'s generic unknown-key `LoopInvalid` instead of
-        // the lifecycle stdout rejection that fires on every other event block.
-        if loop_obj.contains_key("stdout") {
-            return Err(CompositionError::LifecycleStdoutRejected {
-                source_path: source_file.to_path_buf(),
-                property: "loop.stdout".to_string(),
-                kind: "field".to_string(),
-            });
-        }
-
         let mut concerns_obj = serde_json::Map::new();
         for key in LIFECYCLE_CONCERN_KEYS {
             if let Some(value) = loop_obj.get(*key) {
@@ -1111,6 +1109,7 @@ pub(crate) const LIFECYCLE_CONCERN_KEYS: &[&str] = &[
     "info",
     "warn",
     "success",
+    "stdout",
     "stack",
 ];
 
@@ -1126,31 +1125,9 @@ fn parse_event_block(
     source_file: &Path,
     property_name: &str,
 ) -> Result<(LifecycleNotification, Option<Vec<LifecycleStackItem>>), CompositionError> {
-    // Reject `stdout` field before serde so a clear, typed diagnostic fires
-    // rather than the generic "unknown field" fallback.
-    if let Some(obj) = value.as_object()
-        && obj.contains_key("stdout")
-    {
-        return Err(CompositionError::LifecycleStdoutRejected {
-            source_path: source_file.to_path_buf(),
-            property: format!("{property_name}.stdout"),
-            kind: "field".to_string(),
-        });
-    }
-
     let mut notification: LifecycleNotification = serde_json::from_value(value.clone()).map_err(
         |e| {
             let (unknown_field, expected_fields) = parse_serde_unknown_field(&e);
-            // Surface a typed `stdout` rejection if the unknown field is
-            // `stdout` (serde's deny_unknown_fields reaches this branch
-            // before we can intercept it).
-            if unknown_field.as_deref() == Some("stdout") {
-                return CompositionError::LifecycleStdoutRejected {
-                    source_path: source_file.to_path_buf(),
-                    property: format!("{property_name}.stdout"),
-                    kind: "field".to_string(),
-                };
-            }
             CompositionError::LifecycleInvalid {
                 property: property_name.to_string(),
                 message: e.to_string(),
@@ -1171,6 +1148,7 @@ fn parse_event_block(
     normalize_empty_string(&mut notification.info);
     normalize_empty_string(&mut notification.warn);
     normalize_empty_string(&mut notification.success);
+    normalize_empty_string(&mut notification.stdout);
 
     // Validate mutual exclusivity of say and say_first.
     if notification.say.is_some() && notification.say_first.is_some() {
@@ -1290,15 +1268,6 @@ fn annotate_stack_error(err: CompositionError, property: &str, idx: usize) -> Co
             property: dotted,
             action,
             message,
-        },
-        CompositionError::LifecycleStdoutRejected {
-            source_path,
-            property: _,
-            kind,
-        } => CompositionError::LifecycleStdoutRejected {
-            source_path,
-            property: dotted,
-            kind,
         },
         other => other,
     }
@@ -1819,8 +1788,6 @@ fn build_action(
     no_error: bool,
     source_file: &Path,
 ) -> Result<LifecycleAction, CompositionError> {
-    let property = signal.property_name();
-
     // Lifecycle control actions.
     if let Some(control) = parse_lifecycle_control_short(verb, &args, signal, raw, source_file)? {
         return Ok(LifecycleAction {
@@ -1851,15 +1818,6 @@ fn build_action(
                 on_error: None,
             }),
             no_error,
-        });
-    }
-
-    // Rejected `stdout(...)` action — surface the typed variant.
-    if verb == "stdout" {
-        return Err(CompositionError::LifecycleStdoutRejected {
-            source_path: source_file.to_path_buf(),
-            property: format!("{property}.stack"),
-            kind: "action".to_string(),
         });
     }
 
@@ -1947,14 +1905,6 @@ fn build_action_from_params(
         });
     }
 
-    // Rejected `stdout` action.
-    if verb == "stdout" {
-        return Err(CompositionError::LifecycleStdoutRejected {
-            source_path: source_file.to_path_buf(),
-            property: format!("{property}.stack"),
-            kind: "action".to_string(),
-        });
-    }
 
     // Side-effect action: any remaining verb with named params. The
     // Darkmatter catalog is the authority. For a verb with a known signature
@@ -2267,7 +2217,7 @@ pub fn validate_no_interpolation_leaks(
             continue;
         };
 
-        let fields: [(&str, Option<&String>); 8] = [
+        let fields: [(&str, Option<&String>); 9] = [
             ("say", notification.say.as_ref()),
             ("say_first", notification.say_first.as_ref()),
             ("message", notification.message.as_ref()),
@@ -2276,6 +2226,7 @@ pub fn validate_no_interpolation_leaks(
             ("info", notification.info.as_ref()),
             ("warn", notification.warn.as_ref()),
             ("success", notification.success.as_ref()),
+            ("stdout", notification.stdout.as_ref()),
         ];
 
         for (field_name, value) in fields {
@@ -2981,6 +2932,7 @@ pub(crate) const LIFECYCLE_NOTIFICATION_FIELDS: &[&str] = &[
     "info",
     "warn",
     "success",
+    "stdout",
 ];
 
 /// Extract the text inside the `n`th pair of backticks in `s`.
@@ -4966,53 +4918,43 @@ mod tests {
     }
 
     #[test]
-    fn rejects_stdout_field_on_event_block() {
+    fn parses_stdout_field_on_event_block() {
         let fm = json!({
             "start": {"stdout": "hello"}
         });
-        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
-        match err {
-            CompositionError::LifecycleStdoutRejected { property, kind, .. } => {
-                assert_eq!(property, "start.stdout");
-                assert_eq!(kind, "field");
-            }
-            other => panic!("expected LifecycleStdoutRejected, got: {other:?}"),
-        }
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        assert_eq!(
+            config.start.as_ref().unwrap().stdout.as_deref(),
+            Some("hello")
+        );
     }
 
     #[test]
-    fn rejects_stdout_short_form_action() {
+    fn parses_stdout_short_form_action() {
         let fm = json!({
             "start": {
                 "stack": [{"action": "stdout('hello')"}]
             }
         });
-        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
-        match err {
-            CompositionError::LifecycleStdoutRejected { kind, .. } => {
-                assert_eq!(kind, "action");
-            }
-            other => panic!("expected LifecycleStdoutRejected, got: {other:?}"),
-        }
+        // `stdout(...)` is now a recognized communication action; parsing
+        // succeeds and produces a single-item stack.
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        assert_eq!(config.stack(LifecycleSignal::Start).unwrap().len(), 1);
     }
 
     #[test]
-    fn rejects_stdout_field_on_loop_block() {
-        // A top-level `loop.stdout` must fail through the dedicated lifecycle
-        // diagnostic (`LifecycleStdoutRejected`), not the generic loop parser's
-        // `LoopInvalid` unknown-key path. The `while` key keeps the loop block
-        // otherwise valid so the rejection is isolated to `stdout`.
+    fn parses_stdout_field_on_loop_block() {
+        // A top-level `loop.stdout` is extracted as a loop lifecycle concern,
+        // alongside the iteration controls. The `while` key keeps the loop
+        // block otherwise valid.
         let fm = json!({
             "loop": {"while": "true", "stdout": "hello"}
         });
-        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
-        match err {
-            CompositionError::LifecycleStdoutRejected { property, kind, .. } => {
-                assert_eq!(property, "loop.stdout");
-                assert_eq!(kind, "field");
-            }
-            other => panic!("expected LifecycleStdoutRejected, got: {other:?}"),
-        }
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        assert_eq!(
+            config.loop_concerns.as_ref().unwrap().stdout.as_deref(),
+            Some("hello")
+        );
     }
 
     #[test]
