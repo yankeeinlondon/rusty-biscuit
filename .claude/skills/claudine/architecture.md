@@ -255,9 +255,9 @@ All dispatch surfaces that evaluate expressions against an `EventMeta` share the
                       │ (single source of truth for event paths)    │
                       └─────────────────────────────────────────────┘
                                     ▲
-        ┌───────────────────────────┼─────────────────────────────┐
-        │                           │                             │
-templates (template.rs)    matchers (matcher.rs)     harness validate.rs
+              ┌─────────────────────┴─────────────────────┐
+              │                                           │
+     templates (template.rs)                    matchers (matcher.rs)
 
                       ┌─────────────────────────────────────────────┐
                       │ EventMetaConditionLookup                    │

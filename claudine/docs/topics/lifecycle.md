@@ -113,12 +113,14 @@ Lifecycle control actions terminate the current event's stack and influence runt
 | `stop` | every event | End this event's stack cleanly; composition continues with the current outcome |
 | `skip` | `initialize` only | Whole-document opt-out: no provider invocation, no `finalize`, no `loop` |
 | `error("reason")` | every event | Mark this event as failed; at `success`/`finalize` it converts success to failure |
-| `proxy("@other.md")` | `initialize`, `blocked`, `failure` | Hand off to another prompt document, entering the target at its own `initialize` |
-| `retry(N)` | `blocked`, `failure` | Retry the current prompt N additional times |
-| `resume("message")` | `failure` only | Resume the agent session with a follow-up message |
-| `requeue("5m")` | `blocked`, `failure` | Push this prompt onto the deferred-execution queue. Daemon-first over rendezvous (UDS on Unix, named pipe on Windows); on any daemon-unreachable failure, durably appends the prompt to a local fallback file (`<config_dir>/claudine/rendezvous/deferred-queue.jsonl`, overridable via `CLAUDINE_RENDEZVOUS_FALLBACK_DIR`) so the prompt is never lost. The run still proceeds to `finalize` normally. |
+| `proxy("@other.md")` | `initialize`, `blocked`, `failure`, `finalize` | Hand off to another prompt document, entering the target at its own `initialize` |
+| `retry(N)` | `blocked`, `failure`, `finalize` | Retry the current prompt N additional times |
+| `resume("message")` | `failure`, `finalize` | Resume the agent session with a follow-up message |
+| `requeue("5m")` | `blocked`, `failure`, `finalize` | Push this prompt onto the deferred-execution queue. Daemon-first over rendezvous (UDS on Unix, named pipe on Windows); on any daemon-unreachable failure, durably appends the prompt to a local fallback file (`<config_dir>/claudine/rendezvous/deferred-queue.jsonl`, overridable via `CLAUDINE_RENDEZVOUS_FALLBACK_DIR`) so the prompt is never lost. The run still proceeds to `finalize` normally. |
 
 At most one control action may appear in a stack item, and it must be the last action.
+
+**`finalize` is a recovery surface.** `finalize` is the only terminal event that may carry an error, so it doubles as a last-chance recovery handler: a `finalize.stack` (typically guarded by `when: "err"`) can `retry`, `resume`, `requeue`, or `proxy` exactly as `failure` can. A `finalize` recovery re-enters the run — re-running `start` → agent → terminal → `finalize` — or hands off, bounded by the same per-control `max_attempts` budget. This is the canonical pairing for "verify in `success`, recover in `finalize`": a `success.stack` raises `error()` (which routes through the `failure` event), and the subsequent `finalize` — now carrying `err` — retries.
 
 ### Shell Actions
 
@@ -321,6 +323,66 @@ loop:
     - action: info('iteration {{_loop_count}}')
 ---
 ```
+
+### Recover from a usage cap by switching providers
+
+When a provider hits a usage cap or rate limit, the failure surfaces in the `failure` event with that classification in `err.variant` — the provider's raw `error_kind` (e.g. `usage_limit_reached`, `quota_exceeded`, `rate_limit`). There is no in-place "switch provider" action; instead `proxy` hands the same task off to a sibling prompt that pins a different agent.
+
+```yaml
+---
+agent: claude
+prompt: "Implement the feature described in @spec.md"
+failure:
+  stack:
+    - when: "err.variant == 'usage_limit_reached' || err.variant == 'quota_exceeded' || err.variant == 'rate_limit'"
+      action:
+        - warn('Claude usage cap reached — handing off to Codex')
+        - proxy('@prompts/feature-codex.md')
+---
+```
+
+`@prompts/feature-codex.md` is the same task with `agent: codex` in its frontmatter; `proxy` starts it fresh at its own `initialize`. Because `err.variant` carries the provider's raw `error_kind`, widen the guard to match the kinds your provider emits — run the prompt once to observe the value, or read it off the session badge.
+
+### Verify an artifact on success, then retry once from `finalize`
+
+`success` can double-check that the agent actually produced what it claimed. Raising `error` there converts the outcome to failure and routes through the `failure` event **before** `finalize`. Because `finalize` is the optional-error terminal event, it carries that `err` and can recover from it — so the verification lives in `success` and the single retry lives in `finalize`.
+
+```yaml
+---
+prompt: "Generate the release notes and write them to @output/RELEASE.md"
+success:
+  stack:
+    # The agentic loop returned cleanly — confirm the file really exists.
+    - when: "!file_exists('@output/RELEASE.md')"
+      action: error('agent reported success but @output/RELEASE.md was never written')
+finalize:
+  stack:
+    # `finalize` carries `err` after the success-side downgrade. Retry the
+    # whole run exactly once; the retried attempt re-enters at `start`.
+    - when: "err"
+      action: retry(1)
+---
+```
+
+On the retried attempt the agent runs again and `success` re-verifies the file. With `retry(1)` the budget allows exactly one extra attempt; if the file is still missing after it, `finalize` carries `err` once more, the retry budget is spent, and the run ends in failure. To announce that terminal case, add a guarded `warn` ahead of the `retry` item (the first matching control action ends the stack, so order the `warn` before the `retry`).
+
+### Resume after a timeout
+
+Both the wall-clock `timeout` and the step-silence `step_timeout` surface in the `failure` event with `err.variant` of `timeout` or `step_timeout`. `resume` continues the **same** agent session — context intact — with a follow-up message, which is usually better than `retry` for a timeout (retry re-runs the invocation from scratch).
+
+```yaml
+---
+prompt: "Refactor @src/engine.rs and make the test suite pass"
+timeout: 20m
+step_timeout: 5m
+failure:
+  stack:
+    - when: "err.variant == 'timeout' || err.variant == 'step_timeout'"
+      action: resume('You were stopped by a timeout. Continue from where you left off and finish the task.')
+---
+```
+
+`resume` is valid only in `failure` and defaults to a single attempt (`max_attempts: 1`). Its string argument binds to the required `message:` parameter.
 
 ## Sound Effects
 

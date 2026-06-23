@@ -107,9 +107,9 @@ Three canonical commands:
 claudine compose @prompts/review.md review="review.md" count=3 draft=true
 ```
 
-All three commands share a wrapper-grade execution pipeline with full support for environment setup, system prompt resolution, harness detection, structured streaming, and handler-driven recovery.
+All three commands share a wrapper-grade execution pipeline with full support for environment setup, system prompt resolution, harness detection, structured streaming, and lifecycle-stack recovery.
 
-**Unified Harness Execution.** Every non-dry-run `compose` and `inline-compose` run flows through `run_harness_loop` with `HarnessPromptMode::Compose` or `HarnessPromptMode::Inline`. Documents without harness frontmatter yield the empty/bare plan; inline documents receive a single system-owned writability pre-check injected by `finalize_effective_plan`. The loop handles structured streaming, captured/non-structured fallback, inline closure, summary emission, and handler-driven recovery through one code path.
+**Unified Harness Execution.** Every non-dry-run `compose` and `inline-compose` run flows through `run_harness_loop` with `HarnessPromptMode::Compose` or `HarnessPromptMode::Inline`. Documents without harness frontmatter yield the empty/bare plan; the plan now carries only timeout configuration (the pre/post validation and handler-recovery DSL has been retired in favor of lifecycle stacks). The loop handles structured streaming, captured/non-structured fallback, inline closure, summary emission, and lifecycle-stack recovery (`Retry`/`Resume`/`Requeue`/`Proxy`) through one code path.
 
 Provider selection uses explicit flags (`--claude`, `--codex`, etc.), frontmatter hints, config favorites, or interactive chooser. Use `-i` for interactive sessions, `--exclude` to filter providers.
 
@@ -212,7 +212,7 @@ MCP state is stored separately in `~/.claudine/mcp/`:
 
 | Package | Description |
 |---------|-------------|
-| [claudine (lib)](./lib/) | Event model, provider adapters, dispatch pipeline, structured stream parsing with strongly typed protocol models (6 providers), shared-resource linking, MCP catalog/sync/runtime support, composition pipelines, harness validations, permissions policy engine |
+| [claudine (lib)](./lib/) | Event model, provider adapters, dispatch pipeline, structured stream parsing with strongly typed protocol models (6 providers), shared-resource linking, MCP catalog/sync/runtime support, composition pipelines, harness timeouts/shell-audit/attempt-classification, permissions policy engine |
 | [claudine-cli](./cli/) | Binary `claudine` — setup wizard, hook inspection, shared-resource commands (`skills`/`commands`/`agents`), MCP management, provider wrappers with structured streaming, and composition pipelines (`compose`/`inline-compose`/`sequence`) |
 
 ## Documentation

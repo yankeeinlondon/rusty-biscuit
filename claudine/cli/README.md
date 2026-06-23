@@ -65,7 +65,7 @@ Show which actions are configured and for which events across the user and repo 
 
 ### Dispatch Expressions
 
-Hook action templates, conditional `when` clauses, event binding matchers, and harness validation messages all share a single expression evaluator backed by Darkmatter's parser (see `claudine/lib/src/dispatch/expression.rs`). The same paths exposed by `claudine hooks --variables` are available everywhere expressions are evaluated.
+Hook action templates, conditional `when` clauses, event binding matchers, and lifecycle stack expressions all share a single expression evaluator backed by Darkmatter's parser (see `claudine/lib/src/dispatch/expression.rs`). The same paths exposed by `claudine hooks --variables` are available everywhere expressions are evaluated.
 
 **Template Interpolation.** Speak messages, bash params, report templates, and message bodies pass through `{{...}}` interpolation. In addition to simple variable references, authors can use:
 
@@ -203,7 +203,7 @@ Wrapper behavior:
 
 ### Composition commands
 
-Composition turns a Markdown document with frontmatter into a provider session, optionally merging the result back into the source file or running a sequence of steps. All three commands reuse the wrapper pipeline (env setup, harness detection, structured streaming, handler-driven recovery).
+Composition turns a Markdown document with frontmatter into a provider session, optionally merging the result back into the source file or running a sequence of steps. All three commands reuse the wrapper pipeline (env setup, harness detection, structured streaming, lifecycle-stack recovery).
 
 - **`claudine compose [flags] <file-ref> [key=value ...]`** — compose a Markdown file (Darkmatter transclusion/interpolation/conditionals/`::shell`) and send the result as a prompt. No file mutation.
 - **`claudine inline-compose [flags] <file-ref> [key=value ...]`** — compose the frontmatter `prompt` property and replace the document body with the provider's response. Original frontmatter is preserved byte-for-byte; `last_updated` is set to today's date; new frontmatter keys added by the provider are merged in.
@@ -232,7 +232,7 @@ claudine config set favorite-agent codex
 claudine config set favorite-agent none
 ```
 
-**Unified Harness Execution (2026-06-16).** Every non-dry-run `compose` and `inline-compose` run now routes through `run_harness_loop` with `HarnessPromptMode::Compose` or `HarnessPromptMode::Inline`. Documents without harness frontmatter yield the empty/bare plan; inline documents receive a single system-owned writability pre-check injected by `finalize_effective_plan`. The loop handles structured streaming, captured/non-structured fallback, inline closure, summary emission, and handler-driven recovery through one code path.
+**Unified Harness Execution (2026-06-16).** Every non-dry-run `compose` and `inline-compose` run now routes through `run_harness_loop` with `HarnessPromptMode::Compose` or `HarnessPromptMode::Inline`. Documents without harness frontmatter yield the empty/bare plan; the plan now carries only timeout configuration (the pre/post validation and handler-recovery DSL has been retired in favor of lifecycle stacks). The loop handles structured streaming, captured/non-structured fallback, inline closure, summary emission, and lifecycle-stack recovery (`Retry`/`Resume`/`Requeue`/`Proxy`) through one code path.
 
 **Performance Reporting.** All three composition commands support `--perf`, which emits a post-execution performance report to stderr. `sequence` produces a single aggregated report covering all steps; `compose` and `inline-compose` produce one report per invocation. See the main README for report layout details.
 

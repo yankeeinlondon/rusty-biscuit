@@ -16,7 +16,7 @@ claudine/lib/src/
 ├── config/         → Agent detection and hook registration
 ├── dispatch/       → Event processing pipeline
 ├── events/         → Normalized 16-event lifecycle model (`AgenticEvent`, `EventMeta`, matrices)
-├── harness/        → Timeouts, shell audit, programmatic handlers, and attempt classification
+├── harness/        → Timeouts, shell audit, attempt classification, and lifecycle recovery infrastructure
 ├── linking/        → Cross-provider skill and command synchronization
 ├── messaging/      → Outbound messaging routes, resolution, and provider dispatch
 ├── mcp/            → MCP catalog, defaults, import/export, session, and injection
@@ -269,7 +269,7 @@ Sub-modules:
 - `preflight` — shell approval collection and execution for source `::shell` directives and lifecycle stack `shell` actions
 - `closure` — inline closure plan that merges provider-returned content back into the source file atomically (preserves frontmatter, updates `last_updated`)
 - `sequence` — sequence plan parser, normalizer, and per-step overlay builder for `claudine sequence`
-- `lifecycle` — `LifecycleEmitter` trait and `LifecycleRunGuard` RAII guard that emit lifecycle signals (start/success/failure) to external observers; includes `DefaultLifecycleEmitter` and programmatic handler hook integration
+- `lifecycle` — `LifecycleEmitter` trait and `LifecycleRunGuard` RAII guard that emit the seven composition lifecycle signals (`initialize`/`start`/`success`/`blocked`/`failure`/`finalize`/`loop`) to external observers; includes `DefaultLifecycleEmitter`, the per-event stack model, and the static lifecycle validators
 - `guardrails` — inline composition guardrails appended to prompts to constrain output shape
 - `types` — shared types including `PreparedComposition`, `SelectedProvider`, `SequencePlan`, `SequenceStep`, `SharedApprovalCache`, `CompositionMode`, and `SystemPromptInput`
 
