@@ -1,25 +1,33 @@
-//! Helpers for resolving the Unix Domain Socket path used for IPC between
-//! the rendezvous daemon and its local clients.
+//! Helpers for resolving the local IPC endpoint used between the rendezvous
+//! daemon and its clients.
 //!
 //! Resolution order (first match wins):
 //!
 //! 1. The `RENDEZVOUS_SOCKET` environment variable, if set and non-empty.
-//! 2. `$XDG_RUNTIME_DIR/rendezvous/daemon.sock`, when `XDG_RUNTIME_DIR`
-//!    is set (typical on Linux).
-//! 3. `$TMPDIR/rendezvous-<uid-or-user>/daemon.sock`, falling back to
-//!    `/tmp/...` when `TMPDIR` is unset (typical on macOS and other Unix).
+//!    On Unix this is the filesystem path of the Unix Domain Socket; on
+//!    Windows it is the named-pipe path (e.g. `\\.\pipe\rendezvous-daemon`).
+//! 2. The platform default:
+//!    - Unix: `$XDG_RUNTIME_DIR/rendezvous/daemon.sock`, or
+//!      `$TMPDIR/rendezvous-<user>/daemon.sock` (falling back to `/tmp/...`).
+//!    - Windows: `\\.\pipe\rendezvous-daemon`.
 //!
-//! Tests and the test client can override the path with the env var to
+//! Tests and the test client can override the endpoint with the env var to
 //! avoid clashing with a running daemon.
 
 use std::env;
 use std::path::{Path, PathBuf};
 
-/// Environment variable that overrides the IPC socket path.
+/// Environment variable that overrides the IPC endpoint (UDS path on Unix,
+/// named-pipe name on Windows).
 pub const SOCKET_ENV_VAR: &str = "RENDEZVOUS_SOCKET";
 
-/// Default socket file name within the resolved parent directory.
+/// Default socket file name within the resolved parent directory (Unix only).
+#[cfg(unix)]
 pub const SOCKET_FILE_NAME: &str = "daemon.sock";
+
+/// Default Windows named-pipe name (without the `\\.\pipe\` prefix).
+#[cfg(windows)]
+pub const DEFAULT_PIPE_NAME: &str = "rendezvous-daemon";
 
 /// Errors that can occur while resolving or preparing the socket path.
 #[derive(Debug, thiserror::Error)]
@@ -33,11 +41,12 @@ pub enum SocketPathError {
     },
 }
 
-/// Resolve the socket path using the standard precedence rules.
+/// Resolve the IPC endpoint using the standard precedence rules.
 ///
 /// This is a pure function: it inspects environment variables but does not
-/// touch the file system. Use [`ensure_parent_dir`] before binding the
-/// returned path with a `UnixListener`.
+/// touch the file system. On Unix use [`ensure_parent_dir`] before binding
+/// the returned path with a `UnixListener`. On Windows the returned path is
+/// a pipe name and needs no filesystem preparation.
 #[must_use]
 pub fn default_socket_path() -> PathBuf {
     if let Some(explicit) = env::var_os(SOCKET_ENV_VAR)
@@ -46,6 +55,23 @@ pub fn default_socket_path() -> PathBuf {
         return PathBuf::from(explicit);
     }
 
+    #[cfg(unix)]
+    {
+        default_socket_path_unix()
+    }
+    #[cfg(windows)]
+    {
+        default_socket_path_windows()
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        PathBuf::from(String::new())
+    }
+}
+
+/// Unix-only default UDS path resolution.
+#[cfg(unix)]
+fn default_socket_path_unix() -> PathBuf {
     if let Some(runtime) = env::var_os("XDG_RUNTIME_DIR")
         && !runtime.is_empty()
     {
@@ -65,9 +91,16 @@ pub fn default_socket_path() -> PathBuf {
         .join(SOCKET_FILE_NAME)
 }
 
+/// Windows-only default named-pipe path resolution.
+#[cfg(windows)]
+fn default_socket_path_windows() -> PathBuf {
+    PathBuf::from(format!(r"\\.\pipe\{DEFAULT_PIPE_NAME}"))
+}
+
 /// Ensure the parent directory of `socket_path` exists (creating it
 /// recursively if necessary). Returns the directory that was created or
-/// confirmed to exist.
+/// confirmed to exist. Only meaningful on Unix where the endpoint is a
+/// filesystem path.
 pub fn ensure_parent_dir(socket_path: &Path) -> Result<PathBuf, SocketPathError> {
     let Some(parent) = socket_path.parent() else {
         return Ok(PathBuf::from("."));
@@ -110,16 +143,22 @@ mod tests {
     impl EnvSnapshot {
         fn new() -> Self {
             let guard = env_guard();
-            let keys = [SOCKET_ENV_VAR, "XDG_RUNTIME_DIR", "TMPDIR", "USER"]
-                .into_iter()
-                .map(|k| (k, env::var_os(k)))
-                .collect();
+            let mut keys = vec![(SOCKET_ENV_VAR, env::var_os(SOCKET_ENV_VAR))];
+            #[cfg(unix)]
+            {
+                for k in ["XDG_RUNTIME_DIR", "TMPDIR", "USER"] {
+                    keys.push((k, env::var_os(k)));
+                }
+            }
             // SAFETY: tests in this module are serialised by `env_guard`.
             unsafe {
                 env::remove_var(SOCKET_ENV_VAR);
-                env::remove_var("XDG_RUNTIME_DIR");
-                env::remove_var("TMPDIR");
-                env::remove_var("USER");
+                #[cfg(unix)]
+                {
+                    env::remove_var("XDG_RUNTIME_DIR");
+                    env::remove_var("TMPDIR");
+                    env::remove_var("USER");
+                }
             }
             Self {
                 keys,
@@ -131,7 +170,7 @@ mod tests {
     impl Drop for EnvSnapshot {
         fn drop(&mut self) {
             for (key, value) in &self.keys {
-                // SAFETY: tests in this module are serialised by `env_guard`.
+                // SAFETY: tests in this module are serialised by `EnvSnapshot`.
                 unsafe {
                     match value {
                         Some(v) => env::set_var(key, v),
@@ -142,6 +181,9 @@ mod tests {
         }
     }
 
+    /// `RENDEZVOUS_SOCKET` overrides the endpoint verbatim on every platform.
+    /// This is the cross-platform contract: setting it to a sentinel value
+    /// surfaces as-is on both Unix and Windows.
     #[test]
     fn explicit_env_var_wins() {
         let _snapshot = EnvSnapshot::new();
@@ -152,6 +194,7 @@ mod tests {
         assert_eq!(default_socket_path(), PathBuf::from("/tmp/custom-rs.sock"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn xdg_runtime_dir_takes_precedence_over_tmpdir() {
         let _snapshot = EnvSnapshot::new();
@@ -166,6 +209,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn falls_back_to_tmpdir_with_user_segment() {
         let _snapshot = EnvSnapshot::new();
@@ -178,6 +222,30 @@ mod tests {
             default_socket_path(),
             PathBuf::from("/var/folders/abc/rendezvous-alice/daemon.sock"),
         );
+    }
+
+    /// Windows default endpoint is a named pipe under `\\.\pipe\`. This test
+    /// only runs on a Windows host but the assertion documents the contract.
+    #[cfg(windows)]
+    #[test]
+    fn windows_default_is_named_pipe() {
+        let _snapshot = EnvSnapshot::new();
+        assert_eq!(
+            default_socket_path(),
+            PathBuf::from(r"\\.\pipe\rendezvous-daemon"),
+        );
+    }
+
+    /// On Windows the `RENDEZVOUS_SOCKET` override is the pipe name verbatim.
+    #[cfg(windows)]
+    #[test]
+    fn windows_env_var_overrides_pipe_name() {
+        let _snapshot = EnvSnapshot::new();
+        // SAFETY: serialised by `EnvSnapshot`.
+        unsafe {
+            env::set_var(SOCKET_ENV_VAR, r"\\.\pipe\custom-rs");
+        }
+        assert_eq!(default_socket_path(), PathBuf::from(r"\\.\pipe\custom-rs"));
     }
 
     #[test]
