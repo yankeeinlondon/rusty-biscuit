@@ -22,26 +22,9 @@ pub enum HarnessError {
         detail: String,
     },
 
-    /// A handler is missing a required field.
-    #[error("{source_path}: handler `{handler}` is missing required field `{field}`")]
-    MissingHandlerField {
-        source_path: PathBuf,
-        handler: String,
-        field: String,
-    },
-
-    // --- Handler resolution failures ---
-    /// The provider does not support session resume.
-    #[error("provider \"{provider}\" does not support session resume")]
-    ResumeUnsupported { provider: String },
-
-    /// Resume was requested but no session ID is available.
-    #[error("cannot resume: no session ID available from previous attempt")]
-    ResumeNoSession,
-
-    /// A handler action failed during execution.
-    #[error("handler `{action}` failed: {detail}")]
-    HandlerFailed { action: String, detail: String },
+    /// A shell command failed during execution.
+    #[error("shell command execution failed: {detail}")]
+    ShellCommandExecutionFailed { detail: String },
 
     // --- Shell approval failures ---
     /// A shell command was denied by the approval system.

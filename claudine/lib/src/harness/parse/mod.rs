@@ -1,20 +1,15 @@
 //! Frontmatter-to-plan parser for harness configuration.
 //!
-//! Accepts timeout-related keys and handler declarations, and builds a typed
-//! [`HarnessPlan`].
+//! Accepts timeout-related keys and builds a typed [`HarnessPlan`].
 
 use std::path::Path;
 
 use serde_json::Value;
 use tracing::debug;
 
-use self::handlers::parse_handlers;
 use crate::harness::error::HarnessError;
 use crate::harness::model::HarnessPlan;
 use crate::harness::timeout::{format_duration, parse_timeout};
-
-mod handlers;
-mod overlays;
 
 /// Harness-relevant frontmatter keys.
 const HARNESS_KEYS: &[&str] = &[
@@ -22,23 +17,17 @@ const HARNESS_KEYS: &[&str] = &[
     "step_timeout",
     "timeout_warn",
     "step_timeout_warn",
-    "handle",
 ];
 
 /// Check whether composed frontmatter contains any harness-relevant keys.
 ///
-/// Returns `true` if any of `timeout`, `step_timeout`, `timeout_warn`,
-/// `step_timeout_warn`, `handle`, or any `handle_*` key is present.
+/// Returns `true` if any of `timeout`, `step_timeout`, `timeout_warn`, or
+/// `step_timeout_warn` is present.
 pub fn has_harness_properties(frontmatter: &Value) -> bool {
     let Some(obj) = frontmatter.as_object() else {
         return false;
     };
-    for key in obj.keys() {
-        if HARNESS_KEYS.contains(&key.as_str()) || key.starts_with("handle_") {
-            return true;
-        }
-    }
-    false
+    obj.keys().any(|key| HARNESS_KEYS.contains(&key.as_str()))
 }
 
 /// Parse composed frontmatter into a [`HarnessPlan`].
@@ -46,7 +35,7 @@ pub fn has_harness_properties(frontmatter: &Value) -> bool {
 /// ## Errors
 ///
 /// Returns [`HarnessError`] for any structural or semantic issue found at parse
-/// time, including invalid timeout strings and missing handler fields.
+/// time, including invalid timeout strings.
 pub fn parse_harness_plan(
     frontmatter: &Value,
     source_path: &Path,
@@ -171,17 +160,12 @@ pub fn parse_harness_plan(
         });
     }
 
-    // Parse handlers
-    let (handlers, programmatic_handler) = parse_handlers(obj, source_path)?;
-
     let plan = HarnessPlan {
         source_path: source_path.to_path_buf(),
         timeout,
         step_timeout,
         timeout_warn,
         step_timeout_warn,
-        handlers,
-        programmatic_handler,
     };
     debug!(
         source = %source_path.display(),
@@ -210,8 +194,6 @@ mod tests {
             step_timeout: None,
             timeout_warn: None,
             step_timeout_warn: None,
-            handlers: Default::default(),
-            programmatic_handler: None,
         }
     }
 
@@ -224,7 +206,6 @@ mod tests {
         assert_eq!(plan.step_timeout, None);
         assert_eq!(plan.timeout_warn, None);
         assert_eq!(plan.step_timeout_warn, None);
-        assert!(plan.programmatic_handler.is_none());
     }
 
     #[test]
@@ -273,32 +254,5 @@ mod tests {
             matches!(err, HarnessError::InvalidTimeout { .. }),
             "expected InvalidTimeout, got {err:?}"
         );
-    }
-
-    #[test]
-    fn parses_programmatic_handle() {
-        let source = test_source_path();
-        let frontmatter_value = json!({
-            "handle": "my-handler --arg",
-        });
-
-        let plan = parse_harness_plan(&frontmatter_value, &source)
-            .expect("handle should parse");
-        assert!(plan.programmatic_handler.is_some());
-        let cmd = plan.programmatic_handler.unwrap();
-        assert_eq!(cmd.executable, "my-handler");
-        assert_eq!(cmd.args, vec!["--arg"]);
-    }
-
-    #[test]
-    fn parses_handler_table() {
-        let source = test_source_path();
-        let frontmatter_value = json!({
-            "handle_timeout": { "retry": {} },
-        });
-
-        let plan = parse_harness_plan(&frontmatter_value, &source)
-            .expect("handler table should parse");
-        assert_eq!(plan.handlers.generic.len(), 1);
     }
 }

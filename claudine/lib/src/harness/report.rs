@@ -158,8 +158,7 @@ pub fn report_unhandled_failure(message: &str, term: &Terminal) {
 mod tests {
     use super::*;
     use crate::harness::model::{
-        AuditedCommand, AuditedCommandSource, ApprovedRuntimeCommand, ShellAuditOutcome,
-        ShellAuditReport,
+        AuditedCommand, AuditedCommandSource, ShellAuditOutcome, ShellAuditReport,
     };
 
     /// Create a Terminal without real terminal probing (avoids TTY hangs in tests).
@@ -240,7 +239,7 @@ mod tests {
             outcomes: vec![
                 ShellAuditOutcome {
                     command: AuditedCommand {
-                        source: AuditedCommandSource::ProgrammaticHandle,
+                        source: AuditedCommandSource::ComposeSourceLine { line: 1 },
                         raw: "echo ok".to_string(),
                         executable: "echo".to_string(),
                         args: vec!["ok".to_string()],
@@ -250,7 +249,7 @@ mod tests {
                 },
                 ShellAuditOutcome {
                     command: AuditedCommand {
-                        source: AuditedCommandSource::ProgrammaticHandle,
+                        source: AuditedCommandSource::ComposeSourceLine { line: 2 },
                         raw: "rm -rf /".to_string(),
                         executable: "rm".to_string(),
                         args: vec!["-rf".to_string(), "/".to_string()],

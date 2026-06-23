@@ -472,10 +472,12 @@ mod tests {
 
     #[test]
     fn error_info_from_harness_error_records_kind_variant_msg() {
-        let err = HarnessError::ResumeNoSession;
+        let err = HarnessError::ShellCommandDenied {
+            command: "rm -rf /".to_string(),
+        };
         let info = LifecycleErrorInfo::from_harness_error(&err);
         assert_eq!(info.kind, "HarnessError");
-        assert_eq!(info.variant, "ResumeNoSession");
+        assert_eq!(info.variant, "ShellCommandDenied");
         assert!(!info.msg.is_empty());
     }
 
