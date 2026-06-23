@@ -945,12 +945,13 @@ pub(crate) fn early_termination_process_outcome(
         }
         // Content-guard trips (exit-expression / runaway-repetition /
         // runaway-volume) map to `Aborted` so `classify_failure` yields
-        // `AgentFailure` — never `TimedOut` (which would trigger the
-        // handle_timeout retry path and reproduce the runaway).
+        // `AgentFailure` — never `TimedOut` (which would route through the
+        // lifecycle `failure` stack as a retryable timeout and reproduce the
+        // runaway).
         //
         // The repeated-stream-error backstop is also a fail-fast abort: the
-        // provider failed every retry, so retrying via `handle_timeout` would
-        // only reproduce the loop.
+        // provider failed every retry, so a retryable timeout classification
+        // would only reproduce the loop.
         Some(
             EarlyTermination::ExitExpression { .. }
             | EarlyTermination::RunawayRepetition { .. }

@@ -770,7 +770,9 @@ fn level2_lifecycle_finalize_stack_observes_err_after_failure() {
 fn level2_lifecycle_failure_retry_recovers_to_success() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let failure = "failure:\n  stack:\n    - action: \"retry(2)\"\n";
+    let failure = "failure:\n  stack:\n    \
+        - action: \"append_line('events.log', 'failure')\"\n    \
+        - action: \"retry(2)\"\n";
     let doc = format!(
         "---\ntitle: lifecycle failure retry\n\
          {init}{start}{success}{failure}{finalize}---\nBody\n",

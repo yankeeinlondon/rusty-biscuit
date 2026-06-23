@@ -333,15 +333,16 @@ Library-first reporting over Claudine's JSONL event logs:
 
 Timeouts, shell policy, and runtime attempt classification for composed prompt pipelines:
 
-- `model` — core data types: `HarnessPlan`, `HandlerTable` (kept for programmatic `handle`), `ProcessTermination`, `AttemptOutcome`, `FailureEvent`
-- `error` — `HarnessError` enum covering parse, runtime, handler, shell, and path resolution failures
-- `parse` — frontmatter-to-plan parser accepting `timeout`, `step_timeout`, `timeout_warn`, `step_timeout_warn`, and `handle`
-- `audit` — shell command collection across lifecycle stacks and harness handlers for pre-flight approval
-- `handlers` — programmatic `handle` command resolution and execution; the legacy subject-specific handler DSL is retired in favor of lifecycle `blocked`/`failure` recovery actions
+- `model` — core data types: `HarnessPlan`, `ProcessTermination`, `AttemptOutcome`, `FailureEvent`, `GuardContext`, and shell-audit reporting types (`AuditedCommand`, `ShellAuditReport`)
+- `error` — `HarnessError` enum covering parse, runtime, shell, shell-audit, and path resolution failures
+- `parse` — frontmatter-to-plan parser accepting `timeout`, `step_timeout`, `timeout_warn`, and `step_timeout_warn`
+- `audit` — shell command collection across lifecycle stacks for pre-flight approval
 - `shell` — shell policy adapter reusing Darkmatter's tokenizer, blacklist/whitelist, and approval handler infrastructure
 - `resolve` — source-relative path resolution (`@repo/path`, `./local`, `/absolute`)
 - `timeout` — human-friendly duration parser (`30s`, `5m`, `2h`)
-- `runtime` — `build_attempt_outcome()` for mapping stream summaries to harness outcomes
+- `runtime` — `build_attempt_outcome()` and `classify_failure()` for mapping stream summaries to harness outcomes
+- `report` — stderr status emitters used by the harness loop and lifecycle recovery routing
+- `speech` — best-effort TTS helpers for runtime lifecycle side effects
 
 ## Action Execution
 

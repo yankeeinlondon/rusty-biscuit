@@ -879,7 +879,7 @@ fn dispatch_terminal_control(
         ControlDispatch::Retry { delay, from_blocked } => {
             if show_checks {
                 let what = if from_blocked { "pre-flight" } else { "the agent" };
-                claudine::harness::report::report_handler_engagement(
+                claudine::harness::report::report_lifecycle_recovery(
                     &format!("lifecycle retry: re-running {what} (attempt {})", attempt + 1),
                     term,
                 );
@@ -911,7 +911,7 @@ fn dispatch_terminal_control(
             prompt_state.next_prompt_override = Some(message);
             prompt_state.prompt_tail.clear();
             if show_checks {
-                claudine::harness::report::report_handler_engagement(
+                claudine::harness::report::report_lifecycle_recovery(
                     &format!("lifecycle resume: resuming session (attempt {})", attempt + 1),
                     term,
                 );
@@ -978,7 +978,7 @@ fn dispatch_terminal_control(
             proxy.chain.push(resolved.clone());
             proxy.pending = true;
             if show_checks {
-                claudine::harness::report::report_handler_engagement(
+                claudine::harness::report::report_lifecycle_recovery(
                     &format!("lifecycle proxy: handing off to {}", resolved.display()),
                     term,
                 );
@@ -999,7 +999,7 @@ fn dispatch_terminal_control(
             ) {
                 Ok(()) => {
                     if show_checks {
-                        claudine::harness::report::report_handler_engagement(
+                        claudine::harness::report::report_lifecycle_recovery(
                             &format!(
                                 "lifecycle requeue: deferred {} for {delay}",
                                 prompt_state.source_path.display()
@@ -1233,7 +1233,7 @@ pub(crate) fn run_harness_loop(
                     proxy_tracking.chain.push(resolved.clone());
                     proxy_tracking.pending = true;
                     if show_checks {
-                        claudine::harness::report::report_handler_engagement(
+                        claudine::harness::report::report_lifecycle_recovery(
                             &format!("lifecycle proxy: handing off to {}", resolved.display()),
                             term,
                         );

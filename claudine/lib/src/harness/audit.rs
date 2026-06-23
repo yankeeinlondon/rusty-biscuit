@@ -15,8 +15,7 @@ use crate::harness::shell::ShellApprovalOptions;
 /// Collect all shell commands that must pass audit before the run proceeds.
 ///
 /// Only source-page `::shell` directives are collected here. Lifecycle stack
-/// shell commands are audited during composition preflight; harness handler
-/// commands have been removed along with the handler DSL.
+/// shell commands are audited during composition preflight.
 pub fn collect_auditable_commands(
     source_text: Option<&str>,
 ) -> Result<Vec<AuditedCommand>, HarnessError> {

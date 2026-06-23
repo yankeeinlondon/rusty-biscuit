@@ -81,8 +81,8 @@ pub enum EarlyTermination {
     /// The wall-clock budget (`timeout`) elapsed since the child process
     /// was spawned. The wrapper terminates the child process and maps the
     /// outcome to [`crate::harness::ProcessTermination::TimedOut`] so the
-    /// standard `handle_timeout` failure handler runs. The synthesized
-    /// summary marks `error_kind = "timeout"`.
+    /// lifecycle `failure` stack observes a `Timeout` failure event. The
+    /// synthesized summary marks `error_kind = "timeout"`.
     Timeout { message: String },
     /// The stream-silence budget (`step_timeout`) elapsed with no parent
     /// stream event observed. The wrapper terminates the child process and

@@ -110,17 +110,14 @@ pub fn report_shell_audit_outcomes(report: &crate::harness::model::ShellAuditRep
     }
 }
 
-/// Emit the handler-engagement banner once per failure episode.
-pub fn report_handler_engagement(source_display: &str, term: &Terminal) {
-    let escaped = prose_escape(source_display);
-    emit_status(
-        &format!(
-            "an <red>error</red> was encountered while processing \
-             <blue>{escaped}</blue>, engaging registered handlers."
-        ),
-        StatusState::Warning,
-        term,
-    );
+/// Emit a lifecycle recovery status line once per recovery episode.
+///
+/// Callers pass a fully-formed status message (e.g. `"lifecycle retry:
+/// re-running the agent (attempt 2)"`); this function only styles and emits
+/// it. Markup characters in the message are escaped via [`prose_escape`].
+pub fn report_lifecycle_recovery(message: &str, term: &Terminal) {
+    let escaped = prose_escape(message);
+    emit_status(&escaped, StatusState::Warning, term);
 }
 
 /// Emit the prompt frontmatter property status.
@@ -262,13 +259,13 @@ mod tests {
         report_shell_audit_outcomes(&report, &term);
     }
 
-    // -- report_handler_engagement --
+    // -- report_lifecycle_recovery --
 
     #[test]
-    fn report_handler_engagement_escapes_source_display() {
+    fn report_lifecycle_recovery_escapes_message() {
         let term = test_terminal();
-        // Source with markup-like characters should not panic
-        report_handler_engagement("/path/to/<source>.md", &term);
+        // Message with markup-like characters should not panic
+        report_lifecycle_recovery("/path/to/<source>.md", &term);
     }
 
     // -- report_prompt_property --
