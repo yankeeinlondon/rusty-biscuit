@@ -265,7 +265,10 @@ mod tests {
         let original_md: darkmatter::markdown::Markdown = original.to_string().into();
         let plan = InlineClosurePlan {
             original_document_text: original.to_string(),
-            original_body_hash: original_md.hash_body(false),
+            original_hash: original_md.compute_hash(
+                darkmatter::markdown::hash::MdHashKind::Simple,
+                &claudine::composition::closure::inline_hash_options(),
+            ),
         };
 
         let term = Terminal::new_optimistic(120);
@@ -308,7 +311,10 @@ mod tests {
         let original_md: darkmatter::markdown::Markdown = original.to_string().into();
         let plan = InlineClosurePlan {
             original_document_text: original.to_string(),
-            original_body_hash: original_md.hash_body(false),
+            original_hash: original_md.compute_hash(
+                darkmatter::markdown::hash::MdHashKind::Simple,
+                &claudine::composition::closure::inline_hash_options(),
+            ),
         };
 
         let term = Terminal::new_optimistic(120);
