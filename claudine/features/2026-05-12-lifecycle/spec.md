@@ -2,7 +2,7 @@
 clarified: claude/opus-4-8
 reviewed: true
 review_iterations: 8
-status: ready for planning and implementation
+status: complete
 ---
 
 # Lifecycle Formalization for Claudine Prompts & Late Binding Context
@@ -220,7 +220,7 @@ start:
             - "info('continuing')"
 ```
 
-> Reviewer note: the draft originally included a lifecycle `stdout` channel. That has been removed from this feature. Claudine's composition commands reserve stdout for pipeable command data (notably the provider/composed output), while status and user-facing progress belong on stderr via `TerminalRenderable` components. A lifecycle `stdout` side effect would make `claudine compose <file> | other-tool` ambiguous and would be hard to mitigate consistently across `compose`, `inline-compose`, and `sequence`. Authors who need machine-readable lifecycle output should write JSONL or frontmatter through Darkmatter side effects instead of printing lifecycle chatter to stdout.
+> Reviewer note: an earlier revision removed the lifecycle `stdout` channel, reserving stdout exclusively for pipeable command data. That decision was reversed: `stdout` is a first-class channel again, emitting plain prose (no status glyph) to stdout. Authors opt into it knowing it interleaves with the composed/provider output on the same stream; most lifecycle communication should still prefer `stderr`/`info`/`warn`/`success`. The other channels (status and user-facing progress) continue to render to stderr via `TerminalRenderable` components.
 
 ### Top-Level Communication Properties
 
@@ -237,10 +237,11 @@ Each event accepts the following shorthand properties at its top level. They are
 | `info` (new)    | string presented using the Status::Info style                                   |
 | `warn` (new)    | string presented using the Status::Warn style                                   |
 | `success` (new) | string presented using the Status::Success style                                |
+| `stdout` (new)  | Plain prose line to STDOUT — **no status glyph**; interleaves with composed/provider output |
 
 `say` and `say_first` remain mutually exclusive. This preserves the existing `LifecycleSayConflict` contract and the current audio-ordering behavior.
 
-`stderr`, `info`, and `warn` must render through `biscuit-terminal` `TerminalRenderable` components, not raw `eprintln!` formatting. This keeps lifecycle output aligned with Claudine's existing terminal-output contract. Only `info` and `warn` carry a `Status` decoration (glyph + state styling); `stderr` is the **statusless** channel and renders as plain `Prose` (inline styling and links are honored, but no status glyph is attached) regardless of the owning lifecycle event.
+`stderr`, `info`, `warn`, `success`, and `stdout` must render through `biscuit-terminal` `TerminalRenderable` components, not raw `eprintln!`/`println!` formatting. This keeps lifecycle output aligned with Claudine's existing terminal-output contract. Only `info`, `warn`, and `success` carry a `Status` decoration (glyph + state styling); `stderr` (to stderr) and `stdout` (to stdout) are the **statusless** channels and render as plain `Prose` (inline styling and links are honored, but no status glyph is attached) regardless of the owning lifecycle event.
 
 All values support [Darkmatter interpolation](@darkmatter/docs/topics/darkmatter-expressions.md) but also get to use the new global variables provided to lifecycle events.
 
@@ -501,7 +502,7 @@ Ambient variables exposed inside each iteration:
 
 #### Lifecycle Concerns
 
-In addition to iteration controls, the `loop` block accepts the standard lifecycle-event properties (`say`, `say_first`, `notify`, `effect`, `message`, `stderr`, `info`, `warn`, `success`, `stack`).
+In addition to iteration controls, the `loop` block accepts the standard lifecycle-event properties (`say`, `say_first`, `notify`, `effect`, `message`, `stderr`, `info`, `warn`, `success`, `stdout`, `stack`).
 
 **Firing model:** looping **wraps the whole document** — each iteration is a complete execution of the lifecycle. The `loop` event is a **single unified gate** that runs after `finalize` and decides whether to iterate again.
 
@@ -513,7 +514,7 @@ In addition to iteration controls, the `loop` block accepts the standard lifecyc
 
 **At the gate**, in this order:
 
-1. The loop block's **lifecycle concerns** fire (`say`/`say_first`/`notify`/`effect`/`message`/`stderr`/`info`/`warn`/`success`/`stack`) against the **just-completed iteration's** frontmatter state — i.e. *before* the per-iteration `action` mutation is applied. Because this runs after `finalize`, the lifecycle concerns describe the iteration that just finished, not the one about to start.
+1. The loop block's **lifecycle concerns** fire (`say`/`say_first`/`notify`/`effect`/`message`/`stderr`/`info`/`warn`/`success`/`stdout`/`stack`) against the **just-completed iteration's** frontmatter state — i.e. *before* the per-iteration `action` mutation is applied. Because this runs after `finalize`, the lifecycle concerns describe the iteration that just finished, not the one about to start.
 2. The condition (`while`/`until`) is evaluated.
 3. If continuing, the per-iteration `action` mutations (`increment`/`set`/`append`/etc.) are applied and control re-enters at `start`. If stopping, the document exits.
 
@@ -657,7 +658,7 @@ Each item is a concrete, checkable assertion derived from the decisions above.
 - A bare `err`/`timing`/`current` in body or frontmatter interpolation resolves as an ordinary identifier (no special meaning), with normal undefined-variable handling if absent.
 - Top-level communication properties fire before the stack for every event.
 - `say_first` remains supported and mutually exclusive with `say` for every lifecycle event.
-- Lifecycle output does not write to stdout; progress/status output uses `stderr`, `info`, or `warn`, and machine-readable side effects use files/frontmatter/JSONL.
+- Lifecycle output mostly uses `stderr`, `info`, `warn`, or `success`, with machine-readable side effects via files/frontmatter/JSONL. The opt-in `stdout` channel writes plain prose to stdout for authors who specifically want it there.
 - An action carrying `no_error: true` logs its error and continues to the next stack item, leaving the composition outcome unchanged regardless of event.
 - An unintentional action error at a terminal-phase event (`success`/`failure`/`finalize`/`loop`) does not invert the composition outcome; an explicit `Error` lifecycle action at `success`/`finalize` does convert success → failure, with `finalize` doing so without re-entering `failure`.
 - Existing top-level-only prompts (`say`/`effect`/`message` at `start`/`success`/`failure`) continue to work unchanged.
@@ -672,7 +673,7 @@ Tests follow the existing `composition/lifecycle.rs` patterns and the monorepo L
     - expression-argument parsing for action args
     - cardinality (one Lifecycle Action per block) and "Where valid" validation
     - `err` static-scan (halts in no-error events; `doc.err` exempt)
-    - no lifecycle `stdout` field or action parses; unknown-field errors stay typed and include frontmatter excerpts
+    - the lifecycle `stdout` field and `stdout(...)` action parse as a statusless stdout channel; genuinely unknown fields still error typed and include frontmatter excerpts
     - lifecycle interpolation-leak / undefined-variable guards extended to the new events (`initialize`/`finalize`/`loop`)
     - action error-propagation defaults per event
     - `fail_fast` interaction with failed iterations (`finalize` always fires; `loop` gate only runs for failed iterations when `fail_fast: false` or the failure was recovered)
@@ -689,9 +690,9 @@ Tests follow the existing `composition/lifecycle.rs` patterns and the monorepo L
 
 > Draft for author review. The intended direction is **extend, not replace** — consistent with the "Adding `stack:` is purely additive" and Backward Compatibility statements above. The internal-type sketch below states only the additive contract; do not read it as a committed refactor of internal types.
 
-- Today's `LifecycleConfig` / `LifecycleNotification` gain new **optional** fields (`stack`, `info`, `warn`, `success`) rather than being replaced. Their `#[serde(deny_unknown_fields)]` must be updated to admit the new keys while continuing to reject accidental fields such as `stdout`.
+- Today's `LifecycleConfig` / `LifecycleNotification` gain new **optional** fields (`stack`, `info`, `warn`, `success`, `stdout`) rather than being replaced. Their `#[serde(deny_unknown_fields)]` must be updated to admit the new keys while continuing to reject genuinely unknown fields.
 - The `LifecycleSignal` enum gains `Initialize`, `Finalize`, and `Loop` variants (today only `start`/`success`/`blocked`/`failure` exist).
-- The existing `LoopConfig` block gains the lifecycle-concern keys (`say`/`say_first`/`notify`/`effect`/`message`/`stderr`/`info`/`warn`/`success`/`stack`) alongside its iteration controls.
+- The existing `LoopConfig` block gains the lifecycle-concern keys (`say`/`say_first`/`notify`/`effect`/`message`/`stderr`/`info`/`warn`/`success`/`stdout`/`stack`) alongside its iteration controls.
 - Existing prompts using only top-level communication properties continue to parse and behave identically — no breaking change.
 
 ## Dependencies

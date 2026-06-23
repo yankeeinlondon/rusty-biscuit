@@ -29,13 +29,14 @@ Each lifecycle property is an object containing any of these fields:
 | `effect` | string | Sound effect to play (kebab-case name; see [Sound Effects](#sound-effects)). |
 | `message` | string | Message dispatched via the configured messaging route (Discord, Slack, Signal, WhatsApp, or webhooks). |
 | `notify` | string | Local desktop notification title. Zero-config; does not require a messaging route. |
+| `stdout` | string | Plain prose line written to **stdout**. **No status glyph.** Note: stdout is otherwise reserved for pipeable command output, so this interleaves with the composed/provider output on the same stream — use deliberately. |
 | `stderr` | string | Plain prose line written to stderr. **No status glyph** — inline styling and links are honored, but no status decoration. |
 | `info` | string | Status line rendered with an info style. |
 | `warn` | string | Status line rendered with a warning style. |
 | `success` | string | Status line rendered with a success style. |
 | `stack` | list | Ordered list of conditional actions (see [Stacks](#stacks)). |
 
-Lifecycle output is intentionally written to stderr, messaging routes, or desktop notifications only. There is **no `stdout` lifecycle channel** because stdout is reserved for pipeable command output.
+Most lifecycle output is written to stderr, messaging routes, or desktop notifications. The `stdout` channel is the lone exception: it writes to stdout, which is otherwise reserved for pipeable command output, so reach for it only when you specifically want lifecycle text on stdout.
 
 ### Audio Ordering
 
