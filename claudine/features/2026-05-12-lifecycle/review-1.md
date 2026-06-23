@@ -2,6 +2,7 @@
 ready: false
 agent: codex/default
 created: 2026-06-22T08:04:53
+implemented: true
 ---
 
 # Review 1
