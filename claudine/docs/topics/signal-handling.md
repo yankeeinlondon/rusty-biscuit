@@ -43,14 +43,14 @@ share the same SIGTERM → SIGKILL escalation but classify differently:
 | `ProcessTermination` | Meaning | Failure routing |
 |---|---|---|
 | `Completed` | Child exited on its own (exit code may still be non-zero) | `AgentFailure` only if exit ≠ 0 |
-| `Interrupted` | User pressed Ctrl+C — no synthesized `error_kind` | suppressed (no handler) |
-| `TimedOut` | `timeout` / `step_timeout` watchdog kill | `Timeout` → `handle_timeout:` retry |
-| `Aborted` | A claudine **content guard** tripped (exit-expression, runaway-repetition, or volume cap — see [timeouts.md](timeouts.md#content-guards-runaway-output)) | `AgentFailure` → `failure:` fail-fast |
+| `Interrupted` | User pressed Ctrl+C — no synthesized `error_kind` | suppressed (no recovery) |
+| `TimedOut` | `timeout` / `step_timeout` watchdog kill | `Timeout` → `failure` stack `Retry`/`Resume` |
+| `Aborted` | A claudine **content guard** tripped (exit-expression, runaway-repetition, or volume cap — see [timeouts.md](timeouts.md#content-guards-runaway-output)) | `AgentFailure` → `failure` fail-fast |
 
 `Aborted` is deliberately distinct from `TimedOut` (it must **not** take
-the timeout-retry path, which would re-run the runaway) and from
+a `failure`-stack `Retry`, which would re-run the runaway) and from
 `Interrupted` (a content trip is a genuine failure the operator's
-handlers must observe, not a silent user cancel).
+lifecycle stacks must observe, not a silent user cancel).
 
 ## User-driven Ctrl+C (SIGINT)
 

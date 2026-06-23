@@ -358,30 +358,10 @@ pub(crate) fn detect_wrapper_harness(
         )?;
         let harness_enabled = claudine::harness::has_harness_properties(&seed.frontmatter);
         if harness_enabled {
-            let resolve_ctx = claudine::harness::HarnessResolutionContext {
-                source_path: &source_path,
-                repo_root: env_plan.repo_root.as_deref(),
-            };
             let shell_options = harness_orch::build_harness_shell_options(
                 &source_path,
                 env_plan.repo_root.as_deref(),
             );
-            let plan = claudine::harness::parse_harness_plan(
-                &seed.frontmatter,
-                &source_path,
-                &resolve_ctx,
-            )
-            .map_err(|e| eyre!("{e}"))?;
-
-            let _harness_preflight = claudine::composition::resolve_shell_approvals(
-                None,
-                None,
-                Some(&plan),
-                &shell_options,
-            )
-            .map_err(|e| eyre!("{e}"))?;
-
-            drop(plan);
 
             Ok(Some((source_path, base_prompt, seed, shell_options)))
         } else {
@@ -456,6 +436,11 @@ pub(crate) fn run_execution_stage(
             repo_root: env_plan.repo_root.as_deref(),
         };
         let default_lifecycle_emitter = claudine::composition::DefaultLifecycleEmitter;
+        let mut lifecycle_guard = claudine::composition::LifecycleRunGuard::new(
+            &default_lifecycle,
+            &default_lifecycle_ctx,
+            &default_lifecycle_emitter,
+        );
 
         let (harness_code, harness_perf, _harness_signals) = harness_orch::run_harness_loop(
             provider,
@@ -482,9 +467,8 @@ pub(crate) fn run_execution_stage(
             dispatch_context,
             Some(initial_materialized),
             term,
-            &default_lifecycle,
-            &default_lifecycle_ctx,
-            &default_lifecycle_emitter,
+            &mut lifecycle_guard,
+            None,
             true,
         )?;
         if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {

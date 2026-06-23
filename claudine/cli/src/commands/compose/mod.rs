@@ -351,6 +351,22 @@ impl CompositionKind {
         }
     }
 
+    /// Schema-agnostic prepare function for this command.
+    ///
+    /// Used on loop iterations after the first, where the seed pass has
+    /// already validated the frontmatter against `$schema` and we only need
+    /// to re-compose with the current override state.
+    pub(crate) fn prepare_without_schema(
+        self,
+        source: &ResolvedCompositionSource,
+        options: PrepareOptions,
+    ) -> Result<PreparedComposition, CompositionError> {
+        match self {
+            Self::Direct => claudine::composition::prepare_direct(source, options),
+            Self::Inline => claudine::composition::prepare_inline(source, options),
+        }
+    }
+
     /// Command-specific validation that runs immediately after source
     /// resolution.
     ///

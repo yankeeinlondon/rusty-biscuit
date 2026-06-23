@@ -74,14 +74,19 @@ phases (the phase numbers appear throughout the module doc-comments):
   - `rendezvous-daemon` — the service: gRPC server, Loro/redb/DuckDB stack,
     QUIC endpoint, mDNS discovery, peer registry, and the sync engine.
   - `rendezvous-client` — a thin gRPC test client (binary
-    `rendezvous-test-client`) plus a reusable `connect_uds` helper. Explicitly
-    *not* throwaway: it is the integration-test and CI smoke-check driver.
+    `rendezvous-test-client`) plus reusable cross-platform `connect` /
+    `connect_uds` (Unix) / `connect_named_pipe` (Windows) helpers. Explicitly
+    *not* throwaway: it is the integration-test and CI smoke-check driver and
+    the connection path used by the claudine lifecycle `requeue(...)` control
+    action.
 
-- **IPC control plane** (`Rendezvous` gRPC service over UDS). Implemented RPCs:
+- **IPC control plane** (`Rendezvous` gRPC service over the platform's local
+  IPC transport — UDS on Unix, named pipe on Windows). Implemented RPCs:
   `Ping`, `Status`, `AppendEntry`, `ListChunkEntries`, `ListSessionChunks`,
   `QueryProjection`, `CreateInvitation`, `ConnectToPeer`, `ListPeers`,
-  `ApprovePeer`, `RevokePeer`, `ListPairings`, `SyncWithPeer`. Socket path
-  resolution follows `RENDEZVOUS_SOCKET` → `$XDG_RUNTIME_DIR` → `$TMPDIR`/`tmp`.
+  `ApprovePeer`, `RevokePeer`, `ListPairings`, `SyncWithPeer`. Endpoint
+  resolution follows `RENDEZVOUS_SOCKET` → `$XDG_RUNTIME_DIR` → `$TMPDIR`/`tmp`
+  on Unix and `RENDEZVOUS_SOCKET` → `\\.\pipe\rendezvous-daemon` on Windows.
 
 - **Session-log document model** (`core/src/session_log.rs`):
   - Deterministic chunk identity:
@@ -267,10 +272,10 @@ yet. `rendezvous/docs/logging.md` already sketches the contract:
 
 This requires turning the generic POC entry schema into a real
 agentic-session log model and giving Claudine a daemon client (the test client's
-`connect_uds` helper is the seed). Note the related repo-wide
-`feature-fix-lifecycle` spec explicitly **defers** its "closure event into the
-claudine daemon's database" until this logging refactor lands — so this unblocks
-work beyond Rendezvous itself.
+`connect` helper — cross-platform UDS/named-pipe — is the seed). Note the
+related repo-wide `feature-fix-lifecycle` spec explicitly **defers** its
+"closure event into the claudine daemon's database" until this logging
+refactor lands — so this unblocks work beyond Rendezvous itself.
 
 ### B. Harden the mesh foundation
 

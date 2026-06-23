@@ -94,7 +94,7 @@ fn find_git_root_from_path(path: &Path) -> Option<PathBuf> {
 use super::error::CompositionError;
 use super::guardrails::load_or_create_guardrails;
 use super::lifecycle::{
-    parse_lifecycle_config, validate_no_interpolation_leaks,
+    parse_lifecycle_config, validate_no_err_in_no_error_events, validate_no_interpolation_leaks,
     validate_no_undefined_lifecycle_variables,
 };
 use super::types::{
@@ -112,6 +112,15 @@ pub fn prepare_direct(
     options: PrepareOptions,
 ) -> Result<PreparedComposition, CompositionError> {
     let override_keys = top_level_override_keys(options.set_overrides.as_ref());
+    if let Some((key, replacement)) =
+        super::lifecycle::scan_removed_validation_keys(&frontmatter_to_value(source.markdown.frontmatter()))
+    {
+        return Err(CompositionError::RemovedValidationKey {
+            source_path: source.resolved_path.clone(),
+            key,
+            replacement: replacement.to_string(),
+        });
+    }
     let mut ctx = ComposeContext::capture();
     for (key, value) in &options.env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
@@ -151,6 +160,15 @@ pub fn prepare_direct(
     }
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
+    if let Some((key, replacement)) =
+        super::lifecycle::scan_removed_validation_keys(&effective_frontmatter)
+    {
+        return Err(CompositionError::RemovedValidationKey {
+            source_path: source.resolved_path.clone(),
+            key,
+            replacement: replacement.to_string(),
+        });
+    }
     let agent_full = composed
         .frontmatter()
         .as_map()
@@ -179,8 +197,10 @@ pub fn prepare_direct(
     validate_no_undefined_lifecycle_variables(
         source.markdown.frontmatter(),
         &effective_frontmatter,
+        &lifecycle,
         &source.resolved_path,
     )?;
+    validate_no_err_in_no_error_events(&lifecycle, &source.resolved_path)?;
 
     let source_repo_root = options
         .source_repo_root
@@ -212,6 +232,15 @@ pub fn prepare_inline(
 ) -> Result<PreparedComposition, CompositionError> {
     let override_keys = top_level_override_keys(options.set_overrides.as_ref());
     let fm = source.markdown.frontmatter();
+    if let Some((key, replacement)) =
+        super::lifecycle::scan_removed_validation_keys(&frontmatter_to_value(fm))
+    {
+        return Err(CompositionError::RemovedValidationKey {
+            source_path: source.resolved_path.clone(),
+            key,
+            replacement: replacement.to_string(),
+        });
+    }
 
     let prompt_value = fm
         .as_map()
@@ -258,6 +287,15 @@ pub fn prepare_inline(
         .map_err(|e| map_compose_error(&source.resolved_path, e))?;
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
+    if let Some((key, replacement)) =
+        super::lifecycle::scan_removed_validation_keys(&effective_frontmatter)
+    {
+        return Err(CompositionError::RemovedValidationKey {
+            source_path: source.resolved_path.clone(),
+            key,
+            replacement: replacement.to_string(),
+        });
+    }
     let agent_full = composed
         .frontmatter()
         .as_map()
@@ -286,8 +324,10 @@ pub fn prepare_inline(
     validate_no_undefined_lifecycle_variables(
         source.markdown.frontmatter(),
         &effective_frontmatter,
+        &lifecycle,
         &source.resolved_path,
     )?;
+    validate_no_err_in_no_error_events(&lifecycle, &source.resolved_path)?;
 
     let mut prompt = composed.content().to_string();
     if prompt.trim().is_empty() {

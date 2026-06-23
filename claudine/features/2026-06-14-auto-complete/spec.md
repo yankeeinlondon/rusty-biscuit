@@ -43,9 +43,7 @@ When a user types `claudine compose ` they are now ready to specify the Markdown
     - if the user typed `claudine compose @plan` and pressed tab
     - assuming that both `~/.claudine/prompts/plan.md` and `{repo-root}/prompts/plan.md` existed
     - shell completions would recognize that the user wants to use the magic path syntax and that `@prompts/plan.md` is a valid completion
-    - once the user presses ENTER and the claudine process kicks off it will do the final resolution to a single file
-
-
+    - once the user presses ENTER and the claudine process kicks off it will do the final resolution back to the single file
 
 ### `inline-compose` operation
 

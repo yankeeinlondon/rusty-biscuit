@@ -16,7 +16,11 @@ use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::lifecycle::{
-    DefaultLifecycleEmitter, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal,
+    DefaultLifecycleEmitter, LifecycleEmitter, LifecycleRunGuard, LifecycleRuntimeContext,
+    LifecycleSignal,
+};
+use claudine::composition::lifecycle_executor::{
+    LifecycleEventOutcome, StackControl, StackExecutionContext, SystemShellRunner,
 };
 use claudine::composition::{
     AgentResolutionState, CompositionClosurePlan, CompositionError, CompositionExecutionRequest,
@@ -29,6 +33,7 @@ use claudine::config::claudine_config::ProviderModelOverride;
 use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 use claudine::stream::stderr::Verbosity;
 use color_eyre::eyre::{Result, eyre};
+use darkmatter::effects::EffectEngine;
 use inquire::Select;
 use sniff::programs::InstalledAiClients;
 
@@ -133,6 +138,83 @@ fn enforce_repo_launch_detection(
     Ok(())
 }
 
+/// Run the `blocked` and `finalize` lifecycle events (top-level
+/// communication **and** typed stack) for a composition preflight failure.
+///
+/// The spec requires a blocked iteration to reach `blocked` then `finalize`,
+/// each firing both its top-level communication surface and its typed stack
+/// (`spec.md:436`, `spec.md:650`, `spec.md:652`). Pre-flight failures
+/// (harness-plan parse, shell-approval denial, dry-run pre-check) used to
+/// call [`LifecycleRunGuard::emit_blocked_or_failure`], which only fires the
+/// legacy top-level subset (`stderr`/`message`/`notify`/audio) and skips both
+/// the typed stacks and `finalize`. That left documents relying on
+/// `blocked.stack` / `finalize.stack` side effects (e.g.
+/// `append_line('events.log', 'blocked')`) without either marker.
+///
+/// This helper mirrors the [`StackExecutionContext`] pattern the
+/// `initialize` event uses (see `init_ctx` in
+/// [`execute_composition_request_inner_with_guard`]): the context borrows
+/// the *local* `emitter`/`settings`/etc. — not the guard — so
+/// [`LifecycleRunGuard::execute_event`] can take `&mut guard` without a
+/// borrow conflict. `execute_event` records the emission and runs the
+/// top-level + stack in one call, and sets `terminal_emitted = true` so the
+/// guard's `Drop` safety-net cannot double-emit.
+///
+/// `err_info` should faithfully describe which preflight failed
+/// (e.g. `from_action_failure("harness_plan", msg)`) so a user-authored
+/// `blocked.stack` can reference `{{ err.msg }}` meaningfully.
+#[allow(clippy::too_many_arguments)]
+fn emit_preflight_blocked_and_finalize(
+    guard: &mut LifecycleRunGuard<'_>,
+    effect_engine: &EffectEngine,
+    emitter: &dyn LifecycleEmitter,
+    settings: &claudine::events::GlobalSettings,
+    messaging: &claudine::messaging::RuntimeMessagingSettings,
+    term: &Terminal,
+    source_path: &Path,
+    repo_root: Option<&Path>,
+    base_dir: Option<&Path>,
+    frontmatter: &serde_json::Map<String, serde_json::Value>,
+    document_start: std::time::Instant,
+    err_info: claudine::composition::LifecycleErrorInfo,
+) {
+    let timing = claudine::composition::LifecycleTiming::from_instants(
+        document_start,
+        None,
+        std::time::Instant::now(),
+    );
+    let current_anchor = base_dir.unwrap_or(source_path);
+    let current =
+        claudine::composition::LifecycleCurrent::capture_at_event(current_anchor);
+
+    let blocked_ctx = StackExecutionContext {
+        signal: LifecycleSignal::Blocked,
+        frontmatter,
+        err: Some(&err_info),
+        timing: Some(&timing),
+        current: Some(&current),
+        base_dir,
+        effect_engine,
+        shell_runner: &SystemShellRunner,
+        emitter,
+        term,
+        source_path,
+        repo_root,
+        messaging,
+        settings,
+    };
+    guard.execute_event(LifecycleSignal::Blocked, &blocked_ctx);
+
+    // The finalize stack reuses the same frontmatter / globals / side-effect
+    // routes as the blocked stack; only the signal differs. `with_signal`
+    // borrows `blocked_ctx` by shared reference, which does not conflict with
+    // the `&mut guard` `execute_event` requires because the guard and the
+    // context borrow from disjoint locals (emitter/settings/... passed in as
+    // arguments, not pulled out of the guard).
+    let finalize_ctx = blocked_ctx.with_signal(LifecycleSignal::Finalize);
+    guard.execute_event(LifecycleSignal::Finalize, &finalize_ctx);
+}
+
 /// Result of executing a single composition step through the wrapper pipeline.
 pub(crate) struct SingleCompositionOutcome {
     /// The process exit code.
@@ -149,6 +231,11 @@ pub(crate) struct SingleCompositionOutcome {
     /// watchdog `error_kind`). `None` for the dry-run path, which never
     /// launches a provider.
     pub iteration_signals: Option<IterationSummarySignals>,
+    /// Terminal lifecycle signal emitted by the harness loop, if known.
+    ///
+    /// Used by the loop engine to apply `fail_fast` semantics and to sequence
+    /// the post-`finalize` loop gate.
+    pub terminal_signal: Option<LifecycleSignal>,
 }
 
 /// Iteration-level signals lifted from the per-iteration
@@ -276,6 +363,48 @@ pub(crate) fn execute_composition_request_inner(
     startup_timings: Option<crate::perf::StartupTimings>,
     perf_enabled: bool,
 ) -> Result<SingleCompositionOutcome> {
+    execute_composition_request_inner_with_guard(
+        request,
+        verbose,
+        startup_timings,
+        perf_enabled,
+        None,
+        false,
+    )
+}
+
+/// Execute a single composition attempt using an externally-managed lifecycle
+/// guard.
+///
+/// Used by the loop engine for iteration 2+. The caller has already emitted
+/// `initialize` and run schema/shell preflight once; this function skips those
+/// and emits only `start`, the terminal event, and `finalize` through the
+/// shared guard.
+pub(crate) fn execute_composition_attempt(
+    request: CompositionExecutionRequest,
+    verbose: u8,
+    perf_enabled: bool,
+    guard: &mut claudine::composition::LifecycleRunGuard<'_>,
+    skip_preflight: bool,
+) -> Result<SingleCompositionOutcome> {
+    execute_composition_request_inner_with_guard(
+        request,
+        verbose,
+        None,
+        perf_enabled,
+        Some(guard),
+        skip_preflight,
+    )
+}
+
+fn execute_composition_request_inner_with_guard(
+    request: CompositionExecutionRequest,
+    verbose: u8,
+    startup_timings: Option<crate::perf::StartupTimings>,
+    perf_enabled: bool,
+    external_guard: Option<&mut claudine::composition::LifecycleRunGuard<'_>>,
+    skip_preflight: bool,
+) -> Result<SingleCompositionOutcome> {
     let mut perf_collector = if perf_enabled {
         startup_timings.map(|timings| {
             crate::perf::CommandPerfCollector::new_with_composition(
@@ -291,6 +420,11 @@ pub(crate) fn execute_composition_request_inner(
     // headline is the threaded wall-clock baseline sampled at report build,
     // not this mid-flight timer (TM-1).
     let mut last_checkpoint = std::time::Instant::now();
+    // Stable anchor for lifecycle `timing.document_ms`: the moment this
+    // document's execution began. Unlike `last_checkpoint` (reset by every
+    // sub-stage record), this is never advanced, so `document_ms` measures
+    // elapsed time since the document started, not since the last sub-stage.
+    let document_start = last_checkpoint;
     /// Helper to record a named sub-stage timing and reset the checkpoint.
     fn record_substage(
         collector: &mut Option<crate::perf::CommandPerfCollector>,
@@ -334,6 +468,7 @@ pub(crate) fn execute_composition_request_inner(
             provider: claudine::provider::Provider::Claude,
             agent_perf: None,
             iteration_signals: None,
+            terminal_signal: None,
         };
         if let Some(collector) = perf_collector {
             crate::perf::emit_report(&collector.into_report());
@@ -928,9 +1063,9 @@ pub(crate) fn execute_composition_request_inner(
     }
 
     // --dry-run no longer exits here. The seam now sits *after* the harness
-    // preflight block below, so harness shell-approval + writability
-    // pre-checks participate in the dry-run gate before the composed output
-    // is rendered. See the `request.dry_run` early-return after preflight.
+    // shell-approval preflight block below, so shell-approval decisions
+    // participate in the dry-run gate before the composed output is rendered.
+    // See the `request.dry_run` early-return after preflight.
 
     switch_process_cwd(child_cwd)?;
 
@@ -951,9 +1086,9 @@ pub(crate) fn execute_composition_request_inner(
     // -- Harness plan preflight -------------------------------------------
     // Every non-dry-run document is parsed into a harness plan. Documents
     // lacking harness frontmatter yield the bare (all-empty) plan; the loop
-    // re-parses from the materialized frontmatter on retry attempts. Inline
-    // composition gets a system-owned writability pre-check injected here
-    // so handler recovery paths can respond to permission failures.
+    // re-parses from the materialized frontmatter on retry attempts. The plan
+    // now carries only timeout configuration; the removed pre/post validation
+    // checks and handler recovery DSL are no longer evaluated.
 
     let shell_options = apply_composition_shell_overrides(
         build_harness_shell_options_with_cache(
@@ -965,7 +1100,15 @@ pub(crate) fn execute_composition_request_inner(
         request.yolo,
     );
 
-    // --- Lifecycle notification setup ---
+    // --- Lifecycle notification setup ------------------------------------
+    // Constructed up here (rather than just before the guard) so the
+    // `run_body` closure below can capture these by reference and route
+    // composition-preflight failures through the stack-aware event runner
+    // (`emit_preflight_blocked_and_finalize`). Pre-flight failures must fire
+    // `blocked.stack` + `finalize.stack`, which requires the same emitter /
+    // settings / messaging / effect-engine the post-closure `initialize`
+    // event uses — so the bindings are hoisted to a single shared
+    // construction site.
     let lifecycle = &request.prepared.lifecycle;
     let emitter = DefaultLifecycleEmitter;
 
@@ -994,6 +1137,380 @@ pub(crate) fn execute_composition_request_inner(
         }
     };
 
+    // Build an effect engine for lifecycle side effects / expression functions.
+    // Writes are confined to the repo root when known, otherwise the launch cwd.
+    let lifecycle_mutation_root = effective_repo_root.unwrap_or(launch_cwd.as_path());
+    let lifecycle_effect_engine = EffectEngine::builder()
+        .mutation_root(lifecycle_mutation_root)
+        .auto_rehash(false)
+        .build();
+
+    // Common execution body used both when the caller provides an external
+    // lifecycle guard (loop re-entry) and when this function owns the guard
+    // (single-run / first loop iteration). The closure captures the prep
+    // state by reference; it is only invoked while this stack frame lives.
+    let run_body = |
+        guard: &mut claudine::composition::LifecycleRunGuard<'_>,
+        skip_preflight: bool,
+        proxy_source: Option<&Path>,
+    | -> Result<SingleCompositionOutcome> {
+        // Composed frontmatter / source-derived base dir, reused by every
+        // composition-preflight failure path so the blocked+finalize stacks
+        // see the same `frontmatter` and `base_dir` namespaces the
+        // post-closure `initialize` event does.
+        let fm_map = request.prepared.effective_frontmatter.as_object();
+        let empty_frontmatter = serde_json::Map::new();
+        let frontmatter = fm_map.unwrap_or(&empty_frontmatter);
+        let base_dir = request
+            .prepared
+            .resolved_path
+            .parent()
+            .or(effective_repo_root);
+        // Validate that the harness plan can be parsed before proceeding.
+        let plan = claudine::harness::parse_harness_plan(
+            &request.prepared.effective_frontmatter,
+            &request.prepared.resolved_path,
+        )
+        .map_err(|e| {
+            // Route through the stack-aware runner so `blocked.stack` and
+            // `finalize.stack` fire (spec.md:436/650/652), not just the
+            // legacy top-level surface.
+            emit_preflight_blocked_and_finalize(
+                guard,
+                &lifecycle_effect_engine,
+                &emitter,
+                &lifecycle_settings,
+                &lifecycle_messaging,
+                &term,
+                &request.prepared.resolved_path,
+                effective_repo_root,
+                base_dir,
+                frontmatter,
+                document_start,
+                claudine::composition::LifecycleErrorInfo::from_action_failure(
+                    "harness_plan",
+                    e.to_string(),
+                ),
+            );
+            eyre!("{e}")
+        })?;
+
+        // The parsed harness plan is used only for shell-command audit and
+        // timeout configuration; there are no longer pre/post validation
+        // checks that need an effective-plan transform.
+
+        // ── Pre-flight shell approval for harness commands ───────────
+        if !skip_preflight {
+            let _harness_preflight = claudine::composition::resolve_shell_approvals(
+                None, // template commands already approved during compose
+                None,
+                &shell_options,
+                Some(&request.prepared.lifecycle),
+                Some(&request.prepared.resolved_path),
+            )
+            .map_err(|e| {
+                // Shell-audit denial (or any other shell-approval failure)
+                // is a composition-preflight blocked path: route through
+                // the stack-aware runner so `blocked.stack` and
+                // `finalize.stack` fire.
+                emit_preflight_blocked_and_finalize(
+                    guard,
+                    &lifecycle_effect_engine,
+                    &emitter,
+                    &lifecycle_settings,
+                    &lifecycle_messaging,
+                    &term,
+                    &request.prepared.resolved_path,
+                    effective_repo_root,
+                    base_dir,
+                    frontmatter,
+                    document_start,
+                    claudine::composition::LifecycleErrorInfo::from_action_failure(
+                        "shell_approval",
+                        e.to_string(),
+                    ),
+                );
+                eyre!("{e}")
+            })?;
+
+            // Emit the preflight-complete indicator for direct compose and
+            // inline-compose runs. This must sit *before* the dry-run seam below:
+            // dry-run returns early, so a completion message placed after it would
+            // never render for dry-run — leaving the "Starting pre-flight checks"
+            // spinner without its matching "complete" line. Sequence runs handle
+            // their own preflight messaging in the orchestrator
+            // (`wrap::sequence::execute_sequence`) and must not re-emit per step.
+            if !request.sequence && !silent && !quiet {
+                let compose_label = if is_inline {
+                    "inline composition"
+                } else {
+                    "composition"
+                };
+                let status = Status::from_prose(format!(
+                    "<b>Preflight:</b> shell commands approved for this {compose_label}"
+                ))
+                .state(StatusState::Info);
+                log::message(&status.render(&term));
+            }
+        }
+
+        // --dry-run seam: the full composition pipeline (compose, real shell
+        // expansion, shell approval, harness pre-checks) has now run. Stop here —
+        // before any provider launches — and emit the composed artifacts:
+        //   - the composed body → stdout (the data product; pipeable/redirectable)
+        //   - the finalized frontmatter (highlighted YAML) → stderr
+        //   - a metadata table → stderr (after the frontmatter)
+        // `--quiet` / `--silent` do not suppress this render: the dry-run output
+        // *is* the command's purpose.
+        if request.dry_run {
+            // Dry-run never launches the provider or mutates the source.
+            // Pre-check validation has been removed; only timeout parsing
+            // and shell-command audit run during composition preflight.
+            let render = dry_run::DryRunRender::from_request(&request);
+
+            crate::log::data(&render.body);
+            crate::log::message(&dry_run::render_hr(&term));
+            crate::log::message(&dry_run::render_frontmatter_heading(&term));
+            crate::log::message("");
+            crate::log::message(&dry_run::render_frontmatter(&render.frontmatter, &term));
+            crate::log::message(&dry_run::render_metadata_table(&render, &term));
+
+            if let Some(collector) = perf_collector.as_mut() {
+                collector.set_dry_run();
+            }
+            let outcome = SingleCompositionOutcome {
+                exit_code: 0,
+                provider,
+                agent_perf: None,
+                // Dry-run never produces a per-iteration summary.
+                iteration_signals: None,
+                terminal_signal: None,
+            };
+            // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
+            // The perf report is always emitted to stderr when requested.
+            if let Some(collector) = perf_collector {
+                crate::perf::emit_report(&collector.into_report());
+            }
+            return Ok(outcome);
+        }
+
+        // Plan is validated; the harness loop re-parses from the materialized
+        // frontmatter, so the live path no longer needs this copy.
+        drop(plan);
+
+        // -- Preflight output (env details + prompt block) ---------------------
+        // The execution header was already emitted (up front by compose /
+        // inline-compose, or above for callers that did not pre-render). Now
+        // emit the env details and prompt block with the full env_plan.
+
+        // Detect the environment from the source repo root when available so
+        // that git/repo metadata reflects the composition source, not the
+        // caller's CWD (which may be in a different repo entirely).
+        //
+        // Phase 4 (2026-05-09-slow-prep): `detect_environment_fast` is still on
+        // the critical path after Phases 1–2, but its direct cost is minimal
+        // (~8 ms for git summary + repo structure). The `compose_prep.environment`
+        // span added in Phase 3 makes this cost visible in traces. Making the
+        // context truly lazy would require invasive changes to LiveSemanticSink,
+        // DispatchRuntimeContext, and the wire-session path because the context is
+        // consumed synchronously before the child spawns. Per the spec, when lazy
+        // creation is too invasive we instrument and defer deeper work.
+        let env_detect_root = effective_repo_root.unwrap_or(&launch_cwd);
+        let env_context = {
+            let _span = tracing::info_span!("compose_prep.environment").entered();
+            // Phase fix (2026-05-09-slow-prep): reuse the cached
+            // `EnvironmentContext` when the prep-time sniff already covers the
+            // requested env_detect_root. The cached scan was rooted at the
+            // launch CWD, but sniff walks up to find the enclosing git/repo
+            // root, so the resulting env_context is equivalent to one rooted
+            // at `env_detect_root` whenever:
+            //   1. env_detect_root == launch_cwd (trivial), OR
+            //   2. launch_cwd is a subdirectory of env_detect_root AND the
+            //      cached env_context's git repo_root or repo root matches
+            //      env_detect_root (the common monorepo-subdir case).
+            // When neither holds (e.g. `--repo` pins a different root or the
+            // source lives in an unrelated repo), fall back to a fresh scan.
+            let cached_matches = request.prep_env_context.as_ref().is_some_and(|prep| {
+                if env_detect_root == launch_cwd.as_path() {
+                    return true;
+                }
+                if !launch_cwd.starts_with(env_detect_root) {
+                    return false;
+                }
+                let git_root_match = prep
+                    .git
+                    .as_ref()
+                    .map(|g| g.repo_root.as_path() == env_detect_root)
+                    .unwrap_or(false);
+                let repo_root_match = prep
+                    .repo
+                    .as_ref()
+                    .map(|r| r.root.as_path() == env_detect_root)
+                    .unwrap_or(false);
+                git_root_match || repo_root_match
+            });
+            if cached_matches {
+                request
+                    .prep_env_context
+                    .as_ref()
+                    .expect("cached_matches implies Some")
+                    .clone()
+            } else {
+                claudine::events::detect_environment_fast(env_detect_root)
+            }
+        };
+
+        if !silent {
+            if !quiet && (request.session_interactive || detail_requested) {
+                crate::output::log_wrapper_env_details(&env_plan, None, &term, verbose);
+            }
+
+            let scope_for_report = effective_repo_root.unwrap_or(&launch_cwd);
+            crate::output::log_system_prompt_with_scope(
+                &effective_sp,
+                detail_requested,
+                silent,
+                quiet,
+                Some(scope_for_report),
+                &term,
+            );
+
+            if matches!(
+                effective_sp,
+                claudine::system_prompt::ResolvedSystemPrompt::Ready(_)
+            ) && effective_non_interactive
+            {
+                crate::log::message("");
+            }
+
+            if effective_non_interactive {
+                crate::output::log_compose_prompt(
+                    &request.prepared.prompt,
+                    detail_requested,
+                    silent,
+                    quiet,
+                    &term,
+                );
+            }
+
+            if !quiet {
+                crate::log::message("");
+            }
+        }
+
+        drop(_span);
+
+        let _span = tracing::info_span!("composition_execute").entered();
+
+        // -- Execution --------------------------------------------------------
+
+        let dispatch_context = composition_dispatch_context(&request, &target);
+
+        let harness_mode = if is_inline {
+            HarnessPromptMode::Inline
+        } else {
+            HarnessPromptMode::Compose
+        };
+
+        // When an `initialize` Proxy redirected to a different document, the
+        // harness loop re-materializes (re-composes frontmatter + body) from
+        // `source_path` each attempt, so swapping the path here runs the
+        // target document — its body, frontmatter, harness pre-checks, and
+        // its `start`/`success`/`failure`/`finalize` lifecycle. Seed
+        // `initial_materialized = None` so the loop composes the target rather
+        // than reusing the proxying document's prepared prompt.
+        let (effective_source, effective_ref, seed_materialized) = match proxy_source {
+            Some(target) => (
+                target.to_path_buf(),
+                target.display().to_string(),
+                None,
+            ),
+            None => (
+                request.prepared.resolved_path.clone(),
+                request.file_ref.clone(),
+                Some(materialized_harness_prompt_from_prepared(&request.prepared)),
+            ),
+        };
+
+        let mut prompt_state = HarnessPromptState {
+            mode: harness_mode,
+            source_path: effective_source,
+            original_ref: effective_ref,
+            base_prompt: None,
+            overlay: indexmap::IndexMap::new(),
+            prompt_tail: Vec::new(),
+            next_prompt_override: None,
+            next_resume_session_id: None,
+        };
+
+        let mut harness_base_args = args_before_prompt.clone();
+        if !use_structured {
+            profile.prepare_captured_output(&mut harness_base_args);
+        }
+
+        let (exit_code, harness_perf, harness_signals) = run_harness_loop(
+            provider,
+            profile,
+            binary_path.as_path(),
+            child_cwd,
+            effective_non_interactive,
+            request.timeout.clone(),
+            request.step_timeout.clone(),
+            &harness_base_args,
+            &env_plan.env,
+            &mut prompt_state,
+            effective_repo_root,
+            shell_options.clone(),
+            use_structured,
+            structured_codex_output.as_ref(),
+            stdout_noise,
+            stderr_noise,
+            profile.suppress_structured_stderr_on_success(),
+            show_checks,
+            stream_verbosity,
+            detail_requested,
+            &env_context,
+            &dispatch_context,
+            seed_materialized,
+            &term,
+            guard,
+            proxy_source,
+            true,
+        )?;
+        if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {
+            collector.set_agent_perf(perf);
+        }
+        let terminal_signal = guard.terminal_signal();
+        let outcome = SingleCompositionOutcome {
+            exit_code,
+            provider,
+            agent_perf: perf_collector
+                .as_ref()
+                .and_then(|c| c.agent_perf())
+                .or(harness_perf),
+            // The harness loop now surfaces the terminal attempt's iteration
+            // signals, so `compose --loop` receives the same rate-limit /
+            // exit_reason pickup for every composition document.
+            iteration_signals: harness_signals,
+            terminal_signal,
+        };
+        // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
+        // The perf report is always emitted to stderr when requested.
+        if let Some(collector) = perf_collector {
+            crate::perf::emit_report(&collector.into_report());
+        }
+        Ok(outcome)
+    };
+
+    // When the caller passes an external guard (loop re-entry), it has already
+    // emitted `initialize` and owns the lifecycle runtime context. Run only
+    // the per-iteration body and return.
+    if let Some(guard) = external_guard {
+        return run_body(guard, skip_preflight, None);
+    }
+
+    // Bundle the shared lifecycle bindings (constructed above the closure)
+    // into the runtime context the guard drives.
     let lifecycle_ctx = LifecycleRuntimeContext {
         settings: &lifecycle_settings,
         messaging: &lifecycle_messaging,
@@ -1002,320 +1519,134 @@ pub(crate) fn execute_composition_request_inner(
         repo_root: effective_repo_root,
     };
 
+    // --- Initialize lifecycle event --------------------------------------
+    // Fires after prompt/frontmatter resolution and CLI/frontmatter override
+    // merge, but before $schema validation and shell pre-flight.
     let mut guard = LifecycleRunGuard::new(lifecycle, &lifecycle_ctx, &emitter);
-
-    let resolve_ctx = claudine::harness::HarnessResolutionContext {
+    let fm_map = request.prepared.effective_frontmatter.as_object();
+    let empty_frontmatter = serde_json::Map::new();
+    let base_dir = request
+        .prepared
+        .resolved_path
+        .parent()
+        .or(effective_repo_root);
+    // Lifecycle stack-only globals for the `initialize` event (and its
+    // `with_signal`/`with_error` derivations, which copy these references).
+    // `current.env`/`current.ctx` are captured now, so a side effect or
+    // external change since `prepare` is observable through `current.*`. The
+    // document-start instant anchors `timing.document_ms` at this event.
+    let lifecycle_current =
+        claudine::composition::lifecycle_context::LifecycleCurrent::capture_at_event(
+            base_dir.unwrap_or(launch_cwd.as_path()),
+        );
+    let lifecycle_timing = claudine::composition::lifecycle_context::LifecycleTiming::from_instants(
+        document_start,
+        None,
+        std::time::Instant::now(),
+    );
+    let init_ctx = StackExecutionContext {
+        signal: LifecycleSignal::Initialize,
+        frontmatter: fm_map.unwrap_or(&empty_frontmatter),
+        err: None,
+        timing: Some(&lifecycle_timing),
+        current: Some(&lifecycle_current),
+        base_dir,
+        effect_engine: &lifecycle_effect_engine,
+        shell_runner: &SystemShellRunner,
+        emitter: &emitter,
+        term: &term,
         source_path: &request.prepared.resolved_path,
         repo_root: effective_repo_root,
+        messaging: &lifecycle_messaging,
+        settings: &lifecycle_settings,
     };
-    // Validate that the harness plan can be parsed before proceeding.
-    let plan = claudine::harness::parse_harness_plan(
-        &request.prepared.effective_frontmatter,
-        &request.prepared.resolved_path,
-        &resolve_ctx,
-    )
-    .map_err(|e| {
-        guard.emit_blocked_or_failure();
-        eyre!("{e}")
-    })?;
-
-    // Finalize the parsed plan into the effective plan. For inline
-    // composition this prepends a system-owned writability pre-check so
-    // handler recovery paths can respond to permission failures.
-    let plan = claudine::harness::finalize_effective_plan(
-        plan,
-        if is_inline {
-            claudine::harness::EffectivePlanMode::Inline
-        } else {
-            claudine::harness::EffectivePlanMode::Direct
-        },
-        &request.prepared.resolved_path,
-    );
-
-    // ── Pre-flight shell approval for harness commands ───────────
-    let _harness_preflight = claudine::composition::resolve_shell_approvals(
-        None, // template commands already approved during compose
-        None,
-        Some(&plan),
-        &shell_options,
-    )
-    .map_err(|e| {
-        guard.emit_blocked_or_failure();
-        eyre!("{e}")
-    })?;
-
-    // Emit the preflight-complete indicator for direct compose and
-    // inline-compose runs. This must sit *before* the dry-run seam below:
-    // dry-run returns early, so a completion message placed after it would
-    // never render for dry-run — leaving the "Starting pre-flight checks"
-    // spinner without its matching "complete" line. Sequence runs handle
-    // their own preflight messaging in the orchestrator
-    // (`wrap::sequence::execute_sequence`) and must not re-emit per step.
-    if !request.sequence && !silent && !quiet {
-        let compose_label = if is_inline {
-            "inline composition"
-        } else {
-            "composition"
-        };
-        let status = Status::from_prose(format!(
-            "<b>Preflight:</b> shell commands approved for this {compose_label}"
-        ))
-        .state(StatusState::Info);
-        log::message(&status.render(&term));
-    }
-
-    // --dry-run seam: the full composition pipeline (compose, real shell
-    // expansion, shell approval, harness pre-checks) has now run. Stop here —
-    // before any provider launches — and emit the composed artifacts:
-    //   - the composed body → stdout (the data product; pipeable/redirectable)
-    //   - the finalized frontmatter (highlighted YAML) → stderr
-    //   - a metadata table → stderr (after the frontmatter)
-    // `--quiet` / `--silent` do not suppress this render: the dry-run output
-    // *is* the command's purpose.
-    if request.dry_run {
-        // Dry-run never launches the provider or mutates the source, but it
-        // must still surface pre-check failures — chiefly the system-owned
-        // inline `has_write_permission` rule injected by
-        // `finalize_effective_plan`. Otherwise a read-only (`0444`) inline
-        // source would render a clean dry-run and exit 0, masking a write
-        // failure the live run would hit. Evaluate the finalized effective
-        // plan's pre-checks with the same `WrapperHarnessPermissionProbe`
-        // the harness loop uses, then hard-fail on any failure: there is no
-        // handler-resolution step here because no provider will run.
-        let permission_probe = super::policy::WrapperHarnessPermissionProbe::new(
-            provider,
-            args_before_prompt.clone(),
-            effective_repo_root,
-        );
-        let pre_report = claudine::harness::evaluate_pre_checks(&plan, Some(&permission_probe));
-        if !pre_report.all_passed() {
-            let failures = pre_report.failures();
-            guard.emit_blocked_or_failure();
-            return Err(eyre!(
-                "pre-check validation failed ({} {})",
-                failures.len(),
-                if failures.len() == 1 {
-                    "failure"
-                } else {
-                    "failures"
+    let init_outcome = guard.execute_event(LifecycleSignal::Initialize, &init_ctx);
+    // Set by an `initialize` Proxy control: the resolved target document the
+    // run is handed off to. Threaded into `run_body` so the harness loop
+    // re-composes and runs the target instead of the original document.
+    let mut init_proxy_target: Option<std::path::PathBuf> = None;
+    if let Some(ref control) = init_outcome.control {
+        match control {
+            StackControl::Skip => {
+                // Clean whole-document opt-out: no pre-flight, no provider,
+                // no finalize, no loop gate. Sequence orchestrator treats this
+                // as a successful step and advances.
+                return Ok(SingleCompositionOutcome {
+                    exit_code: 0,
+                    provider,
+                    agent_perf: None,
+                    iteration_signals: None,
+                    terminal_signal: None,
+                });
+            }
+            StackControl::Error { reason } => {
+                let msg = reason
+                    .clone()
+                    .unwrap_or_else(|| "lifecycle initialize error".to_string());
+                let action_error =
+                    claudine::composition::lifecycle_context::LifecycleErrorInfo::from_action_failure(
+                        "error",
+                        msg.clone(),
+                    );
+                guard.execute_event(
+                    LifecycleSignal::Failure,
+                    &init_ctx.with_error(&action_error),
+                );
+                guard.execute_event(
+                    LifecycleSignal::Finalize,
+                    &init_ctx.with_error(&action_error).with_signal(LifecycleSignal::Finalize),
+                );
+                return Err(eyre!(msg));
+            }
+            StackControl::Proxy { target } => {
+                // Hand off to the target document. Resolve the reference
+                // (`@repo/…`, relative, or absolute) against the source so
+                // `run_body` runs the target via the harness loop's
+                // re-materialize path. The harness loop resets the lifecycle
+                // guard and re-emits the target's own `initialize` before its
+                // pre-flight / start / terminal / finalize lifecycle runs.
+                let resolved = claudine::composition::resolve_proxy_target(
+                    target,
+                    &request.prepared.resolved_path,
+                    effective_repo_root,
+                )
+                .map_err(|e| eyre!("lifecycle initialize proxy: {e}"))?;
+                if !claudine::composition::proxy_handoff_allowed(
+                    std::slice::from_ref(&request.prepared.resolved_path),
+                    &resolved,
+                ) {
+                    return Err(CompositionError::LifecycleProxyCycle {
+                        source_path: request.prepared.resolved_path.clone(),
+                        target: target.clone(),
+                        chain: vec![request.prepared.resolved_path.display().to_string()],
+                        limit: claudine::composition::MAX_PROXY_HOPS,
+                    }
+                    .into());
                 }
-            ));
-        }
-
-        let render = dry_run::DryRunRender::from_request(&request);
-
-        crate::log::data(&render.body);
-        crate::log::message(&dry_run::render_hr(&term));
-        crate::log::message(&dry_run::render_frontmatter_heading(&term));
-        crate::log::message("");
-        crate::log::message(&dry_run::render_frontmatter(&render.frontmatter, &term));
-        crate::log::message(&dry_run::render_metadata_table(&render, &term));
-
-        if let Some(collector) = perf_collector.as_mut() {
-            collector.set_dry_run();
-        }
-        let outcome = SingleCompositionOutcome {
-            exit_code: 0,
-            provider,
-            agent_perf: None,
-            // Dry-run never produces a per-iteration summary.
-            iteration_signals: None,
-        };
-        // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
-        // The perf report is always emitted to stderr when requested.
-        if let Some(collector) = perf_collector {
-            crate::perf::emit_report(&collector.into_report());
-        }
-        return Ok(outcome);
-    }
-
-    // Plan is validated; the harness loop re-parses from the materialized
-    // frontmatter, so the live path no longer needs this copy.
-    drop(plan);
-
-    // -- Preflight output (env details + prompt block) ---------------------
-    // The execution header was already emitted (up front by compose /
-    // inline-compose, or above for callers that did not pre-render). Now
-    // emit the env details and prompt block with the full env_plan.
-
-    // Detect the environment from the source repo root when available so
-    // that git/repo metadata reflects the composition source, not the
-    // caller's CWD (which may be in a different repo entirely).
-    //
-    // Phase 4 (2026-05-09-slow-prep): `detect_environment_fast` is still on
-    // the critical path after Phases 1–2, but its direct cost is minimal
-    // (~8 ms for git summary + repo structure). The `compose_prep.environment`
-    // span added in Phase 3 makes this cost visible in traces. Making the
-    // context truly lazy would require invasive changes to LiveSemanticSink,
-    // DispatchRuntimeContext, and the wire-session path because the context is
-    // consumed synchronously before the child spawns. Per the spec, when lazy
-    // creation is too invasive we instrument and defer deeper work.
-    let env_detect_root = effective_repo_root.unwrap_or(&launch_cwd);
-    let env_context = {
-        let _span = tracing::info_span!("compose_prep.environment").entered();
-        // Phase fix (2026-05-09-slow-prep): reuse the cached
-        // `EnvironmentContext` when the prep-time sniff already covers the
-        // requested env_detect_root. The cached scan was rooted at the
-        // launch CWD, but sniff walks up to find the enclosing git/repo
-        // root, so the resulting env_context is equivalent to one rooted
-        // at `env_detect_root` whenever:
-        //   1. env_detect_root == launch_cwd (trivial), OR
-        //   2. launch_cwd is a subdirectory of env_detect_root AND the
-        //      cached env_context's git repo_root or repo root matches
-        //      env_detect_root (the common monorepo-subdir case).
-        // When neither holds (e.g. `--repo` pins a different root or the
-        // source lives in an unrelated repo), fall back to a fresh scan.
-        let cached_matches = request.prep_env_context.as_ref().is_some_and(|prep| {
-            if env_detect_root == launch_cwd.as_path() {
-                return true;
+                init_proxy_target = Some(resolved);
             }
-            if !launch_cwd.starts_with(env_detect_root) {
-                return false;
+            StackControl::Retry { .. }
+            | StackControl::Resume { .. }
+            | StackControl::Requeue { .. }
+            | StackControl::Stop => {
+                return Err(eyre!(
+                    "lifecycle control action {control:?} is not valid at initialize"
+                ));
             }
-            let git_root_match = prep
-                .git
-                .as_ref()
-                .map(|g| g.repo_root.as_path() == env_detect_root)
-                .unwrap_or(false);
-            let repo_root_match = prep
-                .repo
-                .as_ref()
-                .map(|r| r.root.as_path() == env_detect_root)
-                .unwrap_or(false);
-            git_root_match || repo_root_match
-        });
-        if cached_matches {
-            request
-                .prep_env_context
-                .as_ref()
-                .expect("cached_matches implies Some")
-                .clone()
-        } else {
-            claudine::events::detect_environment_fast(env_detect_root)
-        }
-    };
-
-    if !silent {
-        if !quiet && (request.session_interactive || detail_requested) {
-            crate::output::log_wrapper_env_details(&env_plan, None, &term, verbose);
-        }
-
-        let scope_for_report = effective_repo_root.unwrap_or(&launch_cwd);
-        crate::output::log_system_prompt_with_scope(
-            &effective_sp,
-            detail_requested,
-            silent,
-            quiet,
-            Some(scope_for_report),
-            &term,
-        );
-
-        if matches!(
-            effective_sp,
-            claudine::system_prompt::ResolvedSystemPrompt::Ready(_)
-        ) && effective_non_interactive
-        {
-            crate::log::message("");
-        }
-
-        if effective_non_interactive {
-            crate::output::log_compose_prompt(
-                &request.prepared.prompt,
-                detail_requested,
-                silent,
-                quiet,
-                &term,
-            );
-        }
-
-        if !quiet {
-            crate::log::message("");
         }
     }
-
-    drop(_span);
-
-    let _span = tracing::info_span!("composition_execute").entered();
-
-    // -- Execution --------------------------------------------------------
-
-    let dispatch_context = composition_dispatch_context(&request, &target);
-
-    let harness_mode = if is_inline {
-        HarnessPromptMode::Inline
-    } else {
-        HarnessPromptMode::Compose
-    };
-
-    let mut prompt_state = HarnessPromptState {
-        mode: harness_mode,
-        source_path: request.prepared.resolved_path.clone(),
-        original_ref: request.file_ref.clone(),
-        base_prompt: None,
-        overlay: indexmap::IndexMap::new(),
-        prompt_tail: Vec::new(),
-        next_prompt_override: None,
-        next_resume_session_id: None,
-    };
-
-    let mut harness_base_args = args_before_prompt.clone();
-    if !use_structured {
-        profile.prepare_captured_output(&mut harness_base_args);
-    }
-
-    // Harness loop manages the guard internally; defuse ours.
-    guard.defuse();
-    let (exit_code, harness_perf, harness_signals) = run_harness_loop(
-        provider,
-        profile,
-        binary_path.as_path(),
-        child_cwd,
-        effective_non_interactive,
-        request.timeout.clone(),
-        request.step_timeout.clone(),
-        &harness_base_args,
-        &env_plan.env,
-        &mut prompt_state,
-        effective_repo_root,
-        shell_options.clone(),
-        use_structured,
-        structured_codex_output.as_ref(),
-        stdout_noise,
-        stderr_noise,
-        profile.suppress_structured_stderr_on_success(),
-        show_checks,
-        stream_verbosity,
-        detail_requested,
-        &env_context,
-        &dispatch_context,
-        Some(materialized_harness_prompt_from_prepared(&request.prepared)),
-        &term,
-        lifecycle,
-        &lifecycle_ctx,
-        &emitter,
-        true,
-    )?;
-    if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {
-        collector.set_agent_perf(perf);
-    }
-    let outcome = SingleCompositionOutcome {
-        exit_code,
-        provider,
-        agent_perf: perf_collector
+    if init_outcome.routes_to_failure(LifecycleSignal::Initialize) {
+        let failure_ctx = init_outcome
+            .action_error
             .as_ref()
-            .and_then(|c| c.agent_perf())
-            .or(harness_perf),
-        // The harness loop now surfaces the terminal attempt's iteration
-        // signals, so `compose --loop` receives the same rate-limit /
-        // exit_reason pickup for every composition document.
-        iteration_signals: harness_signals,
-    };
-    // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
-    // The perf report is always emitted to stderr when requested.
-    if let Some(collector) = perf_collector {
-        crate::perf::emit_report(&collector.into_report());
+            .map(|e| init_ctx.with_error(e))
+            .unwrap_or_else(|| init_ctx.with_signal(LifecycleSignal::Failure));
+        guard.execute_event(LifecycleSignal::Failure, &failure_ctx);
+        guard.execute_event(LifecycleSignal::Finalize, &failure_ctx);
+        return Err(eyre!("lifecycle initialize failed"));
     }
-    Ok(outcome)
+
+    run_body(&mut guard, false, init_proxy_target.as_deref())
 }
 
 // -- Config loading -------------------------------------------------------

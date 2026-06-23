@@ -301,6 +301,281 @@ pub enum CompositionError {
         variable: String,
     },
 
+    /// A removed harness validation or handler DSL key was found in the
+    /// frontmatter.
+    ///
+    /// The `pre_checks`, `post_checks`, `handle`, `deviate`, and
+    /// `handle_<subject>` DSL keys were retired when the lifecycle stack model
+    /// replaced the harness validation and handler execution layers. This
+    /// variant surfaces a typed, actionable diagnostic that names the offending
+    /// key and points to the lifecycle surface that replaces it.
+    #[error(
+        "removed validation/handler key `{key}` in {source_path}: {replacement}",
+        source_path = source_path.display()
+    )]
+    RemovedValidationKey {
+        /// The prompt file whose frontmatter contained the removed key.
+        source_path: PathBuf,
+        /// The removed key exactly as authored (e.g. `"pre_checks"`).
+        key: String,
+        /// Human-readable replacement guidance.
+        replacement: String,
+    },
+
+    /// A lifecycle stack item has an invalid shape (not an object, missing
+    /// `action` key, unknown key, etc.).
+    ///
+    /// Raised at parse time while walking a `stack:` block. The `property`
+    /// names the owning event (e.g. `"start"`) so the diagnostic can point at
+    /// the right frontmatter block.
+    #[error(
+        "invalid lifecycle stack item in `{property}` ({source_path}): {message}",
+        source_path = source_path.display()
+    )]
+    LifecycleStackInvalidShape {
+        /// The prompt file whose lifecycle frontmatter held the malformed stack.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`, `"success.stack[2]"`).
+        property: String,
+        /// Human-readable description of the shape problem.
+        message: String,
+    },
+
+    /// A short-form lifecycle action `verb(args)` failed to parse.
+    ///
+    /// Covers: missing verb, unbalanced parens, trailing characters, argument
+    /// splitter errors, and argument expression parse errors. The bare
+    /// "unquoted multi-word literal" case (e.g. `say(using codex)`) is also
+    /// reported through this variant with a `message` that names the cause.
+    #[error(
+        "invalid lifecycle action `{raw}` in `{property}` ({source_path}): {message}",
+        source_path = source_path.display()
+    )]
+    LifecycleActionInvalidShortForm {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+        /// The raw short-form string exactly as authored.
+        raw: String,
+        /// Human-readable parse failure description.
+        message: String,
+    },
+
+    /// A long-form lifecycle action supplied an unknown field, wrong value
+    /// type, or missing required parameter.
+    #[error(
+        "invalid lifecycle action `{action}` in `{property}` ({source_path}): {message}",
+        source_path = source_path.display()
+    )]
+    LifecycleActionInvalidLongForm {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+        /// The action verb (e.g. `"set_frontmatter"`, `"shell"`).
+        action: String,
+        /// Human-readable description of the long-form problem.
+        message: String,
+    },
+
+    /// A lifecycle control action was used in an event where the spec's
+    /// "Where valid" matrix forbids it (e.g. `Skip` outside `initialize`).
+    ///
+    /// Raised at parse time after the action identity is known, so the
+    /// diagnostic can name both the action and the event.
+    #[error(
+        "lifecycle action `{action}` is not valid in the `{event}` event ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleActionPlacement {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+        /// The rejected action verb (e.g. `"skip"`, `"retry"`).
+        action: String,
+        /// The event name the action was placed in (e.g. `"start"`).
+        event: String,
+    },
+
+    /// More than one lifecycle control action appeared in a single stack item.
+    ///
+    /// The spec's cardinality rule allows at most one lifecycle control action
+    /// per `when/action` block (and it must be the last action). This variant
+    /// covers the "more than one" half.
+    #[error(
+        "lifecycle stack item in `{property}` has more than one lifecycle action; \
+         at most one is allowed per item ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleMultipleLifecycleActions {
+        /// The prompt file whose lifecycle frontmatter held the stack item.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+    },
+
+    /// A lifecycle control action was not the last action in its stack item.
+    ///
+    /// The spec's cardinality rule allows at most one lifecycle control action
+    /// per `when/action` block, and it must be the last action (subsequent
+    /// actions would be unreachable).
+    #[error(
+        "lifecycle action in `{property}` must be the last action in its stack item ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleActionOrder {
+        /// The prompt file whose lifecycle frontmatter held the stack item.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+    },
+
+    /// A lifecycle action received the wrong number or type of arguments.
+    ///
+    /// Distinct from [`Self::LifecycleActionInvalidShortForm`] (which covers
+    /// syntax-level failures): this variant covers semantic-argument errors
+    /// such as `retry(-1)` (negative max attempts) or `proxy()` (missing the
+    /// required target).
+    #[error(
+        "lifecycle action `{action}` in `{property}` has invalid arguments ({source_path}): {message}",
+        source_path = source_path.display()
+    )]
+    LifecycleInvalidArgs {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+        /// The action verb (e.g. `"retry"`, `"proxy"`).
+        action: String,
+        /// Human-readable description of the argument problem.
+        message: String,
+    },
+
+    /// A reference to the lifecycle-stack-only `err` global appeared in a
+    /// no-error event (`initialize`, `start`, `success`, `loop`).
+    ///
+    /// The `err` global is only meaningful when the iteration may have errored
+    /// (`blocked`, `failure`, and the optional-error `finalize`). Reading it
+    /// elsewhere is faulty logic and is rejected at parse time by walking the
+    /// expression surfaces (`when:` clauses, message strings, short-form
+    /// action arguments) with the existing Darkmatter AST machinery. The
+    /// `doc.err` escape hatch is exempt — only a bare `err` (or `err.*`
+    /// member access) triggers this variant.
+    #[error(
+        "lifecycle property `{property}` references `err` in the `{event}` event, \
+         which never carries an error ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleErrNotAvailable {
+        /// The prompt file whose lifecycle frontmatter held the reference.
+        source_path: PathBuf,
+        /// Dotted lifecycle key path, e.g. `"start.stack[1].action"`.
+        property: String,
+        /// The event name the reference appeared in (e.g. `"start"`).
+        event: String,
+    },
+
+    /// A `failure` stack requested `resume(...)` but the agentic loop did
+    /// not surface a provider session id, so there is nothing to resume.
+    ///
+    /// Raised at runtime (not parse time): whether a session id exists is
+    /// only known after the provider runs. Surfacing it as a typed error
+    /// keeps the control from silently no-opping.
+    #[error(
+        "lifecycle `resume` at `failure` requires a provider session to resume, \
+         but none was captured ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleResumeWithoutSession {
+        /// The prompt file whose `failure` stack requested resume.
+        source_path: PathBuf,
+    },
+
+    /// A lifecycle stack requested `requeue(...)`, but the runtime could not
+    /// record the prompt in the deferred-execution queue.
+    #[error(
+        "lifecycle `requeue` (delay `{delay}`{reason}) could not enqueue the \
+         prompt via rendezvous: {message} ({source_path})",
+        reason = match reason {
+            Some(r) => format!(", reason `{r}`"),
+            None => String::new(),
+        },
+        source_path = source_path.display()
+    )]
+    LifecycleRequeueEnqueueFailed {
+        /// The prompt file whose stack requested requeue.
+        source_path: PathBuf,
+        /// The requested delay duration string.
+        delay: String,
+        /// The optional authored reason.
+        reason: Option<String>,
+        /// Human-readable enqueue failure.
+        message: String,
+    },
+
+    /// A lifecycle `proxy(...)` hand-off would re-enter a document already on
+    /// the active proxy chain (a self-proxy or an A→B→A cycle), or exceeded the
+    /// maximum proxy hop count.
+    ///
+    /// Surfaced as a typed error rather than looping forever: a `failure`
+    /// stack that proxies back to a document whose own `failure` stack proxies
+    /// again has no terminal state, so the runtime stops the chain loudly.
+    #[error(
+        "lifecycle `proxy` hand-off to `{target}` forms a cycle or exceeds the \
+         proxy hop limit ({limit}); active chain: {chain} ({source_path})",
+        chain = chain.join(" -> "),
+        source_path = source_path.display()
+    )]
+    LifecycleProxyCycle {
+        /// The prompt file whose stack requested the cyclic proxy.
+        source_path: PathBuf,
+        /// The proxy target that would close the cycle or overflow the limit.
+        target: String,
+        /// The active proxy chain (resolved paths, in hand-off order).
+        chain: Vec<String>,
+        /// The maximum number of proxy hops permitted.
+        limit: usize,
+    },
+
+    /// A lifecycle `initialize` stack raised an explicit `error(...)` (or an
+    /// unintentional action error routed to `failure`), so the run aborts
+    /// before any iteration runs.
+    ///
+    /// Mirrors the non-loop path's `eyre!("...")` failure at initialize: the
+    /// `failure` and `finalize` events fire through the lifecycle guard before
+    /// this error is returned, so callers should not double-emit them.
+    #[error(
+        "lifecycle `initialize` raised an error: {reason} ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleInitializeFailed {
+        /// The prompt file whose `initialize` stack raised the error.
+        source_path: PathBuf,
+        /// Evaluated reason (explicit `error(...)` argument or captured
+        /// action-error message).
+        reason: String,
+    },
+
+    /// A `loop:` gate stack raised an explicit `error(...)`, converting the
+    /// loop's final outcome to failure and exiting the loop.
+    ///
+    /// Only the **explicit** `Error` lifecycle action lands here. The `loop`
+    /// gate is a terminal-phase event, so an *unintentional* action error there
+    /// leaves the composition outcome unchanged (per the action error-
+    /// propagation table) and never produces this variant.
+    #[error(
+        "lifecycle `loop` gate raised an error: {reason} ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleLoopGateFailed {
+        /// The prompt file whose `loop:` gate stack raised the error.
+        source_path: PathBuf,
+        /// Evaluated reason (explicit `error(...)` argument).
+        reason: String,
+    },
+
     // -- Sequence errors -------------------------------------------------------
     /// The `sequence` frontmatter value is not a valid type (must be a list or a string).
     #[error("invalid sequence definition: {0}")]
@@ -893,9 +1168,20 @@ impl CompositionError {
         match self {
             CompositionError::LifecycleInterpolationLeak { property, .. }
             | CompositionError::LifecycleUndefinedVariable { property, .. }
-            | CompositionError::LifecycleInvalid { property, .. } => Some(Some(property.clone())),
+            | CompositionError::LifecycleInvalid { property, .. }
+            | CompositionError::LifecycleStackInvalidShape { property, .. }
+            | CompositionError::LifecycleActionInvalidShortForm { property, .. }
+            | CompositionError::LifecycleActionInvalidLongForm { property, .. }
+            | CompositionError::LifecycleActionPlacement { property, .. }
+            | CompositionError::LifecycleMultipleLifecycleActions { property, .. }
+            | CompositionError::LifecycleActionOrder { property, .. }
+            | CompositionError::LifecycleInvalidArgs { property, .. }
+            | CompositionError::LifecycleErrNotAvailable { property, .. } => {
+                Some(Some(property.clone()))
+            }
             CompositionError::LifecycleSayConflict(property)
             | CompositionError::LifecycleUnknownEffect(property, _) => Some(Some(property.clone())),
+            CompositionError::RemovedValidationKey { key, .. } => Some(Some(key.clone())),
             CompositionError::PromptPropertyMissing
             | CompositionError::PromptPropertyWrongType(_) => Some(Some("prompt".to_string())),
             CompositionError::AgentHintWrongType(_)
@@ -1024,6 +1310,196 @@ impl BlockError for CompositionError {
                     .hint(
                         "Define the variable in frontmatter, prefix a runtime value with \
                          `ctx.`/`env.`, or supply a fallback (`{{ var || 'default' }}`).",
+                    )
+            }
+            CompositionError::RemovedValidationKey {
+                source_path,
+                key,
+                replacement,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "The validation/handler key <cyan>`{}`</cyan> in {file_link} has been \
+                     removed. Use the lifecycle stack model instead.\n\n\
+                     <b>Replacement:</b> {}",
+                    escape_prose_path(key),
+                    escape_prose_path(replacement)
+                );
+
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "removed validation/handler key",
+                    ))
+                    .body(body)
+                    .hint(
+                        "See the lifecycle documentation for `initialize`, `start`, `success`, \
+                         `blocked`, `failure`, `finalize`, and `loop` stacks.",
+                    )
+            }
+            CompositionError::LifecycleStackInvalidShape {
+                source_path,
+                property,
+                message,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "Lifecycle stack item in <cyan>`{property}`</cyan> in {file_link} has an \
+                     invalid shape.\n\n{message}"
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "invalid lifecycle stack item",
+                    ))
+                    .body(body)
+                    .hint(
+                        "A stack item is an object with an optional `when:` condition string \
+                         and an `action:` (scalar or array). Remove any extra keys.",
+                    )
+            }
+            CompositionError::LifecycleActionInvalidShortForm {
+                source_path,
+                property,
+                raw,
+                message,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "Short-form lifecycle action <cyan>`{}`</cyan> in <cyan>`{property}`</cyan> \
+                     in {file_link} could not be parsed.\n\n{message}",
+                    escape_prose_path(raw)
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "invalid lifecycle action",
+                    ))
+                    .body(body)
+                    .hint(
+                        "Short-form actions use `verb(args)` grammar where args are Darkmatter \
+                         expressions. Multi-word literals must be quoted: \
+                         `say('using codex')`, not `say(using codex)`.",
+                    )
+            }
+            CompositionError::LifecycleActionInvalidLongForm {
+                source_path,
+                property,
+                action,
+                message,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "Long-form lifecycle action <cyan>`{action}`</cyan> in <cyan>`{property}`</cyan> \
+                     in {file_link} could not be parsed.\n\n{message}"
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "invalid lifecycle action",
+                    ))
+                    .body(body)
+            }
+            CompositionError::LifecycleActionPlacement {
+                source_path,
+                property: _,
+                action,
+                event,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "Lifecycle action <cyan>`{action}`</cyan> is not valid in the \
+                     <cyan>`{event}`</cyan> event in {file_link}."
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "lifecycle action not valid here",
+                    ))
+                    .body(body)
+                    .hint(
+                        "Check the \"Where valid\" matrix in the lifecycle spec: only certain \
+                         control actions are allowed in each event.",
+                    )
+            }
+            CompositionError::LifecycleMultipleLifecycleActions {
+                source_path, property, ..
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "Stack item in <cyan>`{property}`</cyan> in {file_link} contains more than \
+                     one lifecycle control action."
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "multiple lifecycle actions",
+                    ))
+                    .body(body)
+                    .hint(
+                        "Split the actions across separate stack items, or remove the extra \
+                         lifecycle action. At most one lifecycle control action is allowed per \
+                         `when/action` block.",
+                    )
+            }
+            CompositionError::LifecycleActionOrder {
+                source_path, property, ..
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "Lifecycle action in <cyan>`{property}`</cyan> in {file_link} must be the \
+                     last action in its stack item."
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "lifecycle action must be last",
+                    ))
+                    .body(body)
+                    .hint(
+                        "A lifecycle control action terminates stack processing, so any actions \
+                         after it would never run. Move it to the end of the `action:` array.",
+                    )
+            }
+            CompositionError::LifecycleInvalidArgs {
+                source_path,
+                property,
+                action,
+                message,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "Lifecycle action <cyan>`{action}`</cyan> in <cyan>`{property}`</cyan> in \
+                     {file_link} has invalid arguments.\n\n{message}"
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "invalid lifecycle action arguments",
+                    ))
+                    .body(body)
+            }
+            CompositionError::LifecycleErrNotAvailable {
+                source_path,
+                property,
+                event,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "Lifecycle property <cyan>`{property}`</cyan> in {file_link} references the \
+                     <cyan>`err`</cyan> global in the <cyan>`{event}`</cyan> event, which never \
+                     carries an error."
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "`err` not available in this event",
+                    ))
+                    .body(body)
+                    .hint(
+                        "Use `err` only in `blocked`, `failure`, or `finalize` (where it is \
+                         optional). To reference a frontmatter property named `err`, write \
+                         `doc.err` explicitly.",
                     )
             }
             CompositionError::LoopIterationFailed {
