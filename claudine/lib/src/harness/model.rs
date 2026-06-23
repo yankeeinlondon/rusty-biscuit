@@ -1,6 +1,6 @@
 //! Core data model for the harness subsystem.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};

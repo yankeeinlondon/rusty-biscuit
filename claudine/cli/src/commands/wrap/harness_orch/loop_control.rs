@@ -1070,11 +1070,6 @@ pub(crate) fn run_harness_loop(
         .mutation_root(&mutation_root)
         .auto_rehash(false)
         .build();
-    let permission_probe = super::super::policy::WrapperHarnessPermissionProbe::new(
-        provider,
-        base_args.to_vec(),
-        repo_root,
-    );
     let mut harness_context = CachedHarnessLoopContext::with_shell_options(
         &prompt_state.source_path,
         repo_root,
@@ -1253,7 +1248,6 @@ pub(crate) fn run_harness_loop(
             }
         }
 
-        let resolve_ctx = harness_context.resolve_context();
         let plan = info_span!(
             "harness_plan_parse",
             attempt,
@@ -1263,7 +1257,6 @@ pub(crate) fn run_harness_loop(
             claudine::harness::parse_harness_plan(
                 &materialized.frontmatter,
                 &prompt_state.source_path,
-                &resolve_ctx,
             )
         })
         .inspect_err(|e| {
@@ -1330,18 +1323,8 @@ pub(crate) fn run_harness_loop(
             ));
         }
 
-        // Finalize the parsed plan into the effective plan. For inline
-        // composition this prepends a system-owned writability pre-check so
-        // handler recovery paths can respond to permission failures.
-        let plan = claudine::harness::finalize_effective_plan(
-            plan,
-            if matches!(prompt_state.mode, HarnessPromptMode::Inline) {
-                claudine::harness::EffectivePlanMode::Inline
-            } else {
-                claudine::harness::EffectivePlanMode::Direct
-            },
-            &prompt_state.source_path,
-        );
+        // The parsed harness plan is used for shell audit and timeout
+        // configuration. Pre/post validation checks have been removed.
 
         // Shell audit preflight.
         //
@@ -1507,126 +1490,8 @@ pub(crate) fn run_harness_loop(
             harness_context.freeze_shell_approvals();
         }
 
-        let pre_report = info_span!(
-            "harness_pre_validation",
-            attempt,
-            rule_count = plan.pre_checks.len(),
-        )
-        .in_scope(|| claudine::harness::evaluate_pre_checks(&plan, Some(&permission_probe)));
-
-        if show_checks {
-            claudine::harness::report::report_phase_discovery(
-                claudine::harness::FailurePhase::PreCheck,
-                pre_report.count(),
-                term,
-            );
-            claudine::harness::report::report_check_outcomes(&pre_report, term);
-        }
-
-        if !pre_report.all_passed() {
-            let failures = pre_report.failures();
-            let contexts = claudine::harness::build_validation_failure_context(
-                &failures,
-                provider.as_slug(),
-                plan.source_path.as_path(),
-                attempt,
-                None,
-                None,
-            );
-            if let Some(next_plan) = super::super::resume::try_resolve_handler(
-                &contexts,
-                &plan,
-                attempt,
-                DEFAULT_MAX_RETRIES,
-                profile,
-                None,
-                &prompt_state.source_path,
-                repo_root,
-                show_checks,
-                term,
-            )? {
-                attempt = next_plan.next_attempt;
-                super::super::resume::apply_next_attempt_plan(prompt_state, &next_plan);
-                continue;
-            }
-            let fail_msg = format!(
-                "pre-check validation failed ({} {})",
-                failures.len(),
-                if failures.len() == 1 {
-                    "failure"
-                } else {
-                    "failures"
-                }
-            );
-            if show_checks {
-                claudine::harness::report::report_unhandled_failure(&fail_msg, term);
-            }
-            let err_info =
-                LifecycleErrorInfo::from_action_failure("pre_check", fail_msg.as_str());
-            let blocked_outcome = execute_terminal_event(
-                lifecycle_guard,
-                LifecycleSignal::Blocked,
-                &materialized,
-                &prompt_state.source_path,
-                repo_root,
-                term,
-                &effect_engine,
-                Some(&err_info),
-                loop_start,
-            );
-            // A `blocked.stack` may end in a lifecycle control action
-            // (retry/proxy/requeue). From `blocked`, retry re-runs the
-            // pre-flight/start path (no provider was invoked). No session id
-            // exists at blocked time.
-            match dispatch_terminal_control(
-                LifecycleSignal::Blocked,
-                &blocked_outcome,
-                attempt,
-                &mut control_budgets,
-                None,
-                profile,
-                provider,
-                prompt_state,
-                &materialized,
-                repo_root,
-                lifecycle_guard,
-                &mut proxy_tracking,
-                term,
-                show_checks,
-            ) {
-                TerminalControlAction::Continue { next_attempt } => {
-                    attempt = next_attempt;
-                    continue;
-                }
-                TerminalControlAction::Abort(err) => {
-                    run_lifecycle_event(
-                        lifecycle_guard,
-                        LifecycleSignal::Finalize,
-                        &materialized,
-                        &prompt_state.source_path,
-                        repo_root,
-                        term,
-                        &effect_engine,
-                        Some(&err_info),
-                        loop_start,
-                    );
-                    return Err(err);
-                }
-                TerminalControlAction::Fallthrough => {}
-            }
-            run_lifecycle_event(
-                lifecycle_guard,
-                LifecycleSignal::Finalize,
-                &materialized,
-                &prompt_state.source_path,
-                repo_root,
-                term,
-                &effect_engine,
-                Some(&err_info),
-                loop_start,
-            );
-            return Err(eyre!("{fail_msg}"));
-        }
+        // Pre-check validation has been removed. Shell audit still runs above
+        // for Passthrough mode; composition flows audit during preflight.
 
         // Emit start lifecycle signal before the first provider launch.
         let start_outcome = run_lifecycle_event(
@@ -1724,31 +1589,9 @@ pub(crate) fn run_harness_loop(
             return Err(eyre!("lifecycle start failed"));
         }
 
-        // These setup steps run after `start` and before the first terminal
-        // event, so an error must reach `failure` + `finalize` (with `err`) via
-        // the typed stacks — not the legacy `LifecycleRunGuard::drop` path,
-        // which never runs them. The terminal is always `Failure`: pre-flight
-        // already passed, so `blocked` would be a lie.
-        let snapshot = info_span!(
-            "harness_pre_snapshot",
-            attempt,
-            rule_count = plan.post_checks.len(),
-        )
-        .in_scope(|| claudine::harness::capture_pre_run_snapshot(&plan))
-        .map_err(|e| eyre!("harness snapshot: {e}"))
-        .inspect_err(|e| {
-            let err_info = LifecycleErrorInfo::from_action_failure("harness_snapshot", e.to_string());
-            emit_failure_finalize_with_err(
-                lifecycle_guard,
-                &materialized,
-                &prompt_state.source_path,
-                repo_root,
-                term,
-                &effect_engine,
-                &err_info,
-                loop_start,
-            );
-        })?;
+        // Pre-run snapshot capture for post-check comparisons has been
+        // removed along with post-check validation.
+
         let launch = build_harness_launch(
             provider,
             profile,
@@ -2042,10 +1885,7 @@ pub(crate) fn run_harness_loop(
             return Ok((outcome.exit_code, harness_perf, terminal_signals));
         }
 
-        // For inline mode, apply closure BEFORE post-checks so that
-        // file-state checks (file_changed, frontmatter comparisons, etc.)
-        // observe the final rewritten document rather than the pre-closure
-        // source file.
+        // For inline mode, apply closure after a successful provider run.
         if let Some(closure_plan) = materialized.inline_closure_plan.as_ref()
             && outcome.exit_code == 0
             && let Err(failures) = super::super::inline::try_inline_closure(
@@ -2057,38 +1897,11 @@ pub(crate) fn run_harness_loop(
                 term,
             )
         {
-            let contexts = claudine::harness::build_validation_failure_context(
-                &failures,
-                provider.as_slug(),
-                plan.source_path.as_path(),
-                attempt,
-                outcome.session_id.clone(),
-                Some(outcome.clone()),
-            );
-            if let Some(next_plan) = super::super::resume::try_resolve_handler(
-                &contexts,
-                &plan,
-                attempt,
-                DEFAULT_MAX_RETRIES,
-                profile,
-                outcome.session_id.as_deref(),
-                &prompt_state.source_path,
-                repo_root,
-                show_checks,
-                term,
-            )? {
-                attempt = next_plan.next_attempt;
-                super::super::resume::apply_next_attempt_plan(prompt_state, &next_plan);
-                continue;
-            }
             let fail_msg = format!(
-                "inline closure validation failed ({} {})",
+                "inline closure failed ({} {}): {}",
                 failures.len(),
-                if failures.len() == 1 {
-                    "failure"
-                } else {
-                    "failures"
-                }
+                if failures.len() == 1 { "failure" } else { "failures" },
+                failures.join("; "),
             );
             if show_checks {
                 claudine::harness::report::report_unhandled_failure(&fail_msg, term);
@@ -2156,144 +1969,19 @@ pub(crate) fn run_harness_loop(
             return Err(eyre!("{fail_msg}"));
         }
 
-        // Evaluate post-checks. In inline mode this now runs against the
-        // post-closure document so file-state checks see the final artifact.
-        let post_report = info_span!(
-            "harness_post_validation",
-            attempt,
-            rule_count = plan.post_checks.len(),
-        )
-        .in_scope(|| {
-            claudine::harness::evaluate_post_checks(
-                &plan,
-                &snapshot,
-                &outcome,
-                Some(&permission_probe),
-            )
-        });
-
-        if show_checks {
-            claudine::harness::report::report_phase_discovery(
-                claudine::harness::FailurePhase::PostCheck,
-                post_report.count(),
-                term,
-            );
-            claudine::harness::report::report_check_outcomes(&post_report, term);
-        }
-
-        if post_report.all_passed() {
-            execute_terminal_event(
-                lifecycle_guard,
-                LifecycleSignal::Success,
-                &materialized,
-                &prompt_state.source_path,
-                repo_root,
-                term,
-                &effect_engine,
-                None,
-                loop_start,
-            );
-            run_lifecycle_event(
-                lifecycle_guard,
-                LifecycleSignal::Finalize,
-                &materialized,
-                &prompt_state.source_path,
-                repo_root,
-                term,
-                &effect_engine,
-                None,
-                loop_start,
-            );
-            terminal_signals = iteration_signals;
-            return Ok((outcome.exit_code, harness_perf, terminal_signals));
-        }
-
-        let failures = post_report.failures();
-        let contexts = claudine::harness::build_validation_failure_context(
-            &failures,
-            provider.as_slug(),
-            plan.source_path.as_path(),
-            attempt,
-            outcome.session_id.clone(),
-            Some(outcome.clone()),
-        );
-        if let Some(next_plan) = super::super::resume::try_resolve_handler(
-            &contexts,
-            &plan,
-            attempt,
-            DEFAULT_MAX_RETRIES,
-            profile,
-            outcome.session_id.as_deref(),
-            &prompt_state.source_path,
-            repo_root,
-            show_checks,
-            term,
-        )? {
-            attempt = next_plan.next_attempt;
-            super::super::resume::apply_next_attempt_plan(prompt_state, &next_plan);
-            continue;
-        }
-        let fail_msg = format!(
-            "post-check validation failed ({} {})",
-            failures.len(),
-            if failures.len() == 1 {
-                "failure"
-            } else {
-                "failures"
-            }
-        );
-        if show_checks {
-            claudine::harness::report::report_unhandled_failure(&fail_msg, term);
-        }
-        let err_info =
-            LifecycleErrorInfo::from_action_failure("post_check", fail_msg.as_str());
-        let failure_outcome = execute_terminal_event(
+        // Post-check validation has been removed; a successful provider run
+        // proceeds directly to the success lifecycle event.
+        execute_terminal_event(
             lifecycle_guard,
-            LifecycleSignal::Failure,
+            LifecycleSignal::Success,
             &materialized,
             &prompt_state.source_path,
             repo_root,
             term,
             &effect_engine,
-            Some(&err_info),
+            None,
             loop_start,
         );
-        match dispatch_terminal_control(
-            LifecycleSignal::Failure,
-            &failure_outcome,
-            attempt,
-            &mut control_budgets,
-            outcome.session_id.as_deref(),
-            profile,
-            provider,
-            prompt_state,
-            &materialized,
-            repo_root,
-            lifecycle_guard,
-            &mut proxy_tracking,
-            term,
-            show_checks,
-        ) {
-            TerminalControlAction::Continue { next_attempt } => {
-                attempt = next_attempt;
-                continue;
-            }
-            TerminalControlAction::Abort(err) => {
-                run_lifecycle_event(
-                    lifecycle_guard,
-                    LifecycleSignal::Finalize,
-                    &materialized,
-                    &prompt_state.source_path,
-                    repo_root,
-                    term,
-                    &effect_engine,
-                    Some(&err_info),
-                    loop_start,
-                );
-                return Err(err);
-            }
-            TerminalControlAction::Fallthrough => {}
-        }
         run_lifecycle_event(
             lifecycle_guard,
             LifecycleSignal::Finalize,
@@ -2302,10 +1990,11 @@ pub(crate) fn run_harness_loop(
             repo_root,
             term,
             &effect_engine,
-            Some(&err_info),
+            None,
             loop_start,
         );
-        return Err(eyre!("{fail_msg}"));
+        terminal_signals = iteration_signals;
+        return Ok((outcome.exit_code, harness_perf, terminal_signals));
     }
 }
 

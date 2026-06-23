@@ -1154,10 +1154,6 @@ fn execute_composition_request_inner_with_guard(
         skip_preflight: bool,
         proxy_source: Option<&Path>,
     | -> Result<SingleCompositionOutcome> {
-        let resolve_ctx = claudine::harness::HarnessResolutionContext {
-            source_path: &request.prepared.resolved_path,
-            repo_root: effective_repo_root,
-        };
         // Composed frontmatter / source-derived base dir, reused by every
         // composition-preflight failure path so the blocked+finalize stacks
         // see the same `frontmatter` and `base_dir` namespaces the
@@ -1174,7 +1170,6 @@ fn execute_composition_request_inner_with_guard(
         let plan = claudine::harness::parse_harness_plan(
             &request.prepared.effective_frontmatter,
             &request.prepared.resolved_path,
-            &resolve_ctx,
         )
         .map_err(|e| {
             // Route through the stack-aware runner so `blocked.stack` and
@@ -1200,18 +1195,9 @@ fn execute_composition_request_inner_with_guard(
             eyre!("{e}")
         })?;
 
-        // Finalize the parsed plan into the effective plan. For inline
-        // composition this prepends a system-owned writability pre-check so
-        // handler recovery paths can respond to permission failures.
-        let plan = claudine::harness::finalize_effective_plan(
-            plan,
-            if is_inline {
-                claudine::harness::EffectivePlanMode::Inline
-            } else {
-                claudine::harness::EffectivePlanMode::Direct
-            },
-            &request.prepared.resolved_path,
-        );
+        // The parsed harness plan is used only for shell-command audit and
+        // timeout configuration; there are no longer pre/post validation
+        // checks that need an effective-plan transform.
 
         // ── Pre-flight shell approval for harness commands ───────────
         if !skip_preflight {
@@ -1278,60 +1264,9 @@ fn execute_composition_request_inner_with_guard(
         // `--quiet` / `--silent` do not suppress this render: the dry-run output
         // *is* the command's purpose.
         if request.dry_run {
-            // Dry-run never launches the provider or mutates the source, but it
-            // must still surface pre-check failures — chiefly the system-owned
-            // inline `has_write_permission` rule injected by
-            // `finalize_effective_plan`. Otherwise a read-only (`0444`) inline
-            // source would render a clean dry-run and exit 0, masking a write
-            // failure the live run would hit. Evaluate the finalized effective
-            // plan's pre-checks with the same `WrapperHarnessPermissionProbe`
-            // the harness loop uses, then hard-fail on any failure: there is no
-            // handler-resolution step here because no provider will run.
-            let permission_probe = super::policy::WrapperHarnessPermissionProbe::new(
-                provider,
-                args_before_prompt.clone(),
-                effective_repo_root,
-            );
-            let pre_report = claudine::harness::evaluate_pre_checks(&plan, Some(&permission_probe));
-            if !pre_report.all_passed() {
-                let failures = pre_report.failures();
-                // Dry-run pre-check failure (e.g. inline source is not
-                // writable) is a composition-preflight blocked path: route
-                // through the stack-aware runner so `blocked.stack` and
-                // `finalize.stack` fire.
-                let failure_count = failures.len();
-                emit_preflight_blocked_and_finalize(
-                    guard,
-                    &lifecycle_effect_engine,
-                    &emitter,
-                    &lifecycle_settings,
-                    &lifecycle_messaging,
-                    &term,
-                    &request.prepared.resolved_path,
-                    effective_repo_root,
-                    base_dir,
-                    frontmatter,
-                    document_start,
-                    claudine::composition::LifecycleErrorInfo::from_action_failure(
-                        "pre_check",
-                        format!(
-                            "pre-check validation failed ({} {})",
-                            failure_count,
-                            if failure_count == 1 { "failure" } else { "failures" }
-                        ),
-                    ),
-                );
-                return Err(eyre!(
-                    "pre-check validation failed ({} {})",
-                    failure_count,
-                    if failure_count == 1 {
-                        "failure"
-                    } else {
-                        "failures"
-                    }
-                ));
-            }
-
+            // Dry-run never launches the provider or mutates the source.
+            // Pre-check validation has been removed; only timeout parsing
+            // and shell-command audit run during composition preflight.
             let render = dry_run::DryRunRender::from_request(&request);
 
             crate::log::data(&render.body);

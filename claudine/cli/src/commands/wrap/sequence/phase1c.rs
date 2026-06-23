@@ -17,7 +17,7 @@ use claudine::composition::{
     self, CompositionError, MissingProperty, PrepareOptions, PreparedComposition,
     ResolvedCompositionSource, SequenceMissingPropertiesStep, SequencePlan,
 };
-use claudine::harness::{HarnessResolutionContext, has_harness_properties, parse_harness_plan};
+use claudine::harness::{has_harness_properties, parse_harness_plan};
 use color_eyre::eyre::{Result, eyre};
 
 use crate::commands::compose::SharedComposeArgs;
@@ -345,15 +345,9 @@ fn run_phase_1c_attempt(
         };
 
         if has_harness_properties(&prepared.effective_frontmatter) {
-            let effective_repo_root = prepared.source_repo_root.as_deref();
-            let resolve_ctx = HarnessResolutionContext {
-                source_path: &prepared.resolved_path,
-                repo_root: effective_repo_root,
-            };
             let harness_plan = parse_harness_plan(
                 &prepared.effective_frontmatter,
                 &prepared.resolved_path,
-                &resolve_ctx,
             )
             .map_err(|e| eyre!("{e}"))?;
             let harness_preflight = composition::resolve_shell_approvals(

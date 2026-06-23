@@ -358,10 +358,6 @@ pub(crate) fn detect_wrapper_harness(
         )?;
         let harness_enabled = claudine::harness::has_harness_properties(&seed.frontmatter);
         if harness_enabled {
-            let resolve_ctx = claudine::harness::HarnessResolutionContext {
-                source_path: &source_path,
-                repo_root: env_plan.repo_root.as_deref(),
-            };
             let shell_options = harness_orch::build_harness_shell_options(
                 &source_path,
                 env_plan.repo_root.as_deref(),
@@ -369,7 +365,6 @@ pub(crate) fn detect_wrapper_harness(
             let plan = claudine::harness::parse_harness_plan(
                 &seed.frontmatter,
                 &source_path,
-                &resolve_ctx,
             )
             .map_err(|e| eyre!("{e}"))?;
 

@@ -1,7 +1,7 @@
 //! Pre-flight shell command approval for provider sessions.
 //!
 //! Scans all sources of shell commands (template directives, harness
-//! pre/post checks, handlers), checks them against the whitelist,
+//! handlers, lifecycle stacks), checks them against the whitelist,
 //! prompts the user for any that need approval, and returns the full
 //! pre-approved set.
 
@@ -36,7 +36,7 @@ pub struct PreFlightResult {
 /// ## Sources
 ///
 /// 1. Template `::shell` directives (via Darkmatter's document graph walker)
-/// 2. Harness pre/post checks and handlers (via existing audit infrastructure)
+/// 2. Harness handlers (programmatic `handle` and declarative `deviate`)
 /// 3. Lifecycle stack shell commands (from every reachable `action: shell`
 ///    across all seven lifecycle events)
 ///
@@ -50,7 +50,7 @@ pub struct PreFlightResult {
 ///
 /// * `markdown` — composed Markdown for template `::shell` discovery.
 /// * `compose_options` — Darkmatter compose options for the template walker.
-/// * `harness_plan` — parsed harness plan for pre/post check discovery.
+/// * `harness_plan` — parsed harness plan for handler discovery.
 /// * `approval_options` — shell approval policy, handler, and cache.
 /// * `lifecycle` — parsed lifecycle configuration; when present, every
 ///   reachable `action: shell` command (and `on_error` command) across all
@@ -215,10 +215,7 @@ pub fn resolve_shell_approvals(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::harness::model::{
-        ApprovedRuntimeCommand, HandlerTable, HarnessPlan, ValidationEvent, ValidationKind,
-        ValidationPhase, ValidationRule, ValidationRuleId,
-    };
+    use crate::harness::model::{ApprovedRuntimeCommand, HandlerTable, HarnessPlan};
     use darkmatter::markdown::compose::shell_expansion::types::{
         ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
     };
@@ -286,8 +283,6 @@ mod tests {
             step_timeout: None,
             timeout_warn: None,
             step_timeout_warn: None,
-            pre_checks: Vec::new(),
-            post_checks: Vec::new(),
             handlers: HandlerTable::default(),
             programmatic_handler: None,
         }
@@ -388,22 +383,10 @@ mod tests {
     #[test]
     fn discovers_commands_from_harness_plan() {
         let mut plan = empty_plan();
-        plan.pre_checks.push(ValidationRule {
-            id: ValidationRuleId(0),
-            event: ValidationEvent::ShellCommand,
-            phase: ValidationPhase::Both,
-            kind: ValidationKind::ShellCommand {
-                command: ApprovedRuntimeCommand {
-                    raw: "echo world".to_string(),
-                    executable: "echo".to_string(),
-                    args: vec!["world".to_string()],
-                },
-                show_stdout: false,
-                show_stderr: false,
-            },
-            message_template: None,
-            subject_key: None,
-            source: None,
+        plan.programmatic_handler = Some(ApprovedRuntimeCommand {
+            raw: "echo world".to_string(),
+            executable: "echo".to_string(),
+            args: vec!["world".to_string()],
         });
 
         let (_dir, approval_options) = approval_options_with_whitelist(&["echo"]);
@@ -438,22 +421,10 @@ mod tests {
         let compose_options = ComposeOptions::new();
 
         let mut plan = empty_plan();
-        plan.pre_checks.push(ValidationRule {
-            id: ValidationRuleId(0),
-            event: ValidationEvent::ShellCommand,
-            phase: ValidationPhase::Both,
-            kind: ValidationKind::ShellCommand {
-                command: ApprovedRuntimeCommand {
-                    raw: "echo hello".to_string(),
-                    executable: "echo".to_string(),
-                    args: vec!["hello".to_string()],
-                },
-                show_stdout: false,
-                show_stderr: false,
-            },
-            message_template: None,
-            subject_key: None,
-            source: None,
+        plan.programmatic_handler = Some(ApprovedRuntimeCommand {
+            raw: "echo hello".to_string(),
+            executable: "echo".to_string(),
+            args: vec!["hello".to_string()],
         });
 
         let (_dir, approval_options) = approval_options_with_whitelist(&["echo"]);
@@ -754,26 +725,12 @@ iteration: \"{{ file_exists('design.md') ? 2 : 1 }}\"\n\
             step_timeout: None,
             timeout_warn: None,
             step_timeout_warn: None,
-            pre_checks: vec![ValidationRule {
-                id: ValidationRuleId(0),
-                event: ValidationEvent::ShellCommand,
-                phase: ValidationPhase::Both,
-                kind: ValidationKind::ShellCommand {
-                    command: ApprovedRuntimeCommand {
-                        raw: raw.to_string(),
-                        executable,
-                        args,
-                    },
-                    show_stdout: false,
-                    show_stderr: false,
-                },
-                message_template: None,
-                subject_key: None,
-                source: None,
-            }],
-            post_checks: Vec::new(),
             handlers: HandlerTable::default(),
-            programmatic_handler: None,
+            programmatic_handler: Some(ApprovedRuntimeCommand {
+                raw: raw.to_string(),
+                executable,
+                args,
+            }),
         }
     }
 
