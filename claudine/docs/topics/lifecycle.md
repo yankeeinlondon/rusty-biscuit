@@ -104,23 +104,25 @@ success:
 
 When `action` is a scalar string, sibling keys are the action's parameters. When `action` is an array, each element is self-contained and sibling parameters are not allowed.
 
-### Control Actions
+### Flow Control Actions
 
-Lifecycle control actions terminate the current event's stack and influence runtime flow:
+Lifecycle flow control actions terminate the current event's stack and influence runtime flow:
 
 | Action | Valid in | Effect |
 |--------|----------|--------|
 | `stop` | every event | End this event's stack cleanly; composition continues with the current outcome |
 | `skip` | `initialize` only | Whole-document opt-out: no provider invocation, no `finalize`, no `loop` |
 | `error("reason")` | every event | Mark this event as failed; at `success`/`finalize` it converts success to failure |
-| `proxy("@other.md")` | `initialize`, `blocked`, `failure`, `finalize` | Hand off to another prompt document, entering the target at its own `initialize` |
-| `retry(N)` | `blocked`, `failure`, `finalize` | Retry the current prompt N additional times |
-| `resume("message")` | `failure`, `finalize` | Resume the agent session with a follow-up message |
-| `requeue("5m")` | `blocked`, `failure`, `finalize` | Push this prompt onto the deferred-execution queue. Daemon-first over rendezvous (UDS on Unix, named pipe on Windows); on any daemon-unreachable failure, durably appends the prompt to a local fallback file (`<config_dir>/claudine/rendezvous/deferred-queue.jsonl`, overridable via `CLAUDINE_RENDEZVOUS_FALLBACK_DIR`) so the prompt is never lost. The run still proceeds to `finalize` normally. |
+| `proxy("@other.md")` | every event | Hand off to another prompt document, entering the target at its own `initialize` |
+| `retry(N)` | every event | Retry the current prompt N additional times (re-runs pre-flight pre-launch, re-invokes the agent post-launch) |
+| `resume("message")` | every event | Resume the agent session with a follow-up message. Needs a live session — pre-launch it surfaces a `ResumeWithoutSession` error |
+| `requeue("5m")` | every event | Push this prompt onto the deferred-execution queue. Daemon-first over rendezvous (UDS on Unix, named pipe on Windows); on any daemon-unreachable failure, durably appends the prompt to a local fallback file (`<config_dir>/claudine/rendezvous/deferred-queue.jsonl`, overridable via `CLAUDINE_RENDEZVOUS_FALLBACK_DIR`) so the prompt is never lost. The run still proceeds to `finalize` normally. |
 
-At most one control action may appear in a stack item, and it must be the last action.
+At most one flow-control action may appear in a stack item, and it must be the last action.
 
-**`finalize` is a recovery surface.** `finalize` is the only terminal event that may carry an error, so it doubles as a last-chance recovery handler: a `finalize.stack` (typically guarded by `when: "err"`) can `retry`, `resume`, `requeue`, or `proxy` exactly as `failure` can. A `finalize` recovery re-enters the run — re-running `start` → agent → terminal → `finalize` — or hands off, bounded by the same per-control `max_attempts` budget. This is the canonical pairing for "verify in `success`, recover in `finalize`": a `success.stack` raises `error()` (which routes through the `failure` event), and the subsequent `finalize` — now carrying `err` — retries.
+**Flow control is universal.** Flow control reacts to **state** — an error, a missing file, an `env` value, frontmatter — and an error is just one kind of state. So `error`/`stop`/`retry`/`resume`/`requeue`/`proxy` are valid in **every** event. The headline example: a `success` stack can `resume("you finished but never wrote abc.md — create it as instructed")` when the agent completed cleanly but an expected artifact is missing. The only placement rule is `skip` (`initialize`-only). Apparent event-specific behavior is **runtime capability**, not placement: `resume` needs a live session (pre-launch → `ResumeWithoutSession`) and `retry`'s re-entry point is derived from whether the provider had launched. This is enforced once, at parse time; at runtime every event's stack dispatches its control through the same event-agnostic path. The iteration `loop:` (while/until) is a separate mechanism and is never coupled to handler dispatch.
+
+The provider run-loop events — `start`, `success`, `failure`, `finalize` — dispatch every flow-control action fully (this is where `success` + `resume` lives). The events that sit *outside* that loop — `initialize`, a compose pre-flight `blocked`, and the `loop` gate — handle `error`/`stop` (and `proxy`/`skip` at `initialize`) directly, but `retry`/`requeue`/`proxy` from those events have no re-entry loop to act on yet, so they surface a clear typed error (`LifecycleSetupPhaseRecoveryUnsupported`) rather than a silent no-op. Put recovery on a post-launch event, or use `initialize` `proxy` for pre-launch routing.
 
 ### Shell Actions
 
@@ -388,29 +390,7 @@ failure:
 
 The `effect` field accepts a kebab-case name from the built-in catalog. Names are matched after stripping hyphens and lowercasing.
 
-### UI Sounds
-
-`doorbell`, `doorbell-2`, `space-alarm`, `dit-hit-1`, `dit-hit-2`, `electronic-hit-fx1`–`fx6`, `bong`, `click`, `confirmation`, `drop-1`–`drop-4`, `error-1`–`error-2`, `glass-1`–`glass-4`, `maximize-1`–`maximize-5`, `minimize-1`–`minimize-3`, `mouseclick`, `pluck-1`–`pluck-2`, `question-1`–`question-2`, `select-1`–`select-4`, `switch-1`–`switch-2`
-
-### Cartoon Sounds
-
-`cartoon-accent1`–`accent12`, `cartoon-cry`
-
-### Reaction Sounds
-
-`crowd-applause`, `crowd-applause-recital`, `crowd-applause-stadium`, `crowd-laugh`, `crowd-laugh-applause`, `sad-trombone`, `small-group-cheer`, `female-astonished-gasp`, `sneeze`
-
-### Sci-Fi Sounds
-
-`high-down`, `high-up`, `two-tone`, `phase-jump-1`–`jump-5`, `phaser-down-1`–`down-3`
-
-### Atmosphere Sounds
-
-`creepy-dark-logo`, `elemental-magic-spell-impact`, `epic-orchestra-transition`, `mysterious-bass`, `retro-game`
-
-### Motion Sounds
-
-`air-reverse-burst`, `air-woosh`, `air-zoom-vacuum`, `arrow-whoosh`, `bicycle-horn`, `bottle-cork`, `bullet`
+- see [sound effects](./sound-effects.md) for an enumeration of sound effects
 
 ## State Machine
 
