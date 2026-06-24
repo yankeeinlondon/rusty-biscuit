@@ -177,7 +177,7 @@ fn emit_preflight_blocked_and_finalize(
     frontmatter: &serde_json::Map<String, serde_json::Value>,
     document_start: std::time::Instant,
     err_info: claudine::composition::LifecycleErrorInfo,
-) {
+) -> Option<StackControl> {
     let timing = claudine::composition::LifecycleTiming::from_instants(
         document_start,
         None,
@@ -203,7 +203,7 @@ fn emit_preflight_blocked_and_finalize(
         messaging,
         settings,
     };
-    guard.execute_event(LifecycleSignal::Blocked, &blocked_ctx);
+    let blocked_outcome = guard.execute_event(LifecycleSignal::Blocked, &blocked_ctx);
 
     // The finalize stack reuses the same frontmatter / globals / side-effect
     // routes as the blocked stack; only the signal differs. `with_signal`
@@ -213,6 +213,48 @@ fn emit_preflight_blocked_and_finalize(
     // arguments, not pulled out of the guard).
     let finalize_ctx = blocked_ctx.with_signal(LifecycleSignal::Finalize);
     guard.execute_event(LifecycleSignal::Finalize, &finalize_ctx);
+
+    // Surface the blocked stack's flow-control action (if any) so the caller can
+    // dispatch it. At the compose pre-flight layer the provider has not launched
+    // and there is no run-loop to re-enter, so the caller maps `resume` →
+    // `ResumeWithoutSession` and `retry`/`requeue`/`proxy` → a typed
+    // setup-phase-deferred error rather than silently dropping the control.
+    blocked_outcome.control
+}
+
+/// Translate a compose pre-flight `blocked` stack's surfaced flow-control action
+/// into the error that should replace the generic blocked error.
+///
+/// At this layer the provider has not launched and there is no run-loop to
+/// re-enter, so `resume` reports `ResumeWithoutSession` and `retry`/`requeue`/
+/// `proxy` report the typed setup-phase-deferred error (a `blocked`-proxy is
+/// decided mid-pre-flight, so it needs the same re-entry a `retry` would).
+/// Returns `None` for `stop`/`error`/no-control, leaving the original blocked
+/// error in place.
+fn preflight_blocked_control_error(
+    control: Option<StackControl>,
+    source_path: &Path,
+) -> Option<CompositionError> {
+    match control? {
+        StackControl::Resume { .. } => Some(CompositionError::LifecycleResumeWithoutSession {
+            source_path: source_path.to_path_buf(),
+        }),
+        StackControl::Retry { .. } => Some(setup_phase_deferred("blocked", "retry", source_path)),
+        StackControl::Requeue { .. } => {
+            Some(setup_phase_deferred("blocked", "requeue", source_path))
+        }
+        StackControl::Proxy { .. } => Some(setup_phase_deferred("blocked", "proxy", source_path)),
+        StackControl::Stop | StackControl::Skip | StackControl::Error { .. } => None,
+    }
+}
+
+/// Build the typed setup-phase-deferred-recovery error.
+fn setup_phase_deferred(event: &str, action: &str, source_path: &Path) -> CompositionError {
+    CompositionError::LifecycleSetupPhaseRecoveryUnsupported {
+        source_path: source_path.to_path_buf(),
+        event: event.to_string(),
+        action: action.to_string(),
+    }
 }
 
 /// Result of executing a single composition step through the wrapper pipeline.
@@ -1175,7 +1217,7 @@ fn execute_composition_request_inner_with_guard(
             // Route through the stack-aware runner so `blocked.stack` and
             // `finalize.stack` fire (spec.md:436/650/652), not just the
             // legacy top-level surface.
-            emit_preflight_blocked_and_finalize(
+            let blocked_control = emit_preflight_blocked_and_finalize(
                 guard,
                 &lifecycle_effect_engine,
                 &emitter,
@@ -1192,7 +1234,13 @@ fn execute_composition_request_inner_with_guard(
                     e.to_string(),
                 ),
             );
-            eyre!("{e}")
+            match preflight_blocked_control_error(
+                blocked_control,
+                &request.prepared.resolved_path,
+            ) {
+                Some(ce) => ce.into(),
+                None => eyre!("{e}"),
+            }
         })?;
 
         // The parsed harness plan is used only for shell-command audit and
@@ -1213,7 +1261,7 @@ fn execute_composition_request_inner_with_guard(
                 // is a composition-preflight blocked path: route through
                 // the stack-aware runner so `blocked.stack` and
                 // `finalize.stack` fire.
-                emit_preflight_blocked_and_finalize(
+                let blocked_control = emit_preflight_blocked_and_finalize(
                     guard,
                     &lifecycle_effect_engine,
                     &emitter,
@@ -1230,7 +1278,13 @@ fn execute_composition_request_inner_with_guard(
                         e.to_string(),
                     ),
                 );
-                eyre!("{e}")
+                match preflight_blocked_control_error(
+                    blocked_control,
+                    &request.prepared.resolved_path,
+                ) {
+                    Some(ce) => ce.into(),
+                    None => eyre!("{e}"),
+                }
             })?;
 
             // Emit the preflight-complete indicator for direct compose and
@@ -1625,13 +1679,28 @@ fn execute_composition_request_inner_with_guard(
                 }
                 init_proxy_target = Some(resolved);
             }
-            StackControl::Retry { .. }
-            | StackControl::Resume { .. }
-            | StackControl::Requeue { .. }
-            | StackControl::Stop => {
-                return Err(eyre!(
-                    "lifecycle control action {control:?} is not valid at initialize"
-                ));
+            StackControl::Stop => {}
+            StackControl::Resume { .. } => {
+                // Pre-launch: there is no provider session to resume.
+                return Err(CompositionError::LifecycleResumeWithoutSession {
+                    source_path: request.prepared.resolved_path.clone(),
+                }
+                .into());
+            }
+            StackControl::Retry { .. } | StackControl::Requeue { .. } => {
+                // `retry` (re-run pre-flight) and `requeue` (deferred-queue) need
+                // run-loop re-entry that does not exist in the setup phase.
+                let action = if matches!(control, StackControl::Retry { .. }) {
+                    "retry"
+                } else {
+                    "requeue"
+                };
+                return Err(CompositionError::LifecycleSetupPhaseRecoveryUnsupported {
+                    source_path: request.prepared.resolved_path.clone(),
+                    event: "initialize".to_string(),
+                    action: action.to_string(),
+                }
+                .into());
             }
         }
     }

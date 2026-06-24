@@ -283,6 +283,11 @@ fn emit_blocked_finalize_with_err(
     } else {
         LifecycleSignal::Blocked
     };
+    // NOTE: these are rare internal setup-failure paths (materialize /
+    // target-lifecycle parse) reached inside `inspect_err`/`Err` arms that
+    // propagate their own error. A `blocked.stack` flow-control action here is
+    // not yet dispatched — the common compose pre-flight `blocked` path (shell
+    // audit / schema) is handled by `preflight_blocked_control_error`.
     run_lifecycle_event(
         guard,
         terminal,
@@ -855,8 +860,15 @@ enum TargetInitializeAction {
     Repoint { resolved: std::path::PathBuf },
 }
 
-/// Translate a terminal `failure`/`blocked` event's [`StackControl`] into a
-/// loop action, applying the retry/resume/proxy/requeue runtime effect.
+/// Translate **any** lifecycle event's stack [`StackControl`] into a loop
+/// action, applying the retry/resume/proxy/requeue runtime effect.
+///
+/// This is the single, **event-agnostic** handler-dispatch path shared by every
+/// event whose stack can carry a recovery handler (`blocked`/`failure`/
+/// `finalize`). Which control is *valid* in which event is the parse-time
+/// pre-scan's job, so this function does not branch on the event; it derives
+/// `Retry` re-entry from the guard's `provider_launched()` state, not the
+/// signal.
 ///
 /// Reuses the existing redirect/resume substrate: a retry bumps the attempt
 /// and `continue`s; a resume seeds `next_resume_session_id` +
@@ -865,7 +877,6 @@ enum TargetInitializeAction {
 /// materialized prompt in rendezvous and exits the current run.
 #[allow(clippy::too_many_arguments)]
 fn dispatch_terminal_control(
-    signal: LifecycleSignal,
     outcome: &LifecycleEventOutcome,
     attempt: u32,
     budgets: &mut ControlBudgets,
@@ -895,13 +906,22 @@ fn dispatch_terminal_control(
         _ => 0,
     };
 
-    let dispatch = decide_control(signal, control, attempt, budget, session_id.is_some());
+    let dispatch = decide_control(
+        control,
+        attempt,
+        budget,
+        session_id.is_some(),
+        lifecycle_guard.provider_launched(),
+    );
 
     match dispatch {
         ControlDispatch::Stop | ControlDispatch::Exhausted => TerminalControlAction::Fallthrough,
-        ControlDispatch::Retry { delay, from_blocked } => {
+        ControlDispatch::Retry {
+            delay,
+            reenter_preflight,
+        } => {
             if show_checks {
-                let what = if from_blocked { "pre-flight" } else { "the agent" };
+                let what = if reenter_preflight { "pre-flight" } else { "the agent" };
                 claudine::harness::report::report_lifecycle_recovery(
                     &format!("lifecycle retry: re-running {what} (attempt {})", attempt + 1),
                     term,
@@ -1088,7 +1108,6 @@ fn run_finalize_with_recovery(
         loop_start,
     );
     dispatch_terminal_control(
-        LifecycleSignal::Finalize,
         &finalize_outcome,
         attempt,
         budgets,
@@ -1544,11 +1563,45 @@ pub(crate) fn run_harness_loop(
                     return Err(eyre!(msg));
                 }
                 StackControl::Stop => {}
-                _ => {
-                    return Err(eyre!(
-                        "lifecycle control action {control:?} is not valid at start"
-                    ));
-                }
+                // retry/resume/proxy/requeue at `start` dispatch through the
+                // uniform path. The provider has not launched yet, so `resume`
+                // surfaces `ResumeWithoutSession` and `retry` re-enters before
+                // the agent runs.
+                _ => match dispatch_terminal_control(
+                    &start_outcome,
+                    attempt,
+                    &mut control_budgets,
+                    None,
+                    profile,
+                    provider,
+                    prompt_state,
+                    &materialized,
+                    repo_root,
+                    lifecycle_guard,
+                    &mut proxy_tracking,
+                    term,
+                    show_checks,
+                ) {
+                    TerminalControlAction::Continue { next_attempt } => {
+                        attempt = next_attempt;
+                        continue;
+                    }
+                    TerminalControlAction::Abort(err) => {
+                        run_lifecycle_event(
+                            lifecycle_guard,
+                            LifecycleSignal::Finalize,
+                            &materialized,
+                            &prompt_state.source_path,
+                            repo_root,
+                            term,
+                            &effect_engine,
+                            None,
+                            loop_start,
+                        );
+                        return Err(err);
+                    }
+                    TerminalControlAction::Fallthrough => {}
+                },
             }
         }
         if start_outcome.routes_to_failure(LifecycleSignal::Start) {
@@ -1806,7 +1859,6 @@ pub(crate) fn run_harness_loop(
             // (retry/resume/requeue/proxy). Dispatch it before finalizing so a
             // re-entry skips finalize for this iteration.
             match dispatch_terminal_control(
-                LifecycleSignal::Failure,
                 &failure_outcome,
                 attempt,
                 &mut control_budgets,
@@ -1912,7 +1964,6 @@ pub(crate) fn run_harness_loop(
             )
             .outcome;
             match dispatch_terminal_control(
-                LifecycleSignal::Failure,
                 &failure_outcome,
                 attempt,
                 &mut control_budgets,
@@ -1974,11 +2025,13 @@ pub(crate) fn run_harness_loop(
             return Err(eyre!("{fail_msg}"));
         }
 
-        // Post-check validation has been removed; a successful provider run
-        // proceeds directly to the success lifecycle event. A `success.stack`
-        // may still verify the run and downgrade it via `error()`, which routes
-        // through the `failure` event (run inside `execute_terminal_event`) and
-        // carries an `err` into `finalize`.
+        // A successful provider run proceeds to the success lifecycle event.
+        // The `success.stack` may end in a flow-control action — either a direct
+        // `resume`/`retry`/`proxy`/`requeue` (e.g. the agent finished but an
+        // expected artifact is missing, so `resume` it), or an `error()` that
+        // downgrades the run to failure (handled inside `execute_terminal_event`,
+        // which then carries an `err` into `finalize`). Both surface as
+        // `success.outcome.control`, so dispatch it uniformly.
         let success = execute_terminal_event(
             lifecycle_guard,
             LifecycleSignal::Success,
@@ -1990,46 +2043,40 @@ pub(crate) fn run_harness_loop(
             None,
             loop_start,
         );
-        // When the success stack downgraded to failure, give the failure
-        // event's own recovery stack a chance before finalize (parity with a
-        // provider failure routing through `failure`).
-        if success.downgrade_err.is_some() {
-            match dispatch_terminal_control(
-                LifecycleSignal::Failure,
-                &success.outcome,
-                attempt,
-                &mut control_budgets,
-                outcome.session_id.as_deref(),
-                profile,
-                provider,
-                prompt_state,
-                &materialized,
-                repo_root,
-                lifecycle_guard,
-                &mut proxy_tracking,
-                term,
-                show_checks,
-            ) {
-                TerminalControlAction::Continue { next_attempt } => {
-                    attempt = next_attempt;
-                    continue;
-                }
-                TerminalControlAction::Abort(err) => {
-                    run_lifecycle_event(
-                        lifecycle_guard,
-                        LifecycleSignal::Finalize,
-                        &materialized,
-                        &prompt_state.source_path,
-                        repo_root,
-                        term,
-                        &effect_engine,
-                        success.downgrade_err.as_ref(),
-                        loop_start,
-                    );
-                    return Err(err);
-                }
-                TerminalControlAction::Fallthrough => {}
+        match dispatch_terminal_control(
+            &success.outcome,
+            attempt,
+            &mut control_budgets,
+            outcome.session_id.as_deref(),
+            profile,
+            provider,
+            prompt_state,
+            &materialized,
+            repo_root,
+            lifecycle_guard,
+            &mut proxy_tracking,
+            term,
+            show_checks,
+        ) {
+            TerminalControlAction::Continue { next_attempt } => {
+                attempt = next_attempt;
+                continue;
             }
+            TerminalControlAction::Abort(err) => {
+                run_lifecycle_event(
+                    lifecycle_guard,
+                    LifecycleSignal::Finalize,
+                    &materialized,
+                    &prompt_state.source_path,
+                    repo_root,
+                    term,
+                    &effect_engine,
+                    success.downgrade_err.as_ref(),
+                    loop_start,
+                );
+                return Err(err);
+            }
+            TerminalControlAction::Fallthrough => {}
         }
         // `finalize` carries the downgrade `err` (if any) and may recover.
         match run_finalize_with_recovery(
@@ -2743,7 +2790,6 @@ mod terminal_event_tests {
             delay: "0s".to_string(),
         });
         let action = dispatch_terminal_control(
-            LifecycleSignal::Failure,
             &outcome,
             1,
             &mut budgets,
@@ -2794,7 +2840,6 @@ mod terminal_event_tests {
             delay: "0s".to_string(),
         });
         let action = dispatch_terminal_control(
-            LifecycleSignal::Finalize,
             &outcome,
             1,
             &mut budgets,
@@ -2839,7 +2884,6 @@ mod terminal_event_tests {
             max_attempts: 1,
         });
         let action = dispatch_terminal_control(
-            LifecycleSignal::Finalize,
             &outcome,
             1,
             &mut budgets,
@@ -2884,7 +2928,6 @@ mod terminal_event_tests {
         });
         // attempt 2 has reached the ceiling → fall through (no continue).
         let action = dispatch_terminal_control(
-            LifecycleSignal::Failure,
             &outcome,
             2,
             &mut budgets,
@@ -2922,7 +2965,6 @@ mod terminal_event_tests {
             max_attempts: 1,
         });
         let action = dispatch_terminal_control(
-            LifecycleSignal::Failure,
             &outcome,
             1,
             &mut budgets,
@@ -2967,7 +3009,6 @@ mod terminal_event_tests {
             max_attempts: 1,
         });
         let action = dispatch_terminal_control(
-            LifecycleSignal::Failure,
             &outcome,
             1,
             &mut budgets,
@@ -2985,7 +3026,7 @@ mod terminal_event_tests {
         match action {
             TerminalControlAction::Abort(err) => {
                 assert!(
-                    err.to_string().contains("requires a provider session"),
+                    err.to_string().contains("requires a live provider session"),
                     "unexpected: {err}"
                 );
             }
@@ -3016,7 +3057,6 @@ mod terminal_event_tests {
             target: target.display().to_string(),
         });
         let action = dispatch_terminal_control(
-            LifecycleSignal::Failure,
             &outcome,
             3,
             &mut budgets,
@@ -3061,7 +3101,6 @@ mod terminal_event_tests {
             reason: Some("later".to_string()),
         });
         let action = dispatch_terminal_control(
-            LifecycleSignal::Failure,
             &outcome,
             1,
             &mut budgets,
@@ -3104,7 +3143,6 @@ mod terminal_event_tests {
         let mut state = prompt_state(&fx.source_path);
         let mut budgets = ControlBudgets::default();
         let action = dispatch_terminal_control(
-            LifecycleSignal::Failure,
             &outcome_with(StackControl::Stop),
             1,
             &mut budgets,
@@ -3137,7 +3175,6 @@ mod terminal_event_tests {
         let mut state = prompt_state(&fx.source_path);
         let mut budgets = ControlBudgets::default();
         let action = dispatch_terminal_control(
-            LifecycleSignal::Failure,
             &LifecycleEventOutcome::default(),
             1,
             &mut budgets,
