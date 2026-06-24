@@ -12,6 +12,12 @@ area: "{{ ctx.area }}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
 total_phases: "{{ frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') }}"
 spec_file: "{{ file_exists(spec) ? spec : file_exists(join(dirname, 'spec.md')) ? join(dirname, 'spec.md')  :  '' }}"
+initialize:
+    stack:
+        when: "phase >= total_phases"
+        action:
+            - warn: "There was an attempt to implement a phase [{{phase}}] of the plan which is larger than any phase the plan has [{{total_phases}}]"
+            
 start:
     message: "🎬  starting the implementation of phase **#{{phase}}** of `{{parent_dir(plan)}}`\n> &nbsp;&nbsp;&nbsp;&nbsp;**area:** {{ctx.area}}, **agent:** {{ctx.agent}}/{{ctx.model}}"
 success: 
