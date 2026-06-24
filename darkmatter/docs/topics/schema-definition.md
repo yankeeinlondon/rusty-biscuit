@@ -72,7 +72,7 @@ Every property value follows one of four shapes:
 - **Multiple constraints** are separated by `;`.
 - **Optional by default** — properties are optional unless `required` appears in the constraint list. An optional property also accepts `null` as a sentinel for absent, so a frontmatter value that resolves to `null` validates the same way as a missing key.
 - **Arrays** are written by appending `[]` to the type. Item constraints sit inside the parens that precede the brackets; constraints on the array itself sit in a second parens after the brackets.
-- **Descriptions** (`-> ...`) populate the `description` annotation in the generated JSON Schema. Inside an inline object, a description terminates at the next top-level comma or closing brace (see [Inline Object Literals](#inline-object-literals)).
+- **Descriptions** (`-> ...`) populate the `description` annotation in the generated JSON Schema. Inside an inline object, a description terminates at the next top-level comma or closing brace (see [Inline Object Literals](#inline-object-literals)). When a property fails validation, its declared description surfaces at the point of failure — in `md schema validate` (pretty and JSON output) and in compose schema-failure blocks (see [Error Rendering](#error-rendering)).
 - **Inline object literals** are an extension of the type-expression grammar. The whole `{ ... }` body is a single string scalar that the string-layer parser recognizes. YAML mapping values at a property position are still errors — quote the mapping as a string to opt into inline object syntax.
 
 ```yaml
@@ -107,7 +107,7 @@ Append `[]` to any type for an array of that type — e.g. `string[]`, `enum(red
 Every type accepts:
 
 - `required` — the property must be present.
-- `default(value)` — JSON Schema `default`. Darkmatter does **not** mutate documents; downstream tools and detection honour it.
+- `default(value)` — JSON Schema `default`. Darkmatter does **not** mutate documents; downstream tools and detection honor it.
 
 ### Numeric Constraints (`number`)
 
@@ -566,9 +566,16 @@ post.md  ✓ valid (schema: ./schemas/post.yaml)
 draft.md  ✗ 2 problems
   • title "title" is a required property
       at line 2, column 1 of frontmatter
+      The author's full name
   • tags[2] does not match pattern ^[a-z0-9-]+$
       at line 6, column 5 of frontmatter
 ```
+
+When the failing property declares a `description` (via `-> ...`, an inline-object
+per-property description, or a `description` keyword in a referenced JSON Schema),
+that text renders as a dimmed sub-line one indent level beneath the problem bullet.
+The sub-line is omitted entirely when the property declares no description, so a
+description-less schema produces no extra lines.
 
 For root-union failures, problems are prefixed with `arm[N]`:
 
@@ -584,10 +591,15 @@ Line/column positions are drawn from the **original frontmatter text** (with the
 ```json
 {"file":"post.md","valid":true,"schema":"./schemas/post.yaml","problems":[]}
 {"file":"draft.md","valid":false,"schema":null,"problems":[
-  {"path":"/title","message":"\"title\" is a required property","line":2,"column":1,"arm_index":null},
-  {"path":"/tags/2","message":"does not match pattern ^[a-z0-9-]+$","line":6,"column":5,"arm_index":null}
+  {"path":"/title","message":"\"title\" is a required property","line":2,"column":1,"arm_index":null,"description":"The author's full name"},
+  {"path":"/tags/2","message":"does not match pattern ^[a-z0-9-]+$","line":6,"column":5,"arm_index":null,"description":null}
 ]}
 ```
+
+Each problem carries a `description` field: the failing property's declared
+description string when one is resolved, or `null` when the property declares no
+description (or the description was suppressed because it was whitespace-only or
+byte-for-byte equal to the problem message).
 
 Parse errors and schema-load failures emit JSON entries with an `error` key (`"frontmatter_parse"` or `"schema"`) and an empty `problems` array.
 
@@ -880,7 +892,10 @@ There is no CLI flag for baseline injection in this version; `md compose` honors
   - Wrong type: `type <inverse>property</inverse>: <message>`.
   - Constraint / format failure: `invalid <inverse>property</inverse>: <message>`.
 - Each bullet carries the YAML source `line:col` when available.
+- **Per-problem description sub-line**: when the failing property declares a description (via `-> ...`, an inline-object per-property description, or a `description` keyword in a referenced JSON Schema), it renders as a sub-line beneath the bullet, reusing the same dimmed-italic treatment as the document-level `description:` line. The document-level and per-problem description lines coexist. Schema-preparation failures (empty problems list) render no per-problem description.
 - Root-union failures include the arm index (e.g. `schema arm 2`).
+
+The same `->` description now surfaces at the point of failure across all three surfaces — `md schema validate` (pretty and JSON) and the compose schema-failure block — so the author sees what the failing property is *for* without leaving the error.
 
 Schema-preparation errors (unparseable `$schema`, missing referenced file, etc.) produce a block with `schema could not be prepared: <detail>` and an empty problems list, distinguishing them from validation failures (`frontmatter did not satisfy the schema`).
 
