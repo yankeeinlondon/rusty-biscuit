@@ -45,7 +45,20 @@ When a user types `claudine compose ` they are now ready to specify the Markdown
     - shell completions would recognize that the user wants to use the magic path syntax and that `@prompts/plan.md` is a valid completion
     - once the user presses ENTER and the claudine process kicks off it will do the final resolution back to the single file
 
+### `sequence` operation
+
+The `claudine sequence` command completion should 100% mimic that of `claudine compose` except that the glob pattern for files would include not just Markdown files but also YAML files which at the root level define: `kind: sequence`.
+
 ### `inline-compose` operation
+
+The `claudine inline-compose <file>` operation is similar but not the same as `compose` and `sequence`:
+
+- where as `compose` and `sequence` look for prompt files in a set of folder locations, 
+- by comparison `inline-compose` has no associated set of folders to look in; instead it:
+    - looks for Markdown files in the directory tree starting with `${CWD}` and keeps only those which define one of the following Frontmatter properties:
+        - `prompt` (Note: this is today the way that a inline-compose file operates ... by using the `prompt` property as the prompt passed to the agentic CLI)
+        - `sections` (Note: this references a future capability more so than a current one)
+    - Note: unlike the other commands, the glob scoping is ALWAYS based on CWD and doesn't consider repo root, package roots, etc.
 
 
 ### Frontmatter Completion in `compose` / `inline-compose` / `sequence`
@@ -82,3 +95,43 @@ When a user types `claudine compose ` they are now ready to specify the Markdown
 
 
 ## Autocomplete
+
+- shell completions will help a user tab-complete an incomplete value into a fully complete value but a nice companion to that is allowing a user to type in the incomplete value and have claudine then figure out what the user meant
+- the hints that exist for shell completions will help us here too
+
+### `compose` | `inline-compose` | `sequence` operation file
+
+- if a user says `claudine <compose|inline-compose|sequence> plan` and presses enter we know that "plan" is a reference to a file and so we use glob patterns to find it:
+- the glob pattern identifies _possible_ matches
+    - we use the same glob patterns for `compose`/`sequence` and `inline-compose` here as we do for shell completions
+- when the user passes in "plan" then we can filter the glob matches by those with `*plan*` in the filename/filepath
+- when there is a **singular** match we should:
+    - present a **confirmation dialog**:
+        - **badge** and **name** 
+            - the "badge" indicates to the caller whether the file is a "Compose", "Inline Compose", or "Sequence" operation (it should use background colors to separate it from the rest of the page ... similar to in style as the badges which Claudine already displays as part of it's "execution line" when starting up)
+            - the badge and name reside on the same line and are separated by a single space
+            - target document has not defined the `name` Frontmatter 
+                - the filename with path (as an OSC8 link so that user can click through to see the referenced file)
+            - target _has_ defined the `name` frontmatter
+                - the name property's value is displayed in bold with the filepath in parenthesis in dim and blue text (the path is a OSC8 link)
+        - **description**
+            - the content is derived from the `description` Frontmatter property when available but defaults to "no description" if not defined
+            - it will be vertically below the **name** but with a blank line in between
+            - the text in the description should use BlockQuote formatting with a grey left vertical bar
+        - **schema**
+            - describe the `$schema` of the document if defined
+            - if not defined then simply:
+                - `**Schema:**
+                - (blank line)
+                - `- <dim><i>no schema defined</i></dim>`
+        - **confirmation**
+            - Finally add a confirmation dialog: 
+                - `Use this file? (Y/n)`
+- when there is more than one match we should:
+    - present a list of files that match
+    - this will need to use a TUI based widget so that:
+        - the user can move up and down through the list of possible matches
+        - this will likely use the `ChooseMany` TUI component from `biscuit-tui`
+        - however, this TUI has two main windows:
+            - the list of possible files
+            - the information about that file (same information as we used in the confirmation dialog)
