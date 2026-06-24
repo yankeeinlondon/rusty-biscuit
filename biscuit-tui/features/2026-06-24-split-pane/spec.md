@@ -1,15 +1,24 @@
 ---
 clarified: claude/claude-opus-4-8
+reviewed: true
+review_iterations: 1
+status: ready for planning and implementation
 ---
 
-# SplitPane — Draft Design Specification
+# SplitPane — Design Specification
 
-> **Status:** DRAFT — open architectural questions have now been **resolved**
-> through review (see [§9](#9-open-questions--decisions)); the document is ready
-> for an implementation plan. Decision markers below read **[DECISION — Dn —
-> RESOLVED]**.
+> **Status:** Ready for planning and implementation — open architectural
+> questions have now been **resolved** through review (see
+> [§9](#9-open-questions--decisions)). Decision markers below read
+> **[DECISION — Dn — RESOLVED]**.
 > **Date:** 2026-06-24
 > **Area:** `biscuit-tui/lib`
+
+> **Inline review note:** This review keeps the geometry-only v1 decision,
+> tightens public API placement/export expectations, removes an accidental
+> agent-skill instruction from the testing section, and makes the companion
+> `ChooseOneState` accessor work explicit enough to plan without changing
+> `ChoiceOption`'s data model.
 
 ## 1. Summary
 
@@ -40,7 +49,7 @@ Today an embedding application that wants two panes reaches for raw ratatui
 
 - A named, self-documenting 2-pane abstraction with a 50/50 default.
 - A single place to encode the orientation vocabulary unambiguously
-  (see [§4.1](#41-orientation-the-naming-trap)).
+  (see [§4.1](#41-orientation-semantics)).
 - A clean home for the common **master/detail** layout (a selection list whose
   highlight drives a derived detail pane — see [§6.4](#64-masterdetail-a-first-class-pattern)).
 
@@ -86,6 +95,14 @@ Adding the wrapper later is **strictly additive** — it is a new type that call
 only genuinely irreversible sub-decision (its state model) is therefore
 deferred until a real call site informs it (resolved direction in
 [§8](#8-future-enhancements): a **named** `SplitPaneState`, not a tuple).
+
+**[DECISION — D7 — RESOLVED]** The module home is `core`, not `components`.
+Implement `biscuit-tui/lib/src/core/split_pane.rs`, add `pub mod split_pane;`
+from `core/mod.rs`, and re-export `SplitPane`, `SplitDirection`, and
+`SplitRatio` from both `biscuit_tui::core` and `biscuit_tui::prelude`. This
+matches the existing `FrameChrome` placement for container/layout primitives.
+`ResolvedAxis` remains private because `Auto` resolution is an implementation
+detail in v1.
 
 ## 4. Public API (proposed)
 
@@ -242,6 +259,21 @@ that case is explicitly documented and tested. Deliberate hiding of a pane is
 explicit API (e.g. a collapse flag) so that "zero" is always intentional and
 named.
 
+Implement the clamping through constructors/builders rather than by trusting raw
+enum values at call sites:
+
+```rust
+impl SplitRatio {
+    pub fn percent(p: u8) -> Self { Self::Percent(p.clamp(1, 99)) }
+    pub fn first_fixed(n: u16) -> Self { Self::FirstFixed(n.max(1)) }
+    pub fn second_fixed(n: u16) -> Self { Self::SecondFixed(n.max(1)) }
+}
+```
+
+`SplitPane::with_ratio` must normalize incoming enum values with the same rules,
+so even direct `SplitRatio::Percent(0)` / `SplitRatio::FirstFixed(0)` values
+cannot bypass the invariant. `Default` should call `SplitRatio::percent(50)`.
+
 ### 4.3 The geometry core
 
 ```rust
@@ -290,6 +322,12 @@ impl SplitPane {
 }
 ```
 
+The type derives `Default`, but any default or builder implementation must route
+through the normalization rules in [§4.2](#42-split-ratio). Keeping the enum
+fields public is acceptable for pattern matching and simple construction, but
+`split()` is still responsible for defending against unnormalized values so
+library callers cannot create invalid geometry by bypassing builders.
+
 `split` is a thin wrapper over ratatui `Layout`, operating on the **resolved**
 axis (no `Auto`, hence no `unreachable!`):
 
@@ -306,7 +344,8 @@ let constraints = match self.ratio {
     SplitRatio::FirstFixed(n)  => [Constraint::Length(n), Constraint::Min(1)],
     SplitRatio::SecondFixed(n) => [Constraint::Min(1), Constraint::Length(n)],
 };
-// `gap` becomes Layout::spacing(self.gap) (ratatui 0.30 supports spacing):
+// `gap` becomes Layout::spacing(self.gap) (the current crate uses ratatui 0.30,
+// which supports spacing):
 // the fixed pane keeps exactly its `n`; the gap is removed from the total
 // and the flexible pane absorbs it (see §5.1).
 ```
@@ -316,7 +355,24 @@ let constraints = match self.ratio {
 > the *second* pane for a given constraint set, `split()` must post-adjust the
 > two rects so the documented (and tested) rule holds.
 
-### 4.4 No render wrapper in v1
+### 4.4 Public API surfaces
+
+This feature adds library API only. It must update every live public surface
+that advertises `core` exports:
+
+- `lib/src/core/mod.rs`: add the module and re-export the three public types.
+- `lib/src/prelude.rs`: re-export the three public types.
+- `lib/src/lib.rs`: update module-level docs if the public surface list stays
+  explicit.
+- `lib/tests/public_api_names.rs`: add coverage that the names are available
+  from the crate root/prelude as expected.
+- `docs/components/index.md` and a new `docs/components/split_pane.md`, or a
+  clearly named layout/core docs page, must describe the geometry-only usage
+  pattern. If it lives outside `docs/components/`, link it from the component
+  index so users looking for `FrameChrome`-style containers can find it.
+  The CLI docs must not gain a `question split-pane` command.
+
+### 4.5 No render wrapper in v1
 
 `SplitPaneWidget<A, B>` is **not** part of the v1 surface. It is deferred to a
 fast-follow with a **named** state struct; see
@@ -347,9 +403,7 @@ strictly additive to add later — see [§3](#3-scope--layering) and
 
 ### 5.2 Degenerate / small-area behavior
 
-A layout widget must never panic or overflow on a tiny terminal (the
-[tui skill](../../.claude/skills/tui) lists "layout overflow on small
-terminals" as a top gotcha). Rules:
+A layout widget must never panic or overflow on a tiny terminal. Rules:
 
 - If `area` is zero-sized, both returned rects are zero-sized.
 - **[DECISION — D5 — RESOLVED] — the single zero-pane exception.** If `area` is
@@ -512,7 +566,7 @@ definition of done **includes** the following additions. They live in the
 in the `SplitPane` geometry primitive — they are an explicit, deliberate scope
 expansion of this feature beyond the layout math:
 
-1. **A public active-item accessor on `ChooseOneState`.** Today only
+1. **Public active-item accessors on `ChooseOneState`.** Today only
    `hover() -> Option<usize>` (the highlighted row, distinct from the
    submit-time `selected_value()`) and `options()` exist, forcing
    `options()[hover()?]` at call sites. Add **both**
@@ -523,6 +577,9 @@ expansion of this feature beyond the layout math:
    apply no disabled-filtering of their own (navigation already governs where
    the highlight may land). A `None` result means there is no active row (e.g.
    an empty option list).
+   Add tests for empty options, the initial active row, active row movement,
+   and the disabled-option contract using existing navigation behavior rather
+   than inventing new focus rules.
 2. **Per-option description data — caller-supplied map (no `ChoiceOption`
    change).** `ChoiceOption` is **not** modified (it keeps `id`, `label`,
    `value`, `disabled`, `hotkey`). The detail text comes from a caller-owned
@@ -559,8 +616,9 @@ this is the testable bar for "correct":
 
 ### 7.2 Tests
 
-Following the repo's `TestBackend` + unit-test conventions
-([`rust-testing` skill](../../.claude/skills/rust-testing)):
+Follow the repo's L1/L2/L3 testing taxonomy and use unit tests for pure
+geometry. This feature does not need a real-terminal harness in v1 because it
+adds no renderer, event loop behavior, or CLI command.
 
 - **Geometry unit tests (L1, no terminal):**
   - 50/50 default halves an even area; odd lengths split deterministically with
@@ -592,6 +650,17 @@ Following the repo's `TestBackend` + unit-test conventions
 (No render-wrapper tests in v1, since the wrapper is deferred. The companion
 `ChooseOne` additions in [§6.4](#64-masterdetail-a-first-class-pattern) carry
 their own unit tests in the `choose_one` module.)
+
+### 7.3 Documentation and compatibility checks
+
+- Update `biscuit-tui/lib/CHANGELOG.md` under `Unreleased` because this is a
+  new public library API.
+- Update `biscuit-tui/README.md` and `biscuit-tui/lib/README.md` if their core
+  primitive lists stay explicit.
+- Run the package-area verification commands after implementation:
+  `just test` for unit tests, and `just lint` if the implementation changes
+  public docs or exports. Do not run `cargo fmt` write-mode as part of this
+  feature unless explicitly requested.
 
 ## 8. Future Enhancements
 
@@ -630,5 +699,5 @@ their own unit tests in the `choose_one` module.)
 
 ---
 
-*Authored as a draft for review; decisions above are resolved. Nothing here is
-implemented yet — the code blocks are API sketches, not final signatures.*
+*Reviewed inline and marked ready for planning and implementation. Nothing here
+is implemented yet — the code blocks are API sketches, not final signatures.*
