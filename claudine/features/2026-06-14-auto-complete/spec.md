@@ -135,3 +135,25 @@ The `claudine inline-compose <file>` operation is similar but not the same as `c
         - however, this TUI has two main windows:
             - the list of possible files
             - the information about that file (same information as we used in the confirmation dialog)
+        - how these two windows are laid out depends on the dimensions of the terminal window:
+            - If the terminal is wider than it is tall, we will put the information to the _right_ of the file list
+            - If the terminal is taller than it is wide then we will put the information _above_ the file list.
+- if there are NO matches on the text the caller passed in (e.g., "plan" in this example) then we should immediately return with an error
+
+> **Note:** autocomplete is only available with the terminal is TTY; if it is not then autocomplete will not be active and an incomplete file reference will result in an error
+
+### Frontmatter Properties
+
+- we already use TUI widgets to ask for _required_ properties in the schema of a page when the caller didn't provide them as part of the CLI invocation
+- however, we must improve on this:
+    - we currently consume the entire screen with the dialog for each missing Frontmatter property
+    - we should instead only use _enough_ space for what we need to get the user's input
+    - however, we will need more space than we currently do because we want to tell the user what we are expecting:
+        - **string** type: 'The <b>{property}</b> _requires_ a <inverse>string</inverse> value; please input a value to continue:'
+            - if there are min/max constraints then we should reinforce
+        - **number** type: 'The <b>{property}</b> _requires_ a <inverse>numeric</inverse> value; please input a value to continue:'
+            - if there are min/max constraints then we should reinforce
+        - **boolean** type: 'The <b>{property}</b> _requires_ a <inverse>boolean</inverse> value:'
+        - **file** type: 'The <b>{property}</b> _requires_ a valid <i>file reference</i>; choose from the files below:'
+    - after the intro statement we provide the form input control
+    - after the form input, if the `$schema` property has defined a description then we will display the description of the property below the input in dim italics
