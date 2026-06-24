@@ -174,35 +174,24 @@ impl LifecycleControlAction {
     /// Returns `true` when this control action is permitted in the given
     /// event per the spec's "Where valid" matrix.
     ///
-    /// - `Stop` and `Error` are valid in every event.
-    /// - `Skip` is valid only in `initialize`.
-    /// - `Proxy` is valid in `initialize`, `blocked`, `failure`, `finalize`.
-    /// - `Retry` is valid in `blocked`, `failure`, `finalize`.
-    /// - `Resume` is valid in `failure`, `finalize`.
-    /// - `Requeue` is valid in `blocked`, `failure`, `finalize`.
+    /// Flow control is **universal**: `Stop`, `Error`, `Retry`, `Resume`,
+    /// `Requeue`, and `Proxy` are valid in **every** event. Flow control reacts
+    /// to *state* — an error, a missing file, an `env` value, frontmatter — and
+    /// an error is just one kind of state (e.g. a `success` stack may `resume`
+    /// the agent because an expected artifact was not produced).
     ///
-    /// `finalize` is the optional-error terminal event, so it doubles as a
-    /// last-chance recovery surface: a `finalize.stack` that detects an
-    /// unmet contract (typically guarded by `when: "err"`) can `retry`,
-    /// `resume`, `requeue`, or `proxy` exactly as `failure` can.
+    /// `Skip` is the **one** placement-restricted action: a whole-document
+    /// opt-out is only coherent at `initialize`, before anything has run.
+    ///
+    /// Differences that look event-specific are **runtime capability**, not
+    /// placement, and are checked at runtime rather than here: `Resume` needs a
+    /// live provider session (pre-launch it surfaces `ResumeWithoutSession`),
+    /// and `Retry`'s re-entry point (re-run pre-flight vs. re-invoke the
+    /// provider) is derived from whether the provider had launched.
     pub fn is_valid_for(&self, event: LifecycleSignal) -> bool {
         match self {
-            Self::Stop | Self::Error { .. } => true,
             Self::Skip => matches!(event, LifecycleSignal::Initialize),
-            Self::Proxy { .. } => matches!(
-                event,
-                LifecycleSignal::Initialize
-                    | LifecycleSignal::Blocked
-                    | LifecycleSignal::Failure
-                    | LifecycleSignal::Finalize
-            ),
-            Self::Retry { .. } | Self::Requeue { .. } => matches!(
-                event,
-                LifecycleSignal::Blocked | LifecycleSignal::Failure | LifecycleSignal::Finalize
-            ),
-            Self::Resume { .. } => {
-                matches!(event, LifecycleSignal::Failure | LifecycleSignal::Finalize)
-            }
+            _ => true,
         }
     }
 }
@@ -424,58 +413,38 @@ mod tests {
             assert!(!A::Skip.is_valid_for(event), "Skip in {event:?}");
         }
 
-        // Proxy: Initialize, Blocked, Failure, Finalize.
+        // Flow control is universal: Proxy/Retry/Resume/Requeue are valid in
+        // every event (placement is not error-gated).
+        let every = [
+            S::Initialize,
+            S::Start,
+            S::Success,
+            S::Blocked,
+            S::Failure,
+            S::Finalize,
+            S::Loop,
+        ];
         let proxy = A::Proxy {
             target: Expr::StringLiteral("@other.md".into()),
         };
-        for event in [S::Initialize, S::Blocked, S::Failure, S::Finalize] {
-            assert!(proxy.is_valid_for(event), "Proxy in {event:?}");
-        }
-        for event in [S::Start, S::Success, S::Loop] {
-            assert!(!proxy.is_valid_for(event), "Proxy in {event:?}");
-        }
-
-        // Retry: Blocked, Failure, Finalize.
         let retry = A::Retry {
             max_attempts: None,
             backoff: None,
             delay: None,
         };
-        for event in [S::Blocked, S::Failure, S::Finalize] {
-            assert!(retry.is_valid_for(event), "Retry in {event:?}");
-        }
-        for event in [S::Initialize, S::Start, S::Success, S::Loop] {
-            assert!(!retry.is_valid_for(event), "Retry in {event:?}");
-        }
-
-        // Resume: Failure, Finalize.
         let resume = A::Resume {
             message: Expr::StringLiteral("please retry".into()),
             max_attempts: None,
         };
-        for event in [S::Failure, S::Finalize] {
-            assert!(resume.is_valid_for(event), "Resume in {event:?}");
-        }
-        for event in [
-            S::Initialize,
-            S::Start,
-            S::Success,
-            S::Blocked,
-            S::Loop,
-        ] {
-            assert!(!resume.is_valid_for(event), "Resume in {event:?}");
-        }
-
-        // Requeue: Blocked, Failure, Finalize.
         let requeue = A::Requeue {
             delay: Expr::StringLiteral("5m".into()),
             reason: None,
         };
-        for event in [S::Blocked, S::Failure, S::Finalize] {
+        for event in every {
+            assert!(proxy.is_valid_for(event), "Proxy in {event:?}");
+            assert!(retry.is_valid_for(event), "Retry in {event:?}");
+            assert!(resume.is_valid_for(event), "Resume in {event:?}");
             assert!(requeue.is_valid_for(event), "Requeue in {event:?}");
-        }
-        for event in [S::Initialize, S::Start, S::Success, S::Loop] {
-            assert!(!requeue.is_valid_for(event), "Requeue in {event:?}");
         }
     }
 

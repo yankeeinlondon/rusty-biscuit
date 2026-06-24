@@ -484,13 +484,35 @@ pub enum CompositionError {
     /// only known after the provider runs. Surfacing it as a typed error
     /// keeps the control from silently no-opping.
     #[error(
-        "lifecycle `resume` at `failure` requires a provider session to resume, \
-         but none was captured ({source_path})",
+        "lifecycle `resume` requires a live provider session to resume, but none \
+         was captured (the provider had not launched) ({source_path})",
         source_path = source_path.display()
     )]
     LifecycleResumeWithoutSession {
-        /// The prompt file whose `failure` stack requested resume.
+        /// The prompt file whose stack requested resume.
         source_path: PathBuf,
+    },
+
+    /// A flow-control action is valid in the event (placement is universal),
+    /// but its runtime effect — run-loop re-entry (`retry`), hand-off
+    /// (`proxy`), or the deferred-queue (`requeue`) — is not wired for events
+    /// outside the provider run loop: `initialize`, a compose pre-flight
+    /// `blocked`, and the `loop` gate. The control is surfaced as a clear error
+    /// rather than a silent no-op. (`resume` reports `ResumeWithoutSession`
+    /// separately when no session exists.)
+    #[error(
+        "lifecycle `{action}` at `{event}` is accepted, but its runtime effect is \
+         not wired for this event; move the recovery to a post-launch event \
+         (`failure`/`finalize`/`success`) ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleSetupPhaseRecoveryUnsupported {
+        /// The prompt file whose stack requested the action.
+        source_path: PathBuf,
+        /// The originating event (`initialize` / `blocked` / `loop`).
+        event: String,
+        /// The deferred action verb (`retry` / `requeue` / `proxy`).
+        action: String,
     },
 
     /// A lifecycle stack requested `requeue(...)`, but the runtime could not

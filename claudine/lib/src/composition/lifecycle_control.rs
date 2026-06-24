@@ -14,7 +14,6 @@
 
 use std::time::Duration;
 
-use super::lifecycle::LifecycleSignal;
 use super::lifecycle_actions::RetryBackoff;
 use super::lifecycle_executor::StackControl;
 
@@ -28,14 +27,17 @@ pub enum ControlDispatch {
     /// Re-enter the loop for another attempt. The runtime should sleep for
     /// `delay` (already adjusted for backoff), then `continue` the loop.
     ///
-    /// `from_blocked` re-enters the pre-flight/start path (no provider
+    /// `reenter_preflight` re-enters the pre-flight/start path (no provider
     /// invocation existed yet); otherwise the provider is invoked again.
     Retry {
         /// How long to wait before the next attempt (post-backoff).
         delay: Duration,
-        /// True when retrying a `blocked` event (re-run pre-flight/start);
-        /// false when retrying a `failure` event (re-invoke the provider).
-        from_blocked: bool,
+        /// True when the provider had **not** launched this iteration (re-run
+        /// pre-flight/start); false when it had (re-invoke the provider).
+        /// Derived from launch state, not the event — so a `retry` recovers
+        /// uniformly from `blocked` (pre-launch) or `failure`/`finalize`
+        /// (post-launch).
+        reenter_preflight: bool,
     },
 
     /// Resume the provider session with a follow-up message. The runtime
@@ -75,27 +77,34 @@ pub enum ControlDispatch {
     Stop,
 }
 
-/// Decide what the runtime should do for a terminal-event control.
+/// Decide what the runtime should do for a lifecycle-event control.
 ///
-/// `signal` is the event whose stack produced `control`. `attempt` is the
-/// 1-based current attempt counter, and `control_budget` is the per-control
-/// retry/resume ceiling already chosen for this control's first firing
-/// (`1 + max_attempts`, in absolute attempt-counter terms). When `attempt`
-/// has reached the budget the dispatch is [`ControlDispatch::Exhausted`].
+/// `attempt` is the 1-based current attempt counter, and `control_budget` is
+/// the per-control retry/resume ceiling already chosen for this control's first
+/// firing (`1 + max_attempts`, in absolute attempt-counter terms). When
+/// `attempt` has reached the budget the dispatch is
+/// [`ControlDispatch::Exhausted`].
 ///
-/// `has_session` reports whether a provider session id is available, which
-/// only matters for `Resume`.
+/// `has_session` reports whether a provider session id is available (only
+/// matters for `Resume`). `provider_launched` reports whether the provider
+/// child had launched this iteration; it decides whether a `Retry` re-enters
+/// pre-flight (pre-launch) or re-invokes the provider (post-launch).
 ///
-/// Controls that are invalid for `signal` per the spec's "Where valid"
-/// matrix resolve to [`ControlDispatch::Stop`]; placement is enforced at
-/// parse time, so this is a defensive fall-through rather than a primary
-/// guard.
+/// ## Uniformity
+///
+/// This decision is **event-agnostic**: every lifecycle event's stack
+/// dispatches a control the same way. Which control is *valid* in which event
+/// is the parse-time pre-scan's job ([`super::lifecycle_actions::LifecycleControlAction::is_valid_for`]
+/// → `LifecycleActionPlacement`), not this function's — so there is no
+/// per-signal gate here. `Stop`/`Skip`/`Error` carry no runtime recovery
+/// effect and resolve to [`ControlDispatch::Stop`] (their terminal-outcome
+/// effects are applied by the caller at the event boundary).
 pub fn decide_control(
-    signal: LifecycleSignal,
     control: &StackControl,
     attempt: u32,
     control_budget: u32,
     has_session: bool,
+    provider_launched: bool,
 ) -> ControlDispatch {
     match control {
         StackControl::Stop | StackControl::Skip | StackControl::Error { .. } => {
@@ -106,12 +115,6 @@ pub fn decide_control(
             backoff,
             delay,
         } => {
-            if !matches!(
-                signal,
-                LifecycleSignal::Blocked | LifecycleSignal::Failure | LifecycleSignal::Finalize
-            ) {
-                return ControlDispatch::Stop;
-            }
             // `control_budget` carries the absolute attempt ceiling derived
             // from `max_attempts` when the control first fired. When this is
             // the first firing (budget not yet established) derive it here.
@@ -132,16 +135,13 @@ pub fn decide_control(
             let adjusted = compute_backoff_delay(base, *backoff, consumed);
             ControlDispatch::Retry {
                 delay: adjusted,
-                from_blocked: matches!(signal, LifecycleSignal::Blocked),
+                reenter_preflight: !provider_launched,
             }
         }
         StackControl::Resume {
             message,
             max_attempts,
         } => {
-            if !matches!(signal, LifecycleSignal::Failure | LifecycleSignal::Finalize) {
-                return ControlDispatch::Stop;
-            }
             let budget = if control_budget == 0 {
                 attempt.saturating_add(*max_attempts)
             } else {
@@ -157,32 +157,13 @@ pub fn decide_control(
                 message: message.clone(),
             }
         }
-        StackControl::Proxy { target } => {
-            if !matches!(
-                signal,
-                LifecycleSignal::Initialize
-                    | LifecycleSignal::Blocked
-                    | LifecycleSignal::Failure
-                    | LifecycleSignal::Finalize
-            ) {
-                return ControlDispatch::Stop;
-            }
-            ControlDispatch::Proxy {
-                target: target.clone(),
-            }
-        }
-        StackControl::Requeue { delay, reason } => {
-            if !matches!(
-                signal,
-                LifecycleSignal::Blocked | LifecycleSignal::Failure | LifecycleSignal::Finalize
-            ) {
-                return ControlDispatch::Stop;
-            }
-            ControlDispatch::Requeue {
-                delay: delay.clone(),
-                reason: reason.clone(),
-            }
-        }
+        StackControl::Proxy { target } => ControlDispatch::Proxy {
+            target: target.clone(),
+        },
+        StackControl::Requeue { delay, reason } => ControlDispatch::Requeue {
+            delay: delay.clone(),
+            reason: reason.clone(),
+        },
     }
 }
 
@@ -306,32 +287,32 @@ mod tests {
             StackControl::Error { reason: None },
         ] {
             assert_eq!(
-                decide_control(LifecycleSignal::Failure, &control, 1, 0, true),
+                decide_control(&control, 1, 0, true, true),
                 ControlDispatch::Stop
             );
         }
     }
 
     #[test]
-    fn retry_from_failure_continues_with_provider() {
+    fn retry_post_launch_reinvokes_provider() {
         let control = retry(2, RetryBackoff::Fixed, "0s");
         assert_eq!(
-            decide_control(LifecycleSignal::Failure, &control, 1, 0, false),
+            decide_control(&control, 1, 0, false, true),
             ControlDispatch::Retry {
                 delay: Duration::ZERO,
-                from_blocked: false,
+                reenter_preflight: false,
             }
         );
     }
 
     #[test]
-    fn retry_from_blocked_re_enters_preflight() {
+    fn retry_pre_launch_re_enters_preflight() {
         let control = retry(1, RetryBackoff::Fixed, "0s");
         assert_eq!(
-            decide_control(LifecycleSignal::Blocked, &control, 1, 0, false),
+            decide_control(&control, 1, 0, false, false),
             ControlDispatch::Retry {
                 delay: Duration::ZERO,
-                from_blocked: true,
+                reenter_preflight: true,
             }
         );
     }
@@ -344,25 +325,16 @@ mod tests {
         assert_eq!(budget, 3);
         // attempt 1 and 2 retry; attempt 3 is exhausted.
         assert!(matches!(
-            decide_control(LifecycleSignal::Failure, &control, 1, budget, false),
+            decide_control(&control, 1, budget, false, true),
             ControlDispatch::Retry { .. }
         ));
         assert!(matches!(
-            decide_control(LifecycleSignal::Failure, &control, 2, budget, false),
+            decide_control(&control, 2, budget, false, true),
             ControlDispatch::Retry { .. }
         ));
         assert_eq!(
-            decide_control(LifecycleSignal::Failure, &control, 3, budget, false),
+            decide_control(&control, 3, budget, false, true),
             ControlDispatch::Exhausted
-        );
-    }
-
-    #[test]
-    fn retry_invalid_at_non_terminal_signal_stops() {
-        let control = retry(1, RetryBackoff::Fixed, "0s");
-        assert_eq!(
-            decide_control(LifecycleSignal::Success, &control, 1, 0, false),
-            ControlDispatch::Stop
         );
     }
 
@@ -400,17 +372,17 @@ mod tests {
         // attempt 1: consumed 0 → 4s; attempt 2: consumed 1 → 8s.
         let control = retry(2, RetryBackoff::Exponential, "4s");
         assert_eq!(
-            decide_control(LifecycleSignal::Failure, &control, 1, 3, false),
+            decide_control(&control, 1, 3, false, true),
             ControlDispatch::Retry {
                 delay: Duration::from_secs(4),
-                from_blocked: false,
+                reenter_preflight: false,
             }
         );
         assert_eq!(
-            decide_control(LifecycleSignal::Failure, &control, 2, 3, false),
+            decide_control(&control, 2, 3, false, true),
             ControlDispatch::Retry {
                 delay: Duration::from_secs(8),
-                from_blocked: false,
+                reenter_preflight: false,
             }
         );
     }
@@ -422,7 +394,7 @@ mod tests {
             max_attempts: 1,
         };
         assert_eq!(
-            decide_control(LifecycleSignal::Failure, &control, 1, 0, true),
+            decide_control(&control, 1, 0, true, true),
             ControlDispatch::Resume {
                 message: "fix it".to_string(),
             }
@@ -436,7 +408,7 @@ mod tests {
             max_attempts: 1,
         };
         assert_eq!(
-            decide_control(LifecycleSignal::Failure, &control, 1, 0, false),
+            decide_control(&control, 1, 0, false, true),
             ControlDispatch::ResumeWithoutSession
         );
     }
@@ -449,72 +421,37 @@ mod tests {
         };
         let budget = control_budget_for(1, 1); // 2
         assert!(matches!(
-            decide_control(LifecycleSignal::Failure, &control, 1, budget, true),
+            decide_control(&control, 1, budget, true, true),
             ControlDispatch::Resume { .. }
         ));
         assert_eq!(
-            decide_control(LifecycleSignal::Failure, &control, 2, budget, true),
+            decide_control(&control, 2, budget, true, true),
             ControlDispatch::Exhausted
         );
     }
 
     #[test]
-    fn resume_invalid_outside_failure_stops() {
-        let control = StackControl::Resume {
-            message: "x".to_string(),
-            max_attempts: 1,
-        };
-        assert_eq!(
-            decide_control(LifecycleSignal::Blocked, &control, 1, 0, true),
-            ControlDispatch::Stop
-        );
-    }
-
-    #[test]
-    fn proxy_swaps_target_at_valid_signals() {
+    fn proxy_dispatches_target() {
         let control = StackControl::Proxy {
             target: "@prompts/other.md".to_string(),
         };
-        for signal in [
-            LifecycleSignal::Initialize,
-            LifecycleSignal::Blocked,
-            LifecycleSignal::Failure,
-        ] {
-            assert_eq!(
-                decide_control(signal, &control, 1, 0, false),
-                ControlDispatch::Proxy {
-                    target: "@prompts/other.md".to_string(),
-                }
-            );
-        }
-    }
-
-    #[test]
-    fn proxy_invalid_at_success_stops() {
-        let control = StackControl::Proxy {
-            target: "@x.md".to_string(),
-        };
         assert_eq!(
-            decide_control(LifecycleSignal::Success, &control, 1, 0, false),
-            ControlDispatch::Stop
+            decide_control(&control, 1, 0, false, true),
+            ControlDispatch::Proxy {
+                target: "@prompts/other.md".to_string(),
+            }
         );
     }
 
     #[test]
-    fn recovery_controls_valid_at_finalize() {
-        // `finalize` is the optional-error terminal event and doubles as a
-        // last-chance recovery surface, so retry/resume/requeue/proxy all
-        // dispatch there exactly as they do at `failure`.
+    fn recovery_controls_dispatch_event_agnostically() {
+        // `decide_control` is event-agnostic: placement (which control is valid
+        // in which event) is the parse-time pre-scan's job, so every recovery
+        // control dispatches here regardless of the originating event.
         assert!(matches!(
-            decide_control(
-                LifecycleSignal::Finalize,
-                &retry(1, RetryBackoff::Fixed, "0s"),
-                1,
-                0,
-                false,
-            ),
+            decide_control(&retry(1, RetryBackoff::Fixed, "0s"), 1, 0, false, true),
             ControlDispatch::Retry {
-                from_blocked: false,
+                reenter_preflight: false,
                 ..
             }
         ));
@@ -524,7 +461,7 @@ mod tests {
             max_attempts: 1,
         };
         assert!(matches!(
-            decide_control(LifecycleSignal::Finalize, &resume, 1, 0, true),
+            decide_control(&resume, 1, 0, true, true),
             ControlDispatch::Resume { .. }
         ));
 
@@ -532,7 +469,7 @@ mod tests {
             target: "@x.md".to_string(),
         };
         assert!(matches!(
-            decide_control(LifecycleSignal::Finalize, &proxy, 1, 0, false),
+            decide_control(&proxy, 1, 0, false, true),
             ControlDispatch::Proxy { .. }
         ));
 
@@ -541,7 +478,7 @@ mod tests {
             reason: None,
         };
         assert!(matches!(
-            decide_control(LifecycleSignal::Finalize, &requeue, 1, 0, false),
+            decide_control(&requeue, 1, 0, false, true),
             ControlDispatch::Requeue { .. }
         ));
     }
@@ -553,7 +490,7 @@ mod tests {
             reason: Some("later".to_string()),
         };
         assert_eq!(
-            decide_control(LifecycleSignal::Failure, &control, 1, 0, false),
+            decide_control(&control, 1, 0, false, true),
             ControlDispatch::Requeue {
                 delay: "5m".to_string(),
                 reason: Some("later".to_string()),

@@ -735,20 +735,41 @@ where
                 )
                 .with_init_proxy_target(resolved));
             }
-            StackControl::Retry { .. }
-            | StackControl::Resume { .. }
-            | StackControl::Requeue { .. } => {
+            StackControl::Resume { .. } => {
+                // Pre-launch: no provider session to resume.
                 return Ok(LoopExecutionResult::failure(
                     initial_frontmatter,
                     0,
                     String::new(),
                     0,
-                    CompositionError::LifecycleInvalidArgs {
+                    CompositionError::LifecycleResumeWithoutSession {
                         source_path: prompt_path.to_path_buf(),
-                        property: "initialize.stack".to_string(),
-                        action: format!("{control:?}"),
-                        message: "lifecycle control action is not valid at initialize"
-                            .to_string(),
+                    },
+                ));
+            }
+            StackControl::Retry { .. } => {
+                return Ok(LoopExecutionResult::failure(
+                    initial_frontmatter,
+                    0,
+                    String::new(),
+                    0,
+                    CompositionError::LifecycleSetupPhaseRecoveryUnsupported {
+                        source_path: prompt_path.to_path_buf(),
+                        event: "initialize".to_string(),
+                        action: "retry".to_string(),
+                    },
+                ));
+            }
+            StackControl::Requeue { .. } => {
+                return Ok(LoopExecutionResult::failure(
+                    initial_frontmatter,
+                    0,
+                    String::new(),
+                    0,
+                    CompositionError::LifecycleSetupPhaseRecoveryUnsupported {
+                        source_path: prompt_path.to_path_buf(),
+                        event: "initialize".to_string(),
+                        action: "requeue".to_string(),
                     },
                 ));
             }
@@ -1077,12 +1098,35 @@ fn run_loop_gate(
     // action does this; an unintentional action error leaves the outcome
     // unchanged because `loop` is a terminal-phase event
     // (`routes_to_failure(Loop)` is always false).
-    if let Some(StackControl::Error { reason }) = loop_outcome.control {
-        let reason = reason.unwrap_or_else(|| "lifecycle loop gate error".to_string());
+    if let Some(StackControl::Error { reason }) = &loop_outcome.control {
+        let reason = reason
+            .clone()
+            .unwrap_or_else(|| "lifecycle loop gate error".to_string());
         return Ok(LoopGateOutcome::Fail(
             CompositionError::LifecycleLoopGateFailed {
                 source_path: prompt_path.to_path_buf(),
                 reason,
+            },
+        ));
+    }
+    // The loop gate runs in the loop engine, which has no provider re-entry,
+    // hand-off, or deferred-queue machinery, so a recovery control here is a
+    // clear failure rather than a silent drop. (Recovery from a completed
+    // iteration belongs in `failure`/`finalize`/`success`.) `Stop` and absence
+    // fall through to the normal condition evaluation.
+    let deferred_action = match &loop_outcome.control {
+        Some(StackControl::Retry { .. }) => Some("retry"),
+        Some(StackControl::Resume { .. }) => Some("resume"),
+        Some(StackControl::Requeue { .. }) => Some("requeue"),
+        Some(StackControl::Proxy { .. }) => Some("proxy"),
+        _ => None,
+    };
+    if let Some(action) = deferred_action {
+        return Ok(LoopGateOutcome::Fail(
+            CompositionError::LifecycleSetupPhaseRecoveryUnsupported {
+                source_path: prompt_path.to_path_buf(),
+                event: "loop".to_string(),
+                action: action.to_string(),
             },
         ));
     }

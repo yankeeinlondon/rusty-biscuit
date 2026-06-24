@@ -4947,54 +4947,28 @@ mod tests {
     }
 
     #[test]
-    fn rejects_proxy_in_start() {
-        let fm = json!({
-            "start": {"stack": [{"action": "proxy('@other.md')"}]}
-        });
-        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
-        assert!(matches!(
-            err,
-            CompositionError::LifecycleActionPlacement { .. }
-        ));
-    }
-
-    #[test]
-    fn rejects_retry_in_start() {
-        let fm = json!({
-            "start": {"stack": [{"action": "retry"}]}
-        });
-        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
-        assert!(matches!(
-            err,
-            CompositionError::LifecycleActionPlacement { .. }
-        ));
-    }
-
-    #[test]
-    fn rejects_resume_outside_failure() {
-        let fm = json!({
-            "blocked": {"stack": [{"action": "resume('please')"}]}
-        });
-        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
-        assert!(matches!(
-            err,
-            CompositionError::LifecycleActionPlacement { .. }
-        ));
-    }
-
-    #[test]
-    fn rejects_requeue_in_loop() {
-        let fm = json!({
-            "loop": {
-                "while": "true",
-                "stack": [{"action": "requeue('5m')"}]
-            }
-        });
-        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
-        assert!(matches!(
-            err,
-            CompositionError::LifecycleActionPlacement { .. }
-        ));
+    fn flow_control_is_universal_across_events() {
+        // Flow control reacts to state, not just errors, so `error`/`retry`/
+        // `resume`/`requeue`/`proxy` parse in every event (only `skip` is
+        // placement-restricted, to `initialize`). E.g. a `success` stack may
+        // `resume` because an expected artifact was not produced.
+        let cases = [
+            ("start", "proxy('@other.md')"),
+            ("start", "retry"),
+            ("success", "resume('the file abc.md was never written; create it')"),
+            ("blocked", "resume('please')"),
+            ("initialize", "requeue('5m')"),
+            ("success", "retry(2)"),
+        ];
+        for (event, action) in cases {
+            let fm = json!({ event: {"stack": [{"action": action}]} });
+            parse_lifecycle_config(&fm, dummy_path())
+                .unwrap_or_else(|e| panic!("`{action}` in `{event}` should parse, got: {e:?}"));
+        }
+        // `loop` carries iteration controls; a `requeue` there parses too.
+        let loop_fm = json!({ "loop": {"while": "true", "stack": [{"action": "requeue('5m')"}]} });
+        parse_lifecycle_config(&loop_fm, dummy_path())
+            .unwrap_or_else(|e| panic!("`requeue` in `loop` should parse, got: {e:?}"));
     }
 
     #[test]
@@ -5275,8 +5249,8 @@ mod tests {
 
     #[test]
     fn loop_concerns_stack_uses_loop_signal_for_placement() {
-        // `Skip` is invalid in the `loop` event per the "Where valid" matrix
-        // because loop is a no-error event.
+        // `Skip` is the one placement-restricted action (`initialize` only),
+        // so it is invalid in the `loop` event.
         let fm = json!({
             "loop": {
                 "while": "true",
