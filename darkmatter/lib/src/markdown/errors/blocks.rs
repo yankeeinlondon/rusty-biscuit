@@ -346,6 +346,13 @@ pub(crate) fn schema_validation_failed_block(
         };
 
         body_lines.push(bullet);
+
+        // Per-problem declared description, reusing the dimmed-italic treatment
+        // the document-level `description:` line above already uses. Enrichment
+        // suppressed empty / message-equal descriptions, so a `Some` renders.
+        if let Some(desc) = &problem.description {
+            body_lines.push(format!("<i><dim>{}</dim></i>", Prose::escape_text(desc)));
+        }
     }
 
     StatusBlock::new(StatusState::Error)
@@ -574,6 +581,74 @@ mod tests {
         let block = schema_validation_failed_block(&path, &[], "", &None);
         let out = render_block(&block);
         assert!(out.contains("schema could not be prepared"), "missing fallback summary: {out}");
+    }
+
+    fn problem_with_description(description: Option<&str>) -> ValidationProblem {
+        ValidationProblem {
+            path: "/title".to_string(),
+            message: "expected string".to_string(),
+            kind: ValidationProblemKind::Type,
+            property: Some("title".to_string()),
+            line: Some(2),
+            column: Some(1),
+            arm_index: None,
+            description: description.map(String::from),
+        }
+    }
+
+    /// Track C: the per-problem declared description renders as its own sub-line
+    /// after the problem bullet, surfacing what the failing property is *for*.
+    #[test]
+    fn schema_validation_failed_block_renders_problem_description() {
+        let path = std::path::PathBuf::from("/tmp/test/post.md");
+        let problem = problem_with_description(Some("The headline shown in listing pages"));
+        let block = schema_validation_failed_block(&path, std::slice::from_ref(&problem), "", &None);
+        let out = render_block(&block);
+        assert!(out.contains("type"), "missing problem bullet: {out}");
+        assert!(
+            out.contains("The headline shown in listing pages"),
+            "missing per-problem description sub-line: {out}",
+        );
+    }
+
+    /// Track C: the document-level `description:` line and the per-problem
+    /// description coexist without one clobbering the other.
+    #[test]
+    fn schema_validation_failed_block_coexists_doc_and_problem_descriptions() {
+        let path = std::path::PathBuf::from("/tmp/test/post.md");
+        let problem = problem_with_description(Some("The headline shown in listing pages"));
+        let doc_description = Some("A blog post about anything".to_string());
+        let block = schema_validation_failed_block(
+            &path,
+            std::slice::from_ref(&problem),
+            "",
+            &doc_description,
+        );
+        let out = render_block(&block);
+        assert!(
+            out.contains("A blog post about anything"),
+            "missing document-level description: {out}",
+        );
+        assert!(
+            out.contains("The headline shown in listing pages"),
+            "missing per-problem description: {out}",
+        );
+    }
+
+    /// Track C: a problem without a description emits only its bullet — no
+    /// stray description sub-line (Decision #8).
+    #[test]
+    fn schema_validation_failed_block_omits_absent_problem_description() {
+        let path = std::path::PathBuf::from("/tmp/test/post.md");
+        let problem = problem_with_description(None);
+        let block = schema_validation_failed_block(&path, std::slice::from_ref(&problem), "", &None);
+        let out = render_block(&block);
+        // The bullet is present, but no extra description text rides beneath it.
+        assert!(out.contains("type"), "missing problem bullet: {out}");
+        assert!(
+            out.contains("expected string"),
+            "missing problem message: {out}",
+        );
     }
 
     /// `reqwest::Error` cannot be constructed without firing a real HTTP
