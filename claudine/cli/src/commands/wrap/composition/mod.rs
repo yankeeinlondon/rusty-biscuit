@@ -240,9 +240,9 @@ fn preflight_blocked_control_error(
             source_path: source_path.to_path_buf(),
         }),
         StackControl::Retry { .. } => Some(setup_phase_deferred("blocked", "retry", source_path)),
-        StackControl::Requeue { .. } => {
-            Some(setup_phase_deferred("blocked", "requeue", source_path))
-        }
+        StackControl::Defer { .. } => Some(CompositionError::LifecycleDeferNotImplemented {
+            source_path: source_path.to_path_buf(),
+        }),
         StackControl::Proxy { .. } => Some(setup_phase_deferred("blocked", "proxy", source_path)),
         StackControl::Stop | StackControl::Skip | StackControl::Error { .. } => None,
     }
@@ -1687,18 +1687,20 @@ fn execute_composition_request_inner_with_guard(
                 }
                 .into());
             }
-            StackControl::Retry { .. } | StackControl::Requeue { .. } => {
-                // `retry` (re-run pre-flight) and `requeue` (deferred-queue) need
-                // run-loop re-entry that does not exist in the setup phase.
-                let action = if matches!(control, StackControl::Retry { .. }) {
-                    "retry"
-                } else {
-                    "requeue"
-                };
+            StackControl::Retry { .. } => {
+                // `retry` (re-run pre-flight) needs run-loop re-entry that does
+                // not exist in the setup phase.
                 return Err(CompositionError::LifecycleSetupPhaseRecoveryUnsupported {
                     source_path: request.prepared.resolved_path.clone(),
                     event: "initialize".to_string(),
-                    action: action.to_string(),
+                    action: "retry".to_string(),
+                }
+                .into());
+            }
+            StackControl::Defer { .. } => {
+                // `defer` has no runtime home yet (rendezvous scheduler pending).
+                return Err(CompositionError::LifecycleDeferNotImplemented {
+                    source_path: request.prepared.resolved_path.clone(),
                 }
                 .into());
             }

@@ -31,9 +31,10 @@
 //!   reports a stream session id on the failing first attempt; `resume(...)`
 //!   re-enters at `start`, invokes the provider with the resume argv/session id,
 //!   delivers the follow-up prompt, then reaches `success`/`finalize`.
-//! - **Requeue from `failure`** — appends the materialized prompt to the
-//!   rendezvous deferred-execution session log, then `finalize` fires and the
-//!   run exits. Asserted via the rendezvous source-of-truth chunk read path.
+//! - **Defer from `failure`** — `defer` parses and dispatches, but its runtime
+//!   home (the rendezvous deferred-execution scheduler) is not ready yet, so it
+//!   surfaces the typed "not implemented" error; `failure` and `finalize` still
+//!   fire. Asserted via `events.log` markers and the error text in the pane.
 //!
 //! - **Proxy from `failure`** — `failure.stack` ending in `proxy('@target.md')`
 //!   hands off to the target document, which runs its OWN lifecycle
@@ -56,8 +57,9 @@
 //! - **Proxy from `blocked`** — removed with the harness validation DSL;
 //!   proxy hand-off remains available from `initialize`, `start`, and `failure`.
 //!
-//! - **Requeue from `blocked`** — removed with the harness validation DSL;
-//!   requeue remains available from `failure`.
+//! - **Defer from `blocked`** — accepted (flow control is universal) but, like
+//!   `defer` everywhere, returns the typed "not implemented" error until the
+//!   rendezvous deferred-execution backend lands.
 //!
 //! - **Top-level-before-stack ordering** — for `success` and `blocked`, top-level
 //!   communication properties (`stderr`, `info`, `warn`, etc.) fire before any
@@ -242,6 +244,9 @@ fn stage_proxy_pair(source_doc: &str, target_doc: &str, succeeding: bool) -> Sta
     }
 }
 
+// Retained for when `defer` is wired to the rendezvous deferred-execution
+// backend; currently unused because `defer` returns the not-implemented error.
+#[allow(dead_code)]
 struct RendezvousQueue {
     runtime: tokio::runtime::Runtime,
     handle: Option<rendezvous_daemon::server::ServerHandle>,
@@ -249,6 +254,7 @@ struct RendezvousQueue {
     node_id: String,
 }
 
+#[allow(dead_code)]
 impl RendezvousQueue {
     fn spawn(workspace: &Path) -> Self {
         let socket = workspace.join("rendezvous.sock");
@@ -662,68 +668,46 @@ Original body
     );
 }
 
-/// Requeue from `failure` records the materialized prompt in rendezvous, then
-/// `finalize` fires and the run exits.
+/// `defer` from `failure` parses and dispatches, but its runtime home (the
+/// rendezvous deferred-execution scheduler) is not ready, so it surfaces the
+/// typed "not implemented" error. `failure` and `finalize` still fire (the
+/// failure-dispatch Abort path runs `finalize` before propagating).
 #[test]
 #[serial(level2_lifecycle_control)]
-fn level2_lifecycle_failure_requeue_records_deferred_prompt() {
+fn level2_lifecycle_failure_defer_returns_not_implemented() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
     let doc = r#"---
-title: lifecycle requeue
+title: lifecycle defer
 failure:
   stack:
     - action: "append_line('events.log', 'failure')"
-    - action: requeue
+    - action: defer
       delay: 5m
       reason: provider failed
 finalize:
   stack:
     - action: "append_line('events.log', 'finalize')"
 ---
-Body to defer through rendezvous
+Body
 "#;
-    let mut staged = stage(doc);
-    let queue = RendezvousQueue::spawn(staged.workspace.path());
-    staged.rendezvous_socket = Some(queue.socket.clone());
+    let staged = stage(doc);
     let pane = run_in_tmux(&staged);
 
     let lines = event_lines(&staged);
     assert_eq!(
         lines.iter().filter(|l| **l == "provider-ran").count(),
         1,
-        "requeue must not re-invoke the provider; got {lines:?}; pane:\n{pane}"
+        "defer must not re-invoke the provider; got {lines:?}; pane:\n{pane}"
     );
     assert!(
         lines.iter().any(|l| l == "failure") && lines.iter().any(|l| l == "finalize"),
         "failure then finalize must both fire; got {lines:?}; pane:\n{pane}"
     );
-
-    let entries = queue.entries();
-    assert_eq!(
-        entries.len(),
-        1,
-        "requeue must append exactly one deferred prompt entry; got {entries:?}; pane:\n{pane}"
-    );
-    let entry = &entries[0];
-    assert_eq!(entry.source, "claudine.lifecycle.requeue");
-    assert_eq!(entry.level, "info");
+    let lc = pane.to_lowercase();
     assert!(
-        entry.message.contains("doc.md") && entry.message.contains("5m"),
-        "entry message should identify the prompt and delay; entry: {entry:?}"
-    );
-    let metadata: serde_json::Value =
-        serde_json::from_str(&entry.metadata_json).expect("metadata json");
-    assert_eq!(metadata["kind"], "claudine.lifecycle.requeue");
-    assert_eq!(metadata["provider"], "goose");
-    assert_eq!(metadata["delay"], "5m");
-    assert_eq!(metadata["reason"], "provider failed");
-    assert_eq!(metadata["prompt"], "Body to defer through rendezvous\n");
-    assert!(
-        metadata["source_path"]
-            .as_str()
-            .is_some_and(|path| path.ends_with("doc.md")),
-        "metadata should record source_path; metadata: {metadata}"
+        lc.contains("defer") && lc.contains("not implemented"),
+        "the defer-not-implemented error must surface; pane:\n{pane}"
     );
 }
 

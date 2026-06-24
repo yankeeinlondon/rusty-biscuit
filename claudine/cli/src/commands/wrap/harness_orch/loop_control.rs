@@ -542,7 +542,7 @@ fn run_target_initialize(
             StackControl::Stop => TargetInitializeAction::Proceed,
             StackControl::Retry { .. }
             | StackControl::Resume { .. }
-            | StackControl::Requeue { .. } => TargetInitializeAction::Abort(eyre!(
+            | StackControl::Defer { .. } => TargetInitializeAction::Abort(eyre!(
                 "lifecycle control action {control:?} is not valid at initialize"
             )),
         }
@@ -622,16 +622,20 @@ enum TerminalControlAction {
     Abort(color_eyre::eyre::Report),
 }
 
+#[allow(dead_code)] // retained for the future rendezvous deferred-execution backend
 const REQUEUE_SESSION_ID: &str = "claudine-deferred-execution";
+#[allow(dead_code)] // retained for the future rendezvous deferred-execution backend
 const REQUEUE_SOURCE: &str = "claudine.lifecycle.requeue";
 /// Environment variable that overrides the directory used by the
 /// rendezvous deferred-queue fallback file. When unset the fallback
 /// lives under `<config_dir>/claudine/rendezvous/deferred-queue.jsonl`.
+#[allow(dead_code)] // retained for the future rendezvous deferred-execution backend
 const REQUEUE_FALLBACK_DIR_ENV: &str = "CLAUDINE_RENDEZVOUS_FALLBACK_DIR";
 /// Fallback file name appended to the resolved fallback directory when no
 /// rendezvous daemon is reachable. Each line is the JSON serialization of
 /// the same `AppendEntryRequest` shape the daemon would have received, so a
 /// future daemon can drain it verbatim.
+#[allow(dead_code)] // retained for the future rendezvous deferred-execution backend
 const REQUEUE_FALLBACK_FILE_NAME: &str = "deferred-queue.jsonl";
 
 /// Errors that can occur while persisting a `requeue(...)` deferred-prompt
@@ -642,6 +646,7 @@ const REQUEUE_FALLBACK_FILE_NAME: &str = "deferred-queue.jsonl";
 /// here; a daemon connect/append failure that successfully falls back to the
 /// JSONL file is `Ok(())`.
 #[derive(Debug, thiserror::Error)]
+#[allow(dead_code)] // retained for the future rendezvous deferred-execution backend
 enum RequeueEnqueueError {
     #[error("failed to connect to rendezvous daemon at {endpoint}: {source}")]
     Connect {
@@ -677,6 +682,7 @@ enum RequeueEnqueueError {
 ///    cross-platform: `~/Library/Application Support` on macOS,
 ///    `~/.config` on Linux, `%APPDATA%` on Windows).
 /// 3. `~/.claudine/rendezvous/` as a last-resort home-dir fallback.
+#[allow(dead_code)] // retained for the future rendezvous deferred-execution backend
 fn requeue_fallback_dir() -> Option<std::path::PathBuf> {
     if let Some(explicit) = std::env::var_os(REQUEUE_FALLBACK_DIR_ENV)
         && !explicit.is_empty()
@@ -688,6 +694,7 @@ fn requeue_fallback_dir() -> Option<std::path::PathBuf> {
 }
 
 /// Resolve the absolute fallback file path (without touching the disk).
+#[allow(dead_code)] // retained for the future rendezvous deferred-execution backend
 fn requeue_fallback_path() -> Option<std::path::PathBuf> {
     requeue_fallback_dir().map(|d| d.join(REQUEUE_FALLBACK_FILE_NAME))
 }
@@ -696,6 +703,7 @@ fn requeue_fallback_path() -> Option<std::path::PathBuf> {
 /// single line. Creates the parent directory if needed. Each line carries
 /// the same shape as the `AppendEntryRequest` the daemon would have
 /// received so a future daemon can drain the file verbatim.
+#[allow(dead_code)] // retained for the future rendezvous deferred-execution backend
 fn write_requeue_fallback(
     path: &Path,
     request: &rendezvous_core::AppendEntryRequest,
@@ -745,6 +753,7 @@ fn write_requeue_fallback(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)] // retained for the future rendezvous deferred-execution backend
 async fn enqueue_requeue_entry_async(
     provider: Provider,
     prompt_state: &HarnessPromptState,
@@ -810,6 +819,7 @@ async fn enqueue_requeue_entry_async(
 
 /// Attempt the live-daemon append-entry RPC. The connector dispatches by
 /// platform (`connect_uds` on unix, `connect_named_pipe` on windows).
+#[allow(dead_code)] // retained for the future rendezvous deferred-execution backend
 async fn try_enqueue_via_daemon(
     endpoint: std::path::PathBuf,
     request: &rendezvous_core::AppendEntryRequest,
@@ -824,6 +834,7 @@ async fn try_enqueue_via_daemon(
     Ok(())
 }
 
+#[allow(dead_code)] // retained for the future rendezvous deferred-execution backend
 fn enqueue_requeue_entry(
     provider: Provider,
     prompt_state: &HarnessPromptState,
@@ -882,9 +893,12 @@ fn dispatch_terminal_control(
     budgets: &mut ControlBudgets,
     session_id: Option<&str>,
     profile: &dyn super::super::profile::WrapperProfile,
-    provider: Provider,
+    // `_provider` / `_materialized` are retained on the signature for when
+    // `defer` is wired to the rendezvous deferred-execution backend (it will
+    // need them to enqueue); unused while `defer` returns not-implemented.
+    _provider: Provider,
     prompt_state: &mut HarnessPromptState,
-    materialized: &MaterializedHarnessPrompt,
+    _materialized: &MaterializedHarnessPrompt,
     repo_root: Option<&Path>,
     lifecycle_guard: &mut claudine::composition::LifecycleRunGuard<'_>,
     proxy: &mut ProxyTracking,
@@ -1031,37 +1045,18 @@ fn dispatch_terminal_control(
             // document's attempt count.
             TerminalControlAction::Continue { next_attempt: 1 }
         }
-        ControlDispatch::Requeue { delay, reason } => {
-            match enqueue_requeue_entry(
-                provider,
-                prompt_state,
-                materialized,
-                repo_root,
-                &delay,
-                reason.as_deref(),
-            ) {
-                Ok(()) => {
-                    if show_checks {
-                        claudine::harness::report::report_lifecycle_recovery(
-                            &format!(
-                                "lifecycle requeue: deferred {} for {delay}",
-                                prompt_state.source_path.display()
-                            ),
-                            term,
-                        );
-                    }
-                    TerminalControlAction::Fallthrough
-                }
-                Err(err) => TerminalControlAction::Abort(
-                    CompositionError::LifecycleRequeueEnqueueFailed {
+        ControlDispatch::Defer { .. } => {
+            // `defer` (deferred re-execution) is accepted in every event, but its
+            // runtime home — the rendezvous deferred-execution scheduler — is not
+            // ready to receive prompts yet, so surface a clear "not implemented"
+            // error rather than enqueuing. The rendezvous enqueue machinery
+            // (`enqueue_requeue_entry`) is retained for when it lands.
+            TerminalControlAction::Abort(
+                CompositionError::LifecycleDeferNotImplemented {
                     source_path: prompt_state.source_path.clone(),
-                    delay,
-                    reason,
-                        message: err.to_string(),
                 }
                 .into(),
-                ),
-            }
+            )
         }
     }
 }
@@ -3083,7 +3078,7 @@ mod terminal_event_tests {
     }
 
     #[test]
-    fn dispatch_requeue_aborts_when_enqueue_fails() {
+    fn dispatch_defer_aborts_not_implemented() {
         let fx = fixture(serde_json::json!({}));
         let emitter = RecordingEmitter::default();
         let ctx = LifecycleRuntimeContext {
@@ -3096,7 +3091,7 @@ mod terminal_event_tests {
         let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
         let mut state = prompt_state(&fx.source_path);
         let mut budgets = ControlBudgets::default();
-        let outcome = outcome_with(StackControl::Requeue {
+        let outcome = outcome_with(StackControl::Defer {
             delay: "5m".to_string(),
             reason: Some("later".to_string()),
         });
@@ -3117,11 +3112,12 @@ mod terminal_event_tests {
         );
         match action {
             TerminalControlAction::Abort(err) => {
+                let msg = err.to_string();
                 assert!(
-                    err.to_string().contains("requeue")
-                        && err.to_string().contains("5m")
-                        && err.to_string().contains("rendezvous"),
-                    "unexpected: {err}"
+                    msg.contains("defer")
+                        && msg.contains("not implemented")
+                        && msg.contains("rendezvous"),
+                    "expected the defer-not-implemented error, got: {err}"
                 );
             }
             other => panic!("expected Abort, got {other:?}"),
