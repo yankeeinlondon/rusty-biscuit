@@ -278,10 +278,18 @@ impl EffectiveSchema {
         positions: &PositionMap,
     ) -> ValidationReport {
         let coerced = coerce::coerce_frontmatter(&self.json_schema, frontmatter);
-        let problems = match &self.arm_validators {
+        let mut problems = match &self.arm_validators {
             Some(arms) => validate::collect_root_union_problems(arms, &coerced.value, positions),
             None => validate::collect_problems(&self.validator, &coerced.value, positions),
         };
+        // Enrich each problem with its declared property description (Decision
+        // #2). Whitespace-only descriptions (#8) and descriptions identical to
+        // the rendered message (#9) are suppressed so the output stays additive.
+        for problem in &mut problems {
+            problem.description = validate::resolve_problem_description(&self.json_schema, problem)
+                .filter(|desc| !desc.trim().is_empty())
+                .filter(|desc| *desc != problem.message);
+        }
         ValidationReport {
             valid: problems.is_empty(),
             problems,
@@ -343,6 +351,11 @@ pub struct ValidationProblem {
     /// Index of the root-union arm under which this problem was raised, when
     /// the schema is a root union.
     pub arm_index: Option<usize>,
+    /// Declared description of the failing property, resolved from the
+    /// compiled JSON Schema (the SimplifiedSchema `-> {description}` text, or a
+    /// `description` keyword authored in a referenced JSON Schema file).
+    /// `None` when the property declares no description.
+    pub description: Option<String>,
 }
 
 fn build_arm_validators(
@@ -639,5 +652,79 @@ mod tests {
         );
         let report = api.validate(&md).unwrap();
         assert!(report.valid, "expected valid: {:?}", report.problems);
+    }
+
+    #[test]
+    fn enriches_problem_with_property_description() {
+        // End-to-end: the SimplifiedSchema `->` description surfaces on the
+        // populated `ValidationProblem.description`.
+        let md = md_with_schema(
+            "$schema:\n  title: 'string(required) -> The headline shown in listings'\nother: x\n",
+        );
+        let api = DarkmatterSchemas::new();
+        let report = api.validate(&md).unwrap();
+        assert!(!report.valid);
+        assert!(
+            report
+                .problems
+                .iter()
+                .any(|p| p.description.as_deref() == Some("The headline shown in listings")),
+            "expected a populated description: {:?}",
+            report.problems
+        );
+    }
+
+    #[test]
+    fn description_equal_to_message_is_suppressed() {
+        // Decision #9: a description byte-for-byte equal to the rendered message
+        // is dropped so the same sentence is not printed twice. The missing
+        // `title` message is `"title" is a required property`.
+        let md = md_with_schema("other: x\n");
+        let raw = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string", "description": "\"title\" is a required property" }
+            },
+            "required": ["title"]
+        });
+        let api = DarkmatterSchemas::new()
+            .with_baseline_json_schema(raw)
+            .unwrap();
+        let report = api.validate(&md).unwrap();
+        let problem = report
+            .problems
+            .iter()
+            .find(|p| p.property.as_deref() == Some("title"))
+            .expect("missing-title problem");
+        assert_eq!(problem.message, "\"title\" is a required property");
+        assert_eq!(
+            problem.description, None,
+            "description equal to the message must be suppressed"
+        );
+    }
+
+    #[test]
+    fn whitespace_only_description_is_suppressed() {
+        // Decision #8: a whitespace-only description renders nothing.
+        let md = md_with_schema("title:\n  - 1\n  - 2\n");
+        let raw = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string", "description": "   " }
+            }
+        });
+        let api = DarkmatterSchemas::new()
+            .with_baseline_json_schema(raw)
+            .unwrap();
+        let report = api.validate(&md).unwrap();
+        let problem = report
+            .problems
+            .iter()
+            .find(|p| p.path == "/title")
+            .expect("title type problem");
+        assert_eq!(
+            problem.description, None,
+            "whitespace-only description must be suppressed"
+        );
     }
 }
