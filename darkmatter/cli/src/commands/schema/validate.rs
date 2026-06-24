@@ -283,6 +283,14 @@ fn emit_problem_bullet(problem: &ValidationProblem, terminal: &Terminal) {
     let message = trim_redundant_property_prefix(&problem.message, problem.property.as_deref());
     let bullet = format!("    - {prefix}{}{location_suffix}", escape_prose(message));
     println!("{}", Prose::new(bullet).render(terminal));
+
+    // Surface the declared property description on its own dimmed sub-line,
+    // one indent level beneath the bullet (Decision #7). Enrichment already
+    // suppressed empty / message-equal descriptions, so a `Some` here renders.
+    if let Some(description) = problem.description.as_deref() {
+        let sub_line = format!("        <dim>{}</dim>", escape_prose(description));
+        println!("{}", Prose::new(sub_line).render(terminal));
+    }
 }
 
 /// When `jsonschema` reports a `Required` failure, the message already starts
@@ -339,6 +347,7 @@ fn emit_json(file: &Path, outcome: &FileOutcome) {
                         "line": p.line,
                         "column": p.column,
                         "arm_index": p.arm_index,
+                        "description": p.description,
                     })
                 })
                 .collect();
