@@ -2032,7 +2032,7 @@ fn parse_lifecycle_control_short(
             message: expect_one_arg(verb, args, signal, source_file)?,
             max_attempts: None,
         },
-        "requeue" => A::Requeue {
+        "defer" => A::Defer {
             delay: expect_one_arg(verb, args, signal, source_file)?,
             reason: None,
         },
@@ -2096,7 +2096,7 @@ fn parse_lifecycle_control_long(
             })?,
             max_attempts: params.remove("max_attempts"),
         },
-        "requeue" => A::Requeue {
+        "defer" => A::Defer {
             delay: params.remove("delay").ok_or_else(|| {
                 invalid_args("`requeue` requires a `delay` parameter".to_string())
             })?,
@@ -2468,7 +2468,7 @@ fn iter_action_expressions<'a>(
                     });
                 }
             }
-            LifecycleControlAction::Requeue { delay, reason } => {
+            LifecycleControlAction::Defer { delay, reason } => {
                 surfaces.push(LifecycleExpressionSurface {
                     property: format!("{prefix}.delay"),
                     signal,
@@ -4957,7 +4957,7 @@ mod tests {
             ("start", "retry"),
             ("success", "resume('the file abc.md was never written; create it')"),
             ("blocked", "resume('please')"),
-            ("initialize", "requeue('5m')"),
+            ("initialize", "defer('5m')"),
             ("success", "retry(2)"),
         ];
         for (event, action) in cases {
@@ -4966,7 +4966,7 @@ mod tests {
                 .unwrap_or_else(|e| panic!("`{action}` in `{event}` should parse, got: {e:?}"));
         }
         // `loop` carries iteration controls; a `requeue` there parses too.
-        let loop_fm = json!({ "loop": {"while": "true", "stack": [{"action": "requeue('5m')"}]} });
+        let loop_fm = json!({ "loop": {"while": "true", "stack": [{"action": "defer('5m')"}]} });
         parse_lifecycle_config(&loop_fm, dummy_path())
             .unwrap_or_else(|e| panic!("`requeue` in `loop` should parse, got: {e:?}"));
     }
@@ -4979,7 +4979,7 @@ mod tests {
         for action in [
             "retry(1)",
             "resume('finish the task')",
-            "requeue('5m')",
+            "defer('5m')",
             "proxy('@other.md')",
         ] {
             let fm = json!({

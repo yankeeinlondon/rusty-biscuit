@@ -20,7 +20,7 @@
 //! split with [`LifecycleActionKind`] variants:
 //!
 //! - [`LifecycleControlAction`] — `Stop`/`Skip`/`Error`/`Proxy`/`Retry`/
-//!   `Resume`/`Requeue`. At most one per stack item, always last.
+//!   `Resume`/`Defer`. At most one per stack item, always last.
 //! - [`CommunicationAction`] — `say`/`speak`/`effect`/`message`/`notify`/
 //!   `stderr`/`info`/`warn`.
 //! - [`ShellAction`] — bespoke shell commands.
@@ -147,9 +147,9 @@ pub enum LifecycleControlAction {
         max_attempts: Option<Expr>,
     },
 
-    /// `requeue('5m')` — push this prompt onto the deferred-execution
+    /// `defer('5m')` — push this prompt onto the deferred-execution
     /// queue. Valid in `blocked`, `failure`.
-    Requeue {
+    Defer {
         /// Delay duration expression. Required.
         delay: Expr,
         /// Optional human-readable reason.
@@ -167,7 +167,7 @@ impl LifecycleControlAction {
             Self::Proxy { .. } => "proxy",
             Self::Retry { .. } => "retry",
             Self::Resume { .. } => "resume",
-            Self::Requeue { .. } => "requeue",
+            Self::Defer { .. } => "defer",
         }
     }
 
@@ -175,7 +175,7 @@ impl LifecycleControlAction {
     /// event per the spec's "Where valid" matrix.
     ///
     /// Flow control is **universal**: `Stop`, `Error`, `Retry`, `Resume`,
-    /// `Requeue`, and `Proxy` are valid in **every** event. Flow control reacts
+    /// `Defer`, and `Proxy` are valid in **every** event. Flow control reacts
     /// to *state* — an error, a missing file, an `env` value, frontmatter — and
     /// an error is just one kind of state (e.g. a `success` stack may `resume`
     /// the agent because an expected artifact was not produced).
@@ -413,7 +413,7 @@ mod tests {
             assert!(!A::Skip.is_valid_for(event), "Skip in {event:?}");
         }
 
-        // Flow control is universal: Proxy/Retry/Resume/Requeue are valid in
+        // Flow control is universal: Proxy/Retry/Resume/Defer are valid in
         // every event (placement is not error-gated).
         let every = [
             S::Initialize,
@@ -436,7 +436,7 @@ mod tests {
             message: Expr::StringLiteral("please retry".into()),
             max_attempts: None,
         };
-        let requeue = A::Requeue {
+        let requeue = A::Defer {
             delay: Expr::StringLiteral("5m".into()),
             reason: None,
         };
@@ -444,7 +444,7 @@ mod tests {
             assert!(proxy.is_valid_for(event), "Proxy in {event:?}");
             assert!(retry.is_valid_for(event), "Retry in {event:?}");
             assert!(resume.is_valid_for(event), "Resume in {event:?}");
-            assert!(requeue.is_valid_for(event), "Requeue in {event:?}");
+            assert!(requeue.is_valid_for(event), "Defer in {event:?}");
         }
     }
 

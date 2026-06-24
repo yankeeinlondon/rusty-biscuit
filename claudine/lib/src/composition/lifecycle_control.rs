@@ -61,7 +61,7 @@ pub enum ControlDispatch {
 
     /// Push this prompt onto the deferred-execution (`rendezvous`) queue,
     /// then exit this run.
-    Requeue {
+    Defer {
         /// Evaluated delay duration string.
         delay: String,
         /// Optional human-readable reason.
@@ -160,7 +160,7 @@ pub fn decide_control(
         StackControl::Proxy { target } => ControlDispatch::Proxy {
             target: target.clone(),
         },
-        StackControl::Requeue { delay, reason } => ControlDispatch::Requeue {
+        StackControl::Defer { delay, reason } => ControlDispatch::Defer {
             delay: delay.clone(),
             reason: reason.clone(),
         },
@@ -473,25 +473,25 @@ mod tests {
             ControlDispatch::Proxy { .. }
         ));
 
-        let requeue = StackControl::Requeue {
+        let requeue = StackControl::Defer {
             delay: "5m".to_string(),
             reason: None,
         };
         assert!(matches!(
             decide_control(&requeue, 1, 0, false, true),
-            ControlDispatch::Requeue { .. }
+            ControlDispatch::Defer { .. }
         ));
     }
 
     #[test]
     fn requeue_carries_delay_and_reason() {
-        let control = StackControl::Requeue {
+        let control = StackControl::Defer {
             delay: "5m".to_string(),
             reason: Some("later".to_string()),
         };
         assert_eq!(
             decide_control(&control, 1, 0, false, true),
-            ControlDispatch::Requeue {
+            ControlDispatch::Defer {
                 delay: "5m".to_string(),
                 reason: Some("later".to_string()),
             }

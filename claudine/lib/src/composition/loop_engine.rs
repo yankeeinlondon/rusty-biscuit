@@ -663,7 +663,7 @@ where
     // `Skip` ends the run cleanly with no further events, `Error` routes to
     // `failure`/`finalize` and returns a typed error, `Proxy` resolves the
     // target and asks the caller to hand off, and `Stop` falls through to the
-    // iteration loop. `Retry`/`Resume`/`Requeue` are rejected at parse time, so
+    // iteration loop. `Retry`/`Resume`/`Defer` are rejected at parse time, so
     // they are defensive fall-throughs here.
     if let Some(control) = init_outcome.control.clone() {
         match control {
@@ -760,16 +760,14 @@ where
                     },
                 ));
             }
-            StackControl::Requeue { .. } => {
+            StackControl::Defer { .. } => {
                 return Ok(LoopExecutionResult::failure(
                     initial_frontmatter,
                     0,
                     String::new(),
                     0,
-                    CompositionError::LifecycleSetupPhaseRecoveryUnsupported {
+                    CompositionError::LifecycleDeferNotImplemented {
                         source_path: prompt_path.to_path_buf(),
-                        event: "initialize".to_string(),
-                        action: "requeue".to_string(),
                     },
                 ));
             }
@@ -1114,10 +1112,16 @@ fn run_loop_gate(
     // clear failure rather than a silent drop. (Recovery from a completed
     // iteration belongs in `failure`/`finalize`/`success`.) `Stop` and absence
     // fall through to the normal condition evaluation.
+    if let Some(StackControl::Defer { .. }) = &loop_outcome.control {
+        return Ok(LoopGateOutcome::Fail(
+            CompositionError::LifecycleDeferNotImplemented {
+                source_path: prompt_path.to_path_buf(),
+            },
+        ));
+    }
     let deferred_action = match &loop_outcome.control {
         Some(StackControl::Retry { .. }) => Some("retry"),
         Some(StackControl::Resume { .. }) => Some("resume"),
-        Some(StackControl::Requeue { .. }) => Some("requeue"),
         Some(StackControl::Proxy { .. }) => Some("proxy"),
         _ => None,
     };

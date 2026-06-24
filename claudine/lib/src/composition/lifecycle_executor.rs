@@ -14,7 +14,7 @@
 //! which lifecycle control action fired (if any) plus whether an
 //! unintentional action error must route the run to `failure`. It does **not**
 //! perform the runtime control flow those outcomes imply (`Skip` opt-out,
-//! `Proxy` hand-off, `Retry`/`Resume`/`Requeue` re-entry) — that wiring lives
+//! `Proxy` hand-off, `Retry`/`Resume`/`Defer` re-entry) — that wiring lives
 //! in the composition runtime.
 //!
 //! ## Error propagation
@@ -99,7 +99,7 @@ pub enum StackControl {
     },
 
     /// Push this prompt onto the deferred-execution queue.
-    Requeue {
+    Defer {
         /// Evaluated delay duration.
         delay: String,
         /// Evaluated optional reason.
@@ -632,7 +632,7 @@ impl StackExecutionContext<'_> {
                 message: self.render_message(message)?,
                 max_attempts: self.eval_opt_u32(max_attempts.as_ref())?.unwrap_or(1),
             },
-            C::Requeue { delay, reason } => StackControl::Requeue {
+            C::Defer { delay, reason } => StackControl::Defer {
                 delay: self.render_message(delay)?,
                 reason: self.eval_opt_string(reason.as_ref())?,
             },

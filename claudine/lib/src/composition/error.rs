@@ -511,8 +511,25 @@ pub enum CompositionError {
         source_path: PathBuf,
         /// The originating event (`initialize` / `blocked` / `loop`).
         event: String,
-        /// The deferred action verb (`retry` / `requeue` / `proxy`).
+        /// The deferred action verb (`retry` / `proxy`).
         action: String,
+    },
+
+    /// A lifecycle stack requested `defer(...)` (deferred re-execution). The
+    /// action parses and is valid in every event, but its runtime home — the
+    /// rendezvous deferred-execution scheduler — is not ready to receive
+    /// prompts yet, so the control is surfaced as a clear "not implemented"
+    /// error rather than silently dropped or half-enqueued.
+    #[error(
+        "lifecycle `defer` is not implemented yet: deferred re-execution (running \
+         this prompt again later, via the rendezvous scheduler) is not ready to \
+         receive prompts — use `retry`/`resume` for in-run recovery for now \
+         ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleDeferNotImplemented {
+        /// The prompt file whose stack requested `defer`.
+        source_path: PathBuf,
     },
 
     /// A lifecycle stack requested `requeue(...)`, but the runtime could not
