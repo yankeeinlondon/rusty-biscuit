@@ -65,7 +65,7 @@ When a user types `claudine compose ` they are now ready to specify the Markdown
                     - if not in a repo then all markdown files in the directory tree rooted in ${CWD}
                 - all `.gitignore` files are excluded
                 - all files in the "prompt" directories are ignored:
-                    - 
+                    - it assumed these are associated more with `compose` than `inline-compose`
                 - all files inside a _directory_ starting with `_` are ignored
 
                     > **Note:** all files within a _directory_ starting with `_` are ignored but files with a leading `_` will still match
@@ -78,7 +78,7 @@ When a user types `claudine compose ` they are now ready to specify the Markdown
                     just_images: file(match('*.gif','*.jpg','*.png'))
                     spec_files: file(match('**/{features|fixes}/*spec.md'))
                 ```
-
+> **Note:** any file array type will also autocomplete for a single file but if you add a `,` afterward it will again allow autocomplete for the same glob of files (excluding those already selected).
 
 
 ## Autocomplete
