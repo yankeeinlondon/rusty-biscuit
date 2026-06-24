@@ -166,7 +166,7 @@ This is a Rust workspace with the following modules:
 
 - [claudine-cli](./claudine/cli) _v0.1.0_
 
-    _Hook manager CLI for agentic tool integration._
+    _Hook manager CLI for agentic tool integration. Uses the rendezvous client/core crates on every target to record lifecycle `requeue(...)` deferred-execution entries (UDS on Unix, named pipe on Windows) and falls back to a local durable JSONL queue when the daemon is unreachable._
 
     _Tags: workspace, cli, hooks_
 

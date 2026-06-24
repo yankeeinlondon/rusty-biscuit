@@ -86,6 +86,7 @@ pub(crate) fn build_loop_iteration_output(
             .with_rate_limit(rate_limit)
             .with_exit_reason(exit_reason)
             .with_attribution(provider_id, model_id)
+            .with_terminal_signal(outcome.terminal_signal)
     } else {
         // Build a human-readable cause that surfaces the structured
         // exit_reason at the top. Watchdog detail (e.g. "no stream
@@ -108,6 +109,7 @@ pub(crate) fn build_loop_iteration_output(
             .with_rate_limit(rate_limit)
             .with_exit_reason(exit_reason)
             .with_attribution(provider_id, model_id)
+            .with_terminal_signal(outcome.terminal_signal)
     }
 }
 
@@ -116,22 +118,23 @@ pub(crate) fn build_loop_iteration_output(
 /// Returns `Ok(None)` when the source has no `loop` frontmatter, matching
 /// [`claudine::composition::execute_loop`].
 ///
-/// `base_prepare_options` provides the env, working directory, repo root,
-/// and CLI `set_overrides` used for the seed compose pass. The same options
-/// (with `set_overrides` replaced by the per-iteration control state) are
-/// expected to be used by the executor closure so the seed and iteration 1
-/// resolve from identical inputs.
-///
-/// `mode` selects the seed compose pass and is forwarded to
-/// [`claudine::composition::build_loop_seed`]. It must match the iteration
-/// executor's prepare variant so the seed and iteration 1 resolve from the
-/// same body: `ChainedDocument` for `compose`, `InlineFrontmatterPrompt`
-/// for `inline-compose`.
+/// The caller is responsible for building the loop seed (control-variable
+/// frontmatter) and the lifecycle runtime dependencies. This function wraps
+/// the executor with user-interrupt short-circuiting and CWD restoration,
+/// then drives the loop through [`claudine::composition::execute_loop_with_lifecycle`]
+/// so `initialize` is emitted exactly once and the post-`finalize` loop gate
+/// runs in the required order.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn run_loop_with_overrides<F>(
     source: &claudine::composition::ResolvedCompositionSource,
-    base_prepare_options: &claudine::composition::PrepareOptions,
+    config: &claudine::composition::LoopConfig,
+    initial_frontmatter: serde_json::Map<String, serde_json::Value>,
     options: claudine::composition::LoopExecutionOptions,
-    mode: claudine::composition::CompositionMode,
+    lifecycle_config: &claudine::composition::LifecycleConfig,
+    lifecycle_ctx: &claudine::composition::LifecycleRuntimeContext<'_>,
+    effect_engine: &darkmatter::effects::EffectEngine,
+    shell_runner: &dyn claudine::composition::ShellRunner,
+    emitter: &dyn claudine::composition::LifecycleEmitter,
     mut executor: F,
 ) -> std::result::Result<
     Option<claudine::composition::LoopExecutionResult>,
@@ -140,34 +143,22 @@ pub(crate) fn run_loop_with_overrides<F>(
 where
     F: FnMut(
         claudine::composition::LoopIterationContext,
+        &mut claudine::composition::LifecycleRunGuard<'_>,
     ) -> std::result::Result<
         claudine::composition::LoopIterationOutput,
         claudine::composition::CompositionError,
     >,
 {
-    let Some(config) = claudine::composition::resolve_loop_config(source)? else {
-        return Ok(None);
-    };
-
-    let initial_frontmatter = claudine::composition::build_loop_seed(
-        source,
-        &config,
-        base_prepare_options.clone(),
-        mode,
-    )?;
-
     let prompt_path = source.resolved_path.clone();
 
     // Capture the launch CWD before any iteration runs so we can restore it
     // between iterations. The wrap layer's `switch_process_cwd` mutates the
     // process-global CWD to the detected repo/git root inside each iteration;
-    // without restoration, iteration 2's `prepare_direct_with_schema` resolves
-    // any CLI-supplied `file(required)` setter against the post-switch root
-    // rather than the user's original launch directory. A path that validated
-    // on iteration 1 then fails iteration 2 as `not a "darkmatter-file"`, even
-    // though nothing about the value changed. `PWD` is injected onto the child
-    // `Command` env map in `build_child_env_with_launch`, so we do not need to
-    // mutate the process-global `PWD` here.
+    // without restoration, iteration 2's prepare resolves any CLI-supplied
+    // `file(required)` setter against the post-switch root rather than the
+    // user's original launch directory. `PWD` is injected onto the child
+    // `Command` env map in `build_child_env_with_launch`, so we do not need
+    // to mutate the process-global `PWD` here.
     let launch_cwd = std::env::current_dir().ok();
 
     // The Ctrl+C SIGINT handler is installed at the top of the compose
@@ -176,7 +167,10 @@ where
     // simply observes the process-scoped flag and short-circuits
     // remaining iterations once the user has interrupted.
     let prompt_path_for_executor = prompt_path.clone();
-    let wrapped_executor = move |ctx: claudine::composition::LoopIterationContext| {
+    let wrapped_executor = move |
+        ctx: claudine::composition::LoopIterationContext,
+        guard: &mut claudine::composition::LifecycleRunGuard<'_>,
+    | {
         if crate::output::user_interrupt_observed() {
             return Ok(claudine::composition::LoopIterationOutput::failure(
                 "",
@@ -186,13 +180,13 @@ where
                 },
             ));
         }
-        // Restore launch CWD before each iteration so per-iteration schema
-        // validation (which uses ambient CWD via `validate_file_reference`)
-        // sees the same root that the pre-loop validation saw.
+        // Restore launch CWD before each iteration so per-iteration compose
+        // (which uses ambient CWD via `validate_file_reference`) sees the
+        // same root that the pre-loop validation saw.
         if let Some(ref cwd) = launch_cwd {
             let _ = std::env::set_current_dir(cwd);
         }
-        let output = executor(ctx)?;
+        let output = executor(ctx, guard)?;
         if crate::output::user_interrupt_observed() {
             return Ok(claudine::composition::LoopIterationOutput::failure(
                 output.output,
@@ -205,11 +199,16 @@ where
         Ok(output)
     };
 
-    let mut result = claudine::composition::execute_loop_with_config(
+    let mut result = claudine::composition::execute_loop_with_lifecycle(
         &source.resolved_path,
-        &config,
+        config,
         initial_frontmatter,
         options,
+        lifecycle_config,
+        lifecycle_ctx,
+        effect_engine,
+        shell_runner,
+        emitter,
         wrapped_executor,
     )?;
 

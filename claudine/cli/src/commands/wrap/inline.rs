@@ -99,9 +99,8 @@ pub(crate) fn report_inline_agent_status(
 
 /// Attempt inline closure validation and application.
 ///
-/// Returns `Ok(())` on success (file rewritten), or a list of
-/// `ValidationFailure`s that should be routed through the harness handler
-/// system for potential retry/resume/redirect recovery.
+/// Returns `Ok(())` on success (file rewritten), or a list of human-readable
+/// failure messages if the closure could not be applied.
 pub(crate) fn try_inline_closure(
     closure_plan: &claudine::composition::InlineClosurePlan,
     final_response: &str,
@@ -109,9 +108,7 @@ pub(crate) fn try_inline_closure(
     child_cwd: &Path,
     show_checks: bool,
     term: &Terminal,
-) -> Result<(), Vec<claudine::harness::ValidationFailure>> {
-    use claudine::harness::{FailurePhase, ValidationEvent, ValidationFailure, ValidationRuleId};
-
+) -> Result<(), Vec<String>> {
     let display_path = source_path
         .strip_prefix(child_cwd)
         .unwrap_or(source_path)
@@ -128,13 +125,7 @@ pub(crate) fn try_inline_closure(
             if show_checks {
                 log::message(&crate::output::fm_check_fail(&message, term));
             }
-            return Err(vec![ValidationFailure {
-                rule_id: ValidationRuleId(9000),
-                event: ValidationEvent::InlineResponseEmpty,
-                phase: FailurePhase::PostCheck,
-                subject_key: Some(source_path.display().to_string()),
-                message,
-            }]);
+            return Err(vec![message]);
         }
     };
 
@@ -205,23 +196,11 @@ pub(crate) fn try_inline_closure(
             Ok(())
         }
         Err(error) => {
-            let is_unchanged = error.to_string().contains("unchanged");
-            let event = if is_unchanged {
-                ValidationEvent::InlineBodyUnchanged
-            } else {
-                ValidationEvent::InlineResponseEmpty
-            };
             let message = format!("failed to rewrite {display_path}: {error}");
             if show_checks {
                 log::message(&crate::output::fm_check_fail(&message, term));
             }
-            Err(vec![ValidationFailure {
-                rule_id: ValidationRuleId(9001),
-                event,
-                phase: FailurePhase::PostCheck,
-                subject_key: Some(source_path.display().to_string()),
-                message,
-            }])
+            Err(vec![message])
         }
     }
 }
@@ -265,7 +244,10 @@ mod tests {
         let original_md: darkmatter::markdown::Markdown = original.to_string().into();
         let plan = InlineClosurePlan {
             original_document_text: original.to_string(),
-            original_body_hash: original_md.hash_body(false),
+            original_hash: original_md.compute_hash(
+                darkmatter::markdown::hash::MdHashKind::Simple,
+                &claudine::composition::closure::inline_hash_options(),
+            ),
         };
 
         let term = Terminal::new_optimistic(120);
@@ -308,7 +290,10 @@ mod tests {
         let original_md: darkmatter::markdown::Markdown = original.to_string().into();
         let plan = InlineClosurePlan {
             original_document_text: original.to_string(),
-            original_body_hash: original_md.hash_body(false),
+            original_hash: original_md.compute_hash(
+                darkmatter::markdown::hash::MdHashKind::Simple,
+                &claudine::composition::closure::inline_hash_options(),
+            ),
         };
 
         let term = Terminal::new_optimistic(120);

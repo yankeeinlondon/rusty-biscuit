@@ -354,6 +354,10 @@ fn wait_with_signal_handling(
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
+    // This loop installs a child-targeting SIGINT handler, so the
+    // compose-scoped Ctrl+C guard must defer to it while it runs.
+    let _wait_loop_active = crate::output::WaitLoopActiveGuard::new();
+
     let interrupt_count = Arc::new(AtomicU8::new(0));
     let child_exited = Arc::new(AtomicBool::new(false));
     let child_pid = child.id();
@@ -408,6 +412,7 @@ fn wait_with_signal_handling(
     child: &mut Child,
     _child_in_own_pgroup: bool,
 ) -> Result<(i32, claudine::harness::ProcessTermination)> {
+    let _wait_loop_active = crate::output::WaitLoopActiveGuard::new();
     let status = child.wait()?;
     Ok((
         exit_code_from_status(status),

@@ -196,6 +196,44 @@ impl WezTermHarness {
         self.pane_id()
     }
 
+    /// Captures the pane including up to `lines` rows of scrollback, not just
+    /// the visible viewport that [`capture`](TerminalHarness::capture) returns.
+    ///
+    /// Output taller than the pane scrolls into history; the viewport-only
+    /// `capture` then loses it. A report whose top scrolls off a short shared
+    /// pane (e.g. a header's OSC8 hyperlink above a long body) is recoverable
+    /// only this way. `wezterm cli get-text --start-line -<lines>` reads that
+    /// many physical lines up from the viewport into the scrollback.
+    ///
+    /// ## Notes
+    ///
+    /// A shared pane is reused across serial tests, so its scrollback can hold
+    /// earlier tests' output. Scope assertions to a string only the test under
+    /// capture emits, or clear the pane (`ESC[3J`) before driving the command.
+    pub fn capture_scrollback(&mut self, lines: u32) -> io::Result<CapturedFrame> {
+        let id = self.pane_id().to_string();
+        let start = format!("-{lines}");
+        let mut cmd = Command::new("wezterm");
+        cmd.args([
+            "cli",
+            "get-text",
+            "--pane-id",
+            &id,
+            "--escapes",
+            "--start-line",
+            &start,
+        ]);
+        let out = run_with_timeout(&mut cmd, CAPTURE_TIMEOUT)?;
+        if !out.status.success() {
+            return Err(io::Error::other(format!(
+                "wezterm cli get-text (scrollback) failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            )));
+        }
+        let raw = String::from_utf8_lossy(&out.stdout).into_owned();
+        Ok(CapturedFrame::from_raw(raw))
+    }
+
     /// Borrows the active pane id, panicking with a clear message when
     /// no pane has been spawned yet.
     fn pane_id(&self) -> &str {

@@ -111,6 +111,7 @@ words = [
     "mingcute",
     "minimax",
     "misclassifies",
+    "mouseclick",
     "mvvm",
     "nextest",
     "nomodule",
@@ -164,6 +165,7 @@ words = [
     "wai",
     "wez",
     "wezterm",
+    "woosh",
     "worktrees",
     "zmdi",
 ]

@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-98a03d15d3a9a515
-last_updated: 2026-06-14
+hash: ef46db3751d8e999-f9dd0b7584edf43b
+last_updated: 2026-06-23
 ---
 # Claudine CLI Reference
 
@@ -256,7 +256,7 @@ echo '{"hook_event_name": "PreToolUse", "tool_name": "Bash"}' | claudine handle 
 
 ## Composition Commands
 
-Markdown frontmatter-based composition pipelines for delivering prompts to provider sessions. All three commands reuse the wrapper pipeline (env setup, harness detection, structured streaming, handler-driven recovery).
+Markdown frontmatter-based composition pipelines for delivering prompts to provider sessions. All three commands reuse the wrapper pipeline (env setup, harness detection, structured streaming, lifecycle-stack recovery).
 
 ### `claudine compose <file-ref> [key=value ...]`
 
@@ -286,7 +286,7 @@ claudine sequence @research.md topic="async traits"
 
 Runs the full composition pipeline **up to but not including provider launch**, then emits the composed result instead of sending it to a provider. Available on all three commands; suitable for CI rehearsal because it exercises the identical path minus the spawn.
 
-- Schema validation, shell-command execution (real side effects), and harness pre-checks all run normally.
+- Schema validation, shell-command execution (real side effects), and the shell-audit pre-flight all run normally.
 - The provider is never launched; `inline-compose --dry-run` therefore **does not mutate** the source file.
 - **stdout** = composed body; **stderr** = highlighted YAML frontmatter + a metadata table (Document as a blue OSC8 link, Description, Agent, Model, YOLO, Session mode/source, and Area when inside a monorepo). So `compose --dry-run doc.md > body.md` captures only the body.
 - `--quiet` / `--silent` have **no effect** under `--dry-run`.
