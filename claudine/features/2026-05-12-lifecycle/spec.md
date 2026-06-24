@@ -168,7 +168,7 @@ struct Current {
     - you may also want to double check that the Agentic Loop that just completed actually did what it was supposed to
 - **`failure`**
     - communicate failure, or
-    - recover from Agentic errors with `Retry` / `Resume` / `Requeue` / `Proxy`
+    - recover from Agentic errors with `Retry` / `Resume` / `Defer` / `Proxy`
 - **`finalize`** 
     - fires once per iteration, immediately after the terminal `success`/`failure` (or `blocked`) completes
     - this is the only lifecycle state where you _might_ be in an error state but _might not_ be too
@@ -272,7 +272,7 @@ For each stack item, top to bottom:
               always the last action in the item — see cardinality rule below)
       for each action, in order:
         • communication, side effect, expression call, shell → run, continue
-        • lifecycle action (Stop/Skip/Error/Proxy/Retry/Resume/Requeue)
+        • lifecycle action (Stop/Skip/Error/Proxy/Retry/Resume/Defer)
             → run, then stop processing this event (it is necessarily last)
 
 If the stack runs to completion without a lifecycle action matching, the event ends normally.
@@ -342,13 +342,13 @@ These actions change what happens next. The first one whose `when:` matches **te
 | `Proxy`   | every event | Hand off execution to another prompt document. The proxied document enters at its own `initialize` event — a fresh prompt run, including pre-flight. The target document's own opt-out logic (`Skip`/`Proxy`/`Error` at `initialize`) is respected. |
 | `Retry`   | every event | Try the current prompt again. When the provider has not launched yet (`initialize`/`start`/`blocked`), retry re-runs the pre-flight/start path; once it has (`success`/`failure`/`finalize`), retry re-invokes the agentic loop. Parameters: `max_attempts` (the number of additional attempts beyond the original attempt, default `1`), `backoff` (`fixed` \| `exponential`, default `fixed`), `delay` (duration, default `0s`). |
 | `Resume`  | every event | Resume the agent session with its context intact and a follow-up message. Requires a live session, so pre-launch events surface `ResumeWithoutSession` at runtime. Parameters: `message` (the follow-up prompt, required), `max_attempts` (default `1`). In short form, `resume("...message...")` binds its string argument to the required `message:` parameter. |
-| `Requeue` | every event | Push this prompt onto the deferred-execution queue (via `rendezvous`). Parameters: `delay` (duration, required), `reason` (string, optional).                                                                                                       |
+| `Defer` | every event | Defer this prompt to **run again later** — a fresh scheduled run after the delay (not an in-place pause), via the `rendezvous` deferred-execution scheduler. Parameters: `delay` (duration, required), `reason` (string, optional). **Not implemented yet:** `defer` parses and dispatches but surfaces a typed `LifecycleDeferNotImplemented` error until the rendezvous backend lands. |
 
-**`finalize` is one of many recovery surfaces.** Because `finalize` is the only terminal event that may carry an error, it is a natural last-chance recovery surface — a `finalize.stack` guarded by `when: "err"` can `Retry`/`Resume`/`Requeue`/`Proxy`. But recovery is **not** unique to `finalize`: any event may do the same in response to any state (see below).
+**`finalize` is one of many recovery surfaces.** Because `finalize` is the only terminal event that may carry an error, it is a natural last-chance recovery surface — a `finalize.stack` guarded by `when: "err"` can `Retry`/`Resume`/`Defer`/`Proxy`. But recovery is **not** unique to `finalize`: any event may do the same in response to any state (see below).
 
 ### Flow control is universal; `Skip` is the one placement rule
 
-Flow control reacts to **state**, and an error is just one kind of state. So `Error`, `Stop`, `Retry`, `Resume`, `Requeue`, and `Proxy` are valid in **every** event. Examples: a `success` stack may `resume("you finished but never wrote abc.md — create it")` when an expected artifact is missing; a `start` stack may `proxy` based on an `env` value; a `blocked` stack may `requeue` for later.
+Flow control reacts to **state**, and an error is just one kind of state. So `Error`, `Stop`, `Retry`, `Resume`, `Defer`, and `Proxy` are valid in **every** event. Examples: a `success` stack may `resume("you finished but never wrote abc.md — create it")` when an expected artifact is missing; a `start` stack may `proxy` based on an `env` value; a `blocked` stack may `defer` for later.
 
 `Skip` is the **single** placement-restricted action — `initialize`-only, because opting out of the whole document is incoherent once anything has run.
 
@@ -366,7 +366,7 @@ Short forms:
 - `"error(\"reason\")"`
 - `"retry"`, `"retry(3)"` — count shorthand: `retry(N)` sets `max_attempts = N` (the number of additional attempts beyond the original attempt), so bare `retry` / `retry(1)` means one retry
 - `"resume(\"please set the production_ready frontmatter\")"` — binds the string argument to the required `message:` parameter
-- `"requeue('5m')"`
+- `"defer('5m')"`
 
 ### Communication Actions
 
@@ -450,7 +450,7 @@ Runs as soon as the prompt file is identified. Pre-flight checks have **not** ru
 
 **`initialize` is a timing slot, not a validation phase.** It runs after the prompt file and its frontmatter have parsed, after CLI/frontmatter override merging, and before user `$schema` validation and shell pre-flight. It cannot "fail itself" — pre-flight (owned by `start`) remains the single validation surface. The only way `initialize` alters flow is by a stack item evaluating a lifecycle action (`Skip`, `Proxy`, `Error`, `Stop`). An `Error` raised here routes through the normal `failure` event path, same as anywhere else.
 
-**What "pre-flight" means.** Throughout this spec, "pre-flight checks" refers to exactly two surfaces: `$schema` validation and the shell-command audit (every reachable stack's shell commands pass Claudine's whitelist). It does **not** include the legacy harness `pre_checks`/`post_checks` and handler DSL, whose gating/verification/recovery roles are subsumed by the lifecycle stack (`when:` guards plus `Error`/`Skip`/`Proxy`/`Retry`/`Resume`/`Requeue` actions). That DSL has been retired in a companion feature — see [Retire the Harness Pre/Post Validation & Handler DSL](../2026-06-21-remove-validations/spec.md); declaring any of those keys now rejects with a typed `RemovedValidationKey` diagnostic. A `blocked` outcome is therefore produced by a schema-validation failure or a shell-audit denial.
+**What "pre-flight" means.** Throughout this spec, "pre-flight checks" refers to exactly two surfaces: `$schema` validation and the shell-command audit (every reachable stack's shell commands pass Claudine's whitelist). It does **not** include the legacy harness `pre_checks`/`post_checks` and handler DSL, whose gating/verification/recovery roles are subsumed by the lifecycle stack (`when:` guards plus `Error`/`Skip`/`Proxy`/`Retry`/`Resume`/`Defer` actions). That DSL has been retired in a companion feature — see [Retire the Harness Pre/Post Validation & Handler DSL](../2026-06-21-remove-validations/spec.md); declaring any of those keys now rejects with a typed `RemovedValidationKey` diagnostic. A `blocked` outcome is therefore produced by a schema-validation failure or a shell-audit denial.
 
 ### `start`
 
@@ -458,15 +458,15 @@ Pre-flight has passed; the agent is about to be invoked. Last chance to communic
 
 ### `blocked`
 
-A pre-flight check failed. The agent will not be invoked. Common patterns: communicate the failure, `Proxy` to a fallback prompt, `Retry` after a side-effect fixes the offending condition, or `Requeue` for later execution.
+A pre-flight check failed. The agent will not be invoked. Common patterns: communicate the failure, `Proxy` to a fallback prompt, `Retry` after a side-effect fixes the offending condition, or `Defer` for later execution.
 
 ### `success`
 
-Agentic loop completed cleanly. Common patterns: announce outcome, commit a side effect (e.g., `append_jsonl` to a log), or advance the sequence via the normal success path (e.g., `Requeue` the next step).
+Agentic loop completed cleanly. Common patterns: announce outcome, commit a side effect (e.g., `append_jsonl` to a log), or advance the sequence via the normal success path (e.g., `Defer` the next step).
 
 ### `failure`
 
-Agentic loop errored. Common patterns: announce failure, recover via `Retry` / `Resume` / `Requeue` / `Proxy`, or simply communicate and exit.
+Agentic loop errored. Common patterns: announce failure, recover via `Retry` / `Resume` / `Defer` / `Proxy`, or simply communicate and exit.
 
 ### `finalize`
 
@@ -476,7 +476,7 @@ Use for:
 
 - Cleanup that must run **regardless of outcome** (close handles, flush logs, remove scratch files)
 - A last-chance error handler — e.g., the agentic loop reported success but `finalize` inspects `current` state, decides the work was not actually done, and raises an `Error`
-- A last-chance **recovery** handler — `finalize` may also `Retry`, `Resume`, `Requeue`, or `Proxy` (typically guarded by `when: "err"`) when it determines the iteration's work is incomplete. A recovery action re-enters the run (or hands off) under the same per-control `max_attempts` budget as the `failure` event. This is the canonical pairing for "verify in `success`, recover in `finalize`": a `success` stack raises `Error` (routing through `failure`), and the subsequent `finalize` — now carrying `err` — retries.
+- A last-chance **recovery** handler — `finalize` may also `Retry`, `Resume`, `Defer`, or `Proxy` (typically guarded by `when: "err"`) when it determines the iteration's work is incomplete. A recovery action re-enters the run (or hands off) under the same per-control `max_attempts` budget as the `failure` event. This is the canonical pairing for "verify in `success`, recover in `finalize`": a `success` stack raises `Error` (routing through `failure`), and the subsequent `finalize` — now carrying `err` — retries.
 
 > Note: this is not in tension with the [Action Error Propagation](#action-error-propagation) table's "composition outcome unchanged" rule for `finalize`. That rule governs an action that *unintentionally* errors. The last-chance handler here uses the **explicit `Error` lifecycle action**, which (per the [Lifecycle Actions](#lifecycle-actions) "Where valid" matrix) is a deliberate author choice and **does** convert success → failure. Because `finalize` is already the last terminal boundary, an `Error` raised there updates the final outcome and does **not** re-enter the `failure` event.
 
@@ -677,7 +677,7 @@ Each item is a concrete, checkable assertion derived from the decisions above.
 - Lifecycle output mostly uses `stderr`, `info`, `warn`, or `success`, with machine-readable side effects via files/frontmatter/JSONL. The opt-in `stdout` channel writes plain prose to stdout for authors who specifically want it there.
 - An action carrying `no_error: true` logs its error and continues to the next stack item, leaving the composition outcome unchanged regardless of event.
 - An unintentional action error at a terminal-phase event (`success`/`failure`/`finalize`/`loop`) does not invert the composition outcome; an explicit `Error` lifecycle action at `success`/`finalize` does convert success → failure, with `finalize` doing so without re-entering `failure`.
-- The recovery actions `Retry`, `Resume`, `Requeue`, and `Proxy` are valid in `finalize` (parse-time and runtime), and a `finalize.stack` recovery re-enters the run (or hands off) under the same per-control `max_attempts` budget as `failure`. The canonical "verify in `success`, recover in `finalize`" pattern (success `Error` → `failure` event → `finalize` retry) works end-to-end.
+- The recovery actions `Retry`, `Resume`, `Defer`, and `Proxy` are valid in `finalize` (parse-time and runtime), and a `finalize.stack` recovery re-enters the run (or hands off) under the same per-control `max_attempts` budget as `failure`. The canonical "verify in `success`, recover in `finalize`" pattern (success `Error` → `failure` event → `finalize` retry) works end-to-end.
 - Existing top-level-only prompts (`say`/`effect`/`message` at `start`/`success`/`failure`) continue to work unchanged.
 
 ## Test Strategy
@@ -698,7 +698,7 @@ Tests follow the existing `composition/lifecycle.rs` patterns and the monorepo L
 - **L2 (`just test-l2`, integration):**
     - end-to-end lifecycle dispatch ordering across the full event set
     - loop gate flow: re-enter at `start`, per-iteration `finalize` count, concerns-before-condition-before-mutation ordering
-    - `Proxy` / `Retry` / `Resume` / `Requeue` control flow
+    - `Proxy` / `Retry` / `Resume` / `Defer` control flow
     - the blocked-first-iteration edge case (`blocked` → `finalize`, then exit for unrecovered `fail_fast: true` or reach the `loop` gate for recovered / `fail_fast: false`)
 - **L3 (optional, real terminal / provider):**
     - a real provider wrap exercising `start` → `success` → `finalize` with a trivial prompt

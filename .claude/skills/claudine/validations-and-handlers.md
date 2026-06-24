@@ -1,5 +1,5 @@
 ---
-hash: ef46db3751d8e999-2c21bcb9062ba458
+hash: ef46db3751d8e999-f0f80d972faaca81
 ---
 # Retired: Validations and Handlers → Lifecycle Stacks
 
@@ -15,7 +15,7 @@ The `harness` module is retained for: timeout parsing and enforcement
 (`timeout`, `timeout_warn`, `step_timeout`, `step_timeout_warn`), the shell-audit
 pre-flight, runtime attempt classification (`ProcessTermination`,
 `FailureEvent`, attempt outcome / `error_kind`), speech helpers, and the lifecycle
-recovery infrastructure that backs `Retry` / `Resume` / `Requeue`. It no longer
+recovery infrastructure that backs `Retry` / `Resume` / `Defer`. It no longer
 parses or evaluates validation rules or handler tables.
 
 ## Removed-key diagnostics
@@ -41,7 +41,7 @@ the diagnostic is specific rather than a generic unknown-field error.
 - **Verification** (the old `post_checks` — did the agent do the work?) → a `when:`
   guard in the `success`/`finalize` stack that raises an `Error` lifecycle action when
   the contract is unmet.
-- **Recovery** (the old `handle_*` handlers) → `Retry`, `Resume`, `Requeue`, or
+- **Recovery** (the old `handle_*` handlers) → `Retry`, `Resume`, `Defer`, or
   `Proxy` lifecycle actions in the `failure`/`blocked` stack.
 - **Side-effect recovery** (the old `deviate`) → a lifecycle `shell` action followed by a
   recovery action.
