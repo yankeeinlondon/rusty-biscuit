@@ -2,6 +2,7 @@
 status: ready for planning and implementation
 depends_on: ../2026-05-12-lifecycle/spec.md
 reviewed: true
+review_iterations: 3
 ---
 
 # Lifecycle Actions: Two Forms (Positional and Key/Value)
