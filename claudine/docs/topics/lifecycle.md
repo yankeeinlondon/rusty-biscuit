@@ -128,13 +128,15 @@ Positional form covers a verb's canonical call signature only. Optional named pa
 ```yaml
 success:
   stack:
-    - action: shell
-      command: "git push origin HEAD"
-      on_error: "push failed"
-      no_error: true
-    - action: message
-      message: "Deployed {{version}}"
-      route: "deployments"
+    - action:
+        action: shell
+        command: "git push origin HEAD"
+        on_error: "push failed"
+        no_error: true
+    - action:
+        action: message
+        message: "Deployed {{version}}"
+        route: "deployments"
 ```
 
 Reach for key/value form when you want self-documenting parameter names or an optional named parameter. Key/value parameter values follow the same literal-default rule as positional values.
@@ -155,11 +157,12 @@ payload:
   status: ready
 success:
   stack:
-    - merge_frontmatter: ["state.md", "{{ payload }}"]
+    - action: { merge_frontmatter: ["state.md", "{{ payload }}"] }
     # key/value equivalent:
-    - action: merge_frontmatter
-      file: "state.md"
-      obj: "{{ payload }}"
+    - action:
+        action: merge_frontmatter
+        file: "state.md"
+        obj: "{{ payload }}"
 ```
 
 A literal nested map used directly as an action value (`merge_frontmatter: { owner: ken }`) is a typed object-data-through-interpolation error.
@@ -200,9 +203,10 @@ The `shell` action runs an approved shell command. Commands are collected during
 ```yaml
 start:
   stack:
-    - action: shell
-      command: "npm run typecheck"
-      on_error: "typecheck failed"
+    - action:
+        action: shell
+        command: "npm run typecheck"
+        on_error: "typecheck failed"
 ```
 
 A non-zero exit code is an action error unless `no_error: true` is set.
@@ -214,10 +218,10 @@ Any Darkmatter side-effect verb can be invoked by name:
 ```yaml
 start:
   stack:
-    - set_frontmatter: ["state.md", "status", "in-progress"]
+    - action: { set_frontmatter: ["state.md", "status", "in-progress"] }
 success:
   stack:
-    - set_frontmatter: ["state.md", "status", "done"]
+    - action: { set_frontmatter: ["state.md", "status", "done"] }
 ```
 
 Long-form side-effect actions accept named parameters that are reordered into the verb's positional signature:
@@ -225,9 +229,10 @@ Long-form side-effect actions accept named parameters that are reordered into th
 ```yaml
 success:
   stack:
-    - action: http_post
-      url: "https://example.com/hook"
-      body: "{{payload}}"
+    - action:
+        action: http_post
+        url: "https://example.com/hook"
+        body: "{{payload}}"
 ```
 
 ### Expression-Function Actions
@@ -237,7 +242,7 @@ Any Darkmatter read-only expression function can be invoked for its result. The 
 ```yaml
 start:
   stack:
-    - file_exists: "@docs/plan.md"
+    - action: { file_exists: "@docs/plan.md" }
 ```
 
 ### `no_error`
@@ -247,10 +252,11 @@ The `no_error` flag can be set on any action category. When `true`, an unintenti
 ```yaml
 start:
   stack:
-    - action: shell
-      command: "git status --short"
-      no_error: true
-    - info: "continuing"
+    - action:
+        action: shell
+        command: "git status --short"
+        no_error: true
+    - action: { info: "continuing" }
 ```
 
 ## Lifecycle Context
@@ -280,7 +286,7 @@ A frontmatter property literally named `err` can still be reached through the `d
 err: "user-configured reason"
 start:
   stack:
-    - stderr: "{{doc.err}}"
+    - action: { stderr: "{{doc.err}}" }
 ```
 
 ## Loop Gate Concerns
@@ -294,7 +300,7 @@ loop:
     - increment(iteration)
   stderr: "checking loop condition"
   stack:
-    - info: "loop gate reached"
+    - action: { info: "loop gate reached" }
 ```
 
 Loop execution runs `initialize` once at the start, then re-enters each iteration at `start` without re-running `initialize`, schema validation, or shell pre-flight. `success`, `failure`, and `finalize` fire once per iteration. The loop condition is evaluated **after** lifecycle concerns and **before** per-iteration mutations are applied.
@@ -363,7 +369,7 @@ Action values are literal text; `{{ … }}` interpolates a value:
 ---
 start:
   stack:
-    - info: "running {{agent}}"
+    - action: { info: "running {{agent}}" }
     - action: { shell: "git fetch origin {{branch}}" }
 ---
 ```
@@ -374,10 +380,11 @@ start:
 ---
 start:
   stack:
-    - action: shell
-      command: "which optional-tool"
-      no_error: true
-    - info: "continuing"
+    - action:
+        action: shell
+        command: "which optional-tool"
+        no_error: true
+    - action: { info: "continuing" }
 ---
 ```
 
@@ -393,7 +400,7 @@ loop:
     - increment(iteration)
   stderr: "loop gate"
   stack:
-    - info: "iteration {{_loop_count}}"
+    - action: { info: "iteration {{_loop_count}}" }
 ---
 ```
 
@@ -557,7 +564,7 @@ success:
 ```yaml
 start:
   stack:
-    - stderr: "{{err.msg}}"  # ERROR: err not available in start
+    - action: { stderr: "{{err.msg}}" }  # ERROR: err not available in start
 ```
 
 ### Empty String Normalization
