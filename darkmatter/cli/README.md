@@ -4,6 +4,23 @@ Binary: `md`
 
 A themed markdown renderer for terminal and browser workflows with markdown, markdown-plus, HTML, and AST JSON output modes.
 
+## Binary Overview
+
+The user-facing CLI surface is defined in `src/args/`: `cli.rs` holds global
+flags, `command.rs` holds subcommands, `target.rs` holds command targets,
+`enums.rs` holds output/format enums, `wrappers.rs` holds CLI conversion types,
+`parsers.rs` holds value parsers, and `completion.rs` holds shell completion
+helpers.
+
+Runtime dispatch lives in `src/commands/mod.rs`, with command-specific
+implementations in `commands/render.rs`, `commands/clean.rs`,
+`commands/validate.rs`, `commands/graph.rs`, `commands/compose.rs`,
+`commands/frontmatter.rs`, `commands/hash.rs`, and `commands/code_block.rs`.
+Shared input loading is in `src/io/`, output artifact handling is in
+`src/artifact.rs`, terminal rendering setup is in `src/render.rs`, and CLI flag
+precedence is lowered to `darkmatter::style::CliStyleClaims` in
+`src/style_claims.rs`.
+
 ## Installation
 
 ```bash
@@ -191,6 +208,15 @@ md get doc.md title --json5
 # Normalize formatting (output to stdout)
 md clean README.md
 
+# Normalize formatting and collapse editor/LLM fixed-column prose wrapping
+md clean README.md
+
+# Collapse incidental wrapping, then re-wrap prose to 80 display columns
+md clean README.md --fixed-width 80
+
+# Preserve source single newlines while keeping the older cleanup behavior
+md clean README.md --ignore-incidental-newlines
+
 # Normalize formatting and force 4-space nested list indentation
 md clean README.md --indent 4
 
@@ -206,6 +232,15 @@ md clean README.md --save -v
 # Shorthand: top-level clean-and-save
 md README.md --save
 ```
+
+By default, `md clean` collapses incidental single newlines in prose before
+running the rest of cleanup. Blank lines, fenced and indented code blocks,
+tables, HTML blocks, transclusion directives, list markers, and blockquote
+prefixes are preserved. Use `--fixed-width <#>` when you want canonical cleanup
+followed by prose wrapping to a target display width, or
+`--ignore-incidental-newlines` when source line breaks must remain unchanged.
+`--fixed-width` and `--ignore-incidental-newlines` conflict because fixed-width
+reflow first needs the incidental source wrapping removed.
 
 Frontmatter manipulation is available through `md set` (modify individual properties) and `md compose --fm` (output frontmatter with composed content). The `--state` flag on `compose` fills in null/missing frontmatter keys with default values.
 

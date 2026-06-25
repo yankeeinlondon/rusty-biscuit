@@ -764,6 +764,42 @@ mod tests {
     }
 
     #[test]
+    fn tool_input_string_fallback_parses_without_panic() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"tool_use","tool_id":"t","tool_name":"bash","input":"ls -la"}"#)
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        assert_eq!(kinds(&collected), vec!["tool_call"]);
+        match &collected[0] {
+            SemanticEvent::ToolCall { input, .. } => {
+                assert_eq!(input.as_ref().and_then(Value::as_str), Some("ls -la"));
+            }
+            other => panic!("expected ToolCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn missing_discriminator_falls_through_to_provider_extension() {
+        let (events, mut parser) = new_parser();
+        parser.feed_line(r#"{"payload":{"k":1}}"#).unwrap();
+        let collected = events.lock().unwrap().clone();
+        assert_eq!(collected.len(), 1);
+        match &collected[0] {
+            SemanticEvent::ProviderExtension {
+                provider,
+                kind,
+                payload,
+            } => {
+                assert_eq!(*provider, Provider::Gemini);
+                assert_eq!(kind, "");
+                assert_eq!(payload.get("payload"), Some(&json!({"k": 1})));
+            }
+            other => panic!("expected ProviderExtension, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn streamed_markdown_list_emits_contiguous_items() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/providers/gemini-markdown-list.ndjson");

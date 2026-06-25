@@ -1,6 +1,10 @@
 ---
+description: |-
+        Runs an interactive session to clarify the passed in spec or design file.
 $schema:
-    doc: string(required)
+    - doc: string(required)
+    - spec: string(required)
+    - design: string(required)
 doc: "{{spec || design}}"
 interactive: true
 start:
@@ -8,7 +12,7 @@ start:
     say: "Please stand by while we prepare a set of clarification questions"
 success:
     say: "Specification clarification process is now complete in {{ ctx.current_package_area || env.PACKAGE || ctx.repo || env.REPO }}"
-    message: "The specification file `{{doc.doc}}` has been completed. Now ready for a technical design specification or jumping directly to a plan."
+    message: "The specification file `{{doc.doc}}` has been clarified ({{ctx.agent}}/{{ctx.model}})"
 ---
 
 - You are acting as a senior technical analyst and design reviewer.
@@ -90,10 +94,11 @@ Drive the conversation forward through structured human-in-the-loop clarificatio
 
       - For each question the subagent should be sure to provide:
           - the question
-          - adequate contextual information, using examples where appropriate
+          - adequate contextual information, using examples of how this problem presents
       - Provide 3-4 solutions for each question:
           - these solutions should be well thought out and clearly articulated
-          - you should recommend one of the solutions and say why you're recommending it
+            - each solution must include a description, pros/cons of this solution, and an example of what this solution would look like
+          - you must recommend one of the solutions and say WHY you are recommending it
       - Each question should allow the user to choose an option you've provided, or specify a question or offer an alternative solution
 
 2. Present the questions (along with the sub-agent's solutions) to the user one at a time:

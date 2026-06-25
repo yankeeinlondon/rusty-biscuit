@@ -82,6 +82,13 @@ pub struct WezTermHarness {
     /// When `false` (set by [`WezTermHarness::attach`]) the pane is left
     /// alone because some outer scope owns it.
     owned: bool,
+    /// Extra OS window titles to try in
+    /// [`raise_and_window_bounds`](Self::raise_and_window_bounds) after the
+    /// stamped tab title and the `"question"` fallback. WezTerm overrides the
+    /// OS window title with the foreground program's basename, so a test that
+    /// runs a foreground binary (e.g. `claudine`) must register that basename
+    /// here for AXRaise to match its window. Empty by default.
+    expected_window_titles: Vec<String>,
 }
 
 impl WezTermHarness {
@@ -93,6 +100,7 @@ impl WezTermHarness {
             pane_id: None,
             spawn_visibility: SpawnVisibility::default(),
             owned: true,
+            expected_window_titles: Vec::new(),
         }
     }
 
@@ -108,6 +116,7 @@ impl WezTermHarness {
             pane_id: Some(pane_id.into()),
             spawn_visibility: SpawnVisibility::default(),
             owned: false,
+            expected_window_titles: Vec::new(),
         }
     }
 
@@ -159,6 +168,22 @@ impl WezTermHarness {
         self
     }
 
+    /// Registers an additional OS window title to match in
+    /// [`focus_spawned_pane`](Self::focus_spawned_pane)'s AXRaise step,
+    /// chainable like [`with_spawn_visibility`](Self::with_spawn_visibility).
+    ///
+    /// WezTerm clobbers the window title we stamp on the tab with the
+    /// foreground program's basename whenever a foreground binary is running
+    /// in the pane. A test that runs such a binary (e.g. `claudine`) sees its
+    /// window titled `claudine`, matching neither the stamped tab title nor
+    /// the built-in `"question"` fallback — so it must register `"claudine"`
+    /// here for the raise to find its window. Titles are tried in
+    /// registration order after the stamped title and `"question"`.
+    pub fn with_expected_window_title(mut self, title: impl Into<String>) -> Self {
+        self.expected_window_titles.push(title.into());
+        self
+    }
+
     /// Returns `true` when both the `wezterm` binary and a reachable
     /// WezTerm GUI socket are available.
     pub fn available() -> bool {
@@ -169,6 +194,44 @@ impl WezTermHarness {
     /// spawned or attached yet).
     pub fn pane_id_str(&self) -> &str {
         self.pane_id()
+    }
+
+    /// Captures the pane including up to `lines` rows of scrollback, not just
+    /// the visible viewport that [`capture`](TerminalHarness::capture) returns.
+    ///
+    /// Output taller than the pane scrolls into history; the viewport-only
+    /// `capture` then loses it. A report whose top scrolls off a short shared
+    /// pane (e.g. a header's OSC8 hyperlink above a long body) is recoverable
+    /// only this way. `wezterm cli get-text --start-line -<lines>` reads that
+    /// many physical lines up from the viewport into the scrollback.
+    ///
+    /// ## Notes
+    ///
+    /// A shared pane is reused across serial tests, so its scrollback can hold
+    /// earlier tests' output. Scope assertions to a string only the test under
+    /// capture emits, or clear the pane (`ESC[3J`) before driving the command.
+    pub fn capture_scrollback(&mut self, lines: u32) -> io::Result<CapturedFrame> {
+        let id = self.pane_id().to_string();
+        let start = format!("-{lines}");
+        let mut cmd = Command::new("wezterm");
+        cmd.args([
+            "cli",
+            "get-text",
+            "--pane-id",
+            &id,
+            "--escapes",
+            "--start-line",
+            &start,
+        ]);
+        let out = run_with_timeout(&mut cmd, CAPTURE_TIMEOUT)?;
+        if !out.status.success() {
+            return Err(io::Error::other(format!(
+                "wezterm cli get-text (scrollback) failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            )));
+        }
+        let raw = String::from_utf8_lossy(&out.stdout).into_owned();
+        Ok(CapturedFrame::from_raw(raw))
     }
 
     /// Borrows the active pane id, panicking with a clear message when
@@ -323,6 +386,14 @@ impl WezTermHarness {
     /// and size. Returns `Ok(None)` off macOS, or when the window position
     /// could not be resolved.
     ///
+    /// The AXRaise match tries, in order: the stamped tab title, the literal
+    /// `"question"` (the biscuit-tui CLI binary), then each title registered
+    /// via [`with_expected_window_title`](Self::with_expected_window_title).
+    /// The extra candidates exist because WezTerm overrides the OS window title
+    /// with the foreground program's basename, so a pane running e.g. `claudine`
+    /// reports a window title of `claudine` that matches neither of the first
+    /// two.
+    ///
     /// ## Errors
     ///
     /// Returns an error when the `wezterm cli` title/activate calls fail, or
@@ -364,6 +435,29 @@ impl WezTermHarness {
             let _ = run_with_timeout(&mut cmd, QUERY_TIMEOUT);
             std::thread::sleep(Duration::from_millis(150));
 
+            // Each registered extra title becomes another exact-match fallback
+            // tried only when the stamped title and "question" both miss. See
+            // `with_expected_window_title`: WezTerm renames the OS window to the
+            // foreground program's basename, defeating the stamped-title match.
+            let extra_fallbacks: String = self
+                .expected_window_titles
+                .iter()
+                .map(|t| {
+                    let t = applescript_quote(t);
+                    format!(
+                        "\n                                   if (count of hits) is 0 then\n                                       set hits to windows of p whose title is \"{t}\"\n                                   end if"
+                    )
+                })
+                .collect();
+            // Each candidate is rendered into the AppleScript `error` string
+            // literal, so its surrounding quotes must be backslash-escaped
+            // (`\"name\"`) or they would terminate that literal early.
+            let candidates_for_error: String = std::iter::once("question".to_string())
+                .chain(self.expected_window_titles.iter().cloned())
+                .map(|t| format!("\\\"{}\\\"", applescript_quote(&t)))
+                .collect::<Vec<_>>()
+                .join(", ");
+
             let script = format!(
                 r#"with timeout of 5 seconds
                        tell application "System Events"
@@ -377,7 +471,7 @@ impl WezTermHarness {
                                    set hits to windows of p whose title contains "{title}"
                                    if (count of hits) is 0 then
                                        set hits to windows of p whose title is "question"
-                                   end if
+                                   end if{extra_fallbacks}
                                    if (count of hits) > 0 then
                                        set targetWin to item 1 of hits
                                        perform action "AXRaise" of targetWin
@@ -396,7 +490,7 @@ impl WezTermHarness {
                                    end repeat
                                end try
                            end repeat
-                           error "no wezterm window matched {title} or \"question\"; visible titles:" & linefeed & seenTitles
+                           error "no wezterm window matched {title} or {candidates_for_error}; visible titles:" & linefeed & seenTitles
                        end tell
                    end timeout"#,
             );
@@ -713,6 +807,15 @@ fn kill_wezterm_pane(pane_id: u64) {
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
+}
+
+/// Escapes a title for embedding inside an AppleScript double-quoted string
+/// literal: backslash and double-quote are the only characters AppleScript
+/// string syntax treats specially. Expected titles are simple ASCII basenames
+/// (e.g. `claudine`), but escaping keeps the OR-list robust if that ever
+/// loosens.
+fn applescript_quote(title: &str) -> String {
+    title.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn which(bin: &str) -> bool {

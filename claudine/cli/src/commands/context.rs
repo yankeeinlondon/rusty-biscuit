@@ -12,13 +12,20 @@ use darkmatter::markdown::compose::context::{
 use darkmatter::markdown::compose::expression::{
     expression_function_descriptors, ExpressionFunctionDescriptor,
 };
+use darkmatter::markdown::compose::expression::semantics::{
+    arithmetic_operator_descriptors, comparison_operator_descriptors, mode_descriptors,
+    null_propagation_descriptors, operator_descriptors, truthiness_descriptors,
+    unary_operator_descriptors, variable_access_descriptors,
+};
 use darkmatter::markdown::compose::ComposeContext;
 
 use crate::commands::context_render::{
     configure_shared_table, context_column_widths, function_first_column_width, inline_code_text,
-    prose_with_inline_code, render_context_section, render_table_resilient,
-    render_table_within_contract, report_column, render_unordered_list, TableLayout,
+    render_context_section, render_table_resilient, report_column, render_unordered_list,
+    TableLayout, EXAMPLE_COLUMN_MIN_WIDTH,
 };
+#[cfg(test)]
+use crate::commands::context_render::render_table_within_contract;
 use crate::log;
 
 /// Arguments for the `claudine context` subcommand.
@@ -199,6 +206,26 @@ fn format_safety(safety: EffectSafety, term: &Terminal) -> String {
     Prose::new(colored).render(term)
 }
 
+/// Renders a descriptor's optional example for table cells.
+fn format_example(example: Option<&darkmatter::catalog::Example>, term: &Terminal) -> String {
+    match example {
+        Some(ex) => inline_code_text(&format!("{} → {}", ex.invocation, ex.result), term),
+        None => String::new(),
+    }
+}
+
+/// Compact example formatter for side-effect capabilities.
+///
+/// The signature is already shown in the `Capability` column, so the Example
+/// column only displays the result arrow and value, keeping the four-column
+/// report within the minimum supported terminal width.
+fn format_effect_example(example: Option<&darkmatter::catalog::Example>, term: &Terminal) -> String {
+    match example {
+        Some(ex) => inline_code_text(&format!("→ {}", ex.result), term),
+        None => String::new(),
+    }
+}
+
 // ------------------------------------------------------------------
 // Default report
 // ------------------------------------------------------------------
@@ -377,35 +404,81 @@ fn render_expressions_report() {
     render_footer(true);
 }
 
+/// Whether the metadata reports should render their optional `Example` column at
+/// `term`'s width.
+///
+/// Below the threshold the four-column layout cannot satisfy the table planner
+/// at the minimum supported width, so the column is dropped (the documented
+/// "where layout permits" contract). Shared by every `render_expressions_*`
+/// sub-table and the side-effect report.
+fn show_examples(term: &Terminal) -> bool {
+    term.width() >= EXAMPLE_COLUMN_MIN_WIDTH
+}
+
+/// Renders one expression sub-table with a pinned first column, a middle column,
+/// and an optional trailing `Example` column.
+///
+/// `first_header`/`first_width` describe the signature/operator column pinned to
+/// align sections; `middle_header` is the second column. `rows` yields each
+/// row's `(first, middle, example)` cells already rendered. The `Example` column
+/// — header and per-row cell — is included only when [`show_examples`] permits,
+/// keeping narrow widths within the minimum-supported-width floor.
+fn render_expression_table(
+    term: &Terminal,
+    first_header: impl Into<String>,
+    first_width: usize,
+    middle_header: impl Into<String>,
+    rows: Vec<(TableCellContent, TableCellContent, TableCellContent)>,
+) -> String {
+    let first_header = first_header.into();
+    let middle_header = middle_header.into();
+    let with_examples = show_examples(term);
+
+    render_table_resilient(term, |layout| {
+        let mut first = report_column(first_header.clone());
+        if layout == TableLayout::Pinned {
+            first = first.with_min_width(first_width).with_max_width(first_width);
+        }
+        let mut columns = vec![first, report_column(middle_header.clone())];
+        if with_examples {
+            columns.push(report_column("Example"));
+        }
+        let mut table = Table::new().with_columns(columns);
+        configure_shared_table(&mut table);
+
+        for (first_cell, middle_cell, example_cell) in &rows {
+            let mut row: Vec<TableCellContent> = vec![first_cell.clone(), middle_cell.clone()];
+            if with_examples {
+                row.push(example_cell.clone());
+            }
+            table.add_row(row);
+        }
+        table
+    })
+}
+
 fn render_expressions_precedence(term: &Terminal) {
     let heading = Prose::new("<blue><b>Operator Precedence</b></blue>");
     log::data(&heading.render(term));
     log::data("");
 
-    let items = [
-        ("Primary / member access", "literals, variables, function calls, `foo.bar`, `foo[0]`, `(expr)`"),
-        ("Unary", "`!`, `-`"),
-        ("Multiplicative", "`*`, `/`, `%`"),
-        ("Additive", "`+`, `-`"),
-        ("Comparison", "`==`, `!=`, `>`, `>=`, `<`, `<=`"),
-        ("Logical AND", "`&&` (condition mode)"),
-        ("Logical OR / Fallback", "`||` (mode-dependent)"),
-        ("Ternary", "`? :`"),
-    ];
+    let items = operator_descriptors();
+    let first_width = function_first_column_width("Precedence", items.iter().map(|d| d.name));
 
-    let columns = vec![report_column("Precedence"), report_column("Operators")];
-    let mut table = Table::new().with_columns(columns);
-    configure_shared_table(&mut table);
+    let rows = items
+        .iter()
+        .enumerate()
+        .map(|(i, desc)| {
+            (
+                format!("{}", i + 1).into(),
+                inline_code_text(desc.operators, term).into(),
+                format_example(desc.example.as_ref(), term).into(),
+            )
+        })
+        .collect();
+    let rendered = render_expression_table(term, "Precedence", first_width, "Operators", rows);
 
-    for (i, (name, desc)) in items.iter().enumerate() {
-        let row: Vec<TableCellContent> = vec![
-            format!("{}", i + 1).into(),
-            inline_code_text(&format!("{name} — {desc}"), term).into(),
-        ];
-        table.add_row(row);
-    }
-
-    log::data(&render_table_within_contract(&table, term));
+    log::data(&rendered);
     log::data("");
 }
 
@@ -414,30 +487,22 @@ fn render_expressions_truthiness(term: &Terminal) {
     log::data(&heading.render(term));
     log::data("");
 
-    let columns = vec![report_column("Value"), report_column("Falsy")];
-    let mut table = Table::new().with_columns(columns);
-    configure_shared_table(&mut table);
+    let items = truthiness_descriptors();
+    let first_width = function_first_column_width("Value", items.iter().map(|d| d.form));
 
-    let rows = vec![
-        ("`null` / missing", "yes"),
-        ("`false`", "yes"),
-        ("`0`", "yes"),
-        ("`0.0`", "yes"),
-        ("`\"\"` (empty string)", "yes"),
-        ("`[]` (empty array)", "yes"),
-        ("`{}` (empty object)", "yes"),
-        ("any other value", "no"),
-    ];
+    let rows = items
+        .iter()
+        .map(|desc| {
+            (
+                inline_code_text(desc.form, term).into(),
+                (if desc.is_falsy { "yes" } else { "no" }).into(),
+                format_example(desc.example.as_ref(), term).into(),
+            )
+        })
+        .collect();
+    let rendered = render_expression_table(term, "Value", first_width, "Falsy", rows);
 
-    for (value, falsy) in rows {
-        let row: Vec<TableCellContent> = vec![
-            inline_code_text(value, term).into(),
-            falsy.into(),
-        ];
-        table.add_row(row);
-    }
-
-    log::data(&render_table_within_contract(&table, term));
+    log::data(&rendered);
     log::data("");
 }
 
@@ -446,57 +511,71 @@ fn render_expressions_unary(term: &Terminal) {
     log::data(&heading.render(term));
     log::data("");
 
-    let columns = vec![report_column("Operator"), report_column("Description")];
-    let mut table = Table::new().with_columns(columns);
-    configure_shared_table(&mut table);
+    let items = unary_operator_descriptors();
+    let first_width = function_first_column_width("Operator", items.iter().map(|d| d.syntax));
 
-    let items = vec![
-        ("`!x`", "boolean negation (`!truthy ⇒ false`, `!falsy ⇒ true`)"),
-        ("`-x`", "numeric negation; `-null` is `null`; `-\"hi\"` is an error"),
-    ];
+    let rows = items
+        .iter()
+        .map(|desc| {
+            (
+                inline_code_text(desc.syntax, term).into(),
+                inline_code_text(desc.description, term).into(),
+                format_example(desc.example.as_ref(), term).into(),
+            )
+        })
+        .collect();
+    let rendered = render_expression_table(term, "Operator", first_width, "Description", rows);
 
-    for (op, desc) in items {
-        let row: Vec<TableCellContent> = vec![
-            inline_code_text(op, term).into(),
-            inline_code_text(desc, term).into(),
-        ];
-        table.add_row(row);
-    }
-
-    log::data(&render_table_within_contract(&table, term));
+    log::data(&rendered);
     log::data("");
 }
 
 fn render_expressions_comparison(term: &Terminal) {
     let heading = Prose::new("<blue><b>Comparison Operators</b></blue>");
     log::data(&heading.render(term));
+    log::data("");
 
-    let items = [
-        "`==` and `!=` compare scalar string representations",
-        "`>`, `>=`, `<`, `<=` coerce both sides to numbers",
-        "if both sides are missing, `a == b` is false and `a != b` is also false",
-        "if one side is defined and the other is missing, `==` is false and `!=` is true",
-    ];
-    log::data(&render_unordered_list(
-        &items.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
-        term,
-    ));
+    let items = comparison_operator_descriptors();
+    let first_width = function_first_column_width("Operator", items.iter().map(|d| d.syntax));
+
+    let rows = items
+        .iter()
+        .map(|desc| {
+            (
+                inline_code_text(desc.syntax, term).into(),
+                inline_code_text(desc.description, term).into(),
+                format_example(desc.example.as_ref(), term).into(),
+            )
+        })
+        .collect();
+    let rendered = render_expression_table(term, "Operator", first_width, "Description", rows);
+
+    log::data(&rendered);
+    log::data("");
 }
 
 fn render_expressions_arithmetic(term: &Terminal) {
     let heading = Prose::new("<blue><b>Arithmetic Operators</b></blue>");
     log::data(&heading.render(term));
+    log::data("");
 
-    let items = [
-        "`+`, `-`, `*`, `/`, `%` require numeric operands",
-        "`+` performs string concatenation when either operand is a string",
-        "division by zero (`x / 0`, `x % 0`) raises an error",
-        "`%` follows C-style semantics: the sign of `a % b` follows the sign of `a`",
-    ];
-    log::data(&render_unordered_list(
-        &items.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
-        term,
-    ));
+    let items = arithmetic_operator_descriptors();
+    let first_width = function_first_column_width("Operator", items.iter().map(|d| d.syntax));
+
+    let rows = items
+        .iter()
+        .map(|desc| {
+            (
+                inline_code_text(desc.syntax, term).into(),
+                inline_code_text(desc.description, term).into(),
+                format_example(desc.example.as_ref(), term).into(),
+            )
+        })
+        .collect();
+    let rendered = render_expression_table(term, "Operator", first_width, "Description", rows);
+
+    log::data(&rendered);
+    log::data("");
 }
 
 fn render_expressions_variable_access(term: &Terminal) {
@@ -504,34 +583,23 @@ fn render_expressions_variable_access(term: &Terminal) {
     log::data(&heading.render(term));
     log::data("");
 
-    let access_items = [
-        "simple keys: `draft`",
-        "nested keys: `user.role`",
-        "context variables: `ctx.today`, `ctx.repo`, `ctx.current_package`",
-        "environment keys: `env.AGENT`, `env.HOME`",
-    ];
-    log::data(&prose_with_inline_code(
-        "Supported variable forms:",
-        term,
-    )
-    .render(term));
-    log::data(&render_unordered_list(&access_items.iter().map(|s| s.to_string()).collect::<Vec<_>>(), term));
+    let items = variable_access_descriptors();
+    let first_width = function_first_column_width("Form", items.iter().map(|d| d.form));
 
-    let dot_items = [
-        "a non-existent path resolves to `null` (no error)",
-        "dot access on a `null` base (`null.foo`) returns `null`",
-        "numeric dot access (`foo.0`) is not supported — use bracket syntax",
-    ];
-    log::data(&Prose::new("<b>Dot Access</b>").render(term));
-    log::data(&render_unordered_list(&dot_items.iter().map(|s| s.to_string()).collect::<Vec<_>>(), term));
+    let rows = items
+        .iter()
+        .map(|desc| {
+            (
+                inline_code_text(desc.form, term).into(),
+                inline_code_text(desc.description, term).into(),
+                format_example(desc.example.as_ref(), term).into(),
+            )
+        })
+        .collect();
+    let rendered = render_expression_table(term, "Form", first_width, "Description", rows);
 
-    let bracket_items = [
-        "arrays: `foo[0]`, `foo[-1]` (negative indexes count from the end)",
-        "objects: `foo[\"key\"]` (string keys only)",
-        "chained: `items[-1].name`, `config[\"key\"][0]`",
-    ];
-    log::data(&Prose::new("<b>Bracket Access</b>").render(term));
-    log::data(&render_unordered_list(&bracket_items.iter().map(|s| s.to_string()).collect::<Vec<_>>(), term));
+    log::data(&rendered);
+    log::data("");
 }
 
 fn render_expressions_modes(term: &Terminal) {
@@ -545,33 +613,28 @@ fn render_expressions_modes(term: &Terminal) {
     log::data(&intro.render(term));
     log::data("");
 
-    let columns = vec![
-        report_column("Surface"),
-        report_column(inline_code_text("`||` meaning", term)),
-    ];
-    let mut table = Table::new().with_columns(columns);
-    configure_shared_table(&mut table);
+    let items = mode_descriptors();
+    let first_width = function_first_column_width("Surface", items.iter().map(|d| d.surface));
 
-    let rows = vec![
-        (
-            "`{{ ... }}` (interpolation)",
-            "fallback, first truthy value wins",
-        ),
-        (
-            "`when=\"...\"` (condition)",
-            "logical OR, returns a boolean",
-        ),
-    ];
+    let rows = items
+        .iter()
+        .map(|desc| {
+            (
+                inline_code_text(desc.surface, term).into(),
+                desc.pipe_meaning.into(),
+                format_example(desc.example.as_ref(), term).into(),
+            )
+        })
+        .collect();
+    let rendered = render_expression_table(
+        term,
+        "Surface",
+        first_width,
+        inline_code_text("`||` meaning", term),
+        rows,
+    );
 
-    for (surface, meaning) in rows {
-        let row: Vec<TableCellContent> = vec![
-            inline_code_text(surface, term).into(),
-            meaning.into(),
-        ];
-        table.add_row(row);
-    }
-
-    log::data(&render_table_within_contract(&table, term));
+    log::data(&rendered);
 
     let consequence_items = [
         "`when=\"a || b\"` is logical OR and evaluates to a boolean",
@@ -594,28 +657,22 @@ fn render_expressions_null_propagation(term: &Terminal) {
     log::data(&heading.render(term));
     log::data("");
 
-    let columns = vec![report_column("Operation"), report_column("Behavior")];
-    let mut table = Table::new().with_columns(columns);
-    configure_shared_table(&mut table);
+    let items = null_propagation_descriptors();
+    let first_width = function_first_column_width("Operation", items.iter().map(|d| d.operation));
 
-    let rows = vec![
-        ("Dot access on `null` / missing path", "`null`"),
-        ("Numeric dot access (`foo.0`)", "parse error / unsupported"),
-        ("Bracket out-of-bounds", "`null`"),
-        ("Bracket on `null` base", "`null`"),
-        ("Bracket key on non-collection", "`null`"),
-        ("Negative index from the end", "element or `null` if outside range"),
-    ];
+    let rows = items
+        .iter()
+        .map(|desc| {
+            (
+                inline_code_text(desc.operation, term).into(),
+                inline_code_text(desc.behavior, term).into(),
+                format_example(desc.example.as_ref(), term).into(),
+            )
+        })
+        .collect();
+    let rendered = render_expression_table(term, "Operation", first_width, "Behavior", rows);
 
-    for (op, behavior) in rows {
-        let row: Vec<TableCellContent> = vec![
-            inline_code_text(op, term).into(),
-            inline_code_text(behavior, term).into(),
-        ];
-        table.add_row(row);
-    }
-
-    log::data(&render_table_within_contract(&table, term));
+    log::data(&rendered);
     log::data("");
 }
 
@@ -637,23 +694,17 @@ fn render_expressions_functions(term: &Terminal) {
         let sub_heading = Prose::new(format!("<b>{category}</b>"));
         log::data(&sub_heading.render(term));
 
-        let rendered = render_table_resilient(term, |layout| {
-            let mut function = report_column("Function");
-            if layout == TableLayout::Pinned {
-                function = function.with_min_width(func_width).with_max_width(func_width);
-            }
-            let mut table =
-                Table::new().with_columns(vec![function, report_column("Description")]);
-            configure_shared_table(&mut table);
-            for func in functions {
-                let row: Vec<TableCellContent> = vec![
+        let rows = functions
+            .iter()
+            .map(|func| {
+                (
                     inline_code_text(func.signature, term).into(),
                     inline_code_text(func.description, term).into(),
-                ];
-                table.add_row(row);
-            }
-            table
-        });
+                    format_example(func.example.as_ref(), term).into(),
+                )
+            })
+            .collect();
+        let rendered = render_expression_table(term, "Function", func_width, "Description", rows);
         log::data(&rendered);
         log::data("");
     }
@@ -700,6 +751,12 @@ fn render_side_effects_report() {
     let sig_refs: Vec<&str> = all_signatures.iter().map(|s| s.as_str()).collect();
     let cap_width = function_first_column_width("Capability", sig_refs.into_iter());
 
+    // The Example column is useful on wider terminals, but at the minimum
+    // supported width the four-column report cannot satisfy the table planner.
+    // Drop the column below the shared threshold rather than emitting a
+    // width-error diagnostic.
+    let with_examples = show_examples(&term);
+
     for (category, effects) in &groups {
         let cat_heading = Prose::new(format!("<blue><b>{category}</b></blue>"));
         log::data(&cat_heading.render(&term));
@@ -709,18 +766,28 @@ fn render_side_effects_report() {
             if layout == TableLayout::Pinned {
                 capability = capability.with_min_width(cap_width).with_max_width(cap_width);
             }
-            let mut table = Table::new().with_columns(vec![
+            let mut columns = vec![
                 capability,
                 report_column("Description"),
                 report_column("Safety"),
-            ]);
+            ];
+            if with_examples {
+                columns.insert(2, report_column("Example"));
+            }
+            let mut table = Table::new().with_columns(columns);
             configure_shared_table(&mut table);
             for effect in effects {
-                let row: Vec<TableCellContent> = vec![
+                let mut row: Vec<TableCellContent> = vec![
                     inline_code_text(effect.signature, &term).into(),
                     inline_code_text(effect.description, &term).into(),
                     format_safety(effect.safety, &term).into(),
                 ];
+                if with_examples {
+                    row.insert(
+                        2,
+                        format_effect_example(effect.example.as_ref(), &term).into(),
+                    );
+                }
                 table.add_row(row);
             }
             table
@@ -997,6 +1064,66 @@ mod tests {
         }
     }
 
+    /// The expression report's `Example` column follows the documented "where
+    /// layout permits" contract: it is dropped below `EXAMPLE_COLUMN_MIN_WIDTH`
+    /// (mirroring the side-effect report) and present at or above it. The guard
+    /// is what keeps the narrow report short enough to stay within the L2
+    /// capture pane. Drive `render_expression_table` with a real example cell and
+    /// assert the `Example` header's presence flips at the threshold.
+    #[test]
+    fn expression_table_drops_example_column_below_threshold() {
+        use crate::commands::context_render::EXAMPLE_COLUMN_MIN_WIDTH;
+
+        let example_cell: TableCellContent = "min(1, 2) → 1".into();
+        let build_rows = || {
+            vec![(
+                "min(a, b)".into(),
+                "smaller of two values".into(),
+                example_cell.clone(),
+            )]
+        };
+
+        // At the threshold the Example column (header and content) is present.
+        let at = Terminal::new_optimistic(EXAMPLE_COLUMN_MIN_WIDTH);
+        let wide = render_expression_table(&at, "Function", 9, "Description", build_rows());
+        assert!(
+            wide.contains("Example"),
+            "Example column must be present at the threshold width; output:\n{wide}",
+        );
+
+        // One cell below the threshold the column is dropped entirely — no empty
+        // cells, no header.
+        let below = Terminal::new_optimistic(EXAMPLE_COLUMN_MIN_WIDTH - 1);
+        let narrow = render_expression_table(&below, "Function", 9, "Description", build_rows());
+        assert!(
+            !narrow.contains("Example"),
+            "Example column must be dropped below the threshold width; output:\n{narrow}",
+        );
+        // The remaining columns survive.
+        for header in ["Function", "Description"] {
+            assert!(
+                narrow.contains(header),
+                "narrow expression table must keep the `{header}` column; output:\n{narrow}",
+            );
+        }
+    }
+
+    /// `show_examples` is the single threshold both the expression sub-tables and
+    /// the side-effect report consult, so its boundary must hold exactly at
+    /// `EXAMPLE_COLUMN_MIN_WIDTH`.
+    #[test]
+    fn show_examples_threshold_is_inclusive() {
+        use crate::commands::context_render::EXAMPLE_COLUMN_MIN_WIDTH;
+
+        assert!(!show_examples(&Terminal::new_optimistic(
+            EXAMPLE_COLUMN_MIN_WIDTH - 1
+        )));
+        assert!(show_examples(&Terminal::new_optimistic(EXAMPLE_COLUMN_MIN_WIDTH)));
+        assert!(show_examples(&Terminal::new_optimistic(
+            EXAMPLE_COLUMN_MIN_WIDTH + 1
+        )));
+    }
+
     /// Scalar array elements render with plain values — strings without JSON
     /// quotes — while nested arrays/objects keep compact JSON serialization.
     #[test]
@@ -1045,6 +1172,7 @@ mod tests {
                     .with_min_width(func_width)
                     .with_max_width(func_width),
                 TableColumn::new("Description"),
+                TableColumn::new("Example"),
             ];
             let mut table = Table::new().with_columns(columns);
             configure_shared_table(&mut table);
@@ -1053,6 +1181,7 @@ mod tests {
                 table.add_row(vec![
                     inline_code_text(func.signature, &term).into(),
                     inline_code_text(func.description, &term).into(),
+                    format_example(func.example.as_ref(), &term).into(),
                 ]);
             }
 
@@ -1074,25 +1203,29 @@ mod tests {
         let cap_width = function_first_column_width("Capability", effect_sig_refs.into_iter());
 
         for (category, effects) in &effect_groups {
-            let columns = vec![
-                TableColumn::new("Capability")
-                    .with_min_width(cap_width)
-                    .with_max_width(cap_width),
-                TableColumn::new("Description"),
-                TableColumn::new("Safety"),
-            ];
-            let mut table = Table::new().with_columns(columns);
-            configure_shared_table(&mut table);
-
-            for effect in effects {
-                table.add_row(vec![
-                    inline_code_text(effect.signature, &term).into(),
-                    inline_code_text(effect.description, &term).into(),
-                    format_safety(effect.safety, &term).into(),
+            let out = render_table_resilient(&term, |layout| {
+                let mut capability = report_column("Capability");
+                if layout == TableLayout::Pinned {
+                    capability = capability.with_min_width(cap_width).with_max_width(cap_width);
+                }
+                let mut table = Table::new().with_columns(vec![
+                    capability,
+                    report_column("Description"),
+                    report_column("Example"),
+                    report_column("Safety"),
                 ]);
-            }
+                configure_shared_table(&mut table);
 
-            let out = render_table_within_contract(&table, &term);
+                for effect in effects {
+                    table.add_row(vec![
+                        inline_code_text(effect.signature, &term).into(),
+                        inline_code_text(effect.description, &term).into(),
+                        format_effect_example(effect.example.as_ref(), &term).into(),
+                        format_safety(effect.safety, &term).into(),
+                    ]);
+                }
+                table
+            });
             let max = out.lines().map(|l| visible_width(l) as usize).max().unwrap_or(0);
             assert!(
                 max <= 140,

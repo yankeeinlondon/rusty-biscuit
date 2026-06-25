@@ -912,8 +912,16 @@ pub fn is_this_year_utc(args: &[Value]) -> Result<Value, String> {
     Ok(Value::Bool(is_this_year_with(&args[0], today_utc(), true)))
 }
 
-/// Resolves a filepath argument to an absolute path using FileReference rules
-/// and the document-relative base dir.
+/// Resolves a filepath argument to an absolute path using FileReference rules.
+///
+/// Resolution is attempted document-relative first (against `ctx.base_dir`, so
+/// references written inside a composed document resolve next to that document),
+/// then falls back to ambient process-CWD resolution. The fallback keeps these
+/// functions in agreement with the `file`-typed `$schema` validator, which uses
+/// `FileReference::resolve()` (process CWD): a caller-supplied path — e.g. a CLI
+/// `-y` variable typed relative to the user's working directory — that the
+/// schema layer accepts must not read as missing here. The two anchors only
+/// differ when the process CWD is not the document's directory.
 ///
 /// ## Returns
 ///
@@ -927,9 +935,15 @@ fn resolve_arg(raw: &str, ctx: &ResolutionContext) -> Result<Option<PathBuf>, St
     for (path, position) in &ctx.magic_paths {
         file_ref = file_ref.add_magic_path(path, *position);
     }
-    file_ref
+    match file_ref
         .resolve_from(&ctx.base_dir)
-        .map_err(|e| format!("invalid file path {raw:?}: {e}"))
+        .map_err(|e| format!("invalid file path {raw:?}: {e}"))?
+    {
+        Some(path) => Ok(Some(path)),
+        None => file_ref
+            .resolve()
+            .map_err(|e| format!("invalid file path {raw:?}: {e}")),
+    }
 }
 
 /// `absolute(file) -> file | Error::InvalidFilePath`
@@ -1237,13 +1251,13 @@ pub fn basename_without_index_fn(args: &[Value], ctx: &ResolutionContext) -> Res
     Ok(Value::String(out))
 }
 
-/// `dir(file) -> string` — the directory portion of the display path.
-pub fn dir_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
-    require_args("dir", args, 1)?;
+/// `dirname(file) -> string` — the directory portion of the display path.
+pub fn dirname_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    require_args("dirname", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
-    let path = resolve_path_arg("dir", &args[0], ctx)?;
+    let path = resolve_path_arg("dirname", &args[0], ctx)?;
     let (dirs, _) = path_display_components(&path, &ctx.base_dir);
     Ok(Value::String(if dirs.is_empty() {
         String::new()
@@ -1794,7 +1808,7 @@ pub const FS_FUNCTIONS: &[FsFunction] = &[
     FsFunction { canonical: "decrement_file_index", aliases: &["decrementfileindex"], signatures: &["decrement_file_index(file)"], handler: decrement_file_index_fn },
     FsFunction { canonical: "basename", aliases: &[], signatures: &["basename(file)"], handler: basename_fn },
     FsFunction { canonical: "basename_without_index", aliases: &["basenamewithoutindex"], signatures: &["basename_without_index(file)"], handler: basename_without_index_fn },
-    FsFunction { canonical: "dir", aliases: &[], signatures: &["dir(file)"], handler: dir_fn },
+    FsFunction { canonical: "dirname", aliases: &[], signatures: &["dirname(file)"], handler: dirname_fn },
     FsFunction { canonical: "ext", aliases: &[], signatures: &["ext(file)"], handler: ext_fn },
     FsFunction { canonical: "parent_dir", aliases: &["parentdir"], signatures: &["parent_dir(file)"], handler: parent_dir_fn },
     FsFunction { canonical: "file_trailing", aliases: &["filetrailing"], signatures: &["file_trailing(file)"], handler: file_trailing_fn },
@@ -2281,6 +2295,18 @@ mod tests {
         }
 
         #[test]
+        fn dirname_renamed_without_dir_alias() {
+            let ctx = ResolutionContext::new(std::path::PathBuf::from("."));
+            assert_eq!(
+                dispatch_fs("dirname", &[json!("sub/note.md")], &ctx)
+                    .unwrap()
+                    .unwrap(),
+                json!("sub")
+            );
+            assert!(dispatch_fs("dir", &[json!("sub/note.md")], &ctx).is_none());
+        }
+
+        #[test]
         fn absolute_and_file_exists_resolve_relative_to_base_dir() {
             let dir = tempfile::TempDir::new().unwrap();
             std::fs::write(dir.path().join("a.md"), "# A\n").unwrap();
@@ -2302,6 +2328,29 @@ mod tests {
                 file_exists_fn(&[json!("\0bad")], &ctx).unwrap(),
                 json!(false)
             );
+        }
+
+        #[test]
+        #[serial_test::serial]
+        fn file_exists_falls_back_to_process_cwd() {
+            // A path that does not exist relative to base_dir but DOES exist
+            // relative to the process CWD must still resolve — matching the
+            // `file` schema validator, which resolves from the ambient CWD.
+            // This is the case a CLI `-y` variable typed relative to the user's
+            // working directory hits when the document lives elsewhere.
+            let cwd_dir = tempfile::TempDir::new().unwrap();
+            std::fs::write(cwd_dir.path().join("plan.md"), "# Plan\n").unwrap();
+            // base_dir deliberately lacks plan.md, so document-relative
+            // resolution misses and only the CWD fallback can succeed.
+            let base_dir = tempfile::TempDir::new().unwrap();
+            let ctx = ResolutionContext::new(base_dir.path().to_path_buf());
+
+            let original = std::env::current_dir().unwrap();
+            std::env::set_current_dir(cwd_dir.path()).unwrap();
+            let found = file_exists_fn(&[json!("plan.md")], &ctx);
+            std::env::set_current_dir(&original).unwrap();
+
+            assert_eq!(found.unwrap(), json!(true));
         }
 
         #[test]
@@ -2860,7 +2909,7 @@ mod tests {
                 basename_without_index_fn(&[json!("foo/review-1.md")], &ctx).unwrap(),
                 json!("review.md")
             );
-            assert_eq!(dir_fn(&[json!("foo/bar/baz/test.md")], &ctx).unwrap(), json!("foo/bar/baz"));
+            assert_eq!(dirname_fn(&[json!("foo/bar/baz/test.md")], &ctx).unwrap(), json!("foo/bar/baz"));
             assert_eq!(ext_fn(&[json!("foo/bar/baz/test.md")], &ctx).unwrap(), json!("md"));
             assert_eq!(ext_fn(&[json!("no-ext")], &ctx).unwrap(), json!(""));
             assert_eq!(
@@ -2883,7 +2932,7 @@ mod tests {
             std::fs::write(dir.path().join("test.md"), "x").unwrap();
 
             assert_eq!(basename_fn(&[json!("test.md")], &ctx).unwrap(), json!("test.md"));
-            assert_eq!(dir_fn(&[json!("test.md")], &ctx).unwrap(), json!(""));
+            assert_eq!(dirname_fn(&[json!("test.md")], &ctx).unwrap(), json!(""));
             assert_eq!(parent_dir_fn(&[json!("test.md")], &ctx).unwrap(), json!(""));
             assert_eq!(file_trailing_fn(&[json!("test.md")], &ctx).unwrap(), json!("test.md"));
             assert_eq!(dir_leading_fn(&[json!("test.md")], &ctx).unwrap(), json!(""));
@@ -2934,7 +2983,7 @@ mod tests {
             let ctx = ResolutionContext::new(std::env::temp_dir());
 
             assert_eq!(basename_fn(&[json!("foo/bar/missing.md")], &ctx).unwrap(), json!("missing.md"));
-            assert_eq!(dir_fn(&[json!("foo/bar/missing.md")], &ctx).unwrap(), json!("foo/bar"));
+            assert_eq!(dirname_fn(&[json!("foo/bar/missing.md")], &ctx).unwrap(), json!("foo/bar"));
             assert_eq!(
                 increment_file_index_fn(&[json!("foo/bar/missing.md")], &ctx).unwrap(),
                 json!("foo/bar/missing-2.md")
@@ -2957,6 +3006,10 @@ mod tests {
             assert_eq!(
                 dispatch_fs("basename", &[json!("foo/bar.md")], &ctx).unwrap().unwrap(),
                 json!("bar.md")
+            );
+            assert_eq!(
+                dispatch_fs("dirname", &[json!("foo/bar.md")], &ctx).unwrap().unwrap(),
+                json!("foo")
             );
             assert_eq!(
                 dispatch_fs("join", &[json!("foo"), json!("bar.md")], &ctx)

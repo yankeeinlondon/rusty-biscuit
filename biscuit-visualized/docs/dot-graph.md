@@ -48,7 +48,7 @@ println!("{}", graph.render(&Terminal::default()));
 
 ## Supported DOT grammar
 
-Everything below is exercised by `biscuit-visualized` tests and used in production by `sniff repo deps --ui`.
+Everything below is exercised by `biscuit-visualized` tests and used in production by `sniff repo package-dependencies --ui`.
 
 ### Graph declarations
 

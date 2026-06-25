@@ -196,25 +196,19 @@ fn resolve_extra(extra: &HashMap<String, Value>, path: &str) -> Option<Value> {
     if head.is_empty() {
         return None;
     }
-    let mut current = extra.get(head)?.clone();
+    let mut current = extra.get(head)?;
     for part in parts {
-        current = match current {
-            Value::Object(map) => map.get(part).cloned()?,
-            _ => return None,
-        };
+        current = current.as_object()?.get(part)?;
     }
-    Some(current)
+    Some(current.clone())
 }
 
 fn nested_pointer(value: &Value, path: &str) -> Option<Value> {
-    let mut current = value.clone();
+    let mut current = value;
     for part in path.split('.') {
-        current = match current {
-            Value::Object(map) => map.get(part).cloned()?,
-            _ => return None,
-        };
+        current = current.as_object()?.get(part)?;
     }
-    Some(current)
+    Some(current.clone())
 }
 
 fn resolve_top_level(meta: &EventMeta, path: &str) -> Option<Value> {
@@ -427,11 +421,24 @@ fn resolve_env_path(meta: &EventMeta, path: &str) -> Option<Value> {
         // Project
         "project.language" => meta.env.primary_language.clone().map(Value::String),
         "project.is_monorepo" => meta.env.repo.as_ref().map(|r| Value::Bool(r.is_monorepo)),
+        "project.monorepo_standard" => meta
+            .env
+            .repo
+            .as_ref()
+            .and_then(|r| r.monorepo_standard.clone())
+            .map(Value::String),
+        "project.monorepo_orchestrators" => meta
+            .env
+            .repo
+            .as_ref()
+            .map(|r| Value::String(r.monorepo_orchestrators.join(", "))),
+        // `project.monorepo_tool` is a deprecated alias for
+        // `project.monorepo_standard`.
         "project.monorepo_tool" => meta
             .env
             .repo
             .as_ref()
-            .and_then(|r| r.monorepo_tool.clone())
+            .and_then(|r| r.monorepo_standard.clone())
             .map(Value::String),
 
         _ => None,
@@ -526,7 +533,9 @@ mod tests {
                 }),
                 repo: Some(RepoContext {
                     is_monorepo: true,
-                    monorepo_tool: Some("cargo_workspace".to_string()),
+                    monorepo_standard: Some("cargo-workspace".to_string()),
+                    monorepo_orchestrators: vec!["nx".to_string()],
+                    monorepo_tool: Some("cargo-workspace".to_string()),
                     root: PathBuf::from("/tmp/project"),
                     packages: vec!["lib".to_string(), "cli".to_string()],
                 }),
@@ -566,8 +575,16 @@ mod tests {
         assert_eq!(lookup.get("project.language"), Some(json!("Rust")));
         assert_eq!(lookup.get("project.is_monorepo"), Some(json!(true)));
         assert_eq!(
+            lookup.get("project.monorepo_standard"),
+            Some(json!("cargo-workspace"))
+        );
+        assert_eq!(
+            lookup.get("project.monorepo_orchestrators"),
+            Some(json!("nx"))
+        );
+        assert_eq!(
             lookup.get("project.monorepo_tool"),
-            Some(json!("cargo_workspace"))
+            Some(json!("cargo-workspace"))
         );
     }
 
@@ -599,6 +616,20 @@ mod tests {
             Some(json!(["fast", "urgent", "infrastructure"]))
         );
         assert_eq!(lookup.get("extra.missing"), None);
+    }
+
+    #[test]
+    fn nested_extra_walk_returns_leaf_without_cloning_intermediates() {
+        let meta = sample_meta();
+        let lookup = EventMetaExpressionLookup::new(&meta);
+
+        // Deep dotted path resolves to the scalar leaf.
+        assert_eq!(lookup.get("extra.nested.inner.depth"), Some(json!(7)));
+        // Partial path returns the subtree rooted at that node.
+        let subtree = lookup.get("extra.nested.inner").expect("inner resolves");
+        assert_eq!(subtree.pointer("/depth"), Some(&json!(7)));
+        // Missing intermediate key propagates None.
+        assert_eq!(lookup.get("extra.nested.missing.depth"), None);
     }
 
     #[test]
@@ -786,8 +817,16 @@ mod tests {
         assert_eq!(lookup.get("project.language"), Some(json!("Rust")));
         assert_eq!(lookup.get("project.is_monorepo"), Some(json!(true)));
         assert_eq!(
+            lookup.get("project.monorepo_standard"),
+            Some(json!("cargo-workspace"))
+        );
+        assert_eq!(
+            lookup.get("project.monorepo_orchestrators"),
+            Some(json!("nx"))
+        );
+        assert_eq!(
             lookup.get("project.monorepo_tool"),
-            Some(json!("cargo_workspace"))
+            Some(json!("cargo-workspace"))
         );
     }
 

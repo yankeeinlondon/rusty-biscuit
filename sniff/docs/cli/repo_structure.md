@@ -1,15 +1,17 @@
 ---
 blast_radius:
-  - sniff/cli/src/args.rs
-  - sniff/cli/src/commands.rs
-  - sniff/cli/src/output/filesystem.rs
-  - sniff/lib/src/filesystem/repo.rs
-  - sniff/lib/src/filesystem/mod.rs
+  - sniff/cli/src/args/repo.rs
+  - sniff/cli/src/args/mod.rs
+  - sniff/cli/src/output/filesystem/repo.rs
+  - sniff/cli/src/output/repo_json.rs
+  - sniff/lib/src/filesystem/repo/types.rs
+  - sniff/lib/src/filesystem/repo/standard.rs
+  - sniff/lib/src/filesystem/repo/topology.rs
 ---
 
 # The `sniff repo structure` Subcommand
 
-Detects and displays the structure of a repository, whether single-package or monorepo. Catalogs all packages, their languages, and interdependencies. This is also the default subcommand when running `sniff repo` with no arguments.
+Detects and displays the structure of a repository, whether single-package or monorepo. Catalogs all packages, their languages, and interdependencies. Run it explicitly with `sniff repo structure`; the bare `sniff repo` command dispatches to [`sniff repo name`](./repo_name.md).
 
 ## Scope Resolution
 
@@ -33,20 +35,25 @@ Repository
 
 ### Monorepo
 
-For monorepos, the heading shows tool and package count:
+For monorepos, the heading shows the unified per-standard label and package
+count:
 
-- Prose::new(`<b><u>Repository</u></b> <dim>({tool_name} / {total_count} packages)</dim>`)
+- `Prose::new(`<b><u>Repository</u></b> <dim>({authority_label} / {total_count} packages)</dim>`)`
+- `Prose::new(`<b><u>Repository</u></b> <dim>({orchestrator_label} (using {authority_label}) / {total_count} packages)</dim>`)`
+
+Both `{authority_label}` and `{orchestrator_label}` are drawn from each
+standard's `spec().label` (for example, `cargo`, `pnpm workspaces`, `Nx`).
 
 When filtering reduces the set:
 
-- Prose::new(`<b><u>Repository</u></b> <dim>({tool_name} / showing {shown} of {total} packages)</dim>`)
+- `Prose::new(`<b><u>Repository</u></b> <dim>({authority_label} / showing {shown} of {total} packages)</dim>`)`
 
 ### Package Listing
 
 Packages are grouped by **package area** (top-level directory), displayed in hierarchical order:
 
 ```
-Repository (Cargo / 35 packages)
+Repository (cargo / 35 packages)
 
   sniff
     sniff-cli v0.1.0 (sniff/cli) [Rust]
@@ -149,15 +156,39 @@ Returns a `RepoInfo` object:
 ```json
 {
   "is_monorepo": true,
-  "monorepo_tool": "Cargo",
-  "workspace_tools": ["Cargo"],
   "root": "/absolute/path/to/repo",
+  "monorepo_standards": [
+    {
+      "standard": "cargo-workspace",
+      "root": "/absolute/path/to/repo",
+      "matched_markers": ["Cargo.toml"],
+      "binary": {
+        "name": "cargo",
+        "path": "/usr/bin/cargo",
+        "version": "1.80.0",
+        "source": "path"
+      },
+      "confidence": "marker-confirmed"
+    }
+  ],
+  "monorepo_layers": [
+    {
+      "root": "/absolute/path/to/repo",
+      "authority": "cargo-workspace",
+      "orchestrators": [],
+      "provenance": "globbed",
+      "packages": ["sniff/lib", "sniff/cli"]
+    }
+  ],
   "packages": [
     {
       "path": "/absolute/path/to/sniff/cli",
       "relative": "sniff/cli",
       "package_area": "sniff",
       "name": "sniff-cli",
+      "ecosystem": "cargo",
+      "standard": "cargo-workspace",
+      "provenance": "globbed",
       "primary_language": "Rust",
       "version": "0.1.0",
       "depends_on": ["sniff"],
@@ -178,6 +209,8 @@ Returns a `RepoInfo` object:
   ]
 }
 ```
+
+The legacy keys `monorepo_tool`, `workspace_tools`, and `discovery_sources` are no longer emitted.
 
 ## Plain Output (`--plain`)
 

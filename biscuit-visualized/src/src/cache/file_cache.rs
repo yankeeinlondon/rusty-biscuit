@@ -5,8 +5,20 @@ use std::path::PathBuf;
 use crate::artifact::OutputFormat;
 use crate::cache::VisualizationKind;
 
+/// Overrides the cache root when set, taking precedence over `$TMPDIR`.
+///
+/// Lets a process (notably a test running concurrently with others) point at
+/// an isolated directory so it never contends over the shared global cache.
+pub const CACHE_DIR_ENV: &str = "BISCUIT_VISUALIZED_CACHE_DIR";
+
 /// Backend identifiers for cache key generation.
-pub const MERMAID_BACKEND: &str = "mermaid-rs-renderer@0.2.x";
+///
+/// The mermaid identifier carries a `+bv<n>` suffix for biscuit-visualized's
+/// own render layer (theme overrides in `build_theme`, SVG post-processing in
+/// `apply_svg_overrides`). The cache key sees only the theme *name*, not the
+/// resolved colors, so bump `<n>` whenever those overrides change output —
+/// otherwise identical instructions keep serving pre-change artifacts.
+pub const MERMAID_BACKEND: &str = "mermaid-rs-renderer@0.2.x+bv1";
 pub const GRAPH_BACKEND: &str = "layout-rs@0.1.x";
 pub const RASTERIZER: &str = "resvg@0.45";
 
@@ -34,7 +46,8 @@ pub struct FileCache {
 impl FileCache {
     /// Creates a new file cache.
     ///
-    /// The cache directory is created at `$TMPDIR/biscuit-visualized/v1/`.
+    /// The cache directory is `$TMPDIR/biscuit-visualized/v1/`, or
+    /// `$BISCUIT_VISUALIZED_CACHE_DIR/v1/` when [`CACHE_DIR_ENV`] is set.
     ///
     /// ## Examples
     ///
@@ -44,8 +57,20 @@ impl FileCache {
     /// let cache = FileCache::new();
     /// ```
     pub fn new() -> Self {
-        let base_dir = std::env::temp_dir().join("biscuit-visualized").join("v1");
+        let root = std::env::var_os(CACHE_DIR_ENV)
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let base_dir = root.join("biscuit-visualized").join("v1");
 
+        Self { base_dir }
+    }
+
+    /// Creates a file cache rooted at an explicit directory.
+    ///
+    /// Unlike [`FileCache::new`], this does not share the process-global
+    /// `$TMPDIR/biscuit-visualized/v1/` location, so callers (notably tests)
+    /// can use an isolated directory free of cross-test contention.
+    pub fn with_base_dir(base_dir: PathBuf) -> Self {
         Self { base_dir }
     }
 

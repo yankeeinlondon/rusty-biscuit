@@ -190,6 +190,8 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
         models: HashMap::new(),
         default_sounds: DefaultSounds::default(),
         prompt_for_missing: true,
+        exit_expressions: None,
+        guard_settings: Default::default(),
     };
 
     // Phase 5: Write and Register
@@ -504,6 +506,8 @@ fn default_config(repo_scope: bool) -> Result<ClaudineConfig> {
         models: HashMap::new(),
         default_sounds: DefaultSounds::default(),
         prompt_for_missing: true,
+        exit_expressions: None,
+        guard_settings: Default::default(),
     })
 }
 
@@ -613,6 +617,8 @@ mod tests {
             models: HashMap::new(),
             default_sounds: DefaultSounds::default(),
             prompt_for_missing: true,
+            exit_expressions: None,
+            guard_settings: Default::default(),
         }
     }
 

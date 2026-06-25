@@ -1,0 +1,31 @@
+[package]
+name = "rendezvous-client"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+description = "Test client for the rendezvous daemon. Connects over the platform's local IPC transport (Unix Domain Socket on Unix, named pipe on Windows) and exercises the gRPC control plane."
+
+[[bin]]
+name = "rendezvous-test-client"
+path = "src/main.rs"
+
+[lib]
+name = "rendezvous_client"
+path = "src/lib.rs"
+
+[dependencies]
+rendezvous-core = { path = "../core" }
+tonic = { version = "0.14", default-features = false, features = ["transport", "codegen", "channel"] }
+tonic-prost = "0.14"
+prost = "0.14"
+tokio = { version = "1.48", features = ["rt-multi-thread", "macros", "net", "time"] }
+tower = { version = "0.5", features = ["util"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+thiserror = "2.0"
+
+[dev-dependencies]
+rendezvous-daemon = { path = "../daemon" }
+tempfile = "3"

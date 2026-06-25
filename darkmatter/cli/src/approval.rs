@@ -11,6 +11,7 @@ use std::io::{self, BufRead, IsTerminal, Write};
 pub struct CliShellApprovalHandler;
 
 impl ShellApprovalHandler for CliShellApprovalHandler {
+    #[allow(clippy::result_large_err)]
     fn approve(
         &self,
         request: ShellApprovalRequest,
@@ -24,6 +25,7 @@ impl ShellApprovalHandler for CliShellApprovalHandler {
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn approve_with_io<R: BufRead, W: Write>(
     request: &ShellApprovalRequest,
     input: &mut R,
@@ -66,6 +68,7 @@ fn approve_with_io<R: BufRead, W: Write>(
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn write_prompt<W: Write>(
     output: &mut W,
     request: &ShellApprovalRequest,

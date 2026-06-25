@@ -1057,6 +1057,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
+    use serde_json::json;
 
     struct Recording {
         events: Arc<Mutex<Vec<SemanticEvent>>>,
@@ -1504,6 +1505,26 @@ mod tests {
             events.lock().unwrap()[0],
             SemanticEvent::ProviderExtension { .. }
         ));
+    }
+
+    #[test]
+    fn missing_discriminator_falls_through_to_provider_extension() {
+        let (events, mut parser) = new_parser();
+        parser.feed_line(r#"{"payload":{"k":1}}"#).unwrap();
+        let collected = events.lock().unwrap().clone();
+        assert_eq!(collected.len(), 1);
+        match &collected[0] {
+            SemanticEvent::ProviderExtension {
+                provider,
+                kind,
+                payload,
+            } => {
+                assert_eq!(*provider, Provider::KimiCode);
+                assert_eq!(kind, "");
+                assert_eq!(payload.get("payload"), Some(&json!({"k": 1})));
+            }
+            other => panic!("expected ProviderExtension, got {other:?}"),
+        }
     }
 
     #[test]

@@ -1,14 +1,12 @@
 use crate::artifact::{OutputFormat, RenderRequest};
-use crate::cache::FileCache;
 use crate::mermaid::{MermaidConfig, MermaidDiagram, MermaidTheme, QuadrantTheme};
+use crate::tests::isolated_cache_dir;
 use serial_test::serial;
 
 #[test]
 #[serial]
 fn mermaid_diagram_renders_to_png() {
-    // Clear cache to ensure clean state
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let diagram = MermaidDiagram::new("graph LR; A-->B");
     let request = RenderRequest::default();
@@ -30,9 +28,7 @@ fn mermaid_diagram_renders_to_png() {
 #[test]
 #[serial]
 fn mermaid_diagram_cache_hit_on_second_render() {
-    // Clear cache to ensure clean state
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let diagram = MermaidDiagram::new("graph LR; A-->B");
     let request = RenderRequest::default();
@@ -75,9 +71,7 @@ fn mermaid_builder_methods_are_chainable() {
 #[test]
 #[serial]
 fn mermaid_handles_unusual_syntax_gracefully() {
-    // Clear cache to ensure clean state
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     // mermaid-rs-renderer tends to handle invalid syntax gracefully
     // by producing a simple diagram or placeholder, rather than failing.
@@ -106,9 +100,7 @@ fn mermaid_handles_unusual_syntax_gracefully() {
 #[test]
 #[serial]
 fn mermaid_renders_to_svg() {
-    // Clear cache to ensure clean state
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let diagram = MermaidDiagram::new("graph LR; A-->B");
     let request = RenderRequest {
@@ -126,11 +118,42 @@ fn mermaid_renders_to_svg() {
     assert!(content.contains("<svg"), "Content should be valid SVG");
 }
 
+/// A `HIGHLIGHT` git-graph node (e.g. the worktree "+N" elision marker) must
+/// take its branch's color, not the inverse hue mermaid-rs-renderer defaults
+/// to. The second branch's color is yellow (`hsl(60, 100%`); its inverse is a
+/// blue (`rgb(0, 0, 160`) that must not appear.
+#[test]
+#[serial]
+fn mermaid_highlight_node_uses_branch_color() {
+    let _cache_dir = isolated_cache_dir();
+
+    let instructions = "gitGraph\n    commit id: \"a\"\n    branch feature\n    \
+         checkout feature\n    commit id: \"+3\" type: HIGHLIGHT\n    commit id: \"b\"";
+    let request = RenderRequest {
+        format: OutputFormat::Svg,
+        ..RenderRequest::default()
+    };
+
+    let artifact = MermaidDiagram::new(instructions)
+        .with_theme(MermaidTheme::Dark)
+        .render(&request)
+        .unwrap();
+    let svg = std::fs::read_to_string(artifact.path).unwrap();
+
+    assert!(
+        svg.contains("hsl(60, 100%"),
+        "highlight node should use the branch (yellow) color:\n{svg}"
+    );
+    assert!(
+        !svg.contains("rgb(0, 0, 160"),
+        "highlight node must not fall back to the inverse (blue) color:\n{svg}"
+    );
+}
+
 #[test]
 #[serial]
 fn mermaid_theme_changes_svg_output() {
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let request = RenderRequest {
         format: OutputFormat::Svg,
@@ -159,8 +182,7 @@ fn mermaid_theme_changes_svg_output() {
 #[test]
 #[serial]
 fn mermaid_transparent_background_changes_svg_output() {
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let diagram = MermaidDiagram::new("graph LR; A-->B").with_theme(MermaidTheme::Default);
     let opaque = diagram
@@ -191,8 +213,7 @@ fn mermaid_transparent_background_changes_svg_output() {
 #[test]
 #[serial]
 fn mermaid_quadrant_config_changes_svg_output() {
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let instructions = "quadrantChart\n    title Sample\n    A: [0.2, 0.8]\n    B: [0.7, 0.3]";
     let diagram = MermaidDiagram::new(instructions)
@@ -220,8 +241,7 @@ fn mermaid_quadrant_config_changes_svg_output() {
 #[test]
 #[serial]
 fn mermaid_cache_separates_scale_theme_and_transparency() {
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let base = MermaidDiagram::new("graph LR; A-->B");
     let scaled = base
@@ -373,9 +393,7 @@ fn quadrant_theme_apply_light_mode() {
 #[test]
 #[serial]
 fn mermaid_alt_text_uses_title() {
-    // Clear cache to ensure clean state
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let diagram = MermaidDiagram::new("graph LR; A-->B").with_title("My Custom Diagram");
     let request = RenderRequest::default();
@@ -388,8 +406,7 @@ fn mermaid_alt_text_uses_title() {
 #[test]
 #[serial]
 fn mermaid_pie_chart_init_directive_applies_custom_colors() {
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let instructions = "%%{init: {'themeVariables': {'pie1': '#3178C6', 'pie2': '#A72145'}}}%%\npie\n    \"TypeScript\" : 45\n    \"Rust\" : 35\n    \"Python\" : 20";
     let diagram = MermaidDiagram::new(instructions);
@@ -438,9 +455,7 @@ fn mermaid_pie_chart_init_directive_applies_custom_colors() {
 #[test]
 #[serial]
 fn mermaid_alt_text_defaults_to_mermaid_diagram() {
-    // Clear cache to ensure clean state
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let diagram = MermaidDiagram::new("graph LR; A-->B");
     let request = RenderRequest::default();
@@ -453,8 +468,7 @@ fn mermaid_alt_text_defaults_to_mermaid_diagram() {
 #[test]
 #[serial]
 fn mermaid_backend_smoke_renders_supported_cli_diagram_families() {
-    let cache = FileCache::new();
-    let _ = cache.clear();
+    let _cache_dir = isolated_cache_dir();
 
     let diagrams = [
         (

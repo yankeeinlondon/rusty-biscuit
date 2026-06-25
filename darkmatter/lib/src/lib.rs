@@ -63,16 +63,20 @@
 //! - [`effects`] - Mutating side-effect engine (library surface only)
 //! - [`layout`] - Page-level layout primitive ([`DarkmatterPage`])
 //! - [`mermaid`] - Mermaid diagram theming and rendering
+//! - [`prelude`] - Curated re-exports of every renderable component defined
+//!   in Darkmatter (alongside the render traits)
 //! - [`render`] - Hyperlink rendering utilities
 //! - [`terminal`] - Terminal color detection utilities
 //! - [`testing`] - Testing utilities for terminal output verification
 
+pub mod catalog;
 pub mod diff;
 pub mod editor;
 pub mod effects;
 pub mod layout;
 pub mod markdown;
 pub mod mermaid;
+pub mod prelude;
 pub mod render;
 pub mod style;
 pub mod terminal;

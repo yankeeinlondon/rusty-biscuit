@@ -1,8 +1,8 @@
-//! Best-effort speech helpers for harness handlers.
+//! Best-effort speech helpers for runtime lifecycle side effects.
 
 use biscuit_speaks::TtsConfig;
 
-/// Speak a short handler message without affecting the main harness flow.
+/// Speak a short lifecycle message without affecting the main harness flow.
 ///
 /// This uses `biscuit-speaks` and intentionally ignores playback failures.
 /// If no Tokio runtime is active, it falls back to a lightweight background

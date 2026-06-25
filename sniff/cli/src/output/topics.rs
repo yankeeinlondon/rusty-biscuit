@@ -10,7 +10,7 @@ const TOPIC_COLUMNS: &[(&str, &[&str])] = &[
     ),
     ("filesystem", &["git", "repo", "language"]),
     (
-        "programs",
+        "software",
         &[
             "editors",
             "utilities",
@@ -20,6 +20,8 @@ const TOPIC_COLUMNS: &[(&str, &[&str])] = &[
             "terminal-apps",
             "audio-players",
             "agents",
+            "notification-helpers",
+            "test-runners",
         ],
     ),
 ];

@@ -1,5 +1,10 @@
 //! Loop frontmatter detection and parsing.
 
+use std::collections::BTreeSet;
+
+use darkmatter::markdown::compose::expression::{Expr, ExpressionFinder, parse};
+use serde_json::Value;
+
 use super::error::CompositionError;
 use super::types::{LoopAction, LoopCondition, LoopConfig, OnRateLimit, ResolvedCompositionSource};
 
@@ -115,13 +120,164 @@ pub fn resolve_loop_config(
     }))
 }
 
-/// Recognized keys under the `loop:` frontmatter object.
+/// Extract the set of frontmatter keys the loop reads or writes.
+///
+/// Control variables are the only keys resolved once at seed time and
+/// carried as typed state across iterations. Derived/presentation keys are
+/// intentionally excluded so they re-resolve each iteration.
+///
+/// Sources:
+/// - every action target (`increment`/`decrement`/`set`/`append`/
+///   `prepend`/`merge` `prop`);
+/// - every identifier referenced by the `while`/`until` condition;
+/// - every identifier referenced inside action-value templates.
+///
+/// Reserved namespaces are excluded because they are supplied by the
+/// runtime rather than resolved from frontmatter: `doc.<head>` references
+/// lift `<head>` as a control variable (the `doc` namespace traverses the
+/// loop's frontmatter state), while bare `doc`, `env`, boolean literals,
+/// and any identifier starting with `_loop_` remain excluded.
+pub fn extract_control_variables(config: &LoopConfig) -> Vec<String> {
+    let mut names = BTreeSet::new();
+
+    for action in &config.actions {
+        match action {
+            LoopAction::Increment(prop) | LoopAction::Decrement(prop) => {
+                names.insert(prop.clone());
+            }
+            LoopAction::Set { prop, value }
+            | LoopAction::Append { prop, value }
+            | LoopAction::Prepend { prop, value }
+            | LoopAction::Merge { prop, value } => {
+                names.insert(prop.clone());
+                if let Value::String(raw) = value {
+                    collect_value_template_identifiers(raw, &mut names);
+                }
+            }
+        }
+    }
+
+    let condition_source = match &config.condition {
+        LoopCondition::While(source) | LoopCondition::Until(source) => source,
+    };
+    if let Ok(expr) = darkmatter::markdown::compose::expression::parse_condition(condition_source) {
+        collect_identifiers(&expr, &mut names);
+    }
+
+    Vec::from_iter(names)
+}
+
+fn collect_value_template_identifiers(raw: &str, names: &mut BTreeSet<String>) {
+    for location in ExpressionFinder::find_all_plain(raw) {
+        if let Ok(expr) = parse(&location.expression) {
+            collect_identifiers(&expr, names);
+        }
+    }
+}
+
+fn collect_identifiers(expr: &Expr, names: &mut BTreeSet<String>) {
+    match expr {
+        Expr::Variable(path) => {
+            let mut segments = path.split('.');
+            let head = segments.next().unwrap_or(path);
+            if head == "doc" {
+                // `doc.<path>` traverses the frontmatter object the loop
+                // owns, so lift the first segment after `doc` as a control
+                // variable. Bare `doc` (the whole object) has no single key
+                // to own.
+                if let Some(segment) = segments.next() {
+                    names.insert(segment.to_string());
+                }
+            } else if !is_reserved_identifier(head) {
+                names.insert(head.to_string());
+            }
+        }
+        Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) | Expr::Paren(inner) => {
+            collect_identifiers(inner, names);
+        }
+        Expr::Binary { left, right, .. }
+        | Expr::Comparison { left, right, .. }
+        | Expr::Fallback {
+            primary: left,
+            fallback: right,
+        } => {
+            collect_identifiers(left, names);
+            collect_identifiers(right, names);
+        }
+        Expr::Index { base, index } => {
+            collect_identifiers(base, names);
+            collect_identifiers(index, names);
+        }
+        Expr::MemberAccess { base, .. } => {
+            collect_identifiers(base, names);
+        }
+        Expr::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            collect_identifiers(condition, names);
+            collect_identifiers(then_branch, names);
+            collect_identifiers(else_branch, names);
+        }
+        Expr::FunctionCall { args, .. } => {
+            for arg in args {
+                collect_identifiers(arg, names);
+            }
+        }
+        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
+    }
+}
+
+fn is_reserved_identifier(name: &str) -> bool {
+    name == "true"
+        || name == "false"
+        || name == "doc"
+        || name == "env"
+        || name.starts_with("_loop_")
+}
+
+/// Recognized iteration-control keys under the `loop:` frontmatter object.
 ///
 /// `action` is the canonical key for action mutators; `actions` is accepted
-/// as an alias for backwards compatibility. Any other key is rejected at
-/// parse time so silent typos surface as a clear error rather than being
-/// ignored.
+/// as an alias for backwards compatibility. Any other iteration-control key
+/// is rejected at parse time so silent typos surface as a clear error rather
+/// than being ignored.
+///
+/// The lifecycle-concern keys (`say`, `say_first`, `effect`, `message`,
+/// `stderr`, `notify`, `info`, `warn`, `stack`) are also accepted but
+/// skipped by this parser — they are validated and stored by
+/// [`super::lifecycle::parse_lifecycle_config`], which extracts them as a
+/// `LifecycleNotification` on `LifecycleConfig::loop_concerns`. The two
+/// parsers operate on disjoint key sets inside the same `loop:` block.
 const KNOWN_LOOP_KEYS: &[&str] = &[
+    "while",
+    "until",
+    "action",
+    "actions",
+    "max",
+    "fail_fast",
+    "on_rate_limit",
+    // Lifecycle-concern keys — parsed by `parse_lifecycle_config` into
+    // `LifecycleConfig::loop_concerns`. Listed here so this parser does
+    // not reject them as unknown keys.
+    "say",
+    "say_first",
+    "effect",
+    "message",
+    "stderr",
+    "notify",
+    "info",
+    "warn",
+    "success",
+    "stdout",
+    "stack",
+];
+
+/// Iteration-control keys only, for diagnostic listings. The lifecycle
+/// concerns are valid keys too but are surfaced through a different error
+/// path (see [`super::lifecycle::parse_lifecycle_config`]).
+const ITERATION_CONTROL_KEYS: &[&str] = &[
     "while",
     "until",
     "action",
@@ -142,7 +298,7 @@ fn reject_unknown_loop_keys(
                 .unwrap_or_default();
             return Err(CompositionError::LoopInvalid(format!(
                 "unknown `loop.{key}` key{suggestion_hint}; valid keys are: {}",
-                KNOWN_LOOP_KEYS.join(", ")
+                ITERATION_CONTROL_KEYS.join(", ")
             )));
         }
     }
@@ -372,7 +528,15 @@ fn parse_dsl_value(raw: &str) -> serde_json::Value {
     )
 }
 
-fn split_action_args(input: &str) -> Result<Vec<String>, CompositionError> {
+/// Split a `verb(arg1, arg2, …)` argument list on top-level commas.
+///
+/// Balanced-delimiter and quote-aware: commas inside `()`, `[]`, `{}`, `'…'`,
+/// or `"…"` are preserved. An unbalanced delimiter or unterminated quote is
+/// reported as a `LoopInvalid`.
+///
+/// Shared between the loop-action DSL parser (this module) and the lifecycle
+/// short-form action parser (`super::lifecycle`).
+pub(super) fn split_action_args(input: &str) -> Result<Vec<String>, CompositionError> {
     let mut args = Vec::new();
     let mut current = String::new();
     let mut quote: Option<char> = None;
@@ -541,6 +705,17 @@ mod tests {
     fn no_loop_returns_none() {
         let source = make_source(&[("title", json!("No loop"))]);
         assert!(resolve_loop_config(&source).unwrap().is_none());
+    }
+
+    #[test]
+    fn loop_stdout_is_accepted_as_lifecycle_concern() {
+        // `loop.stdout` is a lifecycle-concern key, not an iteration control.
+        // `resolve_loop_config` must accept it (ignoring it as a concern) rather
+        // than rejecting it as an unknown `LoopInvalid` key. The `while` key
+        // keeps the iteration controls valid.
+        let source = make_source(&[("loop", json!({"while": "true", "stdout": "hello"}))]);
+        let config = resolve_loop_config(&source).unwrap();
+        assert!(config.is_some());
     }
 
     #[test]
@@ -887,6 +1062,105 @@ mod tests {
                 prop: "msg".into(),
                 value: json!("hello world")
             }]
+        );
+    }
+
+    // ── Control-variable extraction tests ────────────────────────────────
+
+    fn control_config(condition: &str, actions: Vec<LoopAction>) -> LoopConfig {
+        LoopConfig {
+            condition: LoopCondition::Until(condition.to_string()),
+            actions,
+            max_iterations: None,
+            fail_fast: None,
+            on_rate_limit: None,
+        }
+    }
+
+    #[test]
+    fn extract_control_variables_repro_shape() {
+        let config = control_config(
+            "phase > total_phases",
+            vec![LoopAction::Increment("phase".into())],
+        );
+        assert_eq!(
+            extract_control_variables(&config),
+            vec!["phase".to_string(), "total_phases".to_string()]
+        );
+    }
+
+    #[test]
+    fn extract_control_variables_action_value_template() {
+        let config = control_config(
+            "phase < max",
+            vec![LoopAction::Set {
+                prop: "next".into(),
+                value: json!("{{ phase + 1 }}"),
+            }],
+        );
+        assert_eq!(
+            extract_control_variables(&config),
+            vec!["max".to_string(), "next".to_string(), "phase".to_string()]
+        );
+    }
+
+    #[test]
+    fn extract_control_variables_excludes_reserved_namespaces() {
+        let config = control_config("_loop_count < 3 && env.DEBUG", vec![]);
+        assert!(extract_control_variables(&config).is_empty());
+    }
+
+    #[test]
+    fn extract_control_variables_dotted_condition_path() {
+        let config = control_config("state.done", vec![]);
+        assert_eq!(
+            extract_control_variables(&config),
+            vec!["state".to_string()]
+        );
+    }
+
+    #[test]
+    fn extract_control_variables_empty_identity() {
+        let config = control_config("true", vec![]);
+        assert!(extract_control_variables(&config).is_empty());
+    }
+
+    #[test]
+    fn extract_control_variables_lifts_doc_namespace_head() {
+        let config = control_config("doc.counter < doc.total", vec![]);
+        assert_eq!(
+            extract_control_variables(&config),
+            vec!["counter".to_string(), "total".to_string()]
+        );
+    }
+
+    #[test]
+    fn extract_control_variables_dotted_doc_path_lifts_head_only() {
+        let config = control_config("doc.config.retries > 0", vec![]);
+        assert_eq!(
+            extract_control_variables(&config),
+            vec!["config".to_string()]
+        );
+    }
+
+    #[test]
+    fn extract_control_variables_bare_doc_lifts_nothing() {
+        let config = control_config("doc && counter < 3", vec![]);
+        assert_eq!(
+            extract_control_variables(&config),
+            vec!["counter".to_string()]
+        );
+    }
+
+    #[test]
+    fn extract_control_variables_doc_and_action_target_merge() {
+        let config = control_config(
+            "doc.counter < doc.total",
+            vec![LoopAction::Increment("counter".into())],
+        );
+        assert_eq!(
+            extract_control_variables(&config),
+            vec!["counter".to_string(), "total".to_string()]
         );
     }
 }

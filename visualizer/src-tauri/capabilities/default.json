@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capability for the Visualizer main window. Intentionally narrow per spec §6 — no broad fs/shell permissions.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

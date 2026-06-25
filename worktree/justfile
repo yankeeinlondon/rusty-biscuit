@@ -56,10 +56,12 @@ sanity:
     @just _sanity {{ CLI }}
 
 # Test both library and CLI (Level-1 only -- `test-l2` runs real-terminal tests).
+# `perf_` tests are excluded here: their wall-clock SLAs only hold under the
+# contention-free `-j 1` run in `test-perf`, which `all` invokes separately.
 test *args="":
     #!/usr/bin/env bash
     set -euo pipefail
-    filter='!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/))'
+    filter='!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/) + test(/perf_/))'
     echo
     echo -e "Testing {{ BOLD }}{{ LIBRARY }}{{ RESET }} package"
     echo
@@ -131,12 +133,13 @@ bench-compare *args="":
 fuzz:
     @echo "fuzz: not applicable for worktree"
 
-# Canonical PR-gate runner: sanity -> lint -> doctest -> test -> test-l2 -> test-browser.
+# Canonical PR-gate runner: sanity -> lint -> doctest -> test -> test-perf -> test-l2 -> test-browser.
 all:
     @just sanity
     @just lint
     @just doctest
     @just test
+    @just test-perf
     @just test-l2
     @just test-browser
 

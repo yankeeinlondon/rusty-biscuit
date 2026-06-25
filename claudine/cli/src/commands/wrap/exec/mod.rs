@@ -1,4 +1,5 @@
 use std::io::{IsTerminal, Write};
+use std::path::Path;
 use std::process::Child;
 use std::sync::Arc;
 use std::thread;
@@ -7,6 +8,7 @@ use std::time::{Duration, Instant};
 use biscuit_terminal::terminal::Terminal;
 use claudine::stream::parser::{SemanticStreamParser, StreamParseError};
 use claudine::stream::summary::StreamExecutionSummary;
+use color_eyre::eyre::Result;
 
 pub(crate) mod exit;
 pub(crate) mod spawn;
@@ -17,8 +19,35 @@ pub(crate) mod timeouts;
 pub(crate) mod watchdog;
 pub(crate) mod wiring;
 
-pub(crate) use exit::{exit_code_from_status, resolve_first_response};
+pub(crate) use exit::{cleanup_mcp_injection, exit_code_from_status, resolve_first_response};
 pub(crate) use spawn::{run_child, run_child_capture, run_child_stream_semantic};
+
+/// Switch the wrapper process cwd to the child's cwd and sync `PWD`.
+///
+/// Rust's `set_current_dir` calls `chdir(2)` but does NOT touch the
+/// `PWD` environment variable — the shell convention is that `PWD`
+/// tracks "where the user thinks they are", which can differ from
+/// `getcwd(3)`. Several downstream tools (notably OpenCode's
+/// `run.ts:276` resolving `process.env.PWD ?? process.cwd()`) trust
+/// `PWD` over the real cwd. If we don't sync them, the spawned
+/// child inherits the user's pre-chdir `PWD` (e.g. a package
+/// subdirectory the user ran `just commit` from) and resolves paths
+/// against the wrong root.
+///
+/// # Safety
+///
+/// Single-threaded wrapper startup; no other thread reads or writes
+/// `PWD` concurrently with this call.
+pub(crate) fn switch_process_cwd(child_cwd: &Path) -> Result<()> {
+    let current = std::env::current_dir()?;
+    if current != child_cwd {
+        std::env::set_current_dir(child_cwd)?;
+    }
+    unsafe {
+        std::env::set_var("PWD", child_cwd.as_os_str());
+    }
+    Ok(())
+}
 
 pub(crate) struct ChildIoOptions<'a> {
     pub(crate) stdout_noise_prefixes: &'a [&'a str],
@@ -69,6 +98,12 @@ pub(crate) struct ProcessResult<T> {
     // not trip `-D warnings`.
     #[allow(dead_code)]
     pub(crate) agent_pid: Option<u32>,
+    /// Structured runaway-guard context (Phase 6), populated when the run
+    /// ended on a content-guard trip (exit-expression / repetition / volume).
+    /// `None` for ordinary completions, timeouts, and rate-limit aborts.
+    /// Carried so the attempt outcome can thread `error_kind` + guard detail
+    /// into the failure-handler payload (C3a).
+    pub(crate) guard_context: Option<claudine::harness::GuardContext>,
 }
 
 /// Renders streamed assistant text as Markdown, flushing at block boundaries.
@@ -448,13 +483,17 @@ fn join_with_timeout_or<T>(handle: thread::JoinHandle<T>, timeout: Duration, fal
 #[cfg(unix)]
 fn kill_process_group(child: &mut Child) {
     let pid = child.id() as i32;
+    // Derive the grace period from the same `TimeoutConfig` knob that
+    // governs SIGTERM->SIGKILL escalation in the streaming wait loop,
+    // so the two termination paths stay consistent.
+    let kill_grace = timeouts::TimeoutConfig::resolve(None, None).kill_grace;
     // Send SIGTERM to the process group first (graceful), then SIGKILL.
     unsafe {
         // kill(-pgid, ...) sends to the entire process group.
         // With process_group(0), the pgid == child pid.
         if libc::kill(-pid, libc::SIGTERM) == 0 {
-            // Give descendants a brief grace period to exit.
-            std::thread::sleep(Duration::from_millis(200));
+            // Give descendants the configured grace period to exit.
+            std::thread::sleep(kill_grace);
             // Ensure everything is dead.
             libc::kill(-pid, libc::SIGKILL);
         }

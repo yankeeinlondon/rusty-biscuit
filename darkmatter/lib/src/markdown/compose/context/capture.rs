@@ -828,11 +828,8 @@ pub(crate) fn populate_datetime(values: &mut Map<String, Value>) {
 /// inserted only when the canonical key is present so a missing canonical
 /// value cannot leak as a populated alias.
 fn populate_datetime_aliases(values: &mut Map<String, Value>) {
-    const ALIASES: &[(&str, &str)] = &[
-        ("utc", "now_utc"),
-        ("dow", "day"),
-        ("dow_abbr", "day_abbr"),
-    ];
+    const ALIASES: &[(&str, &str)] =
+        &[("utc", "now_utc"), ("dow", "day"), ("dow_abbr", "day_abbr")];
     for (alias, canonical) in ALIASES {
         if let Some(value) = values.get(*canonical).cloned() {
             values.insert((*alias).to_string(), value);
@@ -975,11 +972,7 @@ fn populate_monorepo_area(cap: &ContextCapture, values: &mut Map<String, Value>)
             format!("{} package", pkg.name),
             strip_trailing_sep(&pkg.path.to_string_lossy()),
         )
-    } else if let Some(area_name) = cap
-        .current_package_area
-        .as_deref()
-        .filter(|a| *a != "root")
-    {
+    } else if let Some(area_name) = cap.current_package_area.as_deref().filter(|a| *a != "root") {
         // Inside a package area but not a package folder.
         let area_path = cap
             .repo_root
@@ -1735,11 +1728,7 @@ impl ContextCapture {
         Self::for_test_base(root, Some(ri))
     }
 
-    fn for_test_monorepo_in_package(
-        name: &str,
-        depends_on: &[&str],
-        used_by: &[&str],
-    ) -> Self {
+    fn for_test_monorepo_in_package(name: &str, depends_on: &[&str], used_by: &[&str]) -> Self {
         let root = PathBuf::from("/tmp/mono");
         let pkg = Package {
             name: name.to_string(),
@@ -1761,14 +1750,13 @@ impl ContextCapture {
 fn test_repo_info(root: PathBuf, is_monorepo: bool, packages: Option<Vec<Package>>) -> RepoInfo {
     RepoInfo {
         is_monorepo,
-        monorepo_tool: None,
-        workspace_tools: Vec::new(),
         root,
         dependencies: None,
         dev_dependencies: None,
         peer_dependencies: None,
         optional_dependencies: None,
         packages,
+        ..Default::default()
     }
 }
 
@@ -1825,21 +1813,14 @@ mod tests {
         let mut values = Map::new();
         populate_datetime(&mut values);
 
-        for (alias, canonical) in [
-            ("utc", "now_utc"),
-            ("dow", "day"),
-            ("dow_abbr", "day_abbr"),
-        ] {
+        for (alias, canonical) in [("utc", "now_utc"), ("dow", "day"), ("dow_abbr", "day_abbr")] {
             let alias_value = values
                 .get(alias)
                 .unwrap_or_else(|| panic!("alias `{alias}` must be present"));
             let canonical_value = values
                 .get(canonical)
                 .unwrap_or_else(|| panic!("canonical `{canonical}` must be present"));
-            assert!(
-                !alias_value.is_null(),
-                "alias `{alias}` must not be null",
-            );
+            assert!(!alias_value.is_null(), "alias `{alias}` must not be null",);
             assert_eq!(
                 alias_value, canonical_value,
                 "alias `{alias}` must mirror canonical `{canonical}`",
@@ -1915,7 +1896,10 @@ mod tests {
         );
         // area_root falls back to repo root (no trailing slash) when not a monorepo.
         if let Some(Value::String(ar)) = values.get("area_root") {
-            assert!(!ar.ends_with('/'), "area_root must not end with '/': {ar:?}");
+            assert!(
+                !ar.ends_with('/'),
+                "area_root must not end with '/': {ar:?}"
+            );
         }
     }
 
@@ -1932,7 +1916,10 @@ mod tests {
             .and_then(Value::as_str)
             .unwrap_or("");
         assert!(listing.contains("- alpha (alpha/lib)"), "got: {listing}");
-        assert!(listing.contains("- alpha-cli (alpha/cli)"), "got: {listing}");
+        assert!(
+            listing.contains("- alpha-cli (alpha/cli)"),
+            "got: {listing}"
+        );
     }
 
     #[test]
@@ -1940,7 +1927,10 @@ mod tests {
         let cap = ContextCapture::for_test_monorepo_in_package("alpha", &["beta", "gamma"], &[]);
         let mut values = Map::new();
         populate_repo(&cap, &mut values);
-        let s = values.get("depends_on").and_then(Value::as_str).unwrap_or("");
+        let s = values
+            .get("depends_on")
+            .and_then(Value::as_str)
+            .unwrap_or("");
         assert!(s.contains("'alpha' depends on:"), "got: {s}");
         assert!(s.contains("    - beta"), "got: {s}");
         assert!(s.contains("    - gamma"), "got: {s}");

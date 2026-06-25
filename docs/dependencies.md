@@ -2,6 +2,9 @@
 
 ## Recent Dependency Notes
 
+- `worktree/lib` uses `biscuit-hash` for the SHA-pair cache file name. The cache
+  stores deterministic ahead/behind and clean-merge results under the user cache
+  directory, keyed by canonical repo-root xxHash plus branch tip SHAs.
 - `claudine/contract` (`claudine-contract`) implements
   `biscuit_contract::inference::InferenceAdapter` over a Claudine
   non-interactive, tool-free agentic-CLI session. It is the one crate that
@@ -81,6 +84,8 @@ This is a Rust workspace with the following modules:
 - `unchained-ai/lib/Cargo.toml` - LLM pipeline primitives and provider integrations
 - `unchained-ai/gen/Cargo.toml` - Provider model enum generator (`gen-models`)
 - `unchained-ai/cli/Cargo.toml` - Future AI CLI (`unchained`)
+- `worktree/lib/Cargo.toml` - Git worktree business logic (git subprocess orchestration, SHA-pair status cache)
+- `worktree/cli/Cargo.toml` - Worktree CLI (`wt`)
 - `tools/test-toolkit/Cargo.toml` - Shared test lifecycle helpers
 - `biscuit-test-harness/Cargo.toml` - Real-terminal test harness (WezTerm, Kitty, tmux, Apple Terminal)
 - `biscuit-browser-harness/Cargo.toml` - Headless browser test harness (Chrome/Chromium)
@@ -161,7 +166,7 @@ This is a Rust workspace with the following modules:
 
 - [claudine-cli](./claudine/cli) _v0.1.0_
 
-    _Hook manager CLI for agentic tool integration._
+    _Hook manager CLI for agentic tool integration. Uses the rendezvous client/core crates on every target to record lifecycle `requeue(...)` deferred-execution entries (UDS on Unix, named pipe on Windows) and falls back to a local durable JSONL queue when the daemon is unreachable._
 
     _Tags: workspace, cli, hooks_
 

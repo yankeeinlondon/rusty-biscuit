@@ -33,10 +33,10 @@ use super::shell_expansion::store::resolve_policy_paths;
 use super::shell_expansion::tokenize::{parse_pipeline, tokenize};
 use super::shell_expansion::types::{
     ChainOperator, ErrorHandling, PipelineRuntime, ShellCommandOrigin, ShellDirective,
-    ShellExpansionError, ShellPipeline, ShellPolicyPaths,
+    ShellExpansionError, ShellPipeline, ShellPolicyPaths, frontmatter_key_line,
 };
 use super::shell_expansion::{PreparedShellDirective, execute_prepared_directive, prepare_directive};
-use super::types::{ComposeOptions, ComposeWarning};
+use super::{ComposeOptions, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
 use crate::markdown::types::MarkdownResult;
 use biscuit_terminal::errors::SourceContext;
@@ -154,9 +154,15 @@ pub(crate) struct FrontmatterShellDirective {
     #[allow(dead_code)] // Inspected by parser tests; production reads `ast`.
     pub args: Vec<String>,
     pub timeout_override: Option<std::time::Duration>,
+    /// When `true` (from the `::no-cache` suffix), the directive bypasses the
+    /// per-compose command cache and executes fresh at every occurrence.
+    pub no_cache: bool,
     #[allow(dead_code)] // Inspected by parser tests; production uses `directive_reachable_pipelines`.
     pub pipeline: Option<ShellPipeline>,
     pub ast: FrontmatterShellAst,
+    /// 1-indexed file line of the frontmatter key when it can be resolved from
+    /// the source context; `None` otherwise.
+    pub line: Option<usize>,
 }
 
 /// Result of frontmatter shell expansion.
@@ -169,13 +175,87 @@ pub(crate) struct FrontmatterShellExpansionReport {
     pub warnings: Vec<ComposeWarning>,
 }
 
+/// Parses the suffix tail that follows the closing `)` of a `$(...)` shell
+/// expression.
+///
+/// Two suffixes are recognized — `::timeout:N` and the `::no-cache` cache
+/// opt-out — in any order. Each may appear at most once; anything else (any
+/// non-suffix trailing content) is a hard parse error. This grammar is shared
+/// between [`parse_shell_value`] and the leak-guard shape detector so the
+/// supported suffix forms live in exactly one place.
+///
+/// ## Errors
+///
+/// Returns a key-tagged [`ShellExpansionError::ParseDirective`] for a duplicate
+/// suffix, an invalid/zero timeout value, or any non-suffix trailing content.
+fn parse_shell_suffixes(
+    after_close: &str,
+    key: &str,
+    ctx: &SourceContext,
+) -> Result<(Option<std::time::Duration>, bool), ShellExpansionError> {
+    let mut timeout_override = None;
+    let mut no_cache = false;
+    let mut suffix = after_close;
+    while !suffix.is_empty() {
+        if let Some(rest) = suffix.strip_prefix("::no-cache") {
+            if no_cache {
+                return Err(frontmatter_parse_error(
+                    key,
+                    ctx,
+                    "Duplicate ::no-cache suffix in frontmatter shell expression",
+                ));
+            }
+            no_cache = true;
+            suffix = rest;
+        } else if let Some(rest) = suffix.strip_prefix("::timeout:") {
+            if timeout_override.is_some() {
+                return Err(frontmatter_parse_error(
+                    key,
+                    ctx,
+                    "Duplicate ::timeout suffix in frontmatter shell expression",
+                ));
+            }
+            // The timeout digits run up to the next `::` suffix or end of string.
+            let digits_end = rest.find("::").unwrap_or(rest.len());
+            let (digits, tail) = rest.split_at(digits_end);
+            let timeout_val: u64 = digits.parse().map_err(|_| {
+                frontmatter_parse_error(
+                    key,
+                    ctx,
+                    "Invalid ::timeout value in frontmatter shell expression; expected a positive integer number of seconds",
+                )
+            })?;
+            if timeout_val == 0 {
+                return Err(frontmatter_parse_error(
+                    key,
+                    ctx,
+                    "Frontmatter shell timeout must be greater than zero",
+                ));
+            }
+            timeout_override = Some(std::time::Duration::from_secs(timeout_val));
+            suffix = tail;
+        } else {
+            return Err(frontmatter_parse_error(
+                key,
+                ctx,
+                "Unexpected trailing content after frontmatter shell expression",
+            ));
+        }
+    }
+    Ok((timeout_override, no_cache))
+}
+
 /// Parses a single frontmatter string value for shell expression.
 ///
 /// Returns `Some` if the value matches `$(cmd)` or `$(cmd)::timeout:N`.
 ///
 /// ## Rules
 ///
-/// - Value must start with `$(`
+/// - The value and the `original_value` snapshot are trimmed first; the
+///   whole-value `$( … )` rule is defined on that trimmed boundary, so
+///   `"  $(echo ok)  "` parses identically to `"$(echo ok)"`
+/// - Trimmed value must start with `$(` (a mixed literal whose trimmed form
+///   starts with other text returns `Ok(None)` and is left to other handling)
 /// - Must have a closing `)` — either at the end, or followed by `::timeout:N`
 /// - If `::timeout:N` suffix present: extract it, validate N > 0
 /// - Extract the inner command string between `$(` and `)`
@@ -195,6 +275,15 @@ pub(crate) fn parse_shell_value(
     original_value: Option<&str>,
     ctx: &SourceContext,
 ) -> Result<Option<FrontmatterShellDirective>, ShellExpansionError> {
+    // The whole-value `$( … )` rule is defined on the trimmed value, so a padded
+    // value (`"  $(echo ok)  "`) parses and expands identically to its trimmed
+    // form. The pre-interpolation snapshot is trimmed to the same boundary so
+    // ternary structure and executable-interpolation checks see the same body.
+    // A mixed literal whose trimmed form does not open `$(` still returns
+    // `Ok(None)` below and stays outside this strict rule.
+    let value = value.trim();
+    let original_value = original_value.map(str::trim);
+
     // Must start with $(
     if !value.starts_with("$(") {
         return Ok(None);
@@ -206,32 +295,7 @@ pub(crate) fn parse_shell_value(
     let inner_command = &rest[..close_pos];
     let after_close = &rest[close_pos + 1..];
 
-    // Check for ::timeout:N suffix
-    let timeout_override = if let Some(timeout_str) = after_close.strip_prefix("::timeout:") {
-        let timeout_val: u64 = timeout_str.parse().map_err(|_| {
-            frontmatter_parse_error(
-                key,
-                ctx,
-                "Invalid ::timeout value in frontmatter shell expression; expected a positive integer number of seconds",
-            )
-        })?;
-        if timeout_val == 0 {
-            return Err(frontmatter_parse_error(
-                key,
-                ctx,
-                "Frontmatter shell timeout must be greater than zero",
-            ));
-        }
-        Some(std::time::Duration::from_secs(timeout_val))
-    } else if !after_close.is_empty() {
-        return Err(frontmatter_parse_error(
-            key,
-            ctx,
-            "Unexpected trailing content after frontmatter shell expression",
-        ));
-    } else {
-        None
-    };
+    let (timeout_override, no_cache) = parse_shell_suffixes(after_close, key, ctx)?;
 
     // The original (pre-interpolation) inner text drives ternary structure
     // detection and per-branch executable-interpolation validation. If no
@@ -279,12 +343,14 @@ pub(crate) fn parse_shell_value(
             executable: String::new(),
             args: Vec::new(),
             timeout_override,
+            no_cache,
             pipeline: None,
             ast: FrontmatterShellAst::Ternary {
                 condition_source,
                 then_branch,
                 else_branch,
             },
+            line: None,
         }));
     }
 
@@ -341,8 +407,10 @@ pub(crate) fn parse_shell_value(
         executable,
         args,
         timeout_override,
+        no_cache,
         pipeline: Some(pipeline.clone()),
         ast: FrontmatterShellAst::Pipeline(pipeline),
+        line: None,
     }))
 }
 
@@ -937,7 +1005,8 @@ pub(crate) fn scan_frontmatter(
                 .and_then(|map| map.get(key))
                 .map(|s| s.as_str());
 
-            if let Some(directive) = parse_shell_value(s, key, original, ctx)? {
+            if let Some(mut directive) = parse_shell_value(s, key, original, ctx)? {
+                directive.line = frontmatter_key_line(ctx, key);
                 directives.push(directive);
             }
         }
@@ -968,6 +1037,11 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     let candidates = scan_frontmatter(frontmatter, pre_interpolation_snapshot, ctx)?;
 
     if candidates.is_empty() {
+        // No directives to execute, but a scan-skipped whole-value `$(...)`
+        // (e.g. one behind leading whitespace) could still be sitting in
+        // frontmatter. Enabled shell expansion must never leave a raw
+        // expansion-form value behind, so guard even on the no-op path.
+        validate_no_whole_value_shell_leak(frontmatter, ctx)?;
         return Ok(FrontmatterShellExpansionReport {
             replacements: 0,
             approvals_used: 0,
@@ -1081,13 +1155,17 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     }
 
     // Run executable preparations in parallel; short-circuit branches contribute
-    // an empty string and skip the shell runtime entirely.
+    // an empty string and skip the shell runtime entirely. The cache lives behind
+    // the runtime's shared mutex, so a shared borrow suffices here.
+    let shell_runtime = &runtime.shell;
     let mut executions: Vec<_> = pending
         .into_par_iter()
         .map(|(index, key, item)| {
             let result = match item {
-                Pending::Execute(prepared) => execute_prepared_directive(&prepared, options)
-                    .map(|res| (res.stdout, res.warnings)),
+                Pending::Execute(prepared) => {
+                    execute_prepared_directive(&prepared, options, shell_runtime)
+                        .map(|res| (res.stdout, res.warnings))
+                }
                 Pending::Value(value) => Ok((value, Vec::new())),
             };
             (index, key, result)
@@ -1103,6 +1181,11 @@ pub(crate) fn execute_frontmatter_shell_expansion(
         warnings.extend(exec_warnings);
         fm_mut.insert(key, Value::String(stdout.trim().to_string()));
     }
+
+    // Post-expansion leak guard: after replacements, no top-level value may
+    // still be a whole-value `$(...)` candidate (e.g. command output that
+    // reproduced `$( … )`). Such a value is leaked executable state, not text.
+    validate_no_whole_value_shell_leak(frontmatter, ctx)?;
 
     let approvals_used = runtime.shell.take_recent_approval_count();
 
@@ -1280,9 +1363,11 @@ fn prepare_branch_pipeline(
         indent: String::new(),
         origin: ShellCommandOrigin::Frontmatter {
             key: candidate.key.clone(),
+            line: candidate.line,
         },
         error_handling: ErrorHandling::default(),
         timeout_override: candidate.timeout_override,
+        no_cache: candidate.no_cache,
         pipeline: Some(pipeline),
         ctx: ctx.clone(),
     };
@@ -1463,6 +1548,137 @@ fn interpolate_branch_text(
     Ok(rewrite.output)
 }
 
+/// Post-expansion leak guard for top-level frontmatter string values.
+///
+/// After enabled frontmatter shell expansion has run, no top-level value may
+/// still be a whole-value `$(...)` shell-expansion candidate. A surviving
+/// candidate means executable state leaked as raw syntax — e.g. a command whose
+/// own output reproduced `$( … )`, or a `$(...)` value behind leading
+/// whitespace that the strict-start scan skipped. Frontmatter values that are
+/// exactly an expansion form are executable state, not text, and must resolve
+/// or fail loudly rather than reach the composed document verbatim.
+///
+/// Candidate recognition is delegated to [`is_whole_value_shell_candidate`],
+/// which reuses [`parse_shell_value`] so the `$( … )` grammar and supported
+/// suffix rules (`::timeout` / `::no-cache`) are defined in exactly one place.
+/// Mixed literals (`literal $(echo ok)`) and values with trailing content after
+/// the closing paren are not whole-value candidates and pass through unchanged.
+///
+/// ## Errors
+///
+/// Returns a key-tagged [`ShellExpansionError::ParseDirective`] for the first
+/// surviving whole-value candidate, carrying the frontmatter key, the offending
+/// expression text, and source location when [`SourceContext`] can locate the
+/// key.
+fn validate_no_whole_value_shell_leak(
+    frontmatter: &Frontmatter,
+    ctx: &SourceContext,
+) -> Result<(), ShellExpansionError> {
+    for (key, value) in frontmatter.as_map().iter() {
+        if let Value::String(s) = value {
+            match is_whole_value_shell_candidate(s, key, ctx) {
+                WholeValueShellShape::NotCandidate => {}
+                WholeValueShellShape::CleanDirective => {
+                    let trimmed = s.trim();
+                    return Err(frontmatter_parse_error(
+                        key,
+                        ctx,
+                        format!(
+                            "Frontmatter shell expression `{trimmed}` survived shell expansion as a raw \
+                             whole-value `$( … )` candidate. A frontmatter value that is exactly a `$( … )` \
+                             expansion is executable state, not text; it must resolve during shell \
+                             expansion, so a surviving candidate (e.g. command output that reproduced \
+                             `$( … )`) is rejected rather than leaked into the composed frontmatter."
+                        ),
+                    ));
+                }
+                // A whole-value shape that fails the shared parser (malformed,
+                // unclosed, or no-command) is executable state that cannot be
+                // expanded — fatal, not lenient. Propagate the underlying parse
+                // error so the original diagnostic (e.g. missing `)`, no-command
+                // `{{ }}` suggestion) reaches the caller.
+                WholeValueShellShape::ShapeButError(err) => return Err(err),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Classification of a trimmed frontmatter string value with respect to the
+/// whole-value `$( … )` shell-expansion shape.
+enum WholeValueShellShape {
+    /// Not a whole-value `$( … )` value: ordinary text, a mixed literal with a
+    /// non-`$(` prefix, or a `$( … )` followed by non-suffix trailing content
+    /// (`$(echo ok) trailing`). Left to existing behavior — the guard skips it.
+    NotCandidate,
+    /// A whole-value `$( … )` that cleanly parses to a directive. A surviving
+    /// instance is a fatal leak (executable state reaching the composed
+    /// document verbatim).
+    CleanDirective,
+    /// A whole-value `$( … )` *shape* (unclosed, or a clean close followed only
+    /// by valid suffixes) that nonetheless fails the shared parser. Carries the
+    /// underlying parse error to propagate as fatal.
+    ShapeButError(ShellExpansionError),
+}
+
+/// Classifies `value`, after trimming, with respect to the whole-value `$( … )`
+/// shell-expansion shape.
+///
+/// A value that does not open `$(` is ordinary text ([`NotCandidate`]). When it
+/// does open `$(`, the closing paren and any suffix tail decide the shape:
+///
+/// - **Unclosed** (no unquoted closing `)`): a whole-value shape whose body
+///   cannot parse — returns [`ShapeButError`] carrying the missing-paren error.
+/// - **Clean close followed only by valid suffixes** (`::no-cache` /
+///   `::timeout:N`, any order, each at most once): a whole-value shape. If the
+///   directive then parses, [`CleanDirective`]; otherwise [`ShapeButError`]
+///   carrying the body's parse error (e.g. the no-command diagnostic).
+/// - **Clean close followed by non-suffix content** (`$(echo ok) trailing`): a
+///   trailing-literal mixed value — [`NotCandidate`], left lenient.
+///
+/// Close detection reuses [`find_unquoted_closing_paren`] and suffix detection
+/// reuses [`parse_shell_suffixes`], so the `$( … )` grammar lives in one place.
+///
+/// [`NotCandidate`]: WholeValueShellShape::NotCandidate
+/// [`CleanDirective`]: WholeValueShellShape::CleanDirective
+/// [`ShapeButError`]: WholeValueShellShape::ShapeButError
+fn is_whole_value_shell_candidate(
+    value: &str,
+    key: &str,
+    ctx: &SourceContext,
+) -> WholeValueShellShape {
+    let trimmed = value.trim();
+    if !trimmed.starts_with("$(") {
+        return WholeValueShellShape::NotCandidate;
+    }
+
+    let rest = &trimmed[2..];
+    let close_pos = match find_unquoted_closing_paren(rest, key, ctx) {
+        Ok(pos) => pos,
+        // Unclosed whole-value shape: not expandable, must be fatal.
+        Err(err) => return WholeValueShellShape::ShapeButError(err),
+    };
+
+    let after_close = &rest[close_pos + 1..];
+    // Non-suffix trailing content (`$(echo ok) trailing`) is a trailing-literal
+    // mixed value, not a whole-value shape — stay lenient. Valid suffixes keep
+    // the whole-value shape, so a body parse error below still escalates.
+    if parse_shell_suffixes(after_close, key, ctx).is_err() {
+        return WholeValueShellShape::NotCandidate;
+    }
+
+    match parse_shell_value(trimmed, key, None, ctx) {
+        Ok(Some(_)) => WholeValueShellShape::CleanDirective,
+        // The body of a whole-value shape failed to parse (e.g. a no-command
+        // body). Propagate that diagnostic as fatal.
+        Err(err) => WholeValueShellShape::ShapeButError(err),
+        // `Ok(None)` is unreachable for a `$(`-opening value (the parser returns
+        // `Ok(None)` only when the value does not start with `$(`), but treat it
+        // defensively as not-a-candidate.
+        Ok(None) => WholeValueShellShape::NotCandidate,
+    }
+}
+
 fn frontmatter_parse_error(
     key: &str,
     ctx: &SourceContext,
@@ -1472,6 +1688,7 @@ fn frontmatter_parse_error(
         ctx: Box::new(ctx.clone()),
         origin: ShellCommandOrigin::Frontmatter {
             key: key.to_string(),
+            line: frontmatter_key_line(ctx, key),
         },
         message: message.into(),
     }
@@ -1582,7 +1799,7 @@ mod tests {
     fn ternary_condition_uses_read_side_functions_with_context() {
         // A `$()` ternary condition evaluated at the real run carries the
         // resolution context, so `file_exists(...)` resolves against base_dir.
-        use crate::markdown::compose::types::ComposeContext;
+        use crate::markdown::compose::ComposeContext;
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
         let rc = super::super::expression::ResolutionContext::new(dir.path().to_path_buf());
@@ -1607,7 +1824,7 @@ mod tests {
         // The context-free seed state (preflight-style) cannot evaluate a
         // read-side function and surfaces a parse/eval error rather than
         // silently selecting a branch.
-        use crate::markdown::compose::types::ComposeContext;
+        use crate::markdown::compose::ComposeContext;
         let state = FrontmatterSeedState::new(
             std::collections::HashMap::new(),
             ComposeContext::fixed_for_testing(),
@@ -1693,6 +1910,57 @@ mod tests {
     #[test]
     fn rejects_non_integer_timeout() {
         let result = parse_shell_value("$(echo)::timeout:abc", "key", None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn detects_no_cache_suffix() {
+        let directive = parse_shell_value("$(uuidgen)::no-cache", "key", None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(directive.executable, "uuidgen");
+        assert!(directive.no_cache);
+        assert!(directive.timeout_override.is_none());
+    }
+
+    #[test]
+    fn no_cache_defaults_false_without_suffix() {
+        let directive = parse_shell_value("$(uuidgen)", "key", None)
+            .unwrap()
+            .unwrap();
+        assert!(!directive.no_cache);
+    }
+
+    #[test]
+    fn no_cache_combines_with_timeout_either_order() {
+        let a = parse_shell_value("$(uuidgen)::no-cache::timeout:5", "key", None)
+            .unwrap()
+            .unwrap();
+        assert!(a.no_cache);
+        assert_eq!(a.timeout_override, Some(std::time::Duration::from_secs(5)));
+
+        let b = parse_shell_value("$(uuidgen)::timeout:5::no-cache", "key", None)
+            .unwrap()
+            .unwrap();
+        assert!(b.no_cache);
+        assert_eq!(b.timeout_override, Some(std::time::Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn rejects_invalid_suffix_after_expression() {
+        let result = parse_shell_value("$(uuidgen)::bogus", "key", None);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Unexpected trailing content")
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_no_cache_suffix() {
+        let result = parse_shell_value("$(uuidgen)::no-cache::no-cache", "key", None);
         assert!(result.is_err());
     }
 
@@ -1840,12 +2108,161 @@ mod tests {
                 assert_eq!(
                     origin,
                     ShellCommandOrigin::Frontmatter {
-                        key: "bad".to_string()
+                        key: "bad".to_string(),
+                        line: None,
                     }
                 );
             }
             other => panic!("Expected ParseDirective, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn leak_guard_rejects_surviving_whole_value_candidate() {
+        // A value that is still a clean whole-value `$(...)` after expansion —
+        // e.g. command output that reproduced `$( … )` — is rejected.
+        let mut fm = Frontmatter::new();
+        fm.insert("leaked", json!("$(echo hi)")).unwrap();
+
+        let err = super::validate_no_whole_value_shell_leak(&fm, &test_ctx()).unwrap_err();
+        match err {
+            ShellExpansionError::ParseDirective { origin, message, .. } => {
+                assert_eq!(
+                    origin,
+                    ShellCommandOrigin::Frontmatter {
+                        key: "leaked".to_string(),
+                        line: None,
+                    }
+                );
+                assert!(
+                    message.contains("survived shell expansion"),
+                    "unexpected message: {message}"
+                );
+            }
+            other => panic!("Expected ParseDirective, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn leak_guard_trims_before_classifying() {
+        // A whole-value `$(...)` behind leading whitespace is skipped by the
+        // strict-start scan but is still a leak after trimming.
+        let mut fm = Frontmatter::new();
+        fm.insert("padded", json!("   $(echo hi)  ")).unwrap();
+        assert!(super::validate_no_whole_value_shell_leak(&fm, &test_ctx()).is_err());
+    }
+
+    #[test]
+    fn leak_guard_ignores_plain_and_mixed_values() {
+        // Plain text, mixed literals, and `$(...)` with trailing content are not
+        // whole-value candidates and pass the guard untouched.
+        let mut fm = Frontmatter::new();
+        fm.insert("plain", json!("just text")).unwrap();
+        fm.insert("mixed_prefix", json!("literal $(echo ok)")).unwrap();
+        fm.insert("mixed_suffix", json!("$(echo ok) trailing")).unwrap();
+        fm.insert("expanded", json!("hello")).unwrap();
+        fm.insert("number", json!(42)).unwrap();
+
+        assert!(super::validate_no_whole_value_shell_leak(&fm, &test_ctx()).is_ok());
+    }
+
+    #[test]
+    fn leak_guard_rejects_padded_malformed_whole_value() {
+        // A padded whole-value `$(...)` shape that fails to close is a fatal
+        // error, not a silent leak. The strict-start scan skips it (leading
+        // whitespace), so the guard is the only line of defense.
+        let mut fm = Frontmatter::new();
+        fm.insert("padded", json!("  $(echo ok")).unwrap();
+
+        let err = super::validate_no_whole_value_shell_leak(&fm, &test_ctx()).unwrap_err();
+        match err {
+            ShellExpansionError::ParseDirective { origin, message, .. } => {
+                assert_eq!(
+                    origin,
+                    ShellCommandOrigin::Frontmatter {
+                        key: "padded".to_string(),
+                        line: None,
+                    }
+                );
+                // The propagated diagnostic is the missing-paren parse error,
+                // NOT the generic "survived shell expansion" leak message.
+                assert!(
+                    message.contains("Missing closing ')'"),
+                    "unexpected message: {message}"
+                );
+            }
+            other => panic!("Expected ParseDirective, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn leak_guard_rejects_padded_no_command_whole_value() {
+        // A padded whole-value `$(...)` whose body is a no-command expression
+        // (`file_exists('x')`) is a fatal error, propagating the no-command
+        // diagnostic rather than leaking.
+        let mut fm = Frontmatter::new();
+        fm.insert("padded", json!("  $(file_exists('x'))")).unwrap();
+
+        let err = super::validate_no_whole_value_shell_leak(&fm, &test_ctx()).unwrap_err();
+        match err {
+            ShellExpansionError::ParseDirective { origin, .. } => {
+                assert_eq!(
+                    origin,
+                    ShellCommandOrigin::Frontmatter {
+                        key: "padded".to_string(),
+                        line: None,
+                    }
+                );
+            }
+            other => panic!("Expected ParseDirective, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn leak_guard_padded_trailing_literal_stays_lenient() {
+        // A padded `$(...)` with non-suffix trailing content is a trailing-literal
+        // mixed value, not a whole-value shape — it stays lenient.
+        let mut fm = Frontmatter::new();
+        fm.insert("padded", json!("  $(echo ok) trailing")).unwrap();
+        assert!(super::validate_no_whole_value_shell_leak(&fm, &test_ctx()).is_ok());
+    }
+
+    #[test]
+    fn is_whole_value_shell_candidate_recognizes_forms() {
+        use super::WholeValueShellShape;
+        let ctx = test_ctx();
+        // Clean whole-value forms (incl. padded-valid) are fatal-leak candidates.
+        assert!(matches!(
+            super::is_whole_value_shell_candidate("$(echo hi)", "k", &ctx),
+            WholeValueShellShape::CleanDirective
+        ));
+        assert!(matches!(
+            super::is_whole_value_shell_candidate("  $(pwd)  ", "k", &ctx),
+            WholeValueShellShape::CleanDirective
+        ));
+        // Malformed and no-command whole-value shapes are now recognized as
+        // fatal shape-but-error candidates (the bug fix).
+        assert!(matches!(
+            super::is_whole_value_shell_candidate("  $(echo ok", "k", &ctx),
+            WholeValueShellShape::ShapeButError(_)
+        ));
+        assert!(matches!(
+            super::is_whole_value_shell_candidate("  $(file_exists('x'))", "k", &ctx),
+            WholeValueShellShape::ShapeButError(_)
+        ));
+        // Not a candidate: plain text, mixed literal, trailing content.
+        assert!(matches!(
+            super::is_whole_value_shell_candidate("plain", "k", &ctx),
+            WholeValueShellShape::NotCandidate
+        ));
+        assert!(matches!(
+            super::is_whole_value_shell_candidate("x $(echo ok)", "k", &ctx),
+            WholeValueShellShape::NotCandidate
+        ));
+        assert!(matches!(
+            super::is_whole_value_shell_candidate("$(echo ok) x", "k", &ctx),
+            WholeValueShellShape::NotCandidate
+        ));
     }
 
     fn unwrap_ternary(
@@ -2381,7 +2798,7 @@ mod execution_tests {
         PipelineRuntime, ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest,
         ShellExpansionError, ShellExpansionOptions,
     };
-    use crate::markdown::compose::types::ComposeOptions;
+    use crate::markdown::compose::ComposeOptions;
     use crate::markdown::frontmatter::Frontmatter;
     use serde_json::json;
     use serial_test::serial;
@@ -2512,6 +2929,99 @@ mod execution_tests {
             execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
         assert_eq!(report.replacements, 0);
         assert_eq!(report.approvals_used, 0);
+    }
+
+    #[test]
+    fn execute_aborts_on_padded_malformed_whole_value() {
+        // A padded whole-value `$(...)` that fails to close is skipped by the
+        // strict-start scan (no candidates), so composition takes the no-op
+        // early-return path — where the leak guard must still abort with the
+        // underlying parse error instead of leaking the raw syntax.
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = fm_from_json(json!({
+            "leaky": "  $(echo ok"
+        }));
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(MockApproval)),
+            ..Default::default()
+        });
+        let mut runtime = make_runtime();
+
+        let message = match execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None) {
+            Ok(_) => panic!("expected composition to abort on the malformed whole-value"),
+            Err(err) => err.to_string(),
+        };
+        assert!(
+            message.contains("Missing closing ')'"),
+            "expected the missing-paren diagnostic, got: {message}"
+        );
+        // The raw expansion form must not survive into the frontmatter.
+        assert_eq!(fm.as_map().get("leaky"), Some(&json!("  $(echo ok")));
+    }
+
+    #[test]
+    fn execute_expands_padded_whole_value() {
+        // A whole-value `$(...)` behind leading/trailing whitespace must be
+        // scanned as a candidate and expanded — not skipped and then rejected
+        // by the leak guard.
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = fm_from_json(json!({
+            "val": "  $(echo ok)  "
+        }));
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(MockApproval)),
+            ..Default::default()
+        });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(report.replacements, 1);
+        assert_eq!(fm.as_map().get("val"), Some(&json!("ok")));
+    }
+
+    #[test]
+    fn execute_expands_padded_whole_value_with_suffix() {
+        // The suffix grammar (`::no-cache`) is parsed after the same trimming
+        // boundary, so a padded value carrying a suffix still expands.
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = fm_from_json(json!({
+            "val": "  $(echo ok)::no-cache  "
+        }));
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(MockApproval)),
+            ..Default::default()
+        });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(report.replacements, 1);
+        assert_eq!(fm.as_map().get("val"), Some(&json!("ok")));
+    }
+
+    #[test]
+    fn execute_leaves_mixed_literal_unexpanded() {
+        // A trimmed value that does not open `$(` stays outside the strict
+        // whole-value rule: it is neither expanded nor treated as a leak.
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = fm_from_json(json!({
+            "val": "literal $(echo ok)"
+        }));
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(MockApproval)),
+            ..Default::default()
+        });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(report.replacements, 0);
+        assert_eq!(fm.as_map().get("val"), Some(&json!("literal $(echo ok)")));
     }
 
     #[test]

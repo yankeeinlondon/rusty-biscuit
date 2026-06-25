@@ -13,6 +13,7 @@ use crate::error::{ClaudineError, Result};
 use crate::events::AgenticEvent;
 use crate::protect::config::ProtectConfig;
 use crate::provider::Provider;
+use crate::runaway::{validate_exit_expressions, ExitExpressionsValue, GuardSettings};
 
 // Re-exports for backward compatibility
 pub use crate::config::messaging_block::{ClaudineMessengerConfig, MessengerProviderConfig};
@@ -191,6 +192,28 @@ pub struct ClaudineConfig {
     /// User-scope only; repo configs may not declare this field.
     #[serde(default = "default_prompt_for_missing", skip_serializing_if = "is_true")]
     pub prompt_for_missing: bool,
+
+    /// Exit-expression rules for the runaway-output guard (Cluster E).
+    ///
+    /// Accepts either a bare array (uses the user layer's semantics — it
+    /// is the base set) or an object `{ mode, rules }` (explicit mode).
+    /// Defaults to `None` (empty set — exit-expressions ship purely
+    /// user-authored, never pre-populated).
+    ///
+    /// Repo configs may declare their own `exit_expressions`; the repo
+    /// layer combines with this one per its own combine mode. The
+    /// frontmatter layer is parsed from the composition document and
+    /// participates in resolution at run time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_expressions: Option<ExitExpressionsValue>,
+
+    /// Scalar knobs for the repetition + volume guards (Cluster F).
+    ///
+    /// Follows last-writer precedence (frontmatter > repo > user >
+    /// built-in) like `timeout` / `step_timeout` — there is no combine
+    /// mode here, only the list-typed `exit_expressions` carries one.
+    #[serde(default, skip_serializing_if = "is_default_guard_settings")]
+    pub guard_settings: GuardSettings,
 }
 
 fn default_logging() -> bool {
@@ -207,6 +230,12 @@ fn is_true(value: &bool) -> bool {
 
 fn default_protect() -> ProtectConfig {
     ProtectConfig::default()
+}
+
+/// Skip-serializing helper for [`GuardSettings`]: omit the field when it
+/// matches the built-in defaults so a clean user config stays minimal.
+fn is_default_guard_settings(value: &GuardSettings) -> bool {
+    *value == GuardSettings::default()
 }
 
 // ============================================================================
@@ -249,6 +278,22 @@ pub struct RepoOverrideConfig {
         deserialize_with = "deserialize_optional_messenger_override"
     )]
     pub active_messenger: Option<Option<String>>,
+
+    /// Repo-scoped exit-expression rules (Cluster E1).
+    ///
+    /// The repo layer combines with the user layer per its own combine
+    /// mode (default [`crate::runaway::LayerMode::Override`] so every
+    /// contributor gets identical guard behavior; may opt into
+    /// [`crate::runaway::LayerMode::Merge`] for additive rules).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_expressions: Option<ExitExpressionsValue>,
+
+    /// Repo-scoped scalar guard settings (Cluster F).
+    ///
+    /// If present, fully replaces the user-scope [`GuardSettings`] (the
+    /// sub-fields are not individually merged).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guard_settings: Option<GuardSettings>,
 }
 
 impl RepoOverrideConfig {
@@ -257,6 +302,8 @@ impl RepoOverrideConfig {
             && self.actions.is_empty()
             && self.matchers.is_empty()
             && self.active_messenger.is_none()
+            && self.exit_expressions.is_none()
+            && self.guard_settings.is_none()
     }
 }
 
@@ -284,6 +331,8 @@ impl Default for ClaudineConfig {
             models: HashMap::new(),
             default_sounds: DefaultSounds::default(),
             prompt_for_missing: true,
+            exit_expressions: None,
+            guard_settings: GuardSettings::default(),
         }
     }
 }
@@ -295,6 +344,9 @@ impl ClaudineConfig {
     /// - `protect` rules are valid
     /// - `messenger.active_config` references an existing key
     /// - `default_sounds` names are valid `playa::SoundEffect` names
+    /// - `exit_expressions` regexes compile and `scope` strings reference
+    ///   known `Provider` variants (Cluster E2 / E3a — fail at
+    ///   config-load, never mid-stream)
     ///
     /// ## Errors
     ///
@@ -309,6 +361,10 @@ impl ClaudineConfig {
         validate_sound_name("default_sounds.success", &self.default_sounds.success)?;
         validate_sound_name("default_sounds.attention", &self.default_sounds.attention)?;
         validate_sound_name("default_sounds.error", &self.default_sounds.error)?;
+
+        if let Some(exit_expressions) = &self.exit_expressions {
+            validate_exit_expressions(exit_expressions.rules())?;
+        }
 
         Ok(())
     }
@@ -946,6 +1002,8 @@ mod tests {
                 error: Some("space-alarm".to_string()),
             },
             prompt_for_missing: true,
+            exit_expressions: None,
+            guard_settings: GuardSettings::default(),
         };
 
         // First validation pass

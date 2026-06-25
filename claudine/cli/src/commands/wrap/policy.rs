@@ -8,96 +8,6 @@ use std::sync::Arc;
 
 use crate::log;
 
-#[derive(Debug, Clone)]
-pub(crate) struct WrapperHarnessPermissionProbe {
-    provider: Provider,
-    child_args: Vec<String>,
-    repo_root: Option<PathBuf>,
-}
-
-impl WrapperHarnessPermissionProbe {
-    pub(crate) fn new(
-        provider: Provider,
-        child_args: Vec<String>,
-        repo_root: Option<&std::path::Path>,
-    ) -> Self {
-        Self {
-            provider,
-            child_args,
-            repo_root: repo_root.map(std::path::Path::to_path_buf),
-        }
-    }
-
-    fn sandbox_value(&self) -> Option<&str> {
-        self.child_args
-            .iter()
-            .position(|arg| arg == "--sandbox")
-            .and_then(|index| self.child_args.get(index + 1))
-            .map(String::as_str)
-    }
-
-    fn workspace_root<'a>(
-        &'a self,
-        source_path: &'a std::path::Path,
-    ) -> Option<&'a std::path::Path> {
-        self.repo_root.as_deref().or_else(|| {
-            source_path
-                .parent()
-                .filter(|path| !path.as_os_str().is_empty())
-        })
-    }
-}
-
-impl claudine::harness::HarnessPermissionProbe for WrapperHarnessPermissionProbe {
-    fn can_write(
-        &self,
-        path: &std::path::Path,
-        source_path: &std::path::Path,
-    ) -> claudine::harness::PermissionAssessment {
-        use claudine::harness::PermissionAssessment;
-
-        if self.provider != Provider::Codex {
-            return PermissionAssessment::Allowed;
-        }
-
-        if self
-            .child_args
-            .iter()
-            .any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox" || arg == "--yolo")
-        {
-            return PermissionAssessment::Allowed;
-        }
-
-        match self.sandbox_value() {
-            Some("danger-full-access") => PermissionAssessment::Allowed,
-            Some("read-only") => PermissionAssessment::Denied {
-                reason: "Codex is running in read-only sandbox mode".to_string(),
-            },
-            Some("workspace-write") => {
-                let Some(root) = self.workspace_root(source_path) else {
-                    return PermissionAssessment::Unknown {
-                        reason: "workspace-write mode is active, but no workspace root could be determined".to_string(),
-                    };
-                };
-                if path.starts_with(root) {
-                    PermissionAssessment::Allowed
-                } else {
-                    PermissionAssessment::Denied {
-                        reason: format!(
-                            "Codex workspace-write sandbox only allows writes under {}",
-                            root.display()
-                        ),
-                    }
-                }
-            }
-            Some(mode) => PermissionAssessment::Unknown {
-                reason: format!("unrecognized Codex sandbox mode '{mode}'"),
-            },
-            None => PermissionAssessment::Allowed,
-        }
-    }
-}
-
 pub(crate) struct StructuredCodexOutput {
     pub(crate) last_message_path: PathBuf,
 }
@@ -189,6 +99,7 @@ pub(crate) fn build_structured_plumbing(
 ) -> (
     super::exec::SemanticParserBuilder,
     Option<claudine::stream::logs::StderrBridgeHandle>,
+    Option<std::sync::mpsc::Receiver<claudine::stream::logs::EarlyTermination>>,
 ) {
     use claudine::stream::logs::StderrBridgeHandle;
     use claudine::stream::logs::codex::CodexLogBridge;
@@ -196,12 +107,28 @@ pub(crate) fn build_structured_plumbing(
     use claudine::stream::semantic::{ObservedSemanticSink, SharedSemanticSink};
     use std::sync::atomic::AtomicBool;
 
+    // Whether the run wants a content-detector trip channel (Phase 6). True
+    // when a detector is already armed OR when a re-scope source could arm
+    // one on a provider-reported `SessionStart` model (the launch-time
+    // compile can legitimately produce no detector yet still need a channel).
+    // When true, this function owns the unified early-termination channel:
+    // the detector's trip sender and (for OpenCode) the stderr bridge's
+    // sender are clones feeding one receiver the wait loop polls.
+    let detector_armed = sink.wants_content_channel();
+
     if provider == Provider::OpenCode {
         let shared = SharedSemanticSink::new(sink);
         let live_sink_inner = Arc::clone(shared.inner());
         let stdout_seen = Arc::new(AtomicBool::new(false));
 
         let (early_tx, early_rx) = std::sync::mpsc::channel();
+        // The content detector shares the bridge's early-termination sender
+        // so a runaway trip and a usage-cap abort converge on one receiver.
+        if detector_armed
+            && let Ok(mut inner) = live_sink_inner.lock()
+        {
+            inner.set_trip_sender(early_tx.clone());
+        }
         let bridge =
             OpenCodeLogBridge::new(shared.clone(), Arc::clone(&stdout_seen), Some(early_tx));
         let bridge_state = bridge.shared_state();
@@ -223,7 +150,8 @@ pub(crate) fn build_structured_plumbing(
                 }
                 claudine::stream::create_semantic_parser(provider, stdout_sink, parser_config)
             });
-        (build_parser, stderr_bridge)
+        // The receiver reaches the wait loop via the bridge handle.
+        (build_parser, stderr_bridge, None)
     } else if provider == Provider::Codex {
         // Codex emits `tracing-subscriber` records on stderr that we'd
         // rather render inline through the live sink (as an orange
@@ -231,6 +159,20 @@ pub(crate) fn build_structured_plumbing(
         // stdout parser and the stderr bridge feed one rendering pipeline.
         let shared = SharedSemanticSink::new(sink);
         let live_sink_inner = Arc::clone(shared.inner());
+
+        // Codex's bridge has no early-termination of its own, so the
+        // detector gets a dedicated channel whose receiver is returned
+        // separately and routed into the wait loop alongside the bridge.
+        let content_rx = if detector_armed {
+            let (tx, rx) = std::sync::mpsc::channel();
+            if let Ok(mut inner) = live_sink_inner.lock() {
+                inner.set_trip_sender(tx);
+            }
+            Some(rx)
+        } else {
+            None
+        };
+
         let bridge = CodexLogBridge::new(shared.clone());
         let stderr_bridge = Some(StderrBridgeHandle {
             bridge: Box::new(bridge),
@@ -247,15 +189,25 @@ pub(crate) fn build_structured_plumbing(
                 }
                 claudine::stream::create_semantic_parser(provider, stdout_sink, parser_config)
             });
-        (build_parser, stderr_bridge)
+        (build_parser, stderr_bridge, content_rx)
     } else {
+        // No stderr bridge for this provider; the detector gets its own
+        // channel and the receiver is returned for the wait loop.
+        let (content_rx, sink) = if detector_armed {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let mut sink = sink;
+            sink.set_trip_sender(tx);
+            (Some(rx), sink)
+        } else {
+            (None, sink)
+        };
         let build_parser: super::exec::SemanticParserBuilder =
             Box::new(move |output_cb, _reasoning_cb, agent_pid| {
                 let mut sink = sink.with_output_text_sink(output_cb);
                 sink.set_agent_pid(agent_pid);
                 claudine::stream::create_semantic_parser(provider, sink, parser_config)
             });
-        (build_parser, None)
+        (build_parser, None, content_rx)
     }
 }
 

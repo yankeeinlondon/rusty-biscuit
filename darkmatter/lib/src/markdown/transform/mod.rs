@@ -417,7 +417,11 @@ impl Markdown {
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut TransformReport,
     ) -> MarkdownResult<()> {
-        let directives = shell_expansion::parse_directives(&self.content)?;
+        let directives = shell_expansion::parse_directives(
+            &self.content,
+            self.full_source_context_for_errors(),
+            self.frontmatter_line_count(),
+        )?;
         if directives.is_empty() {
             return Ok(());
         }

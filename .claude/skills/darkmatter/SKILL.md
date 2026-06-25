@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-b4ff566298eef5fc
-last_updated: 2026-06-15
+hash: 87f17662fa397abe-e01ab31eb77bb5a0
+last_updated: 2026-06-19
 ---
 
 # darkmatter
@@ -31,6 +31,14 @@ Other entry points:
 
 - Use `darkmatter::markdown::Markdown` for document content.
 - Use the compose pipeline for source transformations before rendering.
+- Use `Markdown::cleanup`, `cleanup_compact`, `cleanup_loose`, and
+  `cleanup_with_indent*` for canonical cleanup. These strip incidental
+  single newlines in prose by default before the existing whitespace/list
+  cleanup. Use `Markdown::strip_incidental_newlines` directly for only that
+  pass, or `Markdown::cleanup_with_fixed_width(width)` to clean and then
+  reflow prose to a display-column width. The `md clean` CLI exposes the same
+  behavior with `--fixed-width <#>` and can preserve source single newlines
+  with `--ignore-incidental-newlines`; those two flags conflict.
 - Use `darkmatter::style` for document `style:` frontmatter.
 - Use `biscuit-terminal` components for rich terminal UI outside ordinary
   parsed Markdown rendering.
@@ -99,8 +107,74 @@ Implemented:
 No valid v1 schema keys remain unwired.
 
 CLI flags win over frontmatter field-by-field. For implementation details, read
-`darkmatter/lib/src/style/{parse.rs,apply.rs}` and
+`darkmatter/lib/src/style/{parse.rs,apply.rs,cli_claims.rs}` and
 `renderable/features/2026-05-23-style-property/`.
+
+## CLI-Neutral Style Claims (`CliStyleClaims`)
+
+`darkmatter::style::CliStyleClaims` is a neutral data model that captures every
+layout/style flag a CLI (or any other caller) may claim. It uses only
+library/layout types — no clap or CLI-only wrappers:
+
+- `apply_cli_claims(page, claims)` applies the **value side** of CLI layout
+  precedence (`margin > mx > mt`, `alignment > align-lists > align-ul`, etc.).
+- `page_style_overrides_from_claims`, `component_style_overrides_from_claims`,
+  `list_style_overrides_from_claims`, `hr_style_overrides_from_claims`,
+  `disclosure_style_overrides_from_claims`, and
+  `bespoke_style_overrides_from_claims` return the **claim-side** override bits
+  consumed by `apply_page_style`, `apply_component_style`, `apply_list_style`,
+  `apply_hr_style`, `apply_disclosure_style`, and `apply_bespoke_style` so
+  frontmatter does not overwrite CLI-claimed fields.
+
+`darkmatter-cli` lowers its parsed `Cli` into `CliStyleClaims` in exactly one
+place: `darkmatter/cli/src/style_claims.rs`. This collapses the previous
+duplication where value application and override-bit construction were both
+implemented near terminal rendering. `darkmatter/cli/src/render.rs` consumes
+the claims for render-time page setup and style-frontmatter override bits.
+
+## CLI Module Layout
+
+The CLI source is split by responsibility:
+
+- `darkmatter/cli/src/args/` — `Cli`, `Command`, targets, output enums,
+  value parsers, wrapper conversions, and shell completion helpers.
+- `darkmatter/cli/src/commands/mod.rs` — subcommand dispatch and top-level
+  subcommand usage validation.
+- `darkmatter/cli/src/commands/{render,clean,validate,graph}.rs` — focused
+  command implementations for render, clean, validate, and graph.
+- `darkmatter/cli/src/commands/{compose,frontmatter,hash,code_block}.rs` —
+  larger or specialized command implementations that already had focused homes.
+- `darkmatter/cli/src/io/` — shared Markdown input loading, stdin reads, and
+  path resolution.
+- `darkmatter/cli/src/render.rs` — terminal render setup, theme resolution,
+  CLI claim application, and style-frontmatter application.
+- `darkmatter/cli/src/artifact.rs` — output artifact creation, writing,
+  opening, and terminal-image environment handling.
+- `darkmatter/cli/src/style_claims.rs` — the only CLI-specific lowering from
+  parsed flags into `darkmatter::style::CliStyleClaims`.
+
+The removed god-files (`args.rs`, `commands.rs`, `output.rs`,
+`tests/cli.rs`, and `tests/level2_layout.rs`) should not be recreated.
+
+## Extracted Library Surfaces
+
+- `renderable::color::Tailwind::from_kebab_name` resolves canonical Tailwind
+  color names such as `red-500`.
+- `renderable::style::PaintColor::from_css_str` parses CLI-compatible paint
+  values (`#RGB`, `#RRGGBB`, `R,G,B`, Tailwind names, and CSS paint keywords)
+  and reports failures with `renderable::style::ParseColorError`.
+- `darkmatter::markdown::toc::TocTree` renders `MarkdownToc` as a terminal
+  component.
+- `darkmatter::markdown::delta::DeltaReport` renders `MarkdownDelta` as a
+  terminal component; use `with_documents(...).verbose()` when visual diffs are
+  needed.
+- `darkmatter::markdown::reference` record/report types own their serde JSON
+  shapes, so CLI JSON paths should call `serde_json` on the library values.
+- `darkmatter::markdown::reference::validate::ValidationReportView` is the
+  terminal view for reference validation reports.
+- `darkmatter::style::CliStyleClaims`, `apply_cli_claims`, and the
+  `*_style_overrides_from_claims` helpers are the single authority for CLI
+  style precedence.
 
 ## Common Entry Points
 
@@ -150,7 +224,11 @@ The compose pipeline runs in four phases:
 
 **Inline Post** (serial):
 
-- Cleanup and normalization.
+- Cleanup and normalization. Cleanup strips incidental single newlines by
+  default, applies list/indent normalization, and can reflow prose with
+  `ComposeOptions::with_fixed_width(...)`. Programmatic callers can preserve
+  source single newlines with
+  `ComposeOptions::with_incidental_newline_mode(IncidentalNewlineMode::Preserve)`.
 
 **Finalization** (root-only):
 
@@ -167,7 +245,7 @@ See `compose.md` for the full API, interpolation syntax, and transclusion detail
 
 ## Schema Validation
 
-Darkmatter defines, detects, and evaluates schemas for Markdown frontmatter via **SimplifiedSchema** — a single-line YAML grammar that compiles to Draft 2020-12 JSON Schema. Key surfaces:
+Darkmatter defines, detects, and evaluates schemas for Markdown frontmatter via **SimplifiedSchema** — a single-line YAML grammar that compiles to Draft 2020-12 JSON Schema. Optional properties are nullable: a frontmatter value that resolves to `null` validates the same way as a missing key. Key surfaces:
 
 - `$schema` frontmatter property (inline, file reference, or root-level union).
 - `md schema validate`, `md schema detect`, and `md schema about` CLI subcommands.

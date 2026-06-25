@@ -3,11 +3,11 @@
 //! performance report.
 
 use crate::args::{Cli, OutputFormat};
-use crate::commands::{format_validation_issues, load_markdown, resolve_file_path};
-use crate::output::{
+use crate::artifact::{
     OutputArtifact, emit_or_show_artifact, html_artifact, json_artifact, markdown_plus_artifact,
     open_output_artifact,
 };
+use crate::io::{load_markdown, resolve_file_path};
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::cleanup::ListSpacingMode;
@@ -284,8 +284,10 @@ pub fn run_compose(
 
                     if allow.is_strict() || has_unallowed {
                         // Strict mode or unallowed errors: show issues and exit
+                        use biscuit_terminal::components::renderable::TerminalRenderable as _;
+                        use darkmatter::markdown::reference::validate::ValidationReportView;
                         let term = Terminal::default();
-                        let formatted = format_validation_issues(&report, &term);
+                        let formatted = ValidationReportView::new(report.clone()).render(&term);
                         eprint!("{formatted}");
                         std::process::exit(2);
                     }
@@ -308,7 +310,12 @@ pub fn run_compose(
         options = options.with_source_file(resolved);
     }
 
-    // Build shell expansion options
+    // Build shell expansion options. The per-directive `approval_handler`
+    // is intentionally left `None` on the runtime shell options: the CLI
+    // runs the v2 pre-flight approval lifecycle (`compose_preflight` →
+    // policy check → batched prompt → `with_pre_approved_commands`) just
+    // before `compose_with`, so the in-stage handler is no longer the
+    // approval path. The pre-flight handler is held locally and used once.
     use darkmatter::markdown::compose::shell_expansion::ShellExpansionOptions;
     use std::sync::Arc;
 
@@ -323,15 +330,21 @@ pub fn run_compose(
                 .filter(|parent| !parent.as_os_str().is_empty())
                 .map(|parent| parent.to_path_buf())
         }),
-        approval_handler: if is_file_input && crate::approval::can_prompt_interactively() {
-            Some(Arc::new(crate::approval::CliShellApprovalHandler))
-        } else {
-            None
-        },
+        approval_handler: None,
         ..Default::default()
     };
 
     options = options.with_shell(shell_opts);
+
+    // The handler used for the single batched pre-flight prompt. Built once
+    // so we can hand it to `compose_preflight_approvals` (and reuse it on
+    // the off-chance a future re-preflight needs to run in the same flow).
+    let preflight_handler: Option<Arc<dyn darkmatter::markdown::compose::shell_expansion::ShellApprovalHandler>> =
+        if is_file_input && crate::approval::can_prompt_interactively() {
+            Some(Arc::new(crate::approval::CliShellApprovalHandler))
+        } else {
+            None
+        };
     if allow_shell_timeout {
         options = options.with_allow_shell_timeout(true);
     }
@@ -350,18 +363,61 @@ pub fn run_compose(
     if let Some(size) = indent {
         options = options.with_indent_size(size);
     }
+    // Share one single-flight remote-fetch runtime between the pre-flight
+    // approval walk and the compose pass so each remote URL is fetched once,
+    // not once per stage. Must follow the remote-read-config and cache-root
+    // wiring above so the shared runtime inherits both.
+    options = options.with_shared_remote_fetch();
     let build_options_dur = opts_start.map(|s| s.elapsed()).unwrap_or_default();
 
     if shell_report {
-        use darkmatter::markdown::compose::shell_expansion::collect_shell_commands;
-
-        let commands = collect_shell_commands(&md, &options)?;
-        print_shell_command_report(&commands);
+        // `--shell` reports condition-blind approval candidates: every command
+        // that *could* run under any document state, routed through the same
+        // pre-flight collector that authorization uses.
+        let preflight = md.compose_preflight(&options)?;
+        print_shell_command_report(&preflight.entries);
         drop(options_ctx_ref);
         return Ok(());
     }
 
     let compose_start = perf.then(Instant::now);
+
+    // Pre-flight approval lifecycle (v2 design step 4): condition-blind
+    // collect every command, validate against blacklist/whitelist policy,
+    // and route the remainder through a single batched prompt. The
+    // resulting set becomes the execution membership source so the
+    // pipeline never prompts per directive and never executes a command
+    // before the full approval set is known. Skipped when shell expansion
+    // is disabled (nothing to approve) and the per-`::shell` per-shell-block
+    // stages never need to gate against an approval set.
+    use darkmatter::markdown::compose::ComposeOperation;
+    if options.is_enabled(ComposeOperation::ShellExpansion)
+        || options.is_enabled(ComposeOperation::ShellBlocks)
+        || options.is_enabled(ComposeOperation::FrontmatterShellExpansion)
+    {
+        match md.compose_preflight_approvals(&options, preflight_handler.clone()) {
+            Ok(approvals) => {
+                if cli.verbose > 0 {
+                    eprintln!(
+                        "pre-flight: {} discovered, {} whitelisted, {} approved",
+                        approvals.stats.total_discovered,
+                        approvals.stats.already_whitelisted,
+                        approvals.stats.user_approved
+                    );
+                }
+                // Reuse the graph the preflight walk already resolved so the
+                // transclusion stage skips a redundant target-resolution pass
+                // (v2 design "reuse the collection walk").
+                options = options
+                    .with_pre_approved_commands(approvals.pre_approved_commands)
+                    .with_preflight_graph(approvals.preflight_graph);
+            }
+            Err(e) => {
+                return Err(preflight_approval_error(e));
+            }
+        }
+    }
+
     let (composed, report) = md.compose_with(options).map_err(|e| {
         use darkmatter::markdown::MarkdownError::ShellExpansion;
         use darkmatter::markdown::compose::ShellExpansionError;
@@ -525,9 +581,11 @@ pub fn run_compose(
 
     // Emit deferred validation issues to stderr (allowed but still reported)
     if let Some(report) = deferred_report {
+        use biscuit_terminal::components::renderable::TerminalRenderable as _;
         use biscuit_terminal::terminal::Terminal;
+        use darkmatter::markdown::reference::validate::ValidationReportView;
         let term = Terminal::default();
-        let formatted = format_validation_issues(&report, &term);
+        let formatted = ValidationReportView::new(report).render(&term);
         if !formatted.is_empty() {
             eprint!("\n{formatted}");
         }
@@ -584,6 +642,52 @@ fn escape_table_cell(value: &str) -> String {
         .replace('\\', "\\\\")
         .replace('|', "\\|")
         .replace('\n', " ")
+}
+
+/// Renders a pre-flight approval lifecycle error as a `color_eyre` report.
+///
+/// Mirrors the formatting the compose-error mapper applies to the
+/// in-stage `ShellExpansionError` so the user sees the same shape
+/// whether the failure was caught at pre-flight (this path) or
+/// surfaced by `compose_with(...)` (the existing path).
+fn preflight_approval_error(
+    err: darkmatter::markdown::compose::ShellExpansionError,
+) -> color_eyre::eyre::Report {
+    use darkmatter::markdown::compose::ShellExpansionError;
+    match err {
+        // A rich error surfaced during pre-flight (transform parse, ctx merge,
+        // schema validation, remote fetch, …). Convert the inner MarkdownError
+        // straight to a report so `main`'s BlockError path renders its styled
+        // block, identical to the `compose_with` failure path.
+        ShellExpansionError::Preflight(inner) => (*inner).into(),
+        ShellExpansionError::Blacklisted {
+            command,
+            reason,
+            origin,
+            ..
+        } => eyre!("Blocked command at {origin}: '{command}'\nReason: {reason}"),
+        ShellExpansionError::Denied { command, origin, .. } => {
+            eyre!("Command denied at {origin}: '{command}'")
+        }
+        ShellExpansionError::ApprovalRequired {
+            command,
+            whitelist_path,
+            origin: _,
+            ..
+        } => {
+            let executable = command.split_whitespace().next().unwrap_or(&command);
+            let escape_prose = |s: &str| s.replace('_', "\\_");
+            let path = whitelist_path.display().to_string();
+            eyre!(
+                "Approval required for '{}'.\nTo allow in non-interactive mode, add one of these to {}:\n  exact {}\n  prefix {}",
+                escape_prose(&command),
+                escape_prose(&path),
+                escape_prose(&command),
+                escape_prose(executable),
+            )
+        }
+        other => eyre!("{other}"),
+    }
 }
 
 // ── Compose performance report ────────────────────────────────────────

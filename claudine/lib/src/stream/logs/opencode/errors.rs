@@ -7,6 +7,7 @@ use std::sync::LazyLock;
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use regex::Regex;
+use tracing::debug;
 
 use crate::stream::logs::opencode::events::{AssetType, LogClassification, OpenCodeLogRecord, ProviderLimitKind};
 use crate::stream::summary::RateLimitInfo;
@@ -21,8 +22,8 @@ static ANSI_RE: LazyLock<Regex> =
 
 static STATUS_CODE_RES: LazyLock<[Regex; 2]> = LazyLock::new(|| {
     [
-        Regex::new(r#""statusCode":(\d{3})"#).expect("status-code regex 1 must compile"),
-        Regex::new(r"statusCode=(\d{3})").expect("status-code regex 2 must compile"),
+        Regex::new(r#""statusCode":(\d{3})(?:\D|$)"#).expect("status-code regex 1 must compile"),
+        Regex::new(r"statusCode=(\d{3})(?:\D|$)").expect("status-code regex 2 must compile"),
     ]
 });
 
@@ -33,9 +34,18 @@ pub fn classify(record: &OpenCodeLogRecord) -> LogClassification {
     }
 
     let service = record.tags.get("service").map(|s| s.as_str()).unwrap_or("");
+    // OpenCode 1.17.8 drops `service=` from `message="stream error"` failure
+    // records, so fall back to the same message-inference used for lifecycle
+    // events. Without this the usage-cap path never runs and a terminal cap is
+    // mistaken for an ongoing call (see fixes/2026-06-21-opencode-log-fix).
+    let effective_service = if service.is_empty() {
+        infer_service_from_message(record)
+    } else {
+        service
+    };
 
-    if (service == "llm" || service == "provider")
-        && let Some(classification) = classify_llm_failure(record, service)
+    if (effective_service == "llm" || effective_service == "provider")
+        && let Some(classification) = classify_llm_failure(record, effective_service)
     {
         return classification;
     }
@@ -121,19 +131,22 @@ fn detect_asset_suffix(value: &str) -> Option<AssetType> {
 }
 
 fn summarize_error_json(record: &OpenCodeLogRecord) -> String {
-    let error_tag = match record.tags.get("error") {
+    let error_tag = match error_context(record) {
         Some(tag) => tag,
         None => return String::new(),
     };
 
-    let root: serde_json::Value = match serde_json::from_str(error_tag) {
+    let root: serde_json::Value = match serde_json::from_str(&error_tag) {
         Ok(v) => v,
-        Err(_) => {
+        Err(err) => {
             // If it's not valid JSON, return the raw tag (truncated if huge).
+            // The 1.17.8 flat `error.error="…"` form lands here verbatim.
+            debug!(%err, "opencode error tag not valid JSON; falling back to raw");
             if error_tag.len() > 500 {
-                return format!("{}...", &error_tag[..497]);
+                let truncated: String = error_tag.chars().take(497).collect();
+                return format!("{truncated}...");
             }
-            return error_tag.to_string();
+            return error_tag;
         }
     };
 
@@ -166,11 +179,15 @@ fn summarize_error_json(record: &OpenCodeLogRecord) -> String {
     let mut parts = Vec::new();
 
     if let Some(code) = status_code {
-        let desc = get_http_status_description(code as u16);
-        if !desc.is_empty() {
-            parts.push(format!("{error_name} ({code}: {desc})"));
-        } else {
+        let desc = u16::try_from(code)
+            .ok()
+            .map(get_http_status_description)
+            .filter(|d| !d.is_empty())
+            .unwrap_or_default();
+        if desc.is_empty() {
             parts.push(format!("{error_name} ({code})"));
+        } else {
+            parts.push(format!("{error_name} ({code}: {desc})"));
         }
     } else {
         parts.push(error_name.to_string());
@@ -191,36 +208,41 @@ fn extract_provider_message(envelope: &serde_json::Value) -> Option<String> {
     }
 
     if let Some(body_str) = envelope.get("responseBody").and_then(|v| v.as_str()) {
-        if let Ok(body) = serde_json::from_str::<serde_json::Value>(body_str) {
-            if let Some(msg) = body
-                .get("error")
-                .and_then(|e| e.get("message"))
-                .and_then(|v| v.as_str())
-                && !msg.is_empty()
-            {
-                return Some(msg.to_string());
-            }
-
-            if let Some(msg) = body.get("message").and_then(|v| v.as_str())
-                && !msg.is_empty()
-            {
-                return Some(msg.to_string());
-            }
-
-            let code = body
-                .get("code")
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-                .or_else(|| {
-                    body.get("code")
-                        .and_then(|v| v.as_u64())
-                        .map(|v| v.to_string())
-                });
-
-            if let Some(code_str) = code {
-                let desc = get_provider_code_description(&code_str);
-                if !desc.is_empty() {
-                    return Some(format!("{code_str}: {desc}"));
+        match serde_json::from_str::<serde_json::Value>(body_str) {
+            Ok(body) => {
+                if let Some(msg) = body
+                    .get("error")
+                    .and_then(|e| e.get("message"))
+                    .and_then(|v| v.as_str())
+                    && !msg.is_empty()
+                {
+                    return Some(msg.to_string());
                 }
+
+                if let Some(msg) = body.get("message").and_then(|v| v.as_str())
+                    && !msg.is_empty()
+                {
+                    return Some(msg.to_string());
+                }
+
+                let code = body
+                    .get("code")
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+                    .or_else(|| {
+                        body.get("code")
+                            .and_then(|v| v.as_u64())
+                            .map(|v| v.to_string())
+                    });
+
+                if let Some(code_str) = code {
+                    let desc = get_provider_code_description(&code_str);
+                    if !desc.is_empty() {
+                        return Some(format!("{code_str}: {desc}"));
+                    }
+                }
+            }
+            Err(err) => {
+                debug!(%err, "opencode responseBody not valid JSON; falling back to raw");
             }
         }
         if !body_str.is_empty() {
@@ -276,6 +298,28 @@ pub(super) fn get_provider_code_description(code: &str) -> &'static str {
     }
 }
 
+/// The tag carrying provider error context, normalized across log formats.
+///
+/// Pre-1.17.8 OpenCode emitted a flat `error={JSON}` tag. 1.17.8's
+/// `message="stream error"` records nest it as `error.error="<string>"` (the
+/// body parser keeps `error.error` as one dotted key). Accept either, plus the
+/// short `err` alias. Surrounding quotes — present on the new flat-string form
+/// but absent on the old JSON form — are stripped so callers see the bare value.
+pub(super) fn error_context(record: &OpenCodeLogRecord) -> Option<String> {
+    let raw = record
+        .tags
+        .get("error")
+        .or_else(|| record.tags.get("error.error"))
+        .or_else(|| record.tags.get("err"))?;
+    let trimmed = raw.trim();
+    let value = if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
+        &trimmed[1..trimmed.len() - 1]
+    } else {
+        trimmed
+    };
+    Some(value.to_string())
+}
+
 fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<LogClassification> {
     let haystack = record.raw.as_str();
 
@@ -301,19 +345,19 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
         || haystack.contains("reached your usage limit")
         || haystack.contains("billing cycle");
     let is_overload = contains_any_ci(haystack, &["overload", "engine_overloaded_error"]);
-    let has_error_context = record.tags.contains_key("error");
+    let provider_error_context = error_context(record);
+    let has_error_context = provider_error_context.is_some();
 
     // Resolution order is critical — cap-with-context wins over retries-exhausted.
     // 1. Cap signal present with error tag → terminal usage cap.
+    // ProviderLimitKind is authoritative; preserve the real HTTP code when
+    // available instead of stamping a 429 sentinel onto a 403 billing cap.
     if has_cap && has_error_context {
-        let status_code = status_code.unwrap_or(429);
         let reset_at = extract_reset_at(haystack);
         let provider_id = record.tags.get("providerID").cloned();
         let model_id = record.tags.get("modelID").cloned();
-        let provider_error = record
-            .tags
-            .get("error")
-            .cloned()
+        let provider_error = provider_error_context
+            .clone()
             .unwrap_or_else(|| haystack.to_string());
 
         return Some(LogClassification::ProviderLimit {
@@ -331,14 +375,12 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
         let reset_at = extract_reset_at(haystack);
         let provider_id = record.tags.get("providerID").cloned();
         let model_id = record.tags.get("modelID").cloned();
-        let provider_error = record
-            .tags
-            .get("error")
-            .cloned()
+        let provider_error = provider_error_context
+            .clone()
             .unwrap_or_else(|| haystack.to_string());
 
         return Some(LogClassification::ProviderLimit {
-            status_code: 429,
+            status_code: Some(429),
             kind: ProviderLimitKind::RetriesExhausted,
             reset_at,
             provider_id,
@@ -347,7 +389,7 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
         });
     }
 
-    // 3. Cap signal without error tag → advisory non-fatal ApiFailure.
+    // 3. Cap signal without error tag -> advisory non-fatal ApiFailure.
     if has_cap && !has_error_context {
         let mut message = None;
         if let Ok(val) = serde_json::from_str::<serde_json::Value>(&record.message) {
@@ -371,14 +413,12 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
         let reset_at = extract_reset_at(haystack);
         let provider_id = record.tags.get("providerID").cloned();
         let model_id = record.tags.get("modelID").cloned();
-        let provider_error = record
-            .tags
-            .get("error")
-            .cloned()
+        let provider_error = provider_error_context
+            .clone()
             .unwrap_or_else(|| haystack.to_string());
 
         return Some(LogClassification::ProviderLimit {
-            status_code: 429,
+            status_code: Some(429),
             kind: ProviderLimitKind::Overloaded,
             reset_at,
             provider_id,
@@ -387,19 +427,17 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
         });
     }
 
-    // 5. Plain 429 → transient rate-limited.
+    // 5. Plain 429 -> transient rate-limited.
     if status_code == Some(429) {
         let reset_at = extract_reset_at(haystack);
         let provider_id = record.tags.get("providerID").cloned();
         let model_id = record.tags.get("modelID").cloned();
-        let provider_error = record
-            .tags
-            .get("error")
-            .cloned()
+        let provider_error = provider_error_context
+            .clone()
             .unwrap_or_else(|| haystack.to_string());
 
         return Some(LogClassification::ProviderLimit {
-            status_code: 429,
+            status_code: Some(429),
             kind: ProviderLimitKind::RateLimited,
             reset_at,
             provider_id,
@@ -497,7 +535,7 @@ fn infer_service_from_message(record: &OpenCodeLogRecord) -> &'static str {
             "session.prompt"
         }
         "exiting loop" if record.tags.contains_key("session.id") => "session.prompt",
-        "stream"
+        "stream" | "stream error"
             if record.tags.contains_key("providerID")
                 && record.tags.contains_key("modelID") =>
         {
@@ -841,7 +879,7 @@ mod tests {
                 reset_at,
                 ..
             } => {
-                assert_eq!(status_code, 429);
+                assert_eq!(status_code, Some(429));
                 assert_eq!(kind, ProviderLimitKind::UsageCap);
                 let reset = reset_at.expect("reset_at should be parsed");
                 assert_eq!(
@@ -850,6 +888,64 @@ mod tests {
                 );
             }
             other => panic!("expected ProviderLimit, got {other:?}"),
+        }
+    }
+
+    // OpenCode 1.17.8 emits stream failures as `message="stream error"` with no
+    // `service=` tag and the payload nested under `error.error="<string>"`.
+    // Regression for fixes/2026-06-21-opencode-log-fix (session ses_1127ec2f).
+    #[test]
+    fn classifies_1178_stream_error_usage_cap() {
+        let line = r#"timestamp=2026-06-22T04:07:15.161Z level=ERROR run=da37e0dd message="stream error" providerID=zai-coding-plan modelID=glm-5.2 session.id=ses_1127ec2fdffepaJc2kEnX093eo small=false agent=build mode=primary error.error="AI_APICallError: Usage limit reached for 5 hour. Your limit will reset at 2026-06-22 13:59:38""#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ProviderLimit {
+                kind,
+                reset_at,
+                provider_id,
+                model_id,
+                provider_error,
+                ..
+            } => {
+                assert_eq!(kind, ProviderLimitKind::UsageCap);
+                let reset = reset_at.expect("reset_at should be parsed");
+                assert_eq!(
+                    reset.format("%Y-%m-%d %H:%M:%S").to_string(),
+                    "2026-06-22 13:59:38"
+                );
+                assert_eq!(provider_id.as_deref(), Some("zai-coding-plan"));
+                assert_eq!(model_id.as_deref(), Some("glm-5.2"));
+                assert!(provider_error.contains("Usage limit reached"));
+                // The flat-string payload's surrounding quotes are stripped.
+                assert!(!provider_error.starts_with('"'));
+            }
+            other => panic!("expected ProviderLimit, got {other:?}"),
+        }
+    }
+
+    // The matching call-start line must still classify as a stream start, not an
+    // error — the `message="stream"` vs `message="stream error"` split is the
+    // only signal distinguishing them in the 1.17.8 format.
+    #[test]
+    fn classifies_1178_stream_start_as_llm_call() {
+        let line = r#"timestamp=2026-06-22T04:05:31.166Z level=INFO run=da37e0dd message=stream providerID=zai-coding-plan modelID=glm-5.2 session.id=ses_x small=false agent=build mode=primary"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::LlmCall {
+                provider_id,
+                model_id,
+                is_stream,
+                ..
+            } => {
+                assert_eq!(provider_id, "zai-coding-plan");
+                assert_eq!(model_id, "glm-5.2");
+                assert!(is_stream);
+            }
+            other => panic!("expected LlmCall, got {other:?}"),
         }
     }
 
@@ -1318,7 +1414,7 @@ mod tests {
         };
         match classify(&record) {
             LogClassification::ProviderLimit { kind, status_code, .. } => {
-                assert_eq!(status_code, 429);
+                assert_eq!(status_code, Some(429));
                 assert_eq!(kind, ProviderLimitKind::Overloaded);
             }
             other => panic!("expected ProviderLimit, got {other:?}"),
@@ -1337,7 +1433,7 @@ mod tests {
                 kind,
                 ..
             } => {
-                assert_eq!(status_code, 429);
+                assert_eq!(status_code, Some(429));
                 assert_eq!(kind, ProviderLimitKind::Overloaded);
             }
             other => panic!("expected ProviderLimit, got {other:?}"),
@@ -1356,7 +1452,7 @@ mod tests {
                 kind,
                 ..
             } => {
-                assert_eq!(status_code, 429);
+                assert_eq!(status_code, Some(429));
                 assert_eq!(kind, ProviderLimitKind::RateLimited);
             }
             other => panic!("expected ProviderLimit, got {other:?}"),
@@ -1375,7 +1471,7 @@ mod tests {
                 kind,
                 ..
             } => {
-                assert_eq!(status_code, 429);
+                assert_eq!(status_code, Some(429));
                 assert_eq!(kind, ProviderLimitKind::RetriesExhausted);
             }
             other => panic!("expected ProviderLimit, got {other:?}"),
@@ -1400,7 +1496,7 @@ mod tests {
                 kind,
                 ..
             } => {
-                assert_eq!(status_code, 403);
+                assert_eq!(status_code, Some(403));
                 assert_eq!(kind, ProviderLimitKind::UsageCap);
             }
             other => panic!("expected ProviderLimit, got {other:?}"),
@@ -1419,7 +1515,7 @@ mod tests {
                 kind,
                 ..
             } => {
-                assert_eq!(status_code, 429);
+                assert_eq!(status_code, Some(429));
                 assert_eq!(kind, ProviderLimitKind::UsageCap);
             }
             other => panic!("expected ProviderLimit, got {other:?}"),
@@ -1459,7 +1555,7 @@ mod tests {
                 kind,
                 ..
             } => {
-                assert_eq!(status_code, 429);
+                assert_eq!(status_code, Some(429));
                 assert_eq!(kind, ProviderLimitKind::UsageCap);
             }
             other => panic!("expected ProviderLimit, got {other:?}"),
@@ -1572,6 +1668,24 @@ mod tests {
     }
 
     #[test]
+    fn overflow_status_code_does_not_produce_bogus_description() {
+        let line = r#"ERROR 2026-04-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_APICallError","statusCode":70000,"message":"unknown error"}}"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ApiFailure { message, .. } => {
+                assert_eq!(message, "AI_APICallError (70000): unknown error");
+                assert!(
+                    !message.contains("Bad Request"),
+                    "overflow status should not pick up a u16 description: {message}"
+                );
+            }
+            other => panic!("expected ApiFailure, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn extracts_zai_code_from_response_body() {
         let line = r#"ERROR 2026-04-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_APICallError","responseBody":"{\"code\":1301,\"message\":\"internal server error\"}"}}"#;
         let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
@@ -1617,6 +1731,20 @@ mod tests {
     }
 
     #[test]
+    fn malformed_response_body_falls_back_to_raw() {
+        let line = r#"ERROR 2026-04-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_APICallError","responseBody":"not json"}}"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ApiFailure { message, .. } => {
+                assert_eq!(message, "AI_APICallError: not json");
+            }
+            other => panic!("expected ApiFailure, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn api_failure_falls_back_to_record_message() {
         let line = "ERROR 2026-04-15T19:26:02 +100ms service=llm dummy=tag AI_APICallError: connection reset";
         let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
@@ -1635,7 +1763,15 @@ mod tests {
         assert_eq!(extract_status_code("no status here"), None);
         assert_eq!(extract_status_code(""), None);
         assert_eq!(extract_status_code("statusCode=99"), None); // too short
-        assert_eq!(extract_status_code("statusCode=9999"), Some(999)); // matches first 3 digits
+        // JSON variant: a 4-digit code must not match the first 3 digits.
+        assert_eq!(extract_status_code(r#""statusCode":4291"#), None);
+        assert_eq!(extract_status_code(r#""statusCode":9999"#), None);
+        // Key-value variant: a 4+ digit run must not match the first 3 digits.
+        assert_eq!(extract_status_code("statusCode=4299"), None);
+        assert_eq!(extract_status_code("statusCode=9999"), None);
+        // Valid 3-digit key-value codes still match (end-of-string or non-digit boundary).
+        assert_eq!(extract_status_code("statusCode=429"), Some(429));
+        assert_eq!(extract_status_code("statusCode=503 retrying"), Some(503));
         assert_eq!(extract_status_code("other=500"), None); // wrong key
     }
 
@@ -1833,5 +1969,36 @@ mod tests {
             panic!("expected Structured");
         };
         assert_eq!(classify(&record), LogClassification::Unclassified);
+    }
+
+    #[test]
+    fn non_json_error_tag_truncation_respects_char_boundaries() {
+        use std::collections::BTreeMap;
+
+        // 496 ASCII bytes, then a 4-byte emoji, then more ASCII. Byte 497
+        // falls inside the emoji, so a byte-index slice at 497 would panic.
+        let prefix = "x".repeat(496);
+        let error_tag = format!("{prefix}😀AI_APICallError: something went wrong");
+        assert!(error_tag.len() > 500);
+        let raw = error_tag.clone();
+        let record = OpenCodeLogRecord {
+            level: LogLevel::Error,
+            timestamp: Utc::now(),
+            delta_ms: 0,
+            tags: BTreeMap::from([
+                ("service".into(), "llm".into()),
+                ("error".into(), error_tag),
+            ]),
+            message: String::new(),
+            raw,
+        };
+        match classify(&record) {
+            LogClassification::ApiFailure { message, .. } => {
+                assert!(message.starts_with(&prefix));
+                assert!(message.contains("😀"));
+                assert!(message.ends_with("..."));
+            }
+            other => panic!("expected ApiFailure, got {other:?}"),
+        }
     }
 }

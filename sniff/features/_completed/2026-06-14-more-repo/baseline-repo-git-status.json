@@ -1,0 +1,539 @@
+{
+  "base_repo_root": "/Volumes/coding/personal/rusty-biscuit",
+  "branches": [
+    {
+      "ahead": 0,
+      "behind": 1288,
+      "name": "biscuit-clipboard",
+      "short_hash": "364cb5b9"
+    },
+    {
+      "ahead": 0,
+      "behind": 4650,
+      "name": "biscuit-location",
+      "short_hash": "6844b37a"
+    },
+    {
+      "ahead": 0,
+      "behind": 5786,
+      "name": "biscuit-terminal",
+      "short_hash": "e3a7d294"
+    },
+    {
+      "ahead": 0,
+      "behind": 2267,
+      "name": "biscuit-tui",
+      "short_hash": "232b0dd3"
+    },
+    {
+      "ahead": 265,
+      "behind": 86,
+      "name": "claudine",
+      "short_hash": "b10882fa"
+    },
+    {
+      "ahead": 0,
+      "behind": 1149,
+      "name": "claudine-schemas",
+      "short_hash": "448c3b66"
+    },
+    {
+      "ahead": 265,
+      "behind": 86,
+      "name": "darkmatter",
+      "short_hash": "b10882fa"
+    },
+    {
+      "ahead": 0,
+      "behind": 6000,
+      "name": "feat/better-trees",
+      "short_hash": "61da3271"
+    },
+    {
+      "ahead": 0,
+      "behind": 7224,
+      "name": "feat/biscuit-hash-cli",
+      "short_hash": "d84a235d"
+    },
+    {
+      "ahead": 0,
+      "behind": 4648,
+      "name": "feat/claudine-composition",
+      "short_hash": "f76f288a"
+    },
+    {
+      "ahead": 0,
+      "behind": 5783,
+      "name": "feat/darkmatter-graph-features",
+      "short_hash": "9b9a9c56"
+    },
+    {
+      "ahead": 0,
+      "behind": 6685,
+      "name": "feat/server-frontend-2",
+      "short_hash": "1fa48243"
+    },
+    {
+      "ahead": 0,
+      "behind": 4775,
+      "name": "feat/sniff-tuning",
+      "short_hash": "928a52f8"
+    },
+    {
+      "ahead": 0,
+      "behind": 5788,
+      "name": "feat/terminal",
+      "short_hash": "845ebf93"
+    },
+    {
+      "ahead": 0,
+      "behind": 3791,
+      "name": "feat/tts-install-prereqs",
+      "short_hash": "c5ac59d0"
+    },
+    {
+      "ahead": 2,
+      "behind": 1326,
+      "name": "file",
+      "short_hash": "ffe3f7bf"
+    },
+    {
+      "ahead": 1,
+      "behind": 637,
+      "name": "hugger",
+      "short_hash": "b474a41e"
+    },
+    {
+      "ahead": 107,
+      "behind": 86,
+      "name": "icon",
+      "short_hash": "68675fd1"
+    },
+    {
+      "ahead": 0,
+      "behind": 477,
+      "name": "list",
+      "short_hash": "6e091959"
+    },
+    {
+      "ahead": 265,
+      "behind": 86,
+      "name": "main",
+      "short_hash": "b10882fa"
+    },
+    {
+      "ahead": 0,
+      "behind": 2152,
+      "name": "messenger",
+      "short_hash": "4658132e"
+    },
+    {
+      "ahead": 0,
+      "behind": 1392,
+      "name": "playa",
+      "short_hash": "a5d38e82"
+    },
+    {
+      "ahead": 143,
+      "behind": 86,
+      "name": "reaper",
+      "short_hash": "c3735865"
+    },
+    {
+      "ahead": 1,
+      "behind": 270,
+      "name": "renderable",
+      "short_hash": "a6087ac0"
+    },
+    {
+      "ahead": 1,
+      "behind": 2233,
+      "name": "research",
+      "short_hash": "088bbda0"
+    },
+    {
+      "ahead": 1,
+      "behind": 4396,
+      "name": "scheduler",
+      "short_hash": "6b96951c"
+    },
+    {
+      "ahead": 1,
+      "behind": 1312,
+      "name": "schematic",
+      "short_hash": "1bfa1fb2"
+    },
+    {
+      "ahead": 0,
+      "behind": 0,
+      "name": "sniff",
+      "short_hash": "2b1b79e5"
+    },
+    {
+      "ahead": 0,
+      "behind": 2580,
+      "name": "speak",
+      "short_hash": "e6eac6b0"
+    },
+    {
+      "ahead": 0,
+      "behind": 93,
+      "name": "terminal",
+      "short_hash": "1f246231"
+    },
+    {
+      "ahead": 0,
+      "behind": 1313,
+      "name": "tmp-test-dirty",
+      "short_hash": "dbe8ffe5"
+    },
+    {
+      "ahead": 0,
+      "behind": 1313,
+      "name": "tmp-test-remove",
+      "short_hash": "dbe8ffe5"
+    },
+    {
+      "ahead": 1,
+      "behind": 128,
+      "name": "tui",
+      "short_hash": "8a8aa494"
+    },
+    {
+      "ahead": 0,
+      "behind": 4232,
+      "name": "tui-chrome",
+      "short_hash": "e2b3696f"
+    },
+    {
+      "ahead": 1,
+      "behind": 2267,
+      "name": "unchained",
+      "short_hash": "aa8fedaf"
+    },
+    {
+      "ahead": 3,
+      "behind": 112,
+      "name": "visual",
+      "short_hash": "77dac181"
+    },
+    {
+      "ahead": 220,
+      "behind": 86,
+      "name": "worktree",
+      "short_hash": "aad54504"
+    },
+    {
+      "ahead": 1,
+      "behind": 5463,
+      "name": "worktree-agent-a176be9c",
+      "short_hash": "90acb4b0"
+    },
+    {
+      "ahead": 1,
+      "behind": 5463,
+      "name": "worktree-agent-a7ccbe98",
+      "short_hash": "1f409f56"
+    }
+  ],
+  "config": {
+    "commit_sign": true,
+    "credential_helper": "osxkeychain",
+    "delta_light": false,
+    "delta_side_by_side": true,
+    "delta_syntax_theme": "Dracula",
+    "gpg_program": "/usr/local/bin/gpg",
+    "gpg_use_agent": true,
+    "pager": "delta",
+    "signing_key": "82537A4603CB9C51",
+    "tag_sign": true,
+    "user_email": "ken@ken.net",
+    "user_name": "Ken Snyder"
+  },
+  "current_branch": "sniff",
+  "in_worktree": true,
+  "org": "yankeeinlondon",
+  "recent": [
+    {
+      "author": "Ken Snyder",
+      "message": "test(sniff): cover primary_layer shallowest-root and enum-order rules\n\n- Add two L1 unit tests covering rules 2 and 3 of the documented `primary_layer()` selection algorithm.\n- Rule 2 test: when no layer sits at the repo root, the shallowest nested root wins regardless of authority priority (pnpm at `/repo/apps` beats cargo at `/repo/tools/nested`).\n- Rule 3 test: same-depth nested layers tie-break by `MonorepoStandard` declaration order; layers are listed opposite the expected order so the test would fail under iteration/push-order tie-breaking.\n- Closes a coverage gap in the existing `primary_layer` test suite, which only exercised rule 1 directly.\n- Production code (`primary_layer()` itself) is unchanged.",
+      "refs": [
+        {
+          "is_head": true,
+          "kind": "LocalBranch",
+          "name": "sniff"
+        }
+      ],
+      "sha": "2b1b79e5a703b1960b5bd3d4d7ea705edef430f5",
+      "timestamp": "2026-06-16T23:30:41Z"
+    },
+    {
+      "author": "Ken Snyder",
+      "message": "docs(sniff): add review-1 and review-2 of monorepo-cli plan\n\n- Add review-1.md marking ready: false with a High finding that\n  `format_monorepo_label` dropped all but the first orchestrator\n  (text surfaces lost user-observable topology information that the\n  spec said the unified label helper should carry), and a Medium\n  finding that `RepoInfo::primary_layer()`'s fallback rule is\n  under-tested (no L1 coverage for the \"no repo-root layer →\n  shallowest root\" or \"same-depth nested → enum-order tie-break\"\n  cases).\n- Add review-2.md marking ready: true with no blocking findings,\n  confirming `format_monorepo_label` now renders every orchestrator\n  in layer order (`Nx + Lerna (using pnpm workspaces)`) with L1\n  unit coverage for zero, one, and multiple orchestrators, and\n  `RepoInfo::primary_layer()` has L1 coverage for the documented\n  fallback cases.\n- Both artifacts live in sniff/features/2026-06-16-monorepo-cli/\n  alongside plan.md and spec.md, documenting the review process\n  for the Monorepo CLI Wiring Cleanup feature.",
+      "sha": "0cbf9b3451cca11cfb85e5ddbb571f6a3ce9ab04",
+      "timestamp": "2026-06-16T23:30:34Z"
+    },
+    {
+      "author": "Ken Snyder",
+      "message": "feat(sniff-cli): join every monorepo orchestrator in unified label\n\n- format_monorepo_label now joins every orchestrator in layer order with\n  \" + \" instead of dropping all but the first via orchestrators.first().\n- A layer can carry multiple orchestrators (e.g. Nx + Lerna over a pnpm\n  workspace); the prior behavior silently hid every orchestrator except\n  the first, so the CLI surface no longer matched the JSON orchestrators\n  array the topology layer emits.\n- Doc comment updated to describe the multi-orchestrator format and the\n  deterministic order it preserves.\n- New monorepo_label test module adds three L1 cases covering zero, one,\n  and multiple orchestrators, locking the new join behavior in place.",
+      "sha": "4eebf64a9141c2352f2818bfad98c29e8516de03",
+      "timestamp": "2026-06-16T23:30:20Z"
+    },
+    {
+      "author": "Ken Snyder",
+      "message": "docs(sniff): record Phase 5 completion in monorepo-cli plan\n\n- mark Phase 4 primary-layer validation checklist done\n- mark Phase 5 D5 docs drift (repo_is-monorepo, repo_structure, related docs, CLI README/--help) done\n- mark final validation checkpoint and all acceptance-sweep items done\n- add phase-5 file lists (source_files_during_phase_5, docs_updated_during_phase_5, source_code, documentation)",
+      "sha": "6492f21c40c27f4da00f95fe415400902c475647",
+      "timestamp": "2026-06-16T20:12:44Z"
+    },
+    {
+      "author": "Ken Snyder",
+      "message": "docs(sniff-cli): document D5 focused is-monorepo contract and unified label\n\n- rewrite sniff/docs/cli/repo_is-monorepo.md for label output, --no-error, new JSON shape, and the focused-vs-aggregate exception\n- update sniff/docs/cli/repo.md, repo_package-count.md, repo_version.md, repo_structure.md, and topics/json-output.md to drop the legacy yes/no and {is-monorepo} references\n- update sniff/cli/README.md examples and the related-subcommand table\n- update sniff/cli/src/args/mod.rs help text to document the new is-monorepo contract and --no-error flag",
+      "sha": "1edc9b356d97f30a2d8099efb70f204ff95b96ea",
+      "timestamp": "2026-06-16T20:12:30Z"
+    },
+    {
+      "author": "Ken Snyder",
+      "message": "style(sniff-cli): rustfmt-clean CLI output modules and tests\n\n- rustfmt-pass sniff/cli/src/commands/mod.rs is-monorepo call site\n- rustfmt-pass sniff/cli/src/output/{mod,filesystem/mod}.rs re-export ordering\n- rustfmt-pass sniff/cli/src/output/repo_json.rs orchestrators collect\n- rustfmt-pass sniff/cli/tests/cli.rs multi-arg assert_eq",
+      "sha": "442417e8ce7d253e06753505c727181a24cba2c9",
+      "timestamp": "2026-06-16T20:12:13Z"
+    },
+    {
+      "author": "Ken Snyder",
+      "message": "refactor(sniff): rustfmt-clean repo/ submodule and tests\n\n- rustfmt-pass sniff/lib/src/filesystem/mod.rs re-exports and update primary_layer doc example in repo/types.rs to use the new accessor\n- rustfmt-pass sniff/lib/src/filesystem/repo/{detection,manifest_index,nx_turbo,polyglot,standard,topology,types}.rs\n- rustfmt-pass sniff/lib/tests/{fixtures,integration}.rs",
+      "sha": "42c6e44abc8d6021eb2862a6376da44c50a7f2ba",
+      "timestamp": "2026-06-16T20:11:57Z"
+    },
+    {
+      "author": "Ken Snyder",
+      "message": "planning(sniff): archive 2026-06-15-monorepo-unification into _completed\n\n- Move the completed monorepo-unification feature artifacts (spec, plan, phase-1 audit, review-1) into `sniff/features/_completed/2026-06-15-monorepo-unification/` to clear the active planning surface\n- Files are unchanged; this is a pure rename (R100)",
+      "sha": "568c86a95b64c13479e25c3348a9f9c54cc3bcdd",
+      "timestamp": "2026-06-16T18:07:36Z"
+    },
+    {
+      "author": "Ken Snyder",
+      "message": "docs(prompts): require spec and design slots in clarify schema\n\n- Restructure `prompts/clarify.md` `$schema` from a single `doc` entry to a YAML list of three required fields: `doc`, `spec`, and `design`\n- The `doc:` interpolation `{{spec || design}}` now resolves against the two newly-required fields",
+      "sha": "58d7f2e7ced52aedf9c78d46f4858ad7054bf513",
+      "timestamp": "2026-06-16T18:06:57Z"
+    },
+    {
+      "author": "Ken Snyder",
+      "message": "docs(sniff): add more-repo and monorepo-cli specs and update skill for unified monorepo label\n\n- Add execution plans for two upcoming sniff features:\n  - `sniff/features/2026-06-14-more-repo/plan.md` (9 phases: software reparenting, test-runner infrastructure, repo local commands, `sniff repo --json` aggregate redesign, CLI polish)\n  - `sniff/features/2026-06-16-monorepo-cli/plan.md` (5 phases implementing D1–D5: primary_layer accessor, Vec<String> join-key, stale comment fix, dead branch removal, is-monorepo leaf redesign)\n- Update the `2026-06-14-more-repo` spec: mark reviewed and ready for planning, document `sniff software` as a hard break with no backward-compatible aliases, list the moved categories and the new test-runner surface\n- Update the `2026-06-16-monorepo-cli` spec: extend the documentation-maintenance item to name the two affected CLI docs and the skill update with the exact fields/shape changes required\n- Refresh `.claude/skills/sniff/SKILL.md`: add the content hash frontmatter field, document the unified per-standard label and `{orchestrator_label} (using {authority_label})` template, document the redesigned `sniff repo is-monorepo` text/JSON/exit-code contract, and note that the focused `is_monorepo` JSON leaf uses snake_case while the bare aggregate keeps the legacy unwrapped `is-monorepo` bool key",
+      "sha": "e519b70c27d9f4ed11c864098debeb668f167fe0",
+      "timestamp": "2026-06-16T18:06:52Z"
+    }
+  ],
+  "remotes": [
+    {
+      "name": "origin",
+      "provider": "GitHub",
+      "url": "git@github.com:yankeeinlondon/rusty-biscuit.git"
+    }
+  ],
+  "repo": "rusty-biscuit",
+  "repo_root": "/Users/ken/.claudine/worktrees/rusty-biscuit/sniff",
+  "status": {
+    "dirty": [],
+    "is_dirty": false,
+    "staged_count": 0,
+    "unstaged_count": 0,
+    "untracked": [],
+    "untracked_count": 0
+  },
+  "worktrees": {
+    "claudine": {
+      "ahead": 0,
+      "base_branch": "main",
+      "behind": 0,
+      "branch": "claudine",
+      "changed_files": 0,
+      "dirty": false,
+      "filepath": "/Users/ken/.claudine/worktrees/rusty-biscuit/claudine",
+      "has_conflicts": false,
+      "is_current": false,
+      "merged": false,
+      "sha": "b10882facd37c4c14c4248b810eb476a792db884"
+    },
+    "darkmatter": {
+      "ahead": 0,
+      "base_branch": "main",
+      "behind": 0,
+      "branch": "darkmatter",
+      "changed_files": 0,
+      "dirty": false,
+      "filepath": "/Users/ken/.claudine/worktrees/rusty-biscuit/darkmatter",
+      "has_conflicts": false,
+      "is_current": false,
+      "merged": false,
+      "sha": "b10882facd37c4c14c4248b810eb476a792db884"
+    },
+    "hugger": {
+      "ahead": 0,
+      "base_branch": "main",
+      "behind": 0,
+      "branch": "hugger",
+      "changed_files": 0,
+      "dirty": false,
+      "filepath": "/Users/ken/.claudine/worktrees/rusty-biscuit/hugger",
+      "has_conflicts": false,
+      "is_current": false,
+      "merged": false,
+      "sha": "b474a41e2b51f825b99d1ff1b0a104a85afb7530"
+    },
+    "icon": {
+      "ahead": 0,
+      "base_branch": "main",
+      "behind": 0,
+      "branch": "icon",
+      "changed_files": 0,
+      "dirty": false,
+      "filepath": "/Users/ken/.claudine/worktrees/rusty-biscuit/icon",
+      "has_conflicts": false,
+      "is_current": false,
+      "merged": false,
+      "sha": "68675fd14f3460640957eecd1651293ef1fb3067"
+    },
+    "reaper": {
+      "ahead": 0,
+      "base_branch": "main",
+      "behind": 0,
+      "branch": "reaper",
+      "changed_files": 0,
+      "dirty": false,
+      "filepath": "/Users/ken/.claudine/worktrees/rusty-biscuit/reaper",
+      "has_conflicts": false,
+      "is_current": false,
+      "merged": false,
+      "sha": "c373586571b229577fe934125ad2a6f7e46c5674"
+    },
+    "renderable": {
+      "ahead": 0,
+      "base_branch": "main",
+      "behind": 0,
+      "branch": "renderable",
+      "changed_files": 0,
+      "dirty": false,
+      "filepath": "/Users/ken/.claudine/worktrees/rusty-biscuit/renderable",
+      "has_conflicts": false,
+      "is_current": false,
+      "merged": false,
+      "sha": "a6087ac0f3701fd0f5d11e3e7e05d8be3b4475be"
+    },
+    "research": {
+      "ahead": 0,
+      "base_branch": "main",
+      "behind": 0,
+      "branch": "research",
+      "changed_files": 0,
+      "dirty": false,
+      "filepath": "/Users/ken/.claudine/worktrees/rusty-biscuit/research",
+      "has_conflicts": false,
+      "is_current": false,
+      "merged": false,
+      "sha": "088bbda0f53d11711cacacae8a00cac88b2874c2"
+    },
+    "scheduler": {
+      "ahead": 0,
+      "base_branch": "main",
+      "behind": 0,
+      "branch": "scheduler",
+      "changed_files": 0,
+      "dirty": false,
+      "filepath": "/Users/ken/.claudine/worktrees/rusty-biscuit/scheduler",
+      "has_conflicts": false,
+      "is_current": false,
+      "merged": false,
+      "sha": "6b96951c612805cad742973927d40edd09b0beb8"
+    },
+    "schematic": {
+      "ahead": 0,
+      "base_branch": "main",
+      "behind": 0,
+      "branch": "schematic",
+      "changed_files": 0,
+      "dirty": false,
+      "filepath": "/Users/ken/.claudine/worktrees/rusty-biscuit/schematic",
+      "has_conflicts": false,
+      "is_current": false,
+      "merged": false,
+      "sha": "1bfa1fb2662bfb2ebbd4b22d0bc4551f01cd9b3d"
+    },
+    "sniff": {
+      "ahead": 86,
+      "base_branch": "main",
+      "behind": 265,
+      "branch": "sniff",
+      "changed_files": 0,
+      "dirty": false,
+      "filepath": "/Users/ken/.claudine/worktrees/rusty-biscuit/sniff",
+      "has_conflicts": true,
+      "is_current": true,
+      "merged": false,
+      "sha": "2b1b79e5a703b1960b5bd3d4d7ea705edef430f5"
+    },
+    "terminal": {
+      "ahead": 0,
+      "base_branch": "main",
+      "behind": 0,
+      "branch": "terminal",
+      "changed_files": 0,
+      "dirty": false,
+      "filepath": "/Users/ken/.claudine/worktrees/rusty-biscuit/terminal",
+      "has_conflicts": false,
+      "is_current": false,
+      "merged": false,
+      "sha": "1f2462314e160bf39899daeef6fb9be4f82b34a6"
+    },
+    "tui": {
+      "ahead": 0,
+      "base_branch": "main",
+      "behind": 0,
+      "branch": "tui",
+      "changed_files": 0,
+      "dirty": false,
+      "filepath": "/Users/ken/.claudine/worktrees/rusty-biscuit/tui",
+      "has_conflicts": false,
+      "is_current": false,
+      "merged": false,
+      "sha": "8a8aa494688ffba71670c8d25a8e81a61326842b"
+    },
+    "unchained": {
+      "ahead": 0,
+      "base_branch": "main",
+      "behind": 0,
+      "branch": "unchained",
+      "changed_files": 0,
+      "dirty": false,
+      "filepath": "/Users/ken/.claudine/worktrees/rusty-biscuit/unchained",
+      "has_conflicts": false,
+      "is_current": false,
+      "merged": false,
+      "sha": "aa8fedaf1639f5ffde606430228eeb6b8e70faa2"
+    },
+    "visual": {
+      "ahead": 0,
+      "base_branch": "main",
+      "behind": 0,
+      "branch": "visual",
+      "changed_files": 0,
+      "dirty": false,
+      "filepath": "/Users/ken/.claudine/worktrees/rusty-biscuit/visual",
+      "has_conflicts": false,
+      "is_current": false,
+      "merged": false,
+      "sha": "77dac181d5c4bdf78e4d7f853d89e17f46af6db1"
+    },
+    "worktree": {
+      "ahead": 0,
+      "base_branch": "main",
+      "behind": 0,
+      "branch": "worktree",
+      "changed_files": 0,
+      "dirty": false,
+      "filepath": "/Users/ken/.claudine/worktrees/rusty-biscuit/worktree",
+      "has_conflicts": false,
+      "is_current": false,
+      "merged": false,
+      "sha": "aad545046d6efc33176decfbbda18167ee034dbd"
+    }
+  }
+}

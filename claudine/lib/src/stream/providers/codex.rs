@@ -1407,4 +1407,50 @@ mod tests {
             "status from item.started must be copied to ToolCall.extra: got {call:?}"
         );
     }
+
+    #[test]
+    fn missing_discriminator_falls_through_to_provider_extension() {
+        let (events, mut parser) = new_parser();
+        parser.feed_line(r#"{"payload":{"k":1}}"#).unwrap();
+        let collected = events.lock().unwrap().clone();
+        assert_eq!(collected.len(), 1);
+        match &collected[0] {
+            SemanticEvent::ProviderExtension {
+                provider,
+                kind,
+                payload,
+            } => {
+                assert_eq!(*provider, Provider::Codex);
+                assert_eq!(kind, "");
+                assert_eq!(payload.get("payload"), Some(&json!({"k": 1})));
+            }
+            other => panic!("expected ProviderExtension, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_input_string_fallback_parses_without_panic() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"item.tool_use","name":"bash","input":"ls -la"}"#)
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        assert_eq!(kinds(&collected), vec!["tool_call"]);
+        match &collected[0] {
+            SemanticEvent::ToolCall { input, .. } => {
+                assert_eq!(input.as_ref().and_then(Value::as_str), Some("ls -la"));
+            }
+            other => panic!("expected ToolCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn truncated_json_line_emits_warning_and_continues() {
+        let (events, mut parser) = new_parser();
+        let result = parser.feed_line(r#"{"type":"turn.started"#);
+        assert!(result.is_ok());
+        parser.feed_line(r#"{"type":"turn.started"}"#).unwrap();
+        let ks = kinds(&events.lock().unwrap());
+        assert_eq!(ks, vec!["warning", "turn_start"]);
+    }
 }

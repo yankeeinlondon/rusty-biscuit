@@ -20,6 +20,7 @@ A top-level frontmatter property whose entire string value matches one of these 
 ```text
 $(<command and args>)
 $(<command and args>)::timeout:<seconds>
+$(<command and args>)::no-cache
 ```
 
 Examples:
@@ -28,6 +29,7 @@ Examples:
 ---
 files: "$(sniff repo dirty-files)"
 cwd: "$(pwd)::timeout:1"
+build_id: "$(uuidgen)::no-cache"
 ---
 ```
 
@@ -36,7 +38,8 @@ cwd: "$(pwd)::timeout:1"
 - The **entire** frontmatter value must be the shell expression -- embedded expressions like `"prefix $(cmd) suffix"` are not supported.
 - Only top-level string-valued frontmatter properties are scanned. Nested objects and array elements are ignored.
 - The optional `::timeout:<N>` suffix overrides the global shell timeout for that specific command. `N` must be a positive integer of seconds.
-- Once a value matches the `$(` shape, malformed syntax is a hard compose error. Invalid timeout suffixes, tokenizer failures, and rejected executable interpolation are not silently ignored.
+- The optional `::no-cache` suffix bypasses the per-compose command cache so the command executes fresh at each occurrence. It combines with `::timeout:<N>` in either order (e.g. `$(uuidgen)::no-cache::timeout:5`).
+- Once a value matches the `$(` shape, malformed syntax is a hard compose error. Invalid timeout suffixes, an unrecognized suffix, tokenizer failures, and rejected executable interpolation are not silently ignored.
 - Closing `)` characters inside quoted arguments are supported, so values like `$(printf ')')` parse correctly.
 
 ## Token Resolution
@@ -127,6 +130,23 @@ This keeps approval preflight aligned with the commands that real compose will e
 Frontmatter shell expansion has **no error-recovery options**. Any non-zero exit code, missing executable, blacklisted command, denied approval, or malformed shell expression results in an immediate compose error. This is intentionally simpler than body `::shell` directives.
 
 Timeout failures follow the timeout behavior configured via `--allow-shell-timeout` (CLI) or `ComposeOptions::with_allow_shell_timeout()` (library).
+
+### Post-Expansion Leak Guard
+
+When frontmatter shell expansion is enabled, a final pass over every top-level
+string value rejects any value that *still* trims to a whole-value `$(...)`
+candidate after expansion has run. This closes the residual leaks the
+strict-start scan cannot catch: command output that reproduces `$( … )` (e.g.
+`$(echo '$(date)')`), and a whole-value `$(...)` hidden behind leading
+whitespace that the start-of-value scan skips. A surviving whole-value
+candidate is a hard compose error tagged with the offending frontmatter key and
+its source line.
+
+The guard runs only when shell expansion is enabled. When frontmatter shell
+expansion is **explicitly disabled**, `$(...)` values are deferred unchanged and
+the guard never runs. Mixed and trailing forms (`literal $(echo ok)`,
+`$(echo ok) trailing`) are outside the whole-value rule and pass the guard
+untouched.
 
 ## Output Normalization
 

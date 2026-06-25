@@ -97,10 +97,10 @@ The **Pre Transclusion** group are a set operations run in a serial process, one
 Being run serial is important so that one operation can _setup_ or _effect_ the next operation. Rather then be a side effect, this is intentional and often adds useful power to the pipeline. It does mean, however, that the ordering of these operations must be considered and organized in a way to provide maximum value.
 
 > **Example:** if a conditional page block is evaluated to _false_ (aka, do not render this page), then identifying this first means any
-shell expansion commands (or any other inline mutation) contained within the block will now be ignored because this part of the page has
+shell expansion commands (or any other inline mutation) contained within the block will not be **executed** because this part of the page has
 been removed.
 >
-> **Note:** in this example, even though we will not execute the shell expansion, when we do the pre-flight checks we will require that ALL shell commands are whitelisted before starting the 
+> **Note:** approval and execution are deliberately separate. Pre-flight builds the **approval set** _condition-blind_ — it walks every branch (false page blocks, false-condition transclusions, both sides of a `$(...)` ternary) and approves every command that **could** run under any state, exactly once, up front. **Execution** is _condition-aware_: a command runs only when its branch is actually reached. So in the example above the dead-branch command is still approved (vetted once), but never executes while the condition is false. The governing invariant is `execution_set ⊆ approval_set`, which makes the execution-time gate a pure membership check that never prompts — see [pre-flight checks](./inline/preflight-checks.md).
 
 ### 2. Transclusion
 
@@ -113,7 +113,7 @@ However, even in this example, we don't know how expensive the operation is unti
 
 ### 3. Inline Post
 
-- [Cleaning](./inline/cleaning.md) - makes the markdown as standard bearing and consistent as possible                    
+- [Cleaning](./inline/cleaning.md) - makes the markdown as standard bearing and consistent as possible. Cleanup strips incidental single newlines by default, then applies list spacing and indentation cleanup, and can finally reflow prose with `ComposeOptions::with_fixed_width(...)`. Programmatic callers can keep source single newlines with `ComposeOptions::with_incidental_newline_mode(IncidentalNewlineMode::Preserve)`; setting `with_fixed_width(...)` overrides `Preserve` and always strips first, so reflow operates on canonical unwrapped prose rather than the source's own wrapping.
 - [Normalization](./inline/structural-normalization.md) - ensures that the heading structure is valid and fixes where it is not
 
 ### 4. Finalization

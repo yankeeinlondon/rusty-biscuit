@@ -642,10 +642,32 @@ Terminal: {{ terminal("<bold>x</bold>") }}"#;
 #[serial_test::serial(env_agent_model)]
 fn regression_ctx_agent_in_interpolation() {
     let content = r#"---
+---
 Agent: {{ ctx.agent }}"#;
     let md: Markdown = content.into();
     let (composed, _) = with_agent_env("opencode", || md.compose().unwrap());
     assert!(composed.content().contains("Agent: opencode"));
+}
+
+#[test]
+fn regression_ctx_agent_uses_compose_env_override() {
+    let content = r#"---
+---
+Agent: {{ ctx.agent }}
+Model: {{ ctx.model }}"#;
+    let md: Markdown = content.into();
+    let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
+    ctx.env_mut()
+        .insert("AGENT".to_string(), "  codex  ".to_string());
+    ctx.env_mut()
+        .insert("MODEL".to_string(), "  gpt-5  ".to_string());
+
+    let (composed, _) = md
+        .compose_with(ComposeOptions::new_with_context(ctx))
+        .unwrap();
+
+    assert!(composed.content().contains("Agent: codex"));
+    assert!(composed.content().contains("Model: gpt-5"));
 }
 
 #[test]
@@ -665,6 +687,12 @@ Indexed file detected
 #[serial_test::serial(env_agent_model)]
 fn regression_page_block_with_has_skill() {
     let dir = tempfile::tempdir().unwrap();
+    // Pin the tempdir as the git root so `has_skill` resolves its local skill
+    // root to this directory deterministically. Without a `.git` marker here,
+    // `find_git_root_from` walks all the way up and a `.git` in any shared
+    // ancestor (e.g. another concurrent test's `$TMPDIR/.git`) would hijack the
+    // local root, hiding the skill below and flaking this test under load.
+    std::fs::create_dir(dir.path().join(".git")).unwrap();
     let skill_root = dir.path().join(".claude").join("skills").join("foo");
     std::fs::create_dir_all(&skill_root).unwrap();
     std::fs::write(skill_root.join("SKILL.md"), "# Foo Skill\n").unwrap();

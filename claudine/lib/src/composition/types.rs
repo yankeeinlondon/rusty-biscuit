@@ -7,7 +7,8 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::ComposePerfReport;
+use darkmatter::markdown::compose::{ComposePerfReport, ComposeWarning};
+use darkmatter::markdown::hash::ComputedHash;
 use serde::{Deserialize, Serialize};
 
 use super::launch_workspace::LaunchWorkspaceContext;
@@ -520,6 +521,9 @@ pub struct PreparedComposition {
     /// post-shell re-validation). The CLI renders one user-visible warning
     /// per entry so silently dropped values are surfaced before launch.
     pub dropped_optionals: Vec<super::error::DroppedOptional>,
+    /// Non-fatal warnings emitted by Darkmatter during composition,
+    /// including parser-aware `ctx.*` typo diagnostics.
+    pub warnings: Vec<ComposeWarning>,
 }
 
 /// How the composition result should be applied after provider execution.
@@ -536,8 +540,12 @@ pub enum CompositionClosurePlan {
 pub struct InlineClosurePlan {
     /// The original on-disk document text (frontmatter + body).
     pub original_document_text: String,
-    /// Hash of the original body (for unchanged-body detection).
-    pub original_body_hash: u64,
+    /// Full pre-run hash of the document, always [`MdHashKind::Simple`].
+    ///
+    /// Computed with `hash` and `last_updated` excluded via
+    /// [`inline_hash_options`][crate::composition::closure::inline_hash_options],
+    /// so the managed properties cannot influence the unchanged-body check.
+    pub original_hash: ComputedHash,
 }
 
 /// Universal output format for composed provider execution.

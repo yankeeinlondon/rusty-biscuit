@@ -89,6 +89,7 @@ pub fn validate_and_approve_command(
 /// Rejects chain operators and redirections so single-command callers
 /// cannot accidentally validate a chain as if it were one command.
 /// Chains are split per-command upstream by Darkmatter's discovery layer.
+#[allow(clippy::result_large_err)]
 pub(crate) fn tokenize_words_strict(raw: &str) -> Result<Vec<String>, ShellExpansionError> {
     let ctx = biscuit_terminal::errors::SourceContext::new(
         PathBuf::from("<harness-shell>"),
@@ -371,8 +372,7 @@ pub async fn execute_approved_command(
     .entered();
 
     let start = Instant::now();
-    let exe = which::which(&command.executable).map_err(|_| HarnessError::HandlerFailed {
-        action: "shell_command".to_string(),
+    let exe = which::which(&command.executable).map_err(|_| HarnessError::ShellCommandExecutionFailed {
         detail: format!("executable '{}' not found in PATH", command.executable),
     })?;
 
@@ -384,8 +384,7 @@ pub async fn execute_approved_command(
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
 
-    let mut child = cmd.spawn().map_err(|e| HarnessError::HandlerFailed {
-        action: "shell_command".to_string(),
+    let mut child = cmd.spawn().map_err(|e| HarnessError::ShellCommandExecutionFailed {
         detail: format!("failed to spawn '{}': {e}", command.executable),
     })?;
 
@@ -430,8 +429,7 @@ pub async fn execute_approved_command(
         }
         Ok(Err(e)) => {
             debug!(error = %e, "shell command wait failed");
-            Err(HarnessError::HandlerFailed {
-                action: "shell_command".to_string(),
+            Err(HarnessError::ShellCommandExecutionFailed {
                 detail: format!("failed to wait for '{}': {e}", command.executable),
             })
         }
@@ -439,8 +437,7 @@ pub async fn execute_approved_command(
             let _ = child.kill().await;
             let _ = child.wait().await;
             debug!(timeout_secs = timeout.as_secs(), "shell command timed out");
-            Err(HarnessError::HandlerFailed {
-                action: "shell_command".to_string(),
+            Err(HarnessError::ShellCommandExecutionFailed {
                 detail: format!(
                     "command '{}' timed out after {}s",
                     command.raw,

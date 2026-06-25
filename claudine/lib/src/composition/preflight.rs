@@ -1,20 +1,16 @@
 //! Pre-flight shell command approval for provider sessions.
 //!
-//! Scans all sources of shell commands (template directives, harness
-//! pre/post checks, handlers), checks them against the whitelist,
-//! prompts the user for any that need approval, and returns the full
-//! pre-approved set.
+//! Scans all sources of shell commands (template directives and lifecycle
+//! stacks), checks them against the whitelist, prompts the user for any that
+//! need approval, and returns the full pre-approved set.
 
 use std::collections::HashSet;
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeOptions;
-use darkmatter::markdown::compose::shell_expansion::discovery::collect_shell_commands;
-use darkmatter::markdown::compose::shell_expansion::policy::normalize_command;
 
 use crate::composition::error::CompositionError;
-use crate::harness::audit::collect_auditable_commands;
-use crate::harness::model::HarnessPlan;
+use crate::composition::lifecycle::{LifecycleConfig, collect_lifecycle_shell_commands};
 use crate::harness::shell::{ShellApprovalOptions, tokenize_words_strict};
 
 /// Result of pre-flight shell command approval.
@@ -36,26 +32,45 @@ pub struct PreFlightResult {
 /// ## Sources
 ///
 /// 1. Template `::shell` directives (via Darkmatter's document graph walker)
-/// 2. Harness pre/post checks and handlers (via existing audit infrastructure)
+/// 2. Lifecycle stack shell commands (from every reachable `action: shell`
+///    across all seven lifecycle events)
 ///
 /// ## Errors
 ///
 /// - `ShellCommandDenied` if the user denies any command
 /// - `PreFlightDiscoveryFailed` if Darkmatter's document graph walk fails
 /// - `PreFlightFailed` for blacklisted commands or missing approval handler
+///
+/// ## Arguments
+///
+/// * `markdown` — composed Markdown for template `::shell` discovery.
+/// * `compose_options` — Darkmatter compose options for the template walker.
+/// * `approval_options` — shell approval policy, handler, and cache.
+/// * `lifecycle` — parsed lifecycle configuration; when present, every
+///   reachable `action: shell` command (and `on_error` command) across all
+///   seven lifecycle events is collected and audited alongside the other
+///   sources. `lifecycle_source_path` names the composition source file for
+///   diagnostics.
+/// * `lifecycle_source_path` — source path for lifecycle-stack shell
+///   commands; ignored when `lifecycle` is `None`.
 pub fn resolve_shell_approvals(
     markdown: Option<&Markdown>,
     compose_options: Option<&ComposeOptions>,
-    harness_plan: Option<&HarnessPlan>,
     approval_options: &ShellApprovalOptions,
+    lifecycle: Option<&LifecycleConfig>,
+    lifecycle_source_path: Option<&std::path::Path>,
 ) -> Result<PreFlightResult, CompositionError> {
     let mut all_commands: Vec<(String, std::path::PathBuf, usize)> = Vec::new();
 
     // -- Source 1: Template ::shell directives ---------------------------------
+    // Darkmatter discovers condition-blind: every command that could run under
+    // any document state (including dead branches). Claudine authorizes the
+    // union of these plus lifecycle stack commands below.
     if let (Some(md), Some(opts)) = (markdown, compose_options) {
-        let entries =
-            collect_shell_commands(md, opts).map_err(CompositionError::PreFlightDiscoveryFailed)?;
-        for entry in &entries {
+        let preflight = md
+            .compose_preflight(opts)
+            .map_err(CompositionError::PreFlightDiscoveryFailed)?;
+        for entry in &preflight.entries {
             all_commands.push((
                 entry.normalized.clone(),
                 entry.source_file.clone(),
@@ -64,15 +79,17 @@ pub fn resolve_shell_approvals(
         }
     }
 
-    // -- Source 2 & 3: Harness commands ----------------------------------------
-    if let Some(plan) = harness_plan {
-        // Pass None for source_text since we already collected template
-        // directives via Darkmatter's graph walker above.
-        let auditable = collect_auditable_commands(plan, None)
-            .map_err(|e| CompositionError::PreFlightFailed(e.to_string()))?;
-        for cmd in &auditable {
-            let normalized = normalize_command(&cmd.executable, &cmd.args);
-            all_commands.push((normalized, plan.source_path.clone(), 0));
+    // -- Source 2: Lifecycle stack shell commands ------------------------------
+    // Condition-blind, matching the template posture: every reachable
+    // `action: shell` (and its `on_error`) is gathered regardless of the
+    // `when:` guard, because the guard may evaluate differently under
+    // document states the audit cannot predict.
+    if let Some(lifecycle_config) = lifecycle {
+        let source_file = lifecycle_source_path
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(|| std::path::PathBuf::from("<lifecycle-stack>"));
+        for (command, _property_path) in collect_lifecycle_shell_commands(lifecycle_config) {
+            all_commands.push((command, source_file.clone(), 0));
         }
     }
 
@@ -179,14 +196,9 @@ pub fn resolve_shell_approvals(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::harness::model::{
-        ApprovedRuntimeCommand, HandlerTable, HarnessPlan, ValidationEvent, ValidationKind,
-        ValidationPhase, ValidationRule, ValidationRuleId,
-    };
     use darkmatter::markdown::compose::shell_expansion::types::{
         ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
     };
-    use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
 
     struct CapturingHandler {
@@ -243,20 +255,6 @@ mod tests {
         }
     }
 
-    fn empty_plan() -> HarnessPlan {
-        HarnessPlan {
-            source_path: PathBuf::from("/tmp/test.md"),
-            timeout: None,
-            step_timeout: None,
-            timeout_warn: None,
-            step_timeout_warn: None,
-            pre_checks: Vec::new(),
-            post_checks: Vec::new(),
-            handlers: HandlerTable::default(),
-            programmatic_handler: None,
-        }
-    }
-
     /// Creates a temp dir with a whitelist file that allows commands prefixed
     /// with the given executables.
     fn approval_options_with_whitelist(
@@ -280,7 +278,7 @@ mod tests {
     #[test]
     fn empty_sources_returns_empty_approved_set() {
         let options = ShellApprovalOptions::default();
-        let result = resolve_shell_approvals(None, None, None, &options).unwrap();
+        let result = resolve_shell_approvals(None, None, &options, None, None).unwrap();
 
         assert!(result.approved_commands.is_empty());
         assert_eq!(result.total_discovered, 0);
@@ -303,7 +301,7 @@ mod tests {
             ..Default::default()
         };
 
-        let err = resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options)
+        let err = resolve_shell_approvals(Some(&md), Some(&compose_options), &options, None, None)
             .unwrap_err();
         let msg = err.to_string();
         assert!(
@@ -322,7 +320,7 @@ mod tests {
         let compose_options = ComposeOptions::new();
         let (_dir, options) = approval_options_with_whitelist(&[]);
 
-        let err = resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options)
+        let err = resolve_shell_approvals(Some(&md), Some(&compose_options), &options, None, None)
             .unwrap_err();
         let msg = err.to_string();
         assert!(
@@ -342,40 +340,11 @@ mod tests {
         let (_dir, approval_options) = approval_options_with_whitelist(&["echo"]);
 
         let result =
-            resolve_shell_approvals(Some(&md), Some(&compose_options), None, &approval_options)
+            resolve_shell_approvals(Some(&md), Some(&compose_options), &approval_options, None, None)
                 .unwrap();
 
         assert_eq!(result.total_discovered, 1);
         assert!(result.approved_commands.contains("echo hello"));
-    }
-
-    #[test]
-    fn discovers_commands_from_harness_plan() {
-        let mut plan = empty_plan();
-        plan.pre_checks.push(ValidationRule {
-            id: ValidationRuleId(0),
-            event: ValidationEvent::ShellCommand,
-            phase: ValidationPhase::Both,
-            kind: ValidationKind::ShellCommand {
-                command: ApprovedRuntimeCommand {
-                    raw: "echo world".to_string(),
-                    executable: "echo".to_string(),
-                    args: vec!["world".to_string()],
-                },
-                show_stdout: false,
-                show_stderr: false,
-            },
-            message_template: None,
-            subject_key: None,
-            source: None,
-        });
-
-        let (_dir, approval_options) = approval_options_with_whitelist(&["echo"]);
-
-        let result = resolve_shell_approvals(None, None, Some(&plan), &approval_options).unwrap();
-
-        assert_eq!(result.total_discovered, 1);
-        assert!(result.approved_commands.contains("echo world"));
     }
 
     #[test]
@@ -385,7 +354,7 @@ mod tests {
         let (_dir, approval_options) = approval_options_with_whitelist(&["rm"]);
 
         let result =
-            resolve_shell_approvals(Some(&md), Some(&compose_options), None, &approval_options);
+            resolve_shell_approvals(Some(&md), Some(&compose_options), &approval_options, None, None);
 
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -393,45 +362,6 @@ mod tests {
             matches!(err, CompositionError::PreFlightFailed(ref msg) if msg.contains("blacklisted")),
             "expected PreFlightFailed with blacklisted, got: {err}"
         );
-    }
-
-    #[test]
-    fn deduplicates_commands_across_sources() {
-        // Both the template and the harness plan provide "echo hello".
-        let md: Markdown = "# Test\n::shell echo hello\n".into();
-        let compose_options = ComposeOptions::new();
-
-        let mut plan = empty_plan();
-        plan.pre_checks.push(ValidationRule {
-            id: ValidationRuleId(0),
-            event: ValidationEvent::ShellCommand,
-            phase: ValidationPhase::Both,
-            kind: ValidationKind::ShellCommand {
-                command: ApprovedRuntimeCommand {
-                    raw: "echo hello".to_string(),
-                    executable: "echo".to_string(),
-                    args: vec!["hello".to_string()],
-                },
-                show_stdout: false,
-                show_stderr: false,
-            },
-            message_template: None,
-            subject_key: None,
-            source: None,
-        });
-
-        let (_dir, approval_options) = approval_options_with_whitelist(&["echo"]);
-
-        let result = resolve_shell_approvals(
-            Some(&md),
-            Some(&compose_options),
-            Some(&plan),
-            &approval_options,
-        )
-        .unwrap();
-
-        assert_eq!(result.total_discovered, 1, "duplicate should be collapsed");
-        assert_eq!(result.approved_commands.len(), 1);
     }
 
     #[test]
@@ -455,7 +385,7 @@ mod tests {
 
         // Pre-flight should discover and approve "echo hello"
         let result =
-            resolve_shell_approvals(Some(&md), Some(&compose_opts), None, &options).unwrap();
+            resolve_shell_approvals(Some(&md), Some(&compose_opts), &options, None, None).unwrap();
         assert!(result.approved_commands.contains("echo hello"));
 
         // Now compose with the pre-approved set — should succeed
@@ -464,6 +394,70 @@ mod tests {
             .with_pre_approved_commands(result.approved_commands);
         let (composed, _) = md.compose_with(compose_with_approval).unwrap();
         assert!(composed.content().contains("hello"));
+    }
+
+    /// End-to-end regression for the `review-feature.md` "command not
+    /// pre-approved" bug. The prompt has:
+    ///
+    /// - a shell-pending `dir` whose template (`{{ spec || design }}`) is
+    ///   transitively blocked (`design` references `dir`), so it resolves only
+    ///   in the interpolation fallback pass; and
+    /// - a sibling `iteration` key calling `file_exists()`, a filesystem
+    ///   function that errors during the context-free pre-flight pass.
+    ///
+    /// Pre-flight must collect the RESOLVED `dirname <spec>` command so the
+    /// pre-approved set covers exactly what `compose_with` later executes —
+    /// otherwise execution fails with `NotPreApproved`.
+    #[test]
+    fn full_flow_shell_pending_dir_with_context_requiring_sibling_key() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("review.md");
+        std::fs::write(
+            &file_path,
+            "---\n\
+dir: \"$(dirname '{{ spec || design }}')\"\n\
+design: \"{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}\"\n\
+iteration: \"{{ file_exists('design.md') ? 2 : 1 }}\"\n\
+---\nReview {{dir}} iteration {{iteration}}\n",
+        )
+        .unwrap();
+
+        // Whitelist `dirname` so pre-flight approves without an interactive handler.
+        let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
+        std::fs::write(&whitelist_path, "prefix dirname\n").unwrap();
+
+        let md = Markdown::try_from(file_path.as_path()).unwrap();
+        let overrides = serde_json::json!({ "spec": "fixes/x/spec.md" });
+        let compose_opts = ComposeOptions::new()
+            .with_source_file(&file_path)
+            .with_set_overrides(overrides.clone());
+
+        let options = ShellApprovalOptions {
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: None,
+            ..Default::default()
+        };
+
+        // Pre-flight must discover the RESOLVED command, not the raw template.
+        let result =
+            resolve_shell_approvals(Some(&md), Some(&compose_opts), &options, None, None).unwrap();
+        assert!(
+            result.approved_commands.contains("dirname fixes/x/spec.md"),
+            "pre-approved set must contain the resolved command; got: {:?}",
+            result.approved_commands
+        );
+
+        // Execution against the pre-approved set must succeed — no NotPreApproved.
+        let compose_with_approval = ComposeOptions::new()
+            .with_source_file(&file_path)
+            .with_set_overrides(overrides)
+            .with_pre_approved_commands(result.approved_commands);
+        let (composed, _) = md.compose_with(compose_with_approval).unwrap();
+        assert!(
+            composed.content().contains("fixes/x"),
+            "composed body should contain the resolved dir; got: {:?}",
+            composed.content()
+        );
     }
 
     #[test]
@@ -479,7 +473,7 @@ mod tests {
             ..Default::default()
         };
 
-        let err = resolve_shell_approvals(Some(&md), Some(&compose_opts), None, &options);
+        let err = resolve_shell_approvals(Some(&md), Some(&compose_opts), &options, None, None);
         assert!(err.is_err());
         let msg = err.unwrap_err().to_string();
         assert!(msg.contains("blacklisted"), "got: {msg}");
@@ -524,7 +518,7 @@ mod tests {
         };
 
         let result =
-            resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options).unwrap();
+            resolve_shell_approvals(Some(&md), Some(&compose_options), &options, None, None).unwrap();
 
         assert_eq!(result.total_discovered, 1);
         assert_eq!(result.user_approved, 1);
@@ -544,7 +538,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options);
+        let result = resolve_shell_approvals(Some(&md), Some(&compose_options), &options, None, None);
 
         assert!(result.is_err());
         assert!(
@@ -571,13 +565,13 @@ mod tests {
 
         // First call: handler invoked
         let result1 =
-            resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options).unwrap();
+            resolve_shell_approvals(Some(&md), Some(&compose_options), &options, None, None).unwrap();
         assert_eq!(result1.user_approved, 1);
         assert_eq!(handler.calls(), 1);
 
         // Second call: cache hit, handler NOT invoked
         let result2 =
-            resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options).unwrap();
+            resolve_shell_approvals(Some(&md), Some(&compose_options), &options, None, None).unwrap();
         assert_eq!(result2.total_discovered, 1);
         assert_eq!(
             handler.calls(),
@@ -600,7 +594,7 @@ mod tests {
         };
 
         let result =
-            resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options).unwrap();
+            resolve_shell_approvals(Some(&md), Some(&compose_options), &options, None, None).unwrap();
 
         assert_eq!(
             handler.calls(),
@@ -641,40 +635,6 @@ mod tests {
         }
     }
 
-    fn harness_plan_with_command(source: &std::path::Path, raw: &str) -> HarnessPlan {
-        // Parse the raw command string the same way pre-flight does.
-        let parts: Vec<String> = raw.split_whitespace().map(String::from).collect();
-        let executable = parts[0].clone();
-        let args = parts[1..].to_vec();
-        HarnessPlan {
-            source_path: source.to_path_buf(),
-            timeout: None,
-            step_timeout: None,
-            timeout_warn: None,
-            step_timeout_warn: None,
-            pre_checks: vec![ValidationRule {
-                id: ValidationRuleId(0),
-                event: ValidationEvent::ShellCommand,
-                phase: ValidationPhase::Both,
-                kind: ValidationKind::ShellCommand {
-                    command: ApprovedRuntimeCommand {
-                        raw: raw.to_string(),
-                        executable,
-                        args,
-                    },
-                    show_stdout: false,
-                    show_stderr: false,
-                },
-                message_template: None,
-                subject_key: None,
-                source: None,
-            }],
-            post_checks: Vec::new(),
-            handlers: HandlerTable::default(),
-            programmatic_handler: None,
-        }
-    }
-
     #[test]
     fn shared_cache_across_distinct_options_prevents_reprompt() {
         // Mirrors the sequence runner: each "step" builds a fresh
@@ -690,81 +650,18 @@ mod tests {
 
         // Step 1: fresh options, cache wired in.
         let step1 = shared_cache_options(&dir, handler.clone(), Arc::clone(&shared_cache));
-        let r1 = resolve_shell_approvals(Some(&md), Some(&compose_options), None, &step1).unwrap();
+        let r1 = resolve_shell_approvals(Some(&md), Some(&compose_options), &step1, None, None).unwrap();
         assert_eq!(r1.user_approved, 1);
         assert_eq!(handler.calls(), 1, "step 1 must prompt once");
 
         // Step 2: BRAND NEW options, same Arc-cloned cache. Cache hit.
         let step2 = shared_cache_options(&dir, handler.clone(), Arc::clone(&shared_cache));
-        let r2 = resolve_shell_approvals(Some(&md), Some(&compose_options), None, &step2).unwrap();
+        let r2 = resolve_shell_approvals(Some(&md), Some(&compose_options), &step2, None, None).unwrap();
         assert_eq!(r2.total_discovered, 1);
         assert_eq!(
             handler.calls(),
             1,
             "step 2 must NOT prompt again — shared cache should be hit"
-        );
-    }
-
-    #[test]
-    fn shared_cache_covers_harness_command_path() {
-        // The review requirement is whole-sequence approval reuse, not
-        // template-only reuse. Harness shell commands (pre/post checks,
-        // handlers) flow through the same pre-flight path and must also
-        // honor the shared cache.
-        let dir = tempfile::TempDir::new().unwrap();
-        let source = dir.path().join("harness-source.md");
-        let plan = harness_plan_with_command(&source, "curl https://internal.example.com");
-
-        let handler = Arc::new(MockApprovalHandler::new(ShellApprovalDecision::AllowOnce));
-        let shared_cache = Arc::new(Mutex::new(std::collections::HashMap::new()));
-
-        // Step 1: harness-sourced command approved via handler.
-        let step1 = shared_cache_options(&dir, handler.clone(), Arc::clone(&shared_cache));
-        let r1 = resolve_shell_approvals(None, None, Some(&plan), &step1).unwrap();
-        assert_eq!(r1.user_approved, 1);
-        assert_eq!(handler.calls(), 1, "harness step 1 must prompt once");
-
-        // Step 2: fresh options, same cache. Handler must NOT be invoked.
-        let step2 = shared_cache_options(&dir, handler.clone(), Arc::clone(&shared_cache));
-        let r2 = resolve_shell_approvals(None, None, Some(&plan), &step2).unwrap();
-        assert_eq!(r2.total_discovered, 1);
-        assert_eq!(
-            handler.calls(),
-            1,
-            "harness step 2 must reuse the shared cache, not re-prompt"
-        );
-    }
-
-    #[test]
-    fn shared_cache_spans_template_and_harness_sources() {
-        // A command first discovered via a template `::shell` directive
-        // on step 1 should remain approved when the same command is
-        // later re-discovered from a HarnessPlan source on step 2
-        // (and vice versa). Approval cache keys are normalized command
-        // strings and must be source-agnostic.
-        let dir = tempfile::TempDir::new().unwrap();
-        let source = dir.path().join("mixed-source.md");
-
-        let md: Markdown = "# Test\n::shell curl https://example.com/api\n".into();
-        let compose_options = ComposeOptions::new();
-        let plan = harness_plan_with_command(&source, "curl https://example.com/api");
-
-        let handler = Arc::new(MockApprovalHandler::new(ShellApprovalDecision::AllowOnce));
-        let shared_cache = Arc::new(Mutex::new(std::collections::HashMap::new()));
-
-        // Step 1: command arrives via template ::shell directive.
-        let step1 = shared_cache_options(&dir, handler.clone(), Arc::clone(&shared_cache));
-        resolve_shell_approvals(Some(&md), Some(&compose_options), None, &step1).unwrap();
-        assert_eq!(handler.calls(), 1, "template-sourced command prompts once");
-
-        // Step 2: SAME command now arrives via HarnessPlan. Cache reuse
-        // must cross the template→harness source boundary.
-        let step2 = shared_cache_options(&dir, handler.clone(), Arc::clone(&shared_cache));
-        resolve_shell_approvals(None, None, Some(&plan), &step2).unwrap();
-        assert_eq!(
-            handler.calls(),
-            1,
-            "harness re-discovery of the same command must hit the shared cache"
         );
     }
 
@@ -787,7 +684,7 @@ mod tests {
         };
 
         let _result =
-            resolve_shell_approvals(Some(&md), Some(&compose_opts), None, &options).unwrap();
+            resolve_shell_approvals(Some(&md), Some(&compose_opts), &options, None, None).unwrap();
 
         let requests = handler.captured_requests();
         assert_eq!(requests.len(), 1, "handler should be called once");

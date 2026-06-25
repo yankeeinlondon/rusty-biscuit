@@ -255,9 +255,9 @@ All dispatch surfaces that evaluate expressions against an `EventMeta` share the
                       │ (single source of truth for event paths)    │
                       └─────────────────────────────────────────────┘
                                     ▲
-        ┌───────────────────────────┼─────────────────────────────┐
-        │                           │                             │
-templates (template.rs)    matchers (matcher.rs)     harness validate.rs
+              ┌─────────────────────┴─────────────────────┐
+              │                                           │
+     templates (template.rs)                    matchers (matcher.rs)
 
                       ┌─────────────────────────────────────────────┐
                       │ EventMetaConditionLookup                    │
@@ -344,7 +344,7 @@ Atomic file writes (`config::atomic`) prevent corruption during concurrent acces
 | `os.*` | `{{os.name}}`, `{{os.type}}`, `{{os.version}}`, `{{os.hostname}}` |
 | `hardware.*` | `{{hardware.arch}}`, `{{hardware.cpu}}`, `{{hardware.cores}}` |
 | `git.*` | `{{git.branch}}`, `{{git.is_dirty}}`, `{{git.head_sha}}`, `{{git.head_message}}`, `{{git.remote}}`, `{{git.hosting}}`, `{{git.repo_name}}`, `{{git.repo_org}}` |
-| `project.*` | `{{project.language}}`, `{{project.is_monorepo}}`, `{{project.monorepo_tool}}` |
+| `project.*` | `{{project.language}}`, `{{project.is_monorepo}}`, `{{project.monorepo_standard}}`, `{{project.monorepo_orchestrators}}`, `{{project.monorepo_tool}}` (deprecated alias) |
 
 Shell environment variables are also supported via `{{env.VAR_NAME}}` with optional defaults: `{{env.MY_VAR || "fallback"}}`. The legacy single-pipe `|` form is no longer supported.
 
@@ -368,6 +368,12 @@ All non-interactive runs follow a **9-section model** for rendered output, ensur
 9. **Final Metadata** — timing, usage, cost, and summary line. _stderr._
 
 Spacing is enforced at the sink level, with at most one blank line between any two sections.
+
+### Markdown rendering boundary (triage)
+
+The prose-bearing sections (System Prompt, **Agent Prompt**, Thinking Prose) render Markdown through `prompt_reporting::render_markdown_for_terminal`, which is **pure delegation** to darkmatter's `Markdown::as_terminal` — it only sets `max_width` and collapses blank lines. claudine owns **no** word-wrap, hanging-indent, or inline-style (code/bold/link) logic; all of that lives in darkmatter's fold + biscuit-terminal's render tree (`render_tree/render.rs`).
+
+So when rendered prompt output shows wrong wrapping, spurious newlines, lines bleeding past the width, or mis-styled inline spans, the defect is in **darkmatter / biscuit-terminal**, not claudine. Reproduce at that layer (`md.as_terminal` with a fixed `max_width`) rather than through the claudine CLI. Known gotcha: a CommonMark *tight* list item carries its content as a flat run of inline siblings (`[Text, InlineCode, Text]`) with no wrapping `Paragraph`, and the terminal renderer must coalesce that run before wrapping — the wrap is per-list-item, not per-inline-node.
 
 ### Provider Parsers (6)
 

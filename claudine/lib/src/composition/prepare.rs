@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
+use darkmatter::markdown::hash::MdHashKind;
 use darkmatter::markdown::{Markdown, MarkdownError};
 
 /// Convert a `MarkdownError` into a `CompositionError`, preserving the
@@ -92,7 +93,10 @@ fn find_git_root_from_path(path: &Path) -> Option<PathBuf> {
 
 use super::error::CompositionError;
 use super::guardrails::load_or_create_guardrails;
-use super::lifecycle::parse_lifecycle_config;
+use super::lifecycle::{
+    parse_lifecycle_config, validate_no_err_in_no_error_events, validate_no_interpolation_leaks,
+    validate_no_undefined_lifecycle_variables,
+};
 use super::types::{
     AgentHint, CompositionClosurePlan, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
     ModelHint, PreparedComposition, ResolvedCompositionSource,
@@ -108,6 +112,15 @@ pub fn prepare_direct(
     options: PrepareOptions,
 ) -> Result<PreparedComposition, CompositionError> {
     let override_keys = top_level_override_keys(options.set_overrides.as_ref());
+    if let Some((key, replacement)) =
+        super::lifecycle::scan_removed_validation_keys(&frontmatter_to_value(source.markdown.frontmatter()))
+    {
+        return Err(CompositionError::RemovedValidationKey {
+            source_path: source.resolved_path.clone(),
+            key,
+            replacement: replacement.to_string(),
+        });
+    }
     let mut ctx = ComposeContext::capture();
     for (key, value) in &options.env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
@@ -117,7 +130,15 @@ pub fn prepare_direct(
         &source.resolved_path,
         options.shell_working_directory.as_deref(),
     )
-    .with_perf(options.perf_enabled);
+    .with_perf(options.perf_enabled)
+    // The composed body is delivered verbatim to the agent and reported as the
+    // user prompt. Darkmatter's default strips incidental single newlines, which
+    // would collapse an author's line-structured prompt into one paragraph —
+    // altering the delivered text and defeating line-count-based report
+    // truncation. Preserve the source line breaks for prompt delivery.
+    .with_incidental_newline_mode(
+        darkmatter::markdown::cleanup::IncidentalNewlineMode::Preserve,
+    );
     if let Some(overrides) = options.set_overrides {
         compose_opts = compose_opts.with_set_overrides(overrides);
     }
@@ -139,6 +160,15 @@ pub fn prepare_direct(
     }
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
+    if let Some((key, replacement)) =
+        super::lifecycle::scan_removed_validation_keys(&effective_frontmatter)
+    {
+        return Err(CompositionError::RemovedValidationKey {
+            source_path: source.resolved_path.clone(),
+            key,
+            replacement: replacement.to_string(),
+        });
+    }
     let agent_full = composed
         .frontmatter()
         .as_map()
@@ -163,6 +193,14 @@ pub fn prepare_direct(
         agent_was_list: agent_full.is_list,
     };
     let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
+    validate_no_interpolation_leaks(&lifecycle, &source.resolved_path, &report.warnings)?;
+    validate_no_undefined_lifecycle_variables(
+        source.markdown.frontmatter(),
+        &effective_frontmatter,
+        &lifecycle,
+        &source.resolved_path,
+    )?;
+    validate_no_err_in_no_error_events(&lifecycle, &source.resolved_path)?;
 
     let source_repo_root = options
         .source_repo_root
@@ -179,6 +217,7 @@ pub fn prepare_direct(
         lifecycle,
         compose_perf: report.perf,
         dropped_optionals: Vec::new(),
+        warnings: report.warnings.clone(),
     })
 }
 
@@ -193,6 +232,15 @@ pub fn prepare_inline(
 ) -> Result<PreparedComposition, CompositionError> {
     let override_keys = top_level_override_keys(options.set_overrides.as_ref());
     let fm = source.markdown.frontmatter();
+    if let Some((key, replacement)) =
+        super::lifecycle::scan_removed_validation_keys(&frontmatter_to_value(fm))
+    {
+        return Err(CompositionError::RemovedValidationKey {
+            source_path: source.resolved_path.clone(),
+            key,
+            replacement: replacement.to_string(),
+        });
+    }
 
     let prompt_value = fm
         .as_map()
@@ -219,7 +267,15 @@ pub fn prepare_inline(
         &source.resolved_path,
         options.shell_working_directory.as_deref(),
     )
-    .with_perf(options.perf_enabled);
+    .with_perf(options.perf_enabled)
+    // The composed body is delivered verbatim to the agent and reported as the
+    // user prompt. Darkmatter's default strips incidental single newlines, which
+    // would collapse an author's line-structured prompt into one paragraph —
+    // altering the delivered text and defeating line-count-based report
+    // truncation. Preserve the source line breaks for prompt delivery.
+    .with_incidental_newline_mode(
+        darkmatter::markdown::cleanup::IncidentalNewlineMode::Preserve,
+    );
     if let Some(overrides) = options.set_overrides {
         compose_opts = compose_opts.with_set_overrides(overrides);
     }
@@ -231,6 +287,15 @@ pub fn prepare_inline(
         .map_err(|e| map_compose_error(&source.resolved_path, e))?;
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
+    if let Some((key, replacement)) =
+        super::lifecycle::scan_removed_validation_keys(&effective_frontmatter)
+    {
+        return Err(CompositionError::RemovedValidationKey {
+            source_path: source.resolved_path.clone(),
+            key,
+            replacement: replacement.to_string(),
+        });
+    }
     let agent_full = composed
         .frontmatter()
         .as_map()
@@ -255,6 +320,14 @@ pub fn prepare_inline(
         agent_was_list: agent_full.is_list,
     };
     let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
+    validate_no_interpolation_leaks(&lifecycle, &source.resolved_path, &report.warnings)?;
+    validate_no_undefined_lifecycle_variables(
+        source.markdown.frontmatter(),
+        &effective_frontmatter,
+        &lifecycle,
+        &source.resolved_path,
+    )?;
+    validate_no_err_in_no_error_events(&lifecycle, &source.resolved_path)?;
 
     let mut prompt = composed.content().to_string();
     if prompt.trim().is_empty() {
@@ -275,7 +348,10 @@ pub fn prepare_inline(
     prompt.push_str(&guardrails);
 
     // Capture pre-execution hash for closure
-    let original_body_hash = source.markdown.hash_body(false);
+    let original_hash = source.markdown.compute_hash(
+        MdHashKind::Simple,
+        &super::closure::inline_hash_options(),
+    );
 
     Ok(PreparedComposition {
         mode: CompositionMode::InlineFrontmatterPrompt,
@@ -286,11 +362,12 @@ pub fn prepare_inline(
         selection_hints,
         closure: CompositionClosurePlan::Inline(InlineClosurePlan {
             original_document_text: source.original_text.clone(),
-            original_body_hash,
+            original_hash,
         }),
         lifecycle,
         compose_perf: report.perf,
         dropped_optionals: Vec::new(),
+        warnings: report.warnings.clone(),
     })
 }
 
@@ -572,8 +649,9 @@ mod tests {
         match &prepared.closure {
             CompositionClosurePlan::Inline(plan) => {
                 assert!(!plan.original_document_text.is_empty());
-                // Body hash should be non-zero for non-empty content
-                assert_ne!(plan.original_body_hash, 0);
+                // Simple hash should produce a non-empty `<fm>-<body>` string.
+                let flat = plan.original_hash.flat_string();
+                assert!(flat.is_some() && !flat.unwrap().is_empty());
             }
             CompositionClosurePlan::Direct => panic!("expected Inline closure plan"),
         }
@@ -617,6 +695,40 @@ mod tests {
         assert!(prepared.lifecycle.failure.is_none());
     }
 
+    /// Regression: Darkmatter's `normalize_list_spacing` used to insert a
+    /// blank line between a tight parent list item and the first child of a
+    /// nested unordered list. That blank line was mis-rendered as an indented
+    /// code block by downstream renderers, corrupting prompts like the
+    /// `## Closure` section of `prompts/review-feature.md`.
+    #[test]
+    fn direct_composition_preserves_tight_nested_list() {
+        let dir = TempDir::new().unwrap();
+        let body = r#"## Closure
+
+- Save your review suggestions to a file
+- Save the following frontmatter properties on "review.md":
+    - based on your review suggestions indicate whether you think this feature is **ready for production**
+    - set the `agent` frontmatter property to claude
+    - set the `model` frontmatter property to some-model
+    - set the `created` frontmatter property to today
+
+**bold:**
+"#;
+        let source = make_source(&dir, &[("title", json!("Test"))], body);
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert!(
+            prepared.prompt.contains("properties on \"review.md\":\n    - based on"),
+            "parent item must be immediately followed by its first child; got:\n{}",
+            prepared.prompt
+        );
+        assert!(
+            !prepared.prompt.contains("properties on \"review.md\":\n\n    - "),
+            "tight nested list must not gain a blank line between parent and child; got:\n{}",
+            prepared.prompt
+        );
+    }
+
     #[test]
     fn inline_composition_parses_lifecycle_config() {
         let dir = TempDir::new().unwrap();
@@ -651,6 +763,207 @@ mod tests {
     }
 
     #[test]
+    fn malformed_lifecycle_interpolation_fails_preparation() {
+        // A *mixed* lifecycle string (literal text plus a malformed `{{ … }}`)
+        // is not whole-value executable state, so Darkmatter leaves it lenient
+        // and the claudine leak guard is the layer that rejects it. (A
+        // whole-value malformed span is caught earlier by Darkmatter's strict
+        // frontmatter interpolation — see
+        // `implement_suggestions_prompt_rejects_malformed_spec_path`.)
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("title", json!("Test")),
+                ("start", json!({"message": "leak {{ parent_dir(review)) }}"})),
+            ],
+            "Content",
+        );
+
+        let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+        match err {
+            CompositionError::LifecycleInterpolationLeak {
+                property,
+                expression,
+                ..
+            } => {
+                assert_eq!(property, "start.message");
+                assert!(expression.contains("parent_dir(review))"));
+            }
+            other => panic!("expected LifecycleInterpolationLeak, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn undefined_lifecycle_variable_fails_preparation() {
+        // Regression: a bare `{{ missing_lifecycle_var }}` resolves to an empty
+        // string during composition with no Darkmatter warning, so the
+        // post-compose leak guard never sees it. Preparation must still fail
+        // before the message becomes eligible for lifecycle dispatch.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("title", json!("Test")),
+                (
+                    "start",
+                    json!({"message": "before {{ missing_lifecycle_var }} after"}),
+                ),
+            ],
+            "Content",
+        );
+
+        let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+        match err {
+            CompositionError::LifecycleUndefinedVariable {
+                property, variable, ..
+            } => {
+                assert_eq!(property, "start.message");
+                assert_eq!(variable, "missing_lifecycle_var");
+            }
+            other => panic!("expected LifecycleUndefinedVariable, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lifecycle_variable_defined_in_frontmatter_passes_preparation() {
+        // A bare variable that names a real frontmatter key is defined, so it
+        // must not trip the undefined-variable guard.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("area", json!("claudine")),
+                ("start", json!({"message": "working on {{ area }}"})),
+            ],
+            "Content",
+        );
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        let message = prepared
+            .lifecycle
+            .start
+            .as_ref()
+            .unwrap()
+            .message
+            .as_ref()
+            .unwrap();
+        assert_eq!(message, "working on claudine");
+    }
+
+    #[test]
+    fn lifecycle_fallback_for_undefined_variable_passes_preparation() {
+        // Fallback (`{{ x || 'y' }}`) intentionally tolerates an undefined
+        // operand, so the guard must leave it alone.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[(
+                "start",
+                json!({"message": "{{ missing_lifecycle_var || 'default' }}"}),
+            )],
+            "Content",
+        );
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        let message = prepared
+            .lifecycle
+            .start
+            .as_ref()
+            .unwrap()
+            .message
+            .as_ref()
+            .unwrap();
+        assert_eq!(message, "default");
+    }
+
+    #[test]
+    fn clean_lifecycle_interpolation_passes_preparation() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("title", json!("Test")),
+                ("start", json!({"message": "{{ ctx.today }}"})),
+            ],
+            "Content",
+        );
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        let start = prepared.lifecycle.start.as_ref().unwrap();
+        let message = start.message.as_ref().unwrap();
+        assert!(!message.contains("{{"));
+        assert!(!message.contains("}}"));
+    }
+
+    #[test]
+    fn lifecycle_leak_reported_for_first_field_in_deterministic_order() {
+        let dir = TempDir::new().unwrap();
+        // Mixed lifecycle strings stay lenient in Darkmatter and surface
+        // through the claudine leak guard, which reports the first leaking
+        // field in deterministic order. Whole-value malformed spans would
+        // instead be rejected earlier by Darkmatter's strict interpolation.
+        let source = make_source(
+            &dir,
+            &[
+                ("title", json!("Test")),
+                ("start", json!({"message": "leak {{ parent_dir(review)) }}"})),
+                ("failure", json!({"say": "leak {{ broken( }}"})),
+            ],
+            "Content",
+        );
+
+        let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+        match err {
+            CompositionError::LifecycleInterpolationLeak { property, .. } => {
+                assert_eq!(property, "start.message");
+            }
+            other => panic!("expected LifecycleInterpolationLeak, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn malformed_whole_value_spec_path_is_rejected() {
+        // Regression for the original `implement-suggestions.md` reproduction:
+        // a `spec_path` frontmatter value that is a malformed whole-value
+        // interpolation — `{{ dirname(review) + '/spec.md') }}` carries an
+        // unbalanced paren. A whole-value `{{ … }}` is executable state, so
+        // composition must abort with a frontmatter interpolation parse error
+        // that names `spec_path`, instead of leaking the raw template
+        // downstream as a successful effective-frontmatter value. The fixture
+        // is self-contained — it must not read the shipped prompt, whose shape
+        // is free to change without breaking this guard.
+        let dir = TempDir::new().unwrap();
+        let review_file = dir.path().join("review.md");
+        fs::write(&review_file, "# Review\n").unwrap();
+
+        let source = make_source(
+            &dir,
+            &[
+                ("title", json!("Implement Suggestions")),
+                ("spec_path", json!("{{ dirname(review) + '/spec.md') }}")),
+            ],
+            "Implement the suggestions from {{ spec_path }}.",
+        );
+
+        let options = PrepareOptions {
+            set_overrides: Some(json!({ "review": review_file.to_str().unwrap() })),
+            ..Default::default()
+        };
+
+        let err = prepare_direct(&source, options).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("spec_path"),
+            "error must name the offending key, got: {msg}"
+        );
+        assert!(
+            msg.contains("Interpolation parse failed"),
+            "error must report the interpolation parse failure, got: {msg}"
+        );
+    }
+
+    #[test]
     fn direct_composition_with_env_overrides() {
         let dir = TempDir::new().unwrap();
         let source = make_source(
@@ -669,6 +982,33 @@ mod tests {
 
         let prepared = prepare_direct(&source, options).unwrap();
         assert!(prepared.prompt.contains("FAIL_FAST is false"));
+    }
+
+    #[test]
+    fn direct_lifecycle_ctx_agent_uses_env_overrides() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[(
+                "start",
+                json!({
+                    "message": "{{ctx.agent}}/{{ctx.model}}"
+                }),
+            )],
+            "Prompt",
+        );
+
+        let options = PrepareOptions {
+            env_overrides: std::collections::BTreeMap::from([
+                ("AGENT".to_string(), "codex".to_string()),
+                ("MODEL".to_string(), "gpt-5".to_string()),
+            ]),
+            ..Default::default()
+        };
+
+        let prepared = prepare_direct(&source, options).unwrap();
+        let start = prepared.lifecycle.start.as_ref().unwrap();
+        assert_eq!(start.message.as_deref(), Some("codex/gpt-5"));
     }
 
     #[test]
@@ -717,7 +1057,8 @@ mod tests {
         match &prepared.closure {
             CompositionClosurePlan::Inline(plan) => {
                 assert!(!plan.original_document_text.is_empty());
-                assert_ne!(plan.original_body_hash, 0);
+                let flat = plan.original_hash.flat_string();
+                assert!(flat.is_some() && !flat.unwrap().is_empty());
             }
             CompositionClosurePlan::Direct => panic!("expected Inline closure plan"),
         }

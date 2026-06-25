@@ -1,3 +1,6 @@
+---
+hash: ef46db3751d8e999-c3d2924067dee01d
+---
 # Claudine Composition
 
 Claudine supports the ability to _compose_ content by leveraging the Darkmatter library's powerful composition features and routing the result through a wrapper-grade execution pipeline.
@@ -7,7 +10,7 @@ Two canonical commands:
 - **`claudine compose [flags] <arg>...`** — direct (chained) composition
 - **`claudine inline-compose [flags] <arg>...`** — inline composition
 
-Both commands share the same five-stage pipeline and inherit full wrapper-grade behavior: environment setup, harness detection, structured streaming, and handler-driven recovery.
+Both commands share the same five-stage pipeline and inherit full wrapper-grade behavior: environment setup, structured streaming, and lifecycle-driven recovery.
 
 Because composition flows through the same execution path as `claudine claude` / `codex` / etc., it inherits every behavior of the live stderr surface documented in [Non-Interactive Sessions](non-interactive-sessions.md):
 
@@ -122,13 +125,41 @@ Steps:
    - If the provider modified an existing frontmatter property, Claudine reverts it to the original value and emits a warning
    - If the provider added a new frontmatter property, Claudine merges it into the document (inserted before `last_updated`)
    - `last_updated` is set to today's date (local time, `YYYY-MM-DD`)
-   - The file is written atomically
-   - A cleanup pass normalizes the body markdown without touching frontmatter
+    - The file is written atomically
+    - A cleanup pass normalizes the body markdown without touching frontmatter
+
+### `hash` property (auto-stamped)
+
+Every successful `inline-compose` closure stamps a Darkmatter `Simple` content
+hash into the `hash:` frontmatter property as part of the same atomic write
+that persists the body.
+
+- **Format** — `<16-hex-fm>-<16-hex-body>` (for example,
+  `hash: a1b2c3d4e5f60718-9a0b1c2d3e4f5061`).
+- **Kind is forced to `Simple`** — even if the document previously held a valid
+  `structured` or `detailed` hash, the next `inline-compose` run normalizes it
+  to the `Simple` shorthand.
+- **Self-reference stability** — `hash` and `last_updated` are excluded from the
+  frontmatter segment when the hash is computed, so re-running `inline-compose`
+  on an already-stamped, otherwise-unchanged document does not perturb the
+  stored value. You can verify this with `md hash --diff <file>`, which exits
+  `0` when the file matches its stored hash.
+- **Malformed existing hash** — if the source file contains a malformed
+  `hash:` value, the closure fails with `CompositionError::InlineHashMalformed`
+  before any write occurs, leaving the file on disk untouched.
+
+This behavior is implemented by [`apply_inline_closure`] in the closure module,
+using `inline_hash_options`, `parse_inline_stored_hash`, `plan_hash_save`, and
+`apply_hash_save`.
+
+[`apply_inline_closure`]: ../../lib/src/composition/closure.rs
 
 ### Inline Conventions
 
+
 - **`prompt`** (required) — the prompt text; composed through Darkmatter before execution
 - **`last_updated`** — auto-updated by Claudine on each successful write
+- **`hash`** — auto-stamped Darkmatter `Simple` content hash on each successful write (see [`hash` property (auto-stamped)](#hash-property-auto-stamped))
 - **`agent`** — optional provider hint (see Provider Selection)
 - **`policy`** — content freshness policy (coming soon)
 - **`blast_radius`** — list of source files that trigger re-generation when changed
@@ -170,10 +201,63 @@ frontmatter keys are available to inspect.
 
 The diagnostic identifies the resolved document (OSC8-linked when supported),
 names both `prompt` and `sequence`, points to `claudine sequence`, and notes the
-upcoming `sections` feature. When the error output stream is a TTY it also
-echoes the authored frontmatter YAML verbatim; when stderr is not a TTY the YAML
-is withheld (to avoid exposing frontmatter) and the diagnostic says so. There is
-no flag to reveal the YAML in non-TTY output.
+upcoming `sections` feature. Like every frontmatter-rooted composition error, it
+appends the authored frontmatter as a syntax-highlighted, line-numbered YAML
+block (see [Frontmatter YAML blocks in errors](#frontmatter-yaml-blocks-in-errors)).
+When stderr is not a TTY the block is withheld to avoid exposing frontmatter,
+and there is no flag to reveal it.
+
+## Whole-Value Frontmatter Expansion Is Executable State
+
+A frontmatter value whose trimmed content is *exactly one* expansion form —
+either a single `{{ ... }}` interpolation span or a single `$(...)` shell
+expression — is not ordinary text. It is executable state that downstream
+pipeline stages (and the provider prompt) consume as a resolved value, so it
+must parse and resolve successfully. Such a value must never leak into the
+effective frontmatter as raw expansion syntax.
+
+- **Whole-value `{{ ... }}` interpolation** must parse and evaluate
+  successfully. A parse failure (e.g. the malformed `spec_path: "{{ dirname(review) + '/spec.md') }}"`)
+  or an evaluation failure aborts composition with a precise
+  `Interpolation parse failed` / `Interpolation evaluation failed` diagnostic
+  naming the frontmatter key — **even when `fail_fast` is off**. Undefined
+  variables remain lenient: a bare `{{ missing }}` still resolves to `null`
+  rather than aborting.
+- **Whole-value `$(...)` shell expansion** must parse and expand when
+  frontmatter shell expansion is enabled. If shell expansion is explicitly
+  disabled, the `$(...)` value is deferred unchanged. When enabled, a value
+  that still trims to a whole-value `$(...)` candidate after the expansion pass
+  is rejected as a leak.
+
+This strictness is scoped to whole-value expansion only. **Mixed strings**
+(`"prefix {{ x }} suffix"`, `"literal $(echo ok)"`) and **body prose**
+interpolation are unchanged: when `fail_fast` is off they keep their lenient
+behavior, leaving an unresolved span in place and recording a warning rather
+than aborting. The enforcement lives in Darkmatter composition; see
+[Frontmatter Interpolation](../../../darkmatter/docs/inline/fm-interpolation.md)
+and [Frontmatter Shell Expansion](../../../darkmatter/docs/inline/fm-shell-expansion.md).
+
+## Frontmatter YAML blocks in errors
+
+Every composition error rooted in a prompt file's YAML frontmatter appends the
+authored frontmatter — delimiters included — as a `CodeBlock`: syntax
+highlighted, line-numbered so block line N equals source-file line N, and with
+the offending line highlighted when the error's property maps to a locatable
+key. This covers the lifecycle guards (interpolation leak, undefined variable,
+say/effect/shape errors), the prompt/agent/model/interactive type errors, the
+schema errors (load, validation, missing, unsupported-interactive), the
+inline-compose / sequence mismatch, and body-composition failures
+(`ComposeFailed`, `ShellExpansionFailed`, which show the block as context with no
+highlight).
+
+The block is **TTY-gated**: it is rendered only when stderr is a TTY, and
+withheld in piped / `NO_COLOR` / CI output so frontmatter is never exposed into
+logs. Capture happens at the render boundary — after all control-flow handling —
+so the wrapper never interferes with upstream decisions; the CLI error walker
+renders the deepest typed diagnostic and appends the YAML block after it. The
+motivating case: a `success.message` referencing `{{review-file}}` (hyphen) when
+the variable is `review_file` (underscore) now shows the frontmatter with the
+offending line highlighted, instead of an opaque "interpolation leaked" message.
 
 ## Provider Selection
 
@@ -265,7 +349,7 @@ Everything before launch runs normally:
 
 - Schema validation (including the interactive missing-property prompt under a TTY).
 - Shell commands in the document graph are **executed for real** — they produce actual side effects and their output is interpolated into the frontmatter and body.
-- Harness pre-checks (shell-command approval, writability) run normally.
+- Shell-command approval and writability checks run normally.
 - Provider and model resolution run normally.
 
 The provider is **never launched**; for `inline-compose` the source file is therefore **never mutated** (`last_updated` is untouched).
@@ -301,6 +385,26 @@ Any composition error (schema validation failure, missing file, denied shell com
 
 Composition documents can declare a `$schema` in their frontmatter to constrain the property values that drive the prompt. Schema processing is anchored on Darkmatter's `SimplifiedSchema` and runs as a stage inside the existing `Resolve → Pre-Flight → Prepare → Select → Launch → Closure` pipeline — between override application and shell expansion. The wrapper layer translates Darkmatter's structural failures into typed claudine errors so users see actionable reports instead of a generic compose failure.
 
+## Lifecycle Integration
+
+Composition runs execute the full seven-event lifecycle declared in the prompt's frontmatter:
+
+```
+initialize → start → (success | blocked | failure) → finalize → loop
+```
+
+- **`initialize`** fires after the prompt file is resolved and frontmatter has parsed, but before schema validation and shell pre-flight. A `skip` control action here opts the whole document out cleanly.
+- **`start`** fires after schema validation and the lifecycle shell-audit pass succeed, immediately before provider invocation.
+- **`success`/`blocked`/`failure`** are the terminal events. Schema-validation failures and shell-audit denials produce `blocked`; provider errors produce `failure`.
+- **`finalize`** fires once per iteration, immediately after the terminal event.
+- **`loop`** is the post-`finalize` gate. Lifecycle concerns authored inside the `loop:` block run first, then the `while`/`until` condition is evaluated, then per-iteration mutations are applied only when continuing.
+
+Legacy prompts that only declare `start`, `success`, `blocked`, and `failure` continue to behave the same way. See [lifecycle.md](lifecycle.md) for the full lifecycle reference, including stacks, control actions, the `err`/`timing`/`current` globals, and examples.
+
+### Loop Execution
+
+A frontmatter `loop:` block turns the prompt into a repeating run. The first iteration runs `initialize` once; later iterations re-enter at `start` without re-running `initialize`, schema validation, or shell pre-flight. `success`, `failure`, and `finalize` fire once per iteration, and the loop condition is evaluated at the post-`finalize` gate after any `loop:` lifecycle concerns.
+
 ### Authoring
 
 `$schema` accepts the same forms Darkmatter accepts: inline `SimplifiedSchema` mappings, references to external YAML/JSON schema files (resolved relative to the prompt document's parent directory), and root-level unions. Raw JSON Schema also validates, but it does not expose typed property metadata, so it does not feed the interactive prompts or shell completion described below.
@@ -322,6 +426,7 @@ For each property declared in `$schema`, claudine routes the validation outcome 
 | Outcome                | Required                                                            | Optional                                                                                |
 | ---------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | Present and valid      | continue                                                            | continue                                                                                |
+| Present as `null`      | hard `SchemaValidation` abort                                       | treated as absent (valid)                                                               |
 | Missing                | prompt in Interactive Mode when allowed; otherwise `MissingProperties` | continue                                                                                |
 | Present but invalid    | hard `SchemaValidation` abort (no prompt, no recovery)              | the value is dropped from the prompt context, a `tracing::warn!` fires, composition retries once |
 
@@ -389,39 +494,25 @@ Source loading (shared by all three commands) parses frontmatter strictly. A doc
 
 The composition completion engine consults `$schema` when the cursor sits on a setter slot AND a positional prompt-file argument is already committed. See [shell-completions.md — Schema-Aware Setter Completion](shell-completions.md#schema-aware-setter-completion) for the full contract.
 
-## Harness: Validations and Handlers
+## Migrating from the Retired Harness DSL
 
-Composed documents can declare **pre-checks**, **post-checks**, **timeouts**, and **handlers** in their frontmatter. When present, Claudine activates a harness that gates provider execution behind validation rules and can recover from failures automatically.
+Earlier Claudine releases let composed documents declare `pre_checks`, `post_checks`, `handle_*` handlers, a programmatic `handle`, and `deviate` recovery commands in their frontmatter. That validation-and-handler DSL has been **removed**. Its gating, verification, and recovery roles are now expressed through the [lifecycle stack](lifecycle.md): `when:` guards plus the `Error` / `Skip` / `Proxy` / `Retry` / `Resume` / `Requeue` lifecycle actions and `shell` actions.
 
-The harness reads from the **effective (composed) frontmatter** — not from the raw source file. This means composition can inject harness properties dynamically via Darkmatter transclusion or interpolation.
+A document that still declares any of these keys fails composition with a typed `RemovedValidationKey` diagnostic that names the offending key and points at its replacement surface:
 
-### Pre-checks and Post-checks
+| Removed key | Replacement |
+|-------------|-------------|
+| `pre_checks` | the `initialize` or `start` lifecycle stack |
+| `post_checks` | the `success` or `finalize` lifecycle stack |
+| `handle_<event>` (e.g. `handle_timeout`, `handle_inline_body_unchanged`) | the `blocked` or `failure` lifecycle recovery actions |
+| `handle` | a lifecycle `shell` action or other lifecycle action |
+| `deviate` | a lifecycle `shell` action plus a recovery action (`retry`, `resume`, etc.) |
 
-Pre-checks run before the provider launches; post-checks run after:
+The scan runs before lifecycle event blocks are parsed, so the diagnostic names the removed DSL key rather than falling through to generic unknown-field handling. Like every frontmatter-rooted composition error, it appends the authored frontmatter as a syntax-highlighted YAML block under a TTY.
 
-```yaml
-pre_checks:
-  - file_exists: "@docs/plan.md"
-  - dir_exists: "@src/components"
-post_checks:
-  - file_changed: "@docs/plan.md"
-  - response_includes: "## Summary"
-```
+**Verification** that the agentic loop actually did the work it claimed (the old `post_checks` role) now belongs in the `success` or `finalize` stack: guard a `when:` clause and raise an `Error` lifecycle action when the contract is unmet. **Recovery** (the old `handle_*` role) belongs in the `failure`/`blocked` stack via `Retry`, `Resume`, `Requeue`, or `Proxy`. See [lifecycle.md](lifecycle.md) for the full action catalog.
 
-Available validations include filesystem checks (`file_exists`, `dir_exists`, `json_file_exists`, `yaml_file_exists`, `toml_file_exists`, `has_write_permission`), git checks (`no_dirty_source_code`, `has_dirty_source_code`), post-only file comparisons (`file_changed`, `file_unchanged`), frontmatter comparisons (`frontmatter_prop_changed`, `frontmatter_prop_unchanged`, `frontmatter_prop_equals`), response checks (`response_length_at_least`, `response_length_at_most`, `response_includes`, `response_missing`), and shell commands (`shell_command`).
-
-#### Failure reporting
-
-Passing checks render as a single compact `Status` line. A failing check renders a four-section block on stderr:
-
-1. **Status header** — red glyph plus a phase label (`Pre-validation failed`, `Post-validation failed`, `Agent execution failed`, or `Shell audit failed`).
-2. **Source line** — `in <path>` pointing at the markdown file that declared the rule, OSC8-linked when the terminal supports hyperlinks.
-3. **YAML snippet** — the rule's frontmatter entry, syntax-highlighted via the same path that renders fenced ` ```yaml ` blocks in markdown.
-4. **Reason line** — the underlying diagnostic (e.g. `file does not exist: /path/to/missing.toml`), rendered in muted styling because the glyph already carries severity.
-
-Programmatically constructed rules without a markdown origin (such as the system-owned inline-compose writability pre-check) fall back to the legacy single-line failure rendering.
-
-### Timeouts
+## Timeouts
 
 Claudine supports two timeout properties — `timeout` (wall-clock) and
 `step_timeout` (stream-silence) — that share the same human-readable
@@ -435,8 +526,8 @@ timeout: 10m          # opt-in hard ceiling on total runtime
 step_timeout: 45s     # kill the child if it goes silent for 45s
 ```
 
-Both timeouts surface as the same `FailureEvent::Timeout` variant, so a
-single `handle_timeout` handler matches either one.
+Both timeouts surface as the same timeout failure and route to the
+`failure` lifecycle event, where a `Retry` or `Resume` action can recover.
 
 **Relational validation.** When both properties are present,
 `step_timeout` must be less than or equal to `timeout`. Documents that
@@ -527,38 +618,20 @@ diagnostic line per active subagent per silence window.
 See [`topics/timeouts.md`](timeouts.md) for the full env-var table,
 precedence chain, termination path, and worked examples.
 
-### Handlers
+### Recovery
 
-Handlers define recovery actions when failures occur:
+Recovery from a failed run is expressed through the `failure` and `blocked` lifecycle stacks, not a separate handler DSL. The available lifecycle recovery actions are:
 
-```yaml
-handle_timeout:
-  resume:
-    prompt: "Continue from where you stopped."
+- **`Retry`** — re-run the prompt (re-runs the pre-flight/start path from `blocked`, or the agentic loop from `failure`)
+- **`Resume`** — resume the agent session with its context intact and a follow-up message (provider must support session resume)
+- **`Proxy`** — hand off execution to a different prompt document at its own `initialize`
+- **`Requeue`** — push the prompt onto the deferred-execution queue
 
-handle_agent_failure:
-  retry:
-    prompt_suffix: "The previous attempt failed. Please try again."
-    retries: 3
-
-handle_file_exists:
-  "@docs/plan.md":
-    redirect:
-      file: "./fallback.md"
-```
-
-Four handler actions are available:
-
-- **retry** — re-run the same prompt with optional modifications
-- **resume** — continue from the previous session (provider must support session resume)
-- **redirect** — switch to a different source document
-- **deviate** — execute a shell command, then re-evaluate post-checks
-
-A programmatic `handle` property accepts a shell command that receives failure context on stdin and returns a handler action as JSON on stdout.
+See [lifecycle.md](lifecycle.md) for the full recovery-action reference and the [migration table](#migrating-from-the-retired-harness-dsl) for the mapping from the removed `handle_*` keys.
 
 ### Shell Policy
 
-All shell commands — `::shell` directives in the template, top-level frontmatter `$(cmd)` expressions, `shell_command` validations, and `deviate`/`handle` declarations — are approved upfront during the pre-flight phase, before the provider session starts. See [Pre-Flight Shell Approval](pre-flight-checks.md) for the full flow.
+All shell commands — `::shell` directives in the template, top-level frontmatter `$(cmd)` expressions, and lifecycle `shell` stack actions — are approved upfront during the pre-flight phase, before the provider session starts. See [Pre-Flight Shell Approval](pre-flight-checks.md) for the full flow.
 
 ## Retired Interfaces
 
@@ -589,7 +662,7 @@ claudine sequence --fail-fast false @batch.md
 
 ### When to Use Sequence
 
-Use `claudine sequence` when you have a fixed list of items and need to compose the same template document against each item independently. Each step is a full one-shot composition run — with its own provider selection, harness evaluation, lifecycle notifications, and pre-flight shell approval. The sequence command is serial; steps do not run in parallel.
+Use `claudine sequence` when you have a fixed list of items and need to compose the same template document against each item independently. Each step is a full one-shot composition run — with its own provider selection, lifecycle evaluation, and pre-flight shell approval. The sequence command is serial; steps do not run in parallel.
 
 ### Compose vs Inline Steps
 
@@ -682,7 +755,7 @@ The `FAIL_FAST` environment variable is also injected per step so that `{{env.FA
 
 ### Fail-Fast Behavior
 
-By default, a sequence stops on the first failed step. Failure means any of: pre-flight failure, preparation failure, non-zero provider exit, or harness resolution failure.
+By default, a sequence stops on the first failed step. Failure means any of: pre-flight failure, preparation failure, non-zero provider exit, or unrecovered lifecycle failure.
 
 The effective fail-fast policy is determined by:
 
@@ -712,24 +785,31 @@ When `fail_fast` is `true` (the default), Claudine stops immediately after the f
 
 When `fail_fast` is `false`, Claudine records each step's result and continues through all steps regardless of failures. After the last step, Claudine exits with `0` if all steps succeeded, or `1` if one or more steps failed.
 
-Harness recovery actions (`retry`, `resume`, `redirect`, `deviate`) apply within a single step only. There is no cross-step recovery mechanism.
+Lifecycle recovery actions (`Retry`, `Resume`, `Requeue`, `Proxy`) apply within a single step only. There is no cross-step recovery mechanism.
 
 > **Note:** The `fail_fast` frontmatter key is reserved for sequence control. It is not passed to Darkmatter's internal compose options.
 
 ## Architecture
 
-Both commands follow the same six-stage pipeline:
+Both commands follow the same six-stage pipeline, with lifecycle events woven around the stages:
 
 ```
-Resolve → Pre-Flight → Prepare → Select Provider → Launch → Closure
+Resolve → Initialize → Pre-Flight → Prepare → Start → Select Provider → Launch → (Success | Blocked | Failure) → Finalize → Loop
 ```
 
 - **Resolve**: `composition::resolve_composition_source()` loads the Markdown file
-- **Pre-Flight**: `composition::resolve_shell_approvals()` discovers every shell command in the document graph — template `::shell` directives, top-level frontmatter `$(...)` expressions, and harness `shell_command` validations / `deviate` / `handle` actions — checks whitelists, and prompts the user to approve any unapproved commands before proceeding (see [Pre-Flight Shell Approval](pre-flight-checks.md))
+- **Initialize**: `LifecycleRunGuard::emit_initialize_once()` fires the `initialize` lifecycle event; a `skip` control action here exits cleanly before any later stage
+- **Pre-Flight**: `composition::resolve_shell_approvals()` discovers every shell command in the document graph — template `::shell` directives, top-level frontmatter `$(...)` expressions, and lifecycle `shell` stack actions — checks whitelists, and prompts the user to approve any unapproved commands before proceeding (see [Pre-Flight Shell Approval](pre-flight-checks.md))
 - **Prepare**: `composition::prepare_direct()` or `composition::prepare_inline()` composes through Darkmatter with the pre-approved command set and produces a `PreparedComposition` with `effective_frontmatter`
+- **Start**: `LifecycleRunGuard::emit_start_once()` fires the `start` lifecycle event after schema validation and shell audit pass
 - **Select**: `composition::select_provider()` applies the precedence chain
 - **Launch**: `wrap::composition::execute_composition_request()` runs the provider through the full wrapper pipeline (env, MCP, harness, streaming)
+- **Terminal**: `LifecycleRunGuard::emit_terminal()` fires `success`, `blocked`, or `failure`
+- **Finalize**: `LifecycleRunGuard::emit_finalize_once()` fires `finalize` once per iteration
+- **Loop**: the post-`finalize` gate evaluates `loop:` lifecycle concerns, the `while`/`until` condition, and applies per-iteration mutations when continuing
 - **Closure**: `composition::closure::rewrite_inline_document()` reconstructs the document for inline mode; direct mode outputs to stdout
+
+The original six-stage summary (`Resolve → Pre-Flight → Prepare → Select Provider → Launch → Closure`) describes the functional pipeline; lifecycle events are the hooks that run at the boundaries between those stages.
 
 ## Performance Reporting
 

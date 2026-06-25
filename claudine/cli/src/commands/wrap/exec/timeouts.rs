@@ -1,117 +1,7 @@
-use std::process::Child;
 use std::time::{Duration, Instant};
 
 use claudine::stream::logs::EarlyTermination;
 use claudine::stream::progress::LiveMetrics;
-use color_eyre::eyre::Result;
-
-/// Wait for the child with a timeout, sending SIGTERM then SIGKILL.
-///
-/// Returns `(exit_code, termination_kind)`.
-#[cfg(unix)]
-pub(crate) fn wait_with_timeout(
-    child: &mut Child,
-    seconds: u64,
-) -> Result<(i32, claudine::harness::ProcessTermination)> {
-    use std::time::{Duration, Instant};
-
-    let deadline = Instant::now() + Duration::from_secs(seconds);
-    let grace_period = Duration::from_secs(5);
-
-    loop {
-        match child.try_wait()? {
-            Some(status) => {
-                return Ok((
-                    super::exit_code_from_status(status),
-                    claudine::harness::ProcessTermination::Completed,
-                ));
-            }
-            None => {
-                if Instant::now() >= deadline {
-                    tracing::warn!(
-                        timeout_secs = seconds,
-                        child_pid = child.id(),
-                        "child process timed out; sending SIGTERM"
-                    );
-                    // Send SIGTERM
-                    unsafe {
-                        libc::kill(child.id() as i32, libc::SIGTERM);
-                    }
-
-                    // Wait for grace period
-                    let kill_deadline = Instant::now() + grace_period;
-                    loop {
-                        match child.try_wait()? {
-                            Some(status) => {
-                                return Ok((
-                                    super::exit_code_from_status(status),
-                                    claudine::harness::ProcessTermination::TimedOut,
-                                ));
-                            }
-                            None => {
-                                if Instant::now() >= kill_deadline {
-                                    tracing::warn!(
-                                        timeout_secs = seconds,
-                                        child_pid = child.id(),
-                                        "child process did not exit after SIGTERM; sending SIGKILL"
-                                    );
-                                    // Send SIGKILL
-                                    unsafe {
-                                        libc::kill(child.id() as i32, libc::SIGKILL);
-                                    }
-                                    let status = child.wait()?;
-                                    return Ok((
-                                        super::exit_code_from_status(status),
-                                        claudine::harness::ProcessTermination::TimedOut,
-                                    ));
-                                }
-                                std::thread::sleep(Duration::from_millis(100));
-                            }
-                        }
-                    }
-                }
-                std::thread::sleep(Duration::from_millis(100));
-            }
-        }
-    }
-}
-
-#[cfg(not(unix))]
-pub(crate) fn wait_with_timeout(
-    child: &mut Child,
-    seconds: u64,
-) -> Result<(i32, claudine::harness::ProcessTermination)> {
-    use std::time::{Duration, Instant};
-
-    let deadline = Instant::now() + Duration::from_secs(seconds);
-
-    loop {
-        match child.try_wait()? {
-            Some(status) => {
-                return Ok((
-                    super::exit_code_from_status(status),
-                    claudine::harness::ProcessTermination::Completed,
-                ));
-            }
-            None => {
-                if Instant::now() >= deadline {
-                    tracing::warn!(
-                        timeout_secs = seconds,
-                        child_pid = child.id(),
-                        "child process timed out; killing process"
-                    );
-                    child.kill()?;
-                    let status = child.wait()?;
-                    return Ok((
-                        super::exit_code_from_status(status),
-                        claudine::harness::ProcessTermination::TimedOut,
-                    ));
-                }
-                std::thread::sleep(Duration::from_millis(100));
-            }
-        }
-    }
-}
 
 /// Detect a step-silence timeout for the harness `step_timeout` field.
 ///
@@ -631,4 +521,11 @@ mod tests {
         assert_eq!(config.timeout, Some(Duration::from_secs(7200)));
         assert_eq!(config.step_timeout, Some(Duration::from_secs(1800)));
     }
+
+    // The former `wait_with_timeout_rejects_absurd_timeout_without_panicking`
+    // regression is now structurally impossible: the unified watchdog compares
+    // `Instant::saturating_duration_since` against the budget rather than
+    // precomputing a deadline `Instant`, so an absurd budget (e.g. `u64::MAX`
+    // seconds) can never overflow the clock — it simply never fires. See
+    // `spawn_wall_clock_timeout_ticker` and `evaluate_timeout_tick`.
 }

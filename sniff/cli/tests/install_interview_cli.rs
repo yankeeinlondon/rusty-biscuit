@@ -11,6 +11,7 @@ fn install_dry_run_plain_emits_announcement_and_success_status() {
     let mut cmd = Command::cargo_bin("sniff").unwrap();
     cmd.env("NO_COLOR", "1")
         .args([
+            "software",
             "utilities",
             "install",
             "ripgrep",

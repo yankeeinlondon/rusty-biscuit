@@ -104,9 +104,9 @@ last_updated: 2026-05-02
   - `detect_with_plan(DetectionPlan)` — fine-grained control
   - Module-level functions for expert composition
 
-- **CLI** with subcommand filtering (`sniff programs`, `sniff hardware`, etc.)
+- **CLI** with subcommand filtering (`sniff software`, `sniff hardware`, etc.)
 - **JSON output** (`--json` flag) for machine-readable results
-- **Program detection module** — detects installed programs across 8 categories including utilities (clipboard managers would fall here)
+- **Program detection module** — detects installed programs across 9 categories including utilities (clipboard managers would fall here)
 - No REST/network API (runs locally; optional network for remote git inspection and version checks)
 
 #### Features

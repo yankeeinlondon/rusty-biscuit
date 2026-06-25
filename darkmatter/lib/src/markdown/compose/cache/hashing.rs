@@ -11,8 +11,8 @@ use serde_json::{Map, Value};
 use std::path::Path;
 
 use super::types::DependencyRef;
-use crate::markdown::compose::state::EffectiveState;
-use crate::markdown::compose::types::{ComposeContext, ComposeOptions};
+use crate::markdown::compose::EffectiveState;
+use crate::markdown::compose::{ComposeContext, ComposeOptions};
 
 // ── Source identification ──────────────────────────────────────────
 

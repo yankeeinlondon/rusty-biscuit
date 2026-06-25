@@ -18,7 +18,7 @@
 //! message, optional source line/column).
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex, OnceLock},
 };
 
@@ -192,7 +192,7 @@ pub fn collect_problems(
 ) -> Vec<ValidationProblem> {
     validator
         .iter_errors(instance)
-        .map(|err| build_problem(&err, positions, None))
+        .flat_map(|err| build_problems(&err, positions, None))
         .collect()
 }
 
@@ -215,7 +215,7 @@ pub fn collect_root_union_problems(
     for (idx, validator) in arm_validators.iter().enumerate() {
         let problems: Vec<ValidationProblem> = validator
             .iter_errors(instance)
-            .map(|err| build_problem(&err, positions, Some(idx)))
+            .flat_map(|err| build_problems(&err, positions, Some(idx)))
             .collect();
         if problems.is_empty() {
             // Instance satisfies this arm — overall validation passes.
@@ -231,6 +231,50 @@ pub fn collect_root_union_problems(
         .min_by_key(|(idx, problems)| (problems.len(), *idx))
         .map(|(_, problems)| problems)
         .unwrap_or_default()
+}
+
+/// Maps one `jsonschema::ValidationError` into one-or-more public problems.
+///
+/// Most errors map to a single problem. An `anyOf` failure is drilled into so
+/// the precise offending sub-path surfaces instead of the parent: when the
+/// `coerce`/`convert` pipeline wraps an optional typed property as
+/// `anyOf: [{ "type": "null" }, <typed-fragment>]` (see
+/// [`super::simplified::convert`]), a non-null value that fails the typed arm
+/// otherwise reports only at the wrapper path with the generic "is not valid
+/// under any of the schemas" message — pointing at the property instead of the
+/// field that actually failed. We recurse into the arm context, keeping only
+/// nested errors that drill *below* the wrapper path (this drops the `null`
+/// sentinel's same-path type error), so an author sees `/config/name` rather
+/// than `/config`. When no arm drills deeper (e.g. `[null, string]` against a
+/// wrong-typed scalar — every arm fails at the wrapper path) the original
+/// `anyOf` problem is kept.
+fn build_problems(
+    err: &jsonschema::ValidationError<'_>,
+    positions: &PositionMap,
+    arm_index: Option<usize>,
+) -> Vec<ValidationProblem> {
+    if let ValidationErrorKind::AnyOf { context } = err.kind() {
+        let parent = err.instance_path().as_str();
+        let mut deeper: Vec<ValidationProblem> = context
+            .iter()
+            .flat_map(|arm| arm.iter())
+            .filter(|nested| {
+                let path = nested.instance_path().as_str();
+                path.len() > parent.len() && path.starts_with(parent)
+            })
+            .flat_map(|nested| build_problems(nested, positions, arm_index))
+            .collect();
+        if !deeper.is_empty() {
+            // Distinct arms can fail identically against the same value (e.g.
+            // overlapping inline-object arms); collapse exact duplicates so the
+            // report points at each offending site once. Duplicates need not be
+            // adjacent, so dedup by a seen set rather than `dedup_by`.
+            let mut seen: HashSet<(String, String)> = HashSet::new();
+            deeper.retain(|p| seen.insert((p.path.clone(), p.message.clone())));
+            return deeper;
+        }
+    }
+    vec![build_problem(err, positions, arm_index)]
 }
 
 fn build_problem(
@@ -259,6 +303,7 @@ fn build_problem(
         line,
         column,
         arm_index,
+        description: None,
     }
 }
 
@@ -335,6 +380,160 @@ fn identify_key(path: &str, kind: &ValidationErrorKind) -> Option<String> {
 
 fn unescape_pointer_segment(segment: &str) -> String {
     segment.replace("~1", "/").replace("~0", "~")
+}
+
+/// Resolves the declared description for `problem` by walking `root` (the
+/// compiled JSON Schema) along the problem's instance path to the failing
+/// property node and reading its `description`.
+///
+/// Returns `None` when the property declares no description or when the path
+/// cannot be resolved. The walk is intentionally defensive: any missing or
+/// mis-shaped node yields `None` rather than panicking, so an unresolvable path
+/// degrades to "no description" instead of a wrong one.
+///
+/// ## Notes
+///
+/// The base node is the winning root-union arm (`root["anyOf"][arm_index]`)
+/// when `problem.arm_index` is `Some`, otherwise `root` itself. Descent unwraps
+/// nullable `anyOf` wrappers, treats numeric segments as `items`, and reads the
+/// description (or a property-level-union articulation) at the final node.
+pub(super) fn resolve_problem_description(
+    root: &Value,
+    problem: &ValidationProblem,
+) -> Option<String> {
+    // Decision #10: an `additionalProperties: false` failure points its path at
+    // the *parent* object, but the offending key is undeclared — reusing the
+    // parent's description would misidentify what the author must fix.
+    if problem.message.starts_with("Additional properties are not allowed") {
+        return None;
+    }
+
+    let mut node = match problem.arm_index {
+        Some(idx) => root.get("anyOf")?.as_array()?.get(idx)?,
+        None => root,
+    };
+
+    let mut segments: Vec<String> = problem
+        .path
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .map(unescape_pointer_segment)
+        .collect();
+
+    // Decision #3: a `Missing` problem's path points at the parent object; the
+    // missing property name lives in `problem.property`.
+    if problem.kind == ValidationProblemKind::Missing
+        && let Some(property) = &problem.property
+    {
+        segments.push(property.clone());
+    }
+
+    for segment in &segments {
+        // Decision #5: step into the non-null arm of a nullable wrapper before
+        // descending into `properties` / `items`.
+        node = unwrap_nullable_arm(node);
+        node = if is_numeric_segment(segment) {
+            node.get("items")? // Decision #4
+        } else {
+            node.get("properties")?.get(segment.as_str())?
+        };
+    }
+
+    description_at_node(node)
+}
+
+/// Reads the description at the resolved node: a direct `description` string,
+/// else a property-level-union articulation (Decision #6), else `None`.
+fn description_at_node(node: &Value) -> Option<String> {
+    if let Some(desc) = node.get("description").and_then(Value::as_str) {
+        return Some(desc.to_string());
+    }
+    if let Some(arms) = node.get("anyOf").and_then(Value::as_array) {
+        let non_null: Vec<&Value> = arms.iter().filter(|arm| !is_null_schema(arm)).collect();
+        // A lone non-null arm is just a nullable wrapper, not a union worth
+        // articulating; only two-or-more genuine alternatives qualify.
+        if non_null.len() >= 2 {
+            return articulate_union(&non_null);
+        }
+    }
+    None
+}
+
+/// Articulates a property-level union (Decision #6) over its non-null arms.
+///
+/// `|D| == 1` returns the lone arm's description verbatim (it speaks for the
+/// whole union); `|D| >= 2` and `|D| == 0` synthesize `a union type of: …`,
+/// drawing on each arm's `description` or its [`type_label`]. Returns `None`
+/// when no description and no derivable type label exist.
+fn articulate_union(non_null_arms: &[&Value]) -> Option<String> {
+    let described = non_null_arms.iter().filter(|arm| arm.get("description").is_some());
+    let describe_count = described.count();
+
+    if describe_count == 1 {
+        return non_null_arms
+            .iter()
+            .find_map(|arm| arm.get("description").and_then(Value::as_str))
+            .map(str::to_string);
+    }
+
+    let parts: Vec<String> = non_null_arms
+        .iter()
+        .filter_map(|arm| {
+            arm.get("description")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or_else(|| type_label(arm).map(str::to_string))
+        })
+        .collect();
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(format!("a union type of: {}", parts.join(" | ")))
+    }
+}
+
+/// Maps a compiled arm schema to a short human-readable type keyword for union
+/// articulation (display aid only; never affects validation). Returns `None`
+/// when no label is derivable.
+fn type_label(arm: &Value) -> Option<&'static str> {
+    if arm.get("enum").is_some() || arm.get("const").is_some() {
+        return Some("enum");
+    }
+    match arm.get("type").and_then(Value::as_str)? {
+        "string" => Some("string"),
+        "number" => Some("number"),
+        "integer" => Some("integer"),
+        "boolean" => Some("boolean"),
+        "object" => Some("object"),
+        "array" => Some("array"),
+        _ => None,
+    }
+}
+
+/// Returns the lone non-null arm of a nullable `anyOf` wrapper, else the node
+/// unchanged. A union with two or more non-null arms is ambiguous to descend
+/// into, so it is left as-is (the subsequent `properties`/`items` lookup will
+/// fail and resolution degrades to `None`).
+fn unwrap_nullable_arm(node: &Value) -> &Value {
+    let Some(arms) = node.get("anyOf").and_then(Value::as_array) else {
+        return node;
+    };
+    let mut non_null = arms.iter().filter(|arm| !is_null_schema(arm));
+    match (non_null.next(), non_null.next()) {
+        (Some(only), None) => only,
+        _ => node,
+    }
+}
+
+/// Whether `arm` is the `{ "type": "null" }` sentinel emitted for optional
+/// (nullable) properties.
+fn is_null_schema(arm: &Value) -> bool {
+    arm.get("type").and_then(Value::as_str) == Some("null")
+}
+
+fn is_numeric_segment(segment: &str) -> bool {
+    !segment.is_empty() && segment.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Builds a top-level YAML key → (line, column) map by scanning the
@@ -513,6 +712,53 @@ mod tests {
         );
         assert_eq!(problems.len(), 1, "expected one MinLength error: {problems:?}");
         assert_eq!(problems[0].kind, ValidationProblemKind::Invalid);
+    }
+
+    #[test]
+    fn nullable_any_of_surfaces_nested_failing_subpath() {
+        // Mirrors the `convert` output for an optional inline-object property:
+        // `anyOf: [{ "type": "null" }, <object with required string field>]`.
+        // A non-null value that fails the typed arm must report the nested
+        // `/config/name` site, not the wrapper path `/config`.
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "config": { "anyOf": [
+                    { "type": "null" },
+                    {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": { "name": { "type": "string" } },
+                        "required": ["name"]
+                    }
+                ] }
+            }
+        });
+        let v = build_validator(&schema).unwrap();
+        let instance = json!({ "config": { "name": ["Ada", "Lovelace"] } });
+        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        assert!(
+            problems.iter().any(|p| p.path == "/config/name"),
+            "expected a problem under /config/name, got {problems:?}"
+        );
+    }
+
+    #[test]
+    fn nullable_any_of_keeps_parent_when_no_arm_drills_deeper() {
+        // `[null, string]` against a wrong-typed scalar: every arm fails at the
+        // wrapper path itself, so there is no deeper site to point at. The
+        // original `anyOf` problem is preserved rather than dropped.
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "name": { "anyOf": [ { "type": "null" }, { "type": "string" } ] }
+            }
+        });
+        let v = build_validator(&schema).unwrap();
+        let instance = json!({ "name": 42 });
+        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        assert_eq!(problems.len(), 1, "expected the wrapper problem: {problems:?}");
+        assert_eq!(problems[0].path, "/name");
     }
 
     #[test]
@@ -1005,6 +1251,309 @@ mod tests {
             problem.message.contains("no existing file matched reference"),
             "expected improved file-reference message in root-union arm, got: {}",
             problem.message,
+        );
+    }
+
+    // --- description resolution (resolve_problem_description) ---
+
+    fn problem(
+        path: &str,
+        kind: ValidationProblemKind,
+        property: Option<&str>,
+        arm_index: Option<usize>,
+    ) -> ValidationProblem {
+        ValidationProblem {
+            path: path.to_string(),
+            message: "msg".to_string(),
+            kind,
+            property: property.map(str::to_string),
+            line: None,
+            column: None,
+            arm_index,
+            description: None,
+        }
+    }
+
+    #[test]
+    fn resolve_top_level_type_reads_property_description() {
+        let root = json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string", "description": "The headline" }
+            }
+        });
+        let p = problem("/title", ValidationProblemKind::Type, None, None);
+        assert_eq!(
+            resolve_problem_description(&root, &p).as_deref(),
+            Some("The headline")
+        );
+    }
+
+    #[test]
+    fn resolve_missing_reads_through_properties_property() {
+        // A Required failure points its path at the parent object; the missing
+        // name lives in `property` (Decision #3).
+        let root = json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string", "description": "The headline" }
+            },
+            "required": ["title"]
+        });
+        let p = problem("", ValidationProblemKind::Missing, Some("title"), None);
+        assert_eq!(
+            resolve_problem_description(&root, &p).as_deref(),
+            Some("The headline")
+        );
+    }
+
+    #[test]
+    fn resolve_decodes_json_pointer_escapes() {
+        // A schema key containing literal `/` and `~` is addressed via `~1`/`~0`.
+        let root = json!({
+            "type": "object",
+            "properties": {
+                "a/b~c": { "type": "string", "description": "weird key" }
+            }
+        });
+        let p = problem("/a~1b~0c", ValidationProblemKind::Type, None, None);
+        assert_eq!(
+            resolve_problem_description(&root, &p).as_deref(),
+            Some("weird key")
+        );
+    }
+
+    #[test]
+    fn resolve_nested_inline_object_unwraps_nullable_anyof() {
+        // `/config/name`: descend properties.config, unwrap the nullable
+        // wrapper, then descend properties.name (Decision #5).
+        let root = json!({
+            "type": "object",
+            "properties": {
+                "config": { "anyOf": [
+                    { "type": "null" },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string", "description": "the name" }
+                        }
+                    }
+                ] }
+            }
+        });
+        let p = problem("/config/name", ValidationProblemKind::Type, None, None);
+        assert_eq!(
+            resolve_problem_description(&root, &p).as_deref(),
+            Some("the name")
+        );
+    }
+
+    #[test]
+    fn resolve_array_path_descends_through_items() {
+        // `/authors/0/name`: the numeric `0` descends into `items` (Decision #4).
+        let root = json!({
+            "type": "object",
+            "properties": {
+                "authors": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string", "description": "author name" }
+                        }
+                    }
+                }
+            }
+        });
+        let p = problem("/authors/0/name", ValidationProblemKind::Type, None, None);
+        assert_eq!(
+            resolve_problem_description(&root, &p).as_deref(),
+            Some("author name")
+        );
+    }
+
+    #[test]
+    fn resolve_nullable_optional_reads_wrapper_description() {
+        // The optional property's description sits on the outer nullable
+        // wrapper; it is read directly (Decision #5) — the lone non-null arm is
+        // not articulated as a union.
+        let root = json!({
+            "type": "object",
+            "properties": {
+                "tag": {
+                    "description": "an optional tag",
+                    "anyOf": [ { "type": "null" }, { "type": "string" } ]
+                }
+            }
+        });
+        let p = problem("/tag", ValidationProblemKind::Type, None, None);
+        assert_eq!(
+            resolve_problem_description(&root, &p).as_deref(),
+            Some("an optional tag")
+        );
+    }
+
+    #[test]
+    fn resolve_union_single_description_used_verbatim() {
+        // Decision #6, |D| == 1: the lone description speaks for the union; no
+        // `a union type of:` wrapper.
+        let root = json!({
+            "type": "object",
+            "properties": {
+                "width": { "anyOf": [
+                    { "type": "number", "description": "the element width" },
+                    { "type": "string" }
+                ] }
+            }
+        });
+        let p = problem("/width", ValidationProblemKind::Invalid, None, None);
+        assert_eq!(
+            resolve_problem_description(&root, &p).as_deref(),
+            Some("the element width")
+        );
+    }
+
+    #[test]
+    fn resolve_union_multiple_descriptions_articulated() {
+        // Decision #6, |D| >= 2: arms with a description use it; a third,
+        // description-less arm falls back to its type label.
+        let root = json!({
+            "type": "object",
+            "properties": {
+                "payload": { "anyOf": [
+                    { "type": "string", "description": "a raw message body" },
+                    { "type": "array", "description": "a list of templated messages" },
+                    { "type": "object" }
+                ] }
+            }
+        });
+        let p = problem("/payload", ValidationProblemKind::Invalid, None, None);
+        assert_eq!(
+            resolve_problem_description(&root, &p).as_deref(),
+            Some("a union type of: a raw message body | a list of templated messages | object")
+        );
+    }
+
+    #[test]
+    fn resolve_union_no_descriptions_uses_type_labels() {
+        // Decision #6, |D| == 0: articulate from type labels alone.
+        let root = json!({
+            "type": "object",
+            "properties": {
+                "value": { "anyOf": [
+                    { "type": "number" },
+                    { "type": "string" }
+                ] }
+            }
+        });
+        let p = problem("/value", ValidationProblemKind::Invalid, None, None);
+        assert_eq!(
+            resolve_problem_description(&root, &p).as_deref(),
+            Some("a union type of: number | string")
+        );
+    }
+
+    #[test]
+    fn resolve_union_excludes_null_sentinel() {
+        // The `{ "type": "null" }` sentinel is excluded from both the `D` count
+        // and the articulation — so a nullable two-arm union with one
+        // description reads that description verbatim, and a nullable two-arm
+        // union with no descriptions is a lone non-null arm (not articulated).
+        let described = json!({
+            "type": "object",
+            "properties": {
+                "value": { "anyOf": [
+                    { "type": "null" },
+                    { "type": "number", "description": "a count" },
+                    { "type": "string" }
+                ] }
+            }
+        });
+        let p = problem("/value", ValidationProblemKind::Invalid, None, None);
+        assert_eq!(
+            resolve_problem_description(&described, &p).as_deref(),
+            Some("a count"),
+            "null sentinel must not count toward D"
+        );
+
+        let labels_only = json!({
+            "type": "object",
+            "properties": {
+                "value": { "anyOf": [
+                    { "type": "null" },
+                    { "type": "number" },
+                    { "type": "string" }
+                ] }
+            }
+        });
+        assert_eq!(
+            resolve_problem_description(&labels_only, &p).as_deref(),
+            Some("a union type of: number | string"),
+            "null sentinel must not appear in the articulation"
+        );
+    }
+
+    #[test]
+    fn resolve_property_without_description_is_none() {
+        let root = json!({
+            "type": "object",
+            "properties": { "title": { "type": "string" } }
+        });
+        let p = problem("/title", ValidationProblemKind::Type, None, None);
+        assert_eq!(resolve_problem_description(&root, &p), None);
+    }
+
+    #[test]
+    fn resolve_additional_properties_failure_is_none() {
+        // Decision #10: the resolver must not reuse the parent object's
+        // description for an undeclared-key failure. The failure path points at
+        // the parent (`/config`), which *does* carry a description here.
+        let root = json!({
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "description": "the config object",
+                    "additionalProperties": false,
+                    "properties": { "name": { "type": "string" } }
+                }
+            }
+        });
+        let mut p = problem("/config", ValidationProblemKind::Invalid, None, None);
+        p.message = "Additional properties are not allowed ('bogus' was unexpected)".to_string();
+        assert_eq!(resolve_problem_description(&root, &p), None);
+    }
+
+    #[test]
+    fn resolve_unresolvable_path_is_none_no_panic() {
+        let root = json!({
+            "type": "object",
+            "properties": { "title": { "type": "string", "description": "x" } }
+        });
+        // Path descends into a property the schema does not declare.
+        let p = problem("/missing/deeper", ValidationProblemKind::Type, None, None);
+        assert_eq!(resolve_problem_description(&root, &p), None);
+    }
+
+    #[test]
+    fn resolve_root_union_reads_winning_arm() {
+        // arm_index: Some(1) resolves against anyOf[1] (Decision: base schema).
+        let root = json!({
+            "anyOf": [
+                {
+                    "type": "object",
+                    "properties": { "doc": { "type": "string", "description": "arm 0 doc" } }
+                },
+                {
+                    "type": "object",
+                    "properties": { "doc": { "type": "number", "description": "arm 1 doc" } }
+                }
+            ]
+        });
+        let p = problem("/doc", ValidationProblemKind::Type, None, Some(1));
+        assert_eq!(
+            resolve_problem_description(&root, &p).as_deref(),
+            Some("arm 1 doc")
         );
     }
 }

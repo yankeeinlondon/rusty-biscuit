@@ -1,7 +1,7 @@
 //! `md code-block` subcommand implementation.
 
 use crate::args::{CodeBlockOutput, Cli};
-use crate::output::{OutputArtifact, open_output_artifact};
+use crate::artifact::{OutputArtifact, open_output_artifact};
 use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Context, Result, eyre};

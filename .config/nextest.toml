@@ -34,6 +34,19 @@ leak-timeout = { period = "100ms", result = "fail" }
 filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# Proptest-driven acceptance test exploring many randomized compose conditions.
+# Finishes in ~7s isolated but is squeezed toward (and past) the default 30s
+# termination ceiling under full parallel `just test darkmatter` load. Give it
+# the same generous leash as the rate-limit pause test so contention never kills
+# a healthy run while a genuine hang still trips the longer window.
+#
+# NOTE: lib unit tests match in filtersets by their *full* module path, so a
+# bare-leaf `test(=execution_subset_…)` matches nothing. The full path is
+# required for this override to bind.
+[[profile.default.overrides]]
+filter = 'test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
 # Browser-tier tests spawn real headless Chrome, whose multi-process teardown
 # (helper + crashpad processes that inherit the test's stdout) routinely takes
 # longer than the default 100ms leak window — producing spurious LEAK-FAILs even
@@ -44,6 +57,28 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 [[profile.default.overrides]]
 filter = 'test(/browser_/)'
 leak-timeout = { period = "5s", result = "fail" }
+
+# The `preflight_graph_*` acceptance tests exercise preflight-graph reuse over
+# `::file` transclusion only — they spawn no subprocess at all (the echo-spawning
+# acceptance tests live under different names and are deliberately excluded). Yet
+# under full-suite parallel load nextest's post-test pipe-drain check occasionally
+# flags them with a spurious LEAK-FAIL (exits code 0, but the pipe read lags the
+# 100ms window). Same situation as the worktree note below: give a 1s grace
+# window; keep `result = "fail"` so a genuine leak still fails. The strict 100ms
+# window stays in force for the sibling acceptance tests that do spawn `echo`.
+[[profile.default.overrides]]
+filter = 'test(/markdown::compose::preflight::acceptance_tests::preflight_graph_/)'
+leak-timeout = { period = "1s", result = "fail" }
+
+# worktree's lib/CLI tests are fast and spawn only short-lived git children.
+# Under heavy parallel load nextest's post-test pipe-drain check occasionally
+# flags spurious LEAK-FAILs on tests that provably spawn nothing (e.g.
+# `classify_dirty_lines_clean`, a pure string parse). Give the runner a 1s
+# grace window to observe the closed pipe; keep `result = "fail"` so a genuine
+# runaway child still fails (1s is far longer than any real git child here).
+[[profile.default.overrides]]
+filter = 'package(worktree) + package(worktree-cli)'
+leak-timeout = { period = "1s", result = "fail" }
 
 [profile.ci]
 # Same behavior for CI environment
@@ -59,8 +94,30 @@ junit = { path = "test-results.xml" }
 filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# See the default-profile note: the randomized-conditions proptest can approach
+# the 30s termination ceiling under full parallel load. CI hosts may be slower
+# still, so the same generous leash applies. Full module path required (see the
+# default-profile note: a bare-leaf filter matches no lib unit test).
+[[profile.ci.overrides]]
+filter = 'test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
 # See the default-profile note: headless-Chrome teardown exceeds the 100ms leak
 # window. CI hosts may be slower still, so the same generous grace applies.
 [[profile.ci.overrides]]
 filter = 'test(/browser_/)'
 leak-timeout = { period = "5s", result = "fail" }
+
+# See the default-profile note: the no-subprocess `preflight_graph_*` acceptance
+# tests draw spurious LEAK-FAILs under parallel load. CI hosts may be slower, so
+# the same 1s grace applies; `result = "fail"` still catches a genuine leak.
+[[profile.ci.overrides]]
+filter = 'test(/markdown::compose::preflight::acceptance_tests::preflight_graph_/)'
+leak-timeout = { period = "1s", result = "fail" }
+
+# See the default-profile note: spurious LEAK-FAILs on worktree's fast,
+# no-child tests under parallel load. CI hosts may be slower, so the same 1s
+# grace applies; `result = "fail"` still catches a genuine runaway child.
+[[profile.ci.overrides]]
+filter = 'package(worktree) + package(worktree-cli)'
+leak-timeout = { period = "1s", result = "fail" }
