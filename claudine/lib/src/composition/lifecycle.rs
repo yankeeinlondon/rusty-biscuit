@@ -1696,33 +1696,86 @@ fn parse_short_form_action(
         });
     }
 
-    let raw_args = match args_raw {
-        Some(args_str) => super::loop_config::split_action_args(args_str).map_err(|e| match e {
-            CompositionError::LoopInvalid(msg) => CompositionError::LifecycleActionInvalidShortForm {
-                source_path: source_file.to_path_buf(),
-                property: property.to_string(),
-                raw: raw.to_string(),
-                message: msg,
-            },
-            // split_action_args only returns LoopInvalid; route anything else
-            // through the same diagnostic for a consistent surface.
-            other => CompositionError::LifecycleActionInvalidShortForm {
-                source_path: source_file.to_path_buf(),
-                property: property.to_string(),
-                raw: raw.to_string(),
-                message: other.to_string(),
-            },
-        })?,
-        None => Vec::new(),
+    // Single-parameter verbs take the whole parenthesized body as one literal
+    // argument: no comma splitting and no quoting required (`warn(hello world)`,
+    // `error(invalid phase: 6, too big)`). `{{ … }}` interpolation has already
+    // been applied upstream by Darkmatter, so the body is final text. Only the
+    // genuinely multi-argument verbs (side-effects, expression functions) and
+    // the numeric/zero-arg control verbs use the comma-separated expression
+    // grammar in `parse_action_arg`.
+    let args = if is_single_text_arg_verb(verb) {
+        match args_raw.map(str::trim) {
+            Some(body) if !body.is_empty() => {
+                vec![Expr::StringLiteral(unwrap_wrapping_quotes(body).to_string())]
+            }
+            _ => Vec::new(),
+        }
+    } else {
+        let raw_args = match args_raw {
+            Some(args_str) => super::loop_config::split_action_args(args_str).map_err(|e| match e {
+                CompositionError::LoopInvalid(msg) => {
+                    CompositionError::LifecycleActionInvalidShortForm {
+                        source_path: source_file.to_path_buf(),
+                        property: property.to_string(),
+                        raw: raw.to_string(),
+                        message: msg,
+                    }
+                }
+                // split_action_args only returns LoopInvalid; route anything
+                // else through the same diagnostic for a consistent surface.
+                other => CompositionError::LifecycleActionInvalidShortForm {
+                    source_path: source_file.to_path_buf(),
+                    property: property.to_string(),
+                    raw: raw.to_string(),
+                    message: other.to_string(),
+                },
+            })?,
+            None => Vec::new(),
+        };
+
+        let mut args = Vec::with_capacity(raw_args.len());
+        for arg in raw_args {
+            let expr = parse_action_arg(signal, &arg, raw, source_file)?;
+            args.push(expr);
+        }
+        args
     };
 
-    let mut args = Vec::with_capacity(raw_args.len());
-    for arg in raw_args {
-        let expr = parse_action_arg(signal, &arg, raw, source_file)?;
-        args.push(expr);
-    }
-
     build_action(signal, verb, args, raw, /* no_error */ false, source_file)
+}
+
+/// Verbs whose short form takes a single free-text argument: the entire
+/// parenthesized body is that one argument, taken literally (no comma
+/// splitting, quotes optional). Covers every communication channel plus
+/// `shell`, `error`, `proxy`, `resume`, and `defer`.
+///
+/// Excluded: the multi-argument side-effect / expression-function verbs (which
+/// keep the comma-separated expression grammar) and the numeric/zero-argument
+/// control verbs `retry`, `stop`, and `skip` (e.g. `retry(3)`'s argument must
+/// stay a number, not become the string `"3"`).
+fn is_single_text_arg_verb(verb: &str) -> bool {
+    CommunicationChannel::from_verb(verb).is_some()
+        || matches!(verb, "shell" | "error" | "proxy" | "resume" | "defer")
+}
+
+/// Strip one layer of matching wrapping quotes from `s` when it is exactly a
+/// single quoted literal — the same quote character at both ends and not
+/// recurring inside. Leaves the string untouched otherwise, so an unquoted
+/// message, or one that merely contains a quote (`error(it's 6, too big)`),
+/// is preserved verbatim. This keeps existing quoted forms (`warn('hi')`)
+/// working while making the quotes optional.
+fn unwrap_wrapping_quotes(s: &str) -> &str {
+    let bytes = s.as_bytes();
+    if bytes.len() >= 2 {
+        let q = bytes[0];
+        if (q == b'\'' || q == b'"') && bytes[bytes.len() - 1] == q {
+            let inner = &s[1..s.len() - 1];
+            if !inner.as_bytes().contains(&q) {
+                return inner;
+            }
+        }
+    }
+    s
 }
 
 /// Convert a raw JSON value into a Darkmatter `Expr`.
@@ -2949,10 +3002,19 @@ fn normalize_empty_string(field: &mut Option<String>) {
 /// Serde's message format is:
 /// `unknown field `X`, expected one of `A`, `B`, `C``
 ///
-/// Returns `(Some("X"), vec!["A", "B", "C"])` on match, or
-/// `(None, LIFECYCLE_NOTIFICATION_FIELDS)` as a fallback.
+/// Returns `(Some("X"), vec!["A", "B", "C"])` on match. For any serde error
+/// that is **not** an unknown-field error (e.g. `invalid type: map, expected
+/// a sequence` when `stack:` is authored as a map instead of a list) returns
+/// `(None, vec![])` — the caller renders the raw serde message rather than a
+/// fabricated "Unknown property" diagnostic, since the "expected" token in a
+/// type-mismatch message ("expected a sequence") is unrelated to the field
+/// catalog.
 fn parse_serde_unknown_field(err: &serde_json::Error) -> (Option<String>, Vec<String>) {
     let msg = err.to_string();
+
+    if !msg.contains("unknown field") {
+        return (None, Vec::new());
+    }
 
     // Extract unknown field name between first pair of backticks.
     let unknown_field = extract_backtick_value(&msg, 0);
@@ -4607,6 +4669,59 @@ mod tests {
         assert!(expected_fields.contains(&"say".to_string()));
     }
 
+    #[test]
+    fn stack_as_map_reports_sequence_mismatch_not_unknown_property() {
+        use biscuit_terminal::errors::BlockError;
+        use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+        // `stack:` authored as a map (its items missing the leading `-`)
+        // rather than a YAML list. This is a type mismatch, NOT an
+        // unknown-field error, so no field name / "Expected one of" catalog
+        // must be fabricated.
+        let frontmatter = json!({
+            "initialize": {
+                "stack": {
+                    "when": "phase >= total_phases",
+                    "action": [{ "warn": "too big" }]
+                }
+            }
+        });
+
+        let err = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap_err();
+        let CompositionError::LifecycleInvalid {
+            property,
+            message,
+            unknown_field,
+            expected_fields,
+            ..
+        } = &err
+        else {
+            panic!("expected LifecycleInvalid, got {err:?}");
+        };
+
+        assert_eq!(property, "initialize");
+        assert!(unknown_field.is_none());
+        assert!(expected_fields.is_empty());
+        assert!(
+            message.contains("expected a sequence"),
+            "raw serde message should be preserved: {message}"
+        );
+
+        let rendered = strip_escape_codes(err.report_block_error_optimistic(Some(80)));
+        assert!(
+            !rendered.contains("Unknown property"),
+            "must not fabricate an unknown-property diagnostic: {rendered}"
+        );
+        assert!(
+            !rendered.contains("Expected one of"),
+            "must not fabricate a field catalog: {rendered}"
+        );
+        assert!(
+            rendered.contains("stack"),
+            "hint should point at the `stack` list shape: {rendered}"
+        );
+    }
+
     // =====================================================================
     // Phase 2: extended event inventory, lifecycle concerns, stacks
     // =====================================================================
@@ -4773,14 +4888,21 @@ mod tests {
     }
 
     #[test]
-    fn parses_short_form_say_with_expression_arg() {
+    fn single_text_arg_is_taken_literally() {
+        // A single-parameter action takes its whole parens body literally —
+        // `ctx.repo` is the text, not the context expression. Use `{{ … }}`
+        // (resolved at render time) to interpolate a value.
         let fm = json!({
             "start": {
                 "stack": [{"action": "say(ctx.repo)"}]
             }
         });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-        let _ = config.stack(LifecycleSignal::Start).expect("start stack");
+        let stack = config.stack(LifecycleSignal::Start).expect("start stack");
+        let LifecycleActionKind::Communication(comm) = &stack[0].actions[0].kind else {
+            panic!("expected communication action");
+        };
+        assert_eq!(comm.message, Expr::StringLiteral("ctx.repo".to_string()));
     }
 
     #[test]
@@ -5041,21 +5163,29 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unquoted_multi_word_literal_in_short_form() {
-        let fm = json!({
-            "start": {
-                "stack": [{"action": "say(using codex)"}]
-            }
-        });
-        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
-        match err {
-            CompositionError::LifecycleActionInvalidShortForm { message, .. } => {
-                assert!(
-                    message.contains("unquoted multi-word"),
-                    "expected multi-word hint, got: {message}"
-                );
-            }
-            other => panic!("expected LifecycleActionInvalidShortForm, got: {other:?}"),
+    fn accepts_unquoted_multi_word_literal_in_single_text_short_form() {
+        // Single-parameter verbs no longer require quotes: the whole body is
+        // one literal argument. Commas inside are part of the message (not
+        // argument separators), and existing wrapping quotes are unwrapped.
+        let cases = [
+            ("say(using codex)", "using codex"),
+            ("warn(phase 6, too big)", "phase 6, too big"),
+            ("error('invalid phase: 6')", "invalid phase: 6"),
+            ("effect(crowd-applause)", "crowd-applause"),
+        ];
+        for (action, expected) in cases {
+            let fm = json!({ "blocked": { "stack": [{"action": action}] } });
+            let config = parse_lifecycle_config(&fm, dummy_path())
+                .unwrap_or_else(|e| panic!("`{action}` should parse, got: {e:?}"));
+            let stack = config.stack(LifecycleSignal::Blocked).expect("blocked stack");
+            let message = match &stack[0].actions[0].kind {
+                LifecycleActionKind::Communication(c) => &c.message,
+                LifecycleActionKind::LifecycleControl(LifecycleControlAction::Error {
+                    reason: Some(r),
+                }) => r,
+                other => panic!("unexpected action kind for `{action}`: {other:?}"),
+            };
+            assert_eq!(message, &Expr::StringLiteral(expected.to_string()), "{action}");
         }
     }
 
@@ -5345,34 +5475,34 @@ mod tests {
     }
 
     #[test]
-    fn err_member_access_in_start_stack_is_rejected() {
-        // `err.msg` is still a bare `err` reference.
+    fn err_member_access_in_single_text_arg_is_literal() {
+        // `say(...)` is a single-parameter action, so its whole body is taken
+        // literally: `err.msg` is the text, not the `err` global. There is
+        // nothing to reject. To reference the error in an error-carrying event,
+        // interpolate instead: `say({{err.msg}})`.
         let fm = json!({
             "start": {
                 "stack": [{"action": "say(err.msg)"}]
             }
         });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-        let err = validate_no_err_in_no_error_events(&config, dummy_path()).unwrap_err();
-        assert!(matches!(
-            err,
-            CompositionError::LifecycleErrNotAvailable { event, .. } if event == "start"
-        ));
+        assert!(validate_no_err_in_no_error_events(&config, dummy_path()).is_ok());
     }
 
     #[test]
-    fn err_in_initialize_loop_success_is_rejected() {
+    fn err_in_single_text_arg_is_literal_across_no_error_events() {
+        // Bare `err` in a single-parameter action arg is literal text in every
+        // no-error event — the err-availability guard only governs expression
+        // surfaces (e.g. `when:` clauses), not literal message bodies.
         for ev in ["initialize", "success"] {
             let fm = json!({
                 ev: {"stack": [{"action": "say(err)"}]}
             });
             let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-            let err = validate_no_err_in_no_error_events(&config, dummy_path()).unwrap_err();
-            let returned_event = match err {
-                CompositionError::LifecycleErrNotAvailable { event, .. } => event,
-                other => panic!("expected err rejection for {ev}, got: {other:?}"),
-            };
-            assert_eq!(returned_event, ev);
+            assert!(
+                validate_no_err_in_no_error_events(&config, dummy_path()).is_ok(),
+                "bare `err` in a {ev} message arg should be literal, not rejected"
+            );
         }
         // Loop concerns live under `loop:`.
         let fm = json!({
@@ -5382,13 +5512,7 @@ mod tests {
             }
         });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-        let err = validate_no_err_in_no_error_events(&config, dummy_path()).unwrap_err();
-        match err {
-            CompositionError::LifecycleErrNotAvailable { event, .. } => {
-                assert_eq!(event, "loop");
-            }
-            other => panic!("expected err rejection for loop, got: {other:?}"),
-        }
+        assert!(validate_no_err_in_no_error_events(&config, dummy_path()).is_ok());
     }
 
     #[test]
@@ -5436,25 +5560,23 @@ mod tests {
     }
 
     #[test]
-    fn err_in_control_action_reason_in_start_is_rejected() {
-        // `error(err.msg)` in `start` references the `err` global.
+    fn err_in_control_reason_single_text_arg_is_literal() {
+        // `error(...)` is single-parameter: its reason is literal text, so a
+        // bare `err.msg` is not a reference to the `err` global and is not
+        // rejected.
         let fm = json!({
             "start": {
                 "stack": [{"action": "error(err.msg)"}]
             }
         });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-        let err = validate_no_err_in_no_error_events(&config, dummy_path()).unwrap_err();
-        assert!(matches!(
-            err,
-            CompositionError::LifecycleErrNotAvailable { event, .. } if event == "start"
-        ));
+        assert!(validate_no_err_in_no_error_events(&config, dummy_path()).is_ok());
     }
 
     #[test]
-    fn err_in_shell_command_in_loop_is_rejected() {
-        // A shell command whose `command` expression references the `err`
-        // global in the `loop` event (a no-error event).
+    fn err_in_shell_command_single_text_arg_is_literal() {
+        // `shell(...)` is single-parameter: the command body is literal text,
+        // so a bare `err.msg` is not an `err`-global reference.
         let fm = json!({
             "loop": {
                 "while": "true",
@@ -5462,13 +5584,7 @@ mod tests {
             }
         });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-        let err = validate_no_err_in_no_error_events(&config, dummy_path()).unwrap_err();
-        match err {
-            CompositionError::LifecycleErrNotAvailable { event, .. } => {
-                assert_eq!(event, "loop");
-            }
-            other => panic!("expected err rejection, got: {other:?}"),
-        }
+        assert!(validate_no_err_in_no_error_events(&config, dummy_path()).is_ok());
     }
 
     // -- stack leak scan ---------------------------------------------------
@@ -5624,7 +5740,13 @@ mod tests {
     }
 
     #[test]
-    fn stack_undefined_bare_variable_in_action_arg_is_rejected() {
+    fn stack_bare_token_in_action_arg_is_literal_not_undefined_variable() {
+        // A bare token in a single-parameter action arg is now literal text,
+        // so it is NOT an undefined-variable reference. (Real references go
+        // through `{{ … }}` interpolation, which is intentionally *not*
+        // compile-time-checked here because runtime globals like `{{err.msg}}`
+        // are legitimately undefined until render. The `when:`-clause guard
+        // still catches undefined variables in conditions.)
         let fm = json!({
             "start": {
                 "stack": [{"action": "say(missing_var)"}]
@@ -5633,14 +5755,11 @@ mod tests {
         let raw = fm_from_json(fm.clone());
         let effective = json!({});
         let lifecycle = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-        let err = validate_no_undefined_lifecycle_variables(&raw, &effective, &lifecycle, dummy_path())
-            .unwrap_err();
-        match err {
-            CompositionError::LifecycleUndefinedVariable { variable, .. } => {
-                assert_eq!(variable, "missing_var");
-            }
-            other => panic!("expected undefined variable, got: {other:?}"),
-        }
+        assert!(
+            validate_no_undefined_lifecycle_variables(&raw, &effective, &lifecycle, dummy_path())
+                .is_ok(),
+            "a bare token in a literal message arg is not a variable reference"
+        );
     }
 
     // -- lifecycle globals vs body/frontmatter interpolation --------------

@@ -1261,16 +1261,11 @@ impl BlockError for CompositionError {
             CompositionError::WithFrontmatter { inner, .. } => inner.status_block(term),
             CompositionError::LifecycleInvalid {
                 property,
+                message,
                 source_file,
                 unknown_field,
                 expected_fields,
-                ..
             } => {
-                let dotted_property = match unknown_field {
-                    Some(field) => format!("{property}.{field}"),
-                    None => property.clone(),
-                };
-
                 let file_display = source_file.display().to_string();
                 let escaped = escape_prose_path(&file_display);
                 let file_link = format!(
@@ -1281,14 +1276,52 @@ impl BlockError for CompositionError {
                     ))
                 );
 
-                let mut body =
-                    format!("Unknown property <cyan>`{dotted_property}`</cyan> in {file_link}");
-                if !expected_fields.is_empty() {
-                    body.push_str("\n\n<b>Expected one of:</b>");
-                    for field in expected_fields {
-                        body.push_str(&format!("\n- <cyan>`{field}`</cyan>"));
+                // An unknown-field error carries a field catalog; render the
+                // "Unknown property / Expected one of" form. Any other serde
+                // error (e.g. `invalid type: map, expected a sequence` when
+                // `stack:` is a map instead of a list) renders its raw message
+                // verbatim — fabricating an "Unknown property" diagnostic with
+                // the comm-field list would be actively misleading.
+                let is_unknown_field = unknown_field.is_some() || !expected_fields.is_empty();
+
+                let (body, hint) = if is_unknown_field {
+                    let dotted_property = match unknown_field {
+                        Some(field) => format!("{property}.{field}"),
+                        None => property.clone(),
+                    };
+                    let mut body = format!(
+                        "Unknown property <cyan>`{dotted_property}`</cyan> in {file_link}"
+                    );
+                    if !expected_fields.is_empty() {
+                        body.push_str("\n\n<b>Expected one of:</b>");
+                        for field in expected_fields {
+                            body.push_str(&format!("\n- <cyan>`{field}`</cyan>"));
+                        }
                     }
-                }
+                    (
+                        body,
+                        "Check the lifecycle frontmatter section in your prompt file."
+                            .to_string(),
+                    )
+                } else {
+                    let body = format!(
+                        "Invalid value for lifecycle property <cyan>`{property}`</cyan> in \
+                         {file_link}\n\n{}",
+                        escape_prose_path(message)
+                    );
+                    // The only sequence-typed field on a lifecycle event block
+                    // is `stack`, so a "expected a sequence" mismatch almost
+                    // always means `stack:` was authored as a map.
+                    let hint = if message.contains("expected a sequence") {
+                        "The `stack:` property must be a YAML list of stack items \
+                         (each item begins with `-`)."
+                            .to_string()
+                    } else {
+                        "Check the lifecycle frontmatter section in your prompt file."
+                            .to_string()
+                    };
+                    (body, hint)
+                };
 
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new(
@@ -1296,7 +1329,7 @@ impl BlockError for CompositionError {
                         "invalid lifecycle property",
                     ))
                     .body(body)
-                    .hint("Check the lifecycle frontmatter section in your prompt file.")
+                    .hint(hint)
             }
             CompositionError::LifecycleInterpolationLeak {
                 source_path,

@@ -1124,12 +1124,15 @@ fn emit_preflight_blocked_and_finalize_propagates_err_msg_into_blocked_stack() {
     };
     use serde_json::json;
 
+    // `err` reaches a message via `{{ … }}` interpolation (resolved at render
+    // time against the runtime stack context), not a bare expression arg — a
+    // single-parameter action body is literal text.
     let fm = json!({
         "blocked": {
-            "stack": [{"action": "stderr(err.msg)"}]
+            "stack": [{"action": "stderr({{err.msg}})"}]
         },
         "finalize": {
-            "stack": [{"action": "stderr('finalize')"}]
+            "stack": [{"action": "stderr(finalize)"}]
         }
     });
     let config = parse_lifecycle_config(&fm, Path::new("/tmp/test.md")).unwrap();
