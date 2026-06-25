@@ -1536,12 +1536,12 @@ mod tests {
                 json!({
                     "until": "phase > 2",
                     "action": "increment(phase)",
-                    "stack": [{"action": "append_line('events.log', 'gate')"}],
+                    "stack": [{"action": {"append_line": ["events.log", "gate"]}}],
                 }),
             ),
-            ("initialize", json!({"stack": [{"action": "append_line('events.log', 'initialize')"}]})),
-            ("start", json!({"stack": [{"action": "append_line('events.log', 'start')"}]})),
-            ("finalize", json!({"stack": [{"action": "append_line('events.log', 'finalize')"}]})),
+            ("initialize", json!({"stack": [{"action": {"append_line": ["events.log", "initialize"]}}]})),
+            ("start", json!({"stack": [{"action": {"append_line": ["events.log", "start"]}}]})),
+            ("finalize", json!({"stack": [{"action": {"append_line": ["events.log", "finalize"]}}]})),
         ]);
         let config = resolve_loop_config(&source).unwrap().unwrap();
 
@@ -2676,7 +2676,7 @@ mod tests {
         let config = counter_loop(3);
         let lifecycle = lifecycle_from(json!({
             "initialize": { "stack": [{ "action": "skip" }] },
-            "finalize": { "stack": [{ "action": "append_line('never.log', 'finalize')" }] },
+            "finalize": { "stack": [{ "action": {"append_line": ["never.log", "finalize"]} }] },
         }));
         let emitter = SignalRecorder::default();
         let invocations = RefCell::new(0usize);
@@ -2719,7 +2719,7 @@ mod tests {
     fn loop_initialize_error_routes_to_failure_and_finalize() {
         let config = counter_loop(3);
         let lifecycle = lifecycle_from(json!({
-            "initialize": { "stack": [{ "action": "error('preflight refused')" }] },
+            "initialize": { "stack": [{ "action": {"error": "preflight refused"} }] },
             "failure": { "stderr": "fail" },
             "finalize": { "stderr": "final" },
         }));
@@ -2765,7 +2765,7 @@ mod tests {
     /// loop untouched without hard-coding the engine's iteration arithmetic.
     #[test]
     fn loop_initialize_stop_proceeds_into_iterations() {
-        let run = |action: &str| {
+        let run = |action: serde_json::Value| {
             let config = counter_loop(3);
             let lifecycle = lifecycle_from(json!({
                 "initialize": { "stack": [{ "action": action }] },
@@ -2783,8 +2783,8 @@ mod tests {
             (result, invocations.into_inner())
         };
 
-        let (stop_result, stop_invocations) = run("stop");
-        let (baseline_result, baseline_invocations) = run("info('init ran')");
+        let (stop_result, stop_invocations) = run(json!("stop"));
+        let (baseline_result, baseline_invocations) = run(json!({ "info": "init ran" }));
 
         assert!(stop_result.error.is_none(), "stop is benign: {stop_result:?}");
         assert!(stop_invocations > 0, "the loop must run after a benign stop");
@@ -2812,7 +2812,7 @@ mod tests {
 
         let config = counter_loop(3);
         let lifecycle = lifecycle_from(json!({
-            "initialize": { "stack": [{ "action": "proxy('target.md')" }] },
+            "initialize": { "stack": [{ "action": {"proxy": "target.md"} }] },
             "finalize": { "stderr": "final" },
         }));
         let emitter = SignalRecorder::default();
@@ -2855,7 +2855,7 @@ mod tests {
 
         let config = counter_loop(3);
         let lifecycle = lifecycle_from(json!({
-            "initialize": { "stack": [{ "action": "proxy('does-not-exist.md')" }] },
+            "initialize": { "stack": [{ "action": {"proxy": "does-not-exist.md"} }] },
             "finalize": { "stderr": "final" },
         }));
         let emitter = SignalRecorder::default();
@@ -2907,7 +2907,7 @@ mod tests {
             on_rate_limit: None,
         };
         let lifecycle = lifecycle_from(json!({
-            "loop": { "stack": [{ "action": "error('gate rejected final state')" }] },
+            "loop": { "stack": [{ "action": {"error": "gate rejected final state"} }] },
         }));
         let emitter = SignalRecorder::default();
         let invocations = RefCell::new(0usize);
@@ -2964,7 +2964,7 @@ mod tests {
             on_rate_limit: None,
         };
         let lifecycle = lifecycle_from(json!({
-            "loop": { "stack": [{ "action": "shell('false')" }] },
+            "loop": { "stack": [{ "action": {"shell": "false"} }] },
         }));
         let emitter = SignalRecorder::default();
         let invocations = RefCell::new(0usize);

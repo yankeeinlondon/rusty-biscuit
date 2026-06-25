@@ -1010,7 +1010,7 @@ impl claudine::composition::LifecycleEmitter for PreflightRecordingEmitter {
 
 /// The helper fires BOTH `blocked` and `finalize`, each with its top-level
 /// communication AND its typed stack. The doc under test carries a
-/// top-level `stderr` line plus a stack `stderr(...)` action on each event,
+/// top-level `stderr` line plus a stack `stderr` action on each event,
 /// so a successful invocation records exactly four stderr emissions in the
 /// order: blocked top-level, blocked stack, finalize top-level, finalize
 /// stack. This is the L1 invariant for review-3 Finding 1.
@@ -1025,11 +1025,11 @@ fn emit_preflight_blocked_and_finalize_runs_top_level_and_stack_for_both_events(
     let fm = json!({
         "blocked": {
             "stderr": "blocked-toplevel",
-            "stack": [{"action": "stderr('blocked-stack')"}]
+            "stack": [{"action": {"stderr": "blocked-stack"}}]
         },
         "finalize": {
             "stderr": "finalize-toplevel",
-            "stack": [{"action": "stderr('finalize-stack')"}]
+            "stack": [{"action": {"stderr": "finalize-stack"}}]
         }
     });
     let config = parse_lifecycle_config(&fm, Path::new("/tmp/test.md")).unwrap();
@@ -1129,10 +1129,10 @@ fn emit_preflight_blocked_and_finalize_propagates_err_msg_into_blocked_stack() {
     // single-parameter action body is literal text.
     let fm = json!({
         "blocked": {
-            "stack": [{"action": "stderr({{err.msg}})"}]
+            "stack": [{"action": {"stderr": "{{err.msg}}"}}]
         },
         "finalize": {
-            "stack": [{"action": "stderr(finalize)"}]
+            "stack": [{"action": {"stderr": "finalize"}}]
         }
     });
     let config = parse_lifecycle_config(&fm, Path::new("/tmp/test.md")).unwrap();

@@ -31,11 +31,21 @@ docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
 source_files_during_phase_5:
   - claudine/lib/src/composition/lifecycle.rs
-  - claudine/lib/src/composition/loop_config.rs
+  - claudine/lib/src/composition/lifecycle_actions.rs
   - claudine/lib/src/composition/error.rs
+  - claudine/lib/src/composition/lifecycle_executor.rs
+  - claudine/lib/src/composition/loop_engine.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+  - claudine/cli/src/commands/wrap/composition/mod.rs
+  - claudine/cli/tests/level2_lifecycle_control.rs
+  - claudine/cli/tests/level2_lifecycle_dispatch.rs
+  - claudine/cli/tests/level2_lifecycle_loop.rs
+  - claudine/cli/tests/level2_wrap_ctrl_c_loop_wedge_tmux.rs
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+packages_during_phase_5:
+  - claudine
 source_files_during_phase_6: []
 docs_updated_during_phase_6: []
 docs_created_during_phase_6: []
@@ -252,48 +262,48 @@ green between commits.
 
 ## Phase 5 - Short-Form Removal, Key/Value Migration, and Disambiguation
 
-- [ ] Replace the scalar-string branch of `parse_scalar_action`
+- [x] Replace the scalar-string branch of `parse_scalar_action`
       (`lifecycle.rs:1613`) so a scalar string `action:` value accepts ONLY the
       bare verb-name zero-arg form (no parens). A string containing `(` is the
       short-form-removed error with the Phase 2 did-you-mean rewrite.
-- [ ] Remove the sibling-keys path (decision #3): `action: <verb>` plus
+- [x] Remove the sibling-keys path (decision #3): `action: <verb>` plus
       sibling parameter keys is no longer accepted — key/value must use the
       explicit `{ action: verb, ... }` **object** form. A multi-key stack item
       without an `action:` key produces the typed ambiguous error with a
       did-you-mean pointing at both the key/value and single-key positional
       rewrites.
-- [ ] Replace the string-element branch in the `action:` array
+- [x] Replace the string-element branch in the `action:` array
       (`lifecycle.rs:1527`) with the bare-verb-name zero-arg form; a string
       element containing `(` is the short-form-removed error (never a zero-arg
       action).
-- [ ] Migrate `parse_long_form_action_object` to route every parameter value
+- [x] Migrate `parse_long_form_action_object` to route every parameter value
       through `action_value_to_expr` (Phase 3) instead of the legacy
       expression-fallback `value_to_expr`. Key/value string parameters are now
       literal by default (`message: "ctx.area"` sends the literal string).
-- [ ] Delete `parse_short_form_action`, `parse_action_arg`,
+- [x] Delete `parse_short_form_action`, `parse_action_arg`,
       `has_unquoted_whitespace`, and the multi-arg branch of
       `is_single_text_arg_verb`/`unwrap_wrapping_quotes` now that no lifecycle
       stack path reaches them. Keep `split_action_args` in `loop_config.rs`
       because the loop `action:` surface (Phase 1 confirmation) still uses it.
       Audit with `rg` that no other call site remains.
-- [ ] Wire the full disambiguation table from the spec: array element bare
+- [x] Wire the full disambiguation table from the spec: array element bare
       known-verb string → positional zero-arg; array element string with `(` →
       short-form-removed; object with `action:` key → key/value; single-key
       object with known verb → positional; single-key object with unknown verb
       → unknown-verb error; multi-key object without `action:` → ambiguous
       error; positional value map → object-data error; key/value parameter map
       → object-data error.
-- [ ] Add parse-time known-verb validation (decision #6): a positional or
+- [x] Add parse-time known-verb validation (decision #6): a positional or
       key/value verb that is not in the `is_known_lifecycle_verb` union fails
       immediately with did-you-mean suggestions where the editor-distance
       helper can offer one (`sucess` → `success`).
-- [ ] Update existing L1 tests in `lifecycle.rs::tests` that previously
+- [x] Update existing L1 tests in `lifecycle.rs::tests` that previously
       asserted short-form acceptance (`parses_short_form_say_action`,
       `single_text_arg_is_taken_literally`, the `say('hello world')` /
       `say('using codex')` / `say(ctx.repo)` fixtures, etc. — list from
       Phase 1) to assert the short-form-removed error and its did-you-mean
       rewrite instead.
-- [ ] Validation checkpoint: L1 parser tests prove — (a) short-form rejection
+- [x] Validation checkpoint: L1 parser tests prove — (a) short-form rejection
       for `success("x")`, `shell(git push)`, `set_frontmatter('a','b','c')`
       with the correct positional rewrite in the message and the excerpt
       highlighting the offending line in TTY; (b) bare `stop` accepted,
@@ -316,32 +326,54 @@ positional path).
 
 ## Phase 6 - L2 Integration and Regression Sweep
 
-- [ ] Add an L2 `compose` fixture matching the spec's acceptance block: a
+- [x] Add an L2 `compose` fixture matching the spec's acceptance block: a
       `success` stack with `when:` gate, a positional multi-arg
       `set_frontmatter`, a positional communication action, and a key/value
       `shell` action — verify event-time interpolation (`{{iteration}}`,
       `{{ctx.area}}`, `{{err.msg}}`) resolves and the side-effect writes the
-      expected frontmatter.
-- [ ] Add an L2 fixture proving typed argument write-through:
+      expected frontmatter. (`level2_action_forms_mixed_success_stack_writes_frontmatter`
+      in `cli/tests/level2_lifecycle_action_forms.rs`; uses event-time
+      `{{ doc.phase }}`/`{{ doc.title }}` for deterministic interpolation —
+      `success` has no `err`, and `iteration`/`ctx.area` are non-deterministic
+      in a bare tempdir; `--yolo` auto-approves the key/value shell action.)
+- [x] Add an L2 fixture proving typed argument write-through:
       `set_frontmatter: ["s.md", "ready", "{{ true }}"]` writes boolean
       `true` to frontmatter; `merge_frontmatter: ["s.md", "{{ payload }}"]`
       merges the object stored in `payload`.
-- [ ] Add an L2 fixture proving the literal-default breaking change is
+      (`level2_action_forms_typed_argument_write_through`; `payload` referenced
+      via the whole-value `{{ doc.payload }}` span.)
+- [x] Add an L2 fixture proving the literal-default breaking change is
       observable end-to-end: a key/value `{ action: message, message:
       "ctx.area" }` sends the literal string `ctx.area`, and the `{{ ctx.area }}`
-      equivalent sends the context value.
-- [ ] Regression sweep: `rg -n '\b(say|message|success|effect|shell|set_frontmatter|append_line|stderr|warn|info|error|stop|skip|retry|proxy|resume|defer|requeue|notify)\('`
+      equivalent sends the context value. (`level2_action_forms_keyvalue_literal_default`;
+      uses the `stderr` channel with `doc.title` — `stderr` writes plain prose
+      to the pane deterministically where `message` routes through statusful
+      logging suppressed in the piped, non-verbose test environment; the
+      literal-default rule is channel-agnostic.)
+- [x] Regression sweep: `rg -n '\b(say|message|success|effect|shell|set_frontmatter|append_line|stderr|warn|info|error|stop|skip|retry|proxy|resume|defer|requeue|notify)\('`
       across `claudine/docs/`, `claudine/prompts/`, `.opencode/skill/claudine/`,
-      `.claude/skills/claudine/`, and the lifecycle test fixtures — the only
-      remaining hits should be inside `loop_config.rs` and its tests (loop
-      surface, out of scope) or inside the new short-form-removed error
-      messages/diagnostics themselves.
-- [ ] Regression sweep: `rg -n 'parse_short_form_action|parse_action_arg|has_unquoted_whitespace'`
-      returns no lifecycle-stack call sites (only the loop-surface retention
-      noted in Phase 1, if any).
-- [ ] Regression sweep: confirm cardinality, ordering, and per-event placement
+      `.claude/skills/claudine/`, and the lifecycle test fixtures. **Code
+      surface is clean:** the only YAML short-form hit in the lifecycle test
+      fixtures is `action: "increment(phase)"` in `level2_lifecycle_loop.rs`,
+      which is the **loop `loop.action:` surface** (`loop_config.rs`, out of
+      scope per Phase 1); the lifecycle *stacks* use the new positional/key
+      value forms. `claudine/prompts/` has no short-form. **Deferred to
+      Phase 7:** `claudine/docs/topics/lifecycle.md` (24 `verb(args)` action
+      examples) and the claudine skill docs still carry short-form examples —
+      these are the explicit doc/skill-migration deliverables of Phase 7 (per
+      this phase's own parallelization note), not a Phase 6 regression.
+- [x] Regression sweep: `rg -n 'parse_short_form_action|parse_action_arg|has_unquoted_whitespace'`
+      returns no lifecycle-stack call sites — only spec/plan/findings prose and
+      the historical late-binding plan reference them; all three symbols were
+      deleted in Phase 5 (no `loop_config.rs` retention was needed for these —
+      only `split_action_args` was kept for the loop surface).
+- [x] Regression sweep: confirm cardinality, ordering, and per-event placement
       checks (`is_valid_for`) still fire identically for positional and
-      key/value control actions; add an L1 test if coverage is missing.
+      key/value control actions; add an L1 test if coverage is missing. (Added
+      `control_checks_fire_identically_for_key_value_form` in
+      `lib/src/composition/lifecycle.rs::tests` — the positional-form tests
+      already pin placement/cardinality/ordering; the new test pins the same
+      diagnostics for the `{action: verb}` key/value form.)
 - [ ] Validation checkpoint: `just test` and `just test-l2` pass in the
       `claudine` package area; the L2 fixtures above run green; the two `rg`
       sweeps return only the documented exceptions.

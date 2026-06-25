@@ -868,7 +868,7 @@ fn enqueue_requeue_entry(
 enum TargetInitializeAction {
     /// Target's `initialize` completed cleanly; proceed to pre-flight/start.
     Proceed,
-    /// Target's `initialize` opted out via `skip()`; exit the run cleanly.
+    /// Target's `initialize` opted out via `skip`; exit the run cleanly.
     ExitCleanly,
     /// Target's `initialize` could not be honored; abort with this error.
     Abort(color_eyre::eyre::Report),
@@ -2267,7 +2267,7 @@ mod terminal_event_tests {
     /// Build a fixture whose `success` and `blocked` stacks each append one
     /// line to `events.log` (a side-effect counter) and carry a top-level
     /// `stderr` communication. When `with_error` is set, the named event's
-    /// stack ends in `error('downgraded')` so it routes to `failure`.
+    /// stack ends in `{error: "downgraded"}` so it routes to `failure`.
     fn fixture(frontmatter: serde_json::Value) -> Fixture {
         let dir = tempfile::tempdir().unwrap();
         let source_path = dir.path().join("prompt.md");
@@ -2300,7 +2300,7 @@ mod terminal_event_tests {
         let fx = fixture(serde_json::json!({
             "success": {
                 "stderr": "succeeded",
-                "stack": [{"action": "append_line('events.log', 'ran')"}]
+                "stack": [{"action": {"append_line": ["events.log", "ran"]}}]
             }
         }));
         let emitter = RecordingEmitter::default();
@@ -2343,11 +2343,11 @@ mod terminal_event_tests {
         let fx = fixture(serde_json::json!({
             "success": {
                 "stderr": "succeeded",
-                "stack": [{"action": ["append_line('events.log', 'ran')", "error('downgraded')"]}]
+                "stack": [{"action": [{"append_line": ["events.log", "ran"]}, {"error": "downgraded"}]}]
             },
             "failure": {
                 "stderr": "failed",
-                "stack": [{"action": "append_line('events.log', 'failure-ran')"}]
+                "stack": [{"action": {"append_line": ["events.log", "failure-ran"]}}]
             }
         }));
         let emitter = RecordingEmitter::default();
@@ -2403,7 +2403,7 @@ mod terminal_event_tests {
         let fx = fixture(serde_json::json!({
             "blocked": {
                 "stderr": "blocked",
-                "stack": [{"action": "append_line('events.log', 'ran')"}]
+                "stack": [{"action": {"append_line": ["events.log", "ran"]}}]
             }
         }));
         let emitter = RecordingEmitter::default();
@@ -2445,7 +2445,7 @@ mod terminal_event_tests {
         let fx = fixture(serde_json::json!({
             "success": {
                 "stderr": "success-top",
-                "stack": [{"action": "stderr('success-stack')"}]
+                "stack": [{"action": {"stderr": "success-stack"}}]
             }
         }));
         let emitter = RecordingEmitter::default();
@@ -2490,7 +2490,7 @@ mod terminal_event_tests {
         let fx = fixture(serde_json::json!({
             "blocked": {
                 "stderr": "blocked-top",
-                "stack": [{"action": "stderr('blocked-stack')"}]
+                "stack": [{"action": {"stderr": "blocked-stack"}}]
             }
         }));
         let emitter = RecordingEmitter::default();
@@ -2538,11 +2538,11 @@ mod terminal_event_tests {
         let fx = fixture(serde_json::json!({
             "failure": {
                 "stderr": "failed",
-                "stack": [{"action": "append_line('events.log', 'failure-ran')"}]
+                "stack": [{"action": {"append_line": ["events.log", "failure-ran"]}}]
             },
             "finalize": {
                 "stderr": "finalized",
-                "stack": [{"action": "append_line('events.log', 'finalize-ran')"}]
+                "stack": [{"action": {"append_line": ["events.log", "finalize-ran"]}}]
             }
         }));
         let emitter = RecordingEmitter::default();
@@ -2623,10 +2623,10 @@ mod terminal_event_tests {
     fn failure_stack_without_record_skips_finalize() {
         let fx = fixture(serde_json::json!({
             "failure": {
-                "stack": [{"action": "append_line('events.log', 'failure-ran')"}]
+                "stack": [{"action": {"append_line": ["events.log", "failure-ran"]}}]
             },
             "finalize": {
-                "stack": [{"action": "append_line('events.log', 'finalize-ran')"}]
+                "stack": [{"action": {"append_line": ["events.log", "finalize-ran"]}}]
             }
         }));
         let emitter = RecordingEmitter::default();
@@ -2689,11 +2689,11 @@ mod terminal_event_tests {
         let fx = fixture(serde_json::json!({
             "blocked": {
                 "stderr": "blocked",
-                "stack": [{"action": ["append_line('events.log', 'ran')", "error('downgraded')"]}]
+                "stack": [{"action": [{"append_line": ["events.log", "ran"]}, {"error": "downgraded"}]}]
             },
             "failure": {
                 "stderr": "failed",
-                "stack": [{"action": "append_line('events.log', 'failure-ran')"}]
+                "stack": [{"action": {"append_line": ["events.log", "failure-ran"]}}]
             }
         }));
         let emitter = RecordingEmitter::default();
@@ -3214,13 +3214,13 @@ mod terminal_event_tests {
         let fx = fixture(serde_json::json!({
             "blocked": {
                 "stack": [
-                    {"action": "append_line('events.log', 'blocked-kind=' + err.kind)"},
-                    {"action": "append_line('events.log', 'blocked-variant=' + err.variant)"},
+                    {"action": {"append_line": ["events.log", "{{ 'blocked-kind=' + err.kind }}"]}},
+                    {"action": {"append_line": ["events.log", "{{ 'blocked-variant=' + err.variant }}"]}},
                 ]
             },
             "finalize": {
                 "stack": [
-                    {"when": "err", "action": "append_line('events.log', 'finalize-msg=' + err.msg)"},
+                    {"when": "err", "action": {"append_line": ["events.log", "{{ 'finalize-msg=' + err.msg }}"]}},
                 ]
             }
         }));
@@ -3269,10 +3269,10 @@ mod terminal_event_tests {
     fn emit_blocked_finalize_post_launch_selects_failure() {
         let fx = fixture(serde_json::json!({
             "failure": {
-                "stack": [{"action": "append_line('events.log', 'failure-ran')"}]
+                "stack": [{"action": {"append_line": ["events.log", "failure-ran"]}}]
             },
             "finalize": {
-                "stack": [{"action": "append_line('events.log', 'finalize-ran')"}]
+                "stack": [{"action": {"append_line": ["events.log", "finalize-ran"]}}]
             }
         }));
         let emitter = RecordingEmitter::default();
@@ -3317,10 +3317,10 @@ mod terminal_event_tests {
     fn emit_blocked_finalize_tolerates_null_frontmatter_materialized() {
         let fx = fixture(serde_json::json!({
             "blocked": {
-                "stack": [{"action": "append_line('events.log', 'blocked-kind=' + err.kind)"}]
+                "stack": [{"action": {"append_line": ["events.log", "{{ 'blocked-kind=' + err.kind }}"]}}]
             },
             "finalize": {
-                "stack": [{"action": "append_line('events.log', 'finalize-ran')"}]
+                "stack": [{"action": {"append_line": ["events.log", "finalize-ran"]}}]
             }
         }));
         let emitter = RecordingEmitter::default();
@@ -3374,13 +3374,13 @@ mod terminal_event_tests {
             "failure": {
                 "stderr": "failed",
                 "stack": [
-                    {"action": "append_line('events.log', 'failure-kind=' + err.kind)"},
-                    {"action": "append_line('events.log', 'failure-variant=' + err.variant)"},
+                    {"action": {"append_line": ["events.log", "{{ 'failure-kind=' + err.kind }}"]}},
+                    {"action": {"append_line": ["events.log", "{{ 'failure-variant=' + err.variant }}"]}},
                 ]
             },
             "finalize": {
                 "stack": [
-                    {"when": "err", "action": "append_line('events.log', 'finalize-msg=' + err.msg)"},
+                    {"when": "err", "action": {"append_line": ["events.log", "{{ 'finalize-msg=' + err.msg }}"]}},
                 ]
             }
         }));
@@ -3441,10 +3441,10 @@ mod terminal_event_tests {
     fn emit_failure_finalize_tolerates_null_frontmatter() {
         let fx = fixture(serde_json::json!({
             "failure": {
-                "stack": [{"action": "append_line('events.log', 'failure-ran')"}]
+                "stack": [{"action": {"append_line": ["events.log", "failure-ran"]}}]
             },
             "finalize": {
-                "stack": [{"action": "append_line('events.log', 'finalize-ran')"}]
+                "stack": [{"action": {"append_line": ["events.log", "finalize-ran"]}}]
             }
         }));
         let emitter = RecordingEmitter::default();

@@ -213,10 +213,11 @@ pub fn resolve_shell_approvals(
 /// is rejected with [`CompositionError::LifecycleShellResolution`] because its
 /// value does not yet exist.
 ///
-/// Both short-form `shell(...)` and long-form `shell` actions with `command:`
-/// (and any `on_error:` text) are covered. Non-string command expressions
-/// (e.g. a bare `command: "ctx.repo"` parsed as a variable) and literals with
-/// no interpolation span are left untouched — there is nothing to stamp.
+/// Positional `shell` actions (`shell: "..."`) and key/value `shell` actions
+/// (`{ action: shell, command: ... }`) with any `on_error:` text are covered.
+/// Non-string command expressions (e.g. a bare `command: "ctx.repo"` parsed as a
+/// variable) and literals with no interpolation span are left untouched — there
+/// is nothing to stamp.
 ///
 /// ## Errors
 ///

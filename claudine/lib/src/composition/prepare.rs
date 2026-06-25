@@ -1501,8 +1501,8 @@ mod tests {
     fn shell_command_early_binding_resolves_at_preflight() {
         use crate::composition::lifecycle::LifecycleSignal;
         use darkmatter::markdown::compose::expression::Expr;
-        // `shell(git fetch {{branch}})` resolves `branch` (a frontmatter key)
-        // at pre-flight; the stamped command equals what will execute.
+        // `{"shell": "git fetch {{branch}}"}` resolves `branch` (a frontmatter
+        // key) at pre-flight; the stamped command equals what will execute.
         let dir = TempDir::new().unwrap();
         let source = make_source(
             &dir,
@@ -1510,7 +1510,7 @@ mod tests {
                 ("branch", json!("main")),
                 (
                     "start",
-                    json!({"stack": [{"action": "shell(git fetch {{branch}})"}]}),
+                    json!({"stack": [{"action": {"shell": "git fetch {{branch}}"}}]}),
                 ),
             ],
             "Do the work.",
@@ -1523,15 +1523,15 @@ mod tests {
 
     #[test]
     fn shell_command_late_binding_reference_rejected_at_prepare() {
-        // `shell(rm {{err.msg}})` references a late-binding global; shell is
-        // resolved at pre-flight (before any event fires), so it is rejected
-        // with the property path.
+        // `{"shell": "rm {{err.msg}}"}` references a late-binding global;
+        // shell is resolved at pre-flight (before any event fires), so it is
+        // rejected with the property path.
         let dir = TempDir::new().unwrap();
         let source = make_source(
             &dir,
             &[(
                 "failure",
-                json!({"stack": [{"action": "shell(rm {{err.msg}})"}]}),
+                json!({"stack": [{"action": {"shell": "rm {{err.msg}}"}}]}),
             )],
             "Do the work.",
         );
@@ -1557,14 +1557,14 @@ mod tests {
 
     #[test]
     fn shell_long_form_command_late_binding_rejected_at_prepare() {
-        // Long-form `command: "rm {{err.msg}}"` is rejected the same way as the
-        // short-form `shell(...)`.
+        // Long-form `command: "rm {{err.msg}}"` is rejected the same way as
+        // the positional `shell: ...` form.
         let dir = TempDir::new().unwrap();
         let source = make_source(
             &dir,
             &[(
                 "failure",
-                json!({"stack": [{"action": "shell", "command": "rm {{err.msg}}"}]}),
+                json!({"stack": [{"action": {"action": "shell", "command": "rm {{err.msg}}"}}]}),
             )],
             "Do the work.",
         );

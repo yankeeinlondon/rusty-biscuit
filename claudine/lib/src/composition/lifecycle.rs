@@ -1416,11 +1416,13 @@ fn annotate_stack_error(err: CompositionError, property: &str, idx: usize) -> Co
 ///
 /// ```yaml
 /// - when: <optional condition>
-///   action: <scalar string | array of (string | object)>
-///   # When `action` is a scalar string, the remaining keys at this level
-///   # are the action's long-form parameters (and the universal `no_error`
-///   # flag). When `action` is an array, each element is self-contained
-///   # (string short form or object long form).
+///   action: <scalar string | array of object>
+///   no_error: <optional boolean>
+///   # A scalar `action` value must be a bare verb name with zero arguments
+///   # (e.g. `stop`, `skip`). The universal `no_error` flag may appear as a
+///   # sibling key. Key/value parameters must live inside an explicit object:
+///   # `{ action: verb, ... }`. Array elements are self-contained positional
+///   # single-key objects (`{verb: value}`) or key/value objects.
 /// ```
 fn parse_lifecycle_stack_item(
     signal: LifecycleSignal,
@@ -2236,12 +2238,11 @@ fn action_value_to_expr(value: &serde_json::Value) -> Result<Expr, String> {
     }
 }
 
-/// Dispatch a parsed short-form action to the right builder. Placement is
-/// Build a typed action from a long-form verb + named parameters.
+/// Build a typed action from an explicit key/value verb + named parameters.
 ///
-/// Long-form allows per-verb named parameters that don't fit the short-form
-/// `verb(args)` shape (e.g. `shell`'s `on_error`, `retry`'s `backoff`,
-/// `set_frontmatter`'s `file`/`prop`/`value`).
+/// Key/value form allows per-verb named parameters that don't fit the
+/// positional `{verb: value}` shape (e.g. `shell`'s `on_error`, `retry`'s
+/// `backoff`, `set_frontmatter`'s `file`/`prop`/`value`).
 fn build_action_from_params(
     signal: LifecycleSignal,
     verb: &str,
@@ -5172,13 +5173,13 @@ mod tests {
     }
 
     #[test]
-    fn single_text_arg_is_taken_literally() {
-        // A single-parameter action takes its whole parens body literally —
-        // `ctx.repo` is the text, not the context expression. Use `{{ … }}`
-        // (resolved at render time) to interpolate a value.
+    fn positional_scalar_value_is_taken_literally() {
+        // A positional scalar value is literal text by default — `ctx.repo` is
+        // the text, not the context expression. Use a whole-value `{{ … }}`
+        // span (resolved at event time) to interpolate a value.
         let fm = json!({
             "start": {
-                "stack": [{"action": "say(ctx.repo)"}]
+                "stack": [{"action": {"say": "ctx.repo"}}]
             }
         });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
@@ -5196,7 +5197,7 @@ mod tests {
                 "stack": [
                     {
                         "when": "env.AGENT == 'claude'",
-                        "action": "say('using claude')"
+                        "action": {"say": "using claude"}
                     }
                 ]
             }
@@ -5213,8 +5214,8 @@ mod tests {
                 "stack": [
                     {
                         "action": [
-                            "say('first')",
-                            "info('second')"
+                            {"say": "first"},
+                            {"info": "second"}
                         ]
                     }
                 ]
@@ -5258,7 +5259,7 @@ mod tests {
     fn parses_retry_with_count_in_blocked() {
         let fm = json!({
             "blocked": {
-                "stack": [{"action": "retry(3)"}]
+                "stack": [{"action": {"retry": 3}}]
             }
         });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
@@ -5272,7 +5273,7 @@ mod tests {
     fn parses_proxy_with_file_arg_in_initialize() {
         let fm = json!({
             "initialize": {
-                "stack": [{"action": "proxy('@fallback.md')"}]
+                "stack": [{"action": {"proxy": "@fallback.md"}}]
             }
         });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
@@ -5284,16 +5285,18 @@ mod tests {
 
     #[test]
     fn parses_shell_long_form_with_on_error_and_no_error() {
-        // Long-form shell action: `command`, `on_error`, `no_error` are
-        // sibling keys of the bare-verb `action: shell`.
+        // Long-form shell action: `command`, `on_error`, `no_error` live
+        // inside the explicit `{ action: shell, ... }` object.
         let fm = json!({
             "start": {
                 "stack": [
                     {
-                        "action": "shell",
-                        "command": "git fetch --all",
-                        "on_error": "fetch failed",
-                        "no_error": true
+                        "action": {
+                            "action": "shell",
+                            "command": "git fetch --all",
+                            "on_error": "fetch failed",
+                            "no_error": true
+                        }
                     }
                 ]
             }
@@ -5306,16 +5309,18 @@ mod tests {
 
     #[test]
     fn parses_side_effect_long_form() {
-        // Side-effect long form: `file`, `prop`, `value` are sibling keys
-        // of the bare-verb `action: set_frontmatter`.
+        // Side-effect long form: `file`, `prop`, `value` live inside the
+        // explicit `{ action: set_frontmatter, ... }` object.
         let fm = json!({
             "start": {
                 "stack": [
                     {
-                        "action": "set_frontmatter",
-                        "file": "@spec.md",
-                        "prop": "status",
-                        "value": "in-progress"
+                        "action": {
+                            "action": "set_frontmatter",
+                            "file": "@spec.md",
+                            "prop": "status",
+                            "value": "in-progress"
+                        }
                     }
                 ]
             }
@@ -5328,7 +5333,7 @@ mod tests {
     fn parses_side_effect_short_form() {
         let fm = json!({
             "start": {
-                "stack": [{"action": "ensure_file('@out/log.md')"}]
+                "stack": [{"action": {"ensure_file": "@out/log.md"}}]
             }
         });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
@@ -5358,13 +5363,16 @@ mod tests {
         // `resume`/`requeue`/`proxy` parse in every event (only `skip` is
         // placement-restricted, to `initialize`). E.g. a `success` stack may
         // `resume` because an expected artifact was not produced.
-        let cases = [
-            ("start", "proxy('@other.md')"),
-            ("start", "retry"),
-            ("success", "resume('the file abc.md was never written; create it')"),
-            ("blocked", "resume('please')"),
-            ("initialize", "defer('5m')"),
-            ("success", "retry(2)"),
+        let cases: [(&str, serde_json::Value); 6] = [
+            ("start", json!({"proxy": "@other.md"})),
+            ("start", json!({"retry": null})),
+            (
+                "success",
+                json!({"resume": "the file abc.md was never written; create it"}),
+            ),
+            ("blocked", json!({"resume": "please"})),
+            ("initialize", json!({"defer": "5m"})),
+            ("success", json!({"retry": 2})),
         ];
         for (event, action) in cases {
             let fm = json!({ event: {"stack": [{"action": action}]} });
@@ -5372,7 +5380,7 @@ mod tests {
                 .unwrap_or_else(|e| panic!("`{action}` in `{event}` should parse, got: {e:?}"));
         }
         // `loop` carries iteration controls; a `requeue` there parses too.
-        let loop_fm = json!({ "loop": {"while": "true", "stack": [{"action": "defer('5m')"}]} });
+        let loop_fm = json!({ "loop": {"while": "true", "stack": [{"action": {"defer": "5m"}}]} });
         parse_lifecycle_config(&loop_fm, dummy_path())
             .unwrap_or_else(|e| panic!("`requeue` in `loop` should parse, got: {e:?}"));
     }
@@ -5383,10 +5391,10 @@ mod tests {
         // recovery surface, so retry/resume/requeue/proxy all parse there
         // (parity with the `failure` event).
         for action in [
-            "retry(1)",
-            "resume('finish the task')",
-            "defer('5m')",
-            "proxy('@other.md')",
+            json!({"retry": 1}),
+            json!({"resume": "finish the task"}),
+            json!({"defer": "5m"}),
+            json!({"proxy": "@other.md"}),
         ] {
             let fm = json!({
                 "finalize": {"stack": [{"when": "err", "action": action}]}
@@ -5417,7 +5425,7 @@ mod tests {
         let fm = json!({
             "initialize": {
                 "stack": [
-                    {"action": ["stop", "say('unreachable')"]}
+                    {"action": ["stop", {"say": "unreachable"}]}
                 ]
             }
         });
@@ -5433,7 +5441,7 @@ mod tests {
         let fm = json!({
             "initialize": {
                 "stack": [
-                    {"action": ["say('one')", "stop"]}
+                    {"action": [{"say": "one"}, "stop"]}
                 ]
             }
         });
@@ -5447,29 +5455,105 @@ mod tests {
     }
 
     #[test]
-    fn accepts_unquoted_multi_word_literal_in_single_text_short_form() {
-        // Single-parameter verbs no longer require quotes: the whole body is
-        // one literal argument. Commas inside are part of the message (not
-        // argument separators), and existing wrapping quotes are unwrapped.
-        let cases = [
-            ("say(using codex)", "using codex"),
-            ("warn(phase 6, too big)", "phase 6, too big"),
-            ("error('invalid phase: 6')", "invalid phase: 6"),
-            ("effect(crowd-applause)", "crowd-applause"),
+    fn control_checks_fire_identically_for_key_value_form() {
+        // The cardinality, ordering, and placement checks operate on the parsed
+        // typed `LifecycleControlAction` — independent of whether the author
+        // wrote the control positional (`{"action": "skip"}` / `{"stop": null}`)
+        // or key/value (`{"action": {"action": "stop"}}`). The positional-form
+        // tests above already pin the behavior; this pins the same diagnostics
+        // for the key/value form so the two forms cannot drift.
+
+        // Placement: a key/value `skip` outside `initialize` is the same
+        // LifecycleActionPlacement error the positional `{"action": "skip"}`
+        // trips in `rejects_skip_outside_initialize`.
+        let fm = json!({
+            "start": {"stack": [{"action": {"action": "skip"}}]}
+        });
+        match parse_lifecycle_config(&fm, dummy_path()).unwrap_err() {
+            CompositionError::LifecycleActionPlacement { action, event, .. } => {
+                assert_eq!(action, "skip");
+                assert_eq!(event, "start");
+            }
+            other => panic!("expected LifecycleActionPlacement, got: {other:?}"),
+        }
+
+        // Cardinality: two key/value control actions in one item trip
+        // LifecycleMultipleLifecycleActions (parity with the positional
+        // `["stop", "skip"]` case).
+        let fm = json!({
+            "blocked": {"stack": [{"action": [{"action": "stop"}, {"action": "skip"}]}]}
+        });
+        assert!(matches!(
+            parse_lifecycle_config(&fm, dummy_path()).unwrap_err(),
+            CompositionError::LifecycleMultipleLifecycleActions { .. }
+        ));
+
+        // Ordering: a key/value control action before a non-control action trips
+        // LifecycleActionOrder (parity with `["stop", {"say": ...}]`).
+        let fm = json!({
+            "initialize": {"stack": [{"action": [
+                {"action": "stop"},
+                {"action": "say", "message": "unreachable"}
+            ]}]}
+        });
+        assert!(matches!(
+            parse_lifecycle_config(&fm, dummy_path()).unwrap_err(),
+            CompositionError::LifecycleActionOrder { .. }
+        ));
+
+        // Positive parity: a key/value control action as the LAST item is
+        // accepted, exactly like the positional form.
+        let fm = json!({
+            "initialize": {"stack": [{"action": [
+                {"action": "say", "message": "one"},
+                {"action": "stop"}
+            ]}]}
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let stack = config
+            .stack(LifecycleSignal::Initialize)
+            .expect("initialize stack");
+        assert_eq!(stack[0].actions.len(), 2);
+        assert!(!stack[0].actions[0].is_lifecycle_control());
+        assert!(stack[0].actions[1].is_lifecycle_control());
+    }
+
+    #[test]
+    fn positional_scalar_value_is_literal_text() {
+        // Positional scalar values are literal text by default — `using codex`
+        // is the text, not an expression. Commas and colons inside are part of
+        // the message.
+        let cases: [( &str, serde_json::Value, &str); 4] = [
+            ("say", json!({"say": "using codex"}), "using codex"),
+            (
+                "warn",
+                json!({"warn": "phase 6, too big"}),
+                "phase 6, too big",
+            ),
+            (
+                "error",
+                json!({"error": "invalid phase: 6"}),
+                "invalid phase: 6",
+            ),
+            (
+                "effect",
+                json!({"effect": "crowd-applause"}),
+                "crowd-applause",
+            ),
         ];
-        for (action, expected) in cases {
+        for (verb, action, expected) in cases {
             let fm = json!({ "blocked": { "stack": [{"action": action}] } });
             let config = parse_lifecycle_config(&fm, dummy_path())
-                .unwrap_or_else(|e| panic!("`{action}` should parse, got: {e:?}"));
+                .unwrap_or_else(|e| panic!("`{verb}` positional scalar should parse, got: {e:?}"));
             let stack = config.stack(LifecycleSignal::Blocked).expect("blocked stack");
             let message = match &stack[0].actions[0].kind {
                 LifecycleActionKind::Communication(c) => &c.message,
                 LifecycleActionKind::LifecycleControl(LifecycleControlAction::Error {
                     reason: Some(r),
                 }) => r,
-                other => panic!("unexpected action kind for `{action}`: {other:?}"),
+                other => panic!("unexpected action kind for `{verb}`: {other:?}"),
             };
-            assert_eq!(message, &Expr::StringLiteral(expected.to_string()), "{action}");
+            assert_eq!(message, &Expr::StringLiteral(expected.to_string()), "{verb}");
         }
     }
 
@@ -5483,7 +5567,7 @@ mod tests {
         let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
         assert!(matches!(
             err,
-            CompositionError::LifecycleActionInvalidShortForm { .. }
+            CompositionError::LifecycleShortFormRemoved { .. }
         ));
     }
 
@@ -5491,29 +5575,29 @@ mod tests {
     fn rejects_retry_with_too_many_args() {
         let fm = json!({
             "blocked": {
-                "stack": [{"action": "retry(3, 4)"}]
+                "stack": [{"action": {"retry": [3, 4]}}]
             }
         });
         let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
         assert!(matches!(
             err,
-            CompositionError::LifecycleInvalidArgs { .. }
+            CompositionError::LifecycleWrongArity { .. }
         ));
     }
 
     #[test]
     fn rejects_proxy_missing_target() {
-        // `proxy` requires a `target` parameter; without one, the long-form
-        // builder fails with `LifecycleInvalidArgs`.
+        // `proxy` requires a `target` parameter; a null positional value is
+        // wrong arity.
         let fm = json!({
             "initialize": {
-                "stack": [{"action": "proxy"}]
+                "stack": [{"action": {"proxy": null}}]
             }
         });
         let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
         assert!(matches!(
             err,
-            CompositionError::LifecycleInvalidArgs { .. }
+            CompositionError::LifecycleWrongArity { .. }
         ));
     }
 
@@ -5533,10 +5617,8 @@ mod tests {
 
     #[test]
     fn rejects_unknown_stack_item_key() {
-        // With the long-form-via-sibling-params design, a `bogus` key on a
-        // stack item is treated as a sibling parameter for the bare-verb
-        // action. `stop` takes no parameters, so the long-form builder
-        // rejects `bogus` as an unknown parameter.
+        // A scalar `action` value cannot carry sibling parameter keys; the
+        // `bogus` key is rejected as an invalid stack-item shape.
         let fm = json!({
             "start": {
                 "stack": [{"action": "stop", "bogus": true}]
@@ -5545,7 +5627,7 @@ mod tests {
         let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
         assert!(matches!(
             err,
-            CompositionError::LifecycleActionInvalidLongForm { .. }
+            CompositionError::LifecycleStackInvalidShape { .. }
         ));
     }
 
@@ -5873,11 +5955,11 @@ mod tests {
     fn parses_stdout_short_form_action() {
         let fm = json!({
             "start": {
-                "stack": [{"action": "stdout('hello')"}]
+                "stack": [{"action": {"stdout": "hello"}}]
             }
         });
-        // `stdout(...)` is now a recognized communication action; parsing
-        // succeeds and produces a single-item stack.
+        // `stdout: ...` is a recognized positional communication action;
+        // parsing succeeds and produces a single-item stack.
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
         assert_eq!(config.stack(LifecycleSignal::Start).unwrap().len(), 1);
     }
@@ -5923,6 +6005,251 @@ mod tests {
             LifecycleSignal::Failure,
         ] {
             assert!(config.get(s).is_some(), "expected {s:?} to be configured");
+        }
+    }
+
+    // =====================================================================
+    // Phase 5: positional-and-key-value action validation checkpoint
+    // =====================================================================
+
+    #[test]
+    fn short_form_rejection_rewrites_to_positional() {
+        // Removed `verb(args)` short form is rejected with a did-you-mean
+        // positional rewrite.
+        let cases: [(&str, serde_json::Value, &str); 3] = [
+            ("success", json!({"success": "x"}), "success: \"x\""),
+            ("shell", json!({"shell": "git push"}), "shell: \"git push\""),
+            (
+                "set_frontmatter",
+                json!({"set_frontmatter": ["a", "b", "c"]}),
+                "set_frontmatter: [\"a\", \"b\", \"c\"]",
+            ),
+        ];
+        for (verb, action, expected_rewrite) in cases {
+            let short_form = format!("{verb}({})", match verb {
+                "success" => "\"x\"".to_string(),
+                "shell" => "git push".to_string(),
+                "set_frontmatter" => "'a','b','c'".to_string(),
+                _ => unreachable!(),
+            });
+            let fm = json!({
+                "start": {
+                    "stack": [{"action": short_form.clone()}]
+                }
+            });
+            let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+            match err {
+                CompositionError::LifecycleShortFormRemoved { raw, rewrite, .. } => {
+                    assert_eq!(raw, short_form, "{verb}");
+                    assert_eq!(rewrite, expected_rewrite, "{verb}");
+                }
+                other => panic!("expected LifecycleShortFormRemoved for {verb}, got: {other:?}"),
+            }
+
+            // The positional rewrite itself parses cleanly.
+            let fm = json!({
+                "start": {
+                    "stack": [{"action": action}]
+                }
+            });
+            assert!(
+                parse_lifecycle_config(&fm, dummy_path()).is_ok(),
+                "{verb} positional rewrite should parse"
+            );
+        }
+    }
+
+    #[test]
+    fn bare_stop_accepted_bare_proxy_rejected_wrong_arity() {
+        // Zero-arg positional: bare `stop` is accepted.
+        let fm = json!({
+            "initialize": {
+                "stack": [{"action": "stop"}]
+            }
+        });
+        assert!(parse_lifecycle_config(&fm, dummy_path()).is_ok());
+
+        // `proxy` requires a target; a bare verb is wrong arity.
+        let fm = json!({
+            "initialize": {
+                "stack": [{"action": "proxy"}]
+            }
+        });
+        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::LifecycleWrongArity { ref verb, .. } if verb == "proxy"),
+            "expected wrong-arity for bare proxy, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn key_value_literal_default_vs_whole_value_interpolation() {
+        // Key/value literal default: a plain string parameter is a literal.
+        let fm = json!({
+            "start": {
+                "stack": [{"action": {"action": "message", "message": "ctx.area"}}]
+            }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let stack = config.stack(LifecycleSignal::Start).expect("start stack");
+        let LifecycleActionKind::Communication(comm) = &stack[0].actions[0].kind else {
+            panic!("expected communication action");
+        };
+        assert_eq!(comm.message, Expr::StringLiteral("ctx.area".to_string()));
+
+        // Whole-value interpolation resolves the expression at event time.
+        let fm = json!({
+            "start": {
+                "stack": [{"action": {"action": "message", "message": "{{ ctx.area }}"}}]
+            }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let stack = config.stack(LifecycleSignal::Start).expect("start stack");
+        let LifecycleActionKind::Communication(comm) = &stack[0].actions[0].kind else {
+            panic!("expected communication action");
+        };
+        assert_eq!(comm.message, Expr::Variable("ctx.area".to_string()));
+    }
+
+    #[test]
+    fn full_disambiguation_table_for_positional_and_key_value() {
+        // Same verb as positional single-key object and as explicit key/value.
+        let positional = json!({"start": {"stack": [{"action": {"success": "it worked"}}]}});
+        let key_value = json!({
+            "start": {
+                "stack": [{"action": {"action": "success", "message": "it worked"}}]
+            }
+        });
+        for fm in [&positional, &key_value] {
+            let config = parse_lifecycle_config(fm, dummy_path()).unwrap();
+            let stack = config.stack(LifecycleSignal::Start).expect("start stack");
+            assert!(matches!(
+                stack[0].actions[0].kind,
+                LifecycleActionKind::Communication(_)
+            ));
+        }
+
+        // Multi-key object without an `action` key is ambiguous.
+        let fm = json!({
+            "start": {
+                "stack": [{"action": {"message": "hi", "route": "team"}}]
+            }
+        });
+        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::LifecycleStackAmbiguous { .. }),
+            "expected ambiguous error, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn predicate_exception_when_evaluates_expression_scalar_stays_literal() {
+        // `when` is always a boolean expression.
+        let fm = json!({
+            "start": {
+                "stack": [
+                    {"when": "true", "action": {"say": "true"}}
+                ]
+            }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let stack = config.stack(LifecycleSignal::Start).expect("start stack");
+        assert!(stack[0].when.is_some());
+
+        // The positional scalar `"true"` is literal text, not a bool.
+        let LifecycleActionKind::Communication(comm) = &stack[0].actions[0].kind else {
+            panic!("expected communication action");
+        };
+        assert_eq!(comm.message, Expr::StringLiteral("true".to_string()));
+    }
+
+    #[test]
+    fn known_verb_validation_for_typoed_positional_and_key_value() {
+        // Typoed positional verb gets a did-you-mean suggestion.
+        let fm = json!({
+            "success": {
+                "stack": [{"action": {"sucess": "it worked"}}]
+            }
+        });
+        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleUnknownVerb { verb, rewrite, .. } => {
+                assert_eq!(verb, "sucess");
+                assert!(rewrite.contains("success"), "got: {rewrite}");
+            }
+            other => panic!("expected LifecycleUnknownVerb for positional typo, got: {other:?}"),
+        }
+
+        // Typoed key/value verb gets the same suggestion.
+        let fm = json!({
+            "success": {
+                "stack": [{"action": {"action": "sucess", "message": "it worked"}}]
+            }
+        });
+        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleUnknownVerb { verb, rewrite, .. } => {
+                assert_eq!(verb, "sucess");
+                assert!(rewrite.contains("success"), "got: {rewrite}");
+            }
+            other => panic!("expected LifecycleUnknownVerb for key/value typo, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn expression_function_actions_positional_key_value_and_variadic_rejection() {
+        // Positional expression-function action.
+        let fm = json!({
+            "start": {
+                "stack": [{"action": {"length": "{{ items }}"}}]
+            }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let stack = config.stack(LifecycleSignal::Start).expect("start stack");
+        let LifecycleActionKind::ExpressionFunction(ef) = &stack[0].actions[0].kind else {
+            panic!("expected expression-function action");
+        };
+        assert_eq!(ef.function, "length");
+        assert_eq!(ef.args.len(), 1);
+        assert_eq!(ef.args[0], Expr::Variable("items".to_string()));
+
+        // Key/value expression-function action with concrete named parameters.
+        let fm = json!({
+            "start": {
+                "stack": [{
+                    "action": {
+                        "action": "contains",
+                        "haystack": "{{ haystack }}",
+                        "needle": "needle"
+                    }
+                }]
+            }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let stack = config.stack(LifecycleSignal::Start).expect("start stack");
+        let LifecycleActionKind::ExpressionFunction(ef) = &stack[0].actions[0].kind else {
+            panic!("expected expression-function action");
+        };
+        assert_eq!(ef.function, "contains");
+        assert_eq!(ef.args.len(), 2);
+
+        // Variadic expression functions reject key/value form.
+        for verb in ["and", "or"] {
+            let fm = json!({
+                "start": {
+                    "stack": [{"action": {"action": verb, "a": "true", "b": "false"}}]
+                }
+            });
+            let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    CompositionError::LifecycleExpressionFunctionKeyValueUnsupported {
+                        verb: ref v, ..
+                    } if v == verb
+                ),
+                "{verb} key/value should be rejected, got: {err:?}"
+            );
         }
     }
 
@@ -6037,7 +6364,7 @@ mod tests {
         let fm = json!({
             "start": {
                 "stack": [
-                    {"when": "err != null", "action": "say('has error')"}
+                    {"when": "err != null", "action": {"say": "has error"}}
                 ]
             }
         });
@@ -6054,13 +6381,13 @@ mod tests {
 
     #[test]
     fn err_member_access_in_single_text_arg_is_literal() {
-        // `say(...)` is a single-parameter action, so its whole body is taken
-        // literally: `err.msg` is the text, not the `err` global. There is
-        // nothing to reject. To reference the error in an error-carrying event,
-        // interpolate instead: `say({{err.msg}})`.
+        // A positional scalar value is literal text by default — `err.msg` is
+        // the text, not the `err` global. There is nothing to reject. To
+        // reference the error in an error-carrying event, interpolate instead:
+        // `{ say: "{{err.msg}}" }`.
         let fm = json!({
             "start": {
-                "stack": [{"action": "say(err.msg)"}]
+                "stack": [{"action": {"say": "err.msg"}}]
             }
         });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
@@ -6069,12 +6396,12 @@ mod tests {
 
     #[test]
     fn err_in_single_text_arg_is_literal_across_no_error_events() {
-        // Bare `err` in a single-parameter action arg is literal text in every
-        // no-error event — the err-availability guard only governs expression
-        // surfaces (e.g. `when:` clauses), not literal message bodies.
+        // A positional scalar value is literal text in every no-error event —
+        // the err-availability guard only governs expression surfaces (e.g.
+        // `when:` clauses), not literal message bodies.
         for ev in ["initialize", "success"] {
             let fm = json!({
-                ev: {"stack": [{"action": "say(err)"}]}
+                ev: {"stack": [{"action": {"say": "err"}}]}
             });
             let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
             assert!(
@@ -6086,7 +6413,7 @@ mod tests {
         let fm = json!({
             "loop": {
                 "while": "true",
-                "stack": [{"action": "say(err)"}]
+                "stack": [{"action": {"say": "err"}}]
             }
         });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
@@ -6098,7 +6425,7 @@ mod tests {
         // `err` is permitted in error-carrying events.
         for event in ["blocked", "failure", "finalize"] {
             let fm = json!({
-                event: {"stack": [{"action": "say(err.msg)"}]}
+                event: {"stack": [{"action": {"say": "err.msg"}}]}
             });
             let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
             let result = validate_no_err_in_no_error_events(&config, dummy_path());
@@ -6119,12 +6446,12 @@ mod tests {
                 json!({
                     "loop": {
                         "while": "true",
-                        "stack": [{"action": "say(doc.err)"}]
+                        "stack": [{"action": {"say": "doc.err"}}]
                     }
                 })
             } else {
                 json!({
-                    event: {"stack": [{"action": "say(doc.err)"}]}
+                    event: {"stack": [{"action": {"say": "doc.err"}}]}
                 })
             };
             let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
@@ -6139,12 +6466,12 @@ mod tests {
 
     #[test]
     fn err_in_control_reason_single_text_arg_is_literal() {
-        // `error(...)` is single-parameter: its reason is literal text, so a
-        // bare `err.msg` is not a reference to the `err` global and is not
+        // `error` with a positional scalar value takes its reason literally, so
+        // `err.msg` is text, not a reference to the `err` global and is not
         // rejected.
         let fm = json!({
             "start": {
-                "stack": [{"action": "error(err.msg)"}]
+                "stack": [{"action": {"error": "err.msg"}}]
             }
         });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
@@ -6153,12 +6480,12 @@ mod tests {
 
     #[test]
     fn err_in_shell_command_single_text_arg_is_literal() {
-        // `shell(...)` is single-parameter: the command body is literal text,
-        // so a bare `err.msg` is not an `err`-global reference.
+        // `shell` with a positional scalar value takes its command literally, so
+        // `err.msg` is text, not an `err`-global reference.
         let fm = json!({
             "loop": {
                 "while": "true",
-                "stack": [{"action": "shell(err.msg)"}]
+                "stack": [{"action": {"shell": "err.msg"}}]
             }
         });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
@@ -6185,10 +6512,10 @@ mod tests {
 
     #[test]
     fn err_interpolation_span_in_stack_message_rejected_in_no_error_event() {
-        // The single-parameter message body is literal text, but its `{{ … }}`
+        // A positional scalar message body is literal text, but its `{{ … }}`
         // span still reaches the `err` global and must be rejected in `start`.
         let fm = json!({
-            "start": { "stack": [{"action": "message(❌️  {{err.msg}})"}] }
+            "start": { "stack": [{"action": {"message": "❌️  {{err.msg}}"}}] }
         });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
         let err = validate_no_err_in_no_error_events(&config, dummy_path()).unwrap_err();
@@ -6250,7 +6577,7 @@ mod tests {
         // verbatim to the evaluated result.
         let fm = json!({
             "start": {
-                "stack": [{"action": "say('leaked {{ broken( }}')"}]
+                "stack": [{"action": {"say": "leaked {{ broken( }}"}}]
             }
         });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
@@ -6341,7 +6668,7 @@ mod tests {
         let fm = json!({
             "start": {
                 "stack": [
-                    {"when": "missing_var == 'x'", "action": "say('hi')"}
+                    {"when": "missing_var == 'x'", "action": {"say": "hi"}}
                 ]
             }
         });
@@ -6366,7 +6693,7 @@ mod tests {
         // misuse).
         let fm = json!({
             "failure": {
-                "stack": [{"action": "say(err.msg)"}]
+                "stack": [{"action": {"say": "err.msg"}}]
             }
         });
         let raw = fm_from_json(fm.clone());
@@ -6381,8 +6708,8 @@ mod tests {
         let fm = json!({
             "start": {
                 "stack": [
-                    {"action": "say(timing.document_ms)"},
-                    {"action": "say(current.ctx.agent)"}
+                    {"action": {"say": "timing.document_ms"}},
+                    {"action": {"say": "current.ctx.agent"}}
                 ]
             }
         });
@@ -6395,15 +6722,12 @@ mod tests {
 
     #[test]
     fn stack_bare_token_in_action_arg_is_literal_not_undefined_variable() {
-        // A bare token in a single-parameter action arg is now literal text,
-        // so it is NOT an undefined-variable reference. (Real references go
-        // through `{{ … }}` interpolation, which is intentionally *not*
-        // compile-time-checked here because runtime globals like `{{err.msg}}`
-        // are legitimately undefined until render. The `when:`-clause guard
-        // still catches undefined variables in conditions.)
+        // A positional scalar value is literal text by default, so a bare token
+        // is not an undefined-variable reference. Real references go through a
+        // whole-value `{{ … }}` span.
         let fm = json!({
             "start": {
-                "stack": [{"action": "say(missing_var)"}]
+                "stack": [{"action": {"say": "missing_var"}}]
             }
         });
         let raw = fm_from_json(fm.clone());
@@ -6466,13 +6790,13 @@ mod tests {
         let fm = json!({
             "start": {
                 "stack": [
-                    {"action": "shell", "command": "git fetch --all"},
-                    {"action": "say('not a shell command')"}
+                    {"action": {"action": "shell", "command": "git fetch --all"}},
+                    {"action": {"say": "not a shell command"}}
                 ]
             },
             "failure": {
                 "stack": [
-                    {"action": "shell", "command": "git reset --hard", "on_error": "cleanup failed"}
+                    {"action": {"action": "shell", "command": "git reset --hard", "on_error": "cleanup failed"}}
                 ]
             }
         });
@@ -6497,7 +6821,7 @@ mod tests {
     fn collect_lifecycle_shell_commands_empty_when_no_shells() {
         let fm = json!({
             "start": {
-                "stack": [{"action": "say('hello')"}]
+                "stack": [{"action": {"say": "hello"}}]
             }
         });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
@@ -6510,7 +6834,7 @@ mod tests {
         let fm = json!({
             "start": {
                 "stack": [
-                    {"action": "shell", "command": "echo hi"}
+                    {"action": {"action": "shell", "command": "echo hi"}}
                 ]
             }
         });
@@ -6530,17 +6854,16 @@ mod tests {
     fn no_error_flag_is_accepted_on_every_action_category() {
         // The universal `no_error: true` flag must be accepted on every
         // action category: communication, shell, side-effect, and
-        // expression-function (long-form arrays carry `no_error` per
-        // element; scalar form carries it as a sibling key).
+        // expression-function.
         let fm = json!({
             "start": {
                 "stack": [
                     {
                         "action": [
-                            {"action": "say('hi')", "no_error": true},
+                            {"action": "say", "message": "hi", "no_error": true},
                             {"action": "shell", "command": "echo hi", "no_error": true},
                             {"action": "set_frontmatter", "file": "@a.md", "prop": "x", "value": "y", "no_error": true},
-                            {"action": "length('hello')", "no_error": true}
+                            {"action": "length", "x": "hello", "no_error": true}
                         ]
                     }
                 ]
@@ -6556,12 +6879,13 @@ mod tests {
 
     #[test]
     fn no_error_on_scalar_form_threads_to_every_category() {
-        // Scalar form: `no_error` is a sibling key alongside `action: <verb>`.
+        // Scalar form: `no_error` is a sibling key alongside a bare-verb
+        // zero-arg `action` value.
         let fm = json!({
             "start": {
                 "stack": [
                     {
-                        "action": "say('hi')",
+                        "action": "stop",
                         "no_error": true
                     }
                 ]
@@ -6576,7 +6900,7 @@ mod tests {
     fn no_error_defaults_to_false() {
         let fm = json!({
             "start": {
-                "stack": [{"action": "say('hi')"}]
+                "stack": [{"action": {"say": "hi"}}]
             }
         });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
@@ -6744,7 +7068,7 @@ mod tests {
         let fm = json!({
             "start": {
                 "stderr": "top-level",
-                "stack": [{"action": "stderr('stack')"}]
+                "stack": [{"action": {"stderr": "stack"}}]
             }
         });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();

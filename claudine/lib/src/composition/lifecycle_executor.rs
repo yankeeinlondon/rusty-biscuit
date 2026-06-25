@@ -424,9 +424,9 @@ impl StackExecutionContext<'_> {
     /// Validate a resolved sound-effect name against the catalog immediately
     /// before dispatch (C4 / deferred effect validation).
     ///
-    /// An `effect: "{{name}}"` field or `effect({{name}})` action cannot be
-    /// validated at prepare time because the name is interpolation-dependent;
-    /// this checks the *resolved* name and reports
+    /// An `effect: "{{name}}"` field or `{"effect": "{{name}}"}` positional
+    /// action cannot be validated at prepare time because the name is
+    /// interpolation-dependent; this checks the *resolved* name and reports
     /// [`CompositionError::LifecycleUnknownEffect`] (carried as the action
     /// error's variant) so an invalid name fails closed rather than playing
     /// nothing.
@@ -661,9 +661,9 @@ impl StackExecutionContext<'_> {
                 let message = self
                     .render_message(&comm.message, working)
                     .map_err(|msg| LifecycleErrorInfo::from_action_failure(comm.channel.verb(), msg))?;
-                // Deferred effect validation (C4): an `effect(...)` name is only
-                // known after interpolation, so validate the resolved name
-                // before dispatch.
+                // Deferred effect validation (C4): an `effect` positional
+                // action's name is only known after interpolation, so validate
+                // the resolved name before dispatch.
                 if comm.channel == CommunicationChannel::Effect {
                     self.validate_effect_name(&message)?;
                 }
@@ -678,9 +678,9 @@ impl StackExecutionContext<'_> {
                 .map(|_| None)
                 .map_err(|msg| LifecycleErrorInfo::from_action_failure(effect.verb.clone(), msg)),
             LifecycleActionKind::ExpressionFunction(func) => {
-                // A short-form `verb(args)` whose verb is actually a known
-                // side effect parses as an expression-function action; route
-                // it to the side-effect engine here.
+                // A positional action whose verb is a known side effect was
+                // parsed as an expression-function action; route it to the
+                // side-effect engine here.
                 if is_known_side_effect(&func.function) {
                     return self
                         .dispatch_side_effect(&func.function, &func.args, working)
@@ -700,11 +700,20 @@ impl StackExecutionContext<'_> {
 
     /// Evaluate a message expression to its display string at event-time.
     ///
-    /// A single-parameter action body is a literal [`Expr::StringLiteral`]; we
-    /// evaluate the expression (resolving multi-argument expression verbs),
-    /// then interpolate any `{{ … }}` spans surviving inside the literal through
-    /// DM2 against the current document `fm` plus the injected globals.
+    /// A literal-default action body is an [`Expr::StringLiteral`]; a whole-value
+    /// `{{ … }}` span resolves to a typed expression. We evaluate the expression
+    /// (resolving multi-argument expression verbs), then interpolate any
+    /// `{{ … }}` spans surviving inside a literal through DM2 against the current
+    /// document `fm` plus the injected globals.
+    ///
+    /// Fails closed (C4): a whole-value span (or a function argument) referencing
+    /// a genuinely-unknown frontmatter root — a typo — errors before dispatch
+    /// rather than evaluating leniently to `null`/empty, matching the `when:`
+    /// guard. A *known* root resolving to `null`/empty still renders empty.
     fn render_message(&self, expr: &Expr, fm: &Map<String, Value>) -> Result<String, String> {
+        if let Some(variable) = first_undefined_stack_variable(expr, Some(fm)) {
+            return Err(format!("references undefined variable `{variable}`"));
+        }
         let value = self.eval_expr(expr, fm)?;
         let rendered = scalar_string(&value);
         if rendered.contains("{{") {
@@ -1298,7 +1307,7 @@ mod tests {
             &json!({
                 "success": {
                     "stderr": "top-level first",
-                    "stack": [{"action": "info('then the stack')"}]
+                    "stack": [{"action": {"info": "then the stack"}}]
                 }
             }),
             Path::new("test.md"),
@@ -1338,7 +1347,7 @@ mod tests {
             &json!({
                 "success": {
                     "success": "top-level success",
-                    "stack": [{"action": "success('stack success')"}]
+                    "stack": [{"action": {"success": "stack success"}}]
                 }
             }),
             Path::new("test.md"),
@@ -1418,7 +1427,7 @@ mod tests {
             &json!({
                 "success": {
                     "stdout": "top-level stdout",
-                    "stack": [{"action": "stdout('stack stdout')"}]
+                    "stack": [{"action": {"stdout": "stack stdout"}}]
                 }
             }),
             Path::new("test.md"),
@@ -1458,8 +1467,8 @@ mod tests {
             &json!({
                 "success": {
                     "stack": [
-                        {"when": "flag == 'yes'", "action": "say('matched')"},
-                        {"when": "flag == 'no'", "action": "say('never')"}
+                        {"when": "flag == 'yes'", "action": {"say": "matched"}},
+                        {"when": "flag == 'no'", "action": {"say": "never"}}
                     ]
                 }
             }),
@@ -1490,7 +1499,7 @@ mod tests {
     #[test]
     fn omitted_when_always_runs() {
         let config = parse_lifecycle_config(
-            &json!({"success": {"stack": [{"action": "warn('always')"}]}}),
+            &json!({"success": {"stack": [{"action": {"warn": "always"}}]}}),
             Path::new("t.md"),
         )
         .unwrap();
@@ -1522,7 +1531,7 @@ mod tests {
         let config = parse_lifecycle_config(
             &json!({
                 "success": {
-                    "stack": [{"when": "spec_fil", "action": "message('guarded')"}]
+                    "stack": [{"when": "spec_fil", "action": {"message": "guarded"}}]
                 }
             }),
             Path::new("t.md"),
@@ -1563,7 +1572,7 @@ mod tests {
         let config = parse_lifecycle_config(
             &json!({
                 "success": {
-                    "stack": [{"when": "maybe_missing || false", "action": "message('guarded')"}]
+                    "stack": [{"when": "maybe_missing || false", "action": {"message": "guarded"}}]
                 }
             }),
             Path::new("t.md"),
@@ -1597,7 +1606,7 @@ mod tests {
         let config = parse_lifecycle_config(
             &json!({
                 "success": {
-                    "stack": [{"when": "maybe_missing || true", "action": "message('guarded')"}]
+                    "stack": [{"when": "maybe_missing || true", "action": {"message": "guarded"}}]
                 }
             }),
             Path::new("t.md"),
@@ -1634,8 +1643,8 @@ mod tests {
             &json!({
                 "success": {
                     "stack": [
-                        {"when": "ready", "action": "message('ran')"},
-                        {"when": "blocked", "action": "message('never')"}
+                        {"when": "ready", "action": {"message": "ran"}},
+                        {"when": "blocked", "action": {"message": "never"}}
                     ]
                 }
             }),
@@ -1671,7 +1680,7 @@ mod tests {
             &json!({
                 "failure": {
                     "stack": [{
-                        "action": ["say('one')", "message('two')", "stop"]
+                        "action": [{"say": "one"}, {"message": "two"}, "stop"]
                     }]
                 }
             }),
@@ -1711,7 +1720,7 @@ mod tests {
                 "failure": {
                     "stack": [
                         {"action": "stop"},
-                        {"action": "say('unreached')"}
+                        {"action": {"say": "unreached"}}
                     ]
                 }
             }),
@@ -1741,7 +1750,7 @@ mod tests {
     #[test]
     fn shell_action_runs_command() {
         let config = parse_lifecycle_config(
-            &json!({"start": {"stack": [{"action": "shell('git status --short')"}]}}),
+            &json!({"start": {"stack": [{"action": {"shell": "git status --short"}}]}}),
             Path::new("t.md"),
         )
         .unwrap();
@@ -1771,9 +1780,7 @@ mod tests {
             &json!({
                 "start": {
                     "stack": [{
-                        "action": "shell",
-                        "command": "false",
-                        "on_error": "build failed"
+                        "action": {"action": "shell", "command": "false", "on_error": "build failed"}
                     }]
                 }
             }),
@@ -1805,7 +1812,7 @@ mod tests {
     #[test]
     fn shell_nonzero_at_terminal_does_not_route_to_failure() {
         let config = parse_lifecycle_config(
-            &json!({"success": {"stack": [{"action": "shell('false')"}]}}),
+            &json!({"success": {"stack": [{"action": {"shell": "false"}}]}}),
             Path::new("t.md"),
         )
         .unwrap();
@@ -1835,8 +1842,8 @@ mod tests {
             &json!({
                 "start": {
                     "stack": [
-                        {"action": "shell", "command": "false", "no_error": true},
-                        {"action": "info('reached')"}
+                        {"action": {"action": "shell", "command": "false", "no_error": true}},
+                        {"action": {"info": "reached"}}
                     ]
                 }
             }),
@@ -1869,7 +1876,7 @@ mod tests {
             &json!({
                 "start": {
                     "stack": [{
-                        "action": ["shell('false')", "info('unreached')"]
+                        "action": [{"shell": "false"}, {"info": "unreached"}]
                     }]
                 }
             }),
@@ -1899,7 +1906,7 @@ mod tests {
     #[test]
     fn explicit_error_control_surfaces_with_reason() {
         let config = parse_lifecycle_config(
-            &json!({"success": {"stack": [{"action": "error('manual failure')"}]}}),
+            &json!({"success": {"stack": [{"action": {"error": "manual failure"}}]}}),
             Path::new("t.md"),
         )
         .unwrap();
@@ -1931,7 +1938,7 @@ mod tests {
     #[test]
     fn retry_count_shorthand_resolves_max_attempts() {
         let config = parse_lifecycle_config(
-            &json!({"failure": {"stack": [{"action": "retry(3)"}]}}),
+            &json!({"failure": {"stack": [{"action": {"retry": 3}}]}}),
             Path::new("t.md"),
         )
         .unwrap();
@@ -1963,13 +1970,13 @@ mod tests {
 
     #[test]
     fn side_effect_short_form_quoted_args_dispatch_to_engine() {
-        // Short form with quoted string args is the unambiguous path: each
-        // arg parses as a string literal, so `prop`/`value` reach the engine
-        // verbatim.
+        // Positional form with an array of quoted string args is the
+        // unambiguous path: each arg parses as a string literal, so
+        // `prop`/`value` reach the engine verbatim.
         let config = parse_lifecycle_config(
             &json!({
                 "start": {
-                    "stack": [{"action": "set_frontmatter('state.md', 'status', 'in-progress')"}]
+                    "stack": [{"action": {"set_frontmatter": ["state.md", "status", "in-progress"]}}]
                 }
             }),
             Path::new("t.md"),
@@ -2008,9 +2015,7 @@ mod tests {
             &json!({
                 "start": {
                     "stack": [{
-                        "action": "http_post",
-                        "url": "https://example.com/hook",
-                        "body": "hello"
+                        "action": {"action": "http_post", "url": "https://example.com/hook", "body": "hello"}
                     }]
                 }
             }),
@@ -2035,7 +2040,7 @@ mod tests {
     #[test]
     fn side_effect_short_form_routes_through_expression_path() {
         let config = parse_lifecycle_config(
-            &json!({"start": {"stack": [{"action": "ensure_file('out/log.md')"}]}}),
+            &json!({"start": {"stack": [{"action": {"ensure_file": "out/log.md"}}]}}),
             Path::new("t.md"),
         )
         .unwrap();
@@ -2066,7 +2071,7 @@ mod tests {
                 "failure": {
                     "stack": [{
                         "when": "err.variant == 'Io'",
-                        "action": "stderr('saw io error')"
+                        "action": {"stderr": "saw io error"}
                     }]
                 }
             }),
@@ -2103,7 +2108,7 @@ mod tests {
     #[test]
     fn message_interpolates_frontmatter_in_literal() {
         let config = parse_lifecycle_config(
-            &json!({"success": {"stack": [{"action": "info", "message": "done {{ name }}"}]}}),
+            &json!({"success": {"stack": [{"action": {"action": "info", "message": "done {{ name }}"}}]}}),
             Path::new("t.md"),
         )
         .unwrap();
@@ -2134,7 +2139,7 @@ mod tests {
             &json!({
                 "success": {
                     "stderr": "top-level only",
-                    "stack": [{"action": "info('must not run')"}]
+                    "stack": [{"action": {"info": "must not run"}}]
                 }
             }),
             Path::new("t.md"),
@@ -2161,7 +2166,7 @@ mod tests {
         assert_eq!(
             recorder.events(),
             vec![Emitted::Stderr("top-level only".to_string())],
-            "only the top-level stderr fires; the stack's info() does not"
+            "only the top-level stderr fires; the stack's info action does not"
         );
     }
 
@@ -2310,7 +2315,7 @@ mod tests {
     #[test]
     fn stack_message_interpolates_err_at_event_time() {
         let config = parse_lifecycle_config(
-            &json!({"failure": {"stack": [{"action": "message(❌️ {{err.msg}})"}]}}),
+            &json!({"failure": {"stack": [{"action": {"message": "❌️ {{err.msg}}"}}]}}),
             Path::new("t.md"),
         )
         .unwrap();
@@ -2343,7 +2348,7 @@ mod tests {
     fn mixed_body_resolves_both_spans_at_event_time() {
         let config = parse_lifecycle_config(
             &json!({"failure": {"stack": [
-                {"action": "message(phase {{phase}} failed: {{err.msg}})"}
+                {"action": {"message": "phase {{phase}} failed: {{err.msg}}"}}
             ]}}),
             Path::new("t.md"),
         )
@@ -2377,7 +2382,7 @@ mod tests {
     #[test]
     fn message_reflects_current_frontmatter_per_event() {
         let config = parse_lifecycle_config(
-            &json!({"success": {"stack": [{"action": "message(iter {{phase}})"}]}}),
+            &json!({"success": {"stack": [{"action": {"message": "iter {{phase}}"}}]}}),
             Path::new("t.md"),
         )
         .unwrap();
@@ -2408,8 +2413,8 @@ mod tests {
     fn stack_action_sees_prior_set_frontmatter() {
         let config = parse_lifecycle_config(
             &json!({"success": {"stack": [{"action": [
-                "set_frontmatter('t.md', 'status', 'done')",
-                "message({{status}})"
+                {"set_frontmatter": ["t.md", "status", "done"]},
+                {"message": "{{status}}"}
             ]}]}}),
             Path::new("t.md"),
         )
@@ -2452,7 +2457,7 @@ mod tests {
     fn frontmatter_mutation_in_start_is_visible_to_later_events() {
         let config = parse_lifecycle_config(
             &json!({
-                "start": {"stack": [{"action": "set_frontmatter('t.md', 'status', 'running')"}]},
+                "start": {"stack": [{"action": {"set_frontmatter": ["t.md", "status", "running"]}}]},
                 "success": {"message": "status={{status}}"},
                 "finalize": {"message": "final={{status}}"}
             }),
@@ -2539,7 +2544,7 @@ mod tests {
     fn without_live_cell_later_event_resolves_against_its_own_base() {
         let config = parse_lifecycle_config(
             &json!({
-                "start": {"stack": [{"action": "set_frontmatter('t.md', 'status', 'running')"}]},
+                "start": {"stack": [{"action": {"set_frontmatter": ["t.md", "status", "running"]}}]},
                 "success": {"message": "status={{status}}"}
             }),
             Path::new("t.md"),
@@ -2603,7 +2608,7 @@ mod tests {
 
         // Executor path.
         let config = parse_lifecycle_config(
-            &json!({"failure": {"stack": [{"action": format!("message({template})")}]}}),
+            &json!({"failure": {"stack": [{"action": {"message": template}}]}}),
             Path::new("t.md"),
         )
         .unwrap();
@@ -2700,7 +2705,7 @@ mod tests {
     #[test]
     fn known_but_empty_reference_renders_empty() {
         let config = parse_lifecycle_config(
-            &json!({"success": {"stack": [{"action": "message(spec={{spec_file}})"}]}}),
+            &json!({"success": {"stack": [{"action": {"message": "spec={{spec_file}}"}}]}}),
             Path::new("t.md"),
         )
         .unwrap();
@@ -2729,7 +2734,7 @@ mod tests {
     #[test]
     fn unknown_root_typo_fails_closed() {
         let config = parse_lifecycle_config(
-            &json!({"success": {"stack": [{"action": "message({{spec_fil}})"}]}}),
+            &json!({"success": {"stack": [{"action": {"message": "{{spec_fil}}"}}]}}),
             Path::new("t.md"),
         )
         .unwrap();
@@ -2788,7 +2793,7 @@ mod tests {
     #[test]
     fn post_dm2_surviving_span_fails_before_dispatch() {
         let config = parse_lifecycle_config(
-            &json!({"success": {"stack": [{"action": "message({{tmpl}})"}]}}),
+            &json!({"success": {"stack": [{"action": {"message": "{{tmpl}}"}}]}}),
             Path::new("t.md"),
         )
         .unwrap();
@@ -2820,7 +2825,7 @@ mod tests {
     #[test]
     fn deferred_effect_invalid_resolved_name_reports_unknown_effect() {
         let config = parse_lifecycle_config(
-            &json!({"success": {"stack": [{"action": "effect({{effect_name}})"}]}}),
+            &json!({"success": {"stack": [{"action": {"effect": "{{effect_name}}"}}]}}),
             Path::new("t.md"),
         )
         .unwrap();
@@ -2850,7 +2855,7 @@ mod tests {
     #[test]
     fn deferred_effect_valid_resolved_name_dispatches() {
         let config = parse_lifecycle_config(
-            &json!({"success": {"stack": [{"action": "effect({{effect_name}})"}]}}),
+            &json!({"success": {"stack": [{"action": {"effect": "{{effect_name}}"}}]}}),
             Path::new("t.md"),
         )
         .unwrap();

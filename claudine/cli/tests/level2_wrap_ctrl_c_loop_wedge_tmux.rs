@@ -140,7 +140,7 @@ fn double_ctrl_c_force_exits(deadline: Duration) -> (bool, String) {
     fs::write(
         &md_file,
         format!(
-            "---\ntitle: l2-loop-wedge\nmodel: test-model\ntotal_phases: 2\nphase: 1\n\
+             "---\ntitle: l2-loop-wedge\nmodel: test-model\ntotal_phases: 2\nphase: 1\n\
              loop:\n  until: \"phase > total_phases\"\n  action: \"increment(phase)\"\n---\n\
              Loop body.\n\n::shell /bin/sh {wedge} ::timeout:600\n",
             wedge = wedge_sh.display()
