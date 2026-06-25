@@ -14,10 +14,10 @@ total_phases: "{{ frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases
 spec_file: "{{ file_exists(spec) ? spec : file_exists(join(dirname, 'spec.md')) ? join(dirname, 'spec.md')  :  '' }}"
 initialize:
     stack:
-        when: "phase >= total_phases"
-        action:
-            - warn: "There was an attempt to implement a phase [{{phase}}] of the plan which is larger than any phase the plan has [{{total_phases}}]"
-            
+        - when: "phase >= total_phases"
+          action: 
+              - "warn(There was an attempt to implement a phase **<yellow>{{phase}}</yellow>** of the plan which is **too large**. This plan only has **<yellow>{{total_phases}}</yellow>** total phases!)"
+              - "error(invalid phase: {{phase}} is larger than {{total_phases}})"
 start:
     message: "🎬  starting the implementation of phase **#{{phase}}** of `{{parent_dir(plan)}}`\n> &nbsp;&nbsp;&nbsp;&nbsp;**area:** {{ctx.area}}, **agent:** {{ctx.agent}}/{{ctx.model}}"
 success: 
@@ -27,7 +27,7 @@ blocked:
     message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved!"
 failure:
     say: "Phase {{phase}} of a plan in the {{area}} package area, ran into problems!"
-    message: "❌️  phase {{phase}} (_of {{total_phases}}_) failed in the plan `{{parent_dir(plan)}}` ({{area}}, {{ctx.agent}}/{{ctx.model}})"
+    message: "❌️  phase **{{phase}}** (_of {{total_phases}}_) failed in the plan `{{parent_dir(plan)}}` ({{area}}, {{ctx.agent}}/{{ctx.model}})"
 loop:
     until: "phase >= total_phases"
     action: "increment(phase)"
