@@ -149,8 +149,11 @@ caller-supplied lookup:
   arbitrary named globals, not three hardcoded names, so future late-binding
   globals need no further Darkmatter change.
 - The subtree compose applies identical whole-value-typing and mixed-string
-  rules, so a lifecycle string interpolated at event-time behaves byte-for-byte
-  like the same string interpolated at compose-time.
+  *resolution* rules, so a lifecycle string interpolated at event-time produces
+  the same typed/substituted result as the same string with the same data at
+  compose-time. Strictness (below) is an **orthogonal** mode flag: it changes
+  what happens on *failure* (typed error vs lenient empty), not how a successful
+  resolution is typed or substituted.
 - The API has an explicit strictness mode. Claudine uses strict mode for
   lifecycle communication/action text so parse failures, fatal evaluation
   failures, and unresolved roots become typed errors before any side effect is
@@ -179,6 +182,14 @@ injected-globals layer handed to DM2 plus the current document state.
 Dispatch uses the resolved event subtree only for the event currently firing.
 The raw deferred subtree remains the stored lifecycle definition so later events
 and later loop iterations re-resolve against their own event-time state.
+
+**Resolution granularity is just-in-time, not a single snapshot.** Each lifecycle
+property/action string is resolved via DM2 immediately before it is used, against
+the live effective document state at that instant — not once when the event
+fires. This is required so a `set_frontmatter` side-effect run by stack action #1
+is visible to action #2 in the same event's stack, and so `current`/`timing` read
+the state at the point of use. (Resolving the whole event subtree up front would
+miss mid-stack mutations.)
 
 ### C3 — `shell(...)` is the early-binding exception
 
@@ -210,10 +221,19 @@ the authored `{{ }}` spans, which is what we want:
   before dispatch. A surviving `{{ }}` at that point is a typed error and the
   side effect is not sent.
 - **Event-time resolution errors:** malformed expressions, unknown functions,
-  unknown roots, and late-binding globals used outside their legal event fail
-  the event with a typed `CompositionError`. Lifecycle side effects must not
-  silently render empty operational text for these cases. Optional values should
-  use explicit fallback syntax.
+  unknown roots (typos / genuinely undefined variables), and late-binding globals
+  used outside their legal event fail the event with a typed `CompositionError`.
+  Lifecycle side effects must not silently render empty operational text for these
+  cases.
+- **Strict mode does not error on known-but-empty.** A reference whose root is a
+  *known* surface — a declared frontmatter key, `ctx`/`env`/`doc`, or an
+  in-scope late-binding global — that resolves to `null`/empty renders empty, as
+  today. Strictness targets *unknown* roots and malformed/illegal expressions,
+  not legitimately-absent values. Without this line, existing prompts that
+  reference optional keys (e.g. `{{total_phases}}` or `{{spec_file}}` in
+  `implement-plan.md`, both of which legitimately resolve to empty) would newly
+  fail. **Migration note:** an author who wants an *unknown* optional name to be
+  tolerated must opt in with explicit fallback syntax (`{{ maybe || '' }}`).
 
 ### C5 — Dry-run visibility
 
@@ -260,6 +280,13 @@ the event-time, late-binding-aware interpolation that pairs with it.
   `loop:` (`say`, `message`, `stack`, etc.) are deferred. Iteration controls
   (`while`, `until`, `actions`, `max`, `fail_fast`) keep their existing parsing
   and binding rules unless they contain lifecycle communication/action text.
+  DM1 defers whole top-level keys, so the planning step must pick one of: (a)
+  defer all of `loop:` and confirm the iteration controls are unaffected (likely
+  safe — `while`/`until`/`actions` are evaluated by the loop engine, not by
+  compose-time `{{ }}` interpolation, so deferring them is a no-op for resolution),
+  or (b) extend DM1 to accept sub-paths (`loop.say`, `loop.stack`, …) if any
+  iteration control turns out to depend on compose-time interpolation. Verify
+  before implementing rather than assuming (a).
 - **Effect names.** `effect: "{{effect_name}}"` and `effect({{effect_name}})`
   cannot be validated against the sound catalog at prepare time. Validate the
   raw literal at prepare time when no interpolation is present; otherwise
@@ -308,6 +335,11 @@ the event-time, late-binding-aware interpolation that pairs with it.
   `command: "rm {{err.msg}}"` are rejected at prepare time.
 - **No leak false-positive:** a deferred `{{err.msg}}` does not trip the
   prepare-time leak guard.
+- **Known-but-empty renders empty:** a lifecycle message referencing a declared
+  frontmatter key that resolves to empty (e.g. `{{spec_file}}`) renders empty and
+  does **not** error, while a typo (`{{spec_fil}}`) fails closed.
+- **Just-in-time resolution:** a stack whose action #1 runs `set_frontmatter` and
+  whose action #2 references that key sees the mutated value in action #2.
 - **Post-DM2 leak guard:** a malformed or nested event-time result that still
   contains `{{...}}` fails before any messenger/TTS/sound/stderr/stdout/notify
   side effect is dispatched.
@@ -345,8 +377,10 @@ actual error on a real/simulated failure.
 9. Compose-time keys cannot accidentally consume deferred lifecycle subtrees.
 10. User schema validation remains unchanged for ordinary prompt inputs and does
     not reject deferred lifecycle interpolation.
-11. Event-time interpolation failures fail closed before lifecycle side effects
-    dispatch; they do not render empty operational text.
+11. Event-time interpolation *failures* (unknown roots, malformed/illegal
+    expressions, late-binding misuse) fail closed before lifecycle side effects
+    dispatch; they do not silently render empty. A *known* surface that resolves
+    to null/empty still renders empty, as today.
 12. Docs updated (`lifecycle.md`, `composition.md`, `frontmatter-properties.md`,
     lifecycle spec lines 67 & 96–101, skill).
 13. All existing claudine + darkmatter tests pass.
