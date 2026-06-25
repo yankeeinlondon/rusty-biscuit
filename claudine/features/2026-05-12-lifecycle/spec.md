@@ -64,7 +64,7 @@ When in a lifecycle event's "stack" your conditional expressions as well as acti
 - extended global variables (`err`, `timing`, `current`)
 - additional functions categorized as "side effects" (because they can mutate the state outside of the current document)
 
-> Note: `err`/`timing`/`current` are **lifecycle-stack-only** globals. Body and frontmatter interpolation is evaluated at composition start, before any lifecycle event fires, so a bare `err`/`timing`/`current` there has **no** special meaning — it resolves as an ordinary identifier against frontmatter/context, exactly like any other variable name (with normal undefined-variable handling if absent). These globals exist only inside a lifecycle event's stack. This mirrors the err-vs-`doc.err` static-scan rule below: the globals are special only inside lifecycle stacks.
+> Note: `err`/`timing`/`current` are **lifecycle-only** globals. Document body and *non-lifecycle* frontmatter interpolation is evaluated at composition start, before any lifecycle event fires, so a bare `err`/`timing`/`current` there has **no** special meaning — it resolves as an ordinary identifier against frontmatter/context, exactly like any other variable name (with normal undefined-variable handling if absent). Lifecycle event properties are different: they interpolate **at event-time** (see the [late-binding spec](../2026-06-22-late-binding/spec.md)), so a lifecycle property/action string's `{{ … }}` span can read these globals. They are still meaningless outside a lifecycle event. This mirrors the err-vs-`doc.err` static-scan rule below: the globals are special only inside lifecycle events.
 
 #### `err` global variable
 
@@ -93,11 +93,10 @@ but we will introduce the `err` global variable.
 - some are also known to never have an error (initialize, start, success, loop),
 - only the `finalize` state can _optionally_ be in an error state
 
-Misuse of `err` is caught by a **static, parse-time scan** that reuses the existing expression-walk machinery — the same approach as `validate_no_undefined_lifecycle_variables` / `ExpressionFinder` in `composition/lifecycle.rs`. For each event block the scan walks every expression surface:
+Misuse of `err` is caught by a **static, parse-time scan** that reuses the existing expression-walk machinery — the same approach as `ExpressionFinder` in `composition/lifecycle.rs`. The two surface kinds are scanned differently, because communication/action bodies are now literal text with `{{ … }}` interpolation (the `literal-short-form-args` change), not whole expressions:
 
-- `when:` clauses
-- communication / message strings
-- short-form action arguments
+- **`when:` clauses** are whole boolean expressions — scanned as a single expression for a bare `err` reference.
+- **communication / message / action strings** are literal prose; the scan walks only their `{{ … }}` **interpolation spans**, parsing each span and checking it for a bare `err` reference. A bare `err` outside a span is literal text, not a reference.
 
 If a reference to the global `err` appears in an event that never carries an error, the scan raises a typed parse-time error (e.g. `CompositionError::LifecycleErrNotAvailable { event, .. }`) and the document does not run.
 

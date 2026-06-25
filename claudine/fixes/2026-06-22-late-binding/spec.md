@@ -2,7 +2,7 @@
 status: ready for planning and implementation
 created: 2026-06-22
 area: claudine
-review_iterations: 0
+review_iterations: 3
 reviewed: true
 packages:
     - darkmatter

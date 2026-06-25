@@ -6,7 +6,9 @@ packages:
 - claudine
 - darkmatter
 reviewed: true
-hash: 16dc8e7d22f703dc-d7e76324b6b6d6d6
+review_iterations: 1
+hash: fc815d8690e91c15-d7e76324b6b6d6d6
+last_updated: 2026-06-24
 ---
 
 # `inline-compose` Document Hashing
