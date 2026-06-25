@@ -43,14 +43,14 @@ share the same SIGTERM → SIGKILL escalation but classify differently:
 | `ProcessTermination` | Meaning | Failure routing |
 |---|---|---|
 | `Completed` | Child exited on its own (exit code may still be non-zero) | `AgentFailure` only if exit ≠ 0 |
-| `Interrupted` | User pressed Ctrl+C — no synthesized `error_kind` | suppressed (no handler) |
-| `TimedOut` | `timeout` / `step_timeout` watchdog kill | `Timeout` → `handle_timeout:` retry |
-| `Aborted` | A claudine **content guard** tripped (exit-expression, runaway-repetition, or volume cap — see [timeouts.md](timeouts.md#content-guards-runaway-output)) | `AgentFailure` → `failure:` fail-fast |
+| `Interrupted` | User pressed Ctrl+C — no synthesized `error_kind` | suppressed (no recovery) |
+| `TimedOut` | `timeout` / `step_timeout` watchdog kill | `Timeout` → `failure` stack `Retry`/`Resume` |
+| `Aborted` | A claudine **content guard** tripped (exit-expression, runaway-repetition, or volume cap — see [timeouts.md](timeouts.md#content-guards-runaway-output)) | `AgentFailure` → `failure` fail-fast |
 
 `Aborted` is deliberately distinct from `TimedOut` (it must **not** take
-the timeout-retry path, which would re-run the runaway) and from
+a `failure`-stack `Retry`, which would re-run the runaway) and from
 `Interrupted` (a content trip is a genuine failure the operator's
-handlers must observe, not a silent user cancel).
+lifecycle stacks must observe, not a silent user cancel).
 
 ## User-driven Ctrl+C (SIGINT)
 
@@ -82,9 +82,18 @@ to async-signal-safe operations:
   has a leading `\n` so it lands at column 1 (off the terminal's echoed
   `^C`) and renders the prompt path as an OSC8 hyperlink whose visible
   text is the user's CLI argument verbatim.
-- Subsequent SIGINTs are no-ops at this layer — they are handled by the
-  per-iteration wrapper handler described below, which escalates SIGINT →
-  SIGTERM → SIGKILL on the wrapped child.
+- On a **second-or-later** SIGINT that lands while **no child wait loop is
+  active**, force-exits the wrapper with `libc::_exit(130)` (after a static
+  async-signal-safe notice). This is the teeth the flag alone lacks: the
+  interrupt flag only short-circuits at the *next explicit checkpoint*, so a
+  synchronous call wedged on a network send or a hung TTS subprocess —
+  notably in the prep phase or *between loop iterations*, where no agent
+  child is running — would otherwise ignore Ctrl+C entirely. The guard reads
+  [`crate::output::wait_loop_active`] (a depth counter raised for the
+  lifetime of every `wait_with_signal_*` call); while a child wait loop *is*
+  active, that loop's own handler owns the child-targeted SIGINT → SIGTERM →
+  SIGKILL ladder, so the compose guard defers to it rather than killing the
+  wrapper out from under a still-reaping child.
 
 `signal_hook::low_level::register` stacks handlers, so this compose-scoped
 guard composes cleanly with the per-iteration handler installed around
@@ -152,6 +161,21 @@ sequence and it could plausibly take more than ~100 ms (network I/O,
 subprocess wait, large sniff scan, TTS subprocess), guard it with
 `crate::interrupt::interrupted()` (lib) or
 `crate::output::user_interrupt_observed()` (CLI).
+
+Two backstops cover the case where such a call is *already in flight* when
+Ctrl+C lands (the flag check has already passed, so the flag cannot break
+in):
+
+1. **Bounded blocking lifecycle side effects.** The genuinely blocking
+   lifecycle emitters — TTS (`say` / `say_first`) and sound `effect` — run
+   on a detached worker thread bounded by `run_blocking_with_timeout`
+   ([`lib/src/composition/lifecycle.rs`](../../lib/src/composition/lifecycle.rs):
+   `TTS_PLAYBACK_TIMEOUT` = 30 s, `EFFECT_PLAYBACK_TIMEOUT` = 15 s). A wedged
+   audio device or network voice can no longer freeze a run between phases;
+   the wait is abandoned and a warning logged. (`message` and `notify` are
+   already fire-and-forget `tokio::spawn`s and never block the caller.)
+2. **Second-press force-exit** (above) — the universal escape hatch when a
+   blocking call outside any wait loop ignores the flag entirely.
 
 ### Lifecycle short-circuit details
 
@@ -494,6 +518,9 @@ pattern the user-interrupt guard uses.
 | Concern | File |
 |---|---|
 | `USER_INTERRUPTED` flag (CLI) | [`cli/src/output/mod.rs`](../../cli/src/output/mod.rs) |
+| `wait_loop_active` flag + `WaitLoopActiveGuard` | [`cli/src/output/mod.rs`](../../cli/src/output/mod.rs) |
+| Second-press force-exit (`_exit(130)`) | [`cli/src/commands/compose/interrupt.rs`](../../cli/src/commands/compose/interrupt.rs) |
+| Bounded lifecycle side effects (`run_blocking_with_timeout`) | [`lib/src/composition/lifecycle.rs`](../../lib/src/composition/lifecycle.rs) |
 | Lib-side mirror flag | [`lib/src/interrupt.rs`](../../lib/src/interrupt.rs) |
 | `install_user_interrupt_guard` + `UserInterruptGuard` | [`cli/src/commands/compose.rs`](../../cli/src/commands/compose.rs) |
 | `USER_INTERRUPT_EXIT_CODE` constant | [`cli/src/commands/compose.rs`](../../cli/src/commands/compose.rs) |

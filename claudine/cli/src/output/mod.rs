@@ -619,6 +619,46 @@ pub(crate) fn user_interrupt_observed() -> bool {
     USER_INTERRUPTED.load(std::sync::atomic::Ordering::SeqCst)
 }
 
+/// Nesting depth of the active child-process wait loops.
+///
+/// A child wait loop (`wait_with_signal_*` in `wrap::exec`) installs its own
+/// `SIGINT` handler that drives the child-targeted `SIGINT → SIGTERM →
+/// SIGKILL` escalation ladder. While that ladder is in charge, the
+/// compose-scoped Ctrl+C guard must **not** abruptly `_exit` the wrapper out
+/// from under it. Outside that window — prep, between loop iterations, and
+/// post-execute lifecycle side effects (TTS, sound) — there is no ladder, so a
+/// repeated press must be able to force-exit a wedged synchronous call.
+///
+/// A counter (not a bool) keeps the flag correct if wait loops ever nest.
+static WAIT_LOOP_DEPTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Returns `true` while at least one child-process wait loop is blocking with
+/// its own `SIGINT` handler installed. Read from the compose guard's signal
+/// handler — a single atomic load, async-signal-safe.
+pub(crate) fn wait_loop_active() -> bool {
+    WAIT_LOOP_DEPTH.load(std::sync::atomic::Ordering::SeqCst) > 0
+}
+
+/// RAII guard that marks a child wait loop active for its lifetime.
+///
+/// Construct it at the top of each `wait_with_signal_*` function; the
+/// decrement on `Drop` fires on every exit path (including `?` early returns),
+/// so the flag can never get stuck "active" after the wait returns.
+pub(crate) struct WaitLoopActiveGuard;
+
+impl WaitLoopActiveGuard {
+    pub(crate) fn new() -> Self {
+        WAIT_LOOP_DEPTH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for WaitLoopActiveGuard {
+    fn drop(&mut self) {
+        WAIT_LOOP_DEPTH.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 /// Reset the user-interrupt flag. Used only by tests that need a clean
 /// observable state across assertions.
 ///
@@ -678,6 +718,33 @@ pub(crate) fn capitalize_provider(provider: Provider) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wait_loop_active_guard_tracks_nesting_depth() {
+        // Outside any wait loop the compose Ctrl+C guard is free to force-exit.
+        assert!(!wait_loop_active(), "must start inactive");
+
+        {
+            let _outer = WaitLoopActiveGuard::new();
+            assert!(wait_loop_active(), "active while a guard is held");
+
+            {
+                let _inner = WaitLoopActiveGuard::new();
+                assert!(wait_loop_active(), "still active while nested");
+            }
+            // Inner drop must not clear the flag while the outer guard lives —
+            // a bool flag would; the depth counter must not.
+            assert!(
+                wait_loop_active(),
+                "must remain active until the outermost guard drops"
+            );
+        }
+
+        assert!(
+            !wait_loop_active(),
+            "must be inactive again once all guards drop"
+        );
+    }
 
     #[test]
     fn format_launch_directory_mentions_directory() {

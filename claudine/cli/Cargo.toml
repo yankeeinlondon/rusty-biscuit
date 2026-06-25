@@ -9,13 +9,6 @@ description = "cross-agent abstraction and meta-agent harness"
 name = "claudine"
 path = "src/main.rs"
 
-# Test-only PTY harness used by `tests/level2_validation_reporter_pty.rs` to observe
-# the exact ANSI/OSC-8 output of the harness validation failure reporter
-# under a real PTY. Not intended for end-user invocation.
-[[bin]]
-name = "validation_reporter_pty_harness"
-path = "src/bin/validation_reporter_pty_harness.rs"
-
 [dependencies]
 biscuit-file = { path = "../../biscuit-file/lib" }
 biscuit-speaks = { path = "../../biscuit-speaks/lib" }
@@ -26,7 +19,7 @@ biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 biscuit-tui = { path = "../../biscuit-tui/lib" }
 clap = { version = "4.5", features = ["derive", "env", "unstable-ext"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
-tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros", "net"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 which = "8"
@@ -39,6 +32,7 @@ color-eyre = "0.6"
 indexmap = "2"
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0"
 dirs = "6"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 uuid = { version = "1", features = ["v4"] }
@@ -46,6 +40,14 @@ tempfile = "3"
 ignore = "0.4"
 globset = "0.4"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+# Cross-platform rendezvous client used by the lifecycle `requeue(...)` control
+# action. On Unix the client connects over a Unix Domain Socket; on Windows it
+# connects over a named pipe. When the daemon is unreachable the requeue path
+# persists the deferred prompt to a local fallback file (see
+# `commands/wrap/harness_orch/loop_control.rs`).
+rendezvous-client = { path = "../rendezvous/client" }
+rendezvous-core = { path = "../rendezvous/core" }
+tonic = { version = "0.14", default-features = false, features = ["codegen"] }
 
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.4"
@@ -80,3 +82,6 @@ rstest = "0.25"
 tracing-test = "0.2"
 test-toolkit = { path = "../../tools/test-toolkit" }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
+
+[target.'cfg(unix)'.dev-dependencies]
+rendezvous-daemon = { path = "../rendezvous/daemon" }

@@ -49,13 +49,12 @@ pub(crate) use inline::{
 pub(crate) use overlay::{frontmatter_map_to_value, merge_frontmatter_overlay};
 pub(crate) use policy::{
     StreamSummaryContext, StructuredCodexOutput, StructuredSummaryDetails,
-    WrapperHarnessPermissionProbe, build_structured_plumbing, emit_stream_summary,
-    format_summary_prose, format_verbose_summary_details_prose,
+    build_structured_plumbing, emit_stream_summary, format_summary_prose,
+    format_verbose_summary_details_prose,
 };
 pub(crate) use prompt_source::{maybe_edit_prompt_source, maybe_edit_prompt_source_with};
 pub(crate) use resume::{
-    NextAttemptPlan, append_resume_passthrough_args, apply_next_attempt_plan,
-    build_next_attempt_plan, normalize_resume_args, try_resolve_handler,
+    append_resume_passthrough_args, check_resume_support, normalize_resume_args,
 };
 use wrapper_stages::{
     detect_wrapper_harness, emit_preflight_preamble, parse_cli_timeouts,

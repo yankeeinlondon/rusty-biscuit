@@ -43,6 +43,14 @@ Two details matter in practice:
 - Protect pre-checks run even when no event binding exists for the current provider/event.
 - MCP payloads are scanned field-by-field, not by concatenating the full JSON response, which avoids cross-field false positives.
 
+MCP responses come from untrusted servers, so the scan is bounded: at most
+10,000 string leaves totalling 1 MiB, with any single leaf truncated to 64 KiB.
+The built-in patterns run in linear time (Rust's `regex` has no catastrophic
+backtracking), so these caps simply bound the per-response cost against a hostile
+multi-megabyte body. Truncation only shortens what is scanned — a match in the
+surviving prefix still blocks — and a `warn!` is emitted whenever a cap clips the
+input.
+
 ## Built-in Rule Groups
 
 The shipped catalog exposes 12 built-in groups plus optional user-defined

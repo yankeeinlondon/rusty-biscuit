@@ -415,19 +415,23 @@ synthesize a distinct termination:
 [`ProcessTermination::Aborted`](../../lib/src/harness/model.rs), **not**
 `TimedOut`. This is deliberate — `Aborted` maps to
 `FailureEvent::AgentFailure` (fail-fast), so a guard trip **never** takes
-the `handle_timeout:` retry path that would re-run the provider and
+a `failure`-stack `Retry` path that would re-run the provider and
 reproduce the runaway. It is also never `Interrupted` (which would
 suppress failure handling like a user cancel). The honest per-guard
-`error_kind` is carried through the summary into `AttemptOutcome.error_kind`
-and forwarded to a programmatic `handle` command as the
-`CLAUDINE_ERROR_KIND` env var plus an `error_kind` / `guard_context`
-field in the JSON payload, so a handler can branch on
-`runaway_repetition` versus a generic `agent_failure`.
+`error_kind` is carried through the synthesized `session_end` summary, so
+a lifecycle `failure`/`finalize` stack can branch on the `err` global
+(`runaway_repetition` versus a generic `agent_failure`).
 
-| Termination | `error_kind` | Failure event | Retry path |
+| Termination | `error_kind` | Failure event | Recovery path |
 |---|---|---|---|
-| `TimedOut` | `timeout` / `step_timeout` | `Timeout` | `handle_timeout:` |
-| `Aborted` | `exit_expression` / `runaway_repetition` / `runaway_volume` | `AgentFailure` | `failure:` (fail-fast) |
+| `TimedOut` | `timeout` / `step_timeout` | `Timeout` | `failure` stack `Retry`/`Resume` |
+| `Aborted` | `exit_expression` / `runaway_repetition` / `runaway_volume` / `repeated_stream_error` | `AgentFailure` | none (fail-fast) |
+
+`repeated_stream_error` is an OpenCode-specific stderr backstop: consecutive
+`message="stream error"` records crossing `MAX_CONSECUTIVE_STREAM_ERRORS` (5)
+with no step advance abort the run, bounding OpenCode's unbounded backoff
+retries when the provider fails every attempt. It is fail-fast (`Aborted`),
+never a `failure`-stack `Retry` that would reproduce the failure loop.
 
 ### Configuration surface
 

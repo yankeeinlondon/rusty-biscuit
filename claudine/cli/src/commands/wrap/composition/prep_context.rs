@@ -90,12 +90,16 @@ impl CompositionPrepContext {
     /// provider list.
     ///
     /// Performs one shared `sniff::detect_with_plan` scan rooted at the
-    /// launch CWD covering git summary + repo structure (no os/hw/net),
-    /// and reuses its result for both [`LaunchContext`] and
-    /// [`EnvironmentContext`] so downstream phases never re-scan. The
-    /// source's parent directory is probed separately with the much
-    /// cheaper `detect_git` to discover `source_repo_root` because the
-    /// markdown file may live in a different repo than the launch CWD.
+    /// launch CWD covering git summary only (no os/hw/net/repo), and reuses
+    /// its result for both [`LaunchContext`] and [`EnvironmentContext`] so
+    /// downstream phases never re-scan. Workspace (repo) structure is
+    /// detected in a separate, bounded `detect_repo_structure` call gated on
+    /// the scan's discovered git root — never as part of the launch-CWD scan
+    /// — so a non-repo launch directory (e.g. `$HOME`) can never trigger an
+    /// unbounded home-tree walk. The source's parent directory is probed
+    /// separately with the much cheaper `detect_git` to discover
+    /// `source_repo_root` because the markdown file may live in a different
+    /// repo than the launch CWD.
     pub fn new(
         original_ref: &str,
         resolved_path: &Path,
@@ -114,6 +118,17 @@ impl CompositionPrepContext {
         // calls. Both consumers now read from the cached results below.
         // Run this FIRST so `source_repo_root` resolution can reuse the
         // launch repo root in the common case.
+        //
+        // The scan requests git summary only — never repo structure. Repo
+        // structure is detected separately below, bounded to the discovered
+        // git root, because sniff bounds its package-enumeration walk to the
+        // git root *when one exists* but otherwise walks `base_dir` unbounded.
+        // Launched from a non-repo directory (e.g. `$HOME`) that unbounded
+        // walk would recurse the entire home tree (`~/Library`, `~/Documents`,
+        // …) and appear to hang. The git root the scan already discovers is
+        // the sole gate for whether a package concept exists at all — the same
+        // gate `FileReference::with_package_area_magic_path` applies before
+        // consulting `cargo_metadata`.
         let (launch_context, env_context, git_root, repo, launch_detection_error) = {
             let _span = tracing::info_span!("compose_prep.shared_sniff").entered();
             let plan = DetectionPlan::new()
@@ -124,7 +139,7 @@ impl CompositionPrepContext {
                 .filesystem(
                     FilesystemRequest::new()
                         .git(GitRequest::summary())
-                        .repo(RepoRequest::structure())
+                        .without_repo()
                         .without_file_inventory()
                         .without_docs()
                         .without_formatting(),
@@ -139,18 +154,23 @@ impl CompositionPrepContext {
             };
             let launch_context = LaunchContext::from_sniff_result(&sniff_result, &cwd);
 
-            // Extract git/repo info for LaunchWorkspaceContext before
-            // moving sniff_result into environment_context_from_sniff_result.
-            let (git_root, repo) = sniff_result
+            // The launch git root, discovered once by the scan above. This is
+            // the single guard for repo-scoped work: no git root means no
+            // repo, hence no workspace packages to enumerate.
+            let git_root = sniff_result
                 .filesystem
                 .as_ref()
-                .map(|f| {
-                    (
-                        f.git.as_ref().map(|g| g.repo_root.clone()),
-                        f.repo.as_ref().cloned(),
-                    )
-                })
-                .unwrap_or((None, None));
+                .and_then(|f| f.git.as_ref().map(|g| g.repo_root.clone()));
+
+            // Detect workspace structure only when inside a repo, bounded to
+            // the git root so the package-enumeration walk can never escape
+            // into an unbounded directory tree. Best-effort: a structure-probe
+            // failure leaves `repo` as `None` rather than aborting prep.
+            let repo = git_root.as_deref().and_then(|root| {
+                sniff::filesystem::repo::detect_repo_structure(root)
+                    .ok()
+                    .flatten()
+            });
 
             let env_context = environment_context_from_sniff_result(sniff_result);
             (
@@ -387,5 +407,98 @@ mod tests {
             .selection_config
             .expect("should fall back to CWD and load config");
         assert_eq!(cfg.favorite, Some(Provider::Codex));
+    }
+
+    /// Regression (compose hangs from `$HOME` / any non-repo directory):
+    /// building the prep context from a launch CWD that is **not** inside a
+    /// git repository must not trigger sniff's package-enumeration walk.
+    /// Sniff bounds that walk to the git root when one exists but otherwise
+    /// recurses `base_dir` unbounded, so launching from `$HOME` would walk
+    /// the entire home tree (`~/Library`, …) and appear to hang.
+    ///
+    /// The launch CWD is a non-repo tempdir that *also* carries a planted
+    /// `[workspace]` `Cargo.toml`. If repo-structure detection were (wrongly)
+    /// rooted at this non-repo CWD, sniff would discover that workspace and
+    /// `launch_workspace.repo_root` would surface as `Some(tempdir)`. The fix
+    /// gates structure detection on the scan's discovered git root — absent
+    /// here — so the workspace is never enumerated and `repo_root` stays
+    /// `None`. That single assertion is what distinguishes the fixed path
+    /// from the unbounded-walk regression.
+    #[test]
+    #[serial_test::serial]
+    fn prep_context_outside_repo_skips_package_enumeration() {
+        let launch = tempfile::tempdir().unwrap();
+        // macOS canonicalizes `/var` → `/private/var`; `current_dir()` (and
+        // therefore `launch_workspace.child_cwd`) returns the canonical form.
+        let launch_canon = std::fs::canonicalize(launch.path()).unwrap();
+
+        // Precondition: the tempdir must resolve to no git root. If an
+        // ancestor of `$TMPDIR` unexpectedly carries a `.git`, the scan would
+        // bound to that root and this test could not exercise the non-repo
+        // path — fail loudly rather than silently mis-assert.
+        assert!(
+            sniff::filesystem::git::repo_root(&launch_canon)
+                .ok()
+                .flatten()
+                .is_none(),
+            "test requires a non-repo launch dir; an ancestor unexpectedly has a .git"
+        );
+
+        // Plant a workspace that only a recursive walk rooted at the launch
+        // CWD would discover.
+        std::fs::write(
+            launch_canon.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"pkg_a\"]\nresolver = \"2\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(launch_canon.join("pkg_a")).unwrap();
+        std::fs::write(
+            launch_canon.join("pkg_a/Cargo.toml"),
+            "[package]\nname = \"pkg_a\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+
+        let source_file = launch_canon.join("prompt.md");
+        std::fs::write(&source_file, "# Test\nTell a joke\n").unwrap();
+
+        let prior_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&launch_canon).unwrap();
+
+        let excluded = BTreeSet::new();
+        let result = CompositionPrepContext::new("prompt.md", &source_file, &excluded);
+
+        // Restore the process CWD before asserting so a failed assert cannot
+        // leave the shared test process pointed at a deleted tempdir.
+        let _ = std::env::set_current_dir(&prior_cwd);
+
+        let ctx = result.expect("prep context must build outside a repo");
+
+        // No git anywhere up the tree → no launch repo root.
+        assert!(
+            ctx.launch_context.repo_root.is_none(),
+            "non-repo launch CWD must yield no launch repo root"
+        );
+        assert!(
+            ctx.source_repo_root.is_none(),
+            "non-repo source must yield no source repo root"
+        );
+        // The child process runs in the launch CWD itself when there is no
+        // repo to anchor it.
+        assert_eq!(
+            ctx.launch_workspace.child_cwd, launch_canon,
+            "child_cwd must follow the launch CWD outside a repo"
+        );
+        // KEY regression assertion: the planted workspace must NOT have been
+        // enumerated. A reintroduced `.repo(RepoRequest::structure())` rooted
+        // at the non-repo CWD would surface it here as `Some(launch_canon)`.
+        assert!(
+            ctx.launch_workspace.repo_root.is_none(),
+            "package enumeration must be skipped outside a repo; \
+             a planted workspace leaked into launch_workspace.repo_root"
+        );
+        assert!(
+            ctx.launch_workspace.package_context.is_none(),
+            "no package context should be derived outside a repo"
+        );
     }
 }

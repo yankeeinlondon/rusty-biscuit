@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
+use darkmatter::markdown::hash::MdHashKind;
 use darkmatter::markdown::{Markdown, MarkdownError};
 
 /// Convert a `MarkdownError` into a `CompositionError`, preserving the
@@ -93,7 +94,7 @@ fn find_git_root_from_path(path: &Path) -> Option<PathBuf> {
 use super::error::CompositionError;
 use super::guardrails::load_or_create_guardrails;
 use super::lifecycle::{
-    parse_lifecycle_config, validate_no_interpolation_leaks,
+    parse_lifecycle_config, validate_no_err_in_no_error_events, validate_no_interpolation_leaks,
     validate_no_undefined_lifecycle_variables,
 };
 use super::types::{
@@ -111,6 +112,15 @@ pub fn prepare_direct(
     options: PrepareOptions,
 ) -> Result<PreparedComposition, CompositionError> {
     let override_keys = top_level_override_keys(options.set_overrides.as_ref());
+    if let Some((key, replacement)) =
+        super::lifecycle::scan_removed_validation_keys(&frontmatter_to_value(source.markdown.frontmatter()))
+    {
+        return Err(CompositionError::RemovedValidationKey {
+            source_path: source.resolved_path.clone(),
+            key,
+            replacement: replacement.to_string(),
+        });
+    }
     let mut ctx = ComposeContext::capture();
     for (key, value) in &options.env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
@@ -150,6 +160,15 @@ pub fn prepare_direct(
     }
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
+    if let Some((key, replacement)) =
+        super::lifecycle::scan_removed_validation_keys(&effective_frontmatter)
+    {
+        return Err(CompositionError::RemovedValidationKey {
+            source_path: source.resolved_path.clone(),
+            key,
+            replacement: replacement.to_string(),
+        });
+    }
     let agent_full = composed
         .frontmatter()
         .as_map()
@@ -178,8 +197,10 @@ pub fn prepare_direct(
     validate_no_undefined_lifecycle_variables(
         source.markdown.frontmatter(),
         &effective_frontmatter,
+        &lifecycle,
         &source.resolved_path,
     )?;
+    validate_no_err_in_no_error_events(&lifecycle, &source.resolved_path)?;
 
     let source_repo_root = options
         .source_repo_root
@@ -211,6 +232,15 @@ pub fn prepare_inline(
 ) -> Result<PreparedComposition, CompositionError> {
     let override_keys = top_level_override_keys(options.set_overrides.as_ref());
     let fm = source.markdown.frontmatter();
+    if let Some((key, replacement)) =
+        super::lifecycle::scan_removed_validation_keys(&frontmatter_to_value(fm))
+    {
+        return Err(CompositionError::RemovedValidationKey {
+            source_path: source.resolved_path.clone(),
+            key,
+            replacement: replacement.to_string(),
+        });
+    }
 
     let prompt_value = fm
         .as_map()
@@ -257,6 +287,15 @@ pub fn prepare_inline(
         .map_err(|e| map_compose_error(&source.resolved_path, e))?;
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
+    if let Some((key, replacement)) =
+        super::lifecycle::scan_removed_validation_keys(&effective_frontmatter)
+    {
+        return Err(CompositionError::RemovedValidationKey {
+            source_path: source.resolved_path.clone(),
+            key,
+            replacement: replacement.to_string(),
+        });
+    }
     let agent_full = composed
         .frontmatter()
         .as_map()
@@ -285,8 +324,10 @@ pub fn prepare_inline(
     validate_no_undefined_lifecycle_variables(
         source.markdown.frontmatter(),
         &effective_frontmatter,
+        &lifecycle,
         &source.resolved_path,
     )?;
+    validate_no_err_in_no_error_events(&lifecycle, &source.resolved_path)?;
 
     let mut prompt = composed.content().to_string();
     if prompt.trim().is_empty() {
@@ -307,7 +348,10 @@ pub fn prepare_inline(
     prompt.push_str(&guardrails);
 
     // Capture pre-execution hash for closure
-    let original_body_hash = source.markdown.hash_body(false);
+    let original_hash = source.markdown.compute_hash(
+        MdHashKind::Simple,
+        &super::closure::inline_hash_options(),
+    );
 
     Ok(PreparedComposition {
         mode: CompositionMode::InlineFrontmatterPrompt,
@@ -318,7 +362,7 @@ pub fn prepare_inline(
         selection_hints,
         closure: CompositionClosurePlan::Inline(InlineClosurePlan {
             original_document_text: source.original_text.clone(),
-            original_body_hash,
+            original_hash,
         }),
         lifecycle,
         compose_perf: report.perf,
@@ -605,8 +649,9 @@ mod tests {
         match &prepared.closure {
             CompositionClosurePlan::Inline(plan) => {
                 assert!(!plan.original_document_text.is_empty());
-                // Body hash should be non-zero for non-empty content
-                assert_ne!(plan.original_body_hash, 0);
+                // Simple hash should produce a non-empty `<fm>-<body>` string.
+                let flat = plan.original_hash.flat_string();
+                assert!(flat.is_some() && !flat.unwrap().is_empty());
             }
             CompositionClosurePlan::Direct => panic!("expected Inline closure plan"),
         }
@@ -1012,7 +1057,8 @@ mod tests {
         match &prepared.closure {
             CompositionClosurePlan::Inline(plan) => {
                 assert!(!plan.original_document_text.is_empty());
-                assert_ne!(plan.original_body_hash, 0);
+                let flat = plan.original_hash.flat_string();
+                assert!(flat.is_some() && !flat.unwrap().is_empty());
             }
             CompositionClosurePlan::Direct => panic!("expected Inline closure plan"),
         }

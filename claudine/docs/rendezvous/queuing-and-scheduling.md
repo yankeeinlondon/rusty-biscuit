@@ -18,16 +18,15 @@ Both _queuing_ and _scheduling_ of work map to the goal of doing some specified 
 - you kick off one of these implementation plans (implement -> review -> implement, etc.) which you expect to take 1-2 hours to complete
 - Now what? 
     - Before AI we would be actively involved in the implementation, review, etc. so our attention was already consumed
-    - however, with AI the developer offloads lots of the work and fundamentally changing the rhythm/flow of development
-- One of the first things which became popular once AI became capable enough to own most of development and testing was git worktrees
-    - a **worktree** allows a developer to have multiple streams of work run concurrently on the same code base but with programmatic **isolation** being provided by this handy git feature
+    - in the era of AI, the developer offloads lots of the work which fundamentally changing the rhythm/flow of development
+    - to be efficient in this new flow, a developer must learn to do a lot more multi-tasking across work
+    - while working on 10 completely unrelated things _could_ be done in a concurrent fashion the "switching costs" of moving from one semantic environment to another would be too high to really consider this an effective strategy
+    - instead the typical effort is into finding ways to leverage concurrency across 1-2 focus areas and find ways to do that without creating too much operational risk
+- One of the first things which became popular once AI became capable enough to own most of development and testing was **git worktrees**
+    - a worktree allows a developer to have multiple streams of work run concurrently on the same code base but with programmatic **isolation** being provided by this handy git feature
     - how many parallel streams can you run at once? it depends on the overlap in code and functionality across the set of specifications but there is a very real limit
-    - in general most AI developers will have no more than 2-3 worktrees doing work at the same time; this might extend to 4-5 worktrees in cases where you are doing A/B testing and the various threads are just variants of the same thing.
-- In far few cases today, developers are running the specs on remote machines (physically remote or at least running in a virtual machine). This is done again to achieve **isolation** and because this form of isolation is done at the host level it has far greater isolation properties.
-    - If this 
-
-
-- While you're initially blocked, one of the things which has exploded in popularity recently is using git **worktrees**
-- A worktree allows you to run multiple of these plans in parallel and each plan is run in an isolated **environment**
-- How many can you run in parallel, well of course it depends (mainly on how isolated the functionality of each is) but for each additional worktree and parallel stream you have, the risks and time spent merging them back together increases. Also, for many developers, if they parallelize too much they will find that instead of working really quickly, all of their parallel workstreams will get capped halfway through the plan. 
-- In addition to avoiding immediate
+    - in general most AI developers will have no more than 2-3 worktrees doing work at the same time (on a particular package); this might extend to 4-5 worktrees in cases where you are doing A/B testing and the various threads are just variants of the same thing.
+- Although far more rare than git worktrees, developers are starting to run compute across remote machines (physically remote or at least running in a virtual machine). This is done again to achieve **isolation** and because this form of isolation is done at the host level it has far greater isolation properties but because the tooling hasn't made this easy yet it's still under-leveraged.
+- Another form of isolation that has a lot of potential is **time isolation**
+- If a developer can find an efficient way to run a sequence of tasks in a way where the human and AI interaction is efficient, human involvement is steered toward the start and end of the process versus in the intervening tasks, and notifications are able to get the attention of the human when it is warranted.
+- **Claudine**'s sequences and loops are a first stab at giving developers the tools to

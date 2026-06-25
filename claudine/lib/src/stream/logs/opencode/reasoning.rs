@@ -16,8 +16,9 @@ use crate::stream::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSin
 use crate::stream::summary::{RateLimitInfo, StderrDiagnostics};
 
 use crate::stream::logs::opencode::errors::{
-    asset_type_as_str, classify, classify_raw, get_http_status_description, max_reset_at,
-    merge_rate_limit, render_malformed_asset_message, render_rate_limit_message, strip_ansi,
+    asset_type_as_str, classify, classify_raw, error_context, get_http_status_description,
+    max_reset_at, merge_rate_limit, render_malformed_asset_message, render_rate_limit_message,
+    strip_ansi,
 };
 use crate::stream::logs::opencode::events::{
     AssetType, LogClassification, LogLevel, OpenCodeLogRecord, ParsedOpenCodeStderrLine,
@@ -80,8 +81,8 @@ pub enum EarlyTermination {
     /// The wall-clock budget (`timeout`) elapsed since the child process
     /// was spawned. The wrapper terminates the child process and maps the
     /// outcome to [`crate::harness::ProcessTermination::TimedOut`] so the
-    /// standard `handle_timeout` failure handler runs. The synthesized
-    /// summary marks `error_kind = "timeout"`.
+    /// lifecycle `failure` stack observes a `Timeout` failure event. The
+    /// synthesized summary marks `error_kind = "timeout"`.
     Timeout { message: String },
     /// The stream-silence budget (`step_timeout`) elapsed with no parent
     /// stream event observed. The wrapper terminates the child process and
@@ -139,6 +140,20 @@ pub enum EarlyTermination {
     /// counters at the moment of breach; at least one will be ≥ its
     /// threshold.
     RunawayVolume { lines: u64, bytes: u64 },
+    /// Consecutive OpenCode `stream error` records crossed
+    /// [`MAX_CONSECUTIVE_STREAM_ERRORS`] with no step advance — the provider is
+    /// failing every retry and OpenCode's internal backoff would otherwise spin
+    /// forever. The wrapper terminates the child and maps the outcome to
+    /// [`crate::harness::ProcessTermination::Aborted`] so
+    /// [`crate::harness::classify_failure`] yields
+    /// [`crate::harness::FailureEvent::AgentFailure`] (fail-fast, never the
+    /// timeout-retry path that would reproduce the failure loop).
+    ///
+    /// ## Notes
+    ///
+    /// Synthesized summary marks `error_kind = "repeated_stream_error"`.
+    /// `count` is the consecutive-failure count at trip time (≥ the threshold).
+    RepeatedStreamError { count: u32 },
 }
 
 /// Shared stderr-side state accumulated by the bridge as it parses lines.
@@ -200,7 +215,19 @@ pub struct OpenCodeLogBridge<S: SemanticEventSink> {
     /// HTTP-span boundary inside the same reasoning step, so we suppress
     /// repeats and only re-emit when `step` actually advances.
     last_step_per_session: BTreeMap<String, u32>,
+    /// Count of consecutive `message="stream error"` records observed with no
+    /// intervening step advance. Bounds OpenCode's unbounded backoff retries so
+    /// an error vocabulary the classifier does not recognize as terminal still
+    /// degrades to a fail-fast abort instead of an indefinite hang. Reset to 0
+    /// on any genuine step transition (see [`Self::on_step_loop`]).
+    consecutive_stream_errors: u32,
 }
+
+/// Consecutive unrecognized `stream error` records tolerated before the bridge
+/// forces a fail-fast abort. Defense-in-depth backstop for OpenCode log-format
+/// drift (see fixes/2026-06-21-opencode-log-fix); the classifier handles known
+/// terminal caps on the first error, so this only catches future/unknown shapes.
+const MAX_CONSECUTIVE_STREAM_ERRORS: u32 = 5;
 
 /// Bookkeeping for an OpenCode child session observed on the stderr stream.
 ///
@@ -233,6 +260,7 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             primary_session_emitted: false,
             child_sessions: BTreeMap::new(),
             last_step_per_session: BTreeMap::new(),
+            consecutive_stream_errors: 0,
         }
     }
 
@@ -278,6 +306,24 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         }
 
         let classification = classify(&record);
+
+        // Defense-in-depth backstop. A `stream error` record that the
+        // classifier already deemed terminal fires early-termination through
+        // its own handler below (idempotent via `early_terminate_fired`). This
+        // guard catches the residual case: repeated stream errors the
+        // classifier treats as non-terminal (or an unknown future shape), which
+        // OpenCode would retry under unbounded backoff. Count consecutive
+        // failures and force a fail-fast abort once the threshold is crossed.
+        if is_stream_error(&record) {
+            self.consecutive_stream_errors =
+                self.consecutive_stream_errors.saturating_add(1);
+            if self.consecutive_stream_errors >= MAX_CONSECUTIVE_STREAM_ERRORS
+                && !self.early_terminate_fired
+            {
+                return self.on_repeated_stream_error(&record);
+            }
+        }
+
         match classification {
             LogClassification::ProviderLimit {
                 status_code,
@@ -760,6 +806,11 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         self.last_step_per_session
             .insert(session_id.clone(), step);
 
+        // A genuine step transition is forward progress: clear the
+        // stream-error backstop counter so transient retries that eventually
+        // succeed do not accumulate toward a false abort.
+        self.consecutive_stream_errors = 0;
+
         let mut extra_map = base_extra(record, "step_loop");
         extra_map.insert("session_id".into(), Value::String(session_id.clone()));
         extra_map.insert("step".into(), json!(step));
@@ -899,6 +950,33 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         StderrIngestOutcome::Consumed
     }
 
+    /// Emit a terminal error and request a fail-fast abort after consecutive
+    /// `stream error` records crossed [`MAX_CONSECUTIVE_STREAM_ERRORS`].
+    fn on_repeated_stream_error(
+        &mut self,
+        record: &OpenCodeLogRecord,
+    ) -> StderrIngestOutcome {
+        let count = self.consecutive_stream_errors;
+        let message = format!(
+            "provider stream failed {count} times with no progress; aborting"
+        );
+
+        let mut extra_map = base_extra(record, "repeated_stream_error");
+        extra_map.insert("count".into(), json!(count));
+        if let Some(provider_error) = error_context(record) {
+            extra_map.insert("provider_error".into(), Value::String(provider_error));
+        }
+
+        self.sink.on_semantic_event(SemanticEvent::Error {
+            message: message.clone(),
+            terminal: true,
+            kind: SemanticErrorKind::ApiRemote,
+            extra: Value::Object(extra_map),
+        });
+        self.fire_early_termination(EarlyTermination::RepeatedStreamError { count });
+        StderrIngestOutcome::Consumed
+    }
+
     fn fire_early_termination(&mut self, termination: EarlyTermination) {
         if self.early_terminate_fired {
             return;
@@ -914,6 +992,14 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             );
         }
     }
+}
+
+/// Whether a parsed record is an OpenCode `message="stream error"` failure
+/// record (1.17.8 format). The keyword lands in the trailing `message` field,
+/// or in the `message` tag when a later tag absorbed the rest of the line.
+fn is_stream_error(record: &OpenCodeLogRecord) -> bool {
+    record.message == "stream error"
+        || record.tags.get("message").map(|v| v.trim_matches('"')) == Some("stream error")
 }
 
 /// Render the inline message string for a `service=llm ... stream` event.
@@ -1259,6 +1345,96 @@ mod tests {
             }
             other => panic!("expected EarlyTermination::RateLimit, got {other:?}"),
         }
+    }
+
+    // The 1.17.8 `message="stream error"` + `error.error=` shape must drive the
+    // same terminal early-termination as the legacy JSON form, otherwise the
+    // wrapper hangs through OpenCode's unbounded backoff retries.
+    // Regression for fixes/2026-06-21-opencode-log-fix (session ses_1127ec2f).
+    #[test]
+    fn opencode_1178_stream_error_usage_cap_terminates() {
+        let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
+        let mut bridge =
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx));
+        let line = r#"timestamp=2026-06-22T04:07:15.161Z level=ERROR run=da37e0dd message="stream error" providerID=zai-coding-plan modelID=glm-5.2 session.id=ses_1127ec2fdffepaJc2kEnX093eo small=false agent=build mode=primary error.error="AI_APICallError: Usage limit reached for 5 hour. Your limit will reset at 2026-06-22 13:59:38""#;
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        match &bridge.sink.events[0] {
+            SemanticEvent::Error {
+                terminal,
+                kind,
+                message,
+                extra,
+            } => {
+                assert!(*terminal);
+                assert_eq!(*kind, SemanticErrorKind::ApiRemote);
+                assert!(message.to_lowercase().contains("usage limit"), "{message}");
+                assert_string(extra, "classification", "rate_limit");
+                assert_string(extra, "kind", "UsageCap");
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
+        assert!(
+            rx.try_recv().is_ok(),
+            "early-termination signal expected for the 1.17.8 stream-error cap",
+        );
+    }
+
+    // A generic `stream error` the classifier treats as a non-fatal API
+    // failure (no cap/429/auth vocabulary) must still trip the backstop after
+    // MAX_CONSECUTIVE_STREAM_ERRORS with no step advance, so an unknown future
+    // format cannot retry forever. Regression for fixes/2026-06-21-opencode-log-fix.
+    const GENERIC_STREAM_ERROR: &str = r#"timestamp=2026-06-22T04:07:15.161Z level=ERROR run=da37e0dd message="stream error" providerID=acme modelID=m1 session.id=ses_x small=false agent=build mode=primary error.error="AI_APICallError: connection reset by peer""#;
+
+    #[test]
+    fn repeated_stream_errors_trip_backstop_and_terminate() {
+        let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
+        let mut bridge =
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx));
+
+        // First MAX-1 errors are non-fatal warnings; the channel stays quiet.
+        for _ in 0..(MAX_CONSECUTIVE_STREAM_ERRORS - 1) {
+            assert_eq!(bridge.ingest(GENERIC_STREAM_ERROR), StderrIngestOutcome::Consumed);
+        }
+        assert!(rx.try_recv().is_err(), "backstop must not fire below threshold");
+
+        // The threshold-crossing error trips the terminal abort.
+        assert_eq!(bridge.ingest(GENERIC_STREAM_ERROR), StderrIngestOutcome::Consumed);
+        match bridge.sink.events.last().expect("expected an event") {
+            SemanticEvent::Error { terminal, kind, .. } => {
+                assert!(*terminal);
+                assert_eq!(*kind, SemanticErrorKind::ApiRemote);
+            }
+            other => panic!("expected terminal Error, got {other:?}"),
+        }
+        match rx.try_recv() {
+            Ok(EarlyTermination::RepeatedStreamError { count }) => {
+                assert_eq!(count, MAX_CONSECUTIVE_STREAM_ERRORS);
+            }
+            other => panic!("expected RepeatedStreamError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn step_advance_resets_stream_error_backstop() {
+        let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
+        let mut bridge =
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx));
+        let step_line = r#"timestamp=2026-06-22T04:07:20.000Z level=INFO run=da37e0dd message=loop session.id=ses_x step=7"#;
+
+        // One below threshold, then a genuine step transition clears the count.
+        for _ in 0..(MAX_CONSECUTIVE_STREAM_ERRORS - 1) {
+            bridge.ingest(GENERIC_STREAM_ERROR);
+        }
+        assert_eq!(bridge.ingest(step_line), StderrIngestOutcome::Consumed);
+
+        // A fresh run of MAX-1 errors must still stay under the threshold.
+        for _ in 0..(MAX_CONSECUTIVE_STREAM_ERRORS - 1) {
+            bridge.ingest(GENERIC_STREAM_ERROR);
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "step advance should have reset the backstop counter",
+        );
     }
 
     #[test]

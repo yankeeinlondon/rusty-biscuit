@@ -114,6 +114,19 @@ const UNTERMINATED_BLOCK: &str = "::block when=\"true\"\nbody\n";
 // snapshots.
 const MISSING_REQUIRED_SCHEMA: &str = "---\n$schema:\n  spec: 'string(min(1); required)'\nspec: \"\"\ndescription: Planner prompt schema\n---\nBody\n";
 
+// Document with an inline `$schema` whose failing property declares a
+// description via the `-> {description}` arrow syntax. Unlike
+// `MISSING_REQUIRED_SCHEMA` above, this fixture has NO document-level
+// `description:` line, so the only `<i><dim>…</dim></i>` sub-line in the
+// rendered `SchemaValidationFailed` block is the per-problem description
+// attached to the `Missing` problem for `title`. This isolates the NEW
+// per-problem description path from the older document-level description
+// rendering already covered by the test below. A missing-required failure is
+// used deliberately: the compose pipeline coerces schema-recognized scalars,
+// so a wrong-type fixture (e.g. `title: 42`) would be coerced to a string and
+// PASS validation, defeating the test.
+const MISSING_DESCRIBED_PROPERTY: &str = "---\n$schema:\n  title: 'string(required) -> The headline shown in listing pages'\n---\nBody\n";
+
 #[test]
 #[serial(level2_terminal)]
 fn level2_error_header_contains_osc8_hyperlink() {
@@ -224,6 +237,62 @@ fn level2_schema_validation_block_renders_styled_link_and_bullet() {
     assert!(
         has_inverse,
         "expected inverse SGR for property name. raw:\n{}",
+        frame.raw
+    );
+}
+
+/// Level-2 capture for the per-problem description sub-line in the
+/// `SchemaValidationFailed` styled block: drives `md compose` against a
+/// fixture whose failing property declares a description via the `->` arrow
+/// syntax and has NO document-level `description:`, so the only
+/// dimmed-italic line in the block is the per-problem description. Verifies
+/// the description text and the dim/italic SGR survive the real binary path —
+/// the NEW path that plain-text Level-1 snapshots cannot see.
+#[test]
+#[serial(level2_terminal)]
+fn level2_schema_validation_block_renders_per_problem_description() {
+    let Some((frame, _)) = run_md_compose_named("post-schema.md", MISSING_DESCRIBED_PROPERTY)
+    else {
+        return;
+    };
+
+    // The header text and failing-property bullet must be visible in plain so
+    // the description assertions below read the styled validation block, not
+    // stray output.
+    assert!(
+        frame.plain.contains("schema validation failed"),
+        "expected schema-validation header text. plain:\n{}",
+        frame.plain
+    );
+    assert!(
+        frame.plain.contains("title"),
+        "expected failing property `title` to appear on the bullet. plain:\n{}",
+        frame.plain
+    );
+
+    // The per-problem description text (declared via `-> {description}`) must
+    // survive to plain. This is the path NOT covered by the document-level
+    // `description:` assertion in the test above.
+    assert!(
+        frame.plain.contains("The headline shown in listing pages"),
+        "expected per-problem description text in styled block. plain:\n{}",
+        frame.plain
+    );
+
+    // The per-problem description renders as `<i><dim>…</dim></i>`. Assert
+    // both italic and dim SGR survive the real terminal, so a regression that
+    // drops the styling (while keeping the text) is caught at Level 2 —
+    // plain-text snapshots cannot see it.
+    let has_italic = frame.raw.contains("\x1b[3m") || frame.raw.contains("\x1b[0;3m");
+    assert!(
+        has_italic,
+        "expected italic SGR for the per-problem description line. raw:\n{}",
+        frame.raw
+    );
+    let has_dim = frame.raw.contains("\x1b[2m") || frame.raw.contains("\x1b[0;2m");
+    assert!(
+        has_dim,
+        "expected dim SGR for the per-problem description line. raw:\n{}",
         frame.raw
     );
 }

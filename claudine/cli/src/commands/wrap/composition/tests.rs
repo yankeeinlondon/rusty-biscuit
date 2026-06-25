@@ -954,3 +954,238 @@ fn inline_interactive_unsupported_names_flag_source() {
     assert!(msg.contains("Claude"), "{msg}");
     assert!(msg.contains("--interactive"), "{msg}");
 }
+
+// -- emit_preflight_blocked_and_finalize L1 unit tests ---------------------
+
+/// Recording emitter that captures the `signal` + `text` of every `stderr`
+/// action, mirroring the pattern in `claudine/lib/.../lifecycle.rs`'s test
+/// module. Used to prove [`emit_preflight_blocked_and_finalize`] fires both
+/// the `blocked` and `finalize` events through the stack-aware runner (i.e.
+/// top-level communication AND typed stack), not just the legacy top-level
+/// surface.
+struct PreflightRecordingEmitter {
+    stderr_calls: std::sync::Mutex<Vec<(claudine::composition::LifecycleSignal, String)>>,
+}
+
+impl PreflightRecordingEmitter {
+    fn new() -> Self {
+        Self {
+            stderr_calls: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    fn stderr_calls(&self) -> Vec<(claudine::composition::LifecycleSignal, String)> {
+        self.stderr_calls.lock().unwrap().clone()
+    }
+}
+
+impl claudine::composition::LifecycleEmitter for PreflightRecordingEmitter {
+    fn emit_stderr(
+        &self,
+        signal: claudine::composition::LifecycleSignal,
+        text: &str,
+        _term: &Terminal,
+    ) {
+        self.stderr_calls
+            .lock()
+            .unwrap()
+            .push((signal, text.to_string()));
+    }
+
+    fn emit_message(
+        &self,
+        _text: &str,
+        _source_path: &Path,
+        _repo_root: Option<&Path>,
+        _messaging: &claudine::messaging::RuntimeMessagingSettings,
+    ) {
+    }
+
+    fn emit_speech(&self, _text: &str, _tts_config: biscuit_speaks::TtsConfig) {}
+
+    fn emit_effect(&self, _name: &str) {}
+
+    fn emit_notification(&self, _title: &str) {}
+}
+
+/// The helper fires BOTH `blocked` and `finalize`, each with its top-level
+/// communication AND its typed stack. The doc under test carries a
+/// top-level `stderr` line plus a stack `stderr(...)` action on each event,
+/// so a successful invocation records exactly four stderr emissions in the
+/// order: blocked top-level, blocked stack, finalize top-level, finalize
+/// stack. This is the L1 invariant for review-3 Finding 1.
+#[test]
+fn emit_preflight_blocked_and_finalize_runs_top_level_and_stack_for_both_events() {
+    use claudine::composition::{
+        LifecycleErrorInfo, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal,
+        parse_lifecycle_config,
+    };
+    use serde_json::json;
+
+    let fm = json!({
+        "blocked": {
+            "stderr": "blocked-toplevel",
+            "stack": [{"action": "stderr('blocked-stack')"}]
+        },
+        "finalize": {
+            "stderr": "finalize-toplevel",
+            "stack": [{"action": "stderr('finalize-stack')"}]
+        }
+    });
+    let config = parse_lifecycle_config(&fm, Path::new("/tmp/test.md")).unwrap();
+    let settings = claudine::events::GlobalSettings::default();
+    let messaging = claudine::messaging::RuntimeMessagingSettings {
+        user: None,
+        repo: None,
+    };
+    let term = Terminal::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &settings,
+        messaging: &messaging,
+        term: &term,
+        source_path: Path::new("/tmp/test.md"),
+        repo_root: None,
+    };
+    let emitter = PreflightRecordingEmitter::new();
+    let effect_engine = darkmatter::effects::EffectEngine::builder()
+        .mutation_root(std::env::temp_dir())
+        .auto_rehash(false)
+        .build();
+    let frontmatter = serde_json::Map::new();
+    let err_info = LifecycleErrorInfo::from_action_failure(
+        "harness_plan",
+        "harness plan parse failed: bogus".to_string(),
+    );
+
+    let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
+    emit_preflight_blocked_and_finalize(
+        &mut guard,
+        &effect_engine,
+        &emitter,
+        &settings,
+        &messaging,
+        &term,
+        Path::new("/tmp/test.md"),
+        None,
+        None,
+        &frontmatter,
+        std::time::Instant::now(),
+        err_info,
+    );
+
+    let calls = emitter.stderr_calls();
+    let signals: Vec<LifecycleSignal> = calls.iter().map(|(s, _)| *s).collect();
+    assert_eq!(
+        signals,
+        vec![
+            LifecycleSignal::Blocked,
+            LifecycleSignal::Blocked,
+            LifecycleSignal::Finalize,
+            LifecycleSignal::Finalize,
+        ],
+        "emit_preflight_blocked_and_finalize must fire blocked (top-level + stack) \
+         then finalize (top-level + stack); got {calls:?}"
+    );
+    let texts: Vec<&str> = calls.iter().map(|(_, t)| t.as_str()).collect();
+    assert_eq!(
+        texts,
+        vec![
+            "blocked-toplevel",
+            "blocked-stack",
+            "finalize-toplevel",
+            "finalize-stack",
+        ],
+        "top-level + stack texts must appear in order per event; got {calls:?}"
+    );
+
+    // Guard state: blocked is the recorded terminal, finalize fired exactly once.
+    assert_eq!(guard.terminal_signal(), Some(LifecycleSignal::Blocked));
+    assert!(guard.finalize_emitted());
+    // Drop the guard after the explicit terminal + finalize: must NOT add a
+    // fifth emission (the explicit `terminal_emitted = true` from
+    // `execute_event(Blocked)` suppresses the Drop safety-net).
+    drop(guard);
+    assert_eq!(
+        emitter.stderr_calls().len(),
+        4,
+        "Drop safety-net must NOT double-emit after explicit blocked+finalize"
+    );
+}
+
+/// The `err` global carried into the blocked stack must surface the
+/// preflight failure message so a user-authored `blocked.stack` can reference
+/// `{{ err.msg }}` meaningfully. Verifies the err_info contract: the helper
+/// threads the failure description into the stack evaluation context.
+#[test]
+fn emit_preflight_blocked_and_finalize_propagates_err_msg_into_blocked_stack() {
+    use claudine::composition::{
+        LifecycleErrorInfo, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal,
+        parse_lifecycle_config,
+    };
+    use serde_json::json;
+
+    let fm = json!({
+        "blocked": {
+            "stack": [{"action": "stderr(err.msg)"}]
+        },
+        "finalize": {
+            "stack": [{"action": "stderr('finalize')"}]
+        }
+    });
+    let config = parse_lifecycle_config(&fm, Path::new("/tmp/test.md")).unwrap();
+    let settings = claudine::events::GlobalSettings::default();
+    let messaging = claudine::messaging::RuntimeMessagingSettings {
+        user: None,
+        repo: None,
+    };
+    let term = Terminal::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &settings,
+        messaging: &messaging,
+        term: &term,
+        source_path: Path::new("/tmp/test.md"),
+        repo_root: None,
+    };
+    let emitter = PreflightRecordingEmitter::new();
+    let effect_engine = darkmatter::effects::EffectEngine::builder()
+        .mutation_root(std::env::temp_dir())
+        .auto_rehash(false)
+        .build();
+    let frontmatter = serde_json::Map::new();
+
+    let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
+    emit_preflight_blocked_and_finalize(
+        &mut guard,
+        &effect_engine,
+        &emitter,
+        &settings,
+        &messaging,
+        &term,
+        Path::new("/tmp/test.md"),
+        None,
+        None,
+        &frontmatter,
+        std::time::Instant::now(),
+        LifecycleErrorInfo::from_action_failure(
+            "shell_approval",
+            "shell command 'rm' is blacklisted".to_string(),
+        ),
+    );
+    drop(guard);
+
+    let calls = emitter.stderr_calls();
+    // Only the blocked stack ran a stderr action; the err.msg text must
+    // appear verbatim, proving the err global propagated into the stack
+    // expression evaluation.
+    let blocked_stack_texts: Vec<&str> = calls
+        .iter()
+        .filter(|(s, _)| *s == LifecycleSignal::Blocked)
+        .map(|(_, t)| t.as_str())
+        .collect();
+    assert!(
+        blocked_stack_texts
+            .iter()
+            .any(|t| t.contains("shell command 'rm' is blacklisted")),
+        "blocked.stack must see err.msg; got {calls:?}"
+    );
+}

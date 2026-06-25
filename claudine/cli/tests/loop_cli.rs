@@ -27,7 +27,7 @@ fn compose_loop_runs_iterations() {
         &md_file,
         r#"---
 loop:
-  while: "counter < 3"
+  while: "counter < 2"
   actions:
     - "increment(counter)"
 ---
@@ -78,7 +78,7 @@ fn inline_compose_loop_runs_iterations() {
         r#"---
 prompt: "Generate a number"
 loop:
-  while: "counter < 2"
+  while: "counter < 1"
   actions:
     - "increment(counter)"
 ---
@@ -136,7 +136,7 @@ fn inline_compose_loop_with_prompt_frontmatter_and_empty_body_runs() {
         r#"---
 prompt: "Generate a number"
 loop:
-  while: "counter < 2"
+  while: "counter < 1"
   actions:
     - "increment(counter)"
 ---
@@ -777,22 +777,22 @@ exit 0
 /// Sibling to `compose_loop_rate_limit_abort_exits_75`, exercising the same
 /// rate-limit abort contract on a document with minimal harness frontmatter.
 /// The always-harness unification routes parsed-harness documents through
-/// `run_harness_loop`, so the terminal-attempt rate-limit signal must still
-/// reach the loop policy and halt with EX_TEMPFAIL (75).
+/// Rate-limit abort on a loop document.
+///
+/// Prior to the lifecycle refactor this test used `post_checks: []` to force
+/// the parsed-harness plan path; that key is now rejected, so the loop itself
+/// drives the iteration path.
 #[cfg(unix)]
 #[test]
-fn compose_loop_rate_limit_abort_exits_75_on_harness_doc() {
+fn compose_loop_rate_limit_abort_exits_75_on_loop_doc() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
 
-    // `post_checks: []` is a harmless harness key: it forces the parsed-harness
-    // plan path without adding any check that would alter the run.
     let md_file = workspace.path().join("loop.md");
     fs::write(
         &md_file,
         r#"---
-post_checks: []
 loop:
   while: "true"
   actions:
@@ -877,7 +877,7 @@ fn compose_loop_rate_limit_pause_waits_then_continues() {
         &md_file,
         r#"---
 loop:
-  while: "counter < 2"
+  while: "counter < 1"
   actions:
     - "increment(counter)"
 ---
@@ -1071,7 +1071,7 @@ $schema:
 phase: 1
 total_phases: 0
 loop:
-  until: "phase > total_phases"
+  until: "phase >= total_phases"
   action: "increment(phase)"
 ---
 Phase {{phase}} of {{total_phases}}.
@@ -1197,11 +1197,11 @@ exit 1
 
 /// Sibling to the above test, exercising the same signal contract on a
 /// document with minimal harness frontmatter. Phase 2 of the always-harness
-/// plan surfaces terminal-attempt signals from `run_harness_loop`, so this
-/// test should now pass alongside the non-harness variant.
+/// plan surfaces terminal-attempt signals from `run_loop`, so this
+/// test should now pass without the retired harness frontmatter key.
 #[cfg(unix)]
 #[test]
-fn compose_loop_exit_reason_surfaces_on_harness_doc() {
+fn compose_loop_exit_reason_surfaces_on_loop_doc() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
@@ -1210,7 +1210,6 @@ fn compose_loop_exit_reason_surfaces_on_harness_doc() {
     fs::write(
         &md_file,
         r#"---
-post_checks: []
 loop:
   while: "true"
   max: 1

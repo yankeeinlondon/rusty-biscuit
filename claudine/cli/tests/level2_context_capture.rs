@@ -84,7 +84,10 @@ fn capture_context(args: &[&str], cols: u32, rows: u32) -> CapturedFrame {
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed)
     );
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+    // POSIX shell (bash/sh), not the developer's `$SHELL`: a custom login
+    // prompt (e.g. Starship's `❯`) never ends in `$`/`#`/`%`, so
+    // `wait_for_prompt` would never match and burn its full timeout twice.
+    let shell = biscuit_test_harness::detect_shell();
     let spawned = std::process::Command::new("tmux")
         .args([
             "new-session",
@@ -122,12 +125,21 @@ fn capture_context(args: &[&str], cols: u32, rows: u32) -> CapturedFrame {
     frame.expect("capture failed")
 }
 
-/// Maximum visible width across all rendered rows (trailing pad stripped, since
-/// tmux pads its capture to the pane width).
+/// Maximum visible width across the rendered report rows (trailing pad
+/// stripped, since tmux pads its capture to the pane width).
+///
+/// The captured pane also holds the shell's echo of the typed
+/// `claudine context …` command. That line carries the absolute binary path
+/// and can exceed the report's width envelope, yet it is shell noise, not
+/// claudine output — so it must not count toward the report width. It is the
+/// only captured line containing the literal `claudine context` invocation
+/// (report content never does), which makes it unambiguous to drop regardless
+/// of the developer's prompt length.
 fn max_visible_width(frame: &CapturedFrame) -> usize {
     frame
         .plain
         .lines()
+        .filter(|l| !l.contains("claudine context"))
         .map(|l| visible_width(l.trim_end()) as usize)
         .max()
         .unwrap_or(0)

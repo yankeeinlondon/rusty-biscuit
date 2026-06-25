@@ -50,6 +50,7 @@ members = [
     "claudine/rendezvous/core",
     "claudine/rendezvous/daemon",
     "claudine/rendezvous/client",
+    "visualizer/src-tauri",
     "sniff/lib",
     "sniff/cli",
     "renderable",

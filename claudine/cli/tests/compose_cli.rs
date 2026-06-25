@@ -34,7 +34,7 @@ exit 0
 
 #[cfg(unix)]
 #[test]
-fn compose_direct_non_harness_and_harness_produce_identical_stdout_body() {
+fn compose_direct_produces_expected_stdout_body() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
@@ -48,44 +48,24 @@ fn compose_direct_non_harness_and_harness_produce_identical_stdout_body() {
     )
     .unwrap();
 
-    let harness_file = workspace.path().join("harness.md");
-    fs::write(
-        &harness_file,
-        "---\npost_checks: []\n---\nCompose this document.\n",
-    )
-    .unwrap();
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("OPENCODE_MODEL", "test-model")
+        .current_dir(workspace.path())
+        .args(["compose", "--opencode", bare_file.to_str().unwrap()])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
 
-    let run = |path: &std::path::Path| {
-        cargo_bin_cmd!("claudine")
-            .env("NO_COLOR", "1")
-            .env("HOME", workspace.path())
-            .env("PATH", augmented_path(&path_dir))
-            .env("OPENCODE_MODEL", "test-model")
-            .current_dir(workspace.path())
-            .args(["compose", "--opencode", path.to_str().unwrap()])
-            .assert()
-            .success()
-            .get_output()
-            .stdout
-            .clone()
-    };
-
-    let bare_bytes = run(&bare_file);
-    let harness_bytes = run(&harness_file);
-    let bare_stdout = String::from_utf8_lossy(&bare_bytes);
-    let harness_stdout = String::from_utf8_lossy(&harness_bytes);
+    let stdout = String::from_utf8_lossy(&output);
     let expected = "# Generated Plan\n\nThis is the generated body.\n";
     assert_eq!(
-        bare_stdout, expected,
-        "direct compose stdout body mismatch; got: {bare_stdout:?}"
-    );
-    assert_eq!(
-        harness_stdout, expected,
-        "harness-enabled direct compose stdout body mismatch; got: {harness_stdout:?}"
-    );
-    assert_eq!(
-        bare_stdout, harness_stdout,
-        "direct compose stdout must be identical with and without harness frontmatter"
+        stdout, expected,
+        "direct compose stdout body mismatch; got: {stdout:?}"
     );
 }
 

@@ -19,9 +19,10 @@ use std::io::IsTerminal;
 use std::sync::{Arc, Mutex};
 
 use claudine::composition::{
-    CompositionError, CompositionExecutionRequest, CompositionMode, LoopExecutionOptions,
-    PrepareOptions, PreparedComposition, ResolvedCompositionSource, ResolvedExecutionTarget,
-    SharedApprovalCache,
+    CompositionError, CompositionExecutionRequest, CompositionMode, DefaultLifecycleEmitter,
+    LifecycleRuntimeContext, LoopExecutionOptions, LoopExecutionResult, PrepareOptions,
+    PreparedComposition, ResolvedCompositionSource, ResolvedExecutionTarget, SharedApprovalCache,
+    SystemShellRunner, build_loop_seed_with_lifecycle, resolve_loop_config,
 };
 use claudine::system_prompt::SystemPromptArgs;
 use color_eyre::eyre::{Result, eyre};
@@ -40,9 +41,10 @@ use crate::commands::schema_interactive::{
 };
 use crate::commands::wrap::composition::{
     CompositionPrepContext, eagerly_resolve_target, emit_execution_header,
-    execute_composition_request, execute_composition_request_inner,
+    execute_composition_request, execute_composition_attempt,
     install_agent_env_for_composition,
 };
+use crate::commands::wrap::wrap_terminal;
 
 /// Enrich a `color_eyre::Report` with a frontmatter excerpt when its root
 /// cause is a frontmatter-rooted [`CompositionError`].
@@ -277,8 +279,9 @@ pub(crate) fn run_composition_inner(
         claudine::composition::resolve_shell_approvals(
             Some(&source.markdown),
             Some(&compose_options),
-            None,
             &approval_options,
+            None,
+            None,
         )?
     };
     record_prep_substage(
@@ -388,6 +391,177 @@ fn build_loop_options(shared: &SharedComposeArgs) -> LoopExecutionOptions {
     }
 }
 
+/// Build the loop seed, lifecycle runtime context, and run the loop engine.
+///
+/// Iteration 1 uses full schema-aware prepare + shell pre-flight. Later
+/// iterations skip schema validation and shell approval; the loop engine
+/// emits `initialize` once and delegates `start`/terminal/`finalize` to the
+/// shared [`claudine::composition::LifecycleRunGuard`].
+#[allow(clippy::too_many_arguments)]
+fn build_and_run_loop(
+    source: &ResolvedCompositionSource,
+    loop_prepare_options: &PrepareOptions,
+    loop_options: LoopExecutionOptions,
+    kind: CompositionKind,
+    file_for_loop: &str,
+    resolved_target: Option<ResolvedExecutionTarget>,
+    system_prompt_args: &SystemPromptArgs,
+    env_overrides: &BTreeMap<String, String>,
+    shared_approval_cache: &SharedApprovalCache,
+    header_emitted: bool,
+    prep_context: &CompositionPrepContext,
+    verbose: u8,
+    shared: &SharedComposeArgs,
+) -> std::result::Result<Option<LoopExecutionResult>, CompositionError> {
+    let config = resolve_loop_config(source)?;
+    let Some(config) = config else {
+        return Ok(None);
+    };
+
+    // Build the seed AND parse lifecycle from the document's full composed
+    // frontmatter. The seed lifts only iteration-control variables, so parsing
+    // lifecycle from it would drop every event block and leave the loop with no
+    // `initialize`/`start`/terminal/`finalize` or `loop:` gate concerns. The
+    // non-loop path parses lifecycle from `prepared.lifecycle`; this matches it.
+    let loop_seed = build_loop_seed_with_lifecycle(
+        source,
+        &config,
+        loop_prepare_options.clone(),
+        kind.mode(),
+    )?;
+    let initial_frontmatter = loop_seed.seed;
+    let lifecycle_config = loop_seed.lifecycle;
+
+    let effective_repo_root = prep_context.source_repo_root.as_deref();
+    let (lifecycle_settings, lifecycle_messaging) = if lifecycle_config.is_empty() {
+        (
+            claudine::events::GlobalSettings::default(),
+            claudine::messaging::RuntimeMessagingSettings {
+                user: None,
+                repo: None,
+            },
+        )
+    } else {
+        match claudine::dispatch::loader::load_claudine_config(None, effective_repo_root) {
+            Ok(config) => (
+                claudine::dispatch::loader::bridge_tts_settings(&config),
+                claudine::dispatch::loader::bridge_messaging_settings(&config),
+            ),
+            Err(_) => (
+                claudine::events::GlobalSettings::default(),
+                claudine::messaging::RuntimeMessagingSettings {
+                    user: None,
+                    repo: None,
+                },
+            ),
+        }
+    };
+
+    let term = wrap_terminal();
+    let lifecycle_ctx = LifecycleRuntimeContext {
+        settings: &lifecycle_settings,
+        messaging: &lifecycle_messaging,
+        term: &term,
+        source_path: &source.resolved_path,
+        repo_root: effective_repo_root,
+    };
+
+    let lifecycle_mutation_root = effective_repo_root
+        .unwrap_or(prep_context.launch_workspace.child_cwd.as_path());
+    let effect_engine = darkmatter::effects::EffectEngine::builder()
+        .mutation_root(lifecycle_mutation_root)
+        .auto_rehash(false)
+        .build();
+    let shell_runner = SystemShellRunner;
+    let emitter = DefaultLifecycleEmitter;
+
+    run_loop_with_overrides(
+        source,
+        &config,
+        initial_frontmatter,
+        loop_options,
+        &lifecycle_config,
+        &lifecycle_ctx,
+        &effect_engine,
+        &shell_runner,
+        &emitter,
+        |ctx, guard| {
+            let prepared = {
+                let _span = match kind {
+                    CompositionKind::Direct => {
+                        info_span!("compose_prep.prepare_direct").entered()
+                    }
+                    CompositionKind::Inline => {
+                        info_span!("compose_prep.prepare_inline").entered()
+                    }
+                };
+                // Iteration 1 validates against `$schema`; re-entry passes
+                // skip schema validation and shell pre-flight because the
+                // seed/frontmatter state was already judged on iteration 1.
+                let mut iteration_options = loop_prepare_options.clone();
+                iteration_options.set_overrides = Some(ctx.as_set_overrides());
+                if ctx.iteration == 1 {
+                    kind.prepare_with_schema(source, iteration_options)?
+                } else {
+                    kind.prepare_without_schema(source, iteration_options)?
+                }
+            };
+
+            emit_compose_warnings(&prepared.warnings, shared.silent);
+
+            // Repoint the guard at THIS iteration's freshly composed lifecycle.
+            // The guard was built from the seed (iteration-1) lifecycle, whose
+            // `{{ }}` interpolations are frozen at the seed frontmatter. Each
+            // iteration re-composes with the live frontmatter, so its
+            // `prepared.lifecycle` carries the current iteration's values
+            // (e.g. a `loop:` gate `'gate:{{phase}}'` resolves to the live
+            // `phase`). The loop gate fires through this same guard after the
+            // executor returns, so swapping here keeps both the per-iteration
+            // terminal events and the post-finalize gate on live state.
+            guard.set_config(prepared.lifecycle.clone());
+
+            let request = build_execution_request(
+                shared,
+                file_for_loop.to_string(),
+                prepared,
+                resolved_target.clone(),
+                system_prompt_args,
+                env_overrides,
+                Some(Arc::clone(shared_approval_cache)),
+                header_emitted,
+                kind.mode(),
+                prep_context,
+            );
+
+            let outcome = execute_composition_attempt(
+                request,
+                verbose,
+                shared.perf,
+                guard,
+                ctx.iteration > 1,
+            )
+            .map_err(|e| {
+                // Pre-spawn execution wiring failed (binary lookup, env
+                // build, etc.). Surface as an iteration failure — these are
+                // runtime problems, not malformed loop frontmatter.
+                CompositionError::LoopIterationFailed {
+                    iteration: ctx.iteration,
+                    prompt_path: source.resolved_path.clone(),
+                    exit_code: 1,
+                    reason: e.to_string(),
+                    exit_reason: None,
+                }
+            })?;
+
+            Ok(build_loop_iteration_output(
+                ctx.iteration,
+                &source.resolved_path,
+                outcome,
+            ))
+        },
+    )
+}
+
 /// Build a [`CompositionExecutionRequest`] from the prepared state.
 ///
 /// Used for both loop iterations (where expensive fields are cloned) and
@@ -487,91 +661,43 @@ fn execute_loop_or_single(
         shell_working_directory: Some(prep_context.launch_workspace.child_cwd.clone()),
     };
 
-    if !shared.dry_run
-        && let Some(loop_result) =
-            run_loop_with_overrides(&source, &loop_prepare_options, loop_options, kind.mode(), |ctx| {
-                let prepared = {
-                    let _span = match kind {
-                        CompositionKind::Direct => {
-                            info_span!("compose_prep.prepare_direct").entered()
-                        }
-                        CompositionKind::Inline => {
-                            info_span!("compose_prep.prepare_inline").entered()
-                        }
-                    };
-                    // Schema-aware variant: typed `SchemaLoad` /
-                    // `SchemaValidation` / `MissingProperties` errors and
-                    // drop-and-retry for invalid optionals apply per
-                    // iteration. Interactive collection is NOT driven inside
-                    // loops; missing required values surface as
-                    // `MissingProperties` on the first iteration.
-                    let mut iteration_options = loop_prepare_options.clone();
-                    iteration_options.set_overrides = Some(ctx.as_set_overrides());
-                    kind.prepare_with_schema(&source, iteration_options)?
-                };
-
-                emit_compose_warnings(&prepared.warnings, shared.silent);
-
-                let request = build_execution_request(
-                    &shared,
-                    file_for_loop.clone(),
-                    prepared,
-                    resolved_target.clone(),
-                    &system_prompt_args,
-                    &env_overrides,
-                    Some(Arc::clone(&shared_approval_cache)),
-                    header_emitted,
-                    kind.mode(),
-                    &prep_context,
-                );
-
-                let outcome = execute_composition_request_inner(request, verbose, None, shared.perf)
-                    .map_err(|e| {
-                        // Pre-spawn execution wiring failed (binary lookup,
-                        // env build, etc.). Surface as an iteration failure —
-                        // these are runtime problems, not malformed loop
-                        // frontmatter.
-                        CompositionError::LoopIterationFailed {
-                            iteration: ctx.iteration,
-                            prompt_path: source.resolved_path.clone(),
-                            exit_code: 1,
-                            reason: e.to_string(),
-                            exit_reason: None,
-                        }
-                    })?;
-
-                Ok(build_loop_iteration_output(
-                    ctx.iteration,
-                    &source.resolved_path,
-                    outcome,
-                ))
-            })?
-    {
-        if let Some(error) = loop_result.error {
-            // The interrupt path already announced itself via the INFO
-            // status line; suppress the red `Error:` echo and exit with
-            // the conventional 130 code so the shell sees a clean Ctrl+C.
-            if matches!(
-                error,
-                CompositionError::LoopInterrupted { .. }
-            ) {
-                return Ok(loop_result.final_exit_code);
+    if !shared.dry_run {
+        let loop_result = build_and_run_loop(
+            &source,
+            &loop_prepare_options,
+            loop_options,
+            kind,
+            &file_for_loop,
+            resolved_target.clone(),
+            &system_prompt_args,
+            &env_overrides,
+            &shared_approval_cache,
+            header_emitted,
+            &prep_context,
+            verbose,
+            &shared,
+        )?;
+        if let Some(loop_result) = loop_result {
+            if let Some(error) = loop_result.error {
+                // The interrupt path already announced itself via the INFO
+                // status line; suppress the red `Error:` echo and exit with
+                // the conventional 130 code so the shell sees a clean Ctrl+C.
+                if matches!(error, CompositionError::LoopInterrupted { .. }) {
+                    return Ok(loop_result.final_exit_code);
+                }
+                // Rate-limit halt has its own conventional exit code
+                // (`EX_TEMPFAIL` = 75) so shell wrappers can recognize a
+                // transient halt and retry-after-cool-off. Render the styled
+                // error block inline, then return `Ok(75)` so the outer
+                // process exits with the right code.
+                if matches!(error, CompositionError::LoopRateLimited { .. }) {
+                    emit_rate_limit_halt(&error);
+                    return Ok(claudine::composition::LOOP_RATE_LIMITED_EXIT_CODE);
+                }
+                return Err(error.enrich_frontmatter(&source, stderr_is_tty).into());
             }
-            // Rate-limit halt has its own conventional exit code
-            // (`EX_TEMPFAIL` = 75) so shell wrappers can recognize a
-            // transient halt and retry-after-cool-off. Render the styled
-            // error block inline, then return `Ok(75)` so the outer
-            // process exits with the right code.
-            if matches!(
-                error,
-                CompositionError::LoopRateLimited { .. }
-            ) {
-                emit_rate_limit_halt(&error);
-                return Ok(claudine::composition::LOOP_RATE_LIMITED_EXIT_CODE);
-            }
-            return Err(error.enrich_frontmatter(&source, stderr_is_tty).into());
+            return Ok(loop_result.final_exit_code);
         }
-        return Ok(loop_result.final_exit_code);
     }
 
     // ── Single execution path (no loop) ──────────────────────────────────

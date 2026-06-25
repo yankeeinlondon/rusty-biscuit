@@ -149,13 +149,6 @@ impl CachedHarnessLoopContext {
         }
     }
 
-    pub(crate) fn resolve_context(&self) -> claudine::harness::HarnessResolutionContext<'_> {
-        claudine::harness::HarnessResolutionContext {
-            source_path: &self.source_path,
-            repo_root: self.repo_root.as_deref(),
-        }
-    }
-
     pub(crate) fn shell_options(&self) -> &claudine::harness::ShellApprovalOptions {
         &self.shell_options
     }
