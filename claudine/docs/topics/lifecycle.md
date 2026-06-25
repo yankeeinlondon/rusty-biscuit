@@ -18,6 +18,30 @@ Seven frontmatter properties control lifecycle behavior. Each accepts an object 
 
 Legacy prompts that only configure `start`, `success`, `blocked`, and `failure` continue to work unchanged.
 
+## Binding Time: Early vs Late
+
+Every frontmatter property of a lifecycle event interpolates **when that event fires**, not during the initial compose. This is what lets a lifecycle message report the state at the moment it runs — including the runtime globals (`err`, `timing`, `current`) that do not exist at compose time. So `failure.message: "❌️  {{err.msg}}"` renders the real error, and a `failure` stack `message(❌️  {{err.msg}})` does too.
+
+The variables a lifecycle `{{ … }}` span can read fall into two groups:
+
+- **Early-binding** (resolvable before the run): `doc.*` (frontmatter), `ctx.*`, `env.*`, and read-side functions (`parent_dir`, `dirname`, `frontmatter`, `file_exists`, …).
+- **Late-binding** (only exists at event-time): `err` (in `blocked`/`failure`/optional-error `finalize`), `timing`, `current`.
+
+A lifecycle property's interpolation resolves against the union of both, at event-time. Bare frontmatter references (`{{phase}}`, `{{artifact.path}}`) read the **current** effective document state at the moment the event fires — not a copy captured at the initial compose — so a `set_frontmatter` side effect that mutates `phase` between loop iterations is visible to the next iteration's lifecycle message.
+
+This is the consistent rule used everywhere else: a value is literal text and `{{ … }}` is how you opt into the expression engine. The document body and ordinary (non-lifecycle) frontmatter keys still interpolate at compose-time and are unchanged.
+
+## When Lifecycle Properties Interpolate
+
+Lifecycle strings keep their authored `{{ … }}` spans through the prepare stage — Darkmatter defers the seven lifecycle keys from compose-time resolution — and Claudine re-interpolates each property/action string through Darkmatter (the same composition engine, no second interpolator) just-in-time, immediately before it is used:
+
+- **Communication and action bodies** (`say`, `message`, `notify`, `stderr`, `info`, side-effect args, …) resolve at the instant the event fires, against the live document state plus the in-scope late-binding globals. Resolution is **just-in-time**, not a single snapshot: a `set_frontmatter` run by stack action #1 is visible to action #2 in the same event's stack.
+- **Resolution fails closed.** A malformed expression, an unknown function, an unknown root (a typo), or a late-binding global used outside its legal event fails the event with a typed error *before any side effect is dispatched* — a lifecycle string never silently renders empty for these cases. A *known* surface (a declared frontmatter key, `ctx`/`env`/`doc`, or an in-scope late-binding global) that resolves to `null`/empty still renders empty, as today. To tolerate an *unknown* optional name, opt in with explicit fallback syntax: `{{ maybe || '' }}`.
+
+### The `shell` exception
+
+`shell(...)` commands (short-form and long-form `command:`) are the single early-binding exception. They are approved during pre-flight, so they are resolved **then**, against early-binding surfaces only (`doc.*`, `ctx.*`, `env.*`, read-side functions). The approved command is byte-identical to the executed command. A late-binding reference (`err`/`timing`/`current`) inside a shell command is rejected at prepare time with a typed error naming the property path — those values do not exist yet at pre-flight.
+
 ## Notification Fields
 
 Each lifecycle property is an object containing any of these fields:
@@ -483,25 +507,20 @@ start:
 
 ### `LifecycleInterpolationLeak`
 
-A rendered lifecycle string still contains a `{{ … }}` span after composition. This guards against unresolved template syntax reaching user-visible side effects.
-
-```yaml
-success:
-  stderr: "Done: {{missing_var}}"  # ERROR: interpolation leaked
-```
+Because lifecycle strings are interpolated at event-time (see [When Lifecycle Properties Interpolate](#when-lifecycle-properties-interpolate)), their authored `{{ … }}` spans are **not** prepare-time leaks — they are deferred by design. This guard runs **after** the event-time resolution, immediately before dispatch: a side-effect string that still contains a `{{ … }}` span at that point (e.g. a frontmatter value that is itself raw template text) is a typed error and the side effect is not sent. For non-lifecycle surfaces the guard still runs at prepare time.
 
 ### `LifecycleUndefinedVariable`
 
-A lifecycle string references a bare variable that is undefined after composition. Darkmatter resolves unknown bare variables to an empty string silently, so this guard inspects raw lifecycle strings before composition.
+A reference to a genuinely-unknown root — a typo such as `{{spec_fil}}` for `{{spec_file}}` — fails the event closed at event-time via Darkmatter's strict mode. A *known* root that resolves to empty (`{{spec_file}}` when the key is legitimately absent) renders empty and does not error. To tolerate an unknown optional name, use explicit fallback syntax: `{{ maybe || '' }}`.
 
 ```yaml
 success:
-  stderr: "Done: {{undefined_key}}"  # ERROR: undefined variable
+  stderr: "Done: {{undefined_kee}}"  # ERROR at event-time: unknown root (typo)
 ```
 
 ### `LifecycleErrNotAvailable`
 
-A bare `err` reference appears in an event that never carries an error (`initialize`, `start`, `success`, `loop`).
+`err` is referenced in an event that never carries an error (`initialize`, `start`, `success`, `loop`). The scan walks the `{{ … }}` spans inside communication/action strings **and** the whole `when:` expression, and rejects at parse time. `timing`/`current` are allowed everywhere; `doc.err` remains the escape hatch.
 
 ```yaml
 start:
