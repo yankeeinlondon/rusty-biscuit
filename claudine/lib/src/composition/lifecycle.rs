@@ -2320,12 +2320,8 @@ fn build_action_from_params(
                 verb: verb.to_string(),
             });
         }
-        let mut args = Vec::with_capacity(signature.params.len());
-        for name in &signature.params {
-            if let Some(expr) = params_map.remove(name) {
-                args.push(expr);
-            }
-        }
+        let args =
+            collect_named_signature_args(verb, &signature, &mut params_map, property, source_file)?;
         reject_extra_params(verb, &params_map, property, source_file)?;
         return Ok(LifecycleAction {
             kind: LifecycleActionKind::ExpressionFunction(ExpressionFunctionAction {
@@ -2344,12 +2340,8 @@ fn build_action_from_params(
     // key order for deterministic storage; the executor surfaces it as an
     // unknown side effect at runtime.
     if let Some(signature) = super::lifecycle_actions::side_effect_signature(verb) {
-        let mut args = Vec::with_capacity(signature.params.len());
-        for name in &signature.params {
-            if let Some(expr) = params_map.remove(name) {
-                args.push(expr);
-            }
-        }
+        let args =
+            collect_named_signature_args(verb, &signature, &mut params_map, property, source_file)?;
         reject_extra_params(verb, &params_map, property, source_file)?;
         return Ok(LifecycleAction {
             kind: LifecycleActionKind::SideEffect(SideEffectAction {
@@ -2435,6 +2427,46 @@ fn parse_lifecycle_control_long(
         _ => return Ok(None),
     };
     Ok(Some(control))
+}
+
+/// Collect key/value action arguments in the descriptor's positional order,
+/// enforcing the required-through-max parameter band at parse time.
+///
+/// Walks `signature.params` and consumes each named parameter present in
+/// `params_map`. A parameter in the first [`required_count`] positions that is
+/// absent is a parse-time error naming the missing required parameter(s);
+/// optional-tail parameters being absent is allowed.
+///
+/// [`required_count`]: super::lifecycle_actions::Signature::required_count
+fn collect_named_signature_args(
+    verb: &str,
+    signature: &super::lifecycle_actions::Signature,
+    params_map: &mut std::collections::HashMap<String, Expr>,
+    property: &str,
+    source_file: &Path,
+) -> Result<Vec<Expr>, CompositionError> {
+    let required = signature.required_count();
+    let mut args = Vec::with_capacity(signature.params.len());
+    let mut missing: Vec<&str> = Vec::new();
+    for (index, name) in signature.params.iter().enumerate() {
+        match params_map.remove(name) {
+            Some(expr) => args.push(expr),
+            None if index < required => missing.push(name),
+            None => {}
+        }
+    }
+    if !missing.is_empty() {
+        return Err(CompositionError::LifecycleActionInvalidLongForm {
+            source_path: source_file.to_path_buf(),
+            property: property.to_string(),
+            action: verb.to_string(),
+            message: format!(
+                "`{verb}` is missing required parameter(s): {}",
+                missing.join(", ")
+            ),
+        });
+    }
+    Ok(args)
 }
 
 /// Reject leftover parameters after a long-form action consumes its known
@@ -5776,6 +5808,77 @@ mod tests {
     }
 
     #[test]
+    fn parses_positional_expression_function_bracket_optional() {
+        // `number(x, [default])` — the bracketed param is optional, so the
+        // one-argument form is valid arity.
+        let fm = json!({
+            "start": {
+                "stack": [{"action": {"number": "{{ value }}"}}]
+            }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let stack = config.stack(LifecycleSignal::Start).expect("start stack");
+        let LifecycleActionKind::ExpressionFunction(ef) = &stack[0].actions[0].kind else {
+            panic!("expected expression-function action");
+        };
+        assert_eq!(ef.function, "number");
+        assert_eq!(ef.args.len(), 1);
+    }
+
+    #[test]
+    fn parses_positional_expression_function_overload_one_arg() {
+        // Overloaded functions accept their shortest (one-argument) form: the
+        // longer overload's extra parameters are optional.
+        let fm = json!({
+            "start": {
+                "stack": [
+                    {"action": {"frontmatter": "state.md"}},
+                    {"action": {"link": "state.md"}}
+                ]
+            }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let stack = config.stack(LifecycleSignal::Start).expect("start stack");
+        assert_eq!(stack.len(), 2);
+
+        let LifecycleActionKind::ExpressionFunction(frontmatter) = &stack[0].actions[0].kind else {
+            panic!("expected frontmatter expression-function action");
+        };
+        assert_eq!(frontmatter.function, "frontmatter");
+        assert_eq!(frontmatter.args.len(), 1);
+
+        let LifecycleActionKind::ExpressionFunction(link) = &stack[1].actions[0].kind else {
+            panic!("expected link expression-function action");
+        };
+        assert_eq!(link.function, "link");
+        assert_eq!(link.args.len(), 1);
+    }
+
+    #[test]
+    fn parses_positional_expression_function_happy_path() {
+        // Confirm the existing fixed-arity expression functions still parse.
+        let fm = json!({
+            "start": {
+                "stack": [
+                    {"action": {"length": "{{ items }}"}},
+                    {"action": {"contains": ["{{ haystack }}", "{{ needle }}"]}},
+                    {"action": {"and": ["true", "true"]}},
+                    {"action": {"or": ["a", "b"]}}
+                ]
+            }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let stack = config.stack(LifecycleSignal::Start).expect("start stack");
+        assert_eq!(stack.len(), 4);
+        for item in stack {
+            assert!(matches!(
+                item.actions[0].kind,
+                LifecycleActionKind::ExpressionFunction(_)
+            ));
+        }
+    }
+
+    #[test]
     fn parses_positional_typed_arguments() {
         let fm = json!({
             "start": {
@@ -6251,6 +6354,107 @@ mod tests {
                 "{verb} key/value should be rejected, got: {err:?}"
             );
         }
+    }
+
+    #[test]
+    fn key_value_expression_function_rejects_missing_required_param() {
+        // `contains(haystack, needle)` — both required. Supplying only
+        // `haystack` must fail at parse time, naming the missing `needle`.
+        let fm = json!({
+            "start": {
+                "stack": [{
+                    "action": {
+                        "action": "contains",
+                        "haystack": "{{ haystack }}"
+                    }
+                }]
+            }
+        });
+        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleActionInvalidLongForm {
+                action, message, ..
+            } => {
+                assert_eq!(action, "contains");
+                assert!(
+                    message.contains("needle"),
+                    "message should name the missing `needle` param, got: {message}"
+                );
+            }
+            other => panic!("expected LifecycleActionInvalidLongForm, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn key_value_side_effect_rejects_missing_required_params() {
+        // `set_frontmatter(file, prop, value)` — all required. Supplying only
+        // `file` must fail at parse time, naming both missing params.
+        let fm = json!({
+            "start": {
+                "stack": [{
+                    "action": {
+                        "action": "set_frontmatter",
+                        "file": "@state.md"
+                    }
+                }]
+            }
+        });
+        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleActionInvalidLongForm {
+                action, message, ..
+            } => {
+                assert_eq!(action, "set_frontmatter");
+                assert!(
+                    message.contains("prop") && message.contains("value"),
+                    "message should name both missing params, got: {message}"
+                );
+            }
+            other => panic!("expected LifecycleActionInvalidLongForm, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn key_value_omitting_optional_tail_param_parses() {
+        // `frontmatter(file, [prop])` (expression function) — `prop` is an
+        // optional tail param, so the `file`-only key/value form is valid.
+        let fm = json!({
+            "start": {
+                "stack": [{
+                    "action": {
+                        "action": "frontmatter",
+                        "file": "@spec.md"
+                    }
+                }]
+            }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let stack = config.stack(LifecycleSignal::Start).expect("start stack");
+        let LifecycleActionKind::ExpressionFunction(ef) = &stack[0].actions[0].kind else {
+            panic!("expected expression-function action");
+        };
+        assert_eq!(ef.function, "frontmatter");
+        assert_eq!(ef.args.len(), 1);
+
+        // `ensure_file(file, [content])` (side effect) — `content` is optional,
+        // so the `file`-only key/value form is valid.
+        let fm = json!({
+            "start": {
+                "stack": [{
+                    "action": {
+                        "action": "ensure_file",
+                        "file": "@out/log.md"
+                    }
+                }]
+            }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let stack = config.stack(LifecycleSignal::Start).expect("start stack");
+        let LifecycleActionKind::SideEffect(se) = &stack[0].actions[0].kind else {
+            panic!("expected side-effect action");
+        };
+        assert_eq!(se.verb, "ensure_file");
+        assert_eq!(se.args.len(), 1);
     }
 
     #[test]

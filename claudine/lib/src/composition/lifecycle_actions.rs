@@ -375,6 +375,8 @@ impl Signature {
 /// Supported forms:
 /// - `verb(p1, p2, ...)` — fixed positional parameters
 /// - `verb(p1, p2?, ...)` — trailing optional parameters (explicit `?`)
+/// - `verb(p1, [p2], ...)` — trailing optional parameters (bracket notation;
+///   the Darkmatter catalog form, e.g. `number(x, [default])`)
 /// - `verb(...)` — variadic
 ///
 /// Returns `None` for syntactically malformed signatures.
@@ -417,7 +419,12 @@ pub fn parse_signature(signature: &str) -> Option<Signature> {
         if raw.is_empty() {
             return None;
         }
-        if let Some(stripped) = raw.strip_suffix('?') {
+        // Two optional-parameter spellings are accepted: a trailing `?`
+        // (`content?`) and Darkmatter's catalog bracket form (`[default]`).
+        let optional_name = raw
+            .strip_suffix('?')
+            .or_else(|| raw.strip_prefix('[').and_then(|s| s.strip_suffix(']')));
+        if let Some(stripped) = optional_name {
             optional_tail += 1;
             let name = stripped.trim();
             if name.is_empty() {
@@ -515,14 +522,22 @@ fn build_side_effect_signatures() -> std::collections::HashMap<String, Signature
 /// not appear in the shortest overload.
 ///
 /// Assumes overloads only add trailing parameters, which is true for the
-/// current Darkmatter catalog (`ensure_file(file)` / `ensure_file(file, content)`).
+/// current Darkmatter catalog (`ensure_file(file)` / `ensure_file(file, content)`,
+/// `frontmatter(file)` / `frontmatter(file, prop)`).
+///
+/// The merged `optional_tail` is the larger of two sources: the parameters the
+/// shortest overload omits, and the longest overload's own intrinsic optional
+/// tail (`[default]` / `name?` markers). The latter matters for a single
+/// non-overloaded signature such as `number(x, [default])`, where `base` and
+/// `longest` are the same signature and the omitted-parameter count is zero.
 fn merge_signatures(sigs: &[Signature]) -> Signature {
     debug_assert!(!sigs.is_empty());
     let mut sorted = sigs.to_vec();
     sorted.sort_by_key(|s| s.params.len());
     let base = sorted.first().expect("non-empty signature list").clone();
     let longest = sorted.last().expect("non-empty signature list").clone();
-    let optional_tail = longest.params.len().saturating_sub(base.params.len());
+    let from_overloads = longest.params.len().saturating_sub(base.params.len());
+    let optional_tail = from_overloads.max(longest.optional_tail);
     Signature {
         verb: longest.verb,
         params: longest.params,
@@ -593,23 +608,17 @@ fn parsed_verb_of(signature: &str) -> Option<&str> {
 /// merged so that parameters present only in longer overloads are marked as
 /// optional tail parameters.
 pub fn expression_function_signature(verb: &str) -> Option<Signature> {
-    EXPRESSION_FUNCTION_DESCRIPTORS
+    let sigs: Vec<Signature> = EXPRESSION_FUNCTION_DESCRIPTORS
         .iter()
         .filter_map(|d| {
             let sig = parse_signature(d.signature)?;
             if sig.verb == verb { Some(sig) } else { None }
         })
-        .fold(None, |acc, sig| match acc {
-            None => Some(sig),
-            Some(prev) => {
-                let mut combined = prev;
-                if sig.params.len() > combined.params.len() {
-                    combined.params = sig.params;
-                }
-                combined.variadic = combined.variadic || sig.variadic;
-                Some(combined)
-            }
-        })
+        .collect();
+    if sigs.is_empty() {
+        return None;
+    }
+    Some(merge_signatures(&sigs))
 }
 
 /// Returns every lifecycle action verb known to the parser.
@@ -895,6 +904,18 @@ mod tests {
     }
 
     #[test]
+    fn parse_signature_bracket_optional_tail() {
+        // Darkmatter's catalog form for an optional trailing parameter.
+        let sig = parse_signature("number(x, [default])").unwrap();
+        assert_eq!(sig.verb, "number");
+        assert_eq!(sig.params, vec!["x", "default"]);
+        assert_eq!(sig.optional_tail, 1);
+        assert!(!sig.variadic);
+        assert_eq!(sig.required_count(), 1);
+        assert_eq!(sig.max_count(), Some(2));
+    }
+
+    #[test]
     fn parse_signature_variadic() {
         let sig = parse_signature("and(...)").unwrap();
         assert_eq!(sig.verb, "and");
@@ -940,6 +961,54 @@ mod tests {
         assert_eq!(ensure.optional_tail, 1);
 
         assert!(side_effect_signature("not_a_verb").is_none());
+    }
+
+    // -------------------------------------------------------------------------
+    // Expression-function signature derivation
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn expression_function_signature_bracket_optional() {
+        // `number(x, [default])` — the bracketed param is optional, so the
+        // one-argument form `number("{{ value }}")` is valid arity.
+        let sig = expression_function_signature("number").unwrap();
+        assert_eq!(sig.params, vec!["x", "default"]);
+        assert_eq!(sig.optional_tail, 1);
+        assert_eq!(sig.required_count(), 1);
+        assert_eq!(sig.max_count(), Some(2));
+
+        let round = expression_function_signature("round").unwrap();
+        assert_eq!(round.required_count(), 1);
+        assert_eq!(round.max_count(), Some(2));
+    }
+
+    #[test]
+    fn expression_function_signature_merges_overloads() {
+        // Overloaded functions: the shorter overload's missing parameters are
+        // optional, so the one-argument positional form is valid arity.
+        let frontmatter = expression_function_signature("frontmatter").unwrap();
+        assert_eq!(frontmatter.params, vec!["file", "prop"]);
+        assert_eq!(frontmatter.optional_tail, 1);
+        assert_eq!(frontmatter.required_count(), 1);
+        assert_eq!(frontmatter.max_count(), Some(2));
+
+        let link = expression_function_signature("link").unwrap();
+        assert_eq!(link.required_count(), 1);
+        assert_eq!(link.max_count(), Some(2));
+
+        let validate = expression_function_signature("validate_schema").unwrap();
+        assert_eq!(validate.required_count(), 1);
+        assert_eq!(validate.max_count(), Some(2));
+    }
+
+    #[test]
+    fn expression_function_signature_variadic_preserved() {
+        let and = expression_function_signature("and").unwrap();
+        assert!(and.variadic);
+        assert_eq!(and.required_count(), 0);
+        assert_eq!(and.max_count(), None);
+
+        assert!(expression_function_signature("not_a_function").is_none());
     }
 
     // -------------------------------------------------------------------------
