@@ -379,6 +379,135 @@ pub enum CompositionError {
         message: String,
     },
 
+    /// A lifecycle action verb is not recognized at parse time.
+    ///
+    /// Raised for single-key positional objects whose only key is not a known
+    /// lifecycle verb.
+    #[error(
+        "unknown lifecycle action `{verb}` in `{property}` ({source_path}){rewrite}",
+        source_path = source_path.display()
+    )]
+    LifecycleUnknownVerb {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+        /// The unrecognized verb.
+        verb: String,
+        /// Did-you-mean rewrite, empty when no suggestion is available.
+        rewrite: String,
+    },
+
+    /// A lifecycle stack item is ambiguous between positional and key/value
+    /// forms because it is a multi-key object without an explicit `action:` key.
+    #[error(
+        "ambiguous lifecycle stack item in `{property}` ({source_path}): {message}",
+        source_path = source_path.display()
+    )]
+    LifecycleStackAmbiguous {
+        /// The prompt file whose lifecycle frontmatter held the stack item.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+        /// Human-readable description with did-you-mean rewrites.
+        message: String,
+    },
+
+    /// A positional lifecycle action received a direct YAML map value.
+    ///
+    /// Object-valued side-effect arguments must be passed through a whole-value
+    /// `{{ … }}` interpolation span; direct nested YAML objects are rejected.
+    #[error(
+        "lifecycle action `{verb}` in `{property}` received an object value where a scalar or array is expected; \
+         pass object data through a whole-value `{{{{ ... }}}}` interpolation ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleObjectDataThroughInterpolationPositional {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+        /// The action verb.
+        verb: String,
+    },
+
+    /// A key/value lifecycle action parameter received a direct YAML map value.
+    ///
+    /// Object-valued side-effect arguments must be passed through a whole-value
+    /// `{{ … }}` interpolation span; direct nested YAML objects are rejected.
+    #[error(
+        "lifecycle action `{verb}` parameter `{param}` in `{property}` received an object value where a scalar is expected; \
+         pass object data through a whole-value `{{{{ ... }}}}` interpolation ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleObjectDataThroughInterpolationParameter {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+        /// The action verb.
+        verb: String,
+        /// The parameter name.
+        param: String,
+    },
+
+    /// A positional lifecycle action received the wrong number of arguments.
+    #[error(
+        "lifecycle action `{verb}` in `{property}` has the wrong arity ({source_path}): {message}",
+        source_path = source_path.display()
+    )]
+    LifecycleWrongArity {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+        /// The action verb.
+        verb: String,
+        /// Human-readable arity description.
+        message: String,
+    },
+
+    /// The short-form lifecycle action grammar `verb(args)` has been removed.
+    ///
+    /// Authors must use positional (`verb: value`) or key/value
+    /// (`{ action: verb, ... }`) form. The `rewrite` field carries the
+    /// positional equivalent for the did-you-mean message.
+    #[error(
+        "short-form lifecycle action `{raw}` in `{property}` has been removed ({source_path}).\n\n\
+         Use the positional or key/value form instead: {rewrite}",
+        source_path = source_path.display()
+    )]
+    LifecycleShortFormRemoved {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+        /// The raw short-form string exactly as authored.
+        raw: String,
+        /// Positional-form did-you-mean rewrite.
+        rewrite: String,
+    },
+
+    /// A variadic expression-function action was authored in key/value form.
+    ///
+    /// Variadic functions (`and`, `or`) accept a variable number of positional
+    /// arguments and have no deterministic named-parameter mapping, so they
+    /// reject the `{ action: verb, ... }` shape. Authors must use the positional
+    /// array form (`and: [a, b, c]`).
+    #[error(
+        "lifecycle expression function `{verb}` in `{property}` does not support key/value form; \
+         use the positional array form (`{verb}: [...]`) ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleExpressionFunctionKeyValueUnsupported {
+        /// The prompt file whose frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+        /// The variadic expression-function verb.
+        verb: String,
+    },
+
     /// A lifecycle control action was used in an event where the spec's
     /// "Where valid" matrix forbids it (e.g. `Skip` outside `initialize`).
     ///
@@ -1239,6 +1368,12 @@ impl CompositionError {
             | CompositionError::LifecycleStackInvalidShape { property, .. }
             | CompositionError::LifecycleActionInvalidShortForm { property, .. }
             | CompositionError::LifecycleActionInvalidLongForm { property, .. }
+            | CompositionError::LifecycleUnknownVerb { property, .. }
+            | CompositionError::LifecycleStackAmbiguous { property, .. }
+            | CompositionError::LifecycleObjectDataThroughInterpolationPositional { property, .. }
+            | CompositionError::LifecycleObjectDataThroughInterpolationParameter { property, .. }
+            | CompositionError::LifecycleWrongArity { property, .. }
+            | CompositionError::LifecycleShortFormRemoved { property, .. }
             | CompositionError::LifecycleActionPlacement { property, .. }
             | CompositionError::LifecycleMultipleLifecycleActions { property, .. }
             | CompositionError::LifecycleActionOrder { property, .. }
@@ -1499,6 +1634,135 @@ impl BlockError for CompositionError {
                         "invalid lifecycle action",
                     ))
                     .body(body)
+            }
+            CompositionError::LifecycleUnknownVerb {
+                source_path,
+                property,
+                verb,
+                rewrite,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "Unknown lifecycle action <cyan>`{verb}`</cyan> in <cyan>`{property}`</cyan> \
+                     in {file_link}.\n\n{rewrite}"
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "unknown lifecycle action",
+                    ))
+                    .body(body)
+                    .hint(
+                        "Lifecycle actions must use positional form (`verb: value`) or key/value \
+                         form (`{ action: verb, ... }`).",
+                    )
+            }
+            CompositionError::LifecycleStackAmbiguous {
+                source_path,
+                property,
+                message,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "Ambiguous lifecycle stack item in <cyan>`{property}`</cyan> in {file_link}.\
+                     \n\n{message}"
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "ambiguous lifecycle stack item",
+                    ))
+                    .body(body)
+                    .hint(
+                        "Use positional form (`verb: value`) with exactly one key, or key/value \
+                         form (`{ action: verb, ... }`).",
+                    )
+            }
+            CompositionError::LifecycleObjectDataThroughInterpolationPositional {
+                source_path,
+                property,
+                verb,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "Lifecycle action <cyan>`{verb}`</cyan> in <cyan>`{property}`</cyan> in \
+                     {file_link} received an object value where a scalar or array was expected."
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "object value not allowed here",
+                    ))
+                    .body(body)
+                    .hint(
+                        "Pass object data through a whole-value `{{ ... }}` interpolation, or use \
+                         key/value form with a scalar parameter.",
+                    )
+            }
+            CompositionError::LifecycleObjectDataThroughInterpolationParameter {
+                source_path,
+                property,
+                verb,
+                param,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "Lifecycle action <cyan>`{verb}`</cyan> parameter <cyan>`{param}`</cyan> in \
+                     <cyan>`{property}`</cyan> in {file_link} received an object value where a \
+                     scalar was expected."
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "object value not allowed here",
+                    ))
+                    .body(body)
+                    .hint(
+                        "Pass object data through a whole-value `{{ ... }}` interpolation.",
+                    )
+            }
+            CompositionError::LifecycleWrongArity {
+                source_path,
+                property,
+                verb,
+                message,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "Lifecycle action <cyan>`{verb}`</cyan> in <cyan>`{property}`</cyan> in \
+                     {file_link} has the wrong number of arguments.\n\n{message}"
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "wrong action arity",
+                    ))
+                    .body(body)
+            }
+            CompositionError::LifecycleShortFormRemoved {
+                source_path,
+                property,
+                raw,
+                rewrite,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "Short-form lifecycle action <cyan>`{}`</cyan> in <cyan>`{property}`</cyan> \
+                     in {file_link} has been removed.\n\n\
+                     <b>Rewrite to positional form:</b> <cyan>`{}`</cyan>",
+                    escape_prose_path(raw),
+                    escape_prose_path(rewrite)
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "short-form action removed",
+                    ))
+                    .body(body)
+                    .hint(
+                        "Use positional form (`verb: value`) or key/value form \
+                         (`{ action: verb, ... }`). `verb(args)` is no longer accepted.",
+                    )
             }
             CompositionError::LifecycleActionPlacement {
                 source_path,
@@ -2773,5 +3037,134 @@ mod tests {
             rendered.contains("title:") || rendered.contains("---"),
             "expected frontmatter block in diagnostic: {rendered}"
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // New lifecycle action form errors (Phase 2)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn lifecycle_short_form_removed_display_includes_rewrite() {
+        let err = CompositionError::LifecycleShortFormRemoved {
+            source_path: PathBuf::from("prompts/plan.md"),
+            property: "success".to_string(),
+            raw: "success(\"x\")".to_string(),
+            rewrite: "success: \"x\"".to_string(),
+        };
+        let rendered = err.to_string();
+        assert!(rendered.contains("short-form lifecycle action"), "got: {rendered}");
+        assert!(rendered.contains("success(\"x\")"), "got: {rendered}");
+        assert!(rendered.contains("success: \"x\""), "got: {rendered}");
+        assert!(rendered.contains("prompts/plan.md"), "got: {rendered}");
+    }
+
+    #[test]
+    fn lifecycle_short_form_removed_status_block_is_escape_free_at_none() {
+        use biscuit_terminal::discovery::detection::ColorDepth;
+        use biscuit_terminal::terminal::Terminal;
+        let err = CompositionError::LifecycleShortFormRemoved {
+            source_path: PathBuf::from("prompts/plan.md"),
+            property: "success".to_string(),
+            raw: "success(\"x\")".to_string(),
+            rewrite: "success: \"x\"".to_string(),
+        };
+        let term = Terminal {
+            color_depth: ColorDepth::None,
+            ..Terminal::new_optimistic(80)
+        };
+        let rendered = err.report_block_error(&term);
+        assert!(
+            !rendered.contains('\x1b'),
+            "expected no escape codes at ColorDepth::None: {rendered}"
+        );
+        assert!(rendered.contains("short-form action removed"), "got: {rendered}");
+        assert!(
+            rendered.contains("Rewrite to positional form:"),
+            "got: {rendered}"
+        );
+        assert!(rendered.contains("success:"), "got: {rendered}");
+        assert!(rendered.contains("\\\"x\\\""), "got: {rendered}");
+    }
+
+    #[test]
+    fn lifecycle_unknown_verb_display_includes_rewrite() {
+        let err = CompositionError::LifecycleUnknownVerb {
+            source_path: PathBuf::from("prompts/plan.md"),
+            property: "success".to_string(),
+            verb: "sucess".to_string(),
+            rewrite: "did you mean `success`?".to_string(),
+        };
+        let rendered = err.to_string();
+        assert!(rendered.contains("unknown lifecycle action"), "got: {rendered}");
+        assert!(rendered.contains("sucess"), "got: {rendered}");
+        assert!(rendered.contains("did you mean `success`?"), "got: {rendered}");
+    }
+
+    #[test]
+    fn lifecycle_wrong_arity_display_includes_message() {
+        let err = CompositionError::LifecycleWrongArity {
+            source_path: PathBuf::from("prompts/plan.md"),
+            property: "success".to_string(),
+            verb: "set_frontmatter".to_string(),
+            message: "expected 3 arguments [file, prop, value], got 1".to_string(),
+        };
+        let rendered = err.to_string();
+        assert!(rendered.contains("set_frontmatter"), "got: {rendered}");
+        assert!(rendered.contains("expected 3 arguments"), "got: {rendered}");
+    }
+
+    #[test]
+    fn lifecycle_object_data_positional_display_mentions_interpolation() {
+        let err = CompositionError::LifecycleObjectDataThroughInterpolationPositional {
+            source_path: PathBuf::from("prompts/plan.md"),
+            property: "success".to_string(),
+            verb: "merge_frontmatter".to_string(),
+        };
+        let rendered = err.to_string();
+        assert!(rendered.contains("merge_frontmatter"), "got: {rendered}");
+        assert!(rendered.contains("whole-value"), "got: {rendered}");
+        assert!(rendered.contains("{{ ... }}"), "got: {rendered}");
+    }
+
+    #[test]
+    fn lifecycle_object_data_parameter_display_mentions_param() {
+        let err = CompositionError::LifecycleObjectDataThroughInterpolationParameter {
+            source_path: PathBuf::from("prompts/plan.md"),
+            property: "success".to_string(),
+            verb: "set_frontmatter".to_string(),
+            param: "value".to_string(),
+        };
+        let rendered = err.to_string();
+        assert!(rendered.contains("set_frontmatter"), "got: {rendered}");
+        assert!(rendered.contains("parameter `value`"), "got: {rendered}");
+    }
+
+    #[test]
+    fn lifecycle_stack_ambiguous_display_includes_message() {
+        let err = CompositionError::LifecycleStackAmbiguous {
+            source_path: PathBuf::from("prompts/plan.md"),
+            property: "success".to_string(),
+            message: "did you mean `success: ...` or `{ action: success, ... }`?".to_string(),
+        };
+        let rendered = err.to_string();
+        assert!(rendered.contains("ambiguous lifecycle stack item"), "got: {rendered}");
+        assert!(rendered.contains("did you mean"), "got: {rendered}");
+    }
+
+    #[test]
+    fn new_lifecycle_errors_get_frontmatter_excerpt() {
+        let source = source_from(
+            "---\nsuccess:\n    sucess: \"x\"\n---\nbody\n",
+        );
+        let err = CompositionError::LifecycleUnknownVerb {
+            source_path: PathBuf::from("review.md"),
+            property: "success".to_string(),
+            verb: "sucess".to_string(),
+            rewrite: "did you mean `success`?".to_string(),
+        }
+        .enrich_frontmatter(&source, true);
+
+        assert!(matches!(err, CompositionError::WithFrontmatter { .. }));
+        assert!(err.frontmatter_excerpt().is_some());
     }
 }

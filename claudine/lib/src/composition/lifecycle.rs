@@ -25,9 +25,10 @@ use tracing::warn;
 
 use super::error::CompositionError;
 use super::lifecycle_actions::{
-    CommunicationAction, CommunicationChannel, ExpressionFunctionAction, LifecycleAction,
-    LifecycleActionKind, LifecycleControlAction, LifecycleStackItem, RetryBackoff, ShellAction,
-    SideEffectAction,
+    all_lifecycle_verbs, CommunicationAction, CommunicationChannel, ExpressionFunctionAction,
+    expression_function_signature, is_known_lifecycle_verb, LifecycleAction, LifecycleActionKind,
+    LifecycleControlAction, LifecycleStackItem, RetryBackoff, rewrite_to_positional, ShellAction,
+    SideEffectAction, side_effect_signature,
 };
 use crate::events::{GlobalSettings, TtsSettings};
 use crate::messaging::RuntimeMessagingSettings;
@@ -1440,6 +1441,10 @@ fn parse_lifecycle_stack_item(
     })?;
 
     // Parse `when:` as a Darkmatter condition expression.
+    //
+    // This is the intentional exception to the literal-default rule: `when`,
+    // `until`, and `while` are always boolean expressions and must never be
+    // routed through `action_value_to_expr`.
     let when = match obj.get("when") {
         Some(serde_json::Value::String(s)) => {
             Some(parse_condition(s).map_err(|e| CompositionError::LifecycleStackInvalidShape {
@@ -1466,11 +1471,12 @@ fn parse_lifecycle_stack_item(
         }
     })?;
 
-    // Collect sibling keys (everything except `when` and `action`). These
-    // apply only when `action` is a scalar string; for an array they are
-    // ignored (each array element carries its own params).
-    let mut sibling_params: Vec<(String, Expr)> = Vec::new();
+    // Collect the universal `no_error` flag. Sibling parameter keys are no
+    // longer accepted at the stack-item level: a scalar `action: <verb>` must
+    // be a bare verb with zero arguments, and key/value parameters must live
+    // inside an explicit `{ action: verb, ... }` object.
     let mut stack_no_error: Option<bool> = None;
+    let mut sibling_keys: Vec<&str> = Vec::new();
     for (key, value) in obj {
         if matches!(key.as_str(), "when" | "action") {
             continue;
@@ -1491,33 +1497,47 @@ fn parse_lifecycle_stack_item(
             });
             continue;
         }
-        let expr = value_to_expr(value).map_err(|message| {
-            CompositionError::LifecycleStackInvalidShape {
-                source_path: source_file.to_path_buf(),
-                property: property_name.to_string(),
-                message: format!("`{key}` is not a valid expression value: {message}"),
-            }
-        })?;
-        sibling_params.push((key.clone(), expr));
+        sibling_keys.push(key.as_str());
+    }
+    if !sibling_keys.is_empty() {
+        sibling_keys.sort_unstable();
+        let message = if let serde_json::Value::String(verb) = raw_action {
+            format!(
+                "scalar `action` value `{verb}` cannot take sibling parameter(s) ({}); \
+                 use the explicit key/value form `{{{{ action: {verb}, ... }}}}``",
+                sibling_keys.join(", ")
+            )
+        } else {
+            format!(
+                "stack item with an {} `action` cannot carry sibling parameter(s) ({}); \
+                 move them into each array element",
+                json_type_name(raw_action),
+                sibling_keys.join(", ")
+            )
+        };
+        return Err(CompositionError::LifecycleStackInvalidShape {
+            source_path: source_file.to_path_buf(),
+            property: property_name.to_string(),
+            message,
+        });
     }
 
     let actions = match raw_action {
-        // Scalar string action: short form (`verb(args)`) or bare verb with
-        // sibling params.
+        // Scalar string action: only bare verb-name zero-arg form is accepted.
+        // Any string containing `(` is the removed short-form grammar.
         serde_json::Value::String(s) => {
             let no_error = stack_no_error.unwrap_or(false);
-            let action =
-                parse_scalar_action(signal, s, &sibling_params, no_error, source_file, property_name)?;
+            let action = parse_scalar_action(signal, s, no_error, source_file, property_name)?;
             vec![action]
         }
         // Array of actions, each self-contained.
         serde_json::Value::Array(items) => {
-            if stack_no_error.is_some() || !sibling_params.is_empty() {
+            if stack_no_error.is_some() {
                 return Err(CompositionError::LifecycleStackInvalidShape {
                     source_path: source_file.to_path_buf(),
                     property: property_name.to_string(),
-                    message: "stack item with an array `action` cannot carry sibling parameters \
-                        (move them into each array element)"
+                    message: "stack item with an array `action` cannot carry a sibling `no_error`; \
+                        move `no_error` into each array element"
                         .to_string(),
                 });
             }
@@ -1525,11 +1545,24 @@ fn parse_lifecycle_stack_item(
             for item in items {
                 let action = match item {
                     serde_json::Value::String(s) => {
-                        parse_short_form_action(signal, s, source_file)?
+                        if s.contains('(') {
+                            return Err(CompositionError::LifecycleShortFormRemoved {
+                                source_path: source_file.to_path_buf(),
+                                property: property_name.to_string(),
+                                raw: s.clone(),
+                                rewrite: rewrite_to_positional(s),
+                            });
+                        }
+                        parse_bare_verb_string(signal, s, false, source_file, property_name)?
                     }
-                    serde_json::Value::Object(inner) => parse_long_form_action_object(
-                        signal, inner, source_file, property_name,
-                    )?,
+                    serde_json::Value::Object(inner) => {
+                        parse_stack_item_action_object(
+                            signal,
+                            inner,
+                            source_file,
+                            property_name,
+                        )?
+                    }
                     other => {
                         return Err(CompositionError::LifecycleStackInvalidShape {
                             source_path: source_file.to_path_buf(),
@@ -1545,17 +1578,15 @@ fn parse_lifecycle_stack_item(
             }
             actions
         }
-        // Object form: long-form action presented as `{action: {verb: ...}}`.
-        // The spec examples use siblings of `action:` rather than nesting,
-        // but accept the nested form too as a tolerant extension.
-        serde_json::Value::Object(_) => {
-            return Err(CompositionError::LifecycleStackInvalidShape {
-                source_path: source_file.to_path_buf(),
-                property: property_name.to_string(),
-                message: "`action` object form is not supported; use a scalar string verb with \
-                    sibling parameter keys, or an array of actions"
-                    .to_string(),
-            });
+        // Object form: either a positional single-key object (`{success: "x"}`)
+        // or a nested key/value object (`{action: {action: verb, ...}}`).
+        serde_json::Value::Object(obj) => {
+            vec![parse_stack_item_action_object(
+                signal,
+                obj,
+                source_file,
+                property_name,
+            )?]
         }
         other => {
             return Err(CompositionError::LifecycleStackInvalidShape {
@@ -1608,19 +1639,73 @@ fn parse_lifecycle_stack_item(
     Ok(LifecycleStackItem { when, actions })
 }
 
-/// Parse a scalar string `action` value, choosing short form or long form
-/// based on whether the string contains parens.
+/// Parse an action object that appears either as an array element or as the
+/// single value of a stack item's `action:` key.
+///
+/// Disambiguation (per the positional-and-key-value spec):
+/// - Object with an `action:` key → key/value long form.
+/// - Single-key object whose key is a known verb → positional form.
+/// - Single-key object whose key is not a known verb → unknown-verb error.
+/// - Multi-key object without an `action:` key → ambiguous error.
+fn parse_stack_item_action_object(
+    signal: LifecycleSignal,
+    obj: &serde_json::Map<String, serde_json::Value>,
+    source_file: &Path,
+    property_name: &str,
+) -> Result<LifecycleAction, CompositionError> {
+    if obj.contains_key("action") {
+        return parse_long_form_action_object(signal, obj, source_file, property_name);
+    }
+
+    match obj.len() {
+        0 => Err(CompositionError::LifecycleStackInvalidShape {
+            source_path: source_file.to_path_buf(),
+            property: property_name.to_string(),
+            message: "action object cannot be empty".to_string(),
+        }),
+        1 => {
+            let (verb, value) = obj.iter().next().expect("single-key object");
+            parse_positional_action(signal, verb, value, source_file, property_name)
+        }
+        _ => {
+            let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
+            keys.sort_unstable();
+            let known_verb = keys.iter().copied().find(|k| is_known_lifecycle_verb(k));
+            let positional_rewrite = known_verb.map(|verb| format!("`{verb}: ...`"));
+            let kv_verb = known_verb.unwrap_or_else(|| keys.first().expect("multi-key object"));
+            let kv_rewrite = format!("`{{{{ action: {kv_verb}, ... }}}}``");
+            let mut rewrites: Vec<String> = Vec::new();
+            if let Some(rw) = positional_rewrite {
+                rewrites.push(rw);
+            }
+            rewrites.push(kv_rewrite);
+            Err(CompositionError::LifecycleStackAmbiguous {
+                source_path: source_file.to_path_buf(),
+                property: property_name.to_string(),
+                message: format!(
+                    "multi-key action object without an `action` key is ambiguous; \
+                     did you mean {}?",
+                    rewrites.join(" or ")
+                ),
+            })
+        }
+    }
+}
+
+/// Parse a scalar string `action` value.
+///
+/// Only the bare verb-name zero-arg form is accepted. A string containing
+/// `(` is the removed short-form grammar and surfaces a typed
+/// [`CompositionError::LifecycleShortFormRemoved`] with a positional rewrite.
 fn parse_scalar_action(
     signal: LifecycleSignal,
     raw: &str,
-    sibling_params: &[(String, Expr)],
     no_error: bool,
     source_file: &Path,
     property_name: &str,
 ) -> Result<LifecycleAction, CompositionError> {
     let trimmed = raw.trim();
 
-    // Empty string is always an error.
     if trimmed.is_empty() {
         return Err(CompositionError::LifecycleActionInvalidShortForm {
             source_path: source_file.to_path_buf(),
@@ -1630,31 +1715,56 @@ fn parse_scalar_action(
         });
     }
 
-    // If the string contains parens, treat as short form. Any sibling params
-    // other than `no_error` are reported as unknown — short form carries its
-    // args inside the parens.
     if trimmed.contains('(') {
-        if !sibling_params.is_empty() {
-            let mut keys: Vec<&str> = sibling_params.iter().map(|(k, _)| k.as_str()).collect();
-            keys.sort_unstable();
-            return Err(CompositionError::LifecycleActionInvalidLongForm {
-                source_path: source_file.to_path_buf(),
-                property: property_name.to_string(),
-                action: trimmed.to_string(),
-                message: format!(
-                    "short-form action `{trimmed}` cannot take sibling parameters: {}",
-                    keys.join(", ")
-                ),
-            });
-        }
-        let mut action = parse_short_form_action(signal, raw, source_file)?;
-        action.no_error = no_error;
-        return Ok(action);
+        return Err(CompositionError::LifecycleShortFormRemoved {
+            source_path: source_file.to_path_buf(),
+            property: property_name.to_string(),
+            raw: raw.to_string(),
+            rewrite: rewrite_to_positional(raw),
+        });
     }
 
-    // Otherwise, bare verb → long form using sibling params.
-    let params: Vec<(String, Expr)> = sibling_params.to_vec();
-    build_action_from_params(signal, trimmed, params, no_error, source_file)
+    parse_bare_verb_string(signal, trimmed, no_error, source_file, property_name)
+}
+
+/// Parse a bare verb-name string as a zero-arg positional action.
+///
+/// Validates that the verb is known and that its zero-arg form is arity-legal
+/// (e.g. `stop` is accepted, `proxy` is rejected as wrong-arity).
+fn parse_bare_verb_string(
+    signal: LifecycleSignal,
+    raw: &str,
+    no_error: bool,
+    source_file: &Path,
+    property_name: &str,
+) -> Result<LifecycleAction, CompositionError> {
+    let trimmed = raw.trim();
+
+    if trimmed.is_empty() {
+        return Err(CompositionError::LifecycleActionInvalidShortForm {
+            source_path: source_file.to_path_buf(),
+            property: property_name.to_string(),
+            raw: raw.to_string(),
+            message: "action cannot be empty".to_string(),
+        });
+    }
+
+    if !is_known_lifecycle_verb(trimmed) {
+        let rewrite = did_you_mean_verb(trimmed)
+            .map(|suggestion| format!("; did you mean `{suggestion}`?"))
+            .unwrap_or_default();
+        return Err(CompositionError::LifecycleUnknownVerb {
+            source_path: source_file.to_path_buf(),
+            property: property_name.to_string(),
+            verb: trimmed.to_string(),
+            rewrite,
+        });
+    }
+
+    let mut action =
+        validate_positional_arity_and_build(signal, trimmed, Vec::new(), source_file, property_name)?;
+    action.no_error = no_error;
+    Ok(action)
 }
 
 /// Parse one long-form action object (used inside an `action:` array).
@@ -1690,6 +1800,18 @@ fn parse_long_form_action_object(
         }
     };
 
+    if !is_known_lifecycle_verb(&verb) {
+        let rewrite = did_you_mean_verb(&verb)
+            .map(|suggestion| format!("; did you mean `{suggestion}`?"))
+            .unwrap_or_default();
+        return Err(CompositionError::LifecycleUnknownVerb {
+            source_path: source_file.to_path_buf(),
+            property: property_name.to_string(),
+            verb: verb.clone(),
+            rewrite,
+        });
+    }
+
     let no_error = match obj.get("no_error") {
         Some(serde_json::Value::Bool(b)) => *b,
         Some(other) => {
@@ -1711,12 +1833,22 @@ fn parse_long_form_action_object(
         if matches!(key.as_str(), "action" | "no_error") {
             continue;
         }
-        let expr = value_to_expr(value).map_err(|message| {
+        // Direct YAML object literals are not accepted as parameter values;
+        // object data must be passed through a whole-value `{{ ... }}` span.
+        if let serde_json::Value::Object(_) = value {
+            return Err(CompositionError::LifecycleObjectDataThroughInterpolationParameter {
+                source_path: source_file.to_path_buf(),
+                property: property_name.to_string(),
+                verb: verb.clone(),
+                param: key.clone(),
+            });
+        }
+        let expr = action_value_to_expr(value).map_err(|message| {
             CompositionError::LifecycleActionInvalidLongForm {
                 source_path: source_file.to_path_buf(),
                 property: property_name.to_string(),
                 action: verb.clone(),
-                message: format!("`{key}` is not a valid expression value: {message}"),
+                message: format!("`{key}` is not a valid value: {message}"),
             }
         })?;
         params.push((key.clone(), expr));
@@ -1725,164 +1857,365 @@ fn parse_long_form_action_object(
     build_action_from_params(signal, &verb, params, no_error, source_file)
 }
 
-/// Parse a short-form action: `verb(arg1, arg2, …)` or bare `verb`.
-fn parse_short_form_action(
+/// Parse a positional action: `{verb: value}`.
+///
+/// The value is classified into arguments per the spec:
+/// - scalar (string/number/bool) → 1 argument
+/// - array → N arguments, each element converted independently
+/// - null or empty array → 0 arguments
+/// - direct object → rejected as object-data-through-interpolation
+///
+/// Arity is validated against the verb's signature (communication, shell,
+/// control, side-effect, or expression-function) and produces a typed
+/// [`CompositionError::LifecycleWrongArity`] when it does not match.
+fn parse_positional_action(
     signal: LifecycleSignal,
-    raw: &str,
+    verb: &str,
+    value: &serde_json::Value,
     source_file: &Path,
+    property_name: &str,
 ) -> Result<LifecycleAction, CompositionError> {
-    let property = signal.property_name();
-    let trimmed = raw.trim();
-
-    if trimmed.is_empty() {
-        return Err(CompositionError::LifecycleActionInvalidShortForm {
+    if !is_known_lifecycle_verb(verb) {
+        let rewrite = did_you_mean_verb(verb)
+            .map(|suggestion| format!("; did you mean `{suggestion}`?"))
+            .unwrap_or_default();
+        return Err(CompositionError::LifecycleUnknownVerb {
             source_path: source_file.to_path_buf(),
-            property: property.to_string(),
-            raw: raw.to_string(),
-            message: "action cannot be empty".to_string(),
+            property: property_name.to_string(),
+            verb: verb.to_string(),
+            rewrite,
         });
     }
 
-    let (verb, args_raw) = match trimmed.find('(') {
-        Some(open) => {
-            let close = trimmed.rfind(')').ok_or_else(|| {
-                CompositionError::LifecycleActionInvalidShortForm {
-                    source_path: source_file.to_path_buf(),
-                    property: property.to_string(),
-                    raw: raw.to_string(),
-                    message: "missing closing `)`".to_string(),
-                }
-            })?;
-            if close != trimmed.len() - 1 || open == 0 {
-                return Err(CompositionError::LifecycleActionInvalidShortForm {
-                    source_path: source_file.to_path_buf(),
-                    property: property.to_string(),
-                    raw: raw.to_string(),
-                    message: "expected `verb(args)` form".to_string(),
-                });
-            }
-            let verb = trimmed[..open].trim();
-            let args_raw = &trimmed[open + 1..close];
-            (verb, Some(args_raw))
-        }
-        None => (trimmed, None),
-    };
+    let args = classify_positional_value(verb, value, source_file, property_name)?;
+    validate_positional_arity_and_build(signal, verb, args, source_file, property_name)
+}
 
-    if verb.is_empty() {
-        return Err(CompositionError::LifecycleActionInvalidShortForm {
-            source_path: source_file.to_path_buf(),
-            property: property.to_string(),
-            raw: raw.to_string(),
-            message: "missing verb before `(`".to_string(),
-        });
-    }
-
-    // Single-parameter verbs take the whole parenthesized body as one literal
-    // argument: no comma splitting and no quoting required (`warn(hello world)`,
-    // `error(invalid phase: 6, too big)`). Any `{{ … }}` spans in the body stay
-    // intact here — lifecycle strings are deferred from compose-time resolution
-    // and interpolated at event-time via DM2 (see `lifecycle_executor`), so the
-    // body is final text only after that event-time pass. Only the genuinely
-    // multi-argument verbs (side-effects, expression functions) and the
-    // numeric/zero-arg control verbs use the comma-separated expression grammar
-    // in `parse_action_arg`.
-    let args = if is_single_text_arg_verb(verb) {
-        match args_raw.map(str::trim) {
-            Some(body) if !body.is_empty() => {
-                vec![Expr::StringLiteral(unwrap_wrapping_quotes(body).to_string())]
+/// Classify a positional action value into zero or more [`Expr`] arguments.
+fn classify_positional_value(
+    verb: &str,
+    value: &serde_json::Value,
+    source_file: &Path,
+    property_name: &str,
+) -> Result<Vec<Expr>, CompositionError> {
+    match value {
+        serde_json::Value::Null => Ok(Vec::new()),
+        serde_json::Value::String(_)
+        | serde_json::Value::Number(_)
+        | serde_json::Value::Bool(_) => Ok(vec![action_value_to_expr(value).map_err(|message| {
+            CompositionError::LifecycleActionInvalidLongForm {
+                source_path: source_file.to_path_buf(),
+                property: property_name.to_string(),
+                action: verb.to_string(),
+                message,
             }
-            _ => Vec::new(),
-        }
-    } else {
-        let raw_args = match args_raw {
-            Some(args_str) => super::loop_config::split_action_args(args_str).map_err(|e| match e {
-                CompositionError::LoopInvalid(msg) => {
-                    CompositionError::LifecycleActionInvalidShortForm {
+        })?]),
+        serde_json::Value::Array(items) => {
+            let mut args = Vec::with_capacity(items.len());
+            for item in items {
+                args.push(action_value_to_expr(item).map_err(|message| {
+                    CompositionError::LifecycleActionInvalidLongForm {
                         source_path: source_file.to_path_buf(),
-                        property: property.to_string(),
-                        raw: raw.to_string(),
-                        message: msg,
+                        property: property_name.to_string(),
+                        action: verb.to_string(),
+                        message,
                     }
-                }
-                // split_action_args only returns LoopInvalid; route anything
-                // else through the same diagnostic for a consistent surface.
-                other => CompositionError::LifecycleActionInvalidShortForm {
-                    source_path: source_file.to_path_buf(),
-                    property: property.to_string(),
-                    raw: raw.to_string(),
-                    message: other.to_string(),
-                },
-            })?,
-            None => Vec::new(),
-        };
-
-        let mut args = Vec::with_capacity(raw_args.len());
-        for arg in raw_args {
-            let expr = parse_action_arg(signal, &arg, raw, source_file)?;
-            args.push(expr);
+                })?);
+            }
+            Ok(args)
         }
-        args
+        serde_json::Value::Object(_) => Err(
+            CompositionError::LifecycleObjectDataThroughInterpolationPositional {
+                source_path: source_file.to_path_buf(),
+                property: property_name.to_string(),
+                verb: verb.to_string(),
+            },
+        ),
+    }
+}
+
+/// Validate the positional argument count for `verb` and build the typed
+/// action.
+fn validate_positional_arity_and_build(
+    signal: LifecycleSignal,
+    verb: &str,
+    args: Vec<Expr>,
+    source_file: &Path,
+    property_name: &str,
+) -> Result<LifecycleAction, CompositionError> {
+    use LifecycleControlAction as A;
+
+    // Lifecycle control verbs.
+    let control = match verb {
+        "stop" => {
+            check_exact_positional_arity(verb, &args, 0, source_file, property_name)?;
+            A::Stop
+        }
+        "skip" => {
+            check_exact_positional_arity(verb, &args, 0, source_file, property_name)?;
+            A::Skip
+        }
+        "error" => {
+            check_optional_positional_arity(verb, &args, 0, 1, source_file, property_name)?;
+            A::Error {
+                reason: args.into_iter().next(),
+            }
+        }
+        "proxy" => {
+            check_exact_positional_arity(verb, &args, 1, source_file, property_name)?;
+            A::Proxy {
+                target: args.into_iter().next().expect("arity checked"),
+            }
+        }
+        "retry" => {
+            check_optional_positional_arity(verb, &args, 0, 1, source_file, property_name)?;
+            A::Retry {
+                max_attempts: args.into_iter().next(),
+                backoff: None,
+                delay: None,
+            }
+        }
+        "resume" => {
+            check_exact_positional_arity(verb, &args, 1, source_file, property_name)?;
+            A::Resume {
+                message: args.into_iter().next().expect("arity checked"),
+                max_attempts: None,
+            }
+        }
+        "defer" => {
+            check_exact_positional_arity(verb, &args, 1, source_file, property_name)?;
+            A::Defer {
+                delay: args.into_iter().next().expect("arity checked"),
+                reason: None,
+            }
+        }
+        _ => {
+            // Not a control verb; fall through to communication / shell /
+            // side-effect / expression-function dispatch.
+            return build_non_control_positional_action(
+                signal, verb, args, source_file, property_name,
+            );
+        }
     };
 
-    build_action(signal, verb, args, raw, /* no_error */ false, source_file)
+    Ok(LifecycleAction {
+        kind: LifecycleActionKind::LifecycleControl(control),
+        no_error: false,
+    })
 }
 
-/// Verbs whose short form takes a single free-text argument: the entire
-/// parenthesized body is that one argument, taken literally (no comma
-/// splitting, quotes optional). Covers every communication channel plus
-/// `shell`, `error`, `proxy`, `resume`, and `defer`.
-///
-/// Excluded: the multi-argument side-effect / expression-function verbs (which
-/// keep the comma-separated expression grammar) and the numeric/zero-argument
-/// control verbs `retry`, `stop`, and `skip` (e.g. `retry(3)`'s argument must
-/// stay a number, not become the string `"3"`).
-fn is_single_text_arg_verb(verb: &str) -> bool {
-    CommunicationChannel::from_verb(verb).is_some()
-        || matches!(verb, "shell" | "error" | "proxy" | "resume" | "defer")
+/// Build a positional action for verbs that are not lifecycle controls.
+fn build_non_control_positional_action(
+    _signal: LifecycleSignal,
+    verb: &str,
+    args: Vec<Expr>,
+    source_file: &Path,
+    property_name: &str,
+) -> Result<LifecycleAction, CompositionError> {
+    // Communication channels.
+    if let Some(channel) = CommunicationChannel::from_verb(verb) {
+        check_exact_positional_arity(verb, &args, 1, source_file, property_name)?;
+        return Ok(LifecycleAction {
+            kind: LifecycleActionKind::Communication(CommunicationAction {
+                channel,
+                message: args.into_iter().next().expect("arity checked"),
+                route: None,
+            }),
+            no_error: false,
+        });
+    }
+
+    // Shell.
+    if verb == "shell" {
+        check_exact_positional_arity(verb, &args, 1, source_file, property_name)?;
+        return Ok(LifecycleAction {
+            kind: LifecycleActionKind::Shell(ShellAction {
+                command: args.into_iter().next().expect("arity checked"),
+                on_error: None,
+            }),
+            no_error: false,
+        });
+    }
+
+    // Side-effect verbs.
+    if let Some(signature) = side_effect_signature(verb) {
+        check_positional_signature(verb, &args, &signature, source_file, property_name)?;
+        return Ok(LifecycleAction {
+            kind: LifecycleActionKind::SideEffect(SideEffectAction {
+                verb: verb.to_string(),
+                args,
+            }),
+            no_error: false,
+        });
+    }
+
+    // Expression-function verbs.
+    let signature = super::lifecycle_actions::expression_function_signature(verb)
+        .unwrap_or_else(|| super::lifecycle_actions::Signature {
+            verb: verb.to_string(),
+            params: Vec::new(),
+            optional_tail: 0,
+            variadic: true,
+        });
+    check_positional_signature(verb, &args, &signature, source_file, property_name)?;
+    Ok(LifecycleAction {
+        kind: LifecycleActionKind::ExpressionFunction(ExpressionFunctionAction {
+            function: verb.to_string(),
+            args,
+        }),
+        no_error: false,
+    })
 }
 
-/// Strip one layer of matching wrapping quotes from `s` when it is exactly a
-/// single quoted literal — the same quote character at both ends and not
-/// recurring inside. Leaves the string untouched otherwise, so an unquoted
-/// message, or one that merely contains a quote (`error(it's 6, too big)`),
-/// is preserved verbatim. This keeps existing quoted forms (`warn('hi')`)
-/// working while making the quotes optional.
-fn unwrap_wrapping_quotes(s: &str) -> &str {
-    let bytes = s.as_bytes();
-    if bytes.len() >= 2 {
-        let q = bytes[0];
-        if (q == b'\'' || q == b'"') && bytes[bytes.len() - 1] == q {
-            let inner = &s[1..s.len() - 1];
-            if !inner.as_bytes().contains(&q) {
-                return inner;
+/// Enforce an exact positional arity.
+fn check_exact_positional_arity(
+    verb: &str,
+    args: &[Expr],
+    expected: usize,
+    source_file: &Path,
+    property_name: &str,
+) -> Result<(), CompositionError> {
+    if args.len() != expected {
+        let message = if expected == 0 {
+            format!("`{verb}` takes no arguments, got {}", args.len())
+        } else if expected == 1 {
+            format!("`{verb}` expects exactly 1 argument, got {}", args.len())
+        } else {
+            format!("`{verb}` expects exactly {expected} arguments, got {}", args.len())
+        };
+        return Err(CompositionError::LifecycleWrongArity {
+            source_path: source_file.to_path_buf(),
+            property: property_name.to_string(),
+            verb: verb.to_string(),
+            message,
+        });
+    }
+    Ok(())
+}
+
+/// Enforce a positional arity in the inclusive range `[min, max]`.
+fn check_optional_positional_arity(
+    verb: &str,
+    args: &[Expr],
+    min: usize,
+    max: usize,
+    source_file: &Path,
+    property_name: &str,
+) -> Result<(), CompositionError> {
+    if args.len() < min || args.len() > max {
+        let message = if min == max {
+            format!("`{verb}` expects exactly {min} argument(s), got {}", args.len())
+        } else {
+            format!(
+                "`{verb}` expects {min} to {max} argument(s), got {}",
+                args.len()
+            )
+        };
+        return Err(CompositionError::LifecycleWrongArity {
+            source_path: source_file.to_path_buf(),
+            property: property_name.to_string(),
+            verb: verb.to_string(),
+            message,
+        });
+    }
+    Ok(())
+}
+
+/// Enforce positional arity against a descriptor signature.
+fn check_positional_signature(
+    verb: &str,
+    args: &[Expr],
+    signature: &super::lifecycle_actions::Signature,
+    source_file: &Path,
+    property_name: &str,
+) -> Result<(), CompositionError> {
+    let min = signature.required_count();
+    let max = signature.max_count();
+
+    let too_few = args.len() < min;
+    let too_many = max.is_some_and(|m| args.len() > m);
+    if too_few || too_many {
+        let message = match max {
+            None => format!(
+                "`{verb}` is variadic and requires at least {min} argument(s), got {}; \
+                 expected {}",
+                args.len(),
+                signature.params.join(", ")
+            ),
+            Some(max) if min == max => format!(
+                "`{verb}` expects exactly {min} argument(s) ({}), got {}",
+                signature.params.join(", "),
+                args.len()
+            ),
+            Some(max) => format!(
+                "`{verb}` expects {min} to {max} argument(s) ({}), got {}",
+                signature.params.join(", "),
+                args.len()
+            ),
+        };
+        return Err(CompositionError::LifecycleWrongArity {
+            source_path: source_file.to_path_buf(),
+            property: property_name.to_string(),
+            verb: verb.to_string(),
+            message,
+        });
+    }
+    Ok(())
+}
+
+/// Suggest a known lifecycle verb that is close to the unknown `verb`.
+fn did_you_mean_verb(verb: &str) -> Option<&'static str> {
+    use darkmatter::catalog::levenshtein;
+
+    let normalized = verb.to_lowercase();
+    let threshold = (normalized.chars().count() / 3).max(2);
+    let mut best: Option<(usize, &'static str)> = None;
+    for candidate in all_lifecycle_verbs() {
+        let distance = levenshtein(&normalized, &candidate.to_lowercase());
+        if distance <= threshold {
+            if best.is_none_or(|(best_distance, _)| distance < best_distance) {
+                best = Some((distance, candidate));
             }
         }
     }
-    s
+    best.map(|(_, candidate)| candidate)
 }
 
-/// Convert a raw JSON value into a Darkmatter `Expr`.
+/// Convert a raw action parameter value into a Darkmatter `Expr` using the
+/// single lifecycle evaluation rule.
 ///
-/// Long-form parameter values are stored as **string literals** when the
-/// string cannot be parsed as a Darkmatter expression. This lets authors
-/// write natural values like `command: "git push origin HEAD"` (a multi-word
-/// shell command) or `file: "@spec.md"` (a file reference) without quoting
-/// gymnastics. Values that *do* parse as expressions (e.g. `target: "ctx.repo"
-/// ` or `max_attempts: 3`) preserve their parsed form for runtime evaluation
-/// against the lifecycle context. Interpolation markers (`{{ … }}`) inside a
-/// literal string are resolved at runtime by the same Darkmatter pipeline
-/// that resolves top-level communication properties.
-fn value_to_expr(value: &serde_json::Value) -> Result<Expr, String> {
+/// - Strings are stored as [`Expr::StringLiteral`] unless the trimmed value is
+///   exactly one `{{ … }}` interpolation span, in which case the inner
+///   expression is parsed and its typed result is preserved (e.g. `{{ true }}`
+///   becomes a bool, `{{ 3 }}` a number, `{{ payload }}` a variable reference
+///   whose runtime value may be an object/array).
+/// - YAML numeric and boolean scalars become [`Expr::NumberLiteral`] and
+///   [`Expr::BoolLiteral`].
+/// - Direct YAML objects and arrays are rejected; object/array data must be
+///   passed through a whole-value interpolation span such as `{{ payload }}`.
+///
+/// The `when`/`until`/`while` keys are **not** action parameters — they remain
+/// boolean expressions parsed by [`parse_condition`].
+fn action_value_to_expr(value: &serde_json::Value) -> Result<Expr, String> {
     match value {
         serde_json::Value::String(s) => {
-            if s.is_empty() {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
                 return Ok(Expr::StringLiteral(String::new()));
             }
-            // Try plain-expression parse first; fall back to a literal string
-            // so natural prose (commands, file refs, descriptions) survives.
-            match parse(s) {
-                Ok(expr) => Ok(expr),
-                Err(_) => Ok(Expr::StringLiteral(s.clone())),
+
+            let spans = ExpressionFinder::find_all_plain(trimmed);
+            if let Some(span) = spans.first()
+                && spans.len() == 1
+                && span.start == 0
+                && span.end == trimmed.len()
+            {
+                // Whole-value expansion: preserve the expression's typed value.
+                parse(&span.expression)
+                    .map_err(|e| format!("whole-value expression is not valid: {e}"))
+            } else {
+                // Literal text, including mixed interpolation.
+                Ok(Expr::StringLiteral(s.clone()))
             }
         }
         serde_json::Value::Number(n) => {
@@ -1892,139 +2225,18 @@ fn value_to_expr(value: &serde_json::Value) -> Result<Expr, String> {
             Ok(Expr::NumberLiteral(f))
         }
         serde_json::Value::Bool(b) => Ok(Expr::BoolLiteral(*b)),
+        serde_json::Value::Null => Err(
+            "null values are not supported as action parameters; use a whole-value `{{ null }}` interpolation to pass null"
+                .to_string(),
+        ),
         other => Err(format!(
-            "{} values are not supported as action parameters; use a scalar or string",
+            "{} values are not supported as action parameters; pass object/array data through a whole-value `{{{{ ... }}}}` interpolation",
             json_type_name(other)
         )),
     }
 }
 
-/// Parse one short-form argument into an [`Expr`], rejecting unquoted
-/// multi-word literals.
-///
-/// Per the spec, short-form arguments are Darkmatter expressions. A bare
-/// unquoted multi-word string (e.g. `say(using codex)`) is invalid because
-/// it parses as multiple tokens with no expression meaning. Detection: an
-/// argument that fails to parse **and** contains whitespace outside any
-/// quote or bracket region is the multi-word case; an argument that fails
-/// to parse without such whitespace is a generic invalid-expression error.
-fn parse_action_arg(
-    signal: LifecycleSignal,
-    arg: &str,
-    raw_action: &str,
-    source_file: &Path,
-) -> Result<Expr, CompositionError> {
-    let property = signal.property_name();
-    let trimmed = arg.trim();
-    if trimmed.is_empty() {
-        return Err(CompositionError::LifecycleActionInvalidShortForm {
-            source_path: source_file.to_path_buf(),
-            property: property.to_string(),
-            raw: raw_action.to_string(),
-            message: "empty argument".to_string(),
-        });
-    }
-
-    match parse(trimmed) {
-        Ok(expr) => Ok(expr),
-        Err(e) => {
-            let message = if has_unquoted_whitespace(trimmed) {
-                format!(
-                    "argument `{trimmed}` looks like an unquoted multi-word literal; \
-                     wrap multi-word strings in quotes (e.g. `'{trimmed}')")
-            } else {
-                format!("argument `{trimmed}` is not a valid expression: {e}")
-            };
-            Err(CompositionError::LifecycleActionInvalidShortForm {
-                source_path: source_file.to_path_buf(),
-                property: property.to_string(),
-                raw: raw_action.to_string(),
-                message,
-            })
-        }
-    }
-}
-
-/// Returns `true` if `s` contains whitespace outside any quote or bracket
-/// region. Used to detect the unquoted-multi-word-literal case.
-fn has_unquoted_whitespace(s: &str) -> bool {
-    let mut quote: Option<char> = None;
-    let mut depth = 0i32;
-    for ch in s.chars() {
-        if let Some(qc) = quote {
-            if ch == qc {
-                quote = None;
-            }
-            continue;
-        }
-        match ch {
-            '\'' | '"' => quote = Some(ch),
-            '[' | '{' | '(' => depth += 1,
-            ']' | '}' | ')' => depth -= 1,
-            c if c.is_whitespace() && depth == 0 => return true,
-            _ => {}
-        }
-    }
-    false
-}
-
 /// Dispatch a parsed short-form action to the right builder. Placement is
-/// NOT enforced here — the stack-item parser runs the cardinality check
-/// first, then enforces placement for any lifecycle control actions.
-fn build_action(
-    signal: LifecycleSignal,
-    verb: &str,
-    args: Vec<Expr>,
-    raw: &str,
-    no_error: bool,
-    source_file: &Path,
-) -> Result<LifecycleAction, CompositionError> {
-    // Lifecycle control actions.
-    if let Some(control) = parse_lifecycle_control_short(verb, &args, signal, raw, source_file)? {
-        return Ok(LifecycleAction {
-            kind: LifecycleActionKind::LifecycleControl(control),
-            no_error,
-        });
-    }
-
-    // Communication actions.
-    if let Some(channel) = CommunicationChannel::from_verb(verb) {
-        let message = expect_one_arg(verb, &args, signal, source_file)?;
-        return Ok(LifecycleAction {
-            kind: LifecycleActionKind::Communication(CommunicationAction {
-                channel,
-                message,
-                route: None,
-            }),
-            no_error,
-        });
-    }
-
-    // Shell action: `shell(command)` accepts exactly one arg.
-    if verb == "shell" {
-        let command = expect_one_arg(verb, &args, signal, source_file)?;
-        return Ok(LifecycleAction {
-            kind: LifecycleActionKind::Shell(ShellAction {
-                command,
-                on_error: None,
-            }),
-            no_error,
-        });
-    }
-
-    // Anything else: try side-effect verb or expression function.
-    // Side-effect verbs are matched by the Darkmatter catalog; here we treat
-    // any unknown verb as an expression function and let Phase 4 / runtime
-    // decide whether it is actually a known side effect.
-    Ok(LifecycleAction {
-        kind: LifecycleActionKind::ExpressionFunction(ExpressionFunctionAction {
-            function: verb.to_string(),
-            args,
-        }),
-        no_error,
-    })
-}
-
 /// Build a typed action from a long-form verb + named parameters.
 ///
 /// Long-form allows per-verb named parameters that don't fit the short-form
@@ -2097,6 +2309,32 @@ fn build_action_from_params(
     }
 
 
+    // Expression-function actions with concrete named parameters. Variadic
+    // functions (`and`, `or`) are positional-only and reject key/value form.
+    if let Some(signature) = expression_function_signature(verb) {
+        if signature.variadic {
+            return Err(CompositionError::LifecycleExpressionFunctionKeyValueUnsupported {
+                source_path: source_file.to_path_buf(),
+                property: property.to_string(),
+                verb: verb.to_string(),
+            });
+        }
+        let mut args = Vec::with_capacity(signature.params.len());
+        for name in &signature.params {
+            if let Some(expr) = params_map.remove(name) {
+                args.push(expr);
+            }
+        }
+        reject_extra_params(verb, &params_map, property, source_file)?;
+        return Ok(LifecycleAction {
+            kind: LifecycleActionKind::ExpressionFunction(ExpressionFunctionAction {
+                function: verb.to_string(),
+                args,
+            }),
+            no_error,
+        });
+    }
+
     // Side-effect action: any remaining verb with named params. The
     // Darkmatter catalog is the authority. For a verb with a known signature
     // we reorder the named params into positional call order (and reject any
@@ -2105,9 +2343,9 @@ fn build_action_from_params(
     // key order for deterministic storage; the executor surfaces it as an
     // unknown side effect at runtime.
     if let Some(signature) = super::lifecycle_actions::side_effect_signature(verb) {
-        let mut args = Vec::with_capacity(signature.len());
-        for name in signature {
-            if let Some(expr) = params_map.remove(*name) {
+        let mut args = Vec::with_capacity(signature.params.len());
+        for name in &signature.params {
+            if let Some(expr) = params_map.remove(name) {
                 args.push(expr);
             }
         }
@@ -2131,51 +2369,6 @@ fn build_action_from_params(
         }),
         no_error,
     })
-}
-
-/// Parse a short-form lifecycle control action (`stop`, `skip`, `retry(N)`,
-/// etc.). Returns `Ok(None)` if the verb is not a control action.
-fn parse_lifecycle_control_short(
-    verb: &str,
-    args: &[Expr],
-    signal: LifecycleSignal,
-    raw: &str,
-    source_file: &Path,
-) -> Result<Option<LifecycleControlAction>, CompositionError> {
-    use LifecycleControlAction as A;
-
-    let control = match verb {
-        "stop" => {
-            expect_no_args(verb, args, signal, source_file)?;
-            A::Stop
-        }
-        "skip" => {
-            expect_no_args(verb, args, signal, source_file)?;
-            A::Skip
-        }
-        "error" => A::Error {
-            reason: expect_optional_one_arg(verb, args, signal, source_file)?,
-        },
-        "proxy" => A::Proxy {
-            target: expect_one_arg(verb, args, signal, source_file)?,
-        },
-        "retry" => A::Retry {
-            max_attempts: expect_optional_one_arg(verb, args, signal, source_file)?,
-            backoff: None,
-            delay: None,
-        },
-        "resume" => A::Resume {
-            message: expect_one_arg(verb, args, signal, source_file)?,
-            max_attempts: None,
-        },
-        "defer" => A::Defer {
-            delay: expect_one_arg(verb, args, signal, source_file)?,
-            reason: None,
-        },
-        _ => return Ok(None),
-    };
-    let _ = raw;
-    Ok(Some(control))
 }
 
 /// Parse a long-form lifecycle control action by named parameters.
@@ -2262,61 +2455,6 @@ fn reject_extra_params(
         action: verb.to_string(),
         message: format!("unknown parameter(s): {}", keys.join(", ")),
     })
-}
-
-/// Expect exactly zero arguments.
-fn expect_no_args(
-    verb: &str,
-    args: &[Expr],
-    signal: LifecycleSignal,
-    source_file: &Path,
-) -> Result<(), CompositionError> {
-    if !args.is_empty() {
-        return Err(CompositionError::LifecycleInvalidArgs {
-            source_path: source_file.to_path_buf(),
-            property: signal.property_name().to_string(),
-            action: verb.to_string(),
-            message: format!("`{verb}` takes no arguments, got {}", args.len()),
-        });
-    }
-    Ok(())
-}
-
-/// Expect exactly one argument and return it.
-fn expect_one_arg(
-    verb: &str,
-    args: &[Expr],
-    signal: LifecycleSignal,
-    source_file: &Path,
-) -> Result<Expr, CompositionError> {
-    if args.len() != 1 {
-        return Err(CompositionError::LifecycleInvalidArgs {
-            source_path: source_file.to_path_buf(),
-            property: signal.property_name().to_string(),
-            action: verb.to_string(),
-            message: format!("`{verb}` expects exactly 1 argument, got {}", args.len()),
-        });
-    }
-    Ok(args[0].clone())
-}
-
-/// Expect zero or one argument and return it as `Option<Expr>`.
-fn expect_optional_one_arg(
-    verb: &str,
-    args: &[Expr],
-    signal: LifecycleSignal,
-    source_file: &Path,
-) -> Result<Option<Expr>, CompositionError> {
-    match args.len() {
-        0 => Ok(None),
-        1 => Ok(Some(args[0].clone())),
-        n => Err(CompositionError::LifecycleInvalidArgs {
-            source_path: source_file.to_path_buf(),
-            property: signal.property_name().to_string(),
-            action: verb.to_string(),
-            message: format!("`{verb}` expects 0 or 1 argument, got {n}"),
-        }),
-    }
 }
 
 /// Render an [`Expr`] back to a string for cases where a parameter is parsed
@@ -5015,7 +5153,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_short_form_say_action() {
+    fn rejects_short_form_say_action() {
         let fm = json!({
             "start": {
                 "stack": [
@@ -5023,13 +5161,14 @@ mod tests {
                 ]
             }
         });
-        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-        let stack = config.stack(LifecycleSignal::Start).expect("start stack");
-        assert_eq!(stack.len(), 1);
-        let item = &stack[0];
-        assert!(item.when.is_none());
-        assert_eq!(item.actions.len(), 1);
-        assert!(!item.actions[0].is_lifecycle_control());
+        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleShortFormRemoved { raw, rewrite, .. } => {
+                assert_eq!(raw, "say('hello world')");
+                assert_eq!(rewrite, "say: \"hello world\"");
+            }
+            other => panic!("expected LifecycleShortFormRemoved, got: {other:?}"),
+        }
     }
 
     #[test]
@@ -5422,6 +5561,300 @@ mod tests {
             err,
             CompositionError::LifecycleStackInvalidShape { .. }
         ));
+    }
+
+    // -- positional action parser (Phase 4) ----------------------------------
+
+    #[test]
+    fn parses_positional_communication_scalar() {
+        let fm = json!({
+            "success": {
+                "stack": [
+                    {"action": {"message": "hello"}},
+                    {"action": {"effect": "crowd-applause"}},
+                    {"action": {"stderr": "an error"}},
+                    {"action": {"success": "it worked"}}
+                ]
+            }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let stack = config.stack(LifecycleSignal::Success).expect("success stack");
+        assert_eq!(stack.len(), 4);
+        for item in stack {
+            assert!(matches!(item.actions[0].kind, LifecycleActionKind::Communication(_)));
+        }
+    }
+
+    #[test]
+    fn parses_positional_shell_scalar() {
+        let fm = json!({
+            "start": {
+                "stack": [{"action": {"shell": "git status"}}]
+            }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let stack = config.stack(LifecycleSignal::Start).expect("start stack");
+        assert!(matches!(stack[0].actions[0].kind, LifecycleActionKind::Shell(_)));
+    }
+
+    #[test]
+    fn parses_positional_side_effect_array() {
+        let fm = json!({
+            "start": {
+                "stack": [{"action": {"set_frontmatter": ["s.md", "status", "ready"]}}]
+            }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let stack = config.stack(LifecycleSignal::Start).expect("start stack");
+        let action = &stack[0].actions[0];
+        let LifecycleActionKind::SideEffect(se) = &action.kind else {
+            panic!("expected side-effect action, got {action:?}");
+        };
+        assert_eq!(se.verb, "set_frontmatter");
+        assert_eq!(se.args.len(), 3);
+    }
+
+    #[test]
+    fn parses_positional_optional_tail_side_effect() {
+        let fm = json!({
+            "start": {
+                "stack": [
+                    {"action": {"ensure_file": ["out/log.md"]}},
+                    {"action": {"ensure_file": ["out/log.md", "# log"]}}
+                ]
+            }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let stack = config.stack(LifecycleSignal::Start).expect("start stack");
+        assert_eq!(stack.len(), 2);
+        for item in stack {
+            let LifecycleActionKind::SideEffect(se) = &item.actions[0].kind else {
+                panic!("expected side-effect action");
+            };
+            assert_eq!(se.verb, "ensure_file");
+        }
+    }
+
+    #[test]
+    fn parses_positional_control_verbs() {
+        let fm = json!({
+            "initialize": {
+                "stack": [
+                    {"action": {"stop": null}},
+                    {"action": {"stop": []}},
+                    {"action": {"error": "reason"}},
+                    {"action": {"retry": 3}},
+                    {"action": {"proxy": "@other.md"}}
+                ]
+            }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let stack = config.stack(LifecycleSignal::Initialize).expect("init stack");
+        assert_eq!(stack.len(), 5);
+        for item in stack {
+            assert!(item.actions[0].is_lifecycle_control());
+        }
+    }
+
+    #[test]
+    fn parses_positional_expression_function_variadic() {
+        let fm = json!({
+            "start": {
+                "stack": [
+                    {"action": {"and": ["true", "true", "false"]}},
+                    {"action": {"or": ["a", "b"]}}
+                ]
+            }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let stack = config.stack(LifecycleSignal::Start).expect("start stack");
+        assert_eq!(stack.len(), 2);
+        for item in stack {
+            assert!(matches!(
+                item.actions[0].kind,
+                LifecycleActionKind::ExpressionFunction(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn parses_positional_expression_function_concrete() {
+        let fm = json!({
+            "start": {
+                "stack": [{"action": {"length": "{{ items }}"}}]
+            }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let stack = config.stack(LifecycleSignal::Start).expect("start stack");
+        let LifecycleActionKind::ExpressionFunction(ef) = &stack[0].actions[0].kind else {
+            panic!("expected expression-function action");
+        };
+        assert_eq!(ef.function, "length");
+        assert_eq!(ef.args.len(), 1);
+    }
+
+    #[test]
+    fn parses_positional_typed_arguments() {
+        let fm = json!({
+            "start": {
+                "stack": [
+                    {"action": {"set_frontmatter": ["s.md", "ready", "{{ true }}"]}},
+                    {"action": {"merge_frontmatter": ["s.md", "{{ payload }}"]}}
+                ]
+            }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let stack = config.stack(LifecycleSignal::Start).expect("start stack");
+
+        let LifecycleActionKind::SideEffect(set) = &stack[0].actions[0].kind else {
+            panic!("expected set_frontmatter side-effect");
+        };
+        assert_eq!(set.args[2], Expr::BoolLiteral(true));
+
+        let LifecycleActionKind::SideEffect(merge) = &stack[1].actions[0].kind else {
+            panic!("expected merge_frontmatter side-effect");
+        };
+        assert!(matches!(merge.args[1], Expr::Variable(_)));
+    }
+
+    #[test]
+    fn parses_positional_action_object_value() {
+        // `action: { success: "..." }` is the single-object positional form.
+        let fm = json!({
+            "success": {
+                "stack": [{"action": {"success": "it worked"}}]
+            }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let stack = config.stack(LifecycleSignal::Success).expect("success stack");
+        assert_eq!(stack[0].actions.len(), 1);
+        assert!(matches!(
+            stack[0].actions[0].kind,
+            LifecycleActionKind::Communication(_)
+        ));
+    }
+
+    #[test]
+    fn rejects_positional_wrong_arity_side_effect() {
+        let fm = json!({
+            "start": {
+                "stack": [{"action": {"set_frontmatter": ["s.md"]}}]
+            }
+        });
+        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::LifecycleWrongArity { .. }),
+            "expected wrong-arity error, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_positional_wrong_arity_communication() {
+        let fm = json!({
+            "success": {
+                "stack": [{"action": {"message": ["a", "b"]}}]
+            }
+        });
+        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::LifecycleWrongArity { .. }),
+            "expected wrong-arity error, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_positional_bare_proxy_as_wrong_arity() {
+        // `proxy` requires a target; a null/empty-array value is wrong arity,
+        // not a short-form issue.
+        let fm = json!({
+            "initialize": {
+                "stack": [{"action": {"proxy": null}}]
+            }
+        });
+        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::LifecycleWrongArity { .. }),
+            "expected wrong-arity error, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_positional_unknown_verb() {
+        let fm = json!({
+            "start": {
+                "stack": [{"action": {"sucess": "it worked"}}]
+            }
+        });
+        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleUnknownVerb { verb, .. } => {
+                assert_eq!(verb, "sucess");
+            }
+            other => panic!("expected LifecycleUnknownVerb, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_positional_object_value() {
+        let fm = json!({
+            "start": {
+                "stack": [{"action": {"merge_frontmatter": {"status": "ready"}}}]
+            }
+        });
+        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CompositionError::LifecycleObjectDataThroughInterpolationPositional { .. }
+            ),
+            "expected object-data-through-interpolation error, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_ambiguous_multi_key_action_object() {
+        let fm = json!({
+            "start": {
+                "stack": [{"action": {"message": "hi", "route": "team"}}]
+            }
+        });
+        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::LifecycleStackAmbiguous { .. }),
+            "expected ambiguous error, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn positional_and_key_value_action_object_coexist_in_array() {
+        // The motivating shape from the spec: positional and key/value actions
+        // in the same stack array.
+        let fm = json!({
+            "success": {
+                "stack": [
+                    {
+                        "when": "true",
+                        "action": [
+                            {"success": "it worked"},
+                            {"set_frontmatter": ["s.md", "status", "done"]},
+                            {"action": "shell", "command": "git push"}
+                        ]
+                    }
+                ]
+            }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let stack = config.stack(LifecycleSignal::Success).expect("success stack");
+        assert_eq!(stack[0].actions.len(), 3);
+        assert!(matches!(
+            stack[0].actions[0].kind,
+            LifecycleActionKind::Communication(_)
+        ));
+        assert!(matches!(
+            stack[0].actions[1].kind,
+            LifecycleActionKind::SideEffect(_)
+        ));
+        assert!(matches!(stack[0].actions[2].kind, LifecycleActionKind::Shell(_)));
     }
 
     #[test]
@@ -6415,5 +6848,109 @@ mod tests {
         assert!(outcome.control.is_none());
         assert!(guard.start_emitted());
         assert_eq!(emitter.signals().len(), 1);
+    }
+
+    // -- action_value_to_expr -------------------------------------------------
+
+    use darkmatter::markdown::compose::expression::{evaluate, EvaluationLookup};
+    use serde_json::Value;
+    use std::collections::HashMap;
+
+    struct MapLookup(HashMap<String, Value>);
+
+    impl EvaluationLookup for MapLookup {
+        fn get(&self, path: &str) -> Option<Value> {
+            self.0.get(path).cloned()
+        }
+    }
+
+    struct EmptyLookup;
+
+    impl EvaluationLookup for EmptyLookup {
+        fn get(&self, _path: &str) -> Option<Value> {
+            None
+        }
+    }
+
+    #[test]
+    fn action_value_to_expr_plain_literal() {
+        let expr = action_value_to_expr(&json!("hello world")).unwrap();
+        assert_eq!(expr, Expr::StringLiteral("hello world".into()));
+    }
+
+    #[test]
+    fn action_value_to_expr_multi_span_interpolation_stays_literal() {
+        let expr = action_value_to_expr(&json!("before {{ x }} after")).unwrap();
+        assert_eq!(expr, Expr::StringLiteral("before {{ x }} after".into()));
+    }
+
+    #[test]
+    fn action_value_to_expr_whole_value_bool() {
+        let expr = action_value_to_expr(&json!("{{ true }}")).unwrap();
+        assert_eq!(expr, Expr::BoolLiteral(true));
+    }
+
+    #[test]
+    fn action_value_to_expr_whole_value_number() {
+        let expr = action_value_to_expr(&json!("{{ 3 }}")).unwrap();
+        assert_eq!(expr, Expr::NumberLiteral(3.0));
+    }
+
+    #[test]
+    fn action_value_to_expr_whole_value_with_surrounding_whitespace() {
+        let expr = action_value_to_expr(&json!("  {{ true }}  ")).unwrap();
+        assert_eq!(expr, Expr::BoolLiteral(true));
+    }
+
+    #[test]
+    fn action_value_to_expr_whole_value_null() {
+        let expr = action_value_to_expr(&json!("{{ null }}")).unwrap();
+        assert_eq!(evaluate(&expr, &EmptyLookup).unwrap(), Value::Null);
+    }
+
+    #[test]
+    fn action_value_to_expr_whole_value_object_passthrough() {
+        let payload = json!({ "status": "ready", "count": 7 });
+        let lookup = MapLookup([("payload".to_string(), payload.clone())].into());
+        let expr = action_value_to_expr(&json!("{{ payload }}")).unwrap();
+        assert_eq!(evaluate(&expr, &lookup).unwrap(), payload);
+    }
+
+    #[test]
+    fn action_value_to_expr_yaml_scalar_typing() {
+        assert_eq!(
+            action_value_to_expr(&json!(42)).unwrap(),
+            Expr::NumberLiteral(42.0)
+        );
+        assert_eq!(
+            action_value_to_expr(&json!(true)).unwrap(),
+            Expr::BoolLiteral(true)
+        );
+    }
+
+    #[test]
+    fn action_value_to_expr_rejects_direct_object() {
+        let err = action_value_to_expr(&json!({ "a": 1 })).unwrap_err();
+        assert!(
+            err.contains("object values are not supported"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            err.contains("{{"),
+            "error should mention whole-value interpolation: {err}"
+        );
+    }
+
+    #[test]
+    fn action_value_to_expr_rejects_direct_array() {
+        let err = action_value_to_expr(&json!([1, 2, 3])).unwrap_err();
+        assert!(
+            err.contains("array values are not supported"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            err.contains("{{"),
+            "error should mention whole-value interpolation: {err}"
+        );
     }
 }
