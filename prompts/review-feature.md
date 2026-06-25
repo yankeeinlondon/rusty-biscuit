@@ -13,18 +13,17 @@ feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 start:
     message: "👓 starting {{feature_or_fix}} review #{{iteration}} of `{{parent_dir(spec)}}` (_in the **{{ctx.area}}** package area_)"
 success:
-
     stack:
         - when: "frontmatter(review_file,'ready') == true"
           action:
-              - "success({{feature_or_fix}} review {{iteration}} in **{{ctx.area}}** finished and deemed code to be **production ready**)"
-              - "message(✅  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed successfully)"
-              - effect(small-group-cheer)
+              - success: "{{feature_or_fix}} review {{iteration}} in **{{ctx.area}}** finished and deemed code to be **production ready**"
+              - message: "✅  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed successfully"
+              - effect: small-group-cheer
         - when: "frontmatter(review_file,'ready') != true"
           action:
-              - "stderr({{feature_or_fix}} review {{iteration}} in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready)"
-              - "message(✅  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed successfully)"
-              - effect(small-group-cheer)
+              - stderr: "{{feature_or_fix}} review {{iteration}} in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready"
+              - message: "⚠️  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed but was deemed NOT production ready"
+              - effect: small-group-cheer
 failure:
     stderr: "{{feature_or_fix}} review {{iteration}} for `{{parent_dir(spec)}}` in the {{ctx.area}} package area failed to complete!"
     message: "💥 {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in **{{ ctx.area }}** failed to complete!"
