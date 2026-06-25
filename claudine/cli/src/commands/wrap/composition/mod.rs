@@ -190,6 +190,8 @@ fn emit_preflight_blocked_and_finalize(
     let blocked_ctx = StackExecutionContext {
         signal: LifecycleSignal::Blocked,
         frontmatter,
+        // Single pre-flight `blocked` event — no later event shares this state.
+        live_frontmatter: None,
         err: Some(&err_info),
         timing: Some(&timing),
         current: Some(&current),
@@ -1601,6 +1603,10 @@ fn execute_composition_request_inner_with_guard(
     let init_ctx = StackExecutionContext {
         signal: LifecycleSignal::Initialize,
         frontmatter: fm_map.unwrap_or(&empty_frontmatter),
+        // Single pre-launch `initialize` event; the cross-event live cell is
+        // owned by the harness loop, which re-materializes frontmatter before
+        // its own events fire.
+        live_frontmatter: None,
         err: None,
         timing: Some(&lifecycle_timing),
         current: Some(&lifecycle_current),

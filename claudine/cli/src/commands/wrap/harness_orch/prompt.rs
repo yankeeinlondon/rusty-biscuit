@@ -13,11 +13,14 @@ pub(crate) fn materialized_harness_prompt_from_prepared(
         claudine::composition::CompositionClosurePlan::Direct => None,
     };
 
+    let live_frontmatter =
+        MaterializedHarnessPrompt::live_cell_from(&prepared.effective_frontmatter);
     MaterializedHarnessPrompt {
         frontmatter: prepared.effective_frontmatter.clone(),
         prompt: prepared.prompt.clone(),
         env_overrides: Vec::new(),
         inline_closure_plan,
+        live_frontmatter,
     }
 }
 
@@ -136,10 +139,12 @@ pub(crate) fn materialize_harness_prompt(
         }
     }
 
+    let live_frontmatter = MaterializedHarnessPrompt::live_cell_from(&frontmatter);
     Ok(MaterializedHarnessPrompt {
         frontmatter,
         prompt,
         env_overrides,
         inline_closure_plan,
+        live_frontmatter,
     })
 }

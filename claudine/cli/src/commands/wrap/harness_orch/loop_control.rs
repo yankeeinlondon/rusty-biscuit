@@ -425,6 +425,11 @@ fn build_lifecycle_stack_context_for_materialized<'a>(
     StackExecutionContext {
         signal,
         frontmatter: fm_map,
+        // The per-attempt live cell carried by `materialized` is shared across
+        // every lifecycle event in this iteration, so a `start.stack`
+        // frontmatter mutation is visible to a later `success`/`finalize`
+        // event-time interpolation (review-2 cross-event contract).
+        live_frontmatter: Some(&materialized.live_frontmatter),
         err,
         timing,
         current,
@@ -1236,6 +1241,9 @@ pub(crate) fn run_harness_loop(
                     prompt: String::new(),
                     env_overrides: Vec::new(),
                     inline_closure_plan: None,
+                    live_frontmatter: MaterializedHarnessPrompt::live_cell_from(
+                        &serde_json::Value::Null,
+                    ),
                 };
                 emit_blocked_finalize_with_err(
                     lifecycle_guard,
@@ -2132,16 +2140,19 @@ mod terminal_event_tests {
         );
     }
 
-    /// The `LifecycleLookup` resolves `current.env.*` and `timing.document_ms`
-    /// from the globals the harness-loop builder attaches — proving the wiring
-    /// reaches expression evaluation, not just the struct fields.
+    /// The injected globals the harness-loop builder attaches resolve
+    /// `current.env.*` and `timing.document_ms` through Darkmatter's layered
+    /// lookup (DM2) — proving the wiring reaches expression evaluation, not just
+    /// the struct fields.
     #[test]
     #[serial_test::serial(env_loop_control_current)]
     fn attached_globals_resolve_through_lookup() {
-        use claudine::composition::lifecycle_context::LifecycleLookup;
+        use claudine::composition::lifecycle_injected_globals;
         use darkmatter::markdown::compose::expression::{
             EvaluationLookup, evaluate, is_truthy, parse,
         };
+        use darkmatter::markdown::compose::subtree::LayeredLookup;
+        use darkmatter::markdown::compose::{ComposeContext, EffectiveStateBuilder};
 
         let key = "CLAUDINE_TEST_LOOP_CONTROL_LATE_BIND";
         // SAFETY: serialized via #[serial]; no other thread reads this var.
@@ -2150,10 +2161,12 @@ mod terminal_event_tests {
             capture_lifecycle_globals(Path::new("prompt.md"), Some(Path::new(".")), loop_start_now());
         unsafe { std::env::remove_var(key) };
 
-        let fm = serde_json::Map::new();
-        let lookup = LifecycleLookup::new(&fm)
-            .with_timing(&timing)
-            .with_current(&current);
+        let state = EffectiveStateBuilder::new()
+            .with_context(ComposeContext::capture_for_content(Path::new("."), ""))
+            .build()
+            .unwrap();
+        let globals = lifecycle_injected_globals(None, Some(&timing), Some(&current));
+        let lookup = LayeredLookup::new(&state, &globals, None);
 
         let when = parse(&format!("current.env.{key} == 'ready'")).expect("parses");
         assert!(
@@ -2220,11 +2233,13 @@ mod terminal_event_tests {
     }
 
     fn materialized(frontmatter: serde_json::Value) -> MaterializedHarnessPrompt {
+        let live_frontmatter = MaterializedHarnessPrompt::live_cell_from(&frontmatter);
         MaterializedHarnessPrompt {
             frontmatter,
             prompt: String::new(),
             env_overrides: Vec::new(),
             inline_closure_plan: None,
+            live_frontmatter,
         }
     }
 
@@ -3491,11 +3506,14 @@ mod requeue_fallback_tests {
     /// Build a materialized prompt with the deferred-prompt body the requeue
     /// action is supposed to persist.
     fn requeue_materialized(prompt: &str) -> MaterializedHarnessPrompt {
+        let frontmatter = serde_json::json!({"title": "deferred"});
+        let live_frontmatter = MaterializedHarnessPrompt::live_cell_from(&frontmatter);
         MaterializedHarnessPrompt {
-            frontmatter: serde_json::json!({"title": "deferred"}),
+            frontmatter,
             prompt: prompt.to_string(),
             env_overrides: Vec::new(),
             inline_closure_plan: None,
+            live_frontmatter,
         }
     }
 

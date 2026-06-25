@@ -60,6 +60,11 @@ pub(crate) struct DryRunRender {
     pub area: Option<String>,
     /// Absolute path to the source document, used for the OSC8 link.
     pub document_path: PathBuf,
+    /// Lifecycle event keys Darkmatter deferred from compose-time resolution
+    /// (DM1 metadata). Sorted. When non-empty, the metadata table labels them
+    /// as interpolated at event-time so their raw `{{ }}` spans in the
+    /// frontmatter block read as intentional, not as unresolved-variable bugs.
+    pub deferred_lifecycle_keys: Vec<String>,
 }
 
 impl DryRunRender {
@@ -124,6 +129,7 @@ impl DryRunRender {
             session_source: request.session_interactive_source,
             area,
             document_path: request.prepared.resolved_path.clone(),
+            deferred_lifecycle_keys: request.prepared.deferred_lifecycle_keys.clone(),
         }
     }
 }
@@ -276,6 +282,19 @@ pub(crate) fn render_metadata_table(render: &DryRunRender, term: &Terminal) -> S
         table.add_row(vec!["Area".into(), area.clone().into()]);
     }
 
+    // Deferred: lifecycle event keys left raw in the frontmatter block above
+    // because they interpolate at event-time, not during compose (C5). Only
+    // shown when at least one such key is present, so a reader sees that a raw
+    // `{{err.msg}}` span there is intentional.
+    if !render.deferred_lifecycle_keys.is_empty() {
+        let keys = render.deferred_lifecycle_keys.join(", ");
+        let cell = Prose::new(format!(
+            "<i><dim>interpolated at event-time:</dim></i> {keys}"
+        ))
+        .render(term);
+        table.add_row(vec!["Deferred".into(), cell.into()]);
+    }
+
     table.render(term)
 }
 
@@ -331,6 +350,7 @@ mod tests {
             session_source,
             area: area.map(str::to_string),
             document_path: PathBuf::from("/tmp/doc.md"),
+            deferred_lifecycle_keys: Vec::new(),
         }
     }
 
@@ -409,6 +429,25 @@ mod tests {
         let plain = plain_table(&render);
         assert!(plain.contains("Area"));
         assert!(plain.contains("claudine"));
+    }
+
+    #[test]
+    fn table_omits_deferred_row_when_no_keys() {
+        let render = render_with(Some("doc"), None, AgentResolutionState::NoAgent, None, false, None);
+        let plain = plain_table(&render);
+        assert!(!plain.contains("Deferred"));
+    }
+
+    #[test]
+    fn table_shows_deferred_keys_labeled_event_time() {
+        let mut render =
+            render_with(Some("doc"), None, AgentResolutionState::NoAgent, None, false, None);
+        render.deferred_lifecycle_keys = vec!["failure".to_string(), "finalize".to_string()];
+        let plain = plain_table(&render);
+        let value = plain_row_value(&plain, "Deferred").expect("Deferred row should exist");
+        assert!(value.contains("event-time"), "row should label event-time: {value}");
+        assert!(value.contains("failure"));
+        assert!(value.contains("finalize"));
     }
 
     #[test]
