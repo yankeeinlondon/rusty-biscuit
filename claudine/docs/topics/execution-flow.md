@@ -519,9 +519,11 @@ After the provider completes, the inline closure pipeline rewrites the target fi
 
 `closure::apply_inline_closure(plan, body, path, today, post_run_fm)`:
 
-1. Validates replacement body is non-empty and the **body segment** of the Simple hash differs from the original
-2. Compares frontmatter to detect new and modified properties
-3. Calls `rewrite_inline_document()`:
+1. Validates replacement body is non-empty
+2. Runs `darkmatter::markdown::cleanup::cleanup_content()` on the body so the cleaned body is what is hashed, stamped, and written (one atomic write; `result.body_cleaned` records whether cleanup changed anything)
+3. Rejects when the **body segment** of the Simple hash of the *cleaned* body matches the original
+4. Compares frontmatter to detect new and modified properties
+5. Calls `rewrite_inline_document()`:
 
     - Splits frontmatter from source text (preserving byte-for-byte layout including block scalars)
     - Updates `last_updated` to today's date (local time, `YYYY-MM-DD`)
@@ -529,17 +531,9 @@ After the provider completes, the inline closure pipeline rewrites the target fi
     - Merges new frontmatter properties from agent (inserted before `last_updated`)
     - Preserves original frontmatter values (reverts agent modifications with a warning)
 
-4. Writes atomically via `atomic_write()`
+6. Writes atomically via `atomic_write()`
 
-##### 9d. Markdown Cleanup
-
-`cleanup_inline_output(resolved_path)`:
-
-1. Splits frontmatter from body
-2. Runs `darkmatter::markdown::cleanup::cleanup_content()` on body only
-3. Writes back only if content changed
-
-##### 9e. Summary Emission
+##### 9d. Summary Emission
 
 Summary is deferred until after closure validation messages (unlike compose which emits immediately), so the section separator does not split the validation block.
 

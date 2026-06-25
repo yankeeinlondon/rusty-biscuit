@@ -48,13 +48,10 @@ use super::exec::switch_process_cwd;
 use crate::log;
 
 pub(crate) mod dry_run;
-pub(crate) mod inline_cleanup;
 pub(crate) mod prep_context;
 pub(crate) mod target;
 pub(crate) mod timeouts;
 
-// Re-export helpers still used by inline.rs and other callers.
-pub(crate) use inline_cleanup::{cleanup_inline_output, split_frontmatter_and_body};
 pub(crate) use prep_context::CompositionPrepContext;
 pub(crate) use target::{
     agent_prompt_message, composition_dispatch_context, eagerly_resolve_target,
@@ -149,7 +146,7 @@ fn enforce_repo_launch_detection(
 /// legacy top-level subset (`stderr`/`message`/`notify`/audio) and skips both
 /// the typed stacks and `finalize`. That left documents relying on
 /// `blocked.stack` / `finalize.stack` side effects (e.g.
-/// `append_line('events.log', 'blocked')`) without either marker.
+/// `{append_line: ["events.log", "blocked"]}`) without either marker.
 ///
 /// This helper mirrors the [`StackExecutionContext`] pattern the
 /// `initialize` event uses (see `init_ctx` in

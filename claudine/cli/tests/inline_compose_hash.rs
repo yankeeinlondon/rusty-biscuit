@@ -6,10 +6,11 @@
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
+use std::path::Path;
 use std::process::Command;
 use tempfile::tempdir;
 mod common;
-use common::{augmented_path, write_executable};
+use common::augmented_path;
 use common::wrap::seed_minimal_config;
 
 /// Locate the `md` binary in the workspace target directory.
@@ -42,7 +43,35 @@ fn md_bin() -> std::path::PathBuf {
     path
 }
 
-#[cfg(unix)]
+/// Write a fake `goose` provider that prints a fixed, deterministic replacement
+/// body and exits 0, discoverable on `PATH` on every platform.
+///
+/// Mirrors `common::write_dry_run_provider_stub`: a `#!/bin/sh` script on Unix
+/// and a `<binary>.cmd` batch file on Windows. The replacement body is
+/// intentionally *dirty* — a heading immediately followed by a paragraph with no
+/// blank line between them — so the test also covers the cleanup→hash
+/// consistency path (the document is normalized before the hash is stamped, and
+/// `md hash --diff` must still match the normalized result).
+fn write_goose_provider(bin_dir: &Path) {
+    #[cfg(unix)]
+    {
+        common::write_executable(
+            &bin_dir.join("goose"),
+            "#!/bin/sh\nprintf '# Replacement heading\\nReplacement body content\\n'\nexit 0\n",
+        );
+    }
+    #[cfg(windows)]
+    {
+        // PATH resolution finds `goose.cmd` via `PATHEXT`. Each `echo` emits one
+        // line; the heading line is followed directly by the paragraph line with
+        // no intervening blank line, producing the same dirty body as the Unix arm.
+        common::write(
+            &bin_dir.join("goose.cmd"),
+            "@echo off\r\necho # Replacement heading\r\necho Replacement body content\r\nexit /b 0\r\n",
+        );
+    }
+}
+
 #[test]
 fn inline_compose_writes_hash_that_passes_md_diff() {
     let workspace = tempdir().unwrap();
@@ -57,18 +86,15 @@ fn inline_compose_writes_hash_that_passes_md_diff() {
     )
     .unwrap();
 
-    // Minimal provider: returns a deterministic replacement body.
-    write_executable(
-        &path_dir.join("goose"),
-        r#"#!/bin/sh
-printf 'Replacement body content\n'
-exit 0
-"#,
-    );
+    write_goose_provider(&path_dir);
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        // `dirs::home_dir()` reads `HOME` on Unix and `USERPROFILE` on Windows;
+        // set both so the wrapper's config home resolves to the temp workspace
+        // on every platform.
         .env("HOME", workspace.path())
+        .env("USERPROFILE", workspace.path())
         .env("PATH", augmented_path(&path_dir))
         .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
         .assert()
