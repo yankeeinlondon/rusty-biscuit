@@ -20,7 +20,7 @@ Legacy prompts that only configure `start`, `success`, `blocked`, and `failure` 
 
 ## Binding Time: Early vs Late
 
-Every frontmatter property of a lifecycle event interpolates **when that event fires**, not during the initial compose. This is what lets a lifecycle message report the state at the moment it runs — including the runtime globals (`err`, `timing`, `current`) that do not exist at compose time. So `failure.message: "❌️  {{err.msg}}"` renders the real error, and a `failure` stack `message(❌️  {{err.msg}})` does too.
+Every frontmatter property of a lifecycle event interpolates **when that event fires**, not during the initial compose. This is what lets a lifecycle message report the state at the moment it runs — including the runtime globals (`err`, `timing`, `current`) that do not exist at compose time. So `failure.message: "❌️  {{err.msg}}"` renders the real error, and a `failure` stack `message: "❌️  {{err.msg}}"` does too.
 
 The variables a lifecycle `{{ … }}` span can read fall into two groups:
 
@@ -40,7 +40,7 @@ Lifecycle strings keep their authored `{{ … }}` spans through the prepare stag
 
 ### The `shell` exception
 
-`shell(...)` commands (short-form and long-form `command:`) are the single early-binding exception. They are approved during pre-flight, so they are resolved **then**, against early-binding surfaces only (`doc.*`, `ctx.*`, `env.*`, read-side functions). The approved command is byte-identical to the executed command. A late-binding reference (`err`/`timing`/`current`) inside a shell command is rejected at prepare time with a typed error naming the property path — those values do not exist yet at pre-flight.
+`shell` commands (positional `shell: "…"` and key/value `command:`) are the single early-binding exception. They are approved during pre-flight, so they are resolved **then**, against early-binding surfaces only (`doc.*`, `ctx.*`, `env.*`, read-side functions). The approved command is byte-identical to the executed command. A late-binding reference (`err`/`timing`/`current`) inside a shell command is rejected at prepare time with a typed error naming the property path — those values do not exist yet at pre-flight.
 
 ## Notification Fields
 
@@ -83,49 +83,47 @@ A `stack` is an ordered list of conditional actions executed after the top-level
 success:
   stack:
     - when: "env.SEND_MESSAGE == 'true'"
-      action: message("Build passed on main")
-    - action: [say("Done"), effect("confirmation")]
+      action: { message: "Build passed on main" }
+    - action:
+        - say: "Done"
+        - effect: "confirmation"
 ```
 
 Actions run in order. The first lifecycle control action (`skip`, `stop`, `error`, etc.) terminates the stack for that event.
 
 ### Action Forms
 
-Actions can be written in short form or long form.
+An action is written in one of exactly two forms — **positional** or **key/value**. Both follow a single evaluation rule:
 
-**Short form:** `verb(args)`
+> **Every value in a lifecycle action is literal text. Use `{{ … }}` to inject a variable or expression. The only expression-evaluated keys in the entire lifecycle surface are the boolean predicates `when`, `until`, and `while`.**
 
-```yaml
-success:
-  stack:
-    - action: say(All done)
-    - action: effect(confirmation)
-    - action: shell(git tag release-{{version}})
-```
-
-**Single-parameter verbs take the whole parenthesized body as one literal argument** — no quoting required, and commas are part of the text, not separators. This covers every communication verb (`say`, `say_first`, `warn`, `info`, `success`, `message`, `stderr`, `stdout`, `notify`, `effect`, `speak`) plus `shell`, `error`, `proxy`, `resume`, and `defer`.
-
-```yaml
-blocked:
-  stack:
-    - action: warn(phase 6 is too large, only 5 exist)   # literal, commas kept
-    - action: error(invalid phase: 6 > 5)                # YAML needs quotes only
-                                                          # because of the `: ` —
-                                                          # the action body stays unquoted
-```
-
-Surrounding quotes are still accepted and unwrapped (`say('hello')` ≡ `say(hello)`), so existing prompts keep working. To inject a value, use `{{ … }}` interpolation (`warn(starting phase {{phase}})`); a bare token is literal text, **not** a variable — `say(phase)` prints the word `phase`. Runtime globals like `{{err.msg}}` resolve when the message is rendered, so they work inside any literal body in an error-carrying event.
-
-**Multi-argument verbs** — side-effect verbs (`set_frontmatter(file, prop, value)`) and expression functions — keep the comma-separated **expression** grammar, where multi-word literals in a single slot must be quoted:
+**Positional** — an object whose single key is a known verb; the value carries the argument(s):
 
 ```yaml
 success:
   stack:
-    - action: set_frontmatter('state.md', 'status', 'done')  # expression args
-    # - action: set_frontmatter(state.md, status here, done) # ERROR: `status here`
+    - action:
+        - success: "review {{iteration}} is production ready"
+        - message: "✅ review #{{iteration}} completed"
+        - effect: "small-group-cheer"
 ```
 
-**Long form:** an object with an `action` verb key plus named parameters.
+- **Scalar value → one argument.** Scalars may be strings, numbers, or booleans (`message: "review {{iteration}} passed"`, `retry: 3`, `proxy: "other-prompt.md"`).
+- **Array value → positional arguments**, zipped against the verb's canonical signature:
+  ```yaml
+  - set_frontmatter: ["state.md", "status", "production ready"]
+  - append_line: ["log.md", "review {{iteration}} done"]
+  ```
+- **Null value, empty array, or bare verb-name string → zero arguments.** All three spellings are equivalent for no-arg (and all-optional-arg) verbs:
+  ```yaml
+  - stop:        # null value
+  - stop: []     # empty array
+  - stop         # bare verb-name string
+  ```
+
+Positional form covers a verb's canonical call signature only. Optional named parameters that have no positional slot (`route`, `on_error`, `no_error`, `backoff`, `delay`, `max_attempts`, …) require key/value form.
+
+**Key/value** — an object with an explicit `action` verb-discriminator key plus named parameters:
 
 ```yaml
 success:
@@ -139,7 +137,41 @@ success:
       route: "deployments"
 ```
 
-When `action` is a scalar string, sibling keys are the action's parameters. When `action` is an array, each element is self-contained and sibling parameters are not allowed.
+Reach for key/value form when you want self-documenting parameter names or an optional named parameter. Key/value parameter values follow the same literal-default rule as positional values.
+
+A stack item's `action:` value may be a single positional map (`action: { success: "…" }`), a single key/value map, a bare verb-name string (`action: stop`), or an **array** mixing positional and key/value elements. A single action need not be wrapped in an array-of-one. The two forms are distinguished structurally: an object with an `action:` key is key/value; an object whose single key names a known verb is positional.
+
+#### Typed argument values
+
+A value whose trimmed content is exactly one `{{ expr }}` span resolves to the expression's **typed** value, matching Darkmatter's whole-value frontmatter rule — so `set_frontmatter: ["s.md", "ready", "{{ true }}"]` writes boolean `true`, `"{{ 3 }}"` writes number `3`, and `"3"` writes the string `"3"`. A bare token is always literal text, never a variable: `set_frontmatter: ["s.md", "status", "done"]` writes the literal string `done`.
+
+#### Object-valued arguments
+
+Some side-effect verbs take an object argument (`merge_frontmatter`, `append_jsonl`, key/value `http_post`). Direct nested YAML maps are **not** accepted inside action values. Place the object in frontmatter or context and pass it through a whole-value `{{ … }}` span:
+
+```yaml
+payload:
+  owner: ken
+  status: ready
+success:
+  stack:
+    - merge_frontmatter: ["state.md", "{{ payload }}"]
+    # key/value equivalent:
+    - action: merge_frontmatter
+      file: "state.md"
+      obj: "{{ payload }}"
+```
+
+A literal nested map used directly as an action value (`merge_frontmatter: { owner: ken }`) is a typed object-data-through-interpolation error.
+
+#### Migration from short form
+
+The `verb(args)` **short form** (`say(All done)`, `shell(git push)`, `set_frontmatter('a','b','c')`) has been **removed**. A document still using it fails with a typed did-you-mean error that prints the positional rewrite (`success("x")` → `success: "x"`; `set_frontmatter('a','b','c')` → `set_frontmatter: ["a","b","c"]`). The error highlights the offending frontmatter line in TTY output and stays escape-free in non-color output. Two breaking changes to migrate:
+
+- **`verb(args)` is gone.** Rewrite each call to positional (`message: "…"`, `set_frontmatter: ["…", "…", "…"]`) or key/value form.
+- **Key/value string parameters are now literal by default.** `target: next_prompt` means the literal string `next_prompt`; write `target: "{{ next_prompt }}"` to evaluate it as an expression. Likewise `message: "ctx.area"` sends the text `ctx.area` while `message: "{{ ctx.area }}"` sends the context value.
+
+A bare verb-name string with no parentheses (`- stop`) is **not** short form — it survives as the zero-argument positional spelling.
 
 ### Flow Control Actions
 
@@ -149,15 +181,15 @@ Lifecycle flow control actions terminate the current event's stack and influence
 |--------|----------|--------|
 | `stop` | every event | End this event's stack cleanly; composition continues with the current outcome |
 | `skip` | `initialize` only | Whole-document opt-out: no provider invocation, no `finalize`, no `loop` |
-| `error("reason")` | every event | Mark this event as failed; at `success`/`finalize` it converts success to failure |
-| `proxy("@other.md")` | every event | Hand off to another prompt document, entering the target at its own `initialize` |
-| `retry(N)` | every event | Retry the current prompt N additional times (re-runs pre-flight pre-launch, re-invokes the agent post-launch) |
-| `resume("message")` | every event | Resume the agent session with a follow-up message. Needs a live session — pre-launch it surfaces a `ResumeWithoutSession` error |
-| `defer("5m")` | every event | Defer this prompt to **run again later** — a fresh scheduled run after the delay (not an in-place pause), via the rendezvous deferred-execution scheduler. **Not implemented yet:** `defer` parses and dispatches but currently surfaces a typed `LifecycleDeferNotImplemented` error until the rendezvous backend is ready. |
+| `error: "reason"` | every event | Mark this event as failed; at `success`/`finalize` it converts success to failure |
+| `proxy: "@other.md"` | every event | Hand off to another prompt document, entering the target at its own `initialize` |
+| `retry: 3` | every event | Retry the current prompt N additional times (re-runs pre-flight pre-launch, re-invokes the agent post-launch) |
+| `resume: "message"` | every event | Resume the agent session with a follow-up message. Needs a live session — pre-launch it surfaces a `ResumeWithoutSession` error |
+| `defer: "5m"` | every event | Defer this prompt to **run again later** — a fresh scheduled run after the delay (not an in-place pause), via the rendezvous deferred-execution scheduler. **Not implemented yet:** `defer` parses and dispatches but currently surfaces a typed `LifecycleDeferNotImplemented` error until the rendezvous backend is ready. |
 
 At most one flow-control action may appear in a stack item, and it must be the last action.
 
-**Flow control is universal.** Flow control reacts to **state** — an error, a missing file, an `env` value, frontmatter — and an error is just one kind of state. So `error`/`stop`/`retry`/`resume`/`defer`/`proxy` are valid in **every** event. The headline example: a `success` stack can `resume("you finished but never wrote abc.md — create it as instructed")` when the agent completed cleanly but an expected artifact is missing. The only placement rule is `skip` (`initialize`-only). Apparent event-specific behavior is **runtime capability**, not placement: `resume` needs a live session (pre-launch → `ResumeWithoutSession`) and `retry`'s re-entry point is derived from whether the provider had launched. This is enforced once, at parse time; at runtime every event's stack dispatches its control through the same event-agnostic path. The iteration `loop:` (while/until) is a separate mechanism and is never coupled to handler dispatch.
+**Flow control is universal.** Flow control reacts to **state** — an error, a missing file, an `env` value, frontmatter — and an error is just one kind of state. So `error`/`stop`/`retry`/`resume`/`defer`/`proxy` are valid in **every** event. The headline example: a `success` stack can `resume: "you finished but never wrote abc.md — create it as instructed"` when the agent completed cleanly but an expected artifact is missing. The only placement rule is `skip` (`initialize`-only). Apparent event-specific behavior is **runtime capability**, not placement: `resume` needs a live session (pre-launch → `ResumeWithoutSession`) and `retry`'s re-entry point is derived from whether the provider had launched. This is enforced once, at parse time; at runtime every event's stack dispatches its control through the same event-agnostic path. The iteration `loop:` (while/until) is a separate mechanism and is never coupled to handler dispatch.
 
 The provider run-loop events — `start`, `success`, `failure`, `finalize` — dispatch `retry`/`resume`/`proxy` fully (this is where `success` + `resume` lives). The events that sit *outside* that loop — `initialize`, a compose pre-flight `blocked`, and the `loop` gate — handle `error`/`stop` (and `proxy`/`skip` at `initialize`) directly, but `retry`/`proxy` from those events have no re-entry loop to act on yet, so they surface a clear typed error (`LifecycleSetupPhaseRecoveryUnsupported`) rather than a silent no-op. Put recovery on a post-launch event, or use `initialize` `proxy` for pre-launch routing. `defer` (deferred re-execution) is **not implemented in any event yet** — it always surfaces `LifecycleDeferNotImplemented` until its rendezvous backend lands.
 
@@ -182,10 +214,10 @@ Any Darkmatter side-effect verb can be invoked by name:
 ```yaml
 start:
   stack:
-    - action: set_frontmatter('state.md', 'status', 'in-progress')
+    - set_frontmatter: ["state.md", "status", "in-progress"]
 success:
   stack:
-    - action: set_frontmatter('state.md', 'status', 'done')
+    - set_frontmatter: ["state.md", "status", "done"]
 ```
 
 Long-form side-effect actions accept named parameters that are reordered into the verb's positional signature:
@@ -205,7 +237,7 @@ Any Darkmatter read-only expression function can be invoked for its result. The 
 ```yaml
 start:
   stack:
-    - action: file_exists('@docs/plan.md')
+    - file_exists: "@docs/plan.md"
 ```
 
 ### `no_error`
@@ -218,7 +250,7 @@ start:
     - action: shell
       command: "git status --short"
       no_error: true
-    - action: info('continuing')
+    - info: "continuing"
 ```
 
 ## Lifecycle Context
@@ -237,7 +269,7 @@ Stack expressions have access to three lifecycle-only globals in addition to fro
 failure:
   stack:
     - when: "err.variant == 'ShellCommandDenied'"
-      action: notify("Shell command was denied")
+      action: { notify: "Shell command was denied" }
 ```
 
 ### `doc.err` Escape Hatch
@@ -248,7 +280,7 @@ A frontmatter property literally named `err` can still be reached through the `d
 err: "user-configured reason"
 start:
   stack:
-    - action: stderr('{{doc.err}}')
+    - stderr: "{{doc.err}}"
 ```
 
 ## Loop Gate Concerns
@@ -262,7 +294,7 @@ loop:
     - increment(iteration)
   stderr: "checking loop condition"
   stack:
-    - action: info('loop gate reached')
+    - info: "loop gate reached"
 ```
 
 Loop execution runs `initialize` once at the start, then re-enters each iteration at `start` without re-running `initialize`, schema validation, or shell pre-flight. `success`, `failure`, and `finalize` fire once per iteration. The loop condition is evaluated **after** lifecycle concerns and **before** per-iteration mutations are applied.
@@ -318,21 +350,21 @@ finalize:
 failure:
   stack:
     - when: "err.kind == 'CompositionError'"
-      action: notify("Composition failed")
-    - action: say('Something went wrong')
+      action: { notify: "Composition failed" }
+    - action: { say: "Something went wrong" }
 ---
 ```
 
-### Short-form actions with interpolation
+### Positional actions with interpolation
 
-Single-parameter bodies are literal text; `{{ … }}` interpolates a value (no quotes needed):
+Action values are literal text; `{{ … }}` interpolates a value:
 
 ```yaml
 ---
 start:
   stack:
-    - action: info(running {{agent}})
-    - action: shell(git fetch origin {{branch}})
+    - info: "running {{agent}}"
+    - action: { shell: "git fetch origin {{branch}}" }
 ---
 ```
 
@@ -345,7 +377,7 @@ start:
     - action: shell
       command: "which optional-tool"
       no_error: true
-    - action: info('continuing')
+    - info: "continuing"
 ---
 ```
 
@@ -361,7 +393,7 @@ loop:
     - increment(iteration)
   stderr: "loop gate"
   stack:
-    - action: info('iteration {{_loop_count}}')
+    - info: "iteration {{_loop_count}}"
 ---
 ```
 
@@ -377,8 +409,8 @@ failure:
   stack:
     - when: "err.variant == 'usage_limit_reached' || err.variant == 'quota_exceeded' || err.variant == 'rate_limit'"
       action:
-        - warn('Claude usage cap reached — handing off to Codex')
-        - proxy('@prompts/feature-codex.md')
+        - warn: "Claude usage cap reached — handing off to Codex"
+        - proxy: "@prompts/feature-codex.md"
 ---
 ```
 
@@ -395,17 +427,17 @@ success:
   stack:
     # The agentic loop returned cleanly — confirm the file really exists.
     - when: "!file_exists('@output/RELEASE.md')"
-      action: error('agent reported success but @output/RELEASE.md was never written')
+      action: { error: "agent reported success but @output/RELEASE.md was never written" }
 finalize:
   stack:
     # `finalize` carries `err` after the success-side downgrade. Retry the
     # whole run exactly once; the retried attempt re-enters at `start`.
     - when: "err"
-      action: retry(1)
+      action: { retry: 1 }
 ---
 ```
 
-On the retried attempt the agent runs again and `success` re-verifies the file. With `retry(1)` the budget allows exactly one extra attempt; if the file is still missing after it, `finalize` carries `err` once more, the retry budget is spent, and the run ends in failure. To announce that terminal case, add a guarded `warn` ahead of the `retry` item (the first matching control action ends the stack, so order the `warn` before the `retry`).
+On the retried attempt the agent runs again and `success` re-verifies the file. With `retry: 1` the budget allows exactly one extra attempt; if the file is still missing after it, `finalize` carries `err` once more, the retry budget is spent, and the run ends in failure. To announce that terminal case, add a guarded `warn` ahead of the `retry` item (the first matching control action ends the stack, so order the `warn` before the `retry`).
 
 ### Resume after a timeout
 
@@ -419,7 +451,7 @@ step_timeout: 5m
 failure:
   stack:
     - when: "err.variant == 'timeout' || err.variant == 'step_timeout'"
-      action: resume('You were stopped by a timeout. Continue from where you left off and finish the task.')
+      action: { resume: "You were stopped by a timeout. Continue from where you left off and finish the task." }
 ---
 ```
 
@@ -525,7 +557,7 @@ success:
 ```yaml
 start:
   stack:
-    - action: stderr('{{err.msg}}')  # ERROR: err not available in start
+    - stderr: "{{err.msg}}"  # ERROR: err not available in start
 ```
 
 ### Empty String Normalization
