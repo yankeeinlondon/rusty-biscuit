@@ -1,7 +1,7 @@
 ---
-status: draft
+status: ready for planning and implementation
 depends_on: ../2026-05-12-lifecycle/spec.md
-reviewed: false
+reviewed: true
 ---
 
 # Lifecycle Actions: Two Forms (Positional and Key/Value)
@@ -80,6 +80,15 @@ with an expression sub-grammar bolted onto the multi-argument verbs.
 > variable or an expression. The only expression-evaluated keys in the entire
 > lifecycle surface are the boolean predicates `when`, `until`, and `while`.**
 
+Reader note: this intentionally changes the current `value_to_expr` behavior for
+action parameters. Today a named string parameter that parses as a Darkmatter
+expression is stored as that expression (`message: ctx.area`, `target: next_prompt`).
+After this feature, those spellings are literal strings. Authors who intend an
+expression must write the expression in an interpolation span:
+`message: "{{ ctx.area }}"`, `target: "{{ next_prompt }}"`. This is the same
+breaking-change family as removing `verb(args)`, and the migration/docs work below
+must call it out explicitly.
+
 Consequences:
 
 - A bare token is literal text, never a variable: `set_frontmatter: ["s.md", "status", "done"]`
@@ -91,6 +100,17 @@ Consequences:
   value, not a string. So `set_frontmatter: ["s.md", "ready", "{{ true }}"]` writes
   a boolean `true`; `"{{ 3 }}"` writes a number `3`; `"3"` writes the string `"3"`.
   This matches Darkmatter's whole-value frontmatter expansion contract.
+- Composite values (objects and arrays as data, not as positional argument lists)
+  are passed through the same whole-value rule. For example, define
+  `payload: { owner: ken }` elsewhere in frontmatter and call
+  `merge_frontmatter: ["state.md", "{{ payload }}"]` or key/value
+  `{ action: merge_frontmatter, file: "state.md", obj: "{{ payload }}" }`.
+  Literal nested YAML maps are not accepted directly inside positional action
+  values in this feature, because a single-key map is already the action
+  discriminator and Darkmatter's expression AST currently stores scalar
+  literals only. If direct YAML object literals become necessary, that should be
+  a separate expression/value-model feature rather than hidden in this parser
+  migration.
 - `when` / `until` / `while` are unchanged: they parse as boolean expressions, not
   literals.
 
@@ -100,10 +120,11 @@ Consequences:
 
 An object whose **single key is a known verb**. The value carries the argument(s):
 
-- **Scalar value** → one argument:
+- **Scalar value** → one argument. Scalars may be strings, numbers, or booleans:
   ```yaml
   - message: "review {{iteration}} passed"
   - effect: "small-group-cheer"
+  - retry: 3
   - proxy: "other-prompt.md"
   ```
 - **Array value** → positional arguments, zipped against the verb's canonical
@@ -111,6 +132,7 @@ An object whose **single key is a known verb**. The value carries the argument(s
   ```yaml
   - set_frontmatter: ["state.md", "status", "production ready"]
   - append_line: ["log.md", "review {{iteration}} done"]
+  - merge_frontmatter: ["state.md", "{{ payload }}"]
   ```
   An **empty array** (`[]`) is the zero-element case of this rule — i.e. zero
   arguments — so it is equivalent to a null value for no-arg verbs.
@@ -132,13 +154,15 @@ An object whose **single key is a known verb**. The value carries the argument(s
   zero-arg action.
 
 Positional is **single-key only**. Optional named parameters that have no
-positional slot (`route`, `on_error`, `no_error`) are **not** expressible in
-positional form — use key/value form for those.
+positional slot (`route`, `on_error`, `no_error`, `backoff`, `delay`, `reason`
+for `defer`, `max_attempts` for `resume`) are **not** expressible in positional
+form — use key/value form for those. Positional form deliberately covers the
+canonical call signature only.
 
 ### Key/Value
 
 An object with an explicit **`action:` verb-discriminator key** plus named
-parameter keys. Unchanged from today's long form:
+parameter keys:
 
 ```yaml
 - action: shell
@@ -152,7 +176,12 @@ parameter keys. Unchanged from today's long form:
 ```
 
 Key/value is the form to reach for when you want self-documenting parameter names
-or an optional named parameter (`route`, `on_error`, `no_error`).
+or an optional named parameter (`route`, `on_error`, `no_error`, `backoff`,
+`delay`, `reason`, `max_attempts`). Key/value parameter values follow the same
+literal-default rule as positional values; use `{{ … }}` for expressions and
+whole-value typed injection. Direct nested YAML maps are rejected in key/value
+parameters for the same reason they are rejected in positional parameters; pass
+object data through a whole-value interpolation span.
 
 ### Disambiguation
 
@@ -166,7 +195,8 @@ The two forms are distinguished structurally, with no ambiguity:
 | Object has exactly one key, and that key names a known verb (and is not `action`) | **positional** |
 | Object has exactly one key that is **not** a known verb | error: unknown verb / did-you-mean |
 | Object has multiple keys but no `action:` key | error: ambiguous — use key/value (`action:`) or a single-key positional |
-| Object key value is a map (not scalar/array/null) | error: positional values are scalar, array, or empty |
+| Single-key positional value is a map | error: positional values are scalar, array-as-argument-list, or null; pass object data through `{{ … }}` |
+| Key/value parameter value is a map | error: action parameter maps are not direct literals in this feature; pass object data through `{{ … }}` |
 
 `action` is never itself a verb, so a positional key never collides with the
 key/value discriminator. Verbs that are also key/value parameter names (e.g.
@@ -179,6 +209,7 @@ A stack item's `action:` value may be:
 
 - a single positional map (`action: { success: "…" }`),
 - a single key/value map (`action: { action: shell, command: "…" }`),
+- a bare verb-name string for a zero-argument action (`action: stop`),
 - or an **array** mixing positional and key/value elements.
 
 A single action need not be wrapped in an array-of-one.
@@ -203,6 +234,11 @@ it survives as the zero-argument positional form — see
   key/value written without nesting; consolidating on the explicit `action:`-key
   **object** form keeps the two forms visually distinct (positional = no `action:`
   key; key/value = has an `action:` key).
+- The current string-parameter expression heuristic in `value_to_expr`: after this
+  feature, action parameter strings are stored as literal strings unless they are
+  a whole-value interpolation span. This removes the accidental third evaluation
+  mode where key/value strings sometimes behaved as expressions and sometimes as
+  prose depending on whether the parser accepted them.
 
 `is_single_text_arg_verb` may be retained as the value-arity classifier for
 positional scalar-vs-array validation if convenient, but it no longer gates a
@@ -213,19 +249,38 @@ parenthesized-body literal path.
 - **Positional parser** — new branch in the `action:`-array element match and the
   single-map `action:` value: detect single-verb-key objects, classify the value
   (scalar → 1 arg; array → N args; null/empty → 0 args), and build the action via
-  the existing `build_action_from_params` / signature-zip machinery.
+  the existing typed-action builders. A string value becomes literal text unless
+  it is exactly one `{{ … }}` interpolation span; numeric and boolean YAML scalars
+  remain typed scalar values; YAML maps inside positional values are rejected with
+  an object-data-through-interpolation diagnostic.
 - **Array→positional zip** — reuse `side_effect_signature` to map an array to the
   verb's positional parameter order. A wrong-arity array is a typed error that
-  names the expected count and the verb's parameter names.
+  names the expected count and the verb's parameter names. For signatures with
+  optional tail parameters, accept any arity from required-minimum through full
+  signature length (e.g. `ensure_file: ["a.md"]` and
+  `ensure_file: ["a.md", "content"]` are both valid).
 - **Key/value parser** — `parse_long_form_action_object`
-  (`composition/lifecycle.rs:1664`) is unchanged.
-- **All action families** remain reachable through both forms: communication
+  (`composition/lifecycle.rs:1664`) keeps its structural role but must use the
+  same literal-default value conversion as positional form. It should no longer
+  parse arbitrary string parameters as expressions.
+- **All action families** remain reachable: communication
   (`CommunicationChannel::from_verb`), `shell`, side-effects
-  (`side_effect_signature`), and lifecycle control
-  (`parse_lifecycle_control_long`). Control verbs in positional form use the
-  scalar/null value as the single optional argument (`error: "reason"`,
+  (`side_effect_signature` / Darkmatter `EFFECT_DESCRIPTORS`), read-side
+  expression functions (`EXPRESSION_FUNCTION_DESCRIPTORS`), and lifecycle
+  control (`parse_lifecycle_control_long`). Control verbs in positional form use
+  the scalar/null value as the single optional argument (`error: "reason"`,
   `retry: 3`, `proxy: "x.md"`, `stop:`), or a bare verb-name string for the
-  zero-argument case (`stop`, `skip`).
+  zero-argument case (`stop`, `skip`). Expression functions are positional-first:
+  the key/value form is accepted only when the selected descriptor signature
+  exposes concrete parameter names that can be matched unambiguously. Variadic
+  signatures such as `and(...)` and `or(...)` are positional-only.
+- **Unknown verbs** — the current parser can preserve unknown verbs as
+  expression-function or side-effect actions and let execution fail later. This
+  feature should fail unknown verbs at parse time for both forms when the verb is
+  not a communication channel, `shell`, lifecycle control action, known
+  Darkmatter side-effect, or known Darkmatter read-side expression function.
+  That keeps single-key positional typos (`sucess: "done"`) from dispatching as
+  mystery side effects and is required for useful did-you-mean diagnostics.
 - **Cardinality and placement checks** — at most one lifecycle control action,
   last in the stack; per-event placement matrix (`is_valid_for`). Unchanged
   (`composition/lifecycle.rs:1572-1606`).
@@ -263,12 +318,37 @@ parenthesized-body literal path.
    typed value (bool/number/null), matching Darkmatter's whole-value frontmatter
    rule, so side-effects can write non-string frontmatter values.
 
+5. **Composite literal handling — defer direct YAML object literals.** Direct YAML
+   maps in action parameters are rejected in this feature. Object-valued
+   side-effect arguments remain supported through whole-value interpolation from
+   existing frontmatter or context values (`obj: "{{ payload }}"`). This keeps the
+   parser migration small, avoids inventing a second object-literal model beside
+   Darkmatter expressions, and still preserves reachability for `merge_frontmatter`
+   and `append_jsonl`.
+
+6. **Known-verb validation — parse-time, not runtime.** Both forms must validate
+   the verb against the union of communication channels, `shell`, lifecycle
+   control verbs, Darkmatter side-effect descriptors, and Darkmatter expression
+   function descriptors. Recommendation: use the existing public descriptor
+   catalogs where possible rather than duplicating string lists. The catalogs
+   expose canonical signatures as strings today, so this feature should add a
+   small signature parser/helper in Claudine or Darkmatter rather than open-code
+   ad hoc splits in the lifecycle parser. This is the most appropriate design
+   because it turns common positional typos into local frontmatter errors with
+   source excerpts and prevents misspelled actions from reaching a mutating
+   execution path.
+
 ## Migration
 
 - **Breaking** change to the action grammar. A document using `verb(args)` short
   form after this change must produce a typed, actionable `CompositionError`
   pointing at the positional (or key/value) rewrite — not a silent ignore and not
   a generic unknown-field error.
+- **Breaking** change to key/value string evaluation. A key/value parameter such
+  as `target: next_prompt`, `message: ctx.area`, or `max_attempts: retries` now
+  means the literal string. The migration note and diagnostics should tell authors
+  to write `target: "{{ next_prompt }}"`, `message: "{{ ctx.area }}"`, or
+  `max_attempts: "{{ retries }}"` when they intend expression evaluation.
 - The diagnostic should reuse the frontmatter-excerpt renderer
   (`composition::FrontmatterExcerpt`) so the offending line is highlighted in
   TTY-capable output and stays escape-free at `ColorDepth::None`.
@@ -279,6 +359,10 @@ parenthesized-body literal path.
   rule.
 - Port internal prompt files that use short form to positional form (including
   `prompts/review-feature.md`, the motivating file).
+- Add or update a lifecycle topic subsection that explains object-valued
+  side-effect args: place the object in frontmatter/context and pass it with a
+  whole-value interpolation span. Do not document direct nested YAML object
+  parameters as accepted.
 
 ## Acceptance Criteria
 
@@ -297,10 +381,19 @@ parenthesized-body literal path.
   with `file`/`prop`/`value`.
 - A whole-value `{{ expr }}` positional argument writes a typed value
   (`set_frontmatter: ["s.md", "ready", "{{ true }}"]` writes boolean `true`).
-- All action families (communication, shell, side-effect, lifecycle control) are
-  reachable through both positional and key/value forms; control verbs accept their
-  optional argument as a scalar value, and zero arguments as a null value
-  (`- stop:`), an empty array (`- stop: []`), or a bare verb-name string (`- stop`).
+- Object-valued side-effect arguments work through whole-value interpolation:
+  `merge_frontmatter: ["s.md", "{{ payload }}"]` merges the object stored in
+  `payload`, and a literal nested map used directly as the positional value
+  produces the typed object-data-through-interpolation error.
+- Key/value string parameters are literal by default:
+  `{ action: message, message: "ctx.area" }` sends `ctx.area`, while
+  `{ action: message, message: "{{ ctx.area }}" }` sends the context value.
+- All action families (communication, shell, side-effect, read-side expression
+  function, lifecycle control) are reachable. Positional form works for every
+  known verb with a non-ambiguous arity; key/value form works for actions whose
+  parameter names are known and non-variadic. Control verbs accept their optional
+  argument as a scalar value, and zero arguments as a null value (`- stop:`), an
+  empty array (`- stop: []`), or a bare verb-name string (`- stop`).
 - A bare verb-name string requiring an argument (e.g. `- proxy`) is a typed
   wrong-arity error, not a zero-arg action.
 - Short form (`verb(args)` scalar string — any string element containing `(`) is
@@ -328,11 +421,24 @@ parenthesized-body literal path.
   (`stop`, `error`, `retry`, `proxy`), including `- stop:`, `- stop: []`, and
   `- stop` all parsing to a zero-arg `stop`.
 - **L1 — typed args:** whole-value `{{ true }}` / `{{ 3 }}` resolve to typed
-  bool/number; plain `"3"` stays a string.
+  bool/number; plain `"3"` stays a string; `{{ payload }}` can pass an object to
+  `merge_frontmatter` / `append_jsonl`.
+- **L1 — literal default for key/value:** `message: ctx.area` and `target:
+  next_prompt` are stored as literal strings; the equivalent `{{ … }}` forms
+  resolve through lifecycle interpolation.
 - **L1 — disambiguation:** `{ action: shell, command }` → key/value;
   `{ shell: "git push" }` → positional; `{ notaverb: "x" }` → typed unknown-verb
   error; `{ message: "x", route: "y" }` (no `action:`) → typed ambiguous error;
-  `{ message: { … } }` → typed non-scalar-value error.
+  `{ message: { … } }` → typed object-data-through-interpolation error.
+- **L1 — known-verb validation:** typoed positional and key/value verbs fail at
+  parse time with did-you-mean suggestions where available; known Darkmatter
+  expression functions and side-effect verbs remain accepted.
+- **L1 — expression function actions:** positional `length: "{{ items }}"` and
+  `contains: ["{{ haystack }}", "needle"]` parse as expression-function actions;
+  key/value works for a descriptor with concrete names
+  (`{ action: contains, haystack: "{{ haystack }}", needle: "needle" }`), while
+  variadic `and(...)` / `or(...)` reject key/value form with a typed
+  positional-only diagnostic.
 - **L1 — short-form rejection:** `success("x")`, `shell(git push)`, and
   `set_frontmatter('a','b','c')` each yield the did-you-mean removal error with the
   positional rewrite; the excerpt highlights the offending line in TTY output. A
