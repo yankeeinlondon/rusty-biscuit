@@ -46,9 +46,9 @@ pub use frontmatter_excerpt::FrontmatterExcerpt;
 pub use launch_workspace::{LaunchWorkspaceContext, PackageContext};
 #[allow(deprecated)]
 pub use lifecycle::{
-    DefaultLifecycleEmitter, LifecycleConfig, LifecycleEmitter, LifecycleNotification,
-    LifecycleRunGuard, LifecycleRuntimeContext, LifecycleRuntimeState, LifecycleSignal,
-    emit_lifecycle_signal, parse_lifecycle_config,
+    DefaultLifecycleEmitter, LIFECYCLE_EVENT_KEYS, LifecycleConfig, LifecycleEmitter,
+    LifecycleNotification, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleRuntimeState,
+    LifecycleSignal, emit_lifecycle_signal, parse_lifecycle_config,
 };
 pub use lifecycle_actions::{
     CommunicationAction, CommunicationChannel, ExpressionFunctionAction, LifecycleAction,
