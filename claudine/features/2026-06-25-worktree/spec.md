@@ -62,6 +62,7 @@ Across all of this Claudine always makes some simplifying assumptions:
 
 ### Auto Naming
 
+TODO
 
 ## Initial User Reporting
 
@@ -77,7 +78,7 @@ When a worktree is successfully requested, Claudine will create the worktree and
     - `Non repo files copied into this branch:`
     - then add an unordered list of the files (each file should be blue and be an OSC8 link)
 
-## Job Closure
+## Job Closure Strategy
 
 Once the claudine command completes then the **closure strategy** is employed.  Strategies are determined by (from highest to lowest precedence):
 
@@ -107,6 +108,35 @@ The types of strategies available are:
                 - if there is a conflict then: Status::Warn('there will be merge conflicts if you decide to merge back to <blue>{default}</blue>')
     
 
-2. `merge-from`
-3. `merge-to`
-4. `pr`
+2. `source-into-new`
+
+    ```mermaid
+    flowchart LR
+        Source(Source Worktree)
+        New(New Worktree)
+        Complete([Complete Prompt])
+        Merge{Merge}
+
+        Source --> |split| New
+        New --> Complete
+
+        Complete --> Merge
+        Source --> Merge
+
+        Conflict{"Has\nConflict"}
+        Stop
+        Offer
+
+        Merge --> Conflict
+
+        Conflict --> |yes| Stop
+        Conflict --> |no| Offer
+    ```
+
+    - this strategy looks to merge the content from worktree/branch it sourced from after completing it's work
+    - this only happens if the work was deemed successful, in the case of an error the error is reported and work is stopped
+    - however, on success we if we can merge -- without merge conflicts -- we will not only merge but offer to have the 
+
+3. `new-into-source`
+4. `new-into-main`
+5. `pr`
