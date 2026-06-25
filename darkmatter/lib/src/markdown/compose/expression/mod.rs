@@ -228,6 +228,23 @@ pub trait EvaluationLookup {
     fn context_variable_names(&self) -> &[&'static str] {
         &[]
     }
+
+    /// Returns `true` when `root` is a known variable root for this lookup.
+    ///
+    /// `root` is the first dotted segment of a variable path (so `err.msg`
+    /// contributes `err`, `ctx.today` contributes `ctx`). Strict-mode subtree
+    /// compose ([`compose_subtree`](crate::markdown::compose::subtree::compose_subtree)
+    /// with [`SubtreeStrictness::Strict`]) rejects a reference whose root is
+    /// *not* known; a known root that resolves to `null`/empty still renders
+    /// empty.
+    ///
+    /// The default `true` preserves existing lenient behavior for lookups that
+    /// do not participate in strict-mode subtree compose.
+    ///
+    /// [`SubtreeStrictness::Strict`]: crate::markdown::compose::subtree::SubtreeStrictness::Strict
+    fn is_known_variable_root(&self, _root: &str) -> bool {
+        true
+    }
 }
 
 /// Checks if a JSON value is truthy.

@@ -159,6 +159,7 @@ impl Markdown {
                     options.fail_fast,
                     shell_expansion_enabled,
                     Some(options.frontmatter_resolution_context()),
+                    &options.exclude_keys,
                 )?;
                 report.frontmatter_interpolations_applied = fm_report.replacements;
                 report.warnings.extend(fm_report.warnings);
@@ -168,6 +169,20 @@ impl Markdown {
                         start.elapsed(),
                     );
                 }
+            }
+
+            // Surface the set of deferred keys that are actually present in
+            // this document's frontmatter (DM1 metadata). Lets callers
+            // distinguish "raw because deferred" from "raw because composition
+            // failed" for dry-run labeling and diagnostics.
+            if !options.exclude_keys.is_empty() {
+                let fm = self.frontmatter().as_map();
+                report.deferred_frontmatter_keys = options
+                    .exclude_keys
+                    .iter()
+                    .filter(|k| fm.contains_key(*k))
+                    .cloned()
+                    .collect();
             }
 
             // Schema Validation: check frontmatter against $schema or baseline
@@ -253,6 +268,7 @@ impl Markdown {
                         options.fail_fast,
                         false,
                         Some(options.frontmatter_resolution_context()),
+                        &options.exclude_keys,
                     )?;
                     report.frontmatter_interpolations_applied += fm_report.replacements;
                     report.warnings.extend(fm_report.warnings);

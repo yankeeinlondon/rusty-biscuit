@@ -2033,6 +2033,435 @@ fn test_frontmatter_interpolation_report_merge() {
     assert_eq!(r1.frontmatter_interpolations_applied, 8);
 }
 
+// ── DM1: exclude-keys integration tests ───────────────────────────
+
+#[test]
+fn dm1_excluded_key_survives_raw_through_compose() {
+    let content = "---\n\
+        base: /root\n\
+        failure:\n\
+        \x20 message: \"{{err.msg}}\"\n\
+        ---\n\
+        body\n";
+    let md: Markdown = content.into();
+    let (composed, report) = md
+        .compose_with(
+            ComposeOptions::new()
+                .only(&[ComposeOperation::FrontmatterInterpolation])
+                .with_exclude_keys(["failure"]),
+        )
+        .unwrap();
+
+    // The excluded key keeps its raw `{{err.msg}}` span.
+    assert_eq!(
+        composed.frontmatter().as_map().get("failure").unwrap().get("message"),
+        Some(&serde_json::json!("{{err.msg}}")),
+        "excluded key must survive raw through compose"
+    );
+    // The deferred-key metadata is surfaced in the report.
+    assert!(
+        report.deferred_frontmatter_keys.contains("failure"),
+        "report must list 'failure' as deferred"
+    );
+}
+
+#[test]
+fn dm1_non_excluded_key_resolves_through_compose() {
+    let content = "---\n\
+        base: /root\n\
+        summary: \"{{base}}/summary\"\n\
+        failure:\n\
+        \x20 message: \"{{err.msg}}\"\n\
+        ---\n\
+        body\n";
+    let md: Markdown = content.into();
+    let (composed, report) = md
+        .compose_with(
+            ComposeOptions::new()
+                .only(&[ComposeOperation::FrontmatterInterpolation])
+                .with_exclude_keys(["failure"]),
+        )
+        .unwrap();
+
+    // Non-excluded key resolves normally.
+    assert_eq!(
+        composed.frontmatter().as_map().get("summary"),
+        Some(&serde_json::json!("/root/summary"))
+    );
+    // Excluded key stays raw.
+    assert_eq!(
+        composed.frontmatter().as_map().get("failure").unwrap().get("message"),
+        Some(&serde_json::json!("{{err.msg}}"))
+    );
+    assert_eq!(report.frontmatter_interpolations_applied, 1);
+}
+
+#[test]
+fn dm1_empty_exclude_set_is_byte_identical_to_default() {
+    let content = "---\nbase: /root\nspec: \"{{base}}/spec.md\"\n---\n{{spec}}";
+    let md1: Markdown = content.into();
+    let md2: Markdown = content.into();
+
+    let (composed_default, _) = md1
+        .compose_with(ComposeOptions::new().only(&[
+            ComposeOperation::FrontmatterInterpolation,
+            ComposeOperation::Interpolation,
+        ]))
+        .unwrap();
+
+    let (composed_excluded, report) = md2
+        .compose_with(
+            ComposeOptions::new()
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::Interpolation,
+                ])
+                .with_exclude_keys(std::iter::empty::<&str>()),
+        )
+        .unwrap();
+
+    assert_eq!(
+        composed_default.content(),
+        composed_excluded.content(),
+        "empty exclude set must be byte-identical to default"
+    );
+    assert!(
+        report.deferred_frontmatter_keys.is_empty(),
+        "no keys deferred with empty exclude set"
+    );
+}
+
+#[test]
+fn dm1a_composed_key_referencing_deferred_fails_through_compose() {
+    let content = "---\n\
+        summary: \"{{ failure.message }}\"\n\
+        failure:\n\
+        \x20 message: \"{{err.msg}}\"\n\
+        ---\n\
+        body\n";
+    let md: Markdown = content.into();
+    let result = md.compose_with(
+        ComposeOptions::new()
+            .only(&[ComposeOperation::FrontmatterInterpolation])
+            .with_exclude_keys(["failure"]),
+    );
+
+    let err = result.unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("summary"), "error names the composed key: {msg}");
+    assert!(
+        msg.contains("failure"),
+        "error names the deferred key: {msg}"
+    );
+}
+
+// ── DM2: subtree compose integration tests ──────────────────────────
+
+#[test]
+fn dm2_subtree_resolves_injected_eager_and_lazy_globals() {
+    use super::subtree::{InjectedGlobal, SubtreeStrictness, compose_subtree};
+    use crate::markdown::compose::EffectiveStateBuilder;
+    use std::collections::HashMap;
+
+    let fm: HashMap<String, serde_json::Value> =
+        [("phase".to_string(), serde_json::json!(2))].into();
+    let state = EffectiveStateBuilder::new()
+        .with_frontmatter(fm)
+        .build()
+        .unwrap();
+
+    let mut globals = HashMap::new();
+    globals.insert(
+        "err".to_string(),
+        InjectedGlobal::eager(serde_json::json!({"msg": "disk full"})),
+    );
+    globals.insert(
+        "current".to_string(),
+        InjectedGlobal::lazy(|| serde_json::json!({"ctx": {"today": "2026-06-24"}})),
+    );
+
+    let result = compose_subtree(
+        &serde_json::json!("phase {{phase}} failed: {{err.msg}} on {{current.ctx.today}}"),
+        &state,
+        globals,
+        SubtreeStrictness::Lenient,
+    )
+    .unwrap();
+
+    assert_eq!(
+        result,
+        serde_json::json!("phase 2 failed: disk full on 2026-06-24")
+    );
+}
+
+#[test]
+fn dm2_subtree_layered_seed_state_still_resolves() {
+    use super::subtree::{SubtreeStrictness, compose_subtree};
+    use crate::markdown::compose::EffectiveStateBuilder;
+    use std::collections::HashMap;
+
+    let fm: HashMap<String, serde_json::Value> = [
+        ("phase".to_string(), serde_json::json!(3)),
+        (
+            "config".to_string(),
+            serde_json::json!({"artifact": {"path": "/tmp/out"}}),
+        ),
+    ]
+    .into();
+    let state = EffectiveStateBuilder::new()
+        .with_frontmatter(fm)
+        .build()
+        .unwrap();
+
+    let result = compose_subtree(
+        &serde_json::json!("artifact={{config.artifact.path}} phase={{phase}}"),
+        &state,
+        HashMap::new(),
+        SubtreeStrictness::Lenient,
+    )
+    .unwrap();
+    assert_eq!(result, serde_json::json!("artifact=/tmp/out phase=3"));
+}
+
+#[test]
+fn dm2_subtree_parity_with_main_compose_whole_value() {
+    // A whole-value single `{{ expr }}` yields the same typed Value in subtree
+    // compose as main compose's frontmatter interpolation does.
+    use super::subtree::{SubtreeStrictness, compose_subtree};
+    use crate::markdown::compose::EffectiveStateBuilder;
+    use std::collections::HashMap;
+
+    let fm: HashMap<String, serde_json::Value> =
+        [("count".to_string(), serde_json::json!(5))].into();
+    let state = EffectiveStateBuilder::new()
+        .with_frontmatter(fm)
+        .build()
+        .unwrap();
+
+    // Whole-value span: typed Number result, not a string.
+    let result = compose_subtree(
+        &serde_json::json!("{{count}}"),
+        &state,
+        HashMap::new(),
+        SubtreeStrictness::Strict,
+    )
+    .unwrap();
+    assert_eq!(result, serde_json::json!(5));
+}
+
+#[test]
+fn dm2_subtree_parity_with_main_compose_mixed_string() {
+    use super::subtree::{SubtreeStrictness, compose_subtree};
+    use crate::markdown::compose::EffectiveStateBuilder;
+    use std::collections::HashMap;
+
+    let fm: HashMap<String, serde_json::Value> =
+        [("count".to_string(), serde_json::json!(5))].into();
+    let state = EffectiveStateBuilder::new()
+        .with_frontmatter(fm)
+        .build()
+        .unwrap();
+
+    let result = compose_subtree(
+        &serde_json::json!("count={{count}}"),
+        &state,
+        HashMap::new(),
+        SubtreeStrictness::Strict,
+    )
+    .unwrap();
+    assert_eq!(result, serde_json::json!("count=5"));
+}
+
+#[test]
+fn dm2_subtree_lazy_global_only_evaluated_when_referenced() {
+    use super::subtree::{InjectedGlobal, SubtreeStrictness, compose_subtree};
+    use crate::markdown::compose::EffectiveStateBuilder;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let state = EffectiveStateBuilder::new().build().unwrap();
+    let count = Arc::new(AtomicUsize::new(0));
+    let count_for_closure = count.clone();
+    let mut globals = HashMap::new();
+    globals.insert(
+        "current".to_string(),
+        InjectedGlobal::lazy(move || {
+            count_for_closure.fetch_add(1, Ordering::SeqCst);
+            serde_json::json!({"phase": 1})
+        }),
+    );
+
+    // String does NOT reference `current`: closure must not run.
+    let result = compose_subtree(
+        &serde_json::json!("no reference"),
+        &state,
+        globals,
+        SubtreeStrictness::Lenient,
+    )
+    .unwrap();
+    assert_eq!(result, serde_json::json!("no reference"));
+    assert_eq!(count.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn dm2_subtree_lazy_global_evaluated_at_most_once() {
+    use super::subtree::{InjectedGlobal, SubtreeStrictness, compose_subtree};
+    use crate::markdown::compose::EffectiveStateBuilder;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let state = EffectiveStateBuilder::new().build().unwrap();
+    let count = Arc::new(AtomicUsize::new(0));
+    let count_for_closure = count.clone();
+    let mut globals = HashMap::new();
+    globals.insert(
+        "current".to_string(),
+        InjectedGlobal::lazy(move || {
+            count_for_closure.fetch_add(1, Ordering::SeqCst);
+            serde_json::json!({"phase": 7})
+        }),
+    );
+
+    // Two references to `current.phase`: closure runs at most once.
+    let result = compose_subtree(
+        &serde_json::json!("{{current.phase}} then {{current.phase}}"),
+        &state,
+        globals,
+        SubtreeStrictness::Lenient,
+    )
+    .unwrap();
+    assert_eq!(result, serde_json::json!("7 then 7"));
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn dm2_subtree_strict_rejects_unknown_root() {
+    use super::subtree::{SubtreeStrictness, compose_subtree};
+    use crate::markdown::compose::EffectiveStateBuilder;
+    use std::collections::HashMap;
+
+    let fm: HashMap<String, serde_json::Value> =
+        [("phase".to_string(), serde_json::json!(2))].into();
+    let state = EffectiveStateBuilder::new()
+        .with_frontmatter(fm)
+        .build()
+        .unwrap();
+
+    let err = compose_subtree(
+        &serde_json::json!("{{spec_fil}}"),
+        &state,
+        HashMap::new(),
+        SubtreeStrictness::Strict,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("unknown root"), "error: {err}");
+    assert!(err.contains("spec_fil"), "error names the typo: {err}");
+}
+
+#[test]
+fn dm2_subtree_strict_known_but_empty_renders_empty() {
+    use super::subtree::{SubtreeStrictness, compose_subtree};
+    use crate::markdown::compose::EffectiveStateBuilder;
+    use std::collections::HashMap;
+
+    let fm: HashMap<String, serde_json::Value> =
+        [("spec_file".to_string(), serde_json::Value::Null)].into();
+    let state = EffectiveStateBuilder::new()
+        .with_frontmatter(fm)
+        .build()
+        .unwrap();
+
+    // `spec_file` is a known root that resolves to null: renders empty.
+    let result = compose_subtree(
+        &serde_json::json!("spec={{spec_file}}"),
+        &state,
+        HashMap::new(),
+        SubtreeStrictness::Strict,
+    )
+    .unwrap();
+    assert_eq!(result, serde_json::json!("spec="));
+}
+
+#[test]
+fn dm2_subtree_strict_rejects_malformed_span() {
+    use super::subtree::{SubtreeStrictness, compose_subtree};
+    use crate::markdown::compose::EffectiveStateBuilder;
+    use std::collections::HashMap;
+
+    let state = EffectiveStateBuilder::new().build().unwrap();
+
+    let err = compose_subtree(
+        &serde_json::json!("{{ > broken }}"),
+        &state,
+        HashMap::new(),
+        SubtreeStrictness::Strict,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("failed to parse"), "error: {err}");
+}
+
+#[test]
+fn dm2_subtree_strict_rejects_unknown_function() {
+    use super::subtree::{SubtreeStrictness, compose_subtree};
+    use crate::markdown::compose::EffectiveStateBuilder;
+    use std::collections::HashMap;
+
+    let fm: HashMap<String, serde_json::Value> =
+        [("phase".to_string(), serde_json::json!(2))].into();
+    let state = EffectiveStateBuilder::new()
+        .with_frontmatter(fm)
+        .build()
+        .unwrap();
+
+    let err = compose_subtree(
+        &serde_json::json!("{{ bogus_fn(phase) }}"),
+        &state,
+        HashMap::new(),
+        SubtreeStrictness::Strict,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(
+        err.contains("Unknown function") || err.to_lowercase().contains("bogus_fn"),
+        "error names the unknown function: {err}"
+    );
+}
+
+#[test]
+fn dm2_subtree_strict_rejects_unknown_root_in_function_argument() {
+    // The strict root check walks the AST, so a typo buried in a function
+    // argument also fails.
+    use super::subtree::{SubtreeStrictness, compose_subtree};
+    use crate::markdown::compose::EffectiveStateBuilder;
+    use std::collections::HashMap;
+
+    let fm: HashMap<String, serde_json::Value> =
+        [("phase".to_string(), serde_json::json!(2))].into();
+    let state = EffectiveStateBuilder::new()
+        .with_frontmatter(fm)
+        .build()
+        .unwrap();
+
+    let err = compose_subtree(
+        &serde_json::json!("{{ parent_dir(typo_var) }}"),
+        &state,
+        HashMap::new(),
+        SubtreeStrictness::Strict,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("unknown root"), "error: {err}");
+    assert!(err.contains("typo_var"), "error names the typo: {err}");
+}
+
 // ── Nested external state regression tests ────────────────────────
 
 #[test]

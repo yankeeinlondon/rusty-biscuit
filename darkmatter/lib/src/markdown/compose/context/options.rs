@@ -268,6 +268,17 @@ pub struct ComposeOptions {
     /// required string) must still fail fast here. Default: `false`.
     pub(crate) defer_shell_pending_schema_problems: bool,
 
+    // ── Deferred frontmatter keys (DM1) ────────────────────────────
+    /// Top-level frontmatter keys deferred from every compose-time value
+    /// resolution pass (`{{ }}` interpolation, whole-value expansion,
+    /// `$(...)` shell expansion, and schema value interpolation).
+    ///
+    /// A deferred key survives in `effective_frontmatter` with its authored
+    /// `{{ }}` / structure intact — its JSON type and shape are preserved,
+    /// only resolution is skipped. The caller owns event-time interpolation
+    /// of these subtrees. Default: empty (no behavior change for any caller).
+    pub(crate) exclude_keys: std::collections::HashSet<String>,
+
     // ── Link normalization ────────────────────────────────────────
     /// Environment variables that may be used as path-prefix abstractions
     /// during the Finalization stage's Link Normalization operation.
@@ -372,6 +383,7 @@ impl std::fmt::Debug for ComposeOptions {
             )
             .field("context", &self.context)
             .field("remote_read_config", &self.remote_read_config)
+            .field("exclude_keys", &self.exclude_keys)
             .finish()
     }
 }
@@ -435,6 +447,7 @@ impl ComposeOptions {
             defer_shell_pending_schema_problems: false,
             preflight_graph: None,
             remote_fetch: None,
+            exclude_keys: std::collections::HashSet::new(),
         }
     }
 
@@ -1033,6 +1046,42 @@ impl ComposeOptions {
     /// Returns a reference to the attached preflight graph, if any.
     pub fn preflight_graph(&self) -> Option<&PreflightGraphNode> {
         self.preflight_graph.as_deref()
+    }
+
+    /// Defers the named top-level frontmatter keys from every compose-time
+    /// value-resolution pass (`{{ }}` interpolation, whole-value expansion,
+    /// `$(...)` shell expansion, and schema value interpolation).
+    ///
+    /// A deferred key survives in `effective_frontmatter` with its authored
+    /// `{{ }}` / structure intact, preserving its JSON type and shape. The
+    /// caller owns event-time interpolation of deferred subtrees. A compose-time
+    /// (non-deferred) key that *references* a deferred key is rejected during
+    /// dependency analysis so a raw lifecycle subtree cannot leak into an
+    /// early-bound value.
+    ///
+    /// Default: empty (no behavior change).
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::compose::ComposeOptions;
+    ///
+    /// let options = ComposeOptions::new()
+    ///     .with_exclude_keys(["failure", "start"]);
+    /// ```
+    #[must_use]
+    pub fn with_exclude_keys(
+        mut self,
+        keys: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.exclude_keys = keys.into_iter().map(|k| k.into()).collect();
+        self
+    }
+
+    /// Returns the set of top-level frontmatter keys deferred from
+    /// compose-time resolution.
+    pub fn exclude_keys(&self) -> &std::collections::HashSet<String> {
+        &self.exclude_keys
     }
 
     /// Attaches a single remote-fetch runtime shared by `compose_preflight` and

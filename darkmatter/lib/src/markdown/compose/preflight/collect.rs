@@ -528,6 +528,7 @@ fn scan_one_frontmatter(
             false,
             true,
             None,
+            &options.exclude_keys,
         );
     }
 
@@ -549,6 +550,7 @@ fn scan_one_frontmatter(
         fm_clone.frontmatter(),
         pre_interpolation_snapshot.as_ref(),
         &scan_ctx,
+        &options.exclude_keys,
     )?;
 
     for candidate in candidates {
