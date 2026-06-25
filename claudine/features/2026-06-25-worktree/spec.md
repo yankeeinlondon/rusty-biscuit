@@ -106,7 +106,6 @@ The types of strategies available are:
             - if this worktree has a clean/no merge-conflict path to merge with the 'main/master/{default}' branch then:
                 - Status::Info('there are no conflicts with merging this branch into <blue>{default}</blue> when you're ready')
                 - if there is a conflict then: Status::Warn('there will be merge conflicts if you decide to merge back to <blue>{default}</blue>')
-    
 
 2. `source-into-new`
 
