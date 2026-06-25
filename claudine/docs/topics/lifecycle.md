@@ -74,18 +74,31 @@ Actions can be written in short form or long form.
 ```yaml
 success:
   stack:
-    - action: say('All done')
-    - action: effect('confirmation')
-    - action: shell('git tag release-{{version}}')
+    - action: say(All done)
+    - action: effect(confirmation)
+    - action: shell(git tag release-{{version}})
 ```
 
-Arguments are Darkmatter expressions. Multi-word strings must be quoted:
+**Single-parameter verbs take the whole parenthesized body as one literal argument** — no quoting required, and commas are part of the text, not separators. This covers every communication verb (`say`, `say_first`, `warn`, `info`, `success`, `message`, `stderr`, `stdout`, `notify`, `effect`, `speak`) plus `shell`, `error`, `proxy`, `resume`, and `defer`.
+
+```yaml
+blocked:
+  stack:
+    - action: warn(phase 6 is too large, only 5 exist)   # literal, commas kept
+    - action: error(invalid phase: 6 > 5)                # YAML needs quotes only
+                                                          # because of the `: ` —
+                                                          # the action body stays unquoted
+```
+
+Surrounding quotes are still accepted and unwrapped (`say('hello')` ≡ `say(hello)`), so existing prompts keep working. To inject a value, use `{{ … }}` interpolation (`warn(starting phase {{phase}})`); a bare token is literal text, **not** a variable — `say(phase)` prints the word `phase`. Runtime globals like `{{err.msg}}` resolve when the message is rendered, so they work inside any literal body in an error-carrying event.
+
+**Multi-argument verbs** — side-effect verbs (`set_frontmatter(file, prop, value)`) and expression functions — keep the comma-separated **expression** grammar, where multi-word literals in a single slot must be quoted:
 
 ```yaml
 success:
   stack:
-    - action: say('hello world')  # ok
-    # - action: say(hello world)  # ERROR: unquoted multi-word literal
+    - action: set_frontmatter('state.md', 'status', 'done')  # expression args
+    # - action: set_frontmatter(state.md, status here, done) # ERROR: `status here`
 ```
 
 **Long form:** an object with an `action` verb key plus named parameters.
@@ -286,14 +299,16 @@ failure:
 ---
 ```
 
-### Short-form expression arguments
+### Short-form actions with interpolation
+
+Single-parameter bodies are literal text; `{{ … }}` interpolates a value (no quotes needed):
 
 ```yaml
 ---
 start:
   stack:
-    - action: info('running {{agent}}')
-    - action: shell('git fetch origin {{branch}}')
+    - action: info(running {{agent}})
+    - action: shell(git fetch origin {{branch}})
 ---
 ```
 
