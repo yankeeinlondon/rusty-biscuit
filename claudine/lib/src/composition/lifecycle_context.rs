@@ -1,15 +1,18 @@
 //! Lifecycle execution context: the stack-only globals `err`, `timing`,
 //! and `current`.
 //!
-//! These globals are visible only inside lifecycle stack expressions
-//! (`when:` clauses and action arguments). Body and frontmatter
-//! interpolation continue to resolve `err`, `timing`, and `current` as
-//! ordinary frontmatter identifiers through Darkmatter's standard
-//! pipeline — this module does not alter that behavior.
+//! These globals supplement the document state at event-time. They reach the
+//! evaluator as Darkmatter **injected globals** (see [`InjectedGlobal`]) layered
+//! over the current effective document state — claudine no longer carries a
+//! bespoke expression lookup. [`lifecycle_injected_globals`] builds that layer;
+//! the lifecycle executor hands it to Darkmatter's subtree compose (DM2) so
+//! event-time interpolation reuses the same parsing/interpolation core as main
+//! compose.
 //!
-//! Phase 3 introduces the data model and the
-//! [`LifecycleLookup`] evaluator adapter. Phase 4 wires the lookup into
-//! the stack execution engine.
+//! `err`/`timing` are eager (already captured by the time the event fires);
+//! `current` is lazy — its JSON snapshot is materialized only when a lifecycle
+//! string references `current`, mirroring how `ctx` is captured lazily at
+//! compose time.
 //!
 //! ## `err`
 //!
@@ -30,10 +33,9 @@
 //! namespaces at event execution time. Exposed as `current.ctx.<name>`
 //! and `current.env.<name>`.
 
-// rustfmt doesn't support let-chains yet, so nested ifs are required
-#![allow(clippy::collapsible_if)]
+use std::collections::HashMap;
 
-use darkmatter::markdown::compose::expression::{EvaluationLookup, ResolutionContext};
+use darkmatter::markdown::compose::subtree::InjectedGlobal;
 use serde_json::{Map, Value};
 
 use super::error::CompositionError;
@@ -269,197 +271,51 @@ impl LifecycleCurrent {
     }
 }
 
-/// Darkmatter expression lookup for lifecycle stack evaluation.
+/// Build the event-time injected-globals layer handed to Darkmatter's subtree
+/// compose (DM2).
 ///
-/// Resolution order:
+/// The returned map layers the lifecycle stack-only globals over the current
+/// effective document state: `err`/`timing` are eager (their snapshots are
+/// already captured when the event fires); `current` is lazy — its JSON
+/// snapshot is materialized only when a lifecycle string references `current`,
+/// mirroring how `ctx` is captured lazily at compose time.
 ///
-/// 1. Lifecycle globals (`err`, `timing`, `current`) — only meaningful in
-///    stack expressions; body/frontmatter interpolation never sees them.
-/// 2. Reserved `doc` namespace (bare `doc` → the whole frontmatter object;
-///    `doc.<path>` → dotted traversal). Intercepted before `ctx.`/`env.`
-///    so `doc.err` reaches a literal `err` property rather than the
-///    lifecycle global.
-/// 3. `env.NAME` — process environment at evaluation time.
-/// 4. `ctx.NAME` — the runtime context (`agent`, `model`, `today`, …).
-/// 5. Bare names — frontmatter properties, including nested paths via `.`.
-///
-/// When constructed with a base directory ([`with_base_dir`](Self::with_base_dir)),
-/// read-side expression functions (`file_exists`, `absolute`, …) resolve
-/// against the prompt's parent directory.
-#[derive(Debug, Clone, Copy)]
-pub struct LifecycleLookup<'a> {
-    frontmatter: &'a Map<String, Value>,
-    err: Option<&'a LifecycleErrorInfo>,
-    timing: Option<&'a LifecycleTiming>,
-    current: Option<&'a LifecycleCurrent>,
-    base_dir: Option<&'a std::path::Path>,
-}
-
-impl<'a> LifecycleLookup<'a> {
-    /// Create a lookup over the composed frontmatter with no lifecycle
-    /// globals attached.
-    pub fn new(frontmatter: &'a Map<String, Value>) -> Self {
-        Self {
-            frontmatter,
-            err: None,
-            timing: None,
-            current: None,
-            base_dir: None,
-        }
+/// An unattached global is simply absent from the map, so a bare
+/// `err`/`timing`/`current` reference falls through to the document state (a
+/// literal frontmatter property of that name stays reachable). `doc.err`
+/// reaches a literal `err` property because the `doc` root is never an injected
+/// global.
+pub fn lifecycle_injected_globals(
+    err: Option<&LifecycleErrorInfo>,
+    timing: Option<&LifecycleTiming>,
+    current: Option<&LifecycleCurrent>,
+) -> HashMap<String, InjectedGlobal> {
+    let mut globals = HashMap::new();
+    if let Some(err) = err {
+        globals.insert("err".to_string(), InjectedGlobal::eager(err.to_value()));
     }
-
-    /// Attach the `err` global snapshot.
-    #[must_use]
-    pub fn with_err(mut self, err: &'a LifecycleErrorInfo) -> Self {
-        self.err = Some(err);
-        self
+    if let Some(timing) = timing {
+        globals.insert(
+            "timing".to_string(),
+            InjectedGlobal::eager(timing.to_value()),
+        );
     }
-
-    /// Attach the `timing` global snapshot.
-    #[must_use]
-    pub fn with_timing(mut self, timing: &'a LifecycleTiming) -> Self {
-        self.timing = Some(timing);
-        self
+    if let Some(current) = current {
+        // Lazy: clone the captured snapshot into the closure so it materializes
+        // its JSON form only if a lifecycle string references `current`.
+        let owned = current.clone();
+        globals.insert(
+            "current".to_string(),
+            InjectedGlobal::lazy(move || owned.to_value()),
+        );
     }
-
-    /// Attach the `current` global snapshot.
-    #[must_use]
-    pub fn with_current(mut self, current: &'a LifecycleCurrent) -> Self {
-        self.current = Some(current);
-        self
-    }
-
-    /// Root read-side expression functions at `base_dir` (typically the
-    /// prompt document's parent directory). `None` leaves the lookup
-    /// context-free.
-    #[must_use]
-    pub fn with_base_dir(mut self, base_dir: Option<&'a std::path::Path>) -> Self {
-        self.base_dir = base_dir;
-        self
-    }
-}
-
-impl EvaluationLookup for LifecycleLookup<'_> {
-    fn get(&self, path: &str) -> Option<Value> {
-        // 1. Lifecycle globals. When the snapshot is attached, resolve
-        //    against it. When not attached, fall through to frontmatter so
-        //    a literal `err`/`timing`/`current` property stays reachable
-        //    (body/frontmatter interpolation contract).
-        //    `doc.err` is intercepted below so a literal `err` property
-        //    stays reachable through the `doc.` namespace even when the
-        //    global is attached.
-        if path == "err" {
-            if let Some(info) = self.err {
-                return Some(info.to_value());
-            }
-            // fall through to frontmatter
-        } else if let Some(rest) = path.strip_prefix("err.") {
-            if let Some(info) = self.err {
-                let value = info.to_value();
-                return walk_json(value, rest);
-            }
-            // fall through to frontmatter
-        } else if path == "timing" {
-            if let Some(timing) = self.timing {
-                return Some(timing.to_value());
-            }
-            // fall through to frontmatter
-        } else if let Some(rest) = path.strip_prefix("timing.") {
-            if let Some(timing) = self.timing {
-                let value = timing.to_value();
-                return walk_json(value, rest);
-            }
-            // fall through to frontmatter
-        } else if path == "current" {
-            if let Some(current) = self.current {
-                return Some(current.to_value());
-            }
-            // fall through to frontmatter
-        } else if let Some(rest) = path.strip_prefix("current.") {
-            if let Some(current) = self.current {
-                let value = current.to_value();
-                return walk_json(value, rest);
-            }
-            // fall through to frontmatter
-        }
-
-        // 2. Reserved `doc` namespace — intercepted before `ctx.`/`env.` so
-        //    `doc.err` reaches a literal property rather than the lifecycle
-        //    global.
-        if path == "doc" || path.starts_with("doc.") {
-            return walk_json(
-                Value::Object(self.frontmatter.clone()),
-                path.trim_start_matches("doc").trim_start_matches('.'),
-            );
-        }
-
-        // 3. env.NAME — process environment at evaluation time.
-        if let Some(name) = path.strip_prefix("env.") {
-            let trimmed = name.trim();
-            if trimmed.is_empty() {
-                return None;
-            }
-            return std::env::var(trimmed).ok().map(Value::String);
-        }
-
-        // 4. ctx.NAME — runtime context. Falls back to the captured
-        //    `current.ctx` snapshot when available.
-        if let Some(name) = path.strip_prefix("ctx.") {
-            if let Some(current) = self.current {
-                let value = current.ctx.clone();
-                return walk_json(value, name);
-            }
-            return None;
-        }
-
-        // 5. Bare names — frontmatter properties.
-        if let Some(value) = self.frontmatter.get(path) {
-            return Some(value.clone());
-        }
-
-        // Dotted traversal into frontmatter.
-        let mut parts = path.split('.');
-        let head = parts.next()?;
-        let mut current = self.frontmatter.get(head)?.clone();
-        for part in parts {
-            current = match current {
-                Value::Object(map) => map.get(part).cloned()?,
-                _ => return None,
-            };
-        }
-        Some(current)
-    }
-
-    fn resolution_context(&self) -> Option<ResolutionContext> {
-        self.base_dir
-            .map(|dir| ResolutionContext::new(dir.to_path_buf()))
-    }
-}
-
-/// Walk a dotted path into a JSON value, returning `None` if any segment
-/// does not resolve.
-fn walk_json(value: Value, path: &str) -> Option<Value> {
-    if path.is_empty() {
-        return Some(value);
-    }
-    let mut current = value;
-    for segment in path.split('.') {
-        current = match current {
-            Value::Object(map) => map.get(segment).cloned()?,
-            _ => return None,
-        };
-    }
-    Some(current)
+    globals
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
-
-    fn map(value: Value) -> Map<String, Value> {
-        value.as_object().unwrap().clone()
-    }
 
     #[test]
     fn error_info_from_claudine_error_records_kind_variant_msg() {
@@ -527,118 +383,101 @@ mod tests {
         assert_eq!(value.get("env").unwrap().get("HOME"), Some(&json!("/tmp")));
     }
 
+    /// Build an [`EffectiveState`] over `fm` with a cheap (sniff-free) context.
+    fn state(fm: Value) -> darkmatter::markdown::compose::EffectiveState {
+        use darkmatter::markdown::compose::{ComposeContext, EffectiveStateBuilder};
+        let fm: std::collections::HashMap<String, Value> = fm
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        EffectiveStateBuilder::new()
+            .with_frontmatter(fm)
+            .with_context(ComposeContext::capture_for_content(std::path::Path::new("."), ""))
+            .build()
+            .unwrap()
+    }
+
     #[test]
-    fn lookup_resolves_err_global_when_attached() {
-        let fm = map(json!({}));
+    fn injected_globals_attaches_err_timing_current() {
         let info = LifecycleErrorInfo {
             kind: "ClaudineError",
             variant: "Io".to_string(),
             msg: "disk full".to_string(),
         };
-        let lookup = LifecycleLookup::new(&fm).with_err(&info);
-        let err_value = lookup.get("err").expect("err resolves");
-        assert_eq!(err_value.get("variant"), Some(&json!("Io")));
-        assert_eq!(lookup.get("err.variant"), Some(json!("Io")));
-        assert_eq!(lookup.get("err.msg"), Some(json!("disk full")));
-    }
-
-    #[test]
-    fn lookup_err_global_none_when_not_attached() {
-        let fm = map(json!({}));
-        let lookup = LifecycleLookup::new(&fm);
-        assert!(lookup.get("err").is_none());
-        assert!(lookup.get("err.variant").is_none());
-    }
-
-    #[test]
-    fn lookup_resolves_timing_global_when_attached() {
-        let fm = map(json!({}));
         let timing = LifecycleTiming {
             document_ms: Some(100),
             total_ms: None,
             step_ms: None,
         };
-        let lookup = LifecycleLookup::new(&fm).with_timing(&timing);
-        assert_eq!(lookup.get("timing.document_ms"), Some(json!(100u64)));
-        assert!(lookup.get("timing.total_ms").is_none());
-    }
-
-    #[test]
-    fn lookup_resolves_current_global_when_attached() {
-        let fm = map(json!({}));
         let current = LifecycleCurrent {
             ctx: json!({"agent": "codex"}),
             env: json!({"DEBUG": "1"}),
         };
-        let lookup = LifecycleLookup::new(&fm).with_current(&current);
-        assert_eq!(
-            lookup.get("current.ctx.agent"),
-            Some(json!("codex"))
-        );
-        assert_eq!(
-            lookup.get("current.env.DEBUG"),
-            Some(json!("1"))
-        );
+        let globals = lifecycle_injected_globals(Some(&info), Some(&timing), Some(&current));
+        assert!(globals.contains_key("err"));
+        assert!(globals.contains_key("timing"));
+        assert!(globals.contains_key("current"));
     }
 
     #[test]
-    fn lookup_ctx_uses_current_snapshot_when_attached() {
-        let fm = map(json!({}));
-        let current = LifecycleCurrent {
-            ctx: json!({"agent": "codex"}),
-            env: json!({}),
-        };
-        let lookup = LifecycleLookup::new(&fm).with_current(&current);
-        assert_eq!(lookup.get("ctx.agent"), Some(json!("codex")));
+    fn injected_globals_omits_unattached() {
+        let globals = lifecycle_injected_globals(None, None, None);
+        assert!(globals.is_empty());
     }
 
     #[test]
-    fn lookup_doc_namespace_reaches_literal_err_property() {
-        // `doc.err` must reach a literal frontmatter `err` property, not the
-        // lifecycle `err` global. This is the `doc.err` escape hatch.
-        let fm = map(json!({"err": "literal-value"}));
+    fn err_global_resolves_through_dm2_subtree() {
+        use darkmatter::markdown::compose::subtree::SubtreeCompose;
         let info = LifecycleErrorInfo {
             kind: "ClaudineError",
             variant: "Io".to_string(),
             msg: "disk full".to_string(),
         };
-        let lookup = LifecycleLookup::new(&fm).with_err(&info);
-        assert_eq!(lookup.get("doc.err"), Some(json!("literal-value")));
-        // Bare `err` still reaches the lifecycle global.
-        assert_eq!(
-            lookup.get("err").unwrap().get("variant"),
-            Some(&json!("Io"))
-        );
+        let globals = lifecycle_injected_globals(Some(&info), None, None);
+        let state = state(json!({}));
+        let resolved = SubtreeCompose::new(&json!("{{err.msg}}"), &state)
+            .with_globals(globals)
+            .compose()
+            .unwrap();
+        assert_eq!(resolved, json!("disk full"));
     }
 
     #[test]
-    fn lookup_bare_err_reaches_frontmatter_when_global_absent() {
-        // Without an attached `err` snapshot, a bare `err` reference falls
-        // through to frontmatter, so a literal `err` property is visible.
-        let fm = map(json!({"err": "frontmatter-value"}));
-        let lookup = LifecycleLookup::new(&fm);
-        assert_eq!(lookup.get("err"), Some(json!("frontmatter-value")));
+    fn timing_global_resolves_through_dm2_subtree() {
+        use darkmatter::markdown::compose::subtree::SubtreeCompose;
+        let timing = LifecycleTiming {
+            document_ms: Some(100),
+            total_ms: None,
+            step_ms: None,
+        };
+        let globals = lifecycle_injected_globals(None, Some(&timing), None);
+        let state = state(json!({}));
+        let resolved = SubtreeCompose::new(&json!("took {{timing.document_ms}}ms"), &state)
+            .with_globals(globals)
+            .compose()
+            .unwrap();
+        assert_eq!(resolved, json!("took 100ms"));
     }
 
     #[test]
-    fn lookup_bare_timing_reaches_frontmatter_when_global_absent() {
-        let fm = map(json!({"timing": "fast"}));
-        let lookup = LifecycleLookup::new(&fm);
-        assert_eq!(lookup.get("timing"), Some(json!("fast")));
-    }
-
-    #[test]
-    fn lookup_bare_current_reaches_frontmatter_when_global_absent() {
-        let fm = map(json!({"current": "yes"}));
-        let lookup = LifecycleLookup::new(&fm);
-        assert_eq!(lookup.get("current"), Some(json!("yes")));
-    }
-
-    #[test]
-    fn lookup_frontmatter_traversal_handles_nested_paths() {
-        let fm = map(json!({"config": {"retries": 3}}));
-        let lookup = LifecycleLookup::new(&fm);
-        assert_eq!(lookup.get("config.retries"), Some(json!(3)));
+    fn doc_namespace_reaches_literal_err_property_through_dm2() {
+        // `doc.err` reaches a literal frontmatter `err` property, not the
+        // lifecycle `err` global — `doc` is never an injected global root.
+        use darkmatter::markdown::compose::subtree::SubtreeCompose;
+        let info = LifecycleErrorInfo {
+            kind: "ClaudineError",
+            variant: "Io".to_string(),
+            msg: "disk full".to_string(),
+        };
+        let globals = lifecycle_injected_globals(Some(&info), None, None);
+        let state = state(json!({"err": "literal-value"}));
+        let resolved = SubtreeCompose::new(&json!("{{doc.err}} / {{err.msg}}"), &state)
+            .with_globals(globals)
+            .compose()
+            .unwrap();
+        assert_eq!(resolved, json!("literal-value / disk full"));
     }
 
     #[test]
@@ -699,14 +538,15 @@ mod tests {
     }
 
     /// Late-binding contract: a stack `when:` clause reacts to an environment
-    /// value present in `current.env` at context-construction time, distinct
-    /// from a value snapshotted at "prepare" time. This is the spec's required
-    /// "reacts to an environment value changed after prepare" behavior, proven
-    /// at the population layer (the snapshot the production builders attach).
+    /// value present in the `current.env` snapshot the production builders
+    /// attach at **event time**, distinct from a value snapshotted at "prepare"
+    /// time. Resolved through DM2's layered lookup over the injected `current`
+    /// global, proving the binding is late.
     #[test]
     #[serial_test::serial(env_lifecycle_current)]
     fn when_clause_reacts_to_env_changed_after_prepare() {
         use darkmatter::markdown::compose::expression::{evaluate, is_truthy, parse};
+        use darkmatter::markdown::compose::subtree::LayeredLookup;
 
         let key = "CLAUDINE_TEST_LATE_BINDING_MYVAR";
         // SAFETY: serialized via #[serial]; no other thread reads this var.
@@ -723,11 +563,13 @@ mod tests {
         let event_snapshot = LifecycleCurrent::capture_env_only();
         unsafe { std::env::remove_var(key) };
 
-        let fm = Map::new();
+        let base = state(json!({}));
         let expr = parse(&format!("current.env.{key} == 'x'")).expect("parses");
 
         // Against the event-time snapshot, the guard fires (late binding).
-        let event_lookup = LifecycleLookup::new(&fm).with_current(&event_snapshot);
+        let event_globals =
+            lifecycle_injected_globals(None, None, Some(&event_snapshot));
+        let event_lookup = LayeredLookup::new(&base, &event_globals, None);
         let event_value = evaluate(&expr, &event_lookup).expect("evaluates");
         assert!(
             is_truthy(&event_value),
@@ -736,7 +578,9 @@ mod tests {
 
         // Against the prepare-time snapshot, the same guard does NOT fire,
         // proving the reaction is to the late-bound value, not the prepare one.
-        let prepare_lookup = LifecycleLookup::new(&fm).with_current(&prepare_snapshot);
+        let prepare_globals =
+            lifecycle_injected_globals(None, None, Some(&prepare_snapshot));
+        let prepare_lookup = LayeredLookup::new(&base, &prepare_globals, None);
         let prepare_value = evaluate(&expr, &prepare_lookup).expect("evaluates");
         assert!(
             !is_truthy(&prepare_value),

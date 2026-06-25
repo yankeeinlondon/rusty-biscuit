@@ -56,7 +56,7 @@ pub use lifecycle_actions::{
     SideEffectAction, is_known_side_effect, side_effect_signature,
 };
 pub use lifecycle_context::{
-    LifecycleCurrent, LifecycleErrorInfo, LifecycleLookup, LifecycleTiming,
+    LifecycleCurrent, LifecycleErrorInfo, LifecycleTiming, lifecycle_injected_globals,
 };
 pub use lifecycle_control::{
     ControlDispatch, MAX_PROXY_HOPS, compute_backoff_delay, control_budget_for, decide_control,

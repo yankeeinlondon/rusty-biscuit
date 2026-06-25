@@ -477,6 +477,34 @@ pub enum CompositionError {
         event: String,
     },
 
+    /// A lifecycle shell command failed pre-flight resolution via DM2 (C3).
+    ///
+    /// Shell commands live inside the deferred lifecycle subtree, so they are
+    /// unresolved after main compose. Pre-flight resolves each one via DM2
+    /// with an early-binding-only lookup (`doc.*`, `ctx.*`, `env.*`, read-side
+    /// functions) and stamps the resolved bytes back so the approved command
+    /// equals the executed command. This variant covers every failure DM2
+    /// surfaces: malformed expressions, unknown roots (typos), unknown
+    /// functions, and late-binding references (`err`/`timing`/`current`),
+    /// which are rejected because shell commands are approved at pre-flight
+    /// time, before any event fires.
+    #[error(
+        "lifecycle shell command at `{property}` failed pre-flight resolution: {message} \
+         (raw: `{raw}`) ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleShellResolution {
+        /// The prompt file whose lifecycle frontmatter held the command.
+        source_path: PathBuf,
+        /// Dotted lifecycle key path, e.g. `"start.stack[0].action.command"`.
+        property: String,
+        /// The raw command string exactly as authored (pre-resolution).
+        raw: String,
+        /// Human-readable resolution failure (parse error, unknown root,
+        /// late-binding reference, etc.).
+        message: String,
+    },
+
     /// A `failure` stack requested `resume(...)` but the agentic loop did
     /// not surface a provider session id, so there is nothing to resume.
     ///

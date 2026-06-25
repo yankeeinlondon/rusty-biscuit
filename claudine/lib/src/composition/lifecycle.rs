@@ -51,6 +51,61 @@ const LIFECYCLE_COMM_FIELDS: &[&str] = &[
     "stdout",
 ];
 
+/// The notification's nine communication-field name/value pairs, in the
+/// [`LIFECYCLE_COMM_FIELDS`] iteration order.
+///
+/// Shared by the lifecycle string guards that walk top-level communication
+/// surfaces (the leak scan and the `err`-availability scan) so they agree on
+/// the field set and iteration order.
+fn notification_comm_fields(
+    n: &LifecycleNotification,
+) -> [(&'static str, Option<&String>); 9] {
+    [
+        ("say", n.say.as_ref()),
+        ("say_first", n.say_first.as_ref()),
+        ("message", n.message.as_ref()),
+        ("stderr", n.stderr.as_ref()),
+        ("notify", n.notify.as_ref()),
+        ("info", n.info.as_ref()),
+        ("warn", n.warn.as_ref()),
+        ("success", n.success.as_ref()),
+        ("stdout", n.stdout.as_ref()),
+    ]
+}
+
+/// The seven top-level frontmatter keys that hold lifecycle event subtrees.
+///
+/// Claudine defers these from Darkmatter's compose-time value-resolution
+/// passes (via `ComposeOptions::with_exclude_keys`) so their authored
+/// `{{ }}` spans survive raw in `effective_frontmatter` for event-time
+/// interpolation. Non-lifecycle keys compose as today; the iteration
+/// controls inside `loop:` (`while`/`until`/`actions`/`max`/`fail_fast`)
+/// are unaffected because they are parsed from raw frontmatter by
+/// [`super::loop_config::resolve_loop_config`] and evaluated by the loop
+/// engine, not by compose-time interpolation.
+///
+/// Order matches [`LifecycleSignal::ALL`] for readable diffs; the set is
+/// what callers consume.
+pub const LIFECYCLE_EVENT_KEYS: &[&str] = &[
+    "initialize",
+    "start",
+    "success",
+    "blocked",
+    "failure",
+    "finalize",
+    "loop",
+];
+
+/// The lifecycle late-binding global roots — values that exist only at
+/// event-time: `err` (active failure), `timing` (observed durations), and
+/// `current` (event-time `ctx`/`env` snapshots).
+///
+/// Shared authority for the pre-flight shell resolution (C3), which rejects
+/// any late-binding reference inside a `shell` command because shell commands
+/// are resolved at pre-flight — before any event fires — so only early-binding
+/// values (`doc.*`, `ctx.*`, `env.*`, read-side functions) are available there.
+pub const LATE_BINDING_ROOTS: &[&str] = &["err", "timing", "current"];
+
 /// A single lifecycle notification configuration.
 ///
 /// Carries the top-level communication properties for one lifecycle event
@@ -929,6 +984,28 @@ impl LifecycleConfig {
         stack.map(Vec::as_slice)
     }
 
+    /// Returns a mutable reference to the typed stack for a given signal, if
+    /// any.
+    ///
+    /// Used by the pre-flight shell resolution pass (C3) to stamp resolved
+    /// command bytes back into `ShellAction::command` / `on_error` so the
+    /// approved command equals the executed command.
+    pub fn stack_mut(
+        &mut self,
+        signal: LifecycleSignal,
+    ) -> Option<&mut Vec<LifecycleStackItem>> {
+        let stack = match signal {
+            LifecycleSignal::Initialize => &mut self.stacks.initialize,
+            LifecycleSignal::Start => &mut self.stacks.start,
+            LifecycleSignal::Success => &mut self.stacks.success,
+            LifecycleSignal::Blocked => &mut self.stacks.blocked,
+            LifecycleSignal::Failure => &mut self.stacks.failure,
+            LifecycleSignal::Finalize => &mut self.stacks.finalize,
+            LifecycleSignal::Loop => &mut self.stacks.loop_gate,
+        };
+        stack.as_mut()
+    }
+
     /// Returns `true` if no lifecycle notifications and no stacks are
     /// configured across any event.
     ///
@@ -1212,8 +1289,12 @@ fn parse_event_block(
         ));
     }
 
-    // Validate effect name if present.
+    // Validate effect name if present and free of interpolation. An
+    // `effect: "{{name}}"` is deferred: its real name is only known after
+    // event-time interpolation, so it is validated then (see
+    // [`super::lifecycle_executor`]'s deferred effect validation), not here.
     if let Some(effect_name) = &notification.effect
+        && !effect_name.contains("{{")
         && playa::SoundEffect::from_name(effect_name).is_none()
     {
         return Err(CompositionError::LifecycleUnknownEffect(
@@ -1698,11 +1779,13 @@ fn parse_short_form_action(
 
     // Single-parameter verbs take the whole parenthesized body as one literal
     // argument: no comma splitting and no quoting required (`warn(hello world)`,
-    // `error(invalid phase: 6, too big)`). `{{ … }}` interpolation has already
-    // been applied upstream by Darkmatter, so the body is final text. Only the
-    // genuinely multi-argument verbs (side-effects, expression functions) and
-    // the numeric/zero-arg control verbs use the comma-separated expression
-    // grammar in `parse_action_arg`.
+    // `error(invalid phase: 6, too big)`). Any `{{ … }}` spans in the body stay
+    // intact here — lifecycle strings are deferred from compose-time resolution
+    // and interpolated at event-time via DM2 (see `lifecycle_executor`), so the
+    // body is final text only after that event-time pass. Only the genuinely
+    // multi-argument verbs (side-effects, expression functions) and the
+    // numeric/zero-arg control verbs use the comma-separated expression grammar
+    // in `parse_action_arg`.
     let args = if is_single_text_arg_verb(verb) {
         match args_raw.map(str::trim) {
             Some(body) if !body.is_empty() => {
@@ -2325,19 +2408,7 @@ pub fn validate_no_interpolation_leaks(
             continue;
         };
 
-        let fields: [(&str, Option<&String>); 9] = [
-            ("say", notification.say.as_ref()),
-            ("say_first", notification.say_first.as_ref()),
-            ("message", notification.message.as_ref()),
-            ("stderr", notification.stderr.as_ref()),
-            ("notify", notification.notify.as_ref()),
-            ("info", notification.info.as_ref()),
-            ("warn", notification.warn.as_ref()),
-            ("success", notification.success.as_ref()),
-            ("stdout", notification.stdout.as_ref()),
-        ];
-
-        for (field_name, value) in fields {
+        for (field_name, value) in notification_comm_fields(notification) {
             let Some(text) = value else { continue };
             if text.is_empty() {
                 continue;
@@ -2726,10 +2797,11 @@ pub fn validate_no_undefined_lifecycle_variables(
 /// Recursively walks `expr`, returning the first frontmatter-scoped bare
 /// variable whose root key is undefined in the composed frontmatter.
 ///
-/// Used for top-level communication fields (post-composition leak scan):
-/// lifecycle globals are **not** exempt here, so a bare `err`/`timing`/
-/// `current` in a top-level field must resolve against frontmatter (the
-/// body-interpolation contract).
+/// Used for top-level communication fields. The runtime namespaces
+/// (`ctx`/`env`/`doc`) and the lifecycle late-binding globals
+/// ([`LATE_BINDING_ROOTS`]: `err`/`timing`/`current`) are known roots — they
+/// resolve at event-time, not against frontmatter — so a bare `err`/`timing`/
+/// `current` is not flagged. Only genuinely-unknown roots (typos) are reported.
 ///
 /// A ternary condition is descended because it is evaluated during composition,
 /// but the ternary branch operands and fallback (`||`) subtrees are not: those
@@ -2772,6 +2844,11 @@ fn find_undefined_top_level_variable<'a>(
 /// Like [`find_undefined_top_level_variable`] but for stack expression
 /// surfaces, where the lifecycle globals (`err`, `timing`, `current`) and
 /// the runtime namespaces (`ctx`, `env`, `doc`) are always defined.
+///
+/// Stack `when:` clauses are parsed in condition mode, so `||`/`&&` lower to
+/// `or(...)`/`and(...)` function calls rather than `Expr::Fallback`. Those two
+/// functions get the same skip-the-operands tolerance a `Fallback` does — they
+/// exist to guard an undefined operand.
 fn find_undefined_stack_variable<'a>(
     expr: &'a Expr,
     defined: Option<&serde_json::Map<String, serde_json::Value>>,
@@ -2793,15 +2870,55 @@ fn find_undefined_stack_variable<'a>(
                 .or_else(|| find_undefined_stack_variable(index, defined))
         }
         Expr::MemberAccess { base, .. } => find_undefined_stack_variable(base, defined),
+        // `or`/`and` are the condition-parse-mode (`parse_condition`) lowering of
+        // `||`/`&&`. Like an interpolation-mode `Expr::Fallback`, they exist to
+        // tolerate an undefined/falsy operand by design (`maybe_missing || false`
+        // is a guarded optional, not a typo), so their operands are not scanned.
+        Expr::FunctionCall { name, .. } if name == "or" || name == "and" => None,
         Expr::FunctionCall { args, .. } => args
             .iter()
             .find_map(|arg| find_undefined_stack_variable(arg, defined)),
     }
 }
 
+/// Returns the first frontmatter-scoped bare variable in `expr` whose root key
+/// is undefined, applying the lifecycle-stack tolerance (`ctx`/`env`/`doc` and
+/// the late-binding globals `err`/`timing`/`current` are known roots; `||`
+/// fallbacks are skipped and only a ternary's condition is descended).
+///
+/// Exposed for the executor's event-time `when:` guard, which fails closed on a
+/// genuinely-unknown root rather than silently treating the guard as false.
+/// Returns `None` when every root resolves. The reference borrows from `expr`.
+pub(crate) fn first_undefined_stack_variable<'a>(
+    expr: &'a Expr,
+    defined: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> Option<&'a str> {
+    find_undefined_stack_variable(expr, defined)
+}
+
+/// Whether `path`'s root resolves outside top-level frontmatter — the runtime
+/// namespaces (`ctx.*` / `env.*` / `doc`) or a lifecycle late-binding global
+/// ([`LATE_BINDING_ROOTS`]: `err`/`timing`/`current`).
+///
+/// Such a reference is never an undefined *frontmatter* variable, so the
+/// undefined scan skips it. A bare `err` *misuse* in a no-error event is caught
+/// separately by [`validate_no_err_in_no_error_events`].
+fn resolves_outside_frontmatter(path: &str) -> bool {
+    if path.starts_with("ctx.")
+        || path.starts_with("env.")
+        || path == "doc"
+        || path.starts_with("doc.")
+    {
+        return true;
+    }
+    let root = path.split('.').next().unwrap_or(path);
+    LATE_BINDING_ROOTS.contains(&root)
+}
+
 /// Returns the bare variable name when `path` is a frontmatter-scoped reference
 /// whose root segment is absent from the composed frontmatter, or `None` when
-/// it resolves elsewhere (`ctx.*` / `env.*` / `doc`) or its root key exists.
+/// it resolves elsewhere ([`resolves_outside_frontmatter`]) or its root key
+/// exists.
 ///
 /// Nested misses (`{{ a.b }}` where `a` exists but `b` does not) are treated as
 /// defined: only the bare-root contract the spec describes is enforced.
@@ -2809,11 +2926,7 @@ fn undefined_bare_variable<'a>(
     path: &'a str,
     defined: Option<&serde_json::Map<String, serde_json::Value>>,
 ) -> Option<&'a str> {
-    if path.starts_with("ctx.")
-        || path.starts_with("env.")
-        || path == "doc"
-        || path.starts_with("doc.")
-    {
+    if resolves_outside_frontmatter(path) {
         return None;
     }
     let root = path.split('.').next().unwrap_or(path);
@@ -2826,36 +2939,14 @@ fn undefined_bare_variable<'a>(
     }
 }
 
-/// Like [`undefined_bare_variable`] but also exempts the lifecycle globals
-/// (`err`, `timing`, `current`) — those are always defined inside stack
-/// expression surfaces even when their value may be `null`. The
-/// [`validate_no_err_in_no_error_events`] scan is responsible for catching
-/// bare `err` misuse in no-error events.
+/// Identical to [`undefined_bare_variable`]: stack expression surfaces and
+/// top-level fields now share one known-root contract (`ctx`/`env`/`doc` plus
+/// the late-binding globals are known; only typos are flagged).
 fn undefined_stack_variable<'a>(
     path: &'a str,
     defined: Option<&serde_json::Map<String, serde_json::Value>>,
 ) -> Option<&'a str> {
-    if path.starts_with("ctx.")
-        || path.starts_with("env.")
-        || path == "doc"
-        || path.starts_with("doc.")
-        || path == "err"
-        || path.starts_with("err.")
-        || path == "timing"
-        || path.starts_with("timing.")
-        || path == "current"
-        || path.starts_with("current.")
-    {
-        return None;
-    }
-    let root = path.split('.').next().unwrap_or(path);
-    if root.is_empty() {
-        return None;
-    }
-    match defined {
-        Some(map) if map.contains_key(root) => None,
-        _ => Some(root),
-    }
+    undefined_bare_variable(path, defined)
 }
 
 /// Validates that the lifecycle-stack-only `err` global is not referenced
@@ -2870,24 +2961,52 @@ fn undefined_stack_variable<'a>(
 /// - The `doc.err` escape hatch is exempt everywhere — it reaches a literal
 ///   frontmatter property named `err`, not the lifecycle global.
 ///
-/// Walks every stack expression surface (`when:` clauses, action arguments,
-/// communication messages, shell commands, side-effect args, control-action
-/// operands) in events that cannot carry an error and rejects the first
-/// bare `err` reference with [`CompositionError::LifecycleErrNotAvailable`].
+/// Two kinds of surface are scanned in events that cannot carry an error:
 ///
-/// Top-level communication fields (`say`/`message`/`stderr`/…) are **not**
-/// scanned here. They go through Darkmatter composition, where `err`
-/// resolves against frontmatter (a literal `err:` property) rather than
-/// the lifecycle global. The undefined-variable scan handles misses there.
+/// - **Communication/action strings** (top-level `say`/`message`/`stderr`/…
+///   fields and single-parameter action message bodies) are literal text whose
+///   only path to the `err` global is a `{{ … }}` interpolation span. Each span
+///   is parsed and rejected when it references bare `err`.
+/// - **Expression surfaces** (`when:` clauses, multi-argument expression-verb
+///   args, control-action operands) evaluate the whole expression, so a bare
+///   `err` reference anywhere in the tree is rejected.
+///
+/// `timing`/`current` are allowed everywhere; `doc.err` remains the escape hatch
+/// (it reaches a literal frontmatter `err` property, not the lifecycle global).
+/// The first violation aborts with [`CompositionError::LifecycleErrNotAvailable`].
 pub fn validate_no_err_in_no_error_events(
     lifecycle: &LifecycleConfig,
     source_path: &Path,
 ) -> Result<(), CompositionError> {
+    // Top-level communication fields: `err` reaches them only through a
+    // `{{ … }}` span, so scan each span rather than the whole string.
+    for signal in LifecycleSignal::ALL {
+        if signal.can_carry_error() {
+            continue;
+        }
+        let Some(notification) = lifecycle.get(signal) else {
+            continue;
+        };
+        for (field_name, value) in notification_comm_fields(notification) {
+            let Some(text) = value else { continue };
+            if literal_spans_reference_err(text) {
+                return Err(CompositionError::LifecycleErrNotAvailable {
+                    source_path: source_path.to_path_buf(),
+                    property: format!("{}.{}", signal.property_name(), field_name),
+                    event: signal.property_name().to_string(),
+                });
+            }
+        }
+    }
+
+    // Stack surfaces: an expression surface is rejected for a bare `err`
+    // anywhere in its tree; a string literal (a single-parameter message body)
+    // is rejected for a bare `err` inside any of its `{{ … }}` spans.
     for surface in iter_stack_expression_surfaces(lifecycle) {
         if surface.signal.can_carry_error() {
             continue;
         }
-        if references_bare_err(surface.expr) {
+        if surface_references_err(surface.expr) {
             return Err(CompositionError::LifecycleErrNotAvailable {
                 source_path: source_path.to_path_buf(),
                 property: surface.property,
@@ -2896,6 +3015,32 @@ pub fn validate_no_err_in_no_error_events(
         }
     }
     Ok(())
+}
+
+/// Whether an expression surface references the lifecycle `err` global, either
+/// as a bare expression reference or inside a `{{ … }}` span of a string literal
+/// embedded in the tree (a single-parameter action message body).
+fn surface_references_err(expr: &Expr) -> bool {
+    if references_bare_err(expr) {
+        return true;
+    }
+    let mut found = false;
+    visit_string_literals(expr, &mut |literal| {
+        if !found && literal_spans_reference_err(literal) {
+            found = true;
+        }
+    });
+    found
+}
+
+/// Whether any `{{ … }}` span inside a literal communication/action string
+/// references the bare lifecycle `err` global.
+fn literal_spans_reference_err(literal: &str) -> bool {
+    ExpressionFinder::find_all_plain(literal).iter().any(|span| {
+        parse(&span.expression)
+            .map(|expr| references_bare_err(&expr))
+            .unwrap_or(false)
+    })
 }
 
 /// Returns `true` when the expression tree references the lifecycle `err`
@@ -5587,6 +5732,82 @@ mod tests {
         assert!(validate_no_err_in_no_error_events(&config, dummy_path()).is_ok());
     }
 
+    // -- err static scan over interpolation spans (C4) --------------------
+
+    #[test]
+    fn err_interpolation_span_in_top_level_field_rejected_in_no_error_event() {
+        // Late binding (C4): a top-level field reaches `err` only through a
+        // `{{ … }}` span, and `err` is still forbidden in a no-error event.
+        let fm = json!({ "start": { "message": "❌️  {{err.msg}}" } });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let err = validate_no_err_in_no_error_events(&config, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleErrNotAvailable { event, property, .. } => {
+                assert_eq!(event, "start");
+                assert_eq!(property, "start.message");
+            }
+            other => panic!("expected LifecycleErrNotAvailable, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn err_interpolation_span_in_stack_message_rejected_in_no_error_event() {
+        // The single-parameter message body is literal text, but its `{{ … }}`
+        // span still reaches the `err` global and must be rejected in `start`.
+        let fm = json!({
+            "start": { "stack": [{"action": "message(❌️  {{err.msg}})"}] }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let err = validate_no_err_in_no_error_events(&config, dummy_path()).unwrap_err();
+        match err {
+            CompositionError::LifecycleErrNotAvailable { event, property, .. } => {
+                assert_eq!(event, "start");
+                assert!(property.starts_with("start.stack"), "got: {property}");
+            }
+            other => panic!("expected LifecycleErrNotAvailable, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn timing_and_current_interpolation_allowed_in_no_error_events() {
+        // `timing`/`current` are allowed everywhere, including no-error events.
+        let fm = json!({
+            "start": { "message": "took {{timing.document_ms}}ms on {{current.ctx.agent}}" }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        assert!(validate_no_err_in_no_error_events(&config, dummy_path()).is_ok());
+    }
+
+    #[test]
+    fn err_interpolation_span_allowed_in_error_carrying_event() {
+        // The same `{{err.msg}}` span is fine in `failure` (an error event).
+        let fm = json!({ "failure": { "message": "❌️  {{err.msg}}" } });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        assert!(validate_no_err_in_no_error_events(&config, dummy_path()).is_ok());
+    }
+
+    // -- deferred effect validation (C4) ----------------------------------
+
+    #[test]
+    fn effect_field_with_interpolation_skips_prepare_validation() {
+        // An `effect: "{{name}}"` cannot be checked against the catalog at parse
+        // time, so it parses cleanly and is validated at event-time instead.
+        let fm = json!({ "success": { "effect": "{{effect_name}}" } });
+        assert!(parse_lifecycle_config(&fm, dummy_path()).is_ok());
+    }
+
+    #[test]
+    fn effect_field_literal_unknown_name_still_rejected_at_prepare() {
+        // A literal (interpolation-free) unknown effect name is still rejected
+        // at parse time.
+        let fm = json!({ "success": { "effect": "nonexistent-effect-xyz" } });
+        let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
+        assert!(matches!(
+            err,
+            CompositionError::LifecycleUnknownEffect(_, _)
+        ));
+    }
+
     // -- stack leak scan ---------------------------------------------------
 
     #[test]
@@ -5765,24 +5986,25 @@ mod tests {
     // -- lifecycle globals vs body/frontmatter interpolation --------------
 
     #[test]
-    fn bare_err_in_top_level_field_is_not_exempt() {
-        // A bare `err` in a top-level communication field is NOT the
-        // lifecycle global — it resolves against frontmatter like any
-        // ordinary identifier. So an undefined `err` property is caught.
-        let raw = fm_from_json(json!({
-            "start": { "message": "error: {{ err }}" }
-        }));
-        let effective = json!({});
-        let result = validate_no_undefined_lifecycle_variables(
-            &raw,
-            &effective,
-            &LifecycleConfig::default(),
-            dummy_path(),
-        );
-        match result {
-            Err(CompositionError::LifecycleUndefinedVariable { variable, .. })
-                if variable == "err" => {}
-            other => panic!("expected undefined err, got: {other:?}"),
+    fn late_binding_global_in_top_level_field_is_a_known_root() {
+        // Late binding (C4 / 5.3): `err`/`timing`/`current` are known roots in
+        // top-level communication fields just like in stack surfaces — they
+        // resolve at event-time, not against frontmatter — so the
+        // undefined-variable scan does not flag a bare reference. (Placement
+        // misuse — `err` in a no-error event — is caught separately by
+        // `validate_no_err_in_no_error_events`.)
+        for global in ["err", "timing", "current"] {
+            let raw = fm_from_json(json!({
+                "failure": { "message": format!("x: {{{{ {global} }}}}") }
+            }));
+            let effective = json!({});
+            let result = validate_no_undefined_lifecycle_variables(
+                &raw,
+                &effective,
+                &LifecycleConfig::default(),
+                dummy_path(),
+            );
+            assert!(result.is_ok(), "`{global}` is a known root; got: {result:?}");
         }
     }
 
@@ -6008,6 +6230,7 @@ mod tests {
         let stack_ctx = crate::composition::lifecycle_executor::StackExecutionContext {
             signal: LifecycleSignal::Failure,
             frontmatter: &serde_json::Map::new(),
+            live_frontmatter: None,
             err: None,
             timing: None,
             current: None,
@@ -6111,6 +6334,7 @@ mod tests {
         let stack_ctx = crate::composition::lifecycle_executor::StackExecutionContext {
             signal: LifecycleSignal::Start,
             frontmatter: &serde_json::Map::new(),
+            live_frontmatter: None,
             err: None,
             timing: None,
             current: None,
@@ -6170,6 +6394,7 @@ mod tests {
         let stack_ctx = crate::composition::lifecycle_executor::StackExecutionContext {
             signal: LifecycleSignal::Start,
             frontmatter: &serde_json::Map::new(),
+            live_frontmatter: None,
             err: None,
             timing: None,
             current: None,

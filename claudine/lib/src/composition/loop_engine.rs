@@ -1163,6 +1163,13 @@ fn build_loop_stack_context<'a>(
     StackExecutionContext {
         signal,
         frontmatter,
+        // The loop engine fires a single `loop` gate concern per iteration and
+        // threads frontmatter across iterations via `apply_actions` /
+        // `next_frontmatter`. There is no second lifecycle event within one gate
+        // that would need to observe this gate's mutations, so the cross-event
+        // live cell is unnecessary here; intra-stack visibility is handled by
+        // `execute_stack`'s local working map.
+        live_frontmatter: None,
         err: None,
         timing,
         current,
@@ -1567,7 +1574,7 @@ mod tests {
         let source = make_source_with_body(
             &[
                 ("prompt", json!("Build phase {{phase}}")),
-                ("phase", json!("{{ start || 1 }}")),
+                ("phase", json!("{{ start_phase || 1 }}")),
                 (
                     "loop",
                     json!({"while": "phase < 2", "action": "increment(phase)"}),
@@ -2376,7 +2383,7 @@ mod tests {
     fn seeded_loop_repro_runs_to_completion_with_live_derived_variable() {
         let source = make_source_with_body(
             &[
-                ("phase", json!("{{ start || 1 }}")),
+                ("phase", json!("{{ start_phase || 1 }}")),
                 ("total_phases", json!(6)),
                 (
                     "pass_icon",

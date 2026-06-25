@@ -1446,6 +1446,51 @@ mod tests {
         );
     }
 
+    /// Phase 7 (acceptance criteria 10 + the reproduction fixture): a prompt
+    /// with a user `$schema` *and* a lifecycle `failure.message: "{{err.msg}}"`
+    /// validates its ordinary schema inputs exactly as today (DM1b: deferred
+    /// lifecycle keys are excluded from user schema value validation) and still
+    /// reaches lifecycle parsing with the late-binding span deferred raw.
+    #[test]
+    fn schema_validates_while_lifecycle_err_span_is_deferred() {
+        let dir = TempDir::new().unwrap();
+        // Mirrors `prompts/implement-plan.md`: required numeric schema inputs
+        // alongside a `failure` block whose message references the late-binding
+        // `err` global. The `{{err.msg}}` span must not be validated against the
+        // user schema, must not fail composition, and must survive raw.
+        let source = make_source(
+            &dir,
+            "---\n$schema:\n  phase: 'number(required)'\n  total_phases: 'number(required)'\nphase: 1\ntotal_phases: 3\nfailure:\n  message: \"❌️ phase {{phase}} failed: {{err.msg}}\"\n---\nbody\n",
+        );
+
+        let prepared = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap();
+        let fm = prepared.effective_frontmatter.as_object().unwrap();
+
+        // Ordinary schema inputs validated and present.
+        assert_eq!(fm.get("phase").and_then(|v| v.as_i64()), Some(1));
+        assert_eq!(fm.get("total_phases").and_then(|v| v.as_i64()), Some(3));
+
+        // The lifecycle key is deferred (DM1) and its span survives raw.
+        assert!(
+            prepared
+                .deferred_lifecycle_keys
+                .iter()
+                .any(|k| k == "failure"),
+            "failure should be reported as a deferred lifecycle key"
+        );
+        assert_eq!(
+            prepared
+                .lifecycle
+                .failure
+                .as_ref()
+                .unwrap()
+                .message
+                .as_deref(),
+            Some("❌️ phase {{phase}} failed: {{err.msg}}"),
+            "lifecycle parsing sees the raw late-binding span after schema validation"
+        );
+    }
+
     #[test]
     fn invalid_optional_drop_leaves_missing_required_surfaced() {
         // The optional `count` is invalid AND a different required value

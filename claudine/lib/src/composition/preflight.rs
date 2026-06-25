@@ -4,13 +4,19 @@
 //! stacks), checks them against the whitelist, prompts the user for any that
 //! need approval, and returns the full pre-approved set.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::ComposeOptions;
+use darkmatter::markdown::compose::expression::{Expr, ExpressionFinder, ResolutionContext, parse};
+use darkmatter::markdown::compose::subtree::SubtreeCompose;
+use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, EffectiveStateBuilder};
 
 use crate::composition::error::CompositionError;
-use crate::composition::lifecycle::{LifecycleConfig, collect_lifecycle_shell_commands};
+use crate::composition::lifecycle::{
+    LATE_BINDING_ROOTS, LifecycleConfig, LifecycleSignal, collect_lifecycle_shell_commands,
+};
+use crate::composition::lifecycle_actions::LifecycleActionKind;
 use crate::harness::shell::{ShellApprovalOptions, tokenize_words_strict};
 
 /// Result of pre-flight shell command approval.
@@ -191,6 +197,212 @@ pub fn resolve_shell_approvals(
         already_whitelisted,
         user_approved,
     })
+}
+
+/// Resolves the `{{ }}` interpolation inside every lifecycle `shell` command
+/// at pre-flight (C3), stamping the resolved bytes back into the parsed
+/// command so the approved command equals the executed command.
+///
+/// Shell commands live inside the deferred lifecycle subtree (see
+/// [`LATE_BINDING_ROOTS`] and `ComposeOptions::with_exclude_keys`), so after
+/// main compose they still carry their authored `{{ }}` spans. Unlike the
+/// communication/action surfaces — which interpolate at event-time (C2) —
+/// `shell` commands are approved at pre-flight, before any event fires, and so
+/// resolve against an **early-binding-only** lookup: `doc.*`, `ctx.*`, `env.*`,
+/// and read-side functions. A late-binding reference (`err`/`timing`/`current`)
+/// is rejected with [`CompositionError::LifecycleShellResolution`] because its
+/// value does not yet exist.
+///
+/// Both short-form `shell(...)` and long-form `shell` actions with `command:`
+/// (and any `on_error:` text) are covered. Non-string command expressions
+/// (e.g. a bare `command: "ctx.repo"` parsed as a variable) and literals with
+/// no interpolation span are left untouched — there is nothing to stamp.
+///
+/// ## Errors
+///
+/// Returns [`CompositionError::LifecycleShellResolution`] when a command's
+/// interpolation references a late-binding global, fails to parse, references
+/// an unknown root (a typo), or calls an unknown function. The error names the
+/// dotted property path (e.g. `failure.stack[0].action[1].command`) and the
+/// raw command string.
+pub fn resolve_lifecycle_shell_commands(
+    lifecycle: &mut LifecycleConfig,
+    effective_frontmatter: &serde_json::Value,
+    context: &ComposeContext,
+    source_path: &Path,
+) -> Result<(), CompositionError> {
+    let frontmatter: HashMap<String, serde_json::Value> = effective_frontmatter
+        .as_object()
+        .map(|map| map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        .unwrap_or_default();
+
+    let state = EffectiveStateBuilder::new()
+        .with_frontmatter(frontmatter)
+        .with_context(context.clone())
+        // A deferred lifecycle subtree never defines `ctx`; downgrade any
+        // pathological `ctx` shape to a warning rather than aborting pre-flight.
+        .with_allow_ctx_override(true)
+        .build()
+        .map_err(|e| {
+            CompositionError::PreFlightFailed(format!(
+                "lifecycle shell pre-flight: building early-binding state failed: {e}"
+            ))
+        })?;
+
+    // Read-side functions (`parent_dir`, `dirname`, `file_exists`, …) resolve
+    // against the prompt's parent directory, matching the early-binding lookup
+    // contract.
+    let resolution_ctx = ResolutionContext::new(
+        source_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| std::path::PathBuf::from(".")),
+    );
+
+    for signal in LifecycleSignal::ALL {
+        let event_name = signal.property_name();
+        let Some(stack) = lifecycle.stack_mut(signal) else {
+            continue;
+        };
+        for (idx, item) in stack.iter_mut().enumerate() {
+            for (action_idx, action) in item.actions.iter_mut().enumerate() {
+                let LifecycleActionKind::Shell(shell) = &mut action.kind else {
+                    continue;
+                };
+                let prefix = format!("{event_name}.stack[{idx}].action[{action_idx}]");
+                resolve_shell_command_expr(
+                    &mut shell.command,
+                    &state,
+                    &resolution_ctx,
+                    &format!("{prefix}.command"),
+                    source_path,
+                )?;
+                if let Some(on_error) = &mut shell.on_error {
+                    resolve_shell_command_expr(
+                        on_error,
+                        &state,
+                        &resolution_ctx,
+                        &format!("{prefix}.on_error"),
+                        source_path,
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Resolves the `{{ }}` spans inside one shell-command [`Expr`] and stamps the
+/// resolved string literal back in place.
+///
+/// Only string-literal expressions carrying an interpolation span are touched.
+/// Late-binding references are rejected before resolution so the diagnostic
+/// names the offending global rather than a generic "unknown root".
+fn resolve_shell_command_expr(
+    expr: &mut Expr,
+    state: &darkmatter::markdown::compose::EffectiveState,
+    resolution_ctx: &ResolutionContext,
+    property: &str,
+    source_path: &Path,
+) -> Result<(), CompositionError> {
+    let Expr::StringLiteral(raw) = expr else {
+        return Ok(());
+    };
+    if !raw.contains("{{") {
+        return Ok(());
+    }
+
+    if let Some(root) = first_late_binding_root(raw) {
+        return Err(CompositionError::LifecycleShellResolution {
+            source_path: source_path.to_path_buf(),
+            property: property.to_string(),
+            raw: raw.clone(),
+            message: format!(
+                "late-binding reference `{root}` is not available in shell commands; \
+                 shell commands are resolved at pre-flight (before any event fires), so only \
+                 early-binding values (`doc.*`, `ctx.*`, `env.*`, read-side functions) may be \
+                 used here"
+            ),
+        });
+    }
+
+    let value = serde_json::Value::String(raw.clone());
+    let resolved = SubtreeCompose::new(&value, state)
+        .with_resolution_context(resolution_ctx.clone())
+        .strict()
+        .compose()
+        .map_err(|e| CompositionError::LifecycleShellResolution {
+            source_path: source_path.to_path_buf(),
+            property: property.to_string(),
+            raw: raw.clone(),
+            message: e.to_string(),
+        })?;
+
+    let resolved = match resolved {
+        serde_json::Value::String(s) => s,
+        other => other.to_string(),
+    };
+    *expr = Expr::StringLiteral(resolved);
+    Ok(())
+}
+
+/// Returns the first late-binding root (`err`/`timing`/`current`) referenced by
+/// any `{{ }}` span in `raw`, or `None` when the command uses only
+/// early-binding values.
+fn first_late_binding_root(raw: &str) -> Option<String> {
+    for loc in ExpressionFinder::find_all_plain(raw) {
+        let Ok(expr) = parse(&loc.expression) else {
+            continue;
+        };
+        if let Some(root) = late_binding_root_in_expr(&expr) {
+            return Some(root);
+        }
+    }
+    None
+}
+
+/// Walks an expression tree for the first variable whose root is a late-binding
+/// global. `doc.*` is exempt: it reaches a literal frontmatter property, not a
+/// lifecycle global.
+fn late_binding_root_in_expr(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Variable(path) => {
+            let root = path.split('.').next().unwrap_or(path);
+            LATE_BINDING_ROOTS
+                .contains(&root)
+                .then(|| root.to_string())
+        }
+        Expr::MemberAccess { base, .. } => {
+            if let Expr::Variable(base_path) = base.as_ref() {
+                let root = base_path.split('.').next().unwrap_or(base_path);
+                if root == "doc" {
+                    return None;
+                }
+            }
+            late_binding_root_in_expr(base)
+        }
+        Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) | Expr::Paren(inner) => {
+            late_binding_root_in_expr(inner)
+        }
+        Expr::Binary { left, right, .. } | Expr::Comparison { left, right, .. } => {
+            late_binding_root_in_expr(left).or_else(|| late_binding_root_in_expr(right))
+        }
+        Expr::Index { base, index } => {
+            late_binding_root_in_expr(base).or_else(|| late_binding_root_in_expr(index))
+        }
+        Expr::FunctionCall { args, .. } => args.iter().find_map(late_binding_root_in_expr),
+        Expr::Fallback { primary, fallback } => {
+            late_binding_root_in_expr(primary).or_else(|| late_binding_root_in_expr(fallback))
+        }
+        Expr::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+        } => late_binding_root_in_expr(condition)
+            .or_else(|| late_binding_root_in_expr(then_branch))
+            .or_else(|| late_binding_root_in_expr(else_branch)),
+        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => None,
+    }
 }
 
 #[cfg(test)]

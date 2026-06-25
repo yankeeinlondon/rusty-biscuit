@@ -524,6 +524,15 @@ pub struct PreparedComposition {
     /// Non-fatal warnings emitted by Darkmatter during composition,
     /// including parser-aware `ctx.*` typo diagnostics.
     pub warnings: Vec<ComposeWarning>,
+    /// Lifecycle event keys that Darkmatter intentionally deferred from
+    /// compose-time resolution (DM1 metadata).
+    ///
+    /// Sorted, and limited to keys actually present in the source
+    /// frontmatter. These keys keep their authored `{{ }}` spans in
+    /// `effective_frontmatter` because they interpolate at event-time, not
+    /// during the initial compose. Dry-run output consumes this so a raw
+    /// span reads as intentional rather than as an unresolved-variable bug.
+    pub deferred_lifecycle_keys: Vec<String>,
 }
 
 /// How the composition result should be applied after provider execution.
