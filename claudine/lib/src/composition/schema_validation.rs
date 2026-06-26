@@ -683,32 +683,85 @@ fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<InteractiveShape> {
                 .constraints
                 .iter()
                 .any(|c| matches!(c, Constraint::Integer));
-            Some(InteractiveShape::Number { integer })
+            let (min, max) = min_max_constraints(atom);
+            Some(InteractiveShape::Number { integer, min, max })
         }
-        TypeExpr::Primitive(SimplifiedType::String) => Some(InteractiveShape::Text {
-            format: TextFormat::Plain,
-        }),
+        TypeExpr::Primitive(SimplifiedType::String) => {
+            let (min_len, max_len) = string_length_constraints(atom);
+            Some(InteractiveShape::Text {
+                format: TextFormat::Plain,
+                min_len,
+                max_len,
+            })
+        }
         TypeExpr::Primitive(SimplifiedType::Date) => Some(InteractiveShape::Text {
             format: TextFormat::Date,
+            min_len: None,
+            max_len: None,
         }),
         TypeExpr::Primitive(SimplifiedType::DateTime) => Some(InteractiveShape::Text {
             format: TextFormat::DateTime,
+            min_len: None,
+            max_len: None,
         }),
         TypeExpr::Primitive(SimplifiedType::Time) => Some(InteractiveShape::Text {
             format: TextFormat::Time,
+            min_len: None,
+            max_len: None,
         }),
         TypeExpr::Primitive(SimplifiedType::Url) => Some(InteractiveShape::Text {
             format: TextFormat::Url,
+            min_len: None,
+            max_len: None,
         }),
         TypeExpr::Primitive(SimplifiedType::Email) => Some(InteractiveShape::Text {
             format: TextFormat::Email,
+            min_len: None,
+            max_len: None,
         }),
-        TypeExpr::Primitive(SimplifiedType::File) => Some(InteractiveShape::Text {
-            format: TextFormat::File,
-        }),
+        TypeExpr::Primitive(SimplifiedType::File) => {
+            let patterns = atom
+                .constraints
+                .iter()
+                .find_map(|c| match c {
+                    Constraint::Match(p) => Some(p.clone()),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            Some(InteractiveShape::File {
+                is_array: atom.is_array,
+                patterns,
+            })
+        }
         TypeExpr::Primitive(SimplifiedType::Object | SimplifiedType::Any)
         | TypeExpr::InlineObject(_) => None,
     }
+}
+
+fn min_max_constraints(atom: &PropertyAtom) -> (Option<f64>, Option<f64>) {
+    let mut min: Option<f64> = None;
+    let mut max: Option<f64> = None;
+    for c in &atom.constraints {
+        match c {
+            Constraint::Min(v) => min = Some(*v),
+            Constraint::Max(v) => max = Some(*v),
+            _ => {}
+        }
+    }
+    (min, max)
+}
+
+fn string_length_constraints(atom: &PropertyAtom) -> (Option<usize>, Option<usize>) {
+    let mut min_len: Option<usize> = None;
+    let mut max_len: Option<usize> = None;
+    for c in &atom.constraints {
+        match c {
+            Constraint::MinLen(v) => min_len = Some(*v),
+            Constraint::MaxLen(v) => max_len = Some(*v),
+            _ => {}
+        }
+    }
+    (min_len, max_len)
 }
 
 fn type_label_for_atom(atom: &PropertyAtom) -> String {
@@ -1742,7 +1795,9 @@ mod tests {
                 assert_eq!(
                     missing[0].interactive_shape,
                     Some(InteractiveShape::Text {
-                        format: TextFormat::Plain
+                        format: TextFormat::Plain,
+                        min_len: None,
+                        max_len: None,
                     })
                 );
             }
@@ -1762,7 +1817,11 @@ mod tests {
             CompositionError::MissingProperties { missing, .. } => {
                 assert_eq!(
                     missing[0].interactive_shape,
-                    Some(InteractiveShape::Number { integer: true })
+                    Some(InteractiveShape::Number {
+                        integer: true,
+                        min: None,
+                        max: None,
+                    })
                 );
             }
             other => panic!("expected MissingProperties, got {other:?}"),
@@ -1828,7 +1887,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_file_property_maps_to_text_file_shape() {
+    fn missing_file_property_maps_to_file_shape() {
         let dir = TempDir::new().unwrap();
         let source = make_source(
             &dir,
@@ -1839,11 +1898,56 @@ mod tests {
             CompositionError::MissingProperties { missing, .. } => {
                 assert_eq!(
                     missing[0].interactive_shape,
-                    Some(InteractiveShape::Text {
-                        format: TextFormat::File
+                    Some(InteractiveShape::File {
+                        is_array: false,
+                        patterns: Vec::new(),
                     })
                 );
             }
+            other => panic!("expected MissingProperties, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn missing_file_array_property_maps_to_file_array_shape() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            "---\n$schema:\n  attachments: 'file[](required)'\n---\nbody\n",
+        );
+        let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+        match err {
+            CompositionError::MissingProperties { missing, .. } => {
+                assert_eq!(
+                    missing[0].interactive_shape,
+                    Some(InteractiveShape::File {
+                        is_array: true,
+                        patterns: Vec::new(),
+                    })
+                );
+            }
+            other => panic!("expected MissingProperties, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn missing_file_property_preserves_match_patterns() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            "---\n$schema:\n  cover: \"file(match('*.png', '*.jpg'); required)\"\n---\nbody\n",
+        );
+        let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+        match err {
+            CompositionError::MissingProperties { missing, .. } => match &missing[0]
+                .interactive_shape
+            {
+                Some(InteractiveShape::File { patterns, is_array }) => {
+                    assert!(!is_array);
+                    assert_eq!(patterns, &["*.png", "*.jpg"]);
+                }
+                other => panic!("expected File shape, got {other:?}"),
+            },
             other => panic!("expected MissingProperties, got {other:?}"),
         }
     }
