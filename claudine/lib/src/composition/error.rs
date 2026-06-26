@@ -1062,6 +1062,36 @@ pub enum CompositionError {
         message: Option<String>,
     },
 
+    // -- Autocomplete errors --------------------------------------------------
+    /// No files matched the autocomplete query.
+    #[error("no files matched autocomplete query `{query}`")]
+    AutocompleteNoMatches {
+        /// The user's typed query token.
+        query: String,
+    },
+
+    /// Too many files matched the autocomplete query; the user must narrow it.
+    #[error(
+        "more than {cap} files matched autocomplete query `{query}`; narrow your query"
+    )]
+    AutocompleteOverCap {
+        /// The user's typed query token.
+        query: String,
+        /// The candidate cap that was exceeded.
+        cap: usize,
+    },
+
+    /// Autocomplete requires an interactive terminal.
+    #[error("autocomplete requires an interactive terminal")]
+    AutocompleteNotInteractive,
+
+    /// The user cancelled the autocomplete dialog or chooser.
+    #[error("autocomplete cancelled for query `{query}`")]
+    AutocompleteCancelled {
+        /// The user's typed query token.
+        query: String,
+    },
+
     /// Composition succeeded but produced an empty body.
     ///
     /// The Markdown composed cleanly (no transclusion or shell-expansion
@@ -1115,7 +1145,7 @@ pub enum CompositionError {
 /// type label, optional description) without holding a Darkmatter schema
 /// reference. Constructed by the validation layer after consulting the
 /// effective SimplifiedSchema.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MissingProperty {
     /// Property name as it appears in the schema.
     pub name: String,
@@ -1138,19 +1168,31 @@ pub struct MissingProperty {
 /// [`SimplifiedType`][darkmatter::markdown::schemas::SimplifiedType] plus
 /// any enum members. The CLI layer chooses the concrete `biscuit-tui`
 /// widget from this enum.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum InteractiveShape {
-    /// Plain text input (string, date, datetime, time, url, email, file).
+    /// Plain text input (string, date, datetime, time, url, email).
     Text {
         /// Hint about the expected text format. Used for placeholder /
         /// help text only — Darkmatter handles validation post-submission.
         format: TextFormat,
+        /// Optional minimum string length (Unicode code points) from the
+        /// SimplifiedSchema `min` constraint.
+        min_len: Option<usize>,
+        /// Optional maximum string length (Unicode code points) from the
+        /// SimplifiedSchema `max` constraint.
+        max_len: Option<usize>,
     },
     /// Numeric input with parse-and-retry validation.
     Number {
         /// `true` when the property is constrained to integer values
         /// (via the SimplifiedSchema `integer` constraint).
         integer: bool,
+        /// Optional inclusive minimum from the SimplifiedSchema `min`
+        /// constraint.
+        min: Option<f64>,
+        /// Optional inclusive maximum from the SimplifiedSchema `max`
+        /// constraint.
+        max: Option<f64>,
     },
     /// Boolean on/off toggle (covers both `boolean` and `boolish`).
     Boolean,
@@ -1163,6 +1205,14 @@ pub enum InteractiveShape {
     EnumMany {
         /// Enum member names in declaration order.
         members: Vec<String>,
+    },
+    /// File reference chooser.
+    File {
+        /// `true` when the property is declared as `file[]`.
+        is_array: bool,
+        /// Glob patterns from `match(...)`, empty for a bare `file`/`file[]`
+        /// property (uses the default glob).
+        patterns: Vec<String>,
     },
 }
 
@@ -1285,7 +1335,7 @@ fn format_missing_names(missing: &[MissingProperty]) -> String {
 ///
 /// Carries the same fields as a single-step [`CompositionError::MissingProperties`]
 /// so the CLI can render each step's report without having to re-validate.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SequenceMissingPropertiesStep {
     /// 1-based step number.
     pub step: usize,
@@ -2038,6 +2088,38 @@ impl BlockError for CompositionError {
                          conditional block.",
                     )
             }
+            CompositionError::AutocompleteNoMatches { query } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "no autocomplete matches"))
+                .body(format!(
+                    "No files matched autocomplete query <cyan>`{}`</cyan>.",
+                    escape_prose_path(query)
+                ))
+                .hint("Check the query token or run without a query to see all candidates."),
+            CompositionError::AutocompleteOverCap { query, cap } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "too many matches"))
+                .body(format!(
+                    "More than <cyan>{cap}</cyan> files matched autocomplete query \
+                     <cyan>`{}`</cyan>.",
+                    escape_prose_path(query)
+                ))
+                .hint("Type more characters to narrow the query."),
+            CompositionError::AutocompleteNotInteractive => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "autocomplete not available",
+                ))
+                .body("Autocomplete requires an interactive terminal.".to_string())
+                .hint("Run in a terminal, or supply an explicit file path or reference."),
+            CompositionError::AutocompleteCancelled { query } => StatusBlock::new(StatusState::Warning)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "autocomplete cancelled",
+                ))
+                .body(format!(
+                    "Autocomplete for query <cyan>`{}`</cyan> was cancelled.",
+                    escape_prose_path(query)
+                ))
+                .hint("Supply an explicit file path or reference, or run the command again."),
             CompositionError::ShellExpansionFailed { error, .. } => {
                 // Delegate to the structured shell-expansion block so the
                 // linked source path, source excerpt, composed frontmatter
@@ -3167,5 +3249,69 @@ mod tests {
 
         assert!(matches!(err, CompositionError::WithFrontmatter { .. }));
         assert!(err.frontmatter_excerpt().is_some());
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 1 autocomplete error variants
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn autocomplete_no_matches_display_includes_query() {
+        let err = CompositionError::AutocompleteNoMatches {
+            query: "foo".to_string(),
+        };
+        let rendered = err.to_string();
+        assert!(rendered.contains("foo"), "got: {rendered}");
+        assert!(rendered.contains("no files matched"), "got: {rendered}");
+    }
+
+    #[test]
+    fn autocomplete_over_cap_display_includes_query_and_cap() {
+        let err = CompositionError::AutocompleteOverCap {
+            query: "bar".to_string(),
+            cap: 500,
+        };
+        let rendered = err.to_string();
+        assert!(rendered.contains("bar"), "got: {rendered}");
+        assert!(rendered.contains("500"), "got: {rendered}");
+        assert!(rendered.contains("narrow your query"), "got: {rendered}");
+    }
+
+    #[test]
+    fn autocomplete_not_interactive_display_is_actionable() {
+        let err = CompositionError::AutocompleteNotInteractive;
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("interactive terminal"),
+            "got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn autocomplete_errors_do_not_get_frontmatter_excerpt() {
+        let source = source_from("---\ntitle: x\n---\nbody\n");
+        let err = CompositionError::AutocompleteNoMatches {
+            query: "q".to_string(),
+        }
+        .enrich_frontmatter(&source, true);
+        assert!(
+            matches!(err, CompositionError::AutocompleteNoMatches { .. }),
+            "expected no wrapping, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn autocomplete_over_cap_status_block_names_query() {
+        use biscuit_terminal::prelude::TerminalRenderable;
+        use biscuit_terminal::terminal::Terminal;
+
+        let err = CompositionError::AutocompleteOverCap {
+            query: "plan".to_string(),
+            cap: 500,
+        };
+        let rendered = err.status_block(&Terminal::default()).render(&Terminal::default());
+        assert!(rendered.contains("plan"), "got: {rendered}");
+        assert!(rendered.contains("500"), "got: {rendered}");
+        assert!(rendered.contains("narrow"), "got: {rendered}");
     }
 }

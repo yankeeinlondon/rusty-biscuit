@@ -14,6 +14,7 @@
 pub mod agent_message;
 pub mod closure;
 mod error;
+pub mod file_detail;
 pub mod frontmatter_excerpt;
 mod guardrails;
 pub mod launch_workspace;
@@ -42,6 +43,7 @@ pub use error::{
     InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE, MissingProperty,
     SequenceMissingPropertiesStep, SequenceSelectionFailure, TextFormat,
 };
+pub use file_detail::{FileDetail, extract_markdown_detail, extract_yaml_sequence_detail};
 pub use frontmatter_excerpt::FrontmatterExcerpt;
 pub use launch_workspace::{LaunchWorkspaceContext, PackageContext};
 #[allow(deprecated)]
