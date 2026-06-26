@@ -339,6 +339,10 @@ fn compose_dry_run_quiet_and_silent_are_no_op() {
 
 /// Error surface (compose): a missing source file under `--dry-run` renders
 /// the error to **stderr**, exits **non-zero**, and leaves stdout clean.
+///
+/// In non-TTY sessions the ENTER-path autocomplete fallback is unavailable,
+/// so the error surfaces as `AutocompleteNotInteractive` rather than the
+/// original `FileNotFound`.
 #[cfg(unix)]
 #[test]
 fn compose_dry_run_missing_file_errors_to_stderr_with_clean_stdout() {
@@ -368,7 +372,8 @@ fn compose_dry_run_missing_file_errors_to_stderr_with_clean_stdout() {
     );
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
     assert!(
-        stderr.contains("does-not-exist.md"),
-        "error naming the missing file must appear on stderr; stderr was:\n{stderr}"
+        stderr.contains("autocomplete not available")
+            || stderr.contains("Autocomplete requires"),
+        "non-TTY missing file must report autocomplete unavailable; stderr was:\n{stderr}"
     );
 }

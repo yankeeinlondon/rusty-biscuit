@@ -104,7 +104,17 @@ fn run_sequence_inner(
         eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
     })?;
 
-    let source = composition::resolve_composition_source(&file)?;
+    let source = match composition::resolve_composition_source(&file) {
+        Ok(source) => source,
+        Err(CompositionError::FileNotFound(_)) => {
+            let selected = crate::completion::operation_file::autocomplete_operation_file(
+                &file,
+                crate::completion::scopes::ComposeMode::Sequence,
+            )?;
+            composition::resolve_composition_source(&selected)?
+        }
+        Err(e) => return Err(e.into()),
+    };
 
     reject_sequence_interactive(&source)?;
 

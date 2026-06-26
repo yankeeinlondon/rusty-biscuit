@@ -342,7 +342,8 @@ fn validate_timeout_flags(shared: &SharedComposeArgs) -> Result<()> {
 }
 
 /// Resolve the composition source, with inline-specific error reporting
-/// for reference-resolution failures.
+/// for reference-resolution failures and an ENTER-path autocomplete fallback
+/// when the file reference is not found.
 fn resolve_composition_source(
     file: &str,
     kind: CompositionKind,
@@ -350,6 +351,17 @@ fn resolve_composition_source(
 ) -> Result<ResolvedCompositionSource> {
     match claudine::composition::resolve_composition_source(file) {
         Ok(source) => Ok(source),
+        Err(CompositionError::FileNotFound(_)) => {
+            let mode = match kind {
+                CompositionKind::Direct => crate::completion::scopes::ComposeMode::Compose,
+                CompositionKind::Inline => {
+                    crate::completion::scopes::ComposeMode::InlineCompose
+                }
+            };
+            let selected =
+                crate::completion::operation_file::autocomplete_operation_file(file, mode)?;
+            claudine::composition::resolve_composition_source(&selected).map_err(|e| e.into())
+        }
         Err(e) => {
             if kind.is_inline() {
                 // Only a genuine reference-resolution failure means the file
@@ -357,12 +369,7 @@ fn resolve_composition_source(
                 // (e.g. malformed frontmatter) must not be reported as
                 // "no match" — its own typed error already names the file and
                 // the cause.
-                if !shared.silent
-                    && matches!(
-                        e,
-                        CompositionError::FileNotFound(_) | CompositionError::InvalidReference(_)
-                    )
-                {
+                if !shared.silent && matches!(e, CompositionError::InvalidReference(_)) {
                     let term = crate::log::terminal();
                     claudine::harness::report::report_source_file(
                         file,
