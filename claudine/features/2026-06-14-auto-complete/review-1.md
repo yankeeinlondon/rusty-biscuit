@@ -1,5 +1,6 @@
 ---
 ready: false
+implemented: true
 agent: "codex/default"
 created: "2026-06-26T02:12:03"
 ---
