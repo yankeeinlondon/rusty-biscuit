@@ -1,12 +1,19 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
+/// Invoke the pre-built `so-you-say` binary directly.
+///
+/// Cargo sets `CARGO_BIN_EXE_<bin-name>` for integration tests, pointing at the
+/// already-compiled binary. Spawning it directly avoids `cargo run`, whose
+/// per-invocation build-lock contention under parallel test execution makes
+/// these assertions flaky (slow waits, interleaved cargo progress on stdout).
+fn cli() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_so-you-say"))
+}
+
 #[test]
 fn test_cli_with_arguments() {
-    let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "test"])
-        .output()
-        .expect("Failed to execute");
+    let output = cli().arg("test").output().expect("Failed to execute");
 
     assert!(
         output.status.success(),
@@ -16,10 +23,7 @@ fn test_cli_with_arguments() {
 
 #[test]
 fn test_cli_help_flag() {
-    let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "--help"])
-        .output()
-        .expect("Failed to execute");
+    let output = cli().arg("--help").output().expect("Failed to execute");
 
     assert!(output.status.success(), "Help flag should exit with code 0");
 
@@ -36,10 +40,7 @@ fn test_cli_help_flag() {
 
 #[test]
 fn test_cli_version_flag() {
-    let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "--version"])
-        .output()
-        .expect("Failed to execute");
+    let output = cli().arg("--version").output().expect("Failed to execute");
 
     assert!(
         output.status.success(),
@@ -55,8 +56,7 @@ fn test_cli_version_flag() {
 
 #[test]
 fn test_cli_stdin_input() {
-    let mut child = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli"])
+    let mut child = cli()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -78,8 +78,7 @@ fn test_cli_stdin_input() {
 
 #[test]
 fn test_cli_no_args_closes_gracefully() {
-    let mut child = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli"])
+    let mut child = cli()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -104,17 +103,8 @@ fn test_cli_no_args_closes_gracefully() {
 
 #[test]
 fn test_cli_multi_word_args() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "biscuit-speaks-cli",
-            "--",
-            "Hello",
-            "world",
-            "from",
-            "tests",
-        ])
+    let output = cli()
+        .args(["Hello", "world", "from", "tests"])
         .output()
         .expect("Failed to execute");
 
@@ -126,8 +116,7 @@ fn test_cli_multi_word_args() {
 
 #[test]
 fn test_cli_empty_stdin() {
-    let mut child = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli"])
+    let mut child = cli()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -153,16 +142,8 @@ fn test_cli_empty_stdin() {
 
 #[test]
 fn test_cli_unicode_args() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "biscuit-speaks-cli",
-            "--",
-            "Hello",
-            "世界",
-            "🚀",
-        ])
+    let output = cli()
+        .args(["Hello", "世界", "🚀"])
         .output()
         .expect("Failed to execute");
 
@@ -174,18 +155,8 @@ fn test_cli_unicode_args() {
 
 #[test]
 fn test_cli_special_chars_args() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "biscuit-speaks-cli",
-            "--",
-            "Hello,",
-            "world!",
-            "How's",
-            "it",
-            "going?",
-        ])
+    let output = cli()
+        .args(["Hello,", "world!", "How's", "it", "going?"])
         .output()
         .expect("Failed to execute");
 
@@ -197,16 +168,8 @@ fn test_cli_special_chars_args() {
 
 #[test]
 fn test_cli_gender_flag_male() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "biscuit-speaks-cli",
-            "--",
-            "--gender",
-            "male",
-            "test",
-        ])
+    let output = cli()
+        .args(["--gender", "male", "test"])
         .output()
         .expect("Failed to execute");
 
@@ -218,16 +181,8 @@ fn test_cli_gender_flag_male() {
 
 #[test]
 fn test_cli_gender_flag_female() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "biscuit-speaks-cli",
-            "--",
-            "--gender",
-            "female",
-            "test",
-        ])
+    let output = cli()
+        .args(["--gender", "female", "test"])
         .output()
         .expect("Failed to execute");
 
@@ -239,16 +194,8 @@ fn test_cli_gender_flag_female() {
 
 #[test]
 fn test_cli_gender_flag_short() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "biscuit-speaks-cli",
-            "--",
-            "-g",
-            "male",
-            "test",
-        ])
+    let output = cli()
+        .args(["-g", "male", "test"])
         .output()
         .expect("Failed to execute");
 
@@ -257,16 +204,8 @@ fn test_cli_gender_flag_short() {
 
 #[test]
 fn test_cli_gender_flag_invalid() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "biscuit-speaks-cli",
-            "--",
-            "--gender",
-            "invalid",
-            "test",
-        ])
+    let output = cli()
+        .args(["--gender", "invalid", "test"])
         .output()
         .expect("Failed to execute");
 
@@ -284,10 +223,7 @@ fn test_cli_gender_flag_invalid() {
 
 #[test]
 fn test_cli_help_shows_gender_option() {
-    let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "--help"])
-        .output()
-        .expect("Failed to execute");
+    let output = cli().arg("--help").output().expect("Failed to execute");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -302,8 +238,8 @@ fn test_cli_help_shows_gender_option() {
 
 #[test]
 fn test_cli_list_providers_subcommand() {
-    let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "list-providers"])
+    let output = cli()
+        .arg("list-providers")
         .output()
         .expect("Failed to execute");
 
@@ -321,10 +257,7 @@ fn test_cli_list_providers_subcommand() {
 
 #[test]
 fn test_cli_help_shows_list_providers_subcommand() {
-    let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "--help"])
-        .output()
-        .expect("Failed to execute");
+    let output = cli().arg("--help").output().expect("Failed to execute");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -335,16 +268,8 @@ fn test_cli_help_shows_list_providers_subcommand() {
 
 #[test]
 fn test_cli_voice_option() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "biscuit-speaks-cli",
-            "--",
-            "--voice",
-            "Samantha",
-            "test",
-        ])
+    let output = cli()
+        .args(["--voice", "Samantha", "test"])
         .output()
         .expect("Failed to execute");
 
@@ -353,10 +278,7 @@ fn test_cli_voice_option() {
 
 #[test]
 fn test_cli_help_shows_voice_option() {
-    let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "--help"])
-        .output()
-        .expect("Failed to execute");
+    let output = cli().arg("--help").output().expect("Failed to execute");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -367,16 +289,8 @@ fn test_cli_help_shows_voice_option() {
 
 #[test]
 fn test_cli_provider_option() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "biscuit-speaks-cli",
-            "--",
-            "--provider",
-            "say",
-            "test",
-        ])
+    let output = cli()
+        .args(["--provider", "say", "test"])
         .output()
         .expect("Failed to execute");
 
@@ -387,16 +301,8 @@ fn test_cli_provider_option() {
 
 #[test]
 fn test_cli_invalid_provider() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "biscuit-speaks-cli",
-            "--",
-            "--provider",
-            "not_a_real_provider",
-            "test",
-        ])
+    let output = cli()
+        .args(["--provider", "not_a_real_provider", "test"])
         .output()
         .expect("Failed to execute");
 
@@ -414,10 +320,7 @@ fn test_cli_invalid_provider() {
 
 #[test]
 fn test_cli_help_shows_provider_option() {
-    let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "--help"])
-        .output()
-        .expect("Failed to execute");
+    let output = cli().arg("--help").output().expect("Failed to execute");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -428,8 +331,8 @@ fn test_cli_help_shows_provider_option() {
 
 #[test]
 fn test_cli_loud_flag() {
-    let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "--loud", "test"])
+    let output = cli()
+        .args(["--loud", "test"])
         .output()
         .expect("Failed to execute");
 
@@ -438,8 +341,8 @@ fn test_cli_loud_flag() {
 
 #[test]
 fn test_cli_soft_flag() {
-    let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "--soft", "test"])
+    let output = cli()
+        .args(["--soft", "test"])
         .output()
         .expect("Failed to execute");
 
@@ -448,16 +351,8 @@ fn test_cli_soft_flag() {
 
 #[test]
 fn test_cli_loud_and_soft_conflict() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "biscuit-speaks-cli",
-            "--",
-            "--loud",
-            "--soft",
-            "test",
-        ])
+    let output = cli()
+        .args(["--loud", "--soft", "test"])
         .output()
         .expect("Failed to execute");
 
@@ -475,10 +370,7 @@ fn test_cli_loud_and_soft_conflict() {
 
 #[test]
 fn test_cli_help_shows_volume_options() {
-    let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "--help"])
-        .output()
-        .expect("Failed to execute");
+    let output = cli().arg("--help").output().expect("Failed to execute");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -493,8 +385,8 @@ fn test_cli_help_shows_volume_options() {
 
 #[test]
 fn test_cli_fast_flag() {
-    let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "--fast", "test"])
+    let output = cli()
+        .args(["--fast", "test"])
         .output()
         .expect("Failed to execute");
 
@@ -503,8 +395,8 @@ fn test_cli_fast_flag() {
 
 #[test]
 fn test_cli_slow_flag() {
-    let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "--slow", "test"])
+    let output = cli()
+        .args(["--slow", "test"])
         .output()
         .expect("Failed to execute");
 
@@ -513,16 +405,8 @@ fn test_cli_slow_flag() {
 
 #[test]
 fn test_cli_fast_and_slow_conflict() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "biscuit-speaks-cli",
-            "--",
-            "--fast",
-            "--slow",
-            "test",
-        ])
+    let output = cli()
+        .args(["--fast", "--slow", "test"])
         .output()
         .expect("Failed to execute");
 
@@ -540,10 +424,7 @@ fn test_cli_fast_and_slow_conflict() {
 
 #[test]
 fn test_cli_help_shows_speed_options() {
-    let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "--help"])
-        .output()
-        .expect("Failed to execute");
+    let output = cli().arg("--help").output().expect("Failed to execute");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -558,15 +439,8 @@ fn test_cli_help_shows_speed_options() {
 
 #[test]
 fn test_cli_background_flag() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "biscuit-speaks-cli",
-            "--",
-            "--background",
-            "background test",
-        ])
+    let output = cli()
+        .args(["--background", "background test"])
         .output()
         .expect("Failed to execute");
 
@@ -585,10 +459,7 @@ fn test_cli_background_flag() {
 
 #[test]
 fn test_cli_help_shows_background_option() {
-    let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "--help"])
-        .output()
-        .expect("Failed to execute");
+    let output = cli().arg("--help").output().expect("Failed to execute");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -599,8 +470,8 @@ fn test_cli_help_shows_background_option() {
 
 #[test]
 fn test_cli_old_list_providers_flag_rejected() {
-    let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "--list-providers"])
+    let output = cli()
+        .arg("--list-providers")
         .output()
         .expect("Failed to execute");
 
@@ -612,8 +483,8 @@ fn test_cli_old_list_providers_flag_rejected() {
 
 #[test]
 fn test_cli_old_list_voices_flag_rejected() {
-    let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "--list-voices"])
+    let output = cli()
+        .arg("--list-voices")
         .output()
         .expect("Failed to execute");
 
@@ -625,16 +496,8 @@ fn test_cli_old_list_voices_flag_rejected() {
 
 #[test]
 fn test_cli_background_with_refresh_cache_is_allowed() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "biscuit-speaks-cli",
-            "--",
-            "--background",
-            "--refresh-cache",
-            "test",
-        ])
+    let output = cli()
+        .args(["--background", "--refresh-cache", "test"])
         .output()
         .expect("Failed to execute");
 
