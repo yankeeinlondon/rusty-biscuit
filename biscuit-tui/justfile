@@ -61,12 +61,12 @@ test-l2 *args="":
     @echo
     @just _test_l2 {{CLI}} {{args}}
 
-# Level-3 (OS keyboard injection) tests for the CLI. macOS only; requires
-# cliclick on PATH and a non-WezTerm parent terminal for focus reliability.
-# Sets `RUN_LEVEL3=1` so the `level3_enabled()` gate trips; individual
-# tests still skip cleanly when cliclick / WezTerm are unavailable.
-test-l3 *args="":
-    @just _test_l3 {{CLI}} {{args}}
+# Not applicable: biscuit-tui has no Level-3 (OS keyboard injection) tests.
+# Keyboard-driven behavior is verified headlessly at Level 2 by injecting the
+# equivalent terminal byte sequences into a tmux pane — focus-stealing
+# cliclick tests were retired in favour of that approach.
+test-l3:
+    @echo "test-l3: not applicable for biscuit-tui (keyboard input verified headlessly at Level 2)"
 
 # Not applicable: biscuit-tui has no browser-target tests.
 test-browser:
