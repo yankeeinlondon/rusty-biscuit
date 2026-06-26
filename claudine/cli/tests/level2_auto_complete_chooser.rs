@@ -23,8 +23,10 @@
 
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+
+use serde_json::Value;
 
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
@@ -41,10 +43,11 @@ const TALL_COLUMNS: u32 = 30;
 const TALL_LINES: u32 = 50;
 
 /// Backend-specific key injection. tmux routes through `send-keys` key
-/// names (more reliable for Enter/Space); WezTerm uses raw bytes.
+/// names (more reliable for Enter/Space/Down); WezTerm uses raw bytes.
 trait KeySender: TerminalHarness {
     fn send_enter(&mut self) -> io::Result<()>;
     fn send_space(&mut self) -> io::Result<()>;
+    fn send_down(&mut self) -> io::Result<()>;
 }
 
 impl KeySender for TmuxHarness {
@@ -53,6 +56,9 @@ impl KeySender for TmuxHarness {
     }
     fn send_space(&mut self) -> io::Result<()> {
         self.send_key("Space")
+    }
+    fn send_down(&mut self) -> io::Result<()> {
+        self.send_key("Down")
     }
 }
 
@@ -63,19 +69,23 @@ impl KeySender for WezTermHarness {
     fn send_space(&mut self) -> io::Result<()> {
         self.send_text(b" ")
     }
+    fn send_down(&mut self) -> io::Result<()> {
+        self.send_text(b"\x1b[B")
+    }
 }
 
 /// Stage a workspace with a `goose` stub, an empty claudine config (so the
 /// init wizard does not intercept stdin), a git repo (so file labels are
 /// repo-relative), and a prompt file whose schema declares the requested
 /// file property.
-fn stage_workspace(property: &str) -> TestWorkspace {
+fn stage_workspace(property: &str, body: &str) -> TestWorkspace {
     let ws = TestWorkspace::named("auto-complete-chooser");
     let bin_dir = ws.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
     let marker = ws.path().join("launched.flag");
+    let prompt_dump = prompt_dump_path(&ws);
 
-    stage_goose_stub(&bin_dir, &marker);
+    stage_goose_stub(&bin_dir, &marker, &prompt_dump);
     stage_default_config(ws.path());
     init_git_repo(ws.path());
 
@@ -89,11 +99,15 @@ fn stage_workspace(property: &str) -> TestWorkspace {
     let md_file = ws.path().join("plan.md");
     fs::write(
         &md_file,
-        format!("---\n$schema:\n  {property}\n---\nPlan.\n"),
+        format!("---\n$schema:\n  {property}\n---\n{body}\n"),
     )
     .unwrap();
 
     ws
+}
+
+fn prompt_dump_path(ws: &TestWorkspace) -> PathBuf {
+    ws.path().join("received.prompt")
 }
 
 fn stage_default_config(home_dir: &Path) {
@@ -102,11 +116,24 @@ fn stage_default_config(home_dir: &Path) {
     fs::write(claudine_dir.join("config.json"), "{}").unwrap();
 }
 
-fn stage_goose_stub(bin_dir: &Path, marker_file: &Path) {
+fn stage_goose_stub(bin_dir: &Path, marker_file: &Path, prompt_file: &Path) {
     write_executable(
         &bin_dir.join("goose"),
         &format!(
-            "#!/bin/sh\necho 'launched' > {}\nexit 0\n",
+            "#!/bin/sh\n\
+             while [ $# -gt 0 ]; do\n\
+               case \"$1\" in\n\
+                 -t)\n\
+                   shift\n\
+                   printf '%s\\n' \"$1\" > {}\n\
+                   break\n\
+                   ;;\n\
+               esac\n\
+               shift\n\
+             done\n\
+             echo 'launched' > {}\n\
+             exit 0\n",
+            prompt_file.display(),
             marker_file.display()
         ),
     );
@@ -186,6 +213,7 @@ fn drive_chooser(
     for key in pre_submit_keys {
         match key {
             Key::Space => harness.send_space().expect("send pre-submit Space"),
+            Key::Down => harness.send_down().expect("send pre-submit Down"),
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -217,12 +245,20 @@ fn drive_chooser(
 #[allow(dead_code)]
 enum Key {
     Space,
+    Down,
 }
 
 /// Candidate labels and detail text markers used by layout assertions.
 /// Whether a line belongs to the candidate list (ChooseOne or ChooseMany).
 fn is_list_line(line: &str) -> bool {
-    line.contains('○') || line.contains('☐') || line.contains('▶') || line.contains('☑')
+    line.contains('○')
+        || line.contains('☐')
+        || line.contains('▶')
+        || line.contains('☑')
+        || line.contains('\u{f043e}')
+        || line.contains('\u{f4aa}')
+        || line.contains('\u{f0131}')
+        || line.contains('\u{f14a}')
 }
 
 fn candidate_marker(plain: &str) -> bool {
@@ -277,20 +313,134 @@ fn assert_tall_layout(frame: &CapturedFrame) {
     );
 }
 
+/// Read the prompt the fake `goose` provider received via its `-t` flag.
+fn read_recorded_prompt(ws: &TestWorkspace) -> String {
+    let path = prompt_dump_path(ws);
+    fs::read_to_string(&path).unwrap_or_else(|_| {
+        panic!(
+            "provider did not record its -t prompt to {}",
+            path.display()
+        )
+    })
+}
+
+/// Assert the captured chooser frame uses `ChooseOne` (single-select) glyphs
+/// and not the checkbox glyphs used by `ChooseMany`.
+fn assert_choose_one_markers(frame: &CapturedFrame) {
+    let plain = &frame.plain;
+    let has_radio = plain.contains('○')
+        || plain.contains('\u{f043e}')
+        || plain.contains('\u{f4aa}');
+    assert!(
+        has_radio,
+        "ChooseOne must render a radio marker (○/\u{f043e}/\u{f4aa}); plain:\n{plain}"
+    );
+    let has_checkbox = plain.contains('☐')
+        || plain.contains('☑')
+        || plain.contains('\u{f0131}')
+        || plain.contains('\u{f14a}');
+    assert!(
+        !has_checkbox,
+        "ChooseOne must not render checkbox markers; plain:\n{plain}"
+    );
+}
+
+/// Assert the captured chooser frame uses `ChooseMany` (multi-select) glyphs
+/// and that exactly `expected_checked` items are checked.
+fn assert_choose_many_markers(frame: &CapturedFrame, expected_checked: usize) {
+    let plain = &frame.plain;
+    let has_checkbox = plain.contains('☐')
+        || plain.contains('☑')
+        || plain.contains('\u{f0131}')
+        || plain.contains('\u{f14a}');
+    assert!(
+        has_checkbox,
+        "ChooseMany must render checkbox markers (☐/☑/\u{f0131}/\u{f14a}); plain:\n{plain}"
+    );
+    let has_radio = plain.contains('○')
+        || plain.contains('\u{f043e}')
+        || plain.contains('\u{f4aa}');
+    assert!(
+        !has_radio,
+        "ChooseMany must not render a radio marker (○/\u{f043e}/\u{f4aa}); plain:\n{plain}"
+    );
+    let checked_count = plain.matches('☑').count() + plain.matches('\u{f14a}').count();
+    assert_eq!(
+        checked_count, expected_checked,
+        "ChooseMany must have {expected_checked} checked item(s), found {checked_count}; plain:\n{plain}"
+    );
+}
+
 // ----------------------------------------------------------------------
 // Type-driven chooser behavior
 // ----------------------------------------------------------------------
 
 fn run_file_chooser_test<H: KeySender>(harness: &mut H) {
-    let ws = stage_workspace("cover: 'file(required)'");
+    let ws = stage_workspace("cover: 'file(required)'", "cover: {{ doc.cover }}");
     let (chooser_frame, _) = drive_chooser(harness, &ws, &[]);
     assert_chooser_and_detail(&chooser_frame);
+    assert_choose_one_markers(&chooser_frame);
+
+    let prompt = read_recorded_prompt(&ws);
+    assert!(
+        prompt.starts_with("cover: "),
+        "composed prompt must begin with 'cover: '; prompt:\n{prompt}"
+    );
+    let value = prompt.trim_start_matches("cover: ").trim();
+    assert!(
+        !value.starts_with('['),
+        "single-select file value must be a scalar string, not an array; value: {value}"
+    );
+    assert!(
+        value.contains("notes.md"),
+        "selected file path must appear in the composed prompt; value: {value}"
+    );
 }
 
 fn run_file_array_chooser_test<H: KeySender>(harness: &mut H) {
-    let ws = stage_workspace("attachments: 'file[](required)'");
-    let (chooser_frame, _) = drive_chooser(harness, &ws, &[Key::Space]);
+    let ws = stage_workspace(
+        "attachments: 'file[](required)'",
+        "attachments: {{ doc.attachments }}",
+    );
+    let (chooser_frame, _) =
+        drive_chooser(harness, &ws, &[Key::Space, Key::Down, Key::Down, Key::Space]);
     assert_chooser_and_detail(&chooser_frame);
+    assert_choose_many_markers(&chooser_frame, 2);
+
+    let prompt = read_recorded_prompt(&ws);
+    assert!(
+        prompt.starts_with("attachments: "),
+        "composed prompt must begin with 'attachments: '; prompt:\n{prompt}"
+    );
+    let value = prompt.trim_start_matches("attachments: ").trim();
+    assert!(
+        value.starts_with('[') && value.ends_with(']'),
+        "multi-select file value must be a JSON array; value: {value}"
+    );
+    let parsed: Value = serde_json::from_str(value)
+        .unwrap_or_else(|_| panic!("multi-select value must be valid JSON; value: {value}"));
+    let arr = parsed.as_array().unwrap_or_else(|| {
+        panic!("multi-select file value must be a JSON array; value: {value}")
+    });
+    assert_eq!(
+        arr.len(),
+        2,
+        "must have selected exactly two files; array: {arr:?}"
+    );
+    for item in arr {
+        assert!(
+            item.is_string(),
+            "each selected file must be a string; item: {item}"
+        );
+    }
+    assert!(
+        arr.iter().any(|v| v.as_str().unwrap().contains("notes.md")),
+        "notes.md must be selected; array: {arr:?}"
+    );
+    assert!(
+        arr.iter().any(|v| v.as_str().unwrap().contains("readme.md")),
+        "readme.md must be selected; array: {arr:?}"
+    );
 }
 
 // ----------------------------------------------------------------------
@@ -298,13 +448,13 @@ fn run_file_array_chooser_test<H: KeySender>(harness: &mut H) {
 // ----------------------------------------------------------------------
 
 fn run_wide_layout_test<H: KeySender>(harness: &mut H) {
-    let ws = stage_workspace("cover: 'file(required)'");
+    let ws = stage_workspace("cover: 'file(required)'", "Plan.");
     let (chooser_frame, _) = drive_chooser(harness, &ws, &[]);
     assert_wide_layout(&chooser_frame);
 }
 
 fn run_tall_layout_test<H: KeySender>(harness: &mut H) {
-    let ws = stage_workspace("cover: 'file(required)'");
+    let ws = stage_workspace("cover: 'file(required)'", "Plan.");
     let (chooser_frame, _) = drive_chooser(harness, &ws, &[]);
     assert_tall_layout(&chooser_frame);
 }
