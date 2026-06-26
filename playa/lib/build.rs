@@ -4,13 +4,11 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use symphonia::core::codecs::DecoderOptions;
-use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
-use symphonia::default::{get_codecs, get_probe};
+use symphonia::default::get_probe;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
@@ -206,47 +204,23 @@ fn compute_duration_ms(path: &Path) -> Result<u32, Box<dyn std::error::Error>> {
         &FormatOptions::default(),
         &MetadataOptions::default(),
     )?;
-    let mut format = probed.format;
-    let (track_id, sample_rate, mut decoder) = {
-        let track = format
-            .default_track()
-            .ok_or("No default track in audio file")?;
-        let sample_rate = track
-            .codec_params
-            .sample_rate
-            .ok_or("Missing sample rate")? as u64;
-        let decoder = get_codecs().make(&track.codec_params, &DecoderOptions::default())?;
-        (track.id, sample_rate, decoder)
-    };
-    let mut total_frames: u64 = 0;
+    let track = probed
+        .format
+        .default_track()
+        .ok_or("No default track in audio file")?;
+    let params = &track.codec_params;
 
-    loop {
-        match format.next_packet() {
-            Ok(packet) => {
-                if packet.track_id() != track_id {
-                    continue;
-                }
-                match decoder.decode(&packet) {
-                    Ok(audio) => {
-                        total_frames += audio.frames() as u64;
-                    }
-                    Err(SymphoniaError::DecodeError(_)) => continue,
-                    Err(error) => return Err(Box::new(error)),
-                }
-            }
-            Err(SymphoniaError::IoError(error))
-                if error.kind() == std::io::ErrorKind::UnexpectedEof =>
-            {
-                break;
-            }
-            Err(SymphoniaError::ResetRequired) => {
-                return Err("Decoder reset required".into());
-            }
-            Err(error) => return Err(Box::new(error)),
-        }
-    }
+    // Derive duration from the container header (`n_frames` / `sample_rate`)
+    // rather than decoding the stream. A decode loop here is unbounded —
+    // `next_packet` can spin on an edge-case stream and stall the whole build,
+    // and the resolved symphonia patch isn't pinned (Cargo.lock is gitignored),
+    // so behavior drifts across hosts. Header math is bounded and host-stable.
+    let sample_rate = params.sample_rate.ok_or("Missing sample rate")? as f64;
+    let n_frames = params
+        .n_frames
+        .ok_or("Missing frame count (n_frames) in audio header")?;
 
-    let duration_ms = ((total_frames as f64 / sample_rate as f64) * 1000.0).round() as u64;
+    let duration_ms = ((n_frames as f64 / sample_rate) * 1000.0).round() as u64;
     Ok(duration_ms.min(u32::MAX as u64) as u32)
 }
 
