@@ -4,6 +4,44 @@ phases: 5
 created: "2026-06-25"
 start_phase: 1
 yolo: "true"
+source_files_during_phase_2:
+  - "claudine/cli/src/completion/schema_completion.rs"
+  - "claudine/cli/tests/compose_schema_cli.rs"
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - "claudine/cli/src/completion/operation_file.rs"
+  - "claudine/cli/src/completion/mod.rs"
+  - "claudine/cli/src/commands/compose/prep.rs"
+  - "claudine/cli/src/commands/sequence.rs"
+  - "claudine/lib/src/composition/error.rs"
+  - "claudine/cli/tests/wrap_compose_validation.rs"
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - "claudine/lib/src/composition/error.rs"
+  - "claudine/lib/src/composition/schema_validation.rs"
+  - "claudine/cli/src/commands/schema_interactive.rs"
+  - "claudine/cli/src/commands/wrap/sequence/tests.rs"
+  - "claudine/cli/src/completion/schema_completion.rs"
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - "claudine/cli/tests/level2_auto_complete_chooser.rs"
+  - "claudine/cli/tests/completion_contract.rs"
+  - "claudine/cli/tests/completion_perf.rs"
+  - "claudine/cli/src/completion/autocomplete_ui.rs"
+docs_updated_during_phase_5:
+  - "claudine/docs/topics/shell-completions.md"
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - ".claude/skills/claudine/cli-reference.md"
+packages:
+  - "claudine"
+  - "claudine-cli"
 ---
 
 # Execution Plan — Shell Completions and Autocomplete
@@ -69,7 +107,7 @@ being consumed in later phases.
 **Parallelizable within the phase:** tasks 1.1, 1.2, 1.3, and 1.6 are
 independent of each other; 1.4 depends on 1.3; 1.5 is independent.
 
-- [ ] **1.1 Walker query-predicate variant.** Add
+- [x] **1.1 Walker query-predicate variant.** Add
   `walk_scope_filtered(scope, budget, predicate)` to
   `cli/src/completion/walker.rs` that threads a filename/path substring
   predicate into the existing `ignore::WalkBuilder` loop so the
@@ -80,7 +118,7 @@ independent of each other; 1.4 depends on 1.3; 1.5 is independent.
   early-abort reports "more than cap", (c) zero-budget / nonexistent-root
   parity with `walk_scope`.
 
-- [ ] **1.2 Default-glob file candidate gatherer.** New module (e.g.
+- [x] **1.2 Default-glob file candidate gatherer.** New module (e.g.
   `cli/src/completion/default_glob.rs`) exposing a function that returns
   markdown candidates under the effective repo root (or CWD tree when no
   repo) honoring `.gitignore` / `.git/info/exclude` / global gitignore,
@@ -91,7 +129,7 @@ independent of each other; 1.4 depends on 1.3; 1.5 is independent.
   `file`/`file[]` property choosers (4.3). Unit-test the prompt-dir
   exclusion and `_`-prefix exclusion explicitly.
 
-- [ ] **1.3 Detail-block data model + extractor.** New type (e.g.
+- [x] **1.3 Detail-block data model + extractor.** New type (e.g.
   `FileDetail { badge, name, path, description, schema_lines }`) plus an
   extractor that reads `name` / `description` / `$schema` from (a)
   Markdown frontmatter via `darkmatter::Markdown` and (b) **YAML sequence
@@ -102,7 +140,7 @@ independent of each other; 1.4 depends on 1.3; 1.5 is independent.
   property chooser consume it. Unit-test both Markdown and YAML extraction
   paths including every fallback.
 
-- [ ] **1.4 Shared presentation components.** In the CLI layer, build:
+- [x] **1.4 Shared presentation components.** In the CLI layer, build:
   (a) a `Prose`-rendered **confirmation dialog** renderer
   (`<badge> <name>` line, blank line, `BlockQuote` description, `Schema:`
   block via `UnorderedList`, trailing `Use this file? (Y/n)`); (b) a
@@ -114,14 +152,14 @@ independent of each other; 1.4 depends on 1.3; 1.5 is independent.
   `biscuit-tui/docs/components/split_pane.md`). Confirm `ansi-to-tui` is
   already a dependency before adding it. Depends on 1.3.
 
-- [ ] **1.5 Autocomplete error variants.** Add typed
+- [x] **1.5 Autocomplete error variants.** Add typed
   `CompositionError` variants for the three ENTER failure modes: no
   matches, over-cap ("narrow your query"), and non-TTY/disabled. Keep them
   distinct so the CLI error walker can render each precisely (acceptance:
   "Autocomplete failure modes … all three are observable"). Wire the
   existing error-rendering path so the over-cap message names the query.
 
-- [ ] **1.6 Phase-1 checkpoint validation.** Run `just test` and
+- [x] **1.6 Phase-1 checkpoint validation.** Run `just test` and
   `just lint` in the `claudine/` area. Confirm the new modules compile
   under the workspace and that no existing completion test regressed.
 
@@ -132,7 +170,7 @@ independent of each other; 1.4 depends on 1.3; 1.5 is independent.
 Implements the two TAB-only additions in the spec. **Independent of
 Phases 3 & 4** — can be developed on a parallel branch once Phase 1 lands.
 
-- [ ] **2.1 Bare-file default-glob fallback.** In
+- [x] **2.1 Bare-file default-glob fallback.** In
   `cli/src/completion/schema_completion.rs` `file_candidates`, when the
   property's `match(...)` pattern list is empty (bare `file`/`file[]`),
   delegate to the 1.2 default-glob gatherer instead of returning
@@ -142,7 +180,7 @@ Phases 3 & 4** — can be developed on a parallel branch once Phase 1 lands.
   the new fallback behavior, and add a positive test that a bare `file`
   property surfaces repo markdown (excluding prompt dirs).
 
-- [ ] **2.2 `,`-continuation for `file[]`.** In the setter-value dispatch
+- [x] **2.2 `,`-continuation for `file[]`.** In the setter-value dispatch
   (`engine.rs::run_setter_value` and/or `schema_completion`), when the
   committed value partial for a `file[]` property already contains a
   top-level `,`, split the typed comma-list (trim whitespace, honor
@@ -153,7 +191,7 @@ Phases 3 & 4** — can be developed on a parallel branch once Phase 1 lands.
   re-open, exclusion of already-named files, and a literal-comma filename
   edge case (documented as unsupported for the exclusion set).
 
-- [ ] **2.3 Phase-2 checkpoint validation.** Run the
+- [x] **2.3 Phase-2 checkpoint validation.** Run the
   `completion_*` integration tests via `just test` (and
   `completion_perf` ignored test stays green). Verify via
   `claudine __complete` subprocess tests in `tests/common/completion.rs`
@@ -168,7 +206,7 @@ The `compose|inline-compose|sequence <file>` positional autocomplete. The
 ENTER path reuses the shipped bounded walker verbatim **except** the
 `*query*` filter is pushed into the walk.
 
-- [ ] **3.1 Hook point + gates.** In the compose/inline-compose/sequence
+- [x] **3.1 Hook point + gates.** In the compose/inline-compose/sequence
   runtime, after `resolve_composition_source` (`lib/src/composition/
   resolve.rs`) returns `FileNotFound` (FileReference failed), gate on an
   interactive session: stdin **and** stderr are TTYs (mirror
@@ -179,7 +217,7 @@ ENTER path reuses the shipped bounded walker verbatim **except** the
   FileNotFound branch gains autocomplete; every other resolve error path
   is untouched.
 
-- [ ] **3.2 Query walk + cap enforcement.** Resolve the same `ScopeSet`
+- [x] **3.2 Query walk + cap enforcement.** Resolve the same `ScopeSet`
   the TAB path uses (`scopes::resolve_compose_scopes` for the mode) and
   walk it through the 1.1 filtered walker with the user's typed token as
   the `*query*` substring predicate. Enforce: zero query-matches → 1.5
@@ -187,14 +225,14 @@ ENTER path reuses the shipped bounded walker verbatim **except** the
   "narrow your query" error (never silent truncation; early-abort reports
   "more than 500"). One `sniff` invocation per run (reuse `ScopeContext`).
 
-- [ ] **3.3 Single-match confirmation dialog.** Exactly one query-match →
+- [x] **3.3 Single-match confirmation dialog.** Exactly one query-match →
   render the 1.4 confirmation dialog (no `SplitPane`, no chooser) using
   the 1.3 detail block for that file. `Y`/Enter proceeds with the
   resolved path; `n`/Esc aborts to a typed cancel (non-fatal). Verify the
   `Use this file? (Y/n)` trailer is present and that the path renders as
   an OSC8 link.
 
-- [ ] **3.4 Multi-match two-pane chooser.** Two or more query-matches →
+- [x] **3.4 Multi-match two-pane chooser.** Two or more query-matches →
   drive `ChooseOne` (single-select — the file argument is ONE file) in a
   `SplitPane` with `SplitDirection::Auto`. The detail pane recomputes from
   `ChooseOneState::active_option()` each frame. Submitting returns the
@@ -202,12 +240,12 @@ ENTER path reuses the shipped bounded walker verbatim **except** the
   frontmatter contract (compose/inline-compose/sequence filtering already
   lives in `frontmatter::valid_for_mode` — apply it to the candidate set).
 
-- [ ] **3.5 YAML sequence candidate detail.** Ensure 3.3/3.4 populate the
+- [x] **3.5 YAML sequence candidate detail.** Ensure 3.3/3.4 populate the
   detail block for `.yaml`/`.yml` sequence files from top-level keys
   (badge `SEQUENCE`) via the 1.3 extractor, identical fallbacks to the
   Markdown path (spec §158).
 
-- [ ] **3.6 Phase-3 checkpoint validation.** `just test` covering: single
+- [x] **3.6 Phase-3 checkpoint validation.** `just test` covering: single
   match → dialog path, multiple matches → chooser path, zero matches →
   error, over-cap → "narrow your query" error, non-TTY → error. Assert
   the FileReference-first happy path is unchanged (existing compose CLI
@@ -222,7 +260,7 @@ collection. **Preserves the existing prompt gate** (TTY × `--silent` ×
 `prompt_for_missing`) per spec §182 and acceptance "Prompt gates
 preserved".
 
-- [ ] **4.1 New `File` interactive shape.** Extend
+- [x] **4.1 New `File` interactive shape.** Extend
   `InteractiveShape` (`lib/src/composition/error.rs`) with a `File`
   variant carrying array-ness and the schema's `match(...)` patterns
   (empty patterns ⇒ default glob). Update the schema-validation layer
@@ -231,7 +269,7 @@ preserved".
   `Text { format: File }` mapping for file-typed properties. Add unit
   tests at the validation layer for both mappings.
 
-- [ ] **4.2 Inline missing-property prompt.** Rework
+- [x] **4.2 Inline missing-property prompt.** Rework
   `prompt_for_property` in `cli/src/commands/schema_interactive.rs` so it
   no longer consumes the full screen via `run_standalone`; render only
   the space needed. Add the per-type intro statements (string / number /
@@ -241,7 +279,7 @@ preserved".
   existing enum/boolean/number/text behaviors (including number
   parse-and-retry).
 
-- [ ] **4.3 `file`/`file[]` choosers.** For a `file` property use
+- [x] **4.3 `file`/`file[]` choosers.** For a `file` property use
   `ChooseOne`; for `file[]` use `ChooseMany`. When more than one candidate
   exists, reuse the 1.4 two-pane `SplitPane`/`SplitDirection::Auto`
   layout with the detail pane derived from `active_option()` (single) or
@@ -250,14 +288,14 @@ preserved".
   Resolve the selected value(s) through `FileReference` before returning
   them as JSON (string / array-of-string).
 
-- [ ] **4.4 Preserve gates + cancellation.** Confirm the prompt only
+- [x] **4.4 Preserve gates + cancellation.** Confirm the prompt only
   fires when `InteractiveSchemaOptions::allowed()` is true (stdin+stderr
   TTY, `--silent` off, `prompt_for_missing` true) and that user cancel
   still bubbles back as the original `MissingProperties` error so the CLI
   shows the non-TTY remediation block. Add a non-TTY regression test
   asserting no prompt is driven.
 
-- [ ] **4.5 Phase-4 checkpoint validation.** `just test` covering each
+- [x] **4.5 Phase-4 checkpoint validation.** `just test` covering each
   interactive shape, the file/file[] chooser paths, min/max reinforcement
   rendering, and the gate-preservation behavior. Verify existing
   `compose_schema_cli.rs` / `sequence_schema.rs` interactive-collection
@@ -270,7 +308,7 @@ preserved".
 Strictly last. Exercises the full feature across real terminals and
 locks in the non-functional acceptance criteria.
 
-- [ ] **5.1 L2/L3 terminal-harness coverage.** Using the
+- [x] **5.1 L2/L3 terminal-harness coverage.** Using the
   `biscuit-test-harness`, add L2 (and L3 where the harness supports OS
   keyboard injection) tests asserting: the type-driven chooser
   (`ChooseOne` for `file`/single-file-arg, `ChooseMany` for `file[]`),
@@ -278,13 +316,13 @@ locks in the non-functional acceptance criteria.
   wider-than-tall, detail above when taller-than-wide). Covers acceptance
   "Type-driven chooser + layout".
 
-- [ ] **5.2 Latency assertion.** Extend/reuse the `completion_perf.rs`
+- [x] **5.2 Latency assertion.** Extend/reuse the `completion_perf.rs`
   fixture to add an autocomplete (ENTER-path) latency scenario and assert
   p95 stays within the same ~100 ms-class budget as completion (acceptance
   "Latency"). Keep the test `#[ignore]`d per the existing harness
   convention; document the invocation command in the module doc comment.
 
-- [ ] **5.3 Contract regression sweep.** Add/extend tests asserting:
+- [x] **5.3 Contract regression sweep.** Add/extend tests asserting:
   `claudine __complete` still drives dynamic completion; `claudine
   completions <shell>` remains the bootstrap install command; selected
   `@` magic candidates still insert concrete paths **without** the `@`
@@ -292,14 +330,14 @@ locks in the non-functional acceptance criteria.
   continuation is TAB-only; YAML `sequence` candidates populate the detail
   block from top-level keys (acceptance criteria sweep).
 
-- [ ] **5.4 Drift maintenance.** Update `claudine/docs/topics/
+- [x] **5.4 Drift maintenance.** Update `claudine/docs/topics/
   shell-completions.md` (autocomplete ENTER path, bare-file fallback,
   comma-continuation), the `claudine` skill (`cli-reference.md` /
   `architecture.md` as needed), and `AGENTS.md` only if a workspace-
   layout or repo-wide convention changed (likely no change here). Keep
   edits behavior-scoped per the AGENTS.md comment-quality rules.
 
-- [ ] **5.5 Final validation.** Run `just test`, `just test-l2`, `just
+- [x] **5.5 Final validation.** Run `just test`, `just test-l2`, `just
   lint`, and `just doctest` in the `claudine/` package area. Confirm
   cross-platform considerations (the walker, FileReference, biscuit-tui,
   and the terminal harness are already cross-platform; no new platform-
