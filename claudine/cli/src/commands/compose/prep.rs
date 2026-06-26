@@ -410,6 +410,7 @@ fn build_and_run_loop(
     shared_approval_cache: &SharedApprovalCache,
     header_emitted: bool,
     prep_context: &CompositionPrepContext,
+    prepared_context: &darkmatter::markdown::compose::ComposeContext,
     verbose: u8,
     shared: &SharedComposeArgs,
 ) -> std::result::Result<Option<LoopExecutionResult>, CompositionError> {
@@ -465,6 +466,7 @@ fn build_and_run_loop(
         source_path: &source.resolved_path,
         repo_root: effective_repo_root,
         launch_area: Some(prep_context.launch_workspace.launch_cwd.as_path()),
+        context: Some(prepared_context),
     };
 
     let lifecycle_mutation_root = effective_repo_root
@@ -653,6 +655,26 @@ fn execute_loop_or_single(
         || std::env::var_os("FORCE_COLOR").is_some();
 
     let file_for_loop = file.clone();
+
+    // Capture the early-binding context ONCE, against the launch area (the
+    // package area the caller launched from), and reuse the same snapshot for
+    // body compose, shell preflight, and lifecycle events. This is the single
+    // source of truth for `ctx.*`/`env.*`: the body and the lifecycle can no
+    // longer diverge, and there is no per-event re-scan. `capture_for_document`
+    // is demand-driven over both frontmatter and body, so the lifecycle
+    // `{{ctx.*}}` strings in frontmatter pull in the groups they need.
+    // `current.*` stays event-time and is captured separately.
+    let prepared_context = {
+        let mut ctx = darkmatter::markdown::compose::ComposeContext::capture_for_document(
+            prep_context.launch_workspace.launch_cwd.as_path(),
+            &source.markdown,
+        );
+        for (key, value) in &env_overrides {
+            ctx.env_mut().insert(key.clone(), value.clone());
+        }
+        ctx
+    };
+
     let loop_prepare_options = PrepareOptions {
         set_overrides: set_overrides.clone(),
         pre_approved_commands: Some(preflight.approved_commands.clone()),
@@ -660,6 +682,7 @@ fn execute_loop_or_single(
         perf_enabled: shared.perf,
         source_repo_root: prep_context.source_repo_root.clone(),
         shell_working_directory: Some(prep_context.launch_workspace.child_cwd.clone()),
+        prepared_context: Some(prepared_context.clone()),
     };
 
     if !shared.dry_run {
@@ -675,6 +698,7 @@ fn execute_loop_or_single(
             &shared_approval_cache,
             header_emitted,
             &prep_context,
+            &prepared_context,
             verbose,
             &shared,
         )?;
@@ -722,6 +746,7 @@ fn execute_loop_or_single(
                 shell_working_directory: Some(
                     prep_context.launch_workspace.child_cwd.clone(),
                 ),
+                prepared_context: Some(prepared_context.clone()),
             },
         )
         .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?
