@@ -2,7 +2,8 @@
 
 use clap::Args;
 use claudine::composition::{
-    self, CompositionError, SequenceExecutionOptions, parse_interactive_hint,
+    self, CompositionError, ResolvedCompositionSource, SequenceExecutionOptions,
+    parse_interactive_hint,
 };
 use color_eyre::eyre::{Result, eyre};
 use tracing::info_span;
@@ -73,6 +74,74 @@ fn reject_sequence_interactive(
     Ok(())
 }
 
+/// Resolve a sequence source, accepting both Markdown files and raw YAML
+/// sequence files.
+///
+/// Markdown files follow the standard [`composition::resolve_composition_source`]
+/// path. YAML files (`.yaml` / `.yml`) are treated as frontmatter without a
+/// Markdown body: their top-level mapping becomes the document frontmatter so
+/// that `sequence`, `prompt`, `name`, `description`, `$schema`, and other keys
+/// behave exactly as they would in a Markdown frontmatter block.
+#[allow(clippy::result_large_err)]
+fn resolve_sequence_source(file_ref: &str) -> Result<ResolvedCompositionSource, CompositionError> {
+    // Markdown files use the standard resolution path.
+    match composition::resolve_composition_source(file_ref) {
+        Ok(source) => return Ok(source),
+        Err(CompositionError::NotMarkdown(_)) => {}
+        Err(e) => return Err(e),
+    }
+
+    // YAML sequence files are treated as frontmatter without a Markdown body.
+    let reference = biscuit_file::FileReference::new(file_ref)
+        .map_err(|e| CompositionError::InvalidReference(format!("{file_ref}: {e}")))?
+        .with_package_area_magic_path();
+    let resolved_path = reference
+        .resolve()
+        .map_err(|e| CompositionError::InvalidReference(format!("{file_ref}: {e}")))?
+        .ok_or_else(|| CompositionError::FileNotFound(file_ref.to_string()))?;
+
+    let ext = resolved_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    if !matches!(ext.to_ascii_lowercase().as_str(), "yaml" | "yml") {
+        return Err(CompositionError::NotMarkdown(resolved_path.display().to_string()));
+    }
+
+    let yaml = biscuit_file::Yaml::new(&resolved_path).map_err(|e| {
+        CompositionError::MarkdownLoad(format!("{}: {e}", resolved_path.display()))
+    })?;
+    let json_value = yaml.as_json().map_err(|e| {
+        CompositionError::MarkdownLoad(format!(
+            "YAML-to-JSON conversion failed for {}: {e}",
+            resolved_path.display()
+        ))
+    })?;
+    let root = json_value.as_object().ok_or_else(|| {
+        CompositionError::SequenceExternalWrongType(
+            "YAML sequence file root must be an object".to_string(),
+        )
+    })?;
+
+    let mut frontmatter = darkmatter::markdown::Frontmatter::new();
+    for (key, value) in root {
+        frontmatter.insert(key, value.clone()).map_err(|e| {
+            CompositionError::MarkdownLoad(format!("{}: {e}", resolved_path.display()))
+        })?;
+    }
+
+    let original_text = std::fs::read_to_string(&resolved_path)
+        .map_err(|e| CompositionError::MarkdownLoad(format!("{}: {e}", resolved_path.display())))?;
+    let markdown = darkmatter::markdown::Markdown::with_frontmatter(frontmatter, "");
+
+    Ok(ResolvedCompositionSource {
+        original_ref: file_ref.to_string(),
+        resolved_path,
+        original_text,
+        markdown,
+    })
+}
+
 fn run_sequence_inner(
     args: SequenceArgs,
     verbose: u8,
@@ -104,14 +173,14 @@ fn run_sequence_inner(
         eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
     })?;
 
-    let source = match composition::resolve_composition_source(&file) {
+    let source = match resolve_sequence_source(&file) {
         Ok(source) => source,
         Err(CompositionError::FileNotFound(_)) => {
             let selected = crate::completion::operation_file::autocomplete_operation_file(
                 &file,
                 crate::completion::scopes::ComposeMode::Sequence,
             )?;
-            composition::resolve_composition_source(&selected)?
+            resolve_sequence_source(&selected)?
         }
         Err(e) => return Err(e.into()),
     };
