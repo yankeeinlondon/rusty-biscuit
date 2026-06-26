@@ -21,8 +21,8 @@ use darkmatter::markdown::compose::ComposeContext;
 
 use crate::commands::context_render::{
     configure_shared_table, context_column_widths, function_first_column_width, inline_code_text,
-    render_context_section, render_table_resilient, report_column, render_unordered_list,
-    TableLayout, EXAMPLE_COLUMN_MIN_WIDTH,
+    middle_elide, render_context_section, render_table_resilient, report_column,
+    render_unordered_list, MAX_REPORT_WIDTH, TableLayout, EXAMPLE_COLUMN_MIN_WIDTH,
 };
 #[cfg(test)]
 use crate::commands::context_render::render_table_within_contract;
@@ -317,6 +317,16 @@ fn render_values_report_with(capture: impl FnOnce() -> ComposeContext) {
     let type_labels: Vec<&str> = all_types.iter().map(|s| s.as_str()).collect();
     let (property_width, type_width) = context_column_widths(&property_labels, &type_labels);
 
+    // Budget for the trailing `Value` column at the resolved render width. The
+    // report-content column keeps path-separator break characters (so tables
+    // render at the minimum supported width), but wrapping a path at `/` yields
+    // a line ending in `/` that reads as a complete parent directory. Pre-eliding
+    // a single-token value (a path) that would otherwise wrap keeps it whole and
+    // unambiguous. Chrome = leading space + four `│` borders + per-cell padding.
+    const TABLE_CHROME: usize = 12;
+    let render_width = term.width().min(MAX_REPORT_WIDTH) as usize;
+    let value_budget = render_width.saturating_sub(property_width + type_width + TABLE_CHROME);
+
     for ((category, subsection), descriptors) in &groups {
         if subsection.is_empty() {
             let heading = Prose::new(format!("<blue><b>{category}</b></blue>"));
@@ -335,8 +345,16 @@ fn render_values_report_with(capture: impl FnOnce() -> ComposeContext) {
             |table| {
                 for desc in descriptors {
                     let value = values.get(desc.name).unwrap_or(&serde_json::Value::Null);
+                    // Single-token string values (filesystem paths) are
+                    // middle-elided to the column budget so they never wrap at a
+                    // `/` into a deceptively-complete parent path. Values with
+                    // whitespace (CSVs, prose, lists) keep normal wrapping.
                     let value_str = if value.is_null() {
                         Prose::new("<dim>null</dim>").render(&term)
+                    } else if let Some(s) =
+                        value.as_str().filter(|s| !s.chars().any(char::is_whitespace))
+                    {
+                        middle_elide(s, value_budget)
                     } else {
                         format_value(value, &term)
                     };
