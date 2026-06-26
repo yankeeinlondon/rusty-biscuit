@@ -302,6 +302,9 @@ fn run_phase_1c_attempt(
             perf_enabled: shared.perf,
             source_repo_root: source_repo_root.map(std::path::Path::to_path_buf),
             shell_working_directory: Some(child_cwd.to_path_buf()),
+            // Sequence prep has no launch-area snapshot threaded here; fall back
+            // to capture-at-prepare (the lib default).
+            prepared_context: None,
         };
 
         // Inline steps prepare via `prepare_inline_with_schema` so the

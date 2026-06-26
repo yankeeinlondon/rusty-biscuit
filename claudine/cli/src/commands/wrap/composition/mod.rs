@@ -172,6 +172,7 @@ fn emit_preflight_blocked_and_finalize(
     repo_root: Option<&Path>,
     base_dir: Option<&Path>,
     ctx_base_dir: Option<&Path>,
+    prepared_context: Option<&darkmatter::markdown::compose::ComposeContext>,
     frontmatter: &serde_json::Map<String, serde_json::Value>,
     document_start: std::time::Instant,
     err_info: claudine::composition::LifecycleErrorInfo,
@@ -196,6 +197,7 @@ fn emit_preflight_blocked_and_finalize(
         current: Some(&current),
         base_dir,
         ctx_base_dir,
+        prepared_context,
         effect_engine,
         shell_runner: &SystemShellRunner,
         emitter,
@@ -1189,6 +1191,28 @@ fn execute_composition_request_inner_with_guard(
         .auto_rehash(false)
         .build();
 
+    // Capture the early-binding context ONCE for this run, against the launch
+    // area (the package area the caller launched from), and reuse the same
+    // snapshot for every lifecycle event (the pre-flight `blocked`/`finalize`
+    // stacks and the post-closure `initialize`) so plain `ctx.*`/`env.*` cannot
+    // diverge per event and no per-event sniff scan runs. Demand-driven over
+    // the effective frontmatter (which still carries the deferred lifecycle
+    // `{{ctx.*}}` strings) plus the composed body. `env_overrides` mirror what
+    // `prepare` applied. `current.*` stays event-time and is captured below.
+    let lifecycle_context = {
+        let fm_json =
+            serde_json::to_string(&request.prepared.effective_frontmatter).unwrap_or_default();
+        let scan = format!("{fm_json}\n{}", request.prepared.prompt);
+        let mut ctx = darkmatter::markdown::compose::ComposeContext::capture_for_content(
+            launch_workspace.launch_cwd.as_path(),
+            &scan,
+        );
+        for (key, value) in &request.env_overrides {
+            ctx.env_mut().insert(key.clone(), value.clone());
+        }
+        ctx
+    };
+
     // Common execution body used both when the caller provides an external
     // lifecycle guard (loop re-entry) and when this function owns the guard
     // (single-run / first loop iteration). The closure captures the prep
@@ -1230,6 +1254,7 @@ fn execute_composition_request_inner_with_guard(
                 effective_repo_root,
                 base_dir,
                 Some(launch_workspace.launch_cwd.as_path()),
+                Some(&lifecycle_context),
                 frontmatter,
                 document_start,
                 claudine::composition::LifecycleErrorInfo::from_action_failure(
@@ -1275,6 +1300,7 @@ fn execute_composition_request_inner_with_guard(
                     effective_repo_root,
                     base_dir,
                     Some(launch_workspace.launch_cwd.as_path()),
+                    Some(&lifecycle_context),
                     frontmatter,
                     document_start,
                     claudine::composition::LifecycleErrorInfo::from_action_failure(
@@ -1576,6 +1602,7 @@ fn execute_composition_request_inner_with_guard(
         source_path: &request.prepared.resolved_path,
         repo_root: effective_repo_root,
         launch_area: Some(launch_workspace.launch_cwd.as_path()),
+        context: Some(&lifecycle_context),
     };
 
     // --- Initialize lifecycle event --------------------------------------
@@ -1616,6 +1643,7 @@ fn execute_composition_request_inner_with_guard(
         current: Some(&lifecycle_current),
         base_dir,
         ctx_base_dir: Some(launch_workspace.launch_cwd.as_path()),
+        prepared_context: Some(&lifecycle_context),
         effect_engine: &lifecycle_effect_engine,
         shell_runner: &SystemShellRunner,
         emitter: &emitter,

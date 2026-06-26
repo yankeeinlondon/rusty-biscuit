@@ -437,6 +437,9 @@ pub(crate) fn run_execution_stage(
             // This stage receives no `LaunchWorkspaceContext`; `ctx.*` capture
             // falls back to the prompt/source directory.
             launch_area: None,
+            // No prepared snapshot here; lifecycle falls back to demand-driven
+            // capture rooted at the source directory.
+            context: None,
         };
         let default_lifecycle_emitter = claudine::composition::DefaultLifecycleEmitter;
         let mut lifecycle_guard = claudine::composition::LifecycleRunGuard::new(
