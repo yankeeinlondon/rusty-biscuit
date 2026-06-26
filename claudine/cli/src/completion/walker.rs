@@ -88,6 +88,9 @@ pub(crate) fn walk_scope_limited(scope: &Scope, budget: usize) -> Vec<PathBuf> {
 /// The ENTER autocomplete path needs this to emit the "narrow your query"
 /// error rather than silently truncating when the query-matching count
 /// exceeds [`MAX_CANDIDATES`].
+// Staged for the ENTER autocomplete path (exercised by tests below); the
+// production consumer is not wired yet, so it is dead in the non-test build.
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WalkOutcome {
     /// All matching entries fit within the budget.
@@ -122,6 +125,9 @@ impl WalkOutcome {
 /// ([`walk_scope`], [`walk_scope_limited`]) and the ENTER autocomplete
 /// path. The predicate lets autocomplete push the `*query*` filter into
 /// the walk so the cap counts query-matching files, not raw discoveries.
+// Staged for the ENTER autocomplete path (covered by tests below); the
+// production consumer is not wired yet, so it is dead in the non-test build.
+#[allow(dead_code)]
 pub(crate) fn walk_scope_filtered<P>(
     scope: &Scope,
     budget: usize,
