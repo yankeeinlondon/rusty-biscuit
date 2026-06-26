@@ -7,7 +7,6 @@ $schema:
     spec_file: file
 phase: "{{ frontmatter(plan, 'start_phase') || 1 }}"
 dirname: "{{ dirname(plan) }}"
-# spec: "{{ frontmatter( }}"
 area: "{{ ctx.area }}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
 total_phases: "{{ frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') }}"
@@ -16,18 +15,18 @@ initialize:
     stack:
         - when: "phase >= total_phases"
           action: 
-              - "warn(There was an attempt to implement a phase **<yellow>{{phase}}</yellow>** of the plan which is **too large**. This plan only has **<yellow>{{total_phases}}</yellow>** total phases!)"
-              - "error(invalid phase: {{phase}} is larger than {{total_phases}})"
+              - warn: "There was an attempt to implement a phase **<yellow>{{phase}}</yellow>** of the plan which is **too large**. This plan only has **<yellow>{{total_phases}}</yellow>** total phases!"
+              - error: "invalid phase: {{phase}} is larger than {{total_phases}}"
 start:
-    message: "🎬  starting the implementation of phase **#{{phase}}** of `{{parent_dir(plan)}}`\n> &nbsp;&nbsp;&nbsp;&nbsp;**area:** {{ctx.area}}, **agent:** {{ctx.agent}}/{{ctx.model}}"
+    message: "🎬  starting the implementation of phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{ctx.area}}, **agent:** {{ctx.agent}}/{{ctx.model}})"
 success: 
     say: "Phase {{phase}} of the plan in the {{area}} package area, was implemented successfully"
-    message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{area}}, {{ctx.agent}}/{{ctx.model}})"
+    message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{ctx.area}}, {{ctx.agent}}/{{ctx.model}})"
 blocked:
-    message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved!"
+    message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved for execution!"
 failure:
     say: "Phase {{phase}} of a plan in the {{area}} package area, ran into problems!"
-    message: "❌️  phase **{{phase}}** (_of {{total_phases}}_) failed in the plan `{{parent_dir(plan)}}` ({{area}}, {{ctx.agent}}/{{ctx.model}})"
+    message: "❌️  phase **{{phase}}** (_of {{total_phases}}_) failed in the plan `{{parent_dir(plan)}}` ({{area}}, {{ctx.agent}}/{{ctx.model}}: {{err.message}})"
 loop:
     until: "phase >= total_phases"
     action: "increment(phase)"
