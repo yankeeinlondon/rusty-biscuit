@@ -1100,6 +1100,168 @@ fn completion_sequence_enum_values_from_schema() {
     );
 }
 
+#[test]
+fn completion_file_bare_falls_back_to_default_glob() {
+    let ws = common::TestWorkspace::named("complete-schema-bare-file");
+    seed_cargo_workspace(ws.path(), &["pkg"]);
+    write_file(
+        &ws.path().join("prompts").join("plan.md"),
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  cover: file\n",
+            "---\n",
+            "Cover at {{cover}}.\n",
+        ),
+    );
+    write_file(&ws.path().join("readme.md"), "# Readme\n");
+    write_file(&ws.path().join("draft.txt"), "plain text\n");
+
+    let got = run_complete(ws.path(), &["compose", "prompts/plan.md", "cover="]);
+    assert!(
+        got.iter().any(|c| c == "cover='readme.md'"),
+        "bare file property must surface default-glob markdown: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c.contains("draft.txt")),
+        "non-markdown file must not surface in default glob: {got:?}"
+    );
+}
+
+#[test]
+fn completion_file_array_first_file_uses_default_glob() {
+    let ws = common::TestWorkspace::named("complete-schema-file-array-first");
+    seed_cargo_workspace(ws.path(), &["pkg"]);
+    write_file(
+        &ws.path().join("prompts").join("plan.md"),
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  attachments: file[]\n",
+            "---\n",
+            "Attachments: {{attachments}}.\n",
+        ),
+    );
+    write_file(&ws.path().join("notes.md"), "# Notes\n");
+
+    let got = run_complete(ws.path(), &["compose", "prompts/plan.md", "attachments="]);
+    assert!(
+        got.iter().any(|c| c == "attachments='notes.md'"),
+        "file[] first file must complete from default glob: {got:?}"
+    );
+}
+
+#[test]
+fn completion_file_array_trailing_comma_reopens_completion() {
+    let ws = common::TestWorkspace::named("complete-schema-file-array-comma");
+    seed_cargo_workspace(ws.path(), &["pkg"]);
+    write_file(
+        &ws.path().join("prompts").join("plan.md"),
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  attachments: file[]\n",
+            "---\n",
+            "Attachments: {{attachments}}.\n",
+        ),
+    );
+    write_file(&ws.path().join("a.md"), "# A\n");
+    write_file(&ws.path().join("b.md"), "# B\n");
+
+    let got = run_complete(ws.path(), &["compose", "prompts/plan.md", "attachments=a.md,"]);
+    assert!(
+        got.iter().any(|c| c == "attachments='a.md,b.md'"),
+        "trailing comma must append a new default-glob file: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c == "attachments='a.md,a.md'"),
+        "already-selected file must be excluded: {got:?}"
+    );
+}
+
+#[test]
+fn completion_file_array_continuation_filters_by_active_partial() {
+    let ws = common::TestWorkspace::named("complete-schema-file-array-partial");
+    seed_cargo_workspace(ws.path(), &["pkg"]);
+    write_file(
+        &ws.path().join("prompts").join("plan.md"),
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  attachments: file[]\n",
+            "---\n",
+            "Attachments: {{attachments}}.\n",
+        ),
+    );
+    write_file(&ws.path().join("alpha.md"), "# A\n");
+    write_file(&ws.path().join("beta.md"), "# B\n");
+
+    let got = run_complete(
+        ws.path(),
+        &["compose", "prompts/plan.md", "attachments=alpha.md,b"],
+    );
+    assert!(
+        got.iter().any(|c| c == "attachments='alpha.md,beta.md'"),
+        "active partial must filter continuation candidates: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c == "attachments='alpha.md,alpha.md'"),
+        "prior file must stay excluded: {got:?}"
+    );
+}
+
+#[test]
+fn completion_file_array_unclosed_quote_round_trips() {
+    let ws = common::TestWorkspace::named("complete-schema-file-array-quote");
+    seed_cargo_workspace(ws.path(), &["pkg"]);
+    write_file(
+        &ws.path().join("prompts").join("plan.md"),
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  attachments: file[]\n",
+            "---\n",
+            "Attachments: {{attachments}}.\n",
+        ),
+    );
+    write_file(&ws.path().join("a.md"), "# A\n");
+    write_file(&ws.path().join("b.md"), "# B\n");
+
+    let got = run_complete(ws.path(), &["compose", "prompts/plan.md", "attachments='a.md,b"]);
+    assert!(
+        got.iter().any(|c| c == "attachments='a.md,b.md'"),
+        "unclosed quote must produce a closed single-quoted candidate: {got:?}"
+    );
+}
+
+#[test]
+fn completion_file_array_literal_comma_filename_is_unsupported() {
+    // Documents the known limitation: the comma-list parser splits on
+    // every top-level comma, so a filename that itself contains a comma
+    // cannot be expressed in the exclusion set. The test only asserts
+    // non-panic and that some candidate is produced.
+    let ws = common::TestWorkspace::named("complete-schema-file-array-comma-limit");
+    seed_cargo_workspace(ws.path(), &["pkg"]);
+    write_file(
+        &ws.path().join("prompts").join("plan.md"),
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  attachments: file[]\n",
+            "---\n",
+            "Attachments: {{attachments}}.\n",
+        ),
+    );
+    write_file(&ws.path().join("a,b.md"), "# Comma\n");
+    write_file(&ws.path().join("b.md"), "# B\n");
+
+    let got = run_complete(ws.path(), &["compose", "prompts/plan.md", "attachments='a,b.md"]);
+    assert!(
+        !got.is_empty(),
+        "comma-named file edge case must produce candidates without panicking: {got:?}"
+    );
+}
+
 // ============================================================================
 // Schema-aware completion for `file(match(...))` values
 // ============================================================================

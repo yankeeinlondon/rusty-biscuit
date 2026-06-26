@@ -30,6 +30,7 @@ use darkmatter::markdown::schemas::{
     SchemaShape, SimplifiedSchema, completion as dm_completion,
 };
 
+use super::default_glob;
 use super::fuzzy;
 use super::scopes::{self, ScopeContext};
 
@@ -319,7 +320,7 @@ pub(crate) fn property_value(
             enum_candidates(property, members, value_partial)
         }
         CompletionKind::File { patterns } => {
-            file_candidates(property, patterns, value_partial, ctx)
+            file_candidates(property, patterns, value_partial, suggestion.is_array, ctx)
         }
         // Hints don't produce concrete candidates — the caller falls back
         // to the existing `@`-gated path or shell-native completion.
@@ -399,25 +400,58 @@ fn file_candidates(
     property: &str,
     patterns: &[String],
     value_partial: &str,
+    is_array: bool,
     ctx: &ScopeContext,
 ) -> Vec<String> {
-    // Empty `match()` means "any file" — without a pattern the result set
-    // would be unbounded, so we return nothing and let the existing
-    // `@`-gated path or shell-native file completion handle it.
-    if patterns.is_empty() {
-        return Vec::new();
-    }
-    let Some(matcher) = MatchGlobs::compile(patterns) else {
-        return Vec::new();
-    };
     let base: PathBuf = scopes::effective_repo_root(ctx)
         .map(Path::to_path_buf)
         .unwrap_or_else(|| ctx.cwd.clone());
-    let trimmed = value_partial.trim_matches(['"', '\'']);
-    let active = trimmed.trim_start_matches('@');
+
+    let (active, prefix_segments) = if is_array {
+        parse_array_file_value(value_partial)
+    } else {
+        (normalize_partial(value_partial), Vec::new())
+    };
+    let excluded: HashSet<String> = prefix_segments.iter().cloned().collect();
 
     let mut out: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
+
+    if patterns.is_empty() {
+        // Bare `file` / `file[]` falls back to the default markdown glob.
+        let candidates = default_glob::default_markdown_candidates_filtered(ctx, |path| {
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                return false;
+            };
+            active.is_empty() || fuzzy::fuzzy_match(name, &active)
+        });
+        for path in candidates {
+            let Ok(rel) = path.strip_prefix(&base) else {
+                continue;
+            };
+            let Some(rel_str) = rel.to_str() else {
+                continue;
+            };
+            if !excluded.is_empty() && excluded.contains(rel_str) {
+                continue;
+            }
+            let rendered = if is_array {
+                format_array_candidate(property, &prefix_segments, rel_str)
+            } else {
+                format!("{property}='{rel_str}'")
+            };
+            if seen.insert(rendered.clone()) {
+                out.push(rendered);
+            }
+        }
+        out.sort();
+        return out;
+    }
+
+    let Some(matcher) = MatchGlobs::compile(patterns) else {
+        return Vec::new();
+    };
+
     let walker = ignore::WalkBuilder::new(&base)
         .hidden(true)
         .git_ignore(true)
@@ -441,20 +475,141 @@ fn file_candidates(
         if !matcher.is_match(rel_str, file_name) {
             continue;
         }
-        // The active partial is fuzzy-matched against the basename — users
-        // typically narrow file completion by typing characters from the
-        // file name, not the leading directory path. Path-qualified globs
-        // are already enforced above by the GlobSet check against `rel_str`.
-        if !active.is_empty() && !fuzzy::fuzzy_match(file_name, active) {
+        if !active.is_empty() && !fuzzy::fuzzy_match(file_name, &active) {
             continue;
         }
-        let rendered = format!("{property}='{rel_str}'");
+        if !excluded.is_empty() && excluded.contains(rel_str) {
+            continue;
+        }
+        let rendered = if is_array {
+            format_array_candidate(property, &prefix_segments, rel_str)
+        } else {
+            format!("{property}='{rel_str}'")
+        };
         if seen.insert(rendered.clone()) {
             out.push(rendered);
         }
     }
     out.sort();
     out
+}
+
+/// Gather absolute file paths for a schema `file`/`file[]` property.
+///
+/// - `patterns` empty → delegates to [`default_glob::default_markdown_candidates`]
+///   (bare `file`/`file[]` fallback).
+/// - `patterns` non-empty → walks from the effective repo root (or cwd)
+///   and returns every file that satisfies the `match(...)` globs.
+///
+/// Used by the ENTER-path missing-property chooser. TAB completion uses
+/// [`file_candidates`] instead because it needs formatted setter tokens and
+/// array-continuation exclusion.
+pub(crate) fn file_candidate_paths(patterns: &[String], ctx: &ScopeContext) -> Vec<PathBuf> {
+    let base: PathBuf = scopes::effective_repo_root(ctx)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| ctx.cwd.clone());
+
+    if patterns.is_empty() {
+        return default_glob::default_markdown_candidates(ctx);
+    }
+
+    let Some(matcher) = MatchGlobs::compile(patterns) else {
+        return Vec::new();
+    };
+
+    let mut out: Vec<PathBuf> = Vec::new();
+    let walker = ignore::WalkBuilder::new(&base)
+        .hidden(true)
+        .git_ignore(true)
+        .require_git(false)
+        .build();
+    for entry in walker.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Ok(rel) = path.strip_prefix(&base) else {
+            continue;
+        };
+        let Some(rel_str) = rel.to_str() else {
+            continue;
+        };
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(rel_str);
+        if !matcher.is_match(rel_str, file_name) {
+            continue;
+        }
+        out.push(path.to_path_buf());
+    }
+    out.sort();
+    out
+}
+
+/// Normalize a value partial by stripping surrounding quotes and the `@`
+/// sigil so it can be used as a fuzzy match target.
+fn normalize_partial(value_partial: &str) -> String {
+    value_partial
+        .trim_matches(['"', '\''])
+        .trim_start_matches('@')
+        .to_string()
+}
+
+/// Parse a `file[]` value partial into the active fuzzy target and the
+/// already-committed prefix segments.
+///
+/// The input may be quoted or unquoted, open or closed. Outer quotes are
+/// stripped for parsing; emitted candidates are always single-quoted. A
+/// top-level comma splits the list. Filenames that themselves contain a
+/// comma are unsupported and will be mis-split — this matches the spec
+/// contract for the exclusion set.
+fn parse_array_file_value(value_partial: &str) -> (String, Vec<String>) {
+    let (body, _quote) = strip_outer_quotes(value_partial);
+    let raw_segments: Vec<&str> = body.split(',').collect();
+    if raw_segments.is_empty() {
+        return (String::new(), Vec::new());
+    }
+    let prefix = &raw_segments[..raw_segments.len() - 1];
+    let active = raw_segments.last().unwrap_or(&"").trim();
+    let prefix_segments = prefix
+        .iter()
+        .map(|s| {
+            s.trim()
+                .trim_matches(['"', '\''])
+                .trim_start_matches('@')
+                .to_string()
+        })
+        .filter(|s| !s.is_empty())
+        .collect();
+    (normalize_partial(active), prefix_segments)
+}
+
+/// Strip a leading quote and, when present, a matching trailing quote.
+/// Returns the unquoted body plus the quote character that was removed.
+/// Unclosed quotes are also stripped from the leading edge so that
+/// `spec='a.md,b<TAB>` parses correctly.
+fn strip_outer_quotes(input: &str) -> (&str, Option<char>) {
+    let first = input.chars().next();
+    let quote = match first {
+        Some('\'') | Some('"') => first,
+        _ => return (input, None),
+    };
+    if input.len() >= 2 && input.ends_with(quote.unwrap()) {
+        (&input[1..input.len() - 1], quote)
+    } else {
+        (&input[1..], quote)
+    }
+}
+
+/// Render a `file[]` candidate, preserving the already-committed segments
+/// and appending the newly selected file. The entire value is wrapped in
+/// single quotes so it round-trips through the setter token parser.
+fn format_array_candidate(property: &str, prefix_segments: &[String], selected: &str) -> String {
+    let mut parts: Vec<String> = prefix_segments.to_vec();
+    parts.push(selected.to_string());
+    let joined = parts.join(",");
+    format!("{property}='{joined}'")
 }
 
 /// Compiled positive + negative globset pair for a Darkmatter
@@ -816,7 +971,7 @@ mod tests {
     }
 
     #[test]
-    fn property_value_returns_empty_for_file_without_match() {
+    fn property_value_falls_back_to_default_glob_for_bare_file() {
         let effective = effective_from_doc(concat!(
             "---\n",
             "$schema:\n",
@@ -825,10 +980,110 @@ mod tests {
         ));
         let tmp = TempDir::new().unwrap();
         seed_repo(tmp.path());
-        write(&tmp.path().join("a.txt"), "");
+        write(&tmp.path().join("readme.md"), "# R\n");
+        write(&tmp.path().join("a.txt"), "text\n");
+        write(&tmp.path().join("prompts").join("plan.md"), "# P\n");
         let ctx = ScopeContext::discover_from(tmp.path());
         let got = property_value(&effective, "cover", "", &ctx);
-        assert!(got.is_empty(), "no `match` => no candidates: {got:?}");
+        assert!(
+            got.iter().any(|c| c == "cover='readme.md'"),
+            "bare file must fall back to default glob markdown candidates: {got:?}"
+        );
+        assert!(
+            !got.iter().any(|c| c.contains("a.txt")),
+            "non-markdown file must be excluded by default glob: {got:?}"
+        );
+        assert!(
+            !got.iter().any(|c| c.contains("prompts")),
+            "prompt directory must be excluded from default glob: {got:?}"
+        );
+    }
+
+    #[test]
+    fn property_value_file_array_first_file_completion() {
+        let effective = effective_from_doc(concat!(
+            "---\n",
+            "$schema:\n",
+            "  attachments: file[]\n",
+            "---\nbody\n",
+        ));
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        write(&tmp.path().join("notes.md"), "# N\n");
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = property_value(&effective, "attachments", "", &ctx);
+        assert!(
+            got.iter().any(|c| c == "attachments='notes.md'"),
+            "file[] first file must complete from default glob: {got:?}"
+        );
+    }
+
+    #[test]
+    fn property_value_file_array_comma_continuation_excludes_prior_files() {
+        let effective = effective_from_doc(concat!(
+            "---\n",
+            "$schema:\n",
+            "  attachments: file[]\n",
+            "---\nbody\n",
+        ));
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        write(&tmp.path().join("a.md"), "# A\n");
+        write(&tmp.path().join("b.md"), "# B\n");
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = property_value(&effective, "attachments", "a.md,", &ctx);
+        assert!(
+            got.iter().any(|c| c == "attachments='a.md,b.md'"),
+            "trailing comma must re-open completion excluding prior file: {got:?}"
+        );
+        assert!(
+            !got.iter().any(|c| c == "attachments='a.md,a.md'"),
+            "already-selected file must be excluded: {got:?}"
+        );
+    }
+
+    #[test]
+    fn property_value_file_array_continuation_filters_by_active_partial() {
+        let effective = effective_from_doc(concat!(
+            "---\n",
+            "$schema:\n",
+            "  attachments: file[]\n",
+            "---\nbody\n",
+        ));
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        write(&tmp.path().join("alpha.md"), "# A\n");
+        write(&tmp.path().join("beta.md"), "# B\n");
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = property_value(&effective, "attachments", "alpha.md,b", &ctx);
+        assert!(
+            got.iter().any(|c| c == "attachments='alpha.md,beta.md'"),
+            "active partial must filter continuation candidates: {got:?}"
+        );
+        assert!(
+            !got.iter().any(|c| c.contains("alpha.md,alpha.md")),
+            "prior file must be excluded even when active partial matches it: {got:?}"
+        );
+    }
+
+    #[test]
+    fn property_value_file_array_continuation_honors_unclosed_quote() {
+        let effective = effective_from_doc(concat!(
+            "---\n",
+            "$schema:\n",
+            "  attachments: file[]\n",
+            "---\nbody\n",
+        ));
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        write(&tmp.path().join("a.md"), "# A\n");
+        write(&tmp.path().join("b.md"), "# B\n");
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = property_value(&effective, "attachments", "'a.md,b", &ctx);
+        assert!(
+            got.iter().any(|c| c == "attachments='a.md,b.md'"),
+            "unclosed quote must still produce a single-quoted candidate: {got:?}"
+        );
     }
 
     #[test]
