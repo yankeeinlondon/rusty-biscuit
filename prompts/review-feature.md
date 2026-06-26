@@ -16,6 +16,18 @@ success:
     stderr: "{{feature_or_fix}} review {{iteration}} in the {{ctx.area}} package area has completed successfully"
     message: "✅  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed successfully"
     effect: "small-group-cheer"
+    stack:
+        - when: "frontmatter(spec, 'ready') == true"
+          action:
+              - info: "{{feature_or_fix}} review {{iteration}} in the {{ctx.area}} package area has completed successfully and has found the code to be **production ready**!"
+              - message: "✅  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed successfully and has found the code to be **production ready**"
+              - effect: "small-group-cheer"
+        - when: "frontmatter(spec, 'ready') != true"
+          action:
+                - warn: "{{feature_or_fix}} review {{iteration}} in the {{ctx.area}} package area has completed successfully but found the code **not** to be production ready!"
+                - message: "✅  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed successfully and has found the code to be **production ready**"
+                - effect: "sad-trombone"
+              
 failure:
     stderr: "{{feature_or_fix}} review {{iteration}} for `{{parent_dir(spec)}}` in the {{ctx.area}} package area failed to complete!"
     message: "💥 {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in **{{ ctx.area }}** failed to complete!"
