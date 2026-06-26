@@ -17,7 +17,11 @@
 use std::io::{self, Write};
 use std::path::Path;
 
+use biscuit_terminal::components::block_quote::BlockQuote;
+use biscuit_terminal::components::compose::Compose;
+use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::renderable::RenderableTerminalContent;
 use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_tui::core::{SplitDirection, SplitPane};
 use biscuit_tui::prelude::*;
@@ -32,57 +36,67 @@ use ratatui::{
 
 /// Render the detail block for a candidate file.
 ///
-/// Layout per spec: `<badge> <name>`, blank line, blockquoted description,
-/// `Schema:` unordered list, and an OSC8 path link.
-pub fn render_file_detail_prose(detail: &FileDetail) -> Prose {
-    Prose::new(detail_body(detail))
+/// Layout per spec: `<badge> <name-or-path-line>`, blank line, blockquoted
+/// description, `Schema:` header + unordered list, and an inline OSC8 path
+/// link. Built from [`Compose`], [`BlockQuote`], [`UnorderedList`], and
+/// [`Prose`] components rather than a hand-rolled markup string.
+pub fn render_file_detail_prose(detail: &FileDetail) -> Compose {
+    let parts: Vec<RenderableTerminalContent> = vec![
+        RenderableTerminalContent::from(name_line_prose(detail)),
+        RenderableTerminalContent::from("\n\n"),
+        RenderableTerminalContent::from(BlockQuote::from(description_prose(detail))),
+        RenderableTerminalContent::from("\n\nSchema:\n\n"),
+        RenderableTerminalContent::from(schema_list(detail)),
+    ];
+    Compose::from(parts)
 }
 
 /// Render the full confirmation dialog including the `Use this file? (Y/n)`
 /// trailer.
-pub fn render_confirmation_dialog(detail: &FileDetail) -> Prose {
-    let mut body = detail_body(detail);
-    body.push_str("\n\nUse this file? (Y/n)");
+pub fn render_confirmation_dialog(detail: &FileDetail) -> Compose {
+    let mut compose = render_file_detail_prose(detail);
+    compose.add_text("\n\nUse this file? (Y/n)");
+    compose
+}
+
+fn name_line_prose(detail: &FileDetail) -> Prose {
+    let badge = badge_markup(&detail.badge);
+    let abs_href = Prose::quoted_attr(&detail.path.display().to_string());
+    let label = path_label(&detail.path);
+
+    let body = if detail.has_custom_name {
+        let name = Prose::escape_text(&detail.name);
+        let escaped_label = Prose::escape_text(&label);
+        format!(
+            "{badge} <bold>{name}</bold> (<a href={abs_href}><dim><blue>{escaped_label}</blue></dim></a>)",
+        )
+    } else {
+        let escaped_label = Prose::escape_text(&label);
+        format!("{badge} <a href={abs_href}>{escaped_label}</a>")
+    };
+
     Prose::new(body)
 }
 
-fn detail_body(detail: &FileDetail) -> String {
-    let mut body = String::new();
-    body.push_str(&format!(
-        "{} {}\n\n",
-        badge_markup(&detail.badge),
-        escape_prose(&detail.name)
-    ));
+fn description_prose(detail: &FileDetail) -> Prose {
+    let text = detail
+        .description
+        .as_deref()
+        .filter(|d| !d.trim().is_empty())
+        .unwrap_or("no description");
+    Prose::new(Prose::escape_text(text))
+}
 
-    body.push_str("> ");
-    body.push_str(&escape_prose(
-        detail
-            .description
-            .as_deref()
-            .filter(|d| !d.trim().is_empty())
-            .unwrap_or("no description"),
-    ));
-
-    body.push_str("\n\nSchema:\n");
+fn schema_list(detail: &FileDetail) -> UnorderedList {
+    let mut list = UnorderedList::empty();
     if detail.schema_lines.is_empty() {
-        body.push_str("- no schema defined\n");
+        list.add(Prose::new("<dim><i>no schema defined</i></dim>"));
     } else {
         for line in &detail.schema_lines {
-            body.push_str("- `");
-            body.push_str(&escape_prose(line));
-            body.push_str("`\n");
+            list.add(Prose::new(Prose::escape_text(line)));
         }
     }
-
-    let abs = detail.path.display().to_string();
-    let label = path_label(&detail.path);
-    body.push_str(&format!(
-        "\nPath: <a href=\"{}\">{}</a>",
-        escape_prose(&abs),
-        escape_prose(&label)
-    ));
-
-    body
+    list
 }
 
 /// Drive a single-file confirmation dialog.
@@ -215,7 +229,7 @@ fn badge_markup(badge: &str) -> String {
         "COMPOSE" => "<bg-cyan-900><bold><cyan-100> Compose </cyan-100></bold></bg-cyan-900>".to_string(),
         "INLINE_COMPOSE" => "<bg-cyan-900><bold><cyan-100> Inline Compose </cyan-100></bold></bg-cyan-900>".to_string(),
         "SEQUENCE" => "<bg-yellow-900><bold><yellow-100> Sequence </yellow-100></bold></bg-yellow-900>".to_string(),
-        _ => format!("<bold> {} </bold>", escape_prose(badge)),
+        _ => format!("<bold> {} </bold>", Prose::escape_text(badge)),
     }
 }
 
@@ -223,20 +237,6 @@ fn path_label(path: &Path) -> String {
     path.canonicalize()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| path.display().to_string())
-}
-
-fn escape_prose(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for ch in input.chars() {
-        match ch {
-            '\\' | '<' | '>' | '{' | '"' => {
-                out.push('\\');
-                out.push(ch);
-            }
-            other => out.push(other),
-        }
-    }
-    out
 }
 
 #[cfg(test)]
@@ -251,6 +251,18 @@ mod tests {
             path: PathBuf::from("/tmp/review-plan.md"),
             description: Some("A helpful prompt".to_string()),
             schema_lines: vec!["title: 'string(required)'".to_string()],
+            has_custom_name: true,
+        }
+    }
+
+    fn unnamed_detail() -> FileDetail {
+        FileDetail {
+            badge: "FILE".to_string(),
+            name: "notes".to_string(),
+            path: PathBuf::from("/tmp/notes.md"),
+            description: None,
+            schema_lines: Vec::new(),
+            has_custom_name: false,
         }
     }
 
@@ -285,14 +297,88 @@ mod tests {
     }
 
     #[test]
+    fn detail_prose_renders_block_quote_border_for_description() {
+        let detail = sample_detail();
+        let rendered = render_file_detail_prose(&detail).render_optimistic(Some(80));
+        assert!(rendered.contains('│'), "block quote border must be present: {rendered}");
+        assert!(rendered.contains("A helpful prompt"));
+    }
+
+    fn strip_ansi(s: &str) -> String {
+        let mut result = String::with_capacity(s.len());
+        let mut in_escape = false;
+        for ch in s.chars() {
+            if in_escape {
+                if ch.is_ascii_alphabetic() {
+                    in_escape = false;
+                }
+            } else if ch == '\u{1b}' {
+                in_escape = true;
+            } else {
+                result.push(ch);
+            }
+        }
+        result
+    }
+
+    #[test]
+    fn detail_prose_no_schema_renders_dim_italic_unordered_list() {
+        let detail = unnamed_detail();
+        let rendered = render_file_detail_prose(&detail).render_optimistic(Some(80));
+        let stripped = strip_ansi(&rendered);
+        assert!(stripped.contains("- no schema defined"));
+        assert!(
+            rendered.contains("\u{1b}[2m") || rendered.contains("\u{1b}[3m"),
+            "dim or italic SGR must style the no-schema fallback: {rendered}"
+        );
+    }
+
+    #[test]
+    fn detail_prose_with_custom_name_renders_bold_name_and_parenthesized_path() {
+        let detail = sample_detail();
+        let rendered = render_file_detail_prose(&detail).render_optimistic(Some(80));
+        assert!(
+            rendered.contains("\u{1b}[1m"),
+            "custom name must be rendered in bold SGR: {rendered}"
+        );
+        assert!(
+            rendered.contains('(') && rendered.contains(')'),
+            "path must appear inside parentheses: {rendered}"
+        );
+        assert!(
+            rendered.contains("\u{1b}]8;"),
+            "path must be emitted as an OSC8 hyperlink: {rendered}"
+        );
+    }
+
+    #[test]
+    fn detail_prose_without_custom_name_renders_path_as_osc8_link() {
+        let detail = unnamed_detail();
+        let rendered = render_file_detail_prose(&detail).render_optimistic(Some(80));
+        assert!(
+            rendered.contains("\u{1b}]8;"),
+            "path must be emitted as an OSC8 hyperlink: {rendered}"
+        );
+        assert!(
+            !rendered.contains("Path:"),
+            "path must be rendered inline, not on a separate 'Path:' line: {rendered}"
+        );
+    }
+
+    #[test]
+    fn detail_prose_does_not_emit_separate_path_line() {
+        let detail = sample_detail();
+        let rendered = render_file_detail_prose(&detail).render_optimistic(Some(80));
+        assert!(
+            !rendered.contains("Path:"),
+            "detail block must not contain a separate 'Path:' line: {rendered}"
+        );
+    }
+
+    #[test]
     fn confirmation_dialog_adds_trailer() {
         let detail = sample_detail();
         let rendered = render_confirmation_dialog(&detail).render_optimistic(Some(80));
         assert!(rendered.contains("Use this file? (Y/n)"));
-    }
-
-    #[test]
-    fn escape_prose_escapes_markup_chars() {
-        assert_eq!(escape_prose("a <b> c"), "a \\<b\\> c");
     }
 }
