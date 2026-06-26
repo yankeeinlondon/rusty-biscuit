@@ -106,13 +106,17 @@ See `docs/components/frame_chrome.md` for the full `BorderStyle` variant list (1
 
 - Focus: arrows navigate; Tab/Shift+Tab wrap; `Ctrl+S` validates and submits
 - Value: `Vec<Row>` where each `Row` has `Vec<RowCell>` with typed `CellValue`
+- Construction: `new` panics on invalid input (row-shape/column-id/cell-type mismatch); use the fallible `try_new` for caller-provided data, which returns a typed `InputTableError` (re-exported from the crate root and prelude). `with_blank_rows` is infallible (seeds from column schema).
 
 ```rust
 let columns = vec![
     InputTableColumn::StaticText { id: "name".into(), text: "Alice".into() },
     InputTableColumn::BooleanSwitch { id: "active".into(), config: Default::default() },
 ];
+// static/known-good data: panics on misuse
 let state = InputTableState::new(columns, vec![]);
+// untrusted data: use try_new -> Result<_, InputTableError>
+// let state = InputTableState::try_new(columns, rows)?;
 ```
 
 ## Core Primitives
@@ -210,6 +214,21 @@ The inline viewport clears on exit by default (fzf-style); pass `--show-input-on
 - `--mt` / `--mb` / `--ml` / `--mr` — per-side margin overrides
 - `--padding <CELLS>` / `-p <CELLS>` — uniform padding inside the border
 - `--pt` / `--pb` / `--pl` / `--pr` — per-side padding overrides
+
+### input-table JSON Boundary
+
+`--columns` and `--rows` JSON is strictly validated. Numeric column-config
+fields (`max_length`, `preferred_width`, `preferred_height`,
+`min_selections`, `max_selections`) reject overflow instead of truncating;
+present-but-wrong-type optional fields error rather than defaulting. Row
+values that mismatch the column's cell type produce an `InvalidInput`
+error with row/column context. A small set of **documented permissive
+coercions** remain as intentional compatibility (see
+`docs/components/input_table.md`): boolean rows accept bool/number/the
+`true|on|yes|1|false|off|no|0` strings; text-area rows accept an array or
+a newline-split string; choose-many rows accept an array or a
+comma-split string. Library and CLI share one validation code path via
+`InputTableState::try_new` / `InputTableError`.
 
 ## Key Design Principles
 
