@@ -628,3 +628,122 @@ fn level2_tmux_alt_r_chord_selects_red() {
         frame.plain
     );
 }
+
+// ---------------------------------------------------------------------------
+// Level 2 — relaxed Ctrl/Alt+Shift chord matching on real terminal bytes
+//
+// Spec F5 / review finding F2 (hotkey): the matcher uses
+// `modifiers.contains(...)` plus `c.to_ascii_lowercase()`, so a benign extra
+// SHIFT bit on an uppercase chord must not suppress an otherwise-valid Ctrl/Alt
+// hotkey. The L1 reducer tests
+// (`choose_one/tests.rs::{ctrl_shift_chord_matches_ctrl_hotkey,
+// alt_shift_chord_matches_alt_hotkey}`) prove the reducer once crossterm has
+// already produced `CONTROL|SHIFT` / `ALT|SHIFT`. These two tests prove the
+// stronger end-to-end claim: real terminal bytes for the physical chord decode
+// into the relaxed-matched selection.
+// ---------------------------------------------------------------------------
+
+#[test]
+#[serial(level2)]
+fn level2_tmux_alt_shift_r_chord_selects_red() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("shared tmux harness present");
+
+    harness.send_text(b"clear\n").expect("clear");
+    harness.settle();
+    let bin = sh_quote(&question_binary());
+    let cmd = format!(
+        "out=$({bin} choose-one {r} {g} {b}); printf '\\nPICK:%s\\n' \"$out\"\n",
+        r = sh_quote("[ALT+r] Red"),
+        g = sh_quote("[ALT+g] Green"),
+        b = sh_quote("[ALT+b] Blue"),
+    );
+    harness.send_text(cmd.as_bytes()).expect("launch question");
+    std::thread::sleep(Duration::from_millis(QUESTION_RENDER_MS));
+
+    // `tmux send-keys M-R` (capital R) emits the `ESC R` Alt/Meta chord — the
+    // legacy byte sequence for Alt+Shift+r. crossterm decodes it as
+    // `KeyCode::Char('R')` with the ALT modifier set; the matcher lowercases
+    // 'R' -> 'r' and looks it up in the alt-hotkey map, so the extra SHIFT
+    // (capital letter) does not suppress the `[ALT+r]` hotkey. This is the
+    // clean legacy-byte proof of relaxed ALT|SHIFT matching.
+    harness.send_key("M-R").expect("send Alt+Shift+R");
+    std::thread::sleep(Duration::from_millis(500));
+
+    let frame = harness.capture().expect("capture tmux pane");
+
+    assert!(
+        frame.plain.contains("PICK:Red"),
+        "Alt+Shift+R MUST relaxed-match + submit the [ALT+r] Red option in tmux; got: {:?}",
+        frame.plain
+    );
+}
+
+// ---------------------------------------------------------------------------
+// CONTROL|SHIFT requires the kitty keyboard protocol.
+//
+// Legacy terminals collapse Ctrl+R and Ctrl+Shift+R to the same 0x12 byte, so
+// `tmux send-keys C-r` cannot carry a *distinct* CONTROL|SHIFT payload — the
+// L1 reducer test stays the authoritative CONTROL|SHIFT contract for the
+// legacy path. To inject a true CONTROL|SHIFT chord we use the kitty CSI-u
+// encoding `\x1b[<codepoint>;<modifiers>u`, where
+// modifiers = 1 + (shift=1) + (alt=2) + (ctrl=4). For Ctrl+Shift+`r`
+// (codepoint 114): modifiers = 1+1+4 = 6, i.e. `\x1b[114;6u`. The binary
+// pushes `DISAMBIGUATE_ESCAPE_CODES | REPORT_ALL_KEYS_AS_ESCAPE_CODES` on a
+// kitty-aware terminal, so WezTerm reports the chord as kitty bytes which
+// crossterm decodes to `KeyCode::Char('r')` + `CONTROL|SHIFT`. The relaxed
+// matcher then selects the `[CTRL+r]` option. We deliver the bytes via
+// `wezterm cli send-text`, bypassing the OS keyboard entirely (see the
+// bare-Ctrl test above for why OS injection is intentionally avoided).
+// ---------------------------------------------------------------------------
+
+#[test]
+#[serial(level2)]
+#[cfg(target_os = "macos")]
+fn level2_wezterm_ctrl_shift_r_kitty_bytes_select_red() {
+    require_level!(Level::L2, WezTermHarness::available(), "WezTerm");
+
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+
+    harness.send_text(b"clear\n").expect("clear");
+    harness.settle();
+    let bin = sh_quote(&question_binary());
+    let cmd = format!(
+        "out=$({bin} choose-one {r} {g} {b}); printf '\\nPICK:%s\\n' \"$out\"\n",
+        r = sh_quote("[CTRL+r] Red"),
+        g = sh_quote("[CTRL+g] Green"),
+        b = sh_quote("[CTRL+b] Blue"),
+    );
+    harness.send_text(cmd.as_bytes()).expect("launch question");
+    std::thread::sleep(Duration::from_millis(QUESTION_RENDER_MS));
+
+    // Kitty CSI-u bytes for Ctrl+Shift+r: codepoint 114, modifiers 6 (ctrl+shift).
+    harness
+        .send_text(b"\x1b[114;6u")
+        .expect("send kitty Ctrl+Shift+r");
+    std::thread::sleep(Duration::from_millis(500));
+
+    let frame = harness.capture().expect("capture wezterm pane");
+    // The chord submits, so question exits and the shell returns to a prompt;
+    // no Ctrl+C cleanup is needed. If for any reason it did not submit, a
+    // best-effort Ctrl+C keeps the shared pane usable for the next test.
+    if !frame.plain.contains("PICK:Red") {
+        cleanup_via_ctrl_c(harness);
+        eprintln!("=== Level-2 capture (raw, with escapes) ===");
+        eprintln!("{:?}", frame.raw);
+        eprintln!("=== Level-2 capture (plain) ===");
+        eprintln!("{:?}", frame.plain);
+    }
+
+    assert!(
+        frame.plain.contains("PICK:Red"),
+        "kitty Ctrl+Shift+r bytes piped into a real WezTerm pane MUST relaxed-match \
+         + submit the [CTRL+r] Red option; got: {:?}",
+        frame.plain
+    );
+}
