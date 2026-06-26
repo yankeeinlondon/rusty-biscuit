@@ -39,6 +39,7 @@ uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
 ignore = "0.4"
 globset = "0.4"
+ansi-to-tui = "8"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 # Cross-platform rendezvous client used by the lifecycle `requeue(...)` control
 # action. On Unix the client connects over a Unix Domain Socket; on Windows it

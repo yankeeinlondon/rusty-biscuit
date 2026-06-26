@@ -52,7 +52,7 @@ pub(crate) const MAX_CANDIDATES: usize = 500;
 /// mature project if left alone, so they are pruned at every depth —
 /// `.gitignore` alone is not enough because many projects under-specify
 /// these trees in their ignore files.
-const SKIP_DIRS: &[&str] = &[
+pub(crate) const SKIP_DIRS: &[&str] = &[
     ".git",
     "target",
     "node_modules",
