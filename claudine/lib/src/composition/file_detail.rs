@@ -29,6 +29,9 @@ pub struct FileDetail {
     pub description: Option<String>,
     /// Serialized `$schema` value split into lines, empty when none.
     pub schema_lines: Vec<String>,
+    /// Whether the [`name`](Self::name) value came from an explicit
+    /// `name` frontmatter key rather than the file-stem fallback.
+    pub has_custom_name: bool,
 }
 
 /// Extract a [`FileDetail`] from a Markdown file.
@@ -49,7 +52,9 @@ pub fn extract_markdown_detail(path: &Path, badge: impl Into<String>) -> FileDet
     match Markdown::try_from(path) {
         Ok(markdown) => {
             let map = markdown.frontmatter().as_map();
-            let name = string_from_map(map, "name").unwrap_or(fallback_name);
+            let custom_name = string_from_map(map, "name");
+            let has_custom_name = custom_name.is_some();
+            let name = custom_name.unwrap_or(fallback_name);
             let description = string_from_map(map, "description");
             let schema_lines = schema_lines_from_map(map);
             FileDetail {
@@ -58,6 +63,7 @@ pub fn extract_markdown_detail(path: &Path, badge: impl Into<String>) -> FileDet
                 path: path.to_path_buf(),
                 description,
                 schema_lines,
+                has_custom_name,
             }
         }
         Err(_) => FileDetail {
@@ -66,6 +72,7 @@ pub fn extract_markdown_detail(path: &Path, badge: impl Into<String>) -> FileDet
             path: path.to_path_buf(),
             description: None,
             schema_lines: Vec::new(),
+            has_custom_name: false,
         },
     }
 }
@@ -87,12 +94,15 @@ pub fn extract_yaml_sequence_detail(path: &Path, badge: impl Into<String>) -> Fi
             path: path.to_path_buf(),
             description: None,
             schema_lines: Vec::new(),
+            has_custom_name: false,
         };
     };
 
     match biscuit_file::serde_yaml_ng::from_str::<biscuit_file::serde_yaml_ng::Value>(&text) {
         Ok(biscuit_file::serde_yaml_ng::Value::Mapping(map)) => {
-            let name = string_from_yaml_map(&map, "name").unwrap_or(fallback_name);
+            let custom_name = string_from_yaml_map(&map, "name");
+            let has_custom_name = custom_name.is_some();
+            let name = custom_name.unwrap_or(fallback_name);
             let description = string_from_yaml_map(&map, "description");
             let schema_lines = schema_lines_from_yaml_map(&map);
             FileDetail {
@@ -101,6 +111,7 @@ pub fn extract_yaml_sequence_detail(path: &Path, badge: impl Into<String>) -> Fi
                 path: path.to_path_buf(),
                 description,
                 schema_lines,
+                has_custom_name,
             }
         }
         _ => FileDetail {
@@ -109,6 +120,7 @@ pub fn extract_yaml_sequence_detail(path: &Path, badge: impl Into<String>) -> Fi
             path: path.to_path_buf(),
             description: None,
             schema_lines: Vec::new(),
+            has_custom_name: false,
         },
     }
 }

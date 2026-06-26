@@ -571,6 +571,7 @@ fn extract_file_detail(path: &Path) -> FileDetail {
         path: path.to_path_buf(),
         description: None,
         schema_lines: Vec::new(),
+        has_custom_name: false,
     }
 }
 
