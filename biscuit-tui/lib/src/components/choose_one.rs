@@ -573,25 +573,27 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseOne<V> {
             return EventOutcome::Consumed;
         }
 
-        // Ctrl/Alt hotkeys select and submit (Phase 5).
-        match event.modifiers {
-            KeyModifiers::CONTROL => {
-                if let KeyCode::Char(c) = event.code
-                    && let Some(&idx) = state.ctrl_hotkeys.get(&c.to_ascii_lowercase())
-                {
-                    select_at(state, idx);
-                    return EventOutcome::Submitted;
-                }
+        // Ctrl/Alt hotkeys select and submit. Modifier matching uses
+        // `.contains(...)` so a benign extra bit (e.g. SHIFT on an
+        // uppercase chord) does not suppress an otherwise valid hotkey.
+        // WHY CONTROL|ALT falls through: on some layouts AltGr-style
+        // chords report CONTROL|ALT and must not be hijacked as a
+        // hotkey, so when both are present neither map matches.
+        let modifiers = event.modifiers;
+        if modifiers.contains(KeyModifiers::CONTROL) && !modifiers.contains(KeyModifiers::ALT) {
+            if let KeyCode::Char(c) = event.code
+                && let Some(&idx) = state.ctrl_hotkeys.get(&c.to_ascii_lowercase())
+            {
+                select_at(state, idx);
+                return EventOutcome::Submitted;
             }
-            KeyModifiers::ALT => {
-                if let KeyCode::Char(c) = event.code
-                    && let Some(&idx) = state.alt_hotkeys.get(&c.to_ascii_lowercase())
-                {
-                    select_at(state, idx);
-                    return EventOutcome::Submitted;
-                }
-            }
-            _ => {}
+        } else if modifiers.contains(KeyModifiers::ALT)
+            && !modifiers.contains(KeyModifiers::CONTROL)
+            && let KeyCode::Char(c) = event.code
+            && let Some(&idx) = state.alt_hotkeys.get(&c.to_ascii_lowercase())
+        {
+            select_at(state, idx);
+            return EventOutcome::Submitted;
         }
 
         // Home/End/vim-style jumps, hotkey or filter-open, only when

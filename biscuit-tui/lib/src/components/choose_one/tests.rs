@@ -412,6 +412,93 @@ fn explicit_hotkey_is_case_insensitive() {
 }
 
 #[test]
+fn ctrl_shift_chord_matches_ctrl_hotkey() {
+    // A terminal that reports CONTROL|SHIFT for an uppercase chord
+    // must still match the ctrl-hotkey map.
+    let input = ChoiceInput::<String>::new("x", "P").with_options(vec![
+        ChoiceOption::new("a", "Apple", "apple").with_hotkey(HotkeySpec::Ctrl('a')),
+        ChoiceOption::new("b", "Banana", "banana"),
+    ]);
+    let mut state = ChooseOneState::new(input);
+    let event = KeyEvent::new(
+        KeyCode::Char('a'),
+        KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+    );
+    let outcome = ChooseOne::new().handle_event(&mut state, event);
+    assert_eq!(outcome, EventOutcome::Submitted);
+    assert_eq!(state.selected_index(), Some(0));
+}
+
+#[test]
+fn alt_shift_chord_matches_alt_hotkey() {
+    let input = ChoiceInput::<String>::new("x", "P").with_options(vec![
+        ChoiceOption::new("a", "Apple", "apple"),
+        ChoiceOption::new("b", "Banana", "banana").with_hotkey(HotkeySpec::Alt('b')),
+    ]);
+    let mut state = ChooseOneState::new(input);
+    let event = KeyEvent::new(KeyCode::Char('b'), KeyModifiers::ALT | KeyModifiers::SHIFT);
+    let outcome = ChooseOne::new().handle_event(&mut state, event);
+    assert_eq!(outcome, EventOutcome::Submitted);
+    assert_eq!(state.selected_index(), Some(1));
+}
+
+#[test]
+fn ctrl_alt_chord_matches_neither_hotkey() {
+    // CONTROL|ALT is treated as ambiguous (AltGr-style) and must not
+    // be hijacked by either hotkey map.
+    let input = ChoiceInput::<String>::new("x", "P").with_options(vec![
+        ChoiceOption::new("a", "Apple", "apple").with_hotkey(HotkeySpec::Ctrl('a')),
+        ChoiceOption::new("b", "Banana", "banana").with_hotkey(HotkeySpec::Alt('b')),
+    ]);
+    let mut state = ChooseOneState::new(input);
+
+    let ctrl_chord = KeyEvent::new(
+        KeyCode::Char('a'),
+        KeyModifiers::CONTROL | KeyModifiers::ALT,
+    );
+    assert_eq!(
+        ChooseOne::new().handle_event(&mut state, ctrl_chord),
+        EventOutcome::Ignored
+    );
+    assert_eq!(state.selected_index(), None);
+
+    let alt_chord = KeyEvent::new(
+        KeyCode::Char('b'),
+        KeyModifiers::CONTROL | KeyModifiers::ALT,
+    );
+    assert_eq!(
+        ChooseOne::new().handle_event(&mut state, alt_chord),
+        EventOutcome::Ignored
+    );
+    assert_eq!(state.selected_index(), None);
+}
+
+#[test]
+fn bare_ctrl_and_alt_hotkeys_still_match() {
+    // Regression guard: the relaxed modifier matching must not change
+    // bare-CONTROL or bare-ALT behavior.
+    let input = ChoiceInput::<String>::new("x", "P").with_options(vec![
+        ChoiceOption::new("a", "Apple", "apple").with_hotkey(HotkeySpec::Ctrl('a')),
+        ChoiceOption::new("b", "Banana", "banana").with_hotkey(HotkeySpec::Alt('b')),
+    ]);
+    let mut state = ChooseOneState::new(input);
+
+    let ctrl = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+    assert_eq!(
+        ChooseOne::new().handle_event(&mut state, ctrl),
+        EventOutcome::Submitted
+    );
+    assert_eq!(state.selected_index(), Some(0));
+
+    let alt = KeyEvent::new(KeyCode::Char('b'), KeyModifiers::ALT);
+    assert_eq!(
+        ChooseOne::new().handle_event(&mut state, alt),
+        EventOutcome::Submitted
+    );
+    assert_eq!(state.selected_index(), Some(1));
+}
+
+#[test]
 fn render_draws_indicator_and_label_per_row() {
     let mut state =
         ChooseOneState::new(fixture_input()).with_terminal_style(TerminalStyle::default());
