@@ -1045,6 +1045,7 @@ fn emit_preflight_blocked_and_finalize_runs_top_level_and_stack_for_both_events(
         term: &term,
         source_path: Path::new("/tmp/test.md"),
         repo_root: None,
+        launch_area: None,
     };
     let emitter = PreflightRecordingEmitter::new();
     let effect_engine = darkmatter::effects::EffectEngine::builder()
@@ -1066,6 +1067,7 @@ fn emit_preflight_blocked_and_finalize_runs_top_level_and_stack_for_both_events(
         &messaging,
         &term,
         Path::new("/tmp/test.md"),
+        None,
         None,
         None,
         &frontmatter,
@@ -1148,6 +1150,7 @@ fn emit_preflight_blocked_and_finalize_propagates_err_msg_into_blocked_stack() {
         term: &term,
         source_path: Path::new("/tmp/test.md"),
         repo_root: None,
+        launch_area: None,
     };
     let emitter = PreflightRecordingEmitter::new();
     let effect_engine = darkmatter::effects::EffectEngine::builder()
@@ -1165,6 +1168,7 @@ fn emit_preflight_blocked_and_finalize_propagates_err_msg_into_blocked_stack() {
         &messaging,
         &term,
         Path::new("/tmp/test.md"),
+        None,
         None,
         None,
         &frontmatter,

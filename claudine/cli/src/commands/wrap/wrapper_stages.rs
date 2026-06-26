@@ -434,6 +434,9 @@ pub(crate) fn run_execution_stage(
             term,
             source_path: &source_path_for_lifecycle,
             repo_root: env_plan.repo_root.as_deref(),
+            // This stage receives no `LaunchWorkspaceContext`; `ctx.*` capture
+            // falls back to the prompt/source directory.
+            launch_area: None,
         };
         let default_lifecycle_emitter = claudine::composition::DefaultLifecycleEmitter;
         let mut lifecycle_guard = claudine::composition::LifecycleRunGuard::new(

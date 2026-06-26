@@ -464,6 +464,7 @@ fn build_and_run_loop(
         term: &term,
         source_path: &source.resolved_path,
         repo_root: effective_repo_root,
+        launch_area: Some(prep_context.launch_workspace.launch_cwd.as_path()),
     };
 
     let lifecycle_mutation_root = effective_repo_root

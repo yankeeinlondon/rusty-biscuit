@@ -162,12 +162,14 @@ fn run_failure_event_for_downgrade(
     err: &LifecycleErrorInfo,
     loop_start: std::time::Instant,
 ) -> LifecycleEventOutcome {
-    let (timing, current) = capture_lifecycle_globals(source_path, repo_root, loop_start);
+    let (timing, current) =
+        capture_lifecycle_globals(source_path, repo_root, guard.context().launch_area, loop_start);
     let ctx = build_lifecycle_stack_context_for_materialized(
         LifecycleSignal::Failure,
         materialized,
         source_path,
         repo_root,
+        guard.context().launch_area,
         term,
         guard.emitter(),
         guard.context().settings,
@@ -200,12 +202,14 @@ fn emit_lifecycle_top_level_already_recorded(
     err: Option<&LifecycleErrorInfo>,
     loop_start: std::time::Instant,
 ) {
-    let (timing, current) = capture_lifecycle_globals(source_path, repo_root, loop_start);
+    let (timing, current) =
+        capture_lifecycle_globals(source_path, repo_root, guard.context().launch_area, loop_start);
     let ctx = build_lifecycle_stack_context_for_materialized(
         signal,
         materialized,
         source_path,
         repo_root,
+        guard.context().launch_area,
         term,
         guard.emitter(),
         guard.context().settings,
@@ -239,12 +243,14 @@ fn run_lifecycle_event(
     if !guard.record_event_emission(signal) {
         return LifecycleEventOutcome::default();
     }
-    let (timing, current) = capture_lifecycle_globals(source_path, repo_root, loop_start);
+    let (timing, current) =
+        capture_lifecycle_globals(source_path, repo_root, guard.context().launch_area, loop_start);
     let ctx = build_lifecycle_stack_context_for_materialized(
         signal,
         materialized,
         source_path,
         repo_root,
+        guard.context().launch_area,
         term,
         guard.emitter(),
         guard.context().settings,
@@ -376,12 +382,14 @@ fn run_lifecycle_stack_only(
     err: Option<&LifecycleErrorInfo>,
     loop_start: std::time::Instant,
 ) -> LifecycleEventOutcome {
-    let (timing, current) = capture_lifecycle_globals(source_path, repo_root, loop_start);
+    let (timing, current) =
+        capture_lifecycle_globals(source_path, repo_root, guard.context().launch_area, loop_start);
     let ctx = build_lifecycle_stack_context_for_materialized(
         signal,
         materialized,
         source_path,
         repo_root,
+        guard.context().launch_area,
         term,
         guard.emitter(),
         guard.context().settings,
@@ -406,6 +414,7 @@ fn build_lifecycle_stack_context_for_materialized<'a>(
     materialized: &'a MaterializedHarnessPrompt,
     source_path: &'a Path,
     repo_root: Option<&'a Path>,
+    launch_area: Option<&'a Path>,
     term: &'a Terminal,
     emitter: &'a dyn claudine::composition::LifecycleEmitter,
     settings: &'a claudine::events::GlobalSettings,
@@ -434,6 +443,7 @@ fn build_lifecycle_stack_context_for_materialized<'a>(
         timing,
         current,
         base_dir,
+        ctx_base_dir: launch_area,
         effect_engine,
         shell_runner: &SystemShellRunner,
         emitter,
@@ -456,10 +466,12 @@ fn build_lifecycle_stack_context_for_materialized<'a>(
 fn capture_lifecycle_globals(
     source_path: &Path,
     repo_root: Option<&Path>,
+    launch_area: Option<&Path>,
     loop_start: std::time::Instant,
 ) -> (LifecycleTiming, LifecycleCurrent) {
     let base_dir = source_path.parent().or(repo_root);
-    let current = match base_dir {
+    // `current.ctx.*` follows the launch area like event-time `ctx.*` capture.
+    let current = match launch_area.or(base_dir) {
         Some(dir) => LifecycleCurrent::capture_at_event(dir),
         None => LifecycleCurrent::capture_env_only(),
     };
@@ -1619,6 +1631,7 @@ pub(crate) fn run_harness_loop(
                 let (timing, current) = capture_lifecycle_globals(
                     &prompt_state.source_path,
                     repo_root,
+                    lifecycle_guard.context().launch_area,
                     loop_start,
                 );
                 let ctx = build_lifecycle_stack_context_for_materialized(
@@ -1626,6 +1639,7 @@ pub(crate) fn run_harness_loop(
                     &materialized,
                     &prompt_state.source_path,
                     repo_root,
+                    lifecycle_guard.context().launch_area,
                     term,
                     lifecycle_guard.emitter(),
                     lifecycle_guard.context().settings,
@@ -2130,7 +2144,7 @@ mod terminal_event_tests {
     fn capture_lifecycle_globals_populates_timing_and_current() {
         let loop_start = std::time::Instant::now();
         let (timing, current) =
-            capture_lifecycle_globals(Path::new("prompt.md"), Some(Path::new(".")), loop_start);
+            capture_lifecycle_globals(Path::new("prompt.md"), Some(Path::new(".")), None, loop_start);
 
         assert!(timing.document_ms.is_some(), "document_ms is populated");
         assert!(timing.total_ms.is_some(), "total_ms is populated");
@@ -2158,7 +2172,12 @@ mod terminal_event_tests {
         // SAFETY: serialized via #[serial]; no other thread reads this var.
         unsafe { std::env::set_var(key, "ready") };
         let (timing, current) =
-            capture_lifecycle_globals(Path::new("prompt.md"), Some(Path::new(".")), loop_start_now());
+            capture_lifecycle_globals(
+                Path::new("prompt.md"),
+                Some(Path::new(".")),
+                None,
+                loop_start_now(),
+            );
         unsafe { std::env::remove_var(key) };
 
         let state = EffectiveStateBuilder::new()
@@ -2310,6 +2329,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
         guard.mark_provider_launched();
@@ -2357,6 +2377,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
         guard.mark_provider_launched();
@@ -2413,6 +2434,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
         let eng = engine(fx._dir.path());
@@ -2455,6 +2477,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
         guard.mark_provider_launched();
@@ -2500,6 +2523,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
         let eng = engine(fx._dir.path());
@@ -2552,6 +2576,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
         // The provider never launched (a setup-phase `start` error routes here),
@@ -2569,6 +2594,7 @@ mod terminal_event_tests {
             &fx.materialized,
             &fx.source_path,
             Some(fx._dir.path()),
+            None,
             &fx.term,
             guard.emitter(),
             guard.context().settings,
@@ -2636,6 +2662,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
         guard.mark_provider_launched();
@@ -2648,6 +2675,7 @@ mod terminal_event_tests {
             &fx.materialized,
             &fx.source_path,
             Some(fx._dir.path()),
+            None,
             &fx.term,
             guard.emitter(),
             guard.context().settings,
@@ -2703,6 +2731,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
         let eng = engine(fx._dir.path());
@@ -2786,6 +2815,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
         guard.mark_provider_launched();
@@ -2834,6 +2864,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
         guard.mark_provider_launched();
@@ -2883,6 +2914,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
         guard.mark_provider_launched();
@@ -2923,6 +2955,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
         let mut state = prompt_state(&fx.source_path);
@@ -2965,6 +2998,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
         guard.mark_provider_launched();
@@ -3010,6 +3044,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
         let mut state = prompt_state(&fx.source_path);
@@ -3056,6 +3091,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
         guard.mark_provider_launched();
@@ -3102,6 +3138,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
         let mut state = prompt_state(&fx.source_path);
@@ -3149,6 +3186,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
         let mut state = prompt_state(&fx.source_path);
@@ -3181,6 +3219,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
         let mut state = prompt_state(&fx.source_path);
@@ -3231,6 +3270,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
         let eng = engine(fx._dir.path());
@@ -3282,6 +3322,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
         guard.mark_provider_launched();
@@ -3330,6 +3371,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
         let eng = engine(fx._dir.path());
@@ -3391,6 +3433,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
         // Reach `start` without launching the provider — exactly the state at
@@ -3454,6 +3497,7 @@ mod terminal_event_tests {
             term: &fx.term,
             source_path: &fx.source_path,
             repo_root: Some(fx._dir.path()),
+            launch_area: None,
         };
         let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
         assert!(guard.record_event_emission(LifecycleSignal::Start));

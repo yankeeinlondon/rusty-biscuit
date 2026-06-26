@@ -171,6 +171,7 @@ fn emit_preflight_blocked_and_finalize(
     source_path: &Path,
     repo_root: Option<&Path>,
     base_dir: Option<&Path>,
+    ctx_base_dir: Option<&Path>,
     frontmatter: &serde_json::Map<String, serde_json::Value>,
     document_start: std::time::Instant,
     err_info: claudine::composition::LifecycleErrorInfo,
@@ -180,7 +181,8 @@ fn emit_preflight_blocked_and_finalize(
         None,
         std::time::Instant::now(),
     );
-    let current_anchor = base_dir.unwrap_or(source_path);
+    // `current.ctx.*` follows the launch area like event-time `ctx.*` capture.
+    let current_anchor = ctx_base_dir.or(base_dir).unwrap_or(source_path);
     let current =
         claudine::composition::LifecycleCurrent::capture_at_event(current_anchor);
 
@@ -193,6 +195,7 @@ fn emit_preflight_blocked_and_finalize(
         timing: Some(&timing),
         current: Some(&current),
         base_dir,
+        ctx_base_dir,
         effect_engine,
         shell_runner: &SystemShellRunner,
         emitter,
@@ -1226,6 +1229,7 @@ fn execute_composition_request_inner_with_guard(
                 &request.prepared.resolved_path,
                 effective_repo_root,
                 base_dir,
+                Some(launch_workspace.launch_cwd.as_path()),
                 frontmatter,
                 document_start,
                 claudine::composition::LifecycleErrorInfo::from_action_failure(
@@ -1270,6 +1274,7 @@ fn execute_composition_request_inner_with_guard(
                     &request.prepared.resolved_path,
                     effective_repo_root,
                     base_dir,
+                    Some(launch_workspace.launch_cwd.as_path()),
                     frontmatter,
                     document_start,
                     claudine::composition::LifecycleErrorInfo::from_action_failure(
@@ -1570,6 +1575,7 @@ fn execute_composition_request_inner_with_guard(
         term: &term,
         source_path: &request.prepared.resolved_path,
         repo_root: effective_repo_root,
+        launch_area: Some(launch_workspace.launch_cwd.as_path()),
     };
 
     // --- Initialize lifecycle event --------------------------------------
@@ -1588,9 +1594,10 @@ fn execute_composition_request_inner_with_guard(
     // `current.env`/`current.ctx` are captured now, so a side effect or
     // external change since `prepare` is observable through `current.*`. The
     // document-start instant anchors `timing.document_ms` at this event.
+    // `current.ctx.*` follows the launch area like event-time `ctx.*` capture.
     let lifecycle_current =
         claudine::composition::lifecycle_context::LifecycleCurrent::capture_at_event(
-            base_dir.unwrap_or(launch_cwd.as_path()),
+            launch_workspace.launch_cwd.as_path(),
         );
     let lifecycle_timing = claudine::composition::lifecycle_context::LifecycleTiming::from_instants(
         document_start,
@@ -1608,6 +1615,7 @@ fn execute_composition_request_inner_with_guard(
         timing: Some(&lifecycle_timing),
         current: Some(&lifecycle_current),
         base_dir,
+        ctx_base_dir: Some(launch_workspace.launch_cwd.as_path()),
         effect_engine: &lifecycle_effect_engine,
         shell_runner: &SystemShellRunner,
         emitter: &emitter,
