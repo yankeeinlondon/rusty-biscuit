@@ -1,0 +1,382 @@
+//! Level 2 real-terminal tests for the ENTER-path autocomplete chooser.
+//!
+//! Phase 5 of the `2026-06-14-auto-complete` feature. These tests drive
+//! `claudine compose` with a missing `file` or `file[]` schema property
+//! inside a real terminal (tmux / WezTerm) and assert:
+//!
+//! - A `file` property renders a single-select `ChooseOne` chooser.
+//! - A `file[]` property renders a multi-select `ChooseMany` chooser.
+//! - The detail pane renders beside the list in wide terminals and above
+//!   the list in tall terminals (`SplitPane` `SplitDirection::Auto`).
+//!
+//! Gating: `#![cfg(unix)]`, `require_level!(Level::L2, ...)` so the tests
+//! skip cleanly when the backend is unavailable and panic under
+//! `BISCUIT_TEST_LEVEL_REQUIRED=2`.
+//!
+//! Run via the canonical recipe:
+//!
+//! ```text
+//! just test-l2
+//! ```
+
+#![cfg(unix)]
+
+use std::fs;
+use std::io;
+use std::path::Path;
+use std::time::{Duration, Instant};
+
+use biscuit_test_harness::tmux::TmuxHarness;
+use biscuit_test_harness::wezterm::WezTermHarness;
+use biscuit_test_harness::{CapturedFrame, TerminalHarness, capture_settled};
+use serial_test::serial;
+use test_toolkit::{Level, require_level};
+
+mod common;
+use common::{TestWorkspace, augmented_path, init_git_repo, write_executable};
+
+const WIDE_COLUMNS: u32 = 120;
+const WIDE_LINES: u32 = 24;
+const TALL_COLUMNS: u32 = 30;
+const TALL_LINES: u32 = 50;
+
+/// Backend-specific key injection. tmux routes through `send-keys` key
+/// names (more reliable for Enter/Space); WezTerm uses raw bytes.
+trait KeySender: TerminalHarness {
+    fn send_enter(&mut self) -> io::Result<()>;
+    fn send_space(&mut self) -> io::Result<()>;
+}
+
+impl KeySender for TmuxHarness {
+    fn send_enter(&mut self) -> io::Result<()> {
+        self.send_key("Enter")
+    }
+    fn send_space(&mut self) -> io::Result<()> {
+        self.send_key("Space")
+    }
+}
+
+impl KeySender for WezTermHarness {
+    fn send_enter(&mut self) -> io::Result<()> {
+        self.send_text(b"\r")
+    }
+    fn send_space(&mut self) -> io::Result<()> {
+        self.send_text(b" ")
+    }
+}
+
+/// Stage a workspace with a `goose` stub, an empty claudine config (so the
+/// init wizard does not intercept stdin), a git repo (so file labels are
+/// repo-relative), and a prompt file whose schema declares the requested
+/// file property.
+fn stage_workspace(property: &str) -> TestWorkspace {
+    let ws = TestWorkspace::named("auto-complete-chooser");
+    let bin_dir = ws.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    let marker = ws.path().join("launched.flag");
+
+    stage_goose_stub(&bin_dir, &marker);
+    stage_default_config(ws.path());
+    init_git_repo(ws.path());
+
+    fs::write(
+        ws.path().join("readme.md"),
+        "---\nname: 'Readme'\ndescription: 'Project readme'\n---\n# Readme\n",
+    )
+    .unwrap();
+    fs::write(ws.path().join("notes.md"), "# Notes\n").unwrap();
+
+    let md_file = ws.path().join("plan.md");
+    fs::write(
+        &md_file,
+        format!("---\n$schema:\n  {property}\n---\nPlan.\n"),
+    )
+    .unwrap();
+
+    ws
+}
+
+fn stage_default_config(home_dir: &Path) {
+    let claudine_dir = home_dir.join(".claudine");
+    fs::create_dir_all(&claudine_dir).unwrap();
+    fs::write(claudine_dir.join("config.json"), "{}").unwrap();
+}
+
+fn stage_goose_stub(bin_dir: &Path, marker_file: &Path) {
+    write_executable(
+        &bin_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\necho 'launched' > {}\nexit 0\n",
+            marker_file.display()
+        ),
+    );
+}
+
+fn claudine_bin() -> String {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| {
+            let mut dir = exe.parent()?.to_path_buf();
+            if dir.file_name()?.to_str()? == "deps" {
+                dir = dir.parent()?.to_path_buf();
+            }
+            dir.join("claudine").exists().then(|| dir.join("claudine").display().to_string())
+        })
+        .unwrap_or_else(|| "claudine".to_string())
+}
+
+
+/// Drive the chooser to completion.
+///
+/// - Sends the compose command and waits for the chooser hint.
+/// - Sends any `pre_submit_keys` (e.g. `Space` to toggle a `ChooseMany`
+///   item) and captures the still-visible chooser frame.
+/// - Sends `Enter` to submit and waits for the provider launch marker.
+///
+/// Returns `(chooser_frame, final_frame)`.
+fn drive_chooser(
+    harness: &mut impl KeySender,
+    ws: &TestWorkspace,
+    pre_submit_keys: &[Key],
+) -> (CapturedFrame, CapturedFrame) {
+    let marker = ws.path().join("launched.flag");
+    let path = augmented_path(&ws.path().join("bin"));
+    let home = ws.path().to_string_lossy();
+
+    harness
+        .send_command_with_env(
+            &format!("cd '{}'", ws.path().display()),
+            &[("HOME", home.as_ref())],
+        )
+        .expect("cd into workspace");
+
+    let cmd = format!(
+        "{} compose --goose {}",
+        claudine_bin(),
+        ws.path().join("plan.md").display(),
+    );
+    harness
+        .send_command_with_env(
+            &cmd,
+            &[
+                ("HOME", home.as_ref()),
+                ("PATH", path.to_str().unwrap_or("/usr/bin")),
+                ("TERM", "xterm-256color"),
+                ("COLORTERM", "truecolor"),
+            ],
+        )
+        .expect("send compose command");
+
+    // Wait for the inline chooser to render before injecting keys.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut frame = harness.capture().expect("initial capture");
+    while Instant::now() < deadline {
+        if frame.plain.contains("Enter=Submit") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+        frame = harness.capture().expect("wait for chooser");
+    }
+    assert!(
+        frame.plain.contains("Enter=Submit"),
+        "chooser never rendered; plain:\n{}",
+        frame.plain
+    );
+
+    for key in pre_submit_keys {
+        match key {
+            Key::Space => harness.send_space().expect("send pre-submit Space"),
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    // Capture the chooser while it is still visible.
+    let chooser_frame = harness.capture().expect("capture chooser");
+
+    harness.send_enter().expect("send Enter");
+
+    // Wait for the goose stub to record its launch.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while Instant::now() < deadline {
+        if marker.exists() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    let final_frame = capture_settled(harness).expect("final capture");
+    assert!(
+        marker.exists(),
+        "provider stub did not launch; final frame:\n{}",
+        final_frame.plain
+    );
+    (chooser_frame, final_frame)
+}
+
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+enum Key {
+    Space,
+}
+
+/// Candidate labels and detail text markers used by layout assertions.
+/// Whether a line belongs to the candidate list (ChooseOne or ChooseMany).
+fn is_list_line(line: &str) -> bool {
+    line.contains('○') || line.contains('☐') || line.contains('▶') || line.contains('☑')
+}
+
+fn candidate_marker(plain: &str) -> bool {
+    plain.contains("plan") || plain.contains("Readme")
+}
+
+fn detail_marker(plain: &str) -> bool {
+    plain.contains("Schema:")
+        || plain.contains("no description")
+        || plain.contains("no schema defined")
+        || plain.contains("FILE")
+}
+
+/// Assert that the captured frame shows the chooser with a live detail pane.
+fn assert_chooser_and_detail(frame: &CapturedFrame) {
+    let plain = &frame.plain;
+    assert!(
+        detail_marker(plain),
+        "detail pane must render schema/description; plain:\n{plain}"
+    );
+    assert!(
+        candidate_marker(plain),
+        "candidate list must render file labels; plain:\n{plain}"
+    );
+}
+
+/// In a wide terminal the detail pane sits to the right of the list, so
+/// some single line carries both a candidate label and detail text.
+fn assert_wide_layout(frame: &CapturedFrame) {
+    let has_side_by_side = frame.plain.lines().any(|line| {
+        is_list_line(line) && candidate_marker(line) && detail_marker(line)
+    });
+    assert!(
+        has_side_by_side,
+        "wide terminal must render list and detail side-by-side; plain:\n{}",
+        frame.plain
+    );
+}
+
+/// In a tall terminal the detail pane sits above the list, so detail text
+/// appears on lines before the first candidate label.
+fn assert_tall_layout(frame: &CapturedFrame) {
+    let lines: Vec<&str> = frame.plain.lines().collect();
+    let first_detail = lines.iter().position(|l| detail_marker(l));
+    let first_list = lines
+        .iter()
+        .position(|l| is_list_line(l) && candidate_marker(l));
+    assert!(
+        matches!((first_detail, first_list), (Some(d), Some(c)) if d < c),
+        "tall terminal must render detail above the candidate list; plain:\n{}",
+        frame.plain
+    );
+}
+
+// ----------------------------------------------------------------------
+// Type-driven chooser behavior
+// ----------------------------------------------------------------------
+
+fn run_file_chooser_test<H: KeySender>(harness: &mut H) {
+    let ws = stage_workspace("cover: 'file(required)'");
+    let (chooser_frame, _) = drive_chooser(harness, &ws, &[]);
+    assert_chooser_and_detail(&chooser_frame);
+}
+
+fn run_file_array_chooser_test<H: KeySender>(harness: &mut H) {
+    let ws = stage_workspace("attachments: 'file[](required)'");
+    let (chooser_frame, _) = drive_chooser(harness, &ws, &[Key::Space]);
+    assert_chooser_and_detail(&chooser_frame);
+}
+
+// ----------------------------------------------------------------------
+// SplitPane Auto layout
+// ----------------------------------------------------------------------
+
+fn run_wide_layout_test<H: KeySender>(harness: &mut H) {
+    let ws = stage_workspace("cover: 'file(required)'");
+    let (chooser_frame, _) = drive_chooser(harness, &ws, &[]);
+    assert_wide_layout(&chooser_frame);
+}
+
+fn run_tall_layout_test<H: KeySender>(harness: &mut H) {
+    let ws = stage_workspace("cover: 'file(required)'");
+    let (chooser_frame, _) = drive_chooser(harness, &ws, &[]);
+    assert_tall_layout(&chooser_frame);
+}
+
+// ----------------------------------------------------------------------
+// tmux backend
+// ----------------------------------------------------------------------
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_tmux_file_property_uses_choose_one() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let mut harness = TmuxHarness::new();
+    harness.spawn_shell().expect("tmux harness");
+    harness.resize(80, 24).ok();
+    run_file_chooser_test(&mut harness);
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_tmux_file_array_property_uses_choose_many() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let mut harness = TmuxHarness::new();
+    harness.spawn_shell().expect("tmux harness");
+    harness.resize(80, 24).ok();
+    run_file_array_chooser_test(&mut harness);
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_tmux_chooser_detail_right_in_wide_terminal() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let mut harness = TmuxHarness::new();
+    harness.spawn_shell().expect("tmux harness");
+    harness.resize(WIDE_COLUMNS, WIDE_LINES).expect("resize tmux pane wide");
+    run_wide_layout_test(&mut harness);
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_tmux_chooser_detail_above_in_tall_terminal() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let mut harness = TmuxHarness::new();
+    harness.spawn_shell().expect("tmux harness");
+    harness.resize(TALL_COLUMNS, TALL_LINES).expect("resize tmux pane tall");
+    run_tall_layout_test(&mut harness);
+}
+
+// ----------------------------------------------------------------------
+// WezTerm backend
+// ----------------------------------------------------------------------
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_wezterm_file_property_uses_choose_one() {
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
+    let mut harness = WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm");
+    run_file_chooser_test(&mut harness);
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_wezterm_file_array_property_uses_choose_many() {
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
+    let mut harness = WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm");
+    run_file_array_chooser_test(&mut harness);
+}

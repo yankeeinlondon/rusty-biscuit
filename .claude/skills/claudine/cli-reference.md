@@ -448,6 +448,14 @@ claudine completions zsh > ~/.zfunc/_claudine
 claudine completions fish > ~/.config/fish/completions/claudine.fish
 ```
 
+**Related runtime behavior.** The `completions` command only installs the
+static shell script. Runtime file selection also happens through the
+ENTER-path autocomplete: when a composition command runs interactively
+and a required file value is missing (omitted positional argument or a
+`file`/`file[]` schema property), Claudine opens a `ChooseOne` or
+`ChooseMany` chooser. See [Shell Completions](../../../claudine/docs/topics/shell-completions.md)
+for details.
+
 ---
 
 ## `claudine context`

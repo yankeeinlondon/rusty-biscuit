@@ -20,6 +20,8 @@ Key code:
 - Engine entry point — [`claudine/cli/src/completion/engine.rs`](../../cli/src/completion/engine.rs)
 - Root menu — [`claudine/cli/src/completion/root_menu.rs`](../../cli/src/completion/root_menu.rs)
 - Composition pipeline — [`claudine/cli/src/completion/composition.rs`](../../cli/src/completion/composition.rs)
+- ENTER-path autocomplete UI — [`claudine/cli/src/completion/autocomplete_ui.rs`](../../cli/src/completion/autocomplete_ui.rs)
+- Default markdown glob — [`claudine/cli/src/completion/default_glob.rs`](../../cli/src/completion/default_glob.rs)
 - Setter-value completer — [`claudine/cli/src/completion/setter_value.rs`](../../cli/src/completion/setter_value.rs)
 - Scope resolution — [`claudine/cli/src/completion/scopes.rs`](../../cli/src/completion/scopes.rs)
 - Walker — [`claudine/cli/src/completion/walker.rs`](../../cli/src/completion/walker.rs)
@@ -27,6 +29,7 @@ Key code:
 - Fuzzy matcher — [`claudine/cli/src/completion/fuzzy.rs`](../../cli/src/completion/fuzzy.rs)
 - Shell scripts — [`claudine/cli/src/completion/bootstrap.rs`](../../cli/src/completion/bootstrap.rs)
 - `__complete` CLI contract — [`claudine/cli/src/commands/completions.rs`](../../cli/src/commands/completions.rs)
+- Interactive schema collection — [`claudine/cli/src/commands/schema_interactive.rs`](../../cli/src/commands/schema_interactive.rs)
 
 ## Installation
 
@@ -604,6 +607,64 @@ malformed schema or a transient filesystem failure must not break
 `<TAB>` for the entire command. Returning nothing keeps the shell's
 own completion alive in those edge cases.
 
+## ENTER-path autocomplete
+
+When a composition command runs interactively and a required file value
+is missing, Claudine can prompt for it at runtime instead of failing.
+This applies to two surfaces:
+
+1. **The composition positional argument** — `claudine compose <file>`,
+   `claudine inline-compose <file>`, and `claudine sequence <file>`.
+   When the positional file is omitted or does not resolve, Claudine
+   offers every markdown candidate in scope.
+2. **Missing `$schema` properties** — when a frontmatter schema declares
+   a property typed `file` or `file[]`, the value can be supplied
+   interactively at runtime.
+
+The prompt is gated by the same rules as the missing-property prompt:
+stdin and stderr must be TTYs, `--silent` must be off, and
+`prompt_for_missing` must be true in config. If any gate is closed,
+Claudine prints the non-interactive remediation block instead.
+
+### Type-driven chooser
+
+- A property typed `file` (or the single positional argument) uses a
+  single-select `ChooseOne` chooser.
+- A property typed `file[]` uses a multi-select `ChooseMany` chooser:
+  press `Space` to toggle items, then `Enter` to submit the set.
+
+Candidates come from the schema's `match(...)` globs when present;
+otherwise the bare `file`/`file[]` fallback walks the effective repo
+root (or CWD when not in a repo) for markdown files, honoring
+`.gitignore` and excluding prompt directories so composition prompts do
+not leak into generic file values.
+
+### Layout
+
+When more than one candidate exists, the chooser renders a two-pane
+layout:
+
+- **Wide terminals** (`width >= height`) — candidate list on the left,
+  live detail pane on the right.
+- **Tall terminals** (`width < height`) — detail pane above the
+  candidate list.
+
+The detail pane shows the file badge, name, description (or
+"no description"), the `$schema` value rendered as YAML, and an OSC8
+path link.
+
+### Single-match shortcut
+
+When only one candidate resolves, Claudine shows a lightweight
+`Use this file? (Y/n)` prose dialog instead of the full chooser.
+Press `Y` or `Enter` to accept; `n` or `Esc` to cancel.
+
+### Cancellation
+
+Pressing `Esc` in the chooser or dialog cancels interactive collection
+and bubbles back as the original `MissingProperties` error, so the CLI
+still surfaces the non-TTY remediation block.
+
 ## Other commands
 
 Every non-composition subcommand — `skills`, `commands`, `hooks`,
@@ -897,3 +958,6 @@ flowchart TD
 | [`bootstrap.rs`](../../cli/src/completion/bootstrap.rs) | Shell scripts (bash/zsh/fish) + legacy PowerShell/Elvish. |
 | [`commands/completions.rs`](../../cli/src/commands/completions.rs) | `claudine completions` and the hidden `__complete`. |
 | [`schema_completion.rs`](../../cli/src/completion/schema_completion.rs) | Schema-aware property-name and property-value completion for setter slots. |
+| [`autocomplete_ui.rs`](../../cli/src/completion/autocomplete_ui.rs) | ENTER-path chooser / confirmation dialog rendering. |
+| [`default_glob.rs`](../../cli/src/completion/default_glob.rs) | Bare `file`/`file[]` markdown candidate gatherer. |
+| [`commands/schema_interactive.rs`](../../cli/src/commands/schema_interactive.rs) | Interactive collection of missing `$schema` properties. |
