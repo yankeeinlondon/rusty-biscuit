@@ -643,7 +643,8 @@ where
     let mut guard = LifecycleRunGuard::new(lifecycle_config, lifecycle_ctx, emitter);
 
     // Emit initialize once before any iteration runs.
-    let (init_timing, init_current) = capture_loop_lifecycle_globals(base_dir, loop_start);
+    let (init_timing, init_current) =
+        capture_loop_lifecycle_globals(base_dir, lifecycle_ctx.launch_area, loop_start);
     let init_ctx = build_loop_stack_context(
         LifecycleSignal::Initialize,
         &initial_frontmatter,
@@ -1076,7 +1077,8 @@ fn run_loop_gate(
     emitter: &dyn LifecycleEmitter,
     loop_start: std::time::Instant,
 ) -> Result<LoopGateOutcome, CompositionError> {
-    let (timing, current) = capture_loop_lifecycle_globals(base_dir, loop_start);
+    let (timing, current) =
+        capture_loop_lifecycle_globals(base_dir, lifecycle_ctx.launch_area, loop_start);
     let loop_ctx = build_loop_stack_context(
         LifecycleSignal::Loop,
         frontmatter,
@@ -1174,6 +1176,7 @@ fn build_loop_stack_context<'a>(
         timing,
         current,
         base_dir,
+        ctx_base_dir: lifecycle_ctx.launch_area,
         effect_engine,
         shell_runner,
         emitter,
@@ -1195,12 +1198,15 @@ fn build_loop_stack_context<'a>(
 /// sequence).
 fn capture_loop_lifecycle_globals(
     base_dir: Option<&Path>,
+    ctx_base_dir: Option<&Path>,
     loop_start: std::time::Instant,
 ) -> (
     super::lifecycle_context::LifecycleTiming,
     super::lifecycle_context::LifecycleCurrent,
 ) {
-    let current = match base_dir {
+    // `current.ctx.*` follows the launch area like the event-time `ctx.*`
+    // capture; `current.env.*` is launch-area independent.
+    let current = match ctx_base_dir.or(base_dir) {
         Some(dir) => super::lifecycle_context::LifecycleCurrent::capture_at_event(dir),
         None => super::lifecycle_context::LifecycleCurrent::capture_env_only(),
     };
@@ -1416,7 +1422,8 @@ mod tests {
     #[test]
     fn capture_loop_lifecycle_globals_populates_timing_and_env() {
         let loop_start = std::time::Instant::now();
-        let (timing, current) = capture_loop_lifecycle_globals(Some(Path::new(".")), loop_start);
+        let (timing, current) =
+            capture_loop_lifecycle_globals(Some(Path::new(".")), None, loop_start);
 
         assert!(
             timing.document_ms.is_some(),
@@ -2645,6 +2652,7 @@ mod tests {
             term: &term,
             source_path: prompt_path,
             repo_root: prompt_path.parent(),
+            launch_area: None,
         };
         let effect_engine = darkmatter::effects::EffectEngine::builder()
             .mutation_root(prompt_path.parent().unwrap_or(Path::new(".")))

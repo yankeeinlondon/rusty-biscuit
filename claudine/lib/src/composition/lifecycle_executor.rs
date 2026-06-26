@@ -202,6 +202,9 @@ pub struct StackExecutionContext<'a> {
     pub current: Option<&'a LifecycleCurrent>,
     /// Base directory for read-side expression functions and file references.
     pub base_dir: Option<&'a Path>,
+    /// Base directory for `ctx.*` capture only (the launch area); when `None`,
+    /// falls back to `base_dir`.
+    pub ctx_base_dir: Option<&'a Path>,
     /// Darkmatter side-effect engine.
     pub effect_engine: &'a EffectEngine,
     /// Approved-shell runner.
@@ -303,6 +306,7 @@ impl StackExecutionContext<'_> {
             timing: self.timing,
             current: self.current,
             base_dir: self.base_dir,
+            ctx_base_dir: self.ctx_base_dir,
             effect_engine: self.effect_engine,
             shell_runner: self.shell_runner,
             emitter: self.emitter,
@@ -331,6 +335,7 @@ impl StackExecutionContext<'_> {
             timing: self.timing,
             current: self.current,
             base_dir: self.base_dir,
+            ctx_base_dir: self.ctx_base_dir,
             effect_engine: self.effect_engine,
             shell_runner: self.shell_runner,
             emitter: self.emitter,
@@ -367,7 +372,10 @@ impl StackExecutionContext<'_> {
     fn build_state(&self, fm: &Map<String, Value>, scan_hint: &str) -> EffectiveState {
         let frontmatter: HashMap<String, Value> =
             fm.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        let base = self.base_dir.unwrap_or_else(|| Path::new("."));
+        let base = self
+            .ctx_base_dir
+            .or(self.base_dir)
+            .unwrap_or_else(|| Path::new("."));
         let context = ComposeContext::capture_for_content(base, scan_hint);
         EffectiveStateBuilder::new()
             .with_frontmatter(frontmatter)
@@ -1252,6 +1260,7 @@ mod tests {
             timing: None,
             current: None,
             base_dir: None,
+            ctx_base_dir: None,
             effect_engine: engine,
             shell_runner: shell,
             emitter: recorder,
@@ -1290,6 +1299,7 @@ mod tests {
             timing: None,
             current: None,
             base_dir: None,
+            ctx_base_dir: None,
             effect_engine: engine,
             shell_runner: shell,
             emitter: recorder,
@@ -2879,6 +2889,82 @@ mod tests {
         assert_eq!(
             recorder.events(),
             vec![Emitted::Effect("confirmation".to_string())]
+        );
+    }
+
+    /// `ctx.*` capture must follow `ctx_base_dir` (the launch area) when set,
+    /// not `base_dir` (the prompt's parent). Regression for lifecycle messages
+    /// interpolating `{{ctx.*}}` against the prompt file's directory instead of
+    /// the directory the caller launched from.
+    ///
+    /// Uses `ctx.repo_root` as a directory-sensitive probe: each temp dir is its
+    /// own git repo, so the discovery resolves to whichever directory the
+    /// capture is rooted at — deterministic and cross-platform (no
+    /// monorepo/cargo fixture needed).
+    #[test]
+    fn ctx_capture_follows_ctx_base_dir_not_base_dir() {
+        let git_init = |dir: &Path| {
+            let ok = std::process::Command::new("git")
+                .arg("init")
+                .arg("--quiet")
+                .current_dir(dir)
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            assert!(ok, "git init must succeed in {}", dir.display());
+        };
+
+        let ctx_dir = tempfile::tempdir().unwrap();
+        let base_dir = tempfile::tempdir().unwrap();
+        git_init(ctx_dir.path());
+        git_init(base_dir.path());
+
+        // Canonicalize: macOS temp dirs are symlinks (`/var` → `/private/var`),
+        // and sniff reports the canonical repo root.
+        let ctx_root = std::fs::canonicalize(ctx_dir.path()).unwrap();
+        let base_root = std::fs::canonicalize(base_dir.path()).unwrap();
+
+        let (_engine_dir, engine) = temp_engine();
+        let shell = MockShell::new(0);
+        let recorder = Recorder::default();
+        let harness = Harness::default();
+        let fm = Map::new();
+        let source_path = ctx_root.join("prompt.md");
+
+        let context = StackExecutionContext {
+            signal: LifecycleSignal::Start,
+            frontmatter: &fm,
+            live_frontmatter: None,
+            err: None,
+            timing: None,
+            current: None,
+            // `base_dir` deliberately differs from `ctx_base_dir` so a leak back
+            // to `base_dir` would resolve to `base_root` and fail the assert.
+            base_dir: Some(base_root.as_path()),
+            ctx_base_dir: Some(ctx_root.as_path()),
+            effect_engine: &engine,
+            shell_runner: &shell,
+            emitter: &recorder,
+            term: &harness.term,
+            source_path: &source_path,
+            repo_root: None,
+            messaging: &harness.messaging,
+            settings: &harness.settings,
+        };
+
+        let resolved = context
+            .resolve_string_value("{{ctx.repo_root}}", &fm)
+            .expect("ctx.repo_root resolves");
+        let resolved = resolved.as_str().unwrap_or_default();
+        assert_eq!(
+            resolved,
+            ctx_root.to_string_lossy(),
+            "ctx.* must capture against ctx_base_dir (launch area), not base_dir"
+        );
+        assert_ne!(
+            resolved,
+            base_root.to_string_lossy(),
+            "ctx.* must not leak to base_dir"
         );
     }
 }

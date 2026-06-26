@@ -823,6 +823,11 @@ pub struct LifecycleRuntimeContext<'a> {
 
     /// Repository root (if in a git repository).
     pub repo_root: Option<&'a Path>,
+
+    /// Directory the caller launched from (the package area), used as the base
+    /// for `ctx.*` capture in lifecycle events; falls back to the prompt/source
+    /// directory when `None`.
+    pub launch_area: Option<&'a Path>,
 }
 
 /// A single audio playback phase.
@@ -4135,6 +4140,7 @@ mod tests {
             term: &term,
             source_path: Path::new("/tmp/test.md"),
             repo_root: None,
+            launch_area: None,
         };
         let emitter = RecordingEmitter::new();
         let mut guard = make_guard(&config, &ctx, &emitter);
@@ -4156,6 +4162,7 @@ mod tests {
             term: &term,
             source_path: Path::new("/tmp/test.md"),
             repo_root: None,
+            launch_area: None,
         };
         let emitter = RecordingEmitter::new();
 
@@ -4181,6 +4188,7 @@ mod tests {
             term: &term,
             source_path: Path::new("/tmp/test.md"),
             repo_root: None,
+            launch_area: None,
         };
         let emitter = RecordingEmitter::new();
 
@@ -4207,6 +4215,7 @@ mod tests {
             term: &term,
             source_path: Path::new("/tmp/test.md"),
             repo_root: None,
+            launch_area: None,
         };
         let emitter = RecordingEmitter::new();
 
@@ -4228,6 +4237,7 @@ mod tests {
             term: &term,
             source_path: Path::new("/tmp/test.md"),
             repo_root: None,
+            launch_area: None,
         };
         let emitter = RecordingEmitter::new();
 
@@ -4255,6 +4265,7 @@ mod tests {
             term: &term,
             source_path: Path::new("/tmp/test.md"),
             repo_root: None,
+            launch_area: None,
         };
         let emitter = RecordingEmitter::new();
 
@@ -4278,6 +4289,7 @@ mod tests {
             term: &term,
             source_path: Path::new("/tmp/test.md"),
             repo_root: None,
+            launch_area: None,
         };
         let emitter = RecordingEmitter::new();
 
@@ -4303,6 +4315,7 @@ mod tests {
             term: &term,
             source_path: Path::new("/tmp/test.md"),
             repo_root: None,
+            launch_area: None,
         };
         let emitter = RecordingEmitter::new();
 
@@ -4329,6 +4342,7 @@ mod tests {
             term: &term,
             source_path: Path::new("/tmp/test.md"),
             repo_root: None,
+            launch_area: None,
         };
         let emitter = RecordingEmitter::new();
         let mut guard = make_guard(&config, &ctx, &emitter);
@@ -4376,6 +4390,7 @@ mod tests {
             term: &term,
             source_path: Path::new("/tmp/test.md"),
             repo_root: None,
+            launch_area: None,
         };
         let emitter = RecordingEmitter::new();
         {
@@ -4601,6 +4616,7 @@ mod tests {
             term: &term,
             source_path: Path::new("/tmp/test.md"),
             repo_root: None,
+            launch_area: None,
         };
         let emitter = RecordingEmitter::new();
         let mut guard = make_guard(&config, &ctx, &emitter);
@@ -4637,6 +4653,7 @@ mod tests {
             term: &term,
             source_path: Path::new("/tmp/test.md"),
             repo_root: None,
+            launch_area: None,
         };
         let emitter = RecordingEmitter::new();
         let mut guard = make_guard(&config, &ctx, &emitter);
@@ -4677,6 +4694,7 @@ mod tests {
             term: &term,
             source_path: Path::new("/tmp/test.md"),
             repo_root: None,
+            launch_area: None,
         };
         let emitter = RecordingEmitter::new();
         let mut guard = make_guard(&config, &ctx, &emitter);
@@ -4721,6 +4739,7 @@ mod tests {
             term: &term,
             source_path: Path::new("/tmp/test.md"),
             repo_root: None,
+            launch_area: None,
         };
         let emitter = RecordingEmitter::new();
         let mut guard = make_guard(&config, &ctx, &emitter);
@@ -4819,6 +4838,7 @@ mod tests {
             term: &term,
             source_path: Path::new("/tmp/test.md"),
             repo_root: None,
+            launch_area: None,
         };
         let emitter = RecordingEmitter::new();
         let mut guard = make_guard(&config, &ctx, &emitter);
@@ -4855,6 +4875,7 @@ mod tests {
             term: &term,
             source_path: Path::new("/tmp/test.md"),
             repo_root: None,
+            launch_area: None,
         };
         let emitter = RecordingEmitter::new();
         let mut guard = make_guard(&config, &ctx, &emitter);
@@ -4884,6 +4905,7 @@ mod tests {
             term: &term,
             source_path: Path::new("/tmp/test.md"),
             repo_root: None,
+            launch_area: None,
         };
         let emitter = RecordingEmitter::new();
         let mut guard = make_guard(&config, &ctx, &emitter);
@@ -7127,6 +7149,7 @@ mod tests {
             term: &term,
             source_path: dummy_path(),
             repo_root: None,
+            launch_area: None,
         };
         let mut guard = LifecycleRunGuard::new(&config,
             &ctx,
@@ -7159,6 +7182,7 @@ mod tests {
             term: &term,
             source_path: dummy_path(),
             repo_root: None,
+            launch_area: None,
         };
         let mut guard = LifecycleRunGuard::new(&config,
             &ctx,
@@ -7183,6 +7207,7 @@ mod tests {
             term: &term,
             source_path: dummy_path(),
             repo_root: None,
+            launch_area: None,
         };
 
         // Running the failure stack via a context (without record) does not
@@ -7196,6 +7221,7 @@ mod tests {
             timing: None,
             current: None,
             base_dir: None,
+            ctx_base_dir: None,
             effect_engine: &darkmatter::effects::EffectEngine::builder()
                 .mutation_root(std::env::current_dir().unwrap())
                 .auto_rehash(false)
@@ -7240,6 +7266,7 @@ mod tests {
             term: &term,
             source_path: dummy_path(),
             repo_root: None,
+            launch_area: None,
         };
 
         // Success slot → re-designate to Failure → finalize still fires.
@@ -7284,6 +7311,7 @@ mod tests {
             term: &term,
             source_path: dummy_path(),
             repo_root: None,
+            launch_area: None,
         };
         let mut guard = LifecycleRunGuard::new(&config,
             &ctx,
@@ -7300,6 +7328,7 @@ mod tests {
             timing: None,
             current: None,
             base_dir: None,
+            ctx_base_dir: None,
             effect_engine: &darkmatter::effects::EffectEngine::builder()
                 .mutation_root(std::env::current_dir().unwrap())
                 .auto_rehash(false)
@@ -7345,6 +7374,7 @@ mod tests {
             term: &term,
             source_path: dummy_path(),
             repo_root: None,
+            launch_area: None,
         };
         let mut guard = LifecycleRunGuard::new(
             &config,
@@ -7360,6 +7390,7 @@ mod tests {
             timing: None,
             current: None,
             base_dir: None,
+            ctx_base_dir: None,
             effect_engine: &darkmatter::effects::EffectEngine::builder()
                 .mutation_root(std::env::current_dir().unwrap())
                 .auto_rehash(false)
