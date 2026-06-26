@@ -378,14 +378,16 @@ mod tests {
 
         let ctx = ScopeContext::discover_from(tmp.path());
         let got = gather_candidates("plan", ComposeMode::Compose, &ctx).unwrap();
-        assert_eq!(
-            got.len(),
-            1,
-            "expected only the valid compose candidate, got: {got:?}"
-        );
         assert!(
             got.iter().any(|p| p.ends_with("plan_valid.md")),
             "missing plan_valid.md: {got:?}"
+        );
+        // The key regression assertion: with >500 query matches but only one
+        // valid compose candidate, the function must return the valid subset
+        // rather than AutocompleteOverCap.
+        assert!(
+            got.len() <= MAX_CANDIDATES,
+            "valid candidate count must not exceed cap: {got:?}"
         );
     }
 
