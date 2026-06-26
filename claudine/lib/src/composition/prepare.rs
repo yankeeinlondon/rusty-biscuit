@@ -77,6 +77,15 @@ pub struct PrepareOptions {
     /// default) preserves Darkmatter's source-relative fallback for
     /// library-only callers and tests.
     pub shell_working_directory: Option<PathBuf>,
+    /// Pre-captured early-binding context snapshot.
+    ///
+    /// When `Some`, [`prepare_direct`]/[`prepare_inline`] compose and run shell
+    /// preflight against this exact snapshot instead of calling
+    /// [`ComposeContext::capture`], so the body and the lifecycle reuse one
+    /// `ctx.*`/`env.*` capture rooted at the launch area. `env_overrides` are
+    /// still applied to it. `None` (the default) preserves the
+    /// capture-at-prepare behavior for library-only callers and tests.
+    pub prepared_context: Option<ComposeContext>,
 }
 
 /// Walk up from a file path to find the nearest `.git` directory.
@@ -120,7 +129,13 @@ pub fn prepare_direct(
             replacement: replacement.to_string(),
         });
     }
-    let mut ctx = ComposeContext::capture();
+    // Reuse the single composition-start snapshot when the caller supplied one
+    // (so body, preflight, and lifecycle share one `ctx.*`/`env.*` capture);
+    // otherwise capture now for library-only callers and tests.
+    let mut ctx = options
+        .prepared_context
+        .clone()
+        .unwrap_or_else(ComposeContext::capture);
     for (key, value) in &options.env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
     }
@@ -281,7 +296,12 @@ pub fn prepare_inline(
 
     // Build temporary markdown (frontmatter + prompt as body) and compose
     let temp_md = Markdown::with_frontmatter(fm.clone(), &prompt_text);
-    let mut ctx = ComposeContext::capture();
+    // Reuse the single composition-start snapshot when supplied; see
+    // `prepare_direct`.
+    let mut ctx = options
+        .prepared_context
+        .clone()
+        .unwrap_or_else(ComposeContext::capture);
     for (key, value) in &options.env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
     }

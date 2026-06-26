@@ -205,6 +205,12 @@ pub struct StackExecutionContext<'a> {
     /// Base directory for `ctx.*` capture only (the launch area); when `None`,
     /// falls back to `base_dir`.
     pub ctx_base_dir: Option<&'a Path>,
+    /// The single early-binding context snapshot captured once at composition
+    /// start. When `Some`, `build_state` reuses it for `ctx.*`/`env.*` instead
+    /// of re-capturing per event (so body and lifecycle cannot diverge); when
+    /// `None`, it falls back to a demand-driven capture rooted at
+    /// `ctx_base_dir`/`base_dir`.
+    pub prepared_context: Option<&'a ComposeContext>,
     /// Darkmatter side-effect engine.
     pub effect_engine: &'a EffectEngine,
     /// Approved-shell runner.
@@ -307,6 +313,7 @@ impl StackExecutionContext<'_> {
             current: self.current,
             base_dir: self.base_dir,
             ctx_base_dir: self.ctx_base_dir,
+            prepared_context: self.prepared_context,
             effect_engine: self.effect_engine,
             shell_runner: self.shell_runner,
             emitter: self.emitter,
@@ -336,6 +343,7 @@ impl StackExecutionContext<'_> {
             current: self.current,
             base_dir: self.base_dir,
             ctx_base_dir: self.ctx_base_dir,
+            prepared_context: self.prepared_context,
             effect_engine: self.effect_engine,
             shell_runner: self.shell_runner,
             emitter: self.emitter,
@@ -363,20 +371,36 @@ impl StackExecutionContext<'_> {
         ResolutionContext::new(dir)
     }
 
+    /// The early-binding `ctx.*`/`env.*` snapshot for this event.
+    ///
+    /// Reuses the single `prepared_context` captured once at composition start
+    /// when present — so plain `ctx.*`/`env.*` in a lifecycle string is the
+    /// exact snapshot the body composed against and cannot diverge. Falls back
+    /// to a demand-driven capture (rooted at the launch area / prompt dir,
+    /// scanned against `scan_hint`) only for callers that supply no snapshot.
+    fn early_binding_context(&self, scan_hint: &str) -> ComposeContext {
+        match self.prepared_context {
+            Some(prepared) => prepared.clone(),
+            None => {
+                let base = self
+                    .ctx_base_dir
+                    .or(self.base_dir)
+                    .unwrap_or_else(|| Path::new("."));
+                ComposeContext::capture_for_content(base, scan_hint)
+            }
+        }
+    }
+
     /// Build the DM2 effective state over the current document `fm`.
     ///
-    /// The `ctx.*` namespace is captured demand-driven against `scan_hint`
-    /// (only the sniff groups a lifecycle string actually references are
-    /// captured — most strings reference none, so this is sniff-free). `env.*`
-    /// resolves to the live process environment at event time.
+    /// `ctx.*`/`env.*` come from [`Self::early_binding_context`] — the single
+    /// composition-start snapshot when available, otherwise a demand-driven
+    /// re-capture against `scan_hint`. Only `current.*`/`err`/`timing` are
+    /// event-time globals (injected separately via [`Self::injected_globals`]).
     fn build_state(&self, fm: &Map<String, Value>, scan_hint: &str) -> EffectiveState {
         let frontmatter: HashMap<String, Value> =
             fm.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        let base = self
-            .ctx_base_dir
-            .or(self.base_dir)
-            .unwrap_or_else(|| Path::new("."));
-        let context = ComposeContext::capture_for_content(base, scan_hint);
+        let context = self.early_binding_context(scan_hint);
         EffectiveStateBuilder::new()
             .with_frontmatter(frontmatter)
             .with_context(context)
@@ -388,7 +412,7 @@ impl StackExecutionContext<'_> {
                 EffectiveState::new(
                     &fm.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
                     None,
-                    ComposeContext::capture_for_content(base, ""),
+                    self.early_binding_context(""),
                 )
             })
     }
@@ -1261,6 +1285,7 @@ mod tests {
             current: None,
             base_dir: None,
             ctx_base_dir: None,
+            prepared_context: None,
             effect_engine: engine,
             shell_runner: shell,
             emitter: recorder,
@@ -1300,6 +1325,7 @@ mod tests {
             current: None,
             base_dir: None,
             ctx_base_dir: None,
+            prepared_context: None,
             effect_engine: engine,
             shell_runner: shell,
             emitter: recorder,
@@ -2942,6 +2968,9 @@ mod tests {
             // to `base_dir` would resolve to `base_root` and fail the assert.
             base_dir: Some(base_root.as_path()),
             ctx_base_dir: Some(ctx_root.as_path()),
+            // No prepared snapshot: exercise the fallback re-capture path so the
+            // assertion proves `ctx_base_dir` (not `base_dir`) roots the capture.
+            prepared_context: None,
             effect_engine: &engine,
             shell_runner: &shell,
             emitter: &recorder,
@@ -2965,6 +2994,95 @@ mod tests {
             resolved,
             base_root.to_string_lossy(),
             "ctx.* must not leak to base_dir"
+        );
+    }
+
+    /// End-to-end of the exact layout that let the bug regress: a prompt living
+    /// OUTSIDE any area (`<repo>/prompts`) while the run was launched FROM a
+    /// different area. The single composition-start snapshot is captured against
+    /// the launch area and threaded as `prepared_context`; the lifecycle event
+    /// reuses it for `{{ctx.*}}` instead of re-capturing against the prompt's
+    /// parent (`base_dir`).
+    ///
+    /// Probes `ctx.repo_root` (directory-sensitive, only needs `git init`).
+    /// The snapshot is rooted at `launch_root`; `base_dir` points at the
+    /// prompt's parentless-of-area `prompts/` dir inside a *different* repo, so
+    /// the pre-fix re-capture would have produced `base_root`, not `launch_root`.
+    #[test]
+    fn lifecycle_reuses_prepared_snapshot_for_prompt_outside_launch_area() {
+        let git_init = |dir: &Path| {
+            let ok = std::process::Command::new("git")
+                .arg("init")
+                .arg("--quiet")
+                .current_dir(dir)
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            assert!(ok, "git init must succeed in {}", dir.display());
+        };
+
+        // The launch area: the package area the caller launched from.
+        let launch_dir = tempfile::tempdir().unwrap();
+        git_init(launch_dir.path());
+        let launch_root = std::fs::canonicalize(launch_dir.path()).unwrap();
+
+        // A separate repo whose `prompts/` subdir holds the prompt file — the
+        // "prompt outside any area" shape. `base_dir` points here.
+        let prompt_repo = tempfile::tempdir().unwrap();
+        git_init(prompt_repo.path());
+        let prompt_repo_root = std::fs::canonicalize(prompt_repo.path()).unwrap();
+        let prompts_dir = prompt_repo_root.join("prompts");
+        std::fs::create_dir(&prompts_dir).unwrap();
+        let source_path = prompts_dir.join("implement-plan.md");
+
+        // The single composition-start snapshot, captured ONCE against the
+        // launch area (mirrors what the CLI does in `compose/prep.rs`).
+        let prepared = ComposeContext::capture_for_content(
+            launch_root.as_path(),
+            "{{ ctx.repo_root }}",
+        );
+
+        let (_engine_dir, engine) = temp_engine();
+        let shell = MockShell::new(0);
+        let recorder = Recorder::default();
+        let harness = Harness::default();
+        let fm = Map::new();
+
+        let context = StackExecutionContext {
+            signal: LifecycleSignal::Initialize,
+            frontmatter: &fm,
+            live_frontmatter: None,
+            err: None,
+            timing: None,
+            current: None,
+            // The prompt's parent — inside a different repo, no area.
+            base_dir: Some(prompts_dir.as_path()),
+            ctx_base_dir: Some(launch_root.as_path()),
+            // The reused snapshot is the source of truth.
+            prepared_context: Some(&prepared),
+            effect_engine: &engine,
+            shell_runner: &shell,
+            emitter: &recorder,
+            term: &harness.term,
+            source_path: &source_path,
+            repo_root: None,
+            messaging: &harness.messaging,
+            settings: &harness.settings,
+        };
+
+        let resolved = context
+            .resolve_string_value("{{ctx.repo_root}}", &fm)
+            .expect("ctx.repo_root resolves");
+        let resolved = resolved.as_str().unwrap_or_default();
+        assert_eq!(
+            resolved,
+            launch_root.to_string_lossy(),
+            "lifecycle must reuse the launch-area snapshot, not the prompt dir"
+        );
+        assert_ne!(
+            resolved,
+            prompt_repo_root.to_string_lossy(),
+            "lifecycle ctx.* must not resolve against the prompt's own repo"
         );
     }
 }

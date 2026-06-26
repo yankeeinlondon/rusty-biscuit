@@ -3015,6 +3015,7 @@ mod tests {
             perf_enabled: false,
             source_repo_root: None,
             shell_working_directory: None,
+            prepared_context: None,
         };
 
         let err = prepare_direct(&source, options).unwrap_err();

@@ -1177,6 +1177,7 @@ fn build_loop_stack_context<'a>(
         current,
         base_dir,
         ctx_base_dir: lifecycle_ctx.launch_area,
+        prepared_context: lifecycle_ctx.context,
         effect_engine,
         shell_runner,
         emitter,
@@ -2653,6 +2654,7 @@ mod tests {
             source_path: prompt_path,
             repo_root: prompt_path.parent(),
             launch_area: None,
+            context: None,
         };
         let effect_engine = darkmatter::effects::EffectEngine::builder()
             .mutation_root(prompt_path.parent().unwrap_or(Path::new(".")))
