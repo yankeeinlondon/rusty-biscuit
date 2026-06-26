@@ -1,5 +1,5 @@
 ----
-name: cross-os
+name: cross-platform
 description: |-
     A review process that looks for indications that source code is NOT appropriately
     cross-platform. Packages in this monorepo are expected to run on:
