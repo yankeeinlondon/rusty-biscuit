@@ -2,6 +2,7 @@
 ready: false
 agent: codex/default
 created: 2026-06-27T11:16:06
+implemented: true
 ---
 
 # Review 1 - OpenCode YOLO

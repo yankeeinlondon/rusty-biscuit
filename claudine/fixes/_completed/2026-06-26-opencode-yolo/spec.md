@@ -5,7 +5,7 @@ created: 2026-06-26
 area: claudine
 packages:
     - claudine
-review_iterations: 1
+review_iterations: 2
 ---
 
 # OpenCode YOLO Does Not Bypass Permissions for Subagent Sessions
