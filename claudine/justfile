@@ -115,10 +115,21 @@ test-windows-ctrl-c:
 test-browser:
     @echo "test-browser: not applicable for claudine"
 
-# opt-in real_ tier: contract adapter against an installed+authenticated
-# provider. Gated by CLAUDINE_CONTRACT_REAL=1 and the provider binary on PATH.
+# opt-in real_ tier: drive installed+authenticated providers end-to-end. Gated
+# by CLAUDINE_CONTRACT_REAL=1 and the provider binary on PATH; each test skips
+# cleanly when its provider/model is unavailable.
+#   - contract adapter against an enabled provider (claude/codex)
+#   - the OpenCode YOLO subagent external-directory regression (compose CLI)
 test-real *args="":
-    @CLAUDINE_CONTRACT_REAL=1 cargo test -p claudine-contract --test real_provider {{ args }}
+    #!/usr/bin/env bash
+    # Run both real-tier binaries independently: one provider being unavailable
+    # in this environment must not mask the other's result. Aggregate the exit
+    # code so a genuine failure still fails the recipe.
+    set -uo pipefail
+    rc=0
+    CLAUDINE_CONTRACT_REAL=1 cargo test -p claudine-contract --test real_provider {{ args }} || rc=$?
+    CLAUDINE_CONTRACT_REAL=1 cargo test -p claudine-cli --test real_opencode_yolo_subagent {{ args }} || rc=$?
+    exit $rc
 
 # Lint the library, contract adapter, and CLI
 lint:
