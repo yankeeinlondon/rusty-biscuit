@@ -5,11 +5,16 @@ $schema:
     plan: file(required)
     spec: file
     spec_file: file
-phase: "{{ frontmatter(plan, 'start_phase') || 1 }}"
-dirname: "{{ dirname(plan) }}"
+description: |-
+    Provide either `plan` or `spec` filepath as a parameter and this
+    prompt will detect the number of phases in the plan and then implement
+    the project phase by phase.
+plan: "{{ file_exists(spec) ? dirname(spec) + '/plan.md'  : null }}"
+phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || 1 : -1 }}"
+dirname: "{{ file_exists(plan) ? dirname(plan) : dirname(spec) }}"
 area: "{{ ctx.area }}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
-total_phases: "{{ frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') }}"
+total_phases: "{{ file_exists(plan) ? frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') : 0 }}"
 spec_file: "{{ file_exists(spec) ? spec : file_exists(join(dirname, 'spec.md')) ? join(dirname, 'spec.md')  :  '' }}"
 initialize:
     stack:
@@ -22,6 +27,7 @@ start:
 success: 
     say: "Phase {{phase}} of the plan in the {{area}} package area, was implemented successfully"
     message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{ctx.area}}, {{ctx.agent}}/{{ctx.model}})"
+    success: "Completed the implementation of {{plan}}"
 blocked:
     message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved for execution!"
 failure:
