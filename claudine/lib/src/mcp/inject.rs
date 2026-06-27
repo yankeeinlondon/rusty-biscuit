@@ -103,7 +103,12 @@ impl McpInjector for OpenCodeInjector {
         // `OPENCODE_CONFIG_CONTENT` value, so a blind overwrite would clobber
         // their `instructions`/`permission` keys.
         let overlay = json!({ "mcp": mcp_config });
-        let existing = env.get("OPENCODE_CONFIG_CONTENT").map(String::as_str);
+        // This injector's env map is `String`-valued, so any existing value is
+        // already valid UTF-8; wrap it as an `OsStr` for the shared helper, which
+        // owns the UTF-8 validity decision for the raw-`OsStr` env call sites.
+        let existing = env
+            .get("OPENCODE_CONFIG_CONTENT")
+            .map(std::ffi::OsStr::new);
         let config_str = crate::opencode_config::merge_overlay(existing, overlay)?;
         env.insert("OPENCODE_CONFIG_CONTENT".into(), config_str);
 
