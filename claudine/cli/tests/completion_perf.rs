@@ -289,14 +289,13 @@ fn perf_inline_compose_empty_partial_meets_target() {
 
 /// Validate the spec target against the recorded p95.
 ///
-/// The function classifies the run into one of three regions:
+/// The function classifies the run into one of two regions:
 ///
 /// - **Pass** — `p95 ≤ 100 ms`. The default no-cache plan holds.
-/// - **Warning** — `100 ms < p95 ≤ 150 ms`. Outside the spec target but
-///   inside the cache trigger; emit a warning so the team can decide
-///   whether to tune the no-cache path further.
-/// - **Cache trigger** — `p95 > 150 ms`. The harness panics so a CI run
-///   forces the team to land the fallback cache from spec §8.3.
+/// - **Fail** — `p95 > 100 ms`. The harness panics so the regression is
+///   visible in CI. When `p95` additionally exceeds the `150 ms` cache
+///   trigger, the panic message notes that the fallback cache from
+///   spec §8.3 should be implemented.
 fn assert_perf_target(label: &str, stats: Stats) {
     if stats.p95 <= TARGET_P95_MS {
         println!(
@@ -305,16 +304,15 @@ fn assert_perf_target(label: &str, stats: Stats) {
         );
         return;
     }
-    if stats.p95 <= CACHE_TRIGGER_MS {
-        println!(
-            "[perf] {label}: WARN (p95 {} ms > {} ms target but ≤ {} ms cache trigger)",
+    if stats.p95 > CACHE_TRIGGER_MS {
+        panic!(
+            "[perf] {label}: FAIL (p95 {} ms > {} ms target; also exceeds {} ms cache trigger — implement fallback cache per spec §8.3)",
             stats.p95, TARGET_P95_MS, CACHE_TRIGGER_MS,
         );
-        return;
     }
     panic!(
-        "[perf] {label}: FAIL (p95 {} ms > {} ms cache trigger — implement cache.rs per spec §8.3)",
-        stats.p95, CACHE_TRIGGER_MS,
+        "[perf] {label}: FAIL (p95 {} ms > {} ms target)",
+        stats.p95, TARGET_P95_MS,
     );
 }
 
@@ -450,4 +448,81 @@ fn perf_enter_compose_partial_meets_target() {
     // The ENTER-path latency scenario requires a PTY, which is not
     // available in a portable way on Windows. The TAB-path scenarios
     // above still run on every platform.
+}
+
+// ----------------------------------------------------------------------
+// assert_perf_target contract — fast, platform-agnostic regression tests.
+//
+// These build `Stats` directly and drive `assert_perf_target` without
+// spawning any subprocess, so they run in the default (non-ignored)
+// suite. They pin the spec §8.1 p95 budget: any p95 over 100 ms fails,
+// which closes the loophole that let a 149 ms run pass as a "warning".
+// ----------------------------------------------------------------------
+
+fn stats_with_p95(p95: u128) -> Stats {
+    Stats {
+        p50: p95,
+        p95,
+        p99: p95,
+        max: p95,
+        mean: p95,
+    }
+}
+
+fn assert_panics(p95: u128) {
+    let result = std::panic::catch_unwind(|| {
+        assert_perf_target("probe", stats_with_p95(p95));
+    });
+    assert!(result.is_err(), "expected p95={} ms to fail the target", p95);
+}
+
+fn assert_passes(p95: u128) {
+    let result = std::panic::catch_unwind(|| {
+        assert_perf_target("probe", stats_with_p95(p95));
+    });
+    assert!(result.is_ok(), "expected p95={} ms to pass the target", p95);
+}
+
+#[test]
+fn assert_perf_target_passes_well_under_target() {
+    assert_passes(50);
+}
+
+#[test]
+fn assert_perf_target_passes_at_target_boundary() {
+    // The budget is inclusive: p95 == TARGET_P95_MS must still pass.
+    assert_passes(TARGET_P95_MS);
+}
+
+#[test]
+fn assert_perf_target_fails_just_over_target() {
+    assert_panics(101);
+}
+
+#[test]
+fn assert_perf_target_fails_in_old_warning_range() {
+    // p95 = 149 ms used to fall in the passing "warning" region; it must
+    // now fail. This is the exact regression the review called out.
+    assert_panics(149);
+}
+
+#[test]
+fn assert_perf_target_fails_over_cache_trigger_with_diagnostic() {
+    let result = std::panic::catch_unwind(|| {
+        assert_perf_target("probe", stats_with_p95(151));
+    });
+    let payload = result.unwrap_err();
+    let msg = payload
+        .downcast_ref::<String>()
+        .map(|s| s.as_str())
+        .or_else(|| payload.downcast_ref::<&'static str>().copied())
+        .unwrap_or("");
+    assert!(
+        msg.contains("100"),
+        "failure msg should mention the 100ms target: {msg}"
+    );
+    assert!(
+        msg.contains("cache") || msg.contains("§8.3"),
+        "failure msg should mention the cache fallback: {msg}"
+    );
 }

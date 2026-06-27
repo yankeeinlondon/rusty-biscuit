@@ -18,10 +18,9 @@
 #[allow(deprecated)]
 use assert_cmd::cargo::cargo_bin;
 use expectrl::Session;
-use expectrl::process::Process;
+use expectrl::process::unix::WaitStatus;
 use expectrl::session::OsSession;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -117,9 +116,10 @@ fn level1_pty_compose_autocomplete_no_match_errors() {
     let transcript = drain_available(&mut session, Duration::from_secs(5));
 
     let status = session
+        .get_process()
         .wait()
         .expect("wait for claudine compose to exit");
-    let failed = !matches!(status, expectrl::process::WaitStatus::Exited(_, 0));
+    let failed = !matches!(status, WaitStatus::Exited(_, 0));
     assert!(failed, "no-match autocomplete must exit non-zero");
 
     let plain = strip_ansi(&transcript).replace('\r', "");
@@ -159,9 +159,10 @@ fn level1_pty_compose_autocomplete_over_cap_errors() {
     let transcript = drain_available(&mut session, Duration::from_secs(10));
 
     let status = session
+        .get_process()
         .wait()
         .expect("wait for claudine compose to exit");
-    let failed = !matches!(status, expectrl::process::WaitStatus::Exited(_, 0));
+    let failed = !matches!(status, WaitStatus::Exited(_, 0));
     assert!(failed, "over-cap autocomplete must exit non-zero");
 
     let plain = strip_ansi(&transcript).replace('\r', "");
