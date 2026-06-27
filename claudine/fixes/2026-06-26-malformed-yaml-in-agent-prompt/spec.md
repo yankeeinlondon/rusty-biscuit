@@ -1,5 +1,6 @@
 ---
-status: ready for planning
+status: ready for planning and implementation
+reviewed: true
 created: 2026-06-26
 area: claudine
 packages:
@@ -100,6 +101,21 @@ Obsidian, every static-site generator). We do **not** broaden what counts as
 valid frontmatter; `---` stays the one true fence. We only convert the
 near-miss silent-leak into a precise, actionable error.
 
+## Reader's note: design decision
+
+This review keeps the original design goal but makes the integration contract
+more explicit: malformed near-miss frontmatter is rejected in **Darkmatter**,
+while **Claudine** classifies and enriches the resulting typed error at the
+same render boundary used by existing frontmatter failures. This avoids adding a
+Claudine-only pre-scan that could drift from Darkmatter's parser and still keeps
+Claudine's prompt-execution surfaces from sending authored YAML to a provider.
+
+The fix intentionally does **not** accept `----` as an alternate fence. Treating
+it as valid would be easier for this one file but would broaden the frontmatter
+grammar in a way other Markdown tools do not recognize, making documents less
+portable. The user-facing repair remains one character: change each fence to
+`---`.
+
 ## Proposed fix
 
 Add near-miss-fence detection to `parse_frontmatter` and raise a new typed
@@ -116,12 +132,25 @@ horizontal rule is never misread as a broken fence. Raise the error only when
    exactly `---` (i.e. length `>= 4`).
 2. A later line exists whose trimmed content is the *same* dash-only run
    (matched closing fence).
-3. The content strictly between the two fences is non-empty and parses as a YAML
-   **mapping** (at least one `key: value` pair) — i.e. it is shaped like
-   frontmatter, not free prose.
+3. The content strictly between the two fences is non-empty, parses as a YAML
+   **mapping**, and that mapping has at least one key. A scalar, sequence, empty
+   map, or parser failure is treated as body text, not frontmatter.
 
 When any condition fails, behavior is unchanged: the document is treated as
 having no frontmatter (a genuine leading `----` thematic break is left intact).
+
+Implementation notes:
+
+- Prefer `serde_yaml_ng::from_str::<serde_yaml_ng::Value>` for this probe, then
+  check for a non-empty mapping. Do not reuse `parse_yaml_with_fallbacks` for
+  detection, because the fallback path protects Darkmatter interpolation and
+  shell syntax inside already-valid `---` frontmatter; near-miss detection
+  should stay a conservative shape check.
+- Preserve the current `---` behavior, including the existing "missing closing
+  delimiter means body text" behavior. This fix only handles a matched
+  near-miss fence pair.
+- Match the closing fence to the exact opening dash run. `----` opened by
+  `-----` should not be normalized into a fence pair.
 
 ### New error variant
 
@@ -132,25 +161,47 @@ Add to `MarkdownError` (darkmatter):
 /// wrapping YAML-shaped content. Frontmatter fences must be exactly `---`.
 FrontmatterFenceMismatch {
     ctx: SourceContext,
-    found: String,   // the offending fence, e.g. "----"
+    found: String, // the offending fence, e.g. "----"
+    line: usize,   // document-absolute line number; currently always 1
 }
 ```
 
 Message guidance: name the offending fence and the fix, e.g.
 *"frontmatter fence must be exactly `---`, found `----` on line 1"*.
 
-### Error rendering reuses existing machinery
+Darkmatter rendering must add a `BlockError` branch for this variant, parallel
+to `FrontmatterParse`, with:
 
-No new rendering work in claudine. Claudine's compose error walker already wraps
-any frontmatter-rooted composition error with `composition::FrontmatterExcerpt`
-(`CompositionError::enrich_frontmatter` → `WithFrontmatter`), emitting the
-authored frontmatter as a syntax-highlighted, line-numbered `CodeBlock` with the
-offending line highlighted (TTY-gated; stripped at `ColorDepth::None`). The new
-`FrontmatterFenceMismatch` must:
+- header: `MarkdownError` / `frontmatter fence mismatch`;
+- body: source path when available plus the offending fence and line;
+- hint: `Use exactly three dashes (---) for Markdown frontmatter fences.`;
+- excerpt: highlight line 1 using the existing source-excerpt style. The
+  excerpt should use the full document context (`SourceContext.content`), not
+  only the YAML body, because the offending token is the delimiter itself.
 
-- map to a `CompositionError` frontmatter-rooted variant so `enrich_frontmatter`
-  picks it up, and
-- expose the fence line (line 1) as the highlight target.
+### Claudine error mapping and excerpt enrichment
+
+Claudine's compose error walker already appends an authored-frontmatter excerpt
+for errors classified as frontmatter-rooted
+(`CompositionError::enrich_frontmatter` → `WithFrontmatter`), emitting a
+syntax-highlighted, line-numbered `CodeBlock` with an offending line highlighted
+(TTY-gated; stripped at `ColorDepth::None`). The new
+`FrontmatterFenceMismatch` must wire into that existing path:
+
+- `claudine/lib/src/composition/resolve.rs::map_load_error` must map
+  `MarkdownError::FrontmatterFenceMismatch { .. }` to
+  `CompositionError::FrontmatterParse(err)` or to a new equivalently
+  frontmatter-rooted `CompositionError` variant. Reusing `FrontmatterParse` is
+  acceptable because the user-facing category is still "the authored
+  frontmatter block cannot be accepted."
+- `claudine/lib/src/composition/prepare.rs::map_compose_error` must preserve the
+  typed `MarkdownError` through `ComposeFailed` for compose-time failures that
+  originate in transcluded or reloaded Markdown.
+- `CompositionError::frontmatter_block_spec` must highlight the fence line for
+  this error. `Some(None)` is not enough for this case because it renders the
+  block without pinpointing the bad delimiter. If the existing
+  `FrontmatterExcerpt::capture` only supports key-path lookup, extend it with a
+  line-target capture helper rather than inventing a separate renderer.
 
 The user then sees the exact two-dash-too-many fence highlighted in their own
 file, with the one-line fix.
@@ -179,6 +230,13 @@ separate, explicit opt-out — not a reason to weaken the compose-time guard.
 5. `prompts/cross-platform.md`, once fixed to `---`, composes with the
    frontmatter stripped and only `# Ensuring Cross Platform Support …` reaching
    the Agent Prompt.
+6. The same malformed-fence document loaded through `Markdown::try_from(path)`
+   and through `Markdown::try_from_content(content)` returns the typed mismatch
+   error; the infallible `From<String>` behavior is not used by Claudine's
+   prompt-loading path and does not mask this failure.
+7. Non-TTY output still reports the typed error and actionable hint, but does
+   not emit ANSI styling or the TTY-only frontmatter appendix unless the
+   existing `FORCE_COLOR=1` behavior requests it.
 
 ## Test plan
 
@@ -187,14 +245,54 @@ separate, explicit opt-out — not a reason to weaken the compose-time guard.
   frontmatter, no error; matched `----` fences around non-mapping scalar content
   → no error (treated as body); correct `---` → parses (existing tests stay
   green).
+- **darkmatter error rendering** (`MarkdownError` block tests): the mismatch
+  block names the offending fence, suggests `---`, includes the source path when
+  present, and highlights document line 1 without relying on a YAML parser
+  location.
 - **claudine** (compose handler): the fence-mismatch error renders the
   `FrontmatterExcerpt` code block with line 1 highlighted, TTY-gated and stripped
   at `ColorDepth::None`.
+- **claudine resolve mapping**: `resolve_composition_source` maps
+  `MarkdownError::FrontmatterFenceMismatch` to a frontmatter-rooted
+  `CompositionError`, not a flat `MarkdownLoad` string.
 - **L2** (optional): real-terminal capture proving the highlighted excerpt and
   the absence of YAML in the Agent Prompt section.
+
+## Open Questions
+
+### Should near-miss detection cover other frontmatter dialects?
+
+This spec only targets dash-only YAML fences because Claudine/Darkmatter
+frontmatter is YAML and the live bug is a `----` typo. There is a broader class
+of near misses (`++++`, `;;;`, or mismatched `---`/`----`) that could also look
+like frontmatter to an author, but broadening detection risks false positives
+for prose or examples.
+
+Suggested solutions:
+
+1. **Dash-only YAML near miss only (recommended).**
+   Pros: directly fixes the observed provider-leak bug; aligns with the
+   current YAML-only frontmatter contract; keeps false-positive risk low.
+   Cons: other malformed dialect-looking blocks continue to render as body
+   text.
+2. **All repeated punctuation fences when the inner content parses as a mapping.**
+   Pros: catches more authoring mistakes before they reach a provider.
+   Cons: invents a broader quasi-frontmatter detector than the parser itself,
+   and may reject legitimate Markdown examples or notes that happen to be
+   wrapped in punctuation.
+3. **Provider-command-only guard in Claudine.**
+   Pros: limits the hard error to the dangerous surfaces that send prompts to
+   agents.
+   Cons: duplicates frontmatter recognition outside Darkmatter, leaves other
+   Darkmatter consumers with silent behavior, and is easier to drift.
+
+Recommendation: implement option 1. It addresses the actual failure mode with
+the smallest grammar change and keeps the parser as the single source of truth.
 
 ## Out of scope
 
 - Accepting `----` as a valid fence. The convention stays exactly `---`.
 - Auto-correcting the user's file during composition.
 - TOML (`+++`) or other front-matter dialects.
+- Rejecting arbitrary leading YAML-looking prose that is not enclosed by a
+  matched near-miss dash fence.
