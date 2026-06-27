@@ -1200,3 +1200,97 @@ fn emit_preflight_blocked_and_finalize_propagates_err_msg_into_blocked_stack() {
         "blocked.stack must see err.msg; got {calls:?}"
     );
 }
+
+// --- Composition OpenCode YOLO / OPENCODE_CONFIG_CONTENT assembly -----------
+//
+// These exercise the composition env-assembly *sequence* (system-prompt
+// `instructions` → MCP fold → YOLO overlay) the executor runs, using the same
+// helpers the executor calls. They are the composition-path counterparts to the
+// direct wrapper's Stage 10.5 coverage in `wrapper_stages.rs`.
+
+mod opencode_yolo_assembly {
+    use super::*;
+    use crate::commands::wrap::wrapper_mcp::merge_injected_env_into_plan;
+    use crate::commands::wrap::wrapper_stages::apply_opencode_yolo_config_overlay;
+    use serde_json::Value;
+    use std::collections::HashMap;
+
+    const KEY: &str = "OPENCODE_CONFIG_CONTENT";
+
+    fn env_plan_with(current: Option<&str>) -> env::EnvPlan {
+        let mut plan = env::EnvPlan::default();
+        if let Some(raw) = current {
+            plan.env
+                .insert(std::ffi::OsString::from(KEY), std::ffi::OsString::from(raw));
+        }
+        plan
+    }
+
+    fn config_value(plan: &env::EnvPlan) -> Option<Value> {
+        plan.env
+            .get(std::ffi::OsStr::new(KEY))
+            .and_then(|os| os.to_str())
+            .map(|raw| serde_json::from_str(raw).expect("config is valid JSON"))
+    }
+
+    #[test]
+    fn non_interactive_yolo_adds_permission_block() {
+        let mut plan = env::EnvPlan::default();
+        apply_opencode_yolo_config_overlay(Provider::OpenCode, true, true, &mut plan).unwrap();
+
+        let config = config_value(&plan).expect("permission overlay was written");
+        let permission = config.get("permission").and_then(Value::as_object).unwrap();
+        assert_eq!(permission["*"], "allow");
+        assert_eq!(permission["external_directory"], "allow");
+        assert_eq!(permission["doom_loop"], "allow");
+    }
+
+    #[test]
+    fn non_yolo_run_adds_no_permission_key() {
+        // Mirrors the composition gate passing `effective_yolo == false`.
+        let mut plan = env::EnvPlan::default();
+        apply_opencode_yolo_config_overlay(Provider::OpenCode, false, true, &mut plan).unwrap();
+        assert!(config_value(&plan).is_none());
+    }
+
+    /// Full composition assembly: system-prompt `instructions`, then the MCP
+    /// fold, then the YOLO overlay. The final config must preserve all three —
+    /// the regression guard for the MCP fold clobbering an existing value.
+    #[test]
+    fn instructions_mcp_and_yolo_all_survive_assembly() {
+        // Stage: system-prompt writer contributed `instructions`.
+        let mut plan = env_plan_with(Some(r#"{"instructions":["/tmp/sp.md"]}"#));
+
+        // Stage: MCP fold injects an `mcp` block (must merge, not clobber).
+        let injected =
+            HashMap::from([(KEY.to_string(), r#"{"mcp":{"srv":{}}}"#.to_string())]);
+        merge_injected_env_into_plan(injected, &mut plan).unwrap();
+
+        // Stage: YOLO overlay, effective + non-interactive.
+        apply_opencode_yolo_config_overlay(Provider::OpenCode, true, true, &mut plan).unwrap();
+
+        let config = config_value(&plan).unwrap();
+        assert_eq!(config["instructions"], serde_json::json!(["/tmp/sp.md"]));
+        assert_eq!(config["mcp"], serde_json::json!({ "srv": {} }));
+        assert_eq!(config["permission"]["*"], "allow");
+        assert_eq!(config["permission"]["external_directory"], "allow");
+        assert_eq!(config["permission"]["doom_loop"], "allow");
+    }
+
+    /// A user-supplied object-valued OPENCODE_CONFIG_CONTENT is merged through
+    /// the whole composition sequence, never replaced.
+    #[test]
+    fn user_supplied_object_value_is_merged_not_replaced() {
+        let mut plan = env_plan_with(Some(r#"{"theme":"dark"}"#));
+
+        let injected =
+            HashMap::from([(KEY.to_string(), r#"{"mcp":{"srv":{}}}"#.to_string())]);
+        merge_injected_env_into_plan(injected, &mut plan).unwrap();
+        apply_opencode_yolo_config_overlay(Provider::OpenCode, true, true, &mut plan).unwrap();
+
+        let config = config_value(&plan).unwrap();
+        assert_eq!(config["theme"], "dark");
+        assert_eq!(config["mcp"], serde_json::json!({ "srv": {} }));
+        assert_eq!(config["permission"]["*"], "allow");
+    }
+}

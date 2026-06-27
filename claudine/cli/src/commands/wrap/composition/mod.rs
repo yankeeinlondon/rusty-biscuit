@@ -758,9 +758,11 @@ fn execute_composition_request_inner_with_guard(
                     .inject(&session.servers, &mut string_env, shadow)
                     .map_err(|e| eyre!("MCP injection failed: {e}"))?;
 
-                for (key, value) in string_env {
-                    env_plan.env.insert(key.into(), value.into());
-                }
+                // The OpenCode inline config is shared with the system-prompt
+                // and YOLO producers, so it must merge into any value already on
+                // the plan rather than overwrite it; every other key is a plain
+                // set. Mirrors the direct wrapper at wrapper_mcp.rs.
+                super::wrapper_mcp::merge_injected_env_into_plan(string_env, &mut env_plan)?;
                 mcp_extra_args.extend(result.extra_args);
             }
         } else {
@@ -815,6 +817,18 @@ fn execute_composition_request_inner_with_guard(
         "YOLO".into(),
         if effective_yolo { "true" } else { "false" }.into(),
     );
+
+    // Merge the OpenCode YOLO permission block into `OPENCODE_CONFIG_CONTENT`
+    // as the last Claudine overlay, mirroring the direct wrapper's Stage 10.5.
+    // Runs after the MCP fold above so it cannot be weakened by the MCP or
+    // system-prompt writers; gated on YOLO having actually taken effect
+    // (`effective_yolo`, not `request.yolo`) plus non-interactive.
+    crate::commands::wrap::wrapper_stages::apply_opencode_yolo_config_overlay(
+        provider,
+        effective_yolo,
+        effective_non_interactive,
+        &mut env_plan,
+    )?;
     // One-shot debug trace of the final argv that goes to the provider
     // so operators can verify the catalog flag actually landed without
     // running an external `ps`. Gated by `tracing` (RUST_LOG); never
