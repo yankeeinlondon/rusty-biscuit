@@ -1277,6 +1277,39 @@ mod opencode_yolo_assembly {
         assert_eq!(config["permission"]["doom_loop"], "allow");
     }
 
+    /// Regression for the compose-path clobber the `real_` subagent test
+    /// surfaced live: in `execute_composition_request_inner_with_guard` the YOLO
+    /// `permission` overlay is applied (mod.rs:826) **before** the system-prompt
+    /// writer contributes `instructions` (mod.rs:~981). A discovered
+    /// `system-prompt.md` made the system-prompt writer run on an ordinary
+    /// `compose --opencode --yolo` even with no `--asp`, and a raw
+    /// `env_plan.env.insert` there dropped the whole `permission` block — silently
+    /// re-opening the subagent `external_directory` hang. The fix routes the
+    /// system-prompt `OPENCODE_CONFIG_CONTENT` through the same merge helper, so
+    /// `instructions` and `permission` must coexist regardless of which writer
+    /// runs last.
+    #[test]
+    fn system_prompt_instructions_folded_after_yolo_keep_permission() {
+        // Stage: YOLO overlay runs first (matches mod.rs:826 ordering).
+        let mut plan = env::EnvPlan::default();
+        apply_opencode_yolo_config_overlay(Provider::OpenCode, true, true, &mut plan).unwrap();
+
+        // Stage: the system-prompt writer contributes `instructions` LAST,
+        // folded through the shared merge helper (the fixed behavior) rather
+        // than a raw clobbering insert.
+        let injected = HashMap::from([(
+            KEY.to_string(),
+            r#"{"instructions":["/tmp/sp.md"]}"#.to_string(),
+        )]);
+        merge_injected_env_into_plan(injected, &mut plan).unwrap();
+
+        let config = config_value(&plan).expect("merged config present");
+        assert_eq!(config["instructions"], serde_json::json!(["/tmp/sp.md"]));
+        assert_eq!(config["permission"]["*"], "allow");
+        assert_eq!(config["permission"]["external_directory"], "allow");
+        assert_eq!(config["permission"]["doom_loop"], "allow");
+    }
+
     /// A user-supplied object-valued OPENCODE_CONFIG_CONTENT is merged through
     /// the whole composition sequence, never replaced.
     #[test]

@@ -982,6 +982,21 @@ fn execute_composition_request_inner_with_guard(
                 if k == "HOME" && env_plan.env.contains_key(std::ffi::OsStr::new("HOME")) {
                     continue;
                 }
+                // `OPENCODE_CONFIG_CONTENT` is the one inline config the
+                // system-prompt writer shares with the MCP and YOLO producers.
+                // A raw insert here clobbers the YOLO `permission` overlay
+                // applied earlier (mod.rs:826), which silently re-opens the
+                // subagent `external_directory` hang the YOLO overlay exists to
+                // prevent. Route it through the same merge the MCP fold uses so
+                // `instructions`, `mcp`, and `permission` coexist.
+                if k == std::ffi::OsStr::new("OPENCODE_CONFIG_CONTENT") {
+                    let injected = std::collections::HashMap::from([(
+                        "OPENCODE_CONFIG_CONTENT".to_string(),
+                        v.to_string_lossy().to_string(),
+                    )]);
+                    super::wrapper_mcp::merge_injected_env_into_plan(injected, &mut env_plan)?;
+                    continue;
+                }
                 env_plan.env.insert(
                     k.to_string_lossy().to_string().into(),
                     v.to_string_lossy().to_string().into(),
