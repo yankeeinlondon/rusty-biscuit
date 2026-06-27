@@ -1,4 +1,4 @@
-----
+---
 name: cross-platform
 description: |-
     A review process that looks for indications that source code is NOT appropriately
@@ -9,19 +9,34 @@ description: |-
     3. Windows:
         - native
         - WSL
-----
+review: "@{{ctx.area}}/reviews/{{ctx.today}}-cross-platform/review-1.md"
+---
 # Ensuring Cross Platform Support
+
+Your task is to review the "{{ ctx.area }}" package area for signs that it is not upholding the requirement that it work across:
+
+1. macOS
+2. Linux
+3. Windows:
+    - native
+    - WSL
+
+and make recommendations on how this could be fixed/improved.
+
+You should save your review to: {{review}}
 
 ## Key areas to examine
 
 ### 1. Hard‑coded file paths and separators
 
 - **Path separators differ by OS.**  Windows uses `\\` as a directory separator, whereas Unix‑like systems (macOS, Linux, WSL) use `/`.  On Windows, `PathBuf` treats both `\\` and `/` as separators, but on Linux a backslash is treated as a normal character, so a path like `foo\\bar` is considered a single component [oai_citation:0‡udoprog.github.io](https://udoprog.github.io/rust/2017-11-05/portability-concerns-with-path.html#:~:text=On%20Windows%2C%20it%20would%20give,this%20output).  The example below passes an equality check on Windows but fails on Linux because backslashes are valid filename characters on Unix:
-  ```rust
-  let path_a = PathBuf::from("C:\\path/to\\example/thingy");
-  let path_b = PathBuf::from("C:\\path\\to\\example\\thingy");
-  assert_eq!(path_a, path_b); // passes on Windows, fails on Linux
-  ```
+
+    ```rust
+    let path_a = PathBuf::from("C:\\path/to\\example/thingy");
+    let path_b = PathBuf::from("C:\\path\\to\\example\\thingy");
+    assert_eq!(path_a, path_b); // passes on Windows, fails on Linux
+    ```
+
 - **String concatenation vs. `Path` API.**  Avoid building paths with string concatenation or macros like `concat!` that hard‑code `/` or `\\`.  A GitHub issue notes that there is no way to call `include_bytes!` with a platform‑agnostic separator, and concatenating `OUT_DIR` with `"/myfile"` or `std::path::MAIN_SEPARATOR` can break on some platforms [oai_citation:1‡github.com](https://github.com/rust-lang/rust/issues/75075).  Always use `std::path::Path`, `PathBuf::push` and `Path::join` to assemble paths component by component [oai_citation:2‡udoprog.github.io](https://udoprog.github.io/rust/2017-11-05/portability-concerns-with-path.html#:~:text=Portable%20paths).
 - **Relative vs absolute paths.**  Windows has multiple drive roots (C:\\, D:\\…), whereas Unix systems have a single `/` root.  Code that assumes an absolute path starting with `/` may not work on Windows.  Use relative paths and combine them with `env::current_dir()` or configuration to determine an absolute path [oai_citation:3‡udoprog.github.io](https://udoprog.github.io/rust/2017-11-05/portability-concerns-with-path.html#:~:text=Another%20major%20difference%20is%20how,Linux%20only%20has%20one%3A).
 

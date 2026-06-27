@@ -19,13 +19,13 @@ success:
     say: "the review suggestions for {{ title_case(without_date(parent_dir(review))) }} in {{ctx.area}} completed successfully"
     effect: bong
 failure:
-    message: "❌ implementation of the review suggestions from **{{ parent_dir(review) }}** failed to complete (_iteration #{{iteration}}_)!"
+    message: "❌ implementation of the review #{{iteration}} suggestions from **{{ parent_dir(review) }}** failed to complete ({{err.message}})!"
     effect: phase-jump-3
 ---
 # Implement Review Suggestions for {{title_case(without_date(parent_dir(spec)))}}
 
-> {{capitalize(feature_or_fix)}}: `{{parent_dir(review)}}`
-> Iteration: {{iteration}}
+> - **{{capitalize(feature_or_fix)}}:** `{{parent_dir(review)}}`
+> - **Iteration:** {{iteration}}
 
 ## Key Documents
 
