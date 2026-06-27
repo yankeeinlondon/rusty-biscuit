@@ -16,8 +16,6 @@
 //!   compose-associated prompts never leak into generic `file` values.
 //! - Results are capped at [`MAX_CANDIDATES`].
 
-#![allow(dead_code)] // Phase 1 scaffolding consumed by Phases 2–4.
-
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 

@@ -12,8 +12,6 @@
 //! - [`choose_one_file`] / [`choose_many_files`] — two-pane
 //!   `SplitDirection::Auto` choosers with a live detail pane.
 
-#![allow(dead_code)] // Phase 1 scaffolding consumed by Phases 2–4.
-
 use std::io::{self, Write};
 use std::path::Path;
 
