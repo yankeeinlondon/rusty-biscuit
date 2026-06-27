@@ -169,9 +169,25 @@ pub(crate) fn compose_mcp_session(
                     .inject(&session.servers, &mut string_env, shadow)
                     .map_err(|e| eyre!("MCP injection failed: {e}"))?;
 
-                // Merge injected env vars into the OsString env plan
+                // Merge injected env vars into the OsString env plan. The
+                // OpenCode inline config is shared with the system-prompt and
+                // YOLO producers, so it must merge into any value already on the
+                // plan rather than overwrite it; every other key is a plain set.
                 for (k, v) in string_env {
-                    env_plan.env.insert(k.into(), v.into());
+                    if k == "OPENCODE_CONFIG_CONTENT" {
+                        let current = env_plan
+                            .env
+                            .get(std::ffi::OsStr::new("OPENCODE_CONFIG_CONTENT"))
+                            .and_then(|os| os.to_str());
+                        let overlay = serde_json::from_str(&v).map_err(|e| {
+                            eyre!("MCP injection produced invalid OPENCODE_CONFIG_CONTENT: {e}")
+                        })?;
+                        let merged = claudine::opencode_config::merge_overlay(current, overlay)
+                            .map_err(|e| eyre!("failed to merge OPENCODE_CONFIG_CONTENT: {e}"))?;
+                        env_plan.env.insert(k.into(), merged.into());
+                    } else {
+                        env_plan.env.insert(k.into(), v.into());
+                    }
                 }
 
                 for arg in &result.extra_args {
