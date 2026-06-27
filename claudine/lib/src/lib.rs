@@ -13,6 +13,7 @@ pub mod linking;
 pub mod mcp;
 pub mod messaging;
 pub mod model_catalog;
+pub mod opencode_config;
 pub mod permissions;
 pub mod prompt_reporting;
 pub mod protect;
