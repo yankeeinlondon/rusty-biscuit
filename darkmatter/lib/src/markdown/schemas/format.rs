@@ -5,8 +5,12 @@
 //!
 //! - **`format: darkmatter-file`** — parses the value through
 //!   [`biscuit_file::FileReference`] and confirms the resolved path exists.
-//!   Path resolution uses the live process working directory at validation
-//!   time, mirroring the spec contract for `file` properties.
+//!   Resolution follows the shared document-first / launch-area-fallback
+//!   order ([`resolve_file_ref_with_fallback`]): the prompt document
+//!   directory first, then the captured launch-area fallback, with no
+//!   ambient-CWD fallback on production paths. This mirrors the expression
+//!   path (`file_exists`/`frontmatter`) so schema validation and expression
+//!   functions agree on the same `file` value.
 //! - **`x-darkmatter-match`** — runs alongside `darkmatter-file` and filters
 //!   the resolved path through one or more glob patterns (positive +
 //!   negative). Globsets are compiled once when the validator is built.
@@ -28,6 +32,8 @@
 //!
 //! let validator = register_darkmatter_formats(
 //!     options().with_draft(Draft::Draft202012),
+//!     None,
+//!     None,
 //! )
 //! .with_keyword("x-darkmatter-match", match_keyword_factory)
 //! .with_keyword("x-darkmatter-url-scheme", url_scheme_keyword_factory)
@@ -35,13 +41,15 @@
 //! ```
 
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use biscuit_file::{FileReference, FileReferenceError};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use jsonschema::{Keyword, ValidationError, ValidationOptions, paths::Location};
 use serde_json::{Map, Value};
 use url::Url;
+
+use crate::markdown::compose::expression::resolve_ctx::resolve_file_ref_with_fallback;
 
 /// Format name registered for `file` SimplifiedSchema atoms.
 pub const DARKMATTER_FILE_FORMAT: &str = "darkmatter-file";
@@ -54,21 +62,45 @@ pub const DARKMATTER_URL_SCHEME_KEYWORD: &str = "x-darkmatter-url-scheme";
 
 /// Registers the `darkmatter-file` format on a `ValidationOptions` builder.
 ///
+/// `base_dir`, when `Some`, is the prompt document directory and is tried
+/// first so references authored inside the document resolve next to it.
+/// `fallback`, when `Some`, is the captured launch area and is tried second
+/// for caller-supplied references not authored in the document. When both are
+/// `None` the validator resolves against the ambient process working
+/// directory (legacy behavior preserved for callers — e.g.
+/// `DarkmatterSchemas::new()` in small unit tests — that configure no anchor).
+///
+/// This matches the shared resolution order encoded by
+/// [`resolve_file_ref_with_fallback`], so the `darkmatter-file` validator and
+/// the expression path (`file_exists`/`frontmatter`) agree on the same `file`
+/// value.
+///
 /// Splitting this out keeps validator construction in
 /// [`crate::markdown::schemas::validate`] tidy and lets tests register only
 /// the format without the keywords.
-pub fn register_darkmatter_formats(options: ValidationOptions) -> ValidationOptions {
-    options.with_format(DARKMATTER_FILE_FORMAT, validate_file_reference)
+///
+/// jsonschema 0.42's `with_format` accepts `F: Fn(&str) -> bool +
+/// Send + Sync + 'static`, so both anchors are captured by move into the
+/// closure — no thread-local or process-global state is required.
+pub fn register_darkmatter_formats(
+    options: ValidationOptions,
+    base_dir: Option<PathBuf>,
+    fallback: Option<PathBuf>,
+) -> ValidationOptions {
+    options.with_format(DARKMATTER_FILE_FORMAT, move |value: &str| {
+        validate_file_reference(value, base_dir.as_deref(), fallback.as_deref())
+    })
 }
 
 /// Validates a string by parsing it as a `FileReference` and confirming the
 /// resolved path exists on disk at validation time.
 ///
-/// Resolution uses the ambient process working directory. Failures (parse,
-/// resolution, missing file) all return `false` so the JSON Schema layer
-/// surfaces a uniform `format: darkmatter-file` error message.
-fn validate_file_reference(value: &str) -> bool {
-    resolve_file_reference(value).is_ok()
+/// Resolution follows the document-first / launch-area-fallback order (see
+/// [`resolve_file_reference`]). Failures (parse, resolution, missing file)
+/// all return `false` so the JSON Schema layer surfaces a uniform
+/// `format: darkmatter-file` error message.
+fn validate_file_reference(value: &str, base_dir: Option<&Path>, fallback: Option<&Path>) -> bool {
+    resolve_file_reference(value, base_dir, fallback).is_ok()
 }
 
 /// Outcome of a [`resolve_file_reference`] call.
@@ -130,18 +162,48 @@ impl fmt::Display for FileReferenceFailure {
     }
 }
 
-/// Parses `value` as a `FileReference`, resolves it against the ambient
-/// process CWD, and confirms the resolved path exists.
+/// Parses `value` as a `FileReference`, resolves it, and confirms the resolved
+/// path exists.
+///
+/// Resolution follows the shared document-first / launch-area-fallback order
+/// ([`resolve_file_ref_with_fallback`]) when either anchor is provided:
+///
+/// 1. absolute paths are returned as-is by `FileReference`;
+/// 2. document-relative via `resolve_from(base_dir)` — **first**, so a `file`
+///    value authored next to the prompt resolves like the expression path's
+///    `file_exists`/`frontmatter` (document-first contract);
+/// 3. launch-area fallback via `resolve_from(fallback)` — **second**, for a
+///    caller-supplied path relative to the launch area;
+/// 4. no ambient-CWD fallback on this anchored path.
+///
+/// When **both** anchors are `None` (small unit tests / callers that configure
+/// no anchor) resolution falls back to the ambient process CWD via
+/// [`FileReference::resolve`] for backward compatibility.
 ///
 /// Returns the resolved path on success, or a [`FileReferenceFailure`]
 /// distinguishing the three failure modes so callers can render a
 /// situation-appropriate diagnostic.
-pub(crate) fn resolve_file_reference(value: &str) -> Result<PathBuf, FileReferenceFailure> {
+pub(crate) fn resolve_file_reference(
+    value: &str,
+    base_dir: Option<&Path>,
+    fallback: Option<&Path>,
+) -> Result<PathBuf, FileReferenceFailure> {
     let reference = FileReference::new(value).map_err(|err| FileReferenceFailure::InvalidSyntax {
         raw: value.to_string(),
         err,
     })?;
-    let path = reference.resolve().map_err(|err| FileReferenceFailure::Resolution {
+    let resolved = match base_dir {
+        // Anchored path: document-first, then launch-area fallback, no
+        // ambient-CWD fallback — identical order to the expression resolver.
+        Some(base_dir) => resolve_file_ref_with_fallback(&reference, base_dir, fallback),
+        // No document anchor configured. When a bare fallback is set, anchor
+        // resolution there; otherwise preserve the legacy ambient-CWD path.
+        None => match fallback {
+            Some(fallback) => reference.resolve_from(fallback),
+            None => reference.resolve(),
+        },
+    };
+    let path = resolved.map_err(|err| FileReferenceFailure::Resolution {
         raw: value.to_string(),
         err,
     })?;
@@ -413,7 +475,7 @@ mod tests {
         let path = dir.path().join("README.md");
         std::fs::write(&path, b"x").unwrap();
         let _cwd = CwdGuard::enter(dir.path());
-        assert!(validate_file_reference("./README.md"));
+        assert!(validate_file_reference("./README.md", None, None));
     }
 
     #[test]
@@ -421,7 +483,7 @@ mod tests {
     fn file_format_rejects_missing_file() {
         let dir = temp_dir();
         let _cwd = CwdGuard::enter(dir.path());
-        assert!(!validate_file_reference("./does-not-exist.md"));
+        assert!(!validate_file_reference("./does-not-exist.md", None, None));
     }
 
     #[test]
@@ -431,7 +493,7 @@ mod tests {
         let path = dir.path().join("README.md");
         std::fs::write(&path, b"x").unwrap();
         let _cwd = CwdGuard::enter(dir.path());
-        let resolved = resolve_file_reference("./README.md").expect("should resolve");
+        let resolved = resolve_file_reference("./README.md", None, None).expect("should resolve");
         // On macOS the temp dir is exposed under both /var/folders/... and
         // /private/var/folders/... depending on how the path is rooted, so
         // compare existence and the trailing component rather than full
@@ -445,7 +507,7 @@ mod tests {
     fn resolve_file_reference_reports_missing_file() {
         let dir = temp_dir();
         let _cwd = CwdGuard::enter(dir.path());
-        let err = resolve_file_reference("./does-not-exist.md")
+        let err = resolve_file_reference("./does-not-exist.md", None, None)
             .expect_err("should fail with NoMatch");
         let rendered = err.to_string();
         assert!(
@@ -460,7 +522,7 @@ mod tests {
     #[test]
     fn resolve_file_reference_reports_invalid_syntax() {
         // Empty input is rejected at parse time.
-        let err = resolve_file_reference("").expect_err("should fail with InvalidSyntax");
+        let err = resolve_file_reference("", None, None).expect_err("should fail with InvalidSyntax");
         let rendered = err.to_string();
         assert!(
             rendered.contains("is not a valid file reference"),
@@ -480,7 +542,7 @@ mod tests {
         // it, but unset it defensively before resolving.
         unsafe { std::env::remove_var(var_name); }
         let raw = format!("{{{{{var_name}}}}}/notes.md");
-        let err = resolve_file_reference(&raw).expect_err("should fail with Resolution");
+        let err = resolve_file_reference(&raw, None, None).expect_err("should fail with Resolution");
         let rendered = err.to_string();
         assert!(
             rendered.contains("could not resolve file reference"),
@@ -499,7 +561,7 @@ mod tests {
     fn resolve_file_reference_reports_resolution_error_for_unconfigured_vault() {
         let dir = temp_dir();
         let _cwd = CwdGuard::enter(dir.path());
-        let err = resolve_file_reference("vault:notes/today.md")
+        let err = resolve_file_reference("vault:notes/today.md", None, None)
             .expect_err("should fail with Resolution");
         let rendered = err.to_string();
         assert!(
@@ -520,7 +582,7 @@ mod tests {
         let dir = temp_dir();
         let _cwd = CwdGuard::enter(dir.path());
         let raw = "/tmp/darkmatter-test-missing-absolute-xyz.md";
-        let err = resolve_file_reference(raw).expect_err("should fail with NoMatch");
+        let err = resolve_file_reference(raw, None, None).expect_err("should fail with NoMatch");
         let rendered = err.to_string();
         assert!(
             rendered.contains("no existing file matched reference"),
@@ -539,7 +601,7 @@ mod tests {
         let dir = temp_dir();
         let _cwd = CwdGuard::enter(dir.path());
         let raw = "@darkmatter-test-missing-magic-xyz.md";
-        let err = resolve_file_reference(raw).expect_err("should fail with NoMatch");
+        let err = resolve_file_reference(raw, None, None).expect_err("should fail with NoMatch");
         let rendered = err.to_string();
         assert!(
             rendered.contains("no existing file matched reference"),
@@ -556,7 +618,7 @@ mod tests {
         let dir = temp_dir();
         let _cwd = CwdGuard::enter(dir.path());
         let raw = "!darkmatter-test-missing-package-xyz.md";
-        let err = resolve_file_reference(raw).expect_err("should fail with NoMatch");
+        let err = resolve_file_reference(raw, None, None).expect_err("should fail with NoMatch");
         let rendered = err.to_string();
         assert!(
             rendered.contains("no existing file matched reference"),
@@ -573,7 +635,7 @@ mod tests {
         let dir = temp_dir();
         let _cwd = CwdGuard::enter(dir.path());
         let raw = "%darkmatter-test-missing-recursive-xyz.md";
-        let err = resolve_file_reference(raw).expect_err("should fail with NoMatch");
+        let err = resolve_file_reference(raw, None, None).expect_err("should fail with NoMatch");
         let rendered = err.to_string();
         assert!(
             rendered.contains("no existing file matched reference"),

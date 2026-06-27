@@ -4838,3 +4838,46 @@ fn apply_wrappers_normalizes_true_disclosure_summary_to_details() {
         "'true' summary must normalize to 'Details': {wrapped}"
     );
 }
+
+/// A document-relative body transclusion (`::file _senior-reviewer.md`) still
+/// resolves next to the prompt document when a `file_ref_fallback_dir` is
+/// configured — the fallback change is scoped to caller-supplied file
+/// references in expression functions and the `darkmatter-file` schema
+/// validator, and must NOT leak into the transclusion resolver (which uses
+/// its own document-relative `resolve_path`). Verification goal #5.
+///
+/// Layout: both the document dir and the fallback dir hold a same-named
+/// `_senior-reviewer.md`. The transcluded content must come from the document
+/// dir copy; if the fallback leaked into transclusion, the fallback content
+/// would appear instead.
+#[test]
+fn body_file_transclusion_stays_document_relative_with_fallback() {
+    let doc_dir = tempfile::tempdir().expect("tempdir");
+    let fallback_dir = tempfile::tempdir().expect("tempdir");
+
+    let root = doc_dir.path().join("review.md");
+    let doc_reviewer = doc_dir.path().join("_senior-reviewer.md");
+    let fallback_reviewer = fallback_dir.path().join("_senior-reviewer.md");
+
+    std::fs::write(&root, "::file ./_senior-reviewer.md").unwrap();
+    std::fs::write(&doc_reviewer, "# From Document").unwrap();
+    std::fs::write(&fallback_reviewer, "# From Fallback").unwrap();
+
+    let md = Markdown::try_from(root.as_path()).unwrap();
+    let options = ComposeOptions::new()
+        .with_source_file(&root)
+        .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
+    let (composed, report) = md.compose_with(options).unwrap();
+
+    assert!(
+        composed.content().contains("# From Document"),
+        "body `::file` transclusion must resolve from the document dir: {}",
+        composed.content(),
+    );
+    assert!(
+        !composed.content().contains("# From Fallback"),
+        "transclusion must NOT leak to the fallback dir: {}",
+        composed.content(),
+    );
+    assert_eq!(report.transclusions_applied, 1);
+}

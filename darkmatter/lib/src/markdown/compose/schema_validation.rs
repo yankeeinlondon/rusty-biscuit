@@ -74,6 +74,9 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
 
     let schemas = {
         let mut builder = DarkmatterSchemas::new();
+        if let Some(fallback) = options.file_ref_fallback_dir.clone() {
+            builder = builder.with_file_ref_fallback_dir(fallback);
+        }
         if let Some(baseline) = options.baseline_schema.clone() {
             builder = builder.with_baseline(baseline).map_err(|err| {
                 MarkdownError::SchemaValidationFailed {

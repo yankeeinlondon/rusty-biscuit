@@ -262,7 +262,7 @@ fn coerce_root_union(
         let wrapped = validate::wrap_arm_as_root_schema(arm);
         // A schema that fails to build cannot be a valid arm; skip it. The
         // surrounding validator already surfaces build failures elsewhere.
-        let Ok(validator) = build_validator(&wrapped) else {
+        let Ok(validator) = build_validator(&wrapped, None, None) else {
             continue;
         };
         if arm_accepts(&validator, &candidate, shell_pending) {
@@ -385,7 +385,7 @@ fn coerce_property_union(arms: &[Value], value: &Value) -> Option<Value> {
             Some(target) => coerce_value(&target, value).unwrap_or_else(|| value.clone()),
             None => value.clone(),
         };
-        let Ok(validator) = build_validator(arm) else {
+        let Ok(validator) = build_validator(arm, None, None) else {
             continue;
         };
         if validator.is_valid(&candidate) {

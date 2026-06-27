@@ -16,7 +16,9 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 
 use super::{json_number, scalar_string, to_number, to_number_coerce};
-use super::resolve_ctx::{ResolutionContext, is_remote_url, normalize_path_arg};
+use super::resolve_ctx::{
+    ResolutionContext, is_remote_url, normalize_path_arg, resolve_file_ref_with_fallback,
+};
 use crate::markdown::Markdown;
 use crate::markdown::schemas::DarkmatterSchemas;
 
@@ -914,20 +916,28 @@ pub fn is_this_year_utc(args: &[Value]) -> Result<Value, String> {
 
 /// Resolves a filepath argument to an absolute path using FileReference rules.
 ///
-/// Resolution is attempted document-relative first (against `ctx.base_dir`, so
-/// references written inside a composed document resolve next to that document),
-/// then falls back to ambient process-CWD resolution. The fallback keeps these
-/// functions in agreement with the `file`-typed `$schema` validator, which uses
-/// `FileReference::resolve()` (process CWD): a caller-supplied path — e.g. a CLI
-/// `-y` variable typed relative to the user's working directory — that the
-/// schema layer accepts must not read as missing here. The two anchors only
-/// differ when the process CWD is not the document's directory.
+/// Encodes the single shared resolution order (delegated to
+/// [`resolve_file_ref_with_fallback`]):
+///
+/// 1. absolute paths are returned as-is by `FileReference`;
+/// 2. document-relative via `resolve_from(base_dir)` (so references written
+///    inside a composed document resolve next to that document);
+/// 3. launch-area fallback via `resolve_from(file_ref_fallback_dir)` when the
+///    context carries one (a caller-supplied path relative to the launch area);
+/// 4. no ambient process-CWD fallback.
+///
+/// The launch-area fallback replaces the previous implicit ambient-CWD
+/// `resolve()` branch, which depended on `std::env::current_dir()`. Production
+/// surfaces thread the captured launch area as `file_ref_fallback_dir` so
+/// resolution stays correct after the wrapper `chdir`s the process.
 ///
 /// ## Returns
 ///
 /// - `Ok(Some(path))` when the reference resolves to a path.
 /// - `Ok(None)` when the reference is well-formed but resolves to nothing.
 /// - `Err` when the reference string itself is invalid.
+///
+/// [`resolve_file_ref_with_fallback`]: super::resolve_ctx::resolve_file_ref_with_fallback
 fn resolve_arg(raw: &str, ctx: &ResolutionContext) -> Result<Option<PathBuf>, String> {
     let normalized = normalize_path_arg(raw);
     let mut file_ref = biscuit_file::FileReference::new(&normalized)
@@ -935,15 +945,12 @@ fn resolve_arg(raw: &str, ctx: &ResolutionContext) -> Result<Option<PathBuf>, St
     for (path, position) in &ctx.magic_paths {
         file_ref = file_ref.add_magic_path(path, *position);
     }
-    match file_ref
-        .resolve_from(&ctx.base_dir)
-        .map_err(|e| format!("invalid file path {raw:?}: {e}"))?
-    {
-        Some(path) => Ok(Some(path)),
-        None => file_ref
-            .resolve()
-            .map_err(|e| format!("invalid file path {raw:?}: {e}")),
-    }
+    resolve_file_ref_with_fallback(
+        &file_ref,
+        &ctx.base_dir,
+        ctx.file_ref_fallback_dir.as_deref(),
+    )
+    .map_err(|e| format!("invalid file path {raw:?}: {e}"))
 }
 
 /// `absolute(file) -> file | Error::InvalidFilePath`
@@ -2332,25 +2339,47 @@ mod tests {
 
         #[test]
         #[serial_test::serial]
-        fn file_exists_falls_back_to_process_cwd() {
-            // A path that does not exist relative to base_dir but DOES exist
-            // relative to the process CWD must still resolve — matching the
-            // `file` schema validator, which resolves from the ambient CWD.
-            // This is the case a CLI `-y` variable typed relative to the user's
-            // working directory hits when the document lives elsewhere.
-            let cwd_dir = tempfile::TempDir::new().unwrap();
-            std::fs::write(cwd_dir.path().join("plan.md"), "# Plan\n").unwrap();
+        fn file_exists_resolves_via_explicit_fallback_not_process_cwd() {
+            // The launch-area fallback replaces the old ambient-CWD `resolve()`
+            // branch. A caller-supplied path relative to the launch area must
+            // resolve via `file_ref_fallback_dir` even when the process CWD has
+            // been mutated to an unrelated directory.
+            let launch_dir = tempfile::TempDir::new().unwrap();
+            std::fs::write(launch_dir.path().join("plan.md"), "# Plan\n").unwrap();
             // base_dir deliberately lacks plan.md, so document-relative
-            // resolution misses and only the CWD fallback can succeed.
+            // resolution misses and only the fallback can succeed.
+            let base_dir = tempfile::TempDir::new().unwrap();
+            // An unrelated directory the process is chdir'd into: plan.md is
+            // NOT here, proving the fallback (not ambient CWD) is consulted.
+            let unrelated_dir = tempfile::TempDir::new().unwrap();
+            let ctx = ResolutionContext::new(base_dir.path().to_path_buf())
+                .with_file_ref_fallback_dir(launch_dir.path().to_path_buf());
+
+            let original = std::env::current_dir().unwrap();
+            std::env::set_current_dir(unrelated_dir.path()).unwrap();
+            let found = file_exists_fn(&[json!("plan.md")], &ctx);
+            std::env::set_current_dir(&original).unwrap();
+
+            assert_eq!(found.unwrap(), json!(true));
+        }
+
+        #[test]
+        #[serial_test::serial]
+        fn file_exists_without_fallback_ignores_process_cwd() {
+            // With no explicit fallback, resolution stays document-relative and
+            // does NOT consult the mutated ambient CWD — the legacy fallback is
+            // gone. A file present only under the process CWD reads as missing.
+            let cwd_dir = tempfile::TempDir::new().unwrap();
+            std::fs::write(cwd_dir.path().join("ambient.md"), "# Ambient\n").unwrap();
             let base_dir = tempfile::TempDir::new().unwrap();
             let ctx = ResolutionContext::new(base_dir.path().to_path_buf());
 
             let original = std::env::current_dir().unwrap();
             std::env::set_current_dir(cwd_dir.path()).unwrap();
-            let found = file_exists_fn(&[json!("plan.md")], &ctx);
+            let found = file_exists_fn(&[json!("ambient.md")], &ctx);
             std::env::set_current_dir(&original).unwrap();
 
-            assert_eq!(found.unwrap(), json!(true));
+            assert_eq!(found.unwrap(), json!(false));
         }
 
         #[test]

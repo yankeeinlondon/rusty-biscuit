@@ -316,6 +316,21 @@ pub struct ComposeOptions {
     /// sharing one instance collapses pre-flight + compose into a single network
     /// request per URL. `None` means each stage builds its own.
     pub(crate) remote_fetch: Option<RemoteFetchRuntime>,
+
+    // ── File-reference fallback (launch-area anchor) ───────────────
+    /// Explicit fallback directory for caller-supplied file references that
+    /// are not authored inside the document (e.g. a CLI-supplied path relative
+    /// to the launch area). Propagated into both
+    /// [`expression_resolution_context`] and [`frontmatter_resolution_context`]
+    /// as `ResolutionContext::file_ref_fallback_dir`, and into the
+    /// [`DarkmatterSchemas`] builder used by the compose-stage schema
+    /// validation. `None` (the default) preserves the legacy document-only +
+    /// ambient-CWD behavior for callers that have not captured a launch area.
+    ///
+    /// [`expression_resolution_context`]: Self::expression_resolution_context
+    /// [`frontmatter_resolution_context`]: Self::frontmatter_resolution_context
+    /// [`DarkmatterSchemas`]: crate::markdown::schemas::DarkmatterSchemas
+    pub(crate) file_ref_fallback_dir: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for ComposeOptions {
@@ -384,6 +399,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("context", &self.context)
             .field("remote_read_config", &self.remote_read_config)
             .field("exclude_keys", &self.exclude_keys)
+            .field("file_ref_fallback_dir", &self.file_ref_fallback_dir)
             .finish()
     }
 }
@@ -448,6 +464,7 @@ impl ComposeOptions {
             preflight_graph: None,
             remote_fetch: None,
             exclude_keys: std::collections::HashSet::new(),
+            file_ref_fallback_dir: None,
         }
     }
 
@@ -843,6 +860,7 @@ impl ComposeOptions {
         super::super::expression::ResolutionContext {
             base_dir: self.resolution_base_dir(),
             magic_paths: self.magic_paths.clone(),
+            file_ref_fallback_dir: self.file_ref_fallback_dir.clone(),
             remote_fetch: self.remote_reads_enabled().then(|| remote_fetch.clone()),
             ctx_values: self.context_values_for_resolution(),
             home_dir: dirs::home_dir(),
@@ -865,6 +883,7 @@ impl ComposeOptions {
         super::super::expression::ResolutionContext {
             base_dir: self.resolution_base_dir(),
             magic_paths: self.magic_paths.clone(),
+            file_ref_fallback_dir: self.file_ref_fallback_dir.clone(),
             remote_fetch: None,
             ctx_values: self.context_values_for_resolution(),
             home_dir: dirs::home_dir(),
@@ -1084,6 +1103,26 @@ impl ComposeOptions {
         &self.exclude_keys
     }
 
+    /// Sets the explicit fallback directory for caller-supplied file references
+    /// (typically the captured launch area).
+    ///
+    /// Propagated into both [`expression_resolution_context`] and
+    /// [`frontmatter_resolution_context`] as
+    /// [`ResolutionContext::file_ref_fallback_dir`], and into the
+    /// [`DarkmatterSchemas`] builder used by the compose-stage schema
+    /// validation. Resolution still tries `base_dir` (the document directory)
+    /// first; only when that misses does it consult the fallback.
+    ///
+    /// [`expression_resolution_context`]: Self::expression_resolution_context
+    /// [`frontmatter_resolution_context`]: Self::frontmatter_resolution_context
+    /// [`ResolutionContext::file_ref_fallback_dir`]: super::super::expression::ResolutionContext::file_ref_fallback_dir
+    /// [`DarkmatterSchemas`]: crate::markdown::schemas::DarkmatterSchemas
+    #[must_use]
+    pub fn with_file_ref_fallback_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.file_ref_fallback_dir = Some(dir.into());
+        self
+    }
+
     /// Attaches a single remote-fetch runtime shared by `compose_preflight` and
     /// the subsequent `compose_with` pass.
     ///
@@ -1231,5 +1270,70 @@ impl Default for TransclusionOptions {
             resolve_repo_root: true,
             magic_paths: Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn file_ref_fallback_dir_defaults_to_none() {
+        let options = ComposeOptions::new();
+        assert!(options.file_ref_fallback_dir.is_none());
+    }
+
+    #[test]
+    fn with_file_ref_fallback_dir_sets_the_field() {
+        let options = ComposeOptions::new().with_file_ref_fallback_dir("/tmp/launch");
+        assert_eq!(
+            options.file_ref_fallback_dir.as_deref(),
+            Some(std::path::Path::new("/tmp/launch")),
+        );
+    }
+
+    /// A `ComposeOptions` with a fallback produces a `ResolutionContext`
+    /// carrying it — verifying the builder threads through to both resolution
+    /// contexts (Phase 2 Track A verification goal).
+    #[test]
+    fn frontmatter_resolution_context_carries_fallback() {
+        let options = ComposeOptions::new().with_file_ref_fallback_dir("/tmp/launch");
+        let ctx = options.frontmatter_resolution_context();
+        assert_eq!(
+            ctx.file_ref_fallback_dir.as_deref(),
+            Some(std::path::Path::new("/tmp/launch")),
+        );
+    }
+
+    /// Without a fallback set, the resolution context leaves the field as
+    /// `None` — preserving the legacy document-only resolution behavior.
+    #[test]
+    fn frontmatter_resolution_context_without_fallback_is_none() {
+        let options = ComposeOptions::new();
+        let ctx = options.frontmatter_resolution_context();
+        assert!(ctx.file_ref_fallback_dir.is_none());
+    }
+
+    /// The fallback appears in the `Debug` output so diagnostics surface it.
+    #[test]
+    fn debug_impl_includes_file_ref_fallback_dir() {
+        let options = ComposeOptions::new().with_file_ref_fallback_dir("/tmp/launch");
+        let debug = format!("{options:?}");
+        assert!(
+            debug.contains("file_ref_fallback_dir"),
+            "expected Debug to include file_ref_fallback_dir, got: {debug}",
+        );
+        assert!(
+            debug.contains("/tmp/launch"),
+            "expected Debug to include the path, got: {debug}",
+        );
+    }
+
+    /// `PathBuf` type assertion — the field accepts any `Into<PathBuf>`.
+    #[test]
+    #[allow(dead_code)]
+    fn file_ref_fallback_dir_accepts_pathbuf() {
+        let _: PathBuf = PathBuf::from("/tmp/x");
     }
 }
