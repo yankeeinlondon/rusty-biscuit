@@ -98,8 +98,13 @@ impl McpInjector for OpenCodeInjector {
             mcp_config.insert(server.id.clone(), serde_json::Value::Object(entry));
         }
 
-        let config = json!({ "mcp": mcp_config });
-        let config_str = serde_json::to_string(&config)?;
+        // Merge `{"mcp": …}` into any existing inline config rather than
+        // overwriting it: the system-prompt and YOLO producers target the same
+        // `OPENCODE_CONFIG_CONTENT` value, so a blind overwrite would clobber
+        // their `instructions`/`permission` keys.
+        let overlay = json!({ "mcp": mcp_config });
+        let existing = env.get("OPENCODE_CONFIG_CONTENT").map(String::as_str);
+        let config_str = crate::opencode_config::merge_overlay(existing, overlay)?;
         env.insert("OPENCODE_CONFIG_CONTENT".into(), config_str);
 
         Ok(InjectionResult {
@@ -488,6 +493,66 @@ mod tests {
         assert!(content["mcp"]["calendar"].is_object());
         assert!(result.temp_files.is_empty());
         assert_eq!(result.servers_injected, vec!["calendar"]);
+    }
+
+    #[test]
+    fn opencode_merge_preserves_prior_config_keys() {
+        // The injector is handed a map that already carries an
+        // OPENCODE_CONFIG_CONTENT object; the merge must keep its keys.
+        let injector = OpenCodeInjector;
+        let servers = vec![make_server("calendar")];
+        let mut env = HashMap::new();
+        env.insert(
+            "OPENCODE_CONFIG_CONTENT".to_string(),
+            json!({ "theme": "dark" }).to_string(),
+        );
+
+        injector.inject(&servers, &mut env, None).unwrap();
+
+        let content: serde_json::Value =
+            serde_json::from_str(env.get("OPENCODE_CONFIG_CONTENT").unwrap()).unwrap();
+        assert_eq!(content["theme"], "dark");
+        assert!(content["mcp"]["calendar"].is_object());
+    }
+
+    #[test]
+    fn opencode_merge_coexists_with_instructions() {
+        // Regression for the MCP ↔ system-prompt clobber: a pre-existing
+        // `instructions` key and the injected `mcp` key must both survive.
+        let injector = OpenCodeInjector;
+        let servers = vec![make_server("calendar")];
+        let mut env = HashMap::new();
+        env.insert(
+            "OPENCODE_CONFIG_CONTENT".to_string(),
+            json!({ "instructions": ["do the thing"] }).to_string(),
+        );
+
+        injector.inject(&servers, &mut env, None).unwrap();
+
+        let content: serde_json::Value =
+            serde_json::from_str(env.get("OPENCODE_CONFIG_CONTENT").unwrap()).unwrap();
+        assert_eq!(content["instructions"], json!(["do the thing"]));
+        assert!(content["mcp"]["calendar"].is_object());
+    }
+
+    #[test]
+    fn opencode_merge_preserves_user_supplied_config() {
+        // A user-supplied non-empty config object is preserved, not replaced,
+        // when MCP is injected.
+        let injector = OpenCodeInjector;
+        let servers = vec![make_server("calendar")];
+        let mut env = HashMap::new();
+        env.insert(
+            "OPENCODE_CONFIG_CONTENT".to_string(),
+            json!({ "provider": { "anthropic": { "model": "claude" } } }).to_string(),
+        );
+
+        injector.inject(&servers, &mut env, None).unwrap();
+
+        let content: serde_json::Value =
+            serde_json::from_str(env.get("OPENCODE_CONFIG_CONTENT").unwrap()).unwrap();
+        assert_eq!(content["provider"]["anthropic"]["model"], "claude");
+        assert!(content["mcp"]["calendar"].is_object());
     }
 
     #[test]
