@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-f9dd0b7584edf43b
-last_updated: 2026-06-23
+hash: ef46db3751d8e999-78665c4e30346eb0
+last_updated: 2026-06-27
 ---
 # Claudine CLI Reference
 
@@ -389,7 +389,7 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 
 | Flag | Description |
 |------|-------------|
-| `-y, --yolo` | Translate to provider-specific auto-approval mode (warn-only for OpenCode) |
+| `-y, --yolo` | Translate to provider-specific auto-approval mode (OpenCode: non-interactive only — pushes `--dangerously-skip-permissions` **and** merges a session-wide `permission` block into `OPENCODE_CONFIG_CONTENT` so subagents are also auto-approved; warn-only/ignored in OpenCode interactive sessions) |
 | `-i, --interactive` | Force interactive mode even when a prompt string is provided |
 | `-m, --model <MODEL>` | Override the model used by the provider |
 | `--asp <FILE>` | Append a system prompt from a file (alias: `--append-system-prompt`) |
