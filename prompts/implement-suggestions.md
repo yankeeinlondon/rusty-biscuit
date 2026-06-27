@@ -2,7 +2,7 @@
 $schema:
     spec: string(required)
     design: string
-iteration: "{{ frontmatter(spec, 'review_iterations') ? frontmatter(spec, 'review_iterations') : 1 }}"
+iteration: "{{ frontmatter(spec, 'review_iterations') ? frontmatter(spec, 'review_iterations') || 1 : 1 }}"
 review: "{{ dirname(spec) + '/' + 'review-' + iteration + '.md' }}"
 # is the review "production ready"?
 ready: "{{ review && file_exists(review) ? frontmatter(review, 'ready') : null }}"
