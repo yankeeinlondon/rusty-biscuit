@@ -409,6 +409,7 @@ pub(crate) fn execute_sequence(
         &user_set_overrides,
         source_repo_root.as_deref(),
         &prep_context.launch_workspace.child_cwd,
+        Some(prep_context.launch_workspace.launch_cwd.as_path()),
         shared,
         effective_fail_fast,
         inline_mode,

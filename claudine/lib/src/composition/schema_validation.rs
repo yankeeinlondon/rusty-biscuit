@@ -148,6 +148,7 @@ fn prepare_with_schema(
     mode: PrepareMode,
 ) -> Result<PreparedComposition, CompositionError> {
     let mut dropped: Vec<DroppedOptional> = Vec::new();
+    let file_ref_fallback_dir = options.file_ref_fallback_dir.clone();
     let prepared = match run_prepare(source, options.clone(), mode) {
         Ok(prepared) => prepared,
         Err(err) => handle_compose_error(source, options, mode, err, &mut dropped)?,
@@ -156,7 +157,7 @@ fn prepare_with_schema(
     // the same typed error / drop-and-retry rules so values that became
     // invalid (or now satisfy the schema) after `$(...)` expansion are
     // judged on their final form.
-    post_shell_validate(source, prepared, dropped, mode)
+    post_shell_validate(source, prepared, dropped, mode, file_ref_fallback_dir.as_deref())
 }
 
 fn run_prepare(
@@ -206,7 +207,7 @@ fn translate_schema_failure(
         });
     }
 
-    let effective = load_effective_schema(source)?;
+    let effective = load_effective_schema(source, options.file_ref_fallback_dir.as_deref())?;
     let categorized = categorize_problems(&problems, effective.as_ref());
 
     if !categorized.invalid_required.is_empty() {
@@ -232,7 +233,9 @@ fn translate_schema_failure(
         dropped.extend(override_drops);
         return match run_prepare(&retry_source, retry_options, mode) {
             Ok(prepared) => Ok(prepared),
-            Err(retry_err) => handle_retry_error(source, retry_err),
+            Err(retry_err) => {
+                handle_retry_error(source, retry_err, options.file_ref_fallback_dir.as_deref())
+            }
         };
     }
 
@@ -257,6 +260,7 @@ fn translate_schema_failure(
 fn handle_retry_error(
     source: &ResolvedCompositionSource,
     err: CompositionError,
+    file_ref_fallback_dir: Option<&std::path::Path>,
 ) -> Result<PreparedComposition, CompositionError> {
     let CompositionError::ComposeFailed(MarkdownError::SchemaValidationFailed {
         problems,
@@ -267,7 +271,7 @@ fn handle_retry_error(
         return Err(err);
     };
 
-    let effective = load_effective_schema(source)?;
+    let effective = load_effective_schema(source, file_ref_fallback_dir)?;
     let categorized = categorize_problems(&problems, effective.as_ref());
 
     if !categorized.invalid_required.is_empty() {
@@ -316,6 +320,7 @@ fn post_shell_validate(
     mut prepared: PreparedComposition,
     mut dropped: Vec<DroppedOptional>,
     _mode: PrepareMode,
+    file_ref_fallback_dir: Option<&std::path::Path>,
 ) -> Result<PreparedComposition, CompositionError> {
     // No `$schema` → no validation work to do.
     if !source
@@ -328,7 +333,7 @@ fn post_shell_validate(
         return Ok(prepared);
     }
 
-    let Some(effective) = load_effective_schema(source)? else {
+    let Some(effective) = load_effective_schema(source, file_ref_fallback_dir)? else {
         // Raw JSON Schema (no SimplifiedSchema): nothing else to do here.
         prepared.dropped_optionals = dropped;
         return Ok(prepared);
@@ -423,8 +428,13 @@ fn post_shell_validate(
 
 fn load_effective_schema(
     source: &ResolvedCompositionSource,
+    file_ref_fallback_dir: Option<&std::path::Path>,
 ) -> Result<Option<EffectiveSchema>, CompositionError> {
-    DarkmatterSchemas::new()
+    let mut schemas = DarkmatterSchemas::new();
+    if let Some(fallback) = file_ref_fallback_dir {
+        schemas = schemas.with_file_ref_fallback_dir(fallback);
+    }
+    schemas
         .effective_for(&source.markdown)
         .map_err(|err| CompositionError::SchemaLoad {
             source_path: source.resolved_path.clone(),
@@ -835,6 +845,11 @@ pub enum PropertyState {
 /// `set_overrides`, mirroring the validation Darkmatter would run during
 /// composition.
 ///
+/// `file_ref_fallback_dir` is the captured launch area used as the
+/// document-first / launch-area-fallback anchor for `file`-typed property
+/// resolution, matching the expression path. Pass `None` only when no launch
+/// area is known (e.g. unit tests).
+///
 /// Returns `Ok(None)` when the document has no `$schema` declaration.
 ///
 /// ## Errors
@@ -844,6 +859,7 @@ pub enum PropertyState {
 pub fn build_schema_status_report(
     source: &ResolvedCompositionSource,
     set_overrides: Option<&serde_json::Value>,
+    file_ref_fallback_dir: Option<&std::path::Path>,
 ) -> Result<Option<SchemaStatusReport>, CompositionError> {
     // Skip when the document has no `$schema`.
     if source
@@ -856,7 +872,7 @@ pub fn build_schema_status_report(
         return Ok(None);
     }
 
-    let effective = load_effective_schema(source)?;
+    let effective = load_effective_schema(source, file_ref_fallback_dir)?;
     let Some(effective) = effective else {
         // Raw JSON Schema (no SimplifiedSchema projection): we can still
         // run validation, but without typed metadata for per-property
@@ -1055,6 +1071,7 @@ pub struct PreValidatedSchema {
 pub fn pre_validate_schema(
     source: &ResolvedCompositionSource,
     set_overrides: Option<&serde_json::Value>,
+    file_ref_fallback_dir: Option<&std::path::Path>,
 ) -> Result<PreValidatedSchema, CompositionError> {
     let no_schema = !source
         .markdown
@@ -1072,9 +1089,9 @@ pub fn pre_validate_schema(
     // First pass: drop non-template invalid optionals so the prepare-time
     // pipeline (and the preflight Darkmatter pass) sees a clean slate.
     let (source, set_overrides, dropped_optionals) =
-        drop_invalid_optionals(source.clone(), set_overrides.cloned());
+        drop_invalid_optionals(source.clone(), set_overrides.cloned(), file_ref_fallback_dir);
 
-    let effective = match load_effective_schema(&source) {
+    let effective = match load_effective_schema(&source, file_ref_fallback_dir) {
         Ok(Some(e)) => e,
         Ok(None) => {
             // Raw JSON Schema (no SimplifiedSchema projection): we cannot
@@ -1193,6 +1210,7 @@ fn build_effective_instance(
 pub fn drop_invalid_optionals(
     mut source: ResolvedCompositionSource,
     mut set_overrides: Option<serde_json::Value>,
+    file_ref_fallback_dir: Option<&std::path::Path>,
 ) -> (
     ResolvedCompositionSource,
     Option<serde_json::Value>,
@@ -1208,7 +1226,7 @@ pub fn drop_invalid_optionals(
         return (source, set_overrides, dropped);
     }
 
-    let effective = match load_effective_schema(&source) {
+    let effective = match load_effective_schema(&source, file_ref_fallback_dir) {
         Ok(Some(e)) => e,
         // No SimplifiedSchema projection (raw JSON Schema or schema load
         // failure) — let the prepare-time validator handle it.
@@ -1974,7 +1992,7 @@ mod tests {
     fn status_report_is_none_when_no_schema() {
         let dir = TempDir::new().unwrap();
         let source = make_source(&dir, "---\ntitle: hi\n---\nbody\n");
-        let report = build_schema_status_report(&source, None).unwrap();
+        let report = build_schema_status_report(&source, None, None).unwrap();
         assert!(report.is_none());
     }
 
@@ -1985,7 +2003,7 @@ mod tests {
             &dir,
             "---\n$schema:\n  title: 'string(required)'\n  description: 'string'\ntitle: Plan\n---\nbody\n",
         );
-        let report = build_schema_status_report(&source, None).unwrap().unwrap();
+        let report = build_schema_status_report(&source, None, None).unwrap().unwrap();
         assert_eq!(report.required.len(), 1);
         assert_eq!(report.required[0].name, "title");
         assert_eq!(report.required[0].state, PropertyState::Valid);
@@ -2001,7 +2019,7 @@ mod tests {
             &dir,
             "---\n$schema:\n  title: 'string(required)'\n---\nbody\n",
         );
-        let report = build_schema_status_report(&source, None).unwrap().unwrap();
+        let report = build_schema_status_report(&source, None, None).unwrap().unwrap();
         assert_eq!(report.required[0].state, PropertyState::Missing);
     }
 
@@ -2012,7 +2030,7 @@ mod tests {
             &dir,
             "---\n$schema:\n  count: 'number(required)'\ncount: not-a-number\n---\nbody\n",
         );
-        let report = build_schema_status_report(&source, None).unwrap().unwrap();
+        let report = build_schema_status_report(&source, None, None).unwrap().unwrap();
         assert_eq!(report.required[0].state, PropertyState::Invalid);
     }
 
@@ -2024,7 +2042,7 @@ mod tests {
             "---\n$schema:\n  title: 'string(required)'\n---\nbody\n",
         );
         let overrides = serde_json::json!({ "title": "supplied" });
-        let report = build_schema_status_report(&source, Some(&overrides))
+        let report = build_schema_status_report(&source, Some(&overrides), None)
             .unwrap()
             .unwrap();
         assert_eq!(report.required[0].state, PropertyState::Valid);
@@ -2037,7 +2055,7 @@ mod tests {
             &dir,
             "---\n$schema:\n  title: 'string(required)'\n  count: 'number'\ntitle: Plan\ncount: nope\n---\nbody\n",
         );
-        let report = build_schema_status_report(&source, None).unwrap().unwrap();
+        let report = build_schema_status_report(&source, None, None).unwrap().unwrap();
         assert!(report.has_invalid_optional);
     }
 
@@ -2062,7 +2080,7 @@ mod tests {
                 "---\nbody\n",
             ),
         );
-        let report = build_schema_status_report(&source, None).unwrap().unwrap();
+        let report = build_schema_status_report(&source, None, None).unwrap().unwrap();
         let runtime = report
             .required
             .iter()
@@ -2102,7 +2120,7 @@ mod tests {
                 "---\nbody\n",
             ),
         );
-        let report = build_schema_status_report(&source, None).unwrap().unwrap();
+        let report = build_schema_status_report(&source, None, None).unwrap().unwrap();
         assert!(
             !report.has_invalid_optional,
             "templated optional must not be flagged invalid: {:?}",
@@ -2156,7 +2174,7 @@ mod tests {
             "---\n$schema:\n  runtime_agent: 'enum(goose; required)'\nruntime_agent: '{{ env.AGENT }}'\n---\nbody\n",
         );
 
-        let pre = pre_validate_schema(&source, None)
+        let pre = pre_validate_schema(&source, None, None)
             .expect("template-bearing required value must pass pre-validation");
         // Source/overrides are returned unchanged.
         assert!(pre.set_overrides.is_none());
@@ -2183,7 +2201,7 @@ mod tests {
             "---\n$schema:\n  runtime_agent: 'enum(goose; required)'\nruntime_agent: '{{ env.AGENT }}'\n---\nbody\n",
         );
 
-        let pre = pre_validate_schema(&source, None);
+        let pre = pre_validate_schema(&source, None, None);
         assert!(
             pre.is_ok(),
             "pre-validation must defer template-bearing invalid-required to prepare-time"
@@ -2201,7 +2219,7 @@ mod tests {
             "---\n$schema:\n  count: 'number(required)'\ncount: not-a-number\n---\nbody\n",
         );
 
-        let err = pre_validate_schema(&source, None).unwrap_err();
+        let err = pre_validate_schema(&source, None, None).unwrap_err();
         assert!(
             matches!(err, CompositionError::SchemaValidation { .. }),
             "expected SchemaValidation for literal invalid-required, got: {err:?}"
@@ -2220,7 +2238,7 @@ mod tests {
             "---\n$schema:\n  title: 'string(required)'\n---\nbody\n",
         );
 
-        let err = pre_validate_schema(&source, None).unwrap_err();
+        let err = pre_validate_schema(&source, None, None).unwrap_err();
         assert!(
             matches!(err, CompositionError::MissingProperties { .. }),
             "expected MissingProperties, got: {err:?}"
@@ -2238,7 +2256,7 @@ mod tests {
             "---\n$schema:\n  count: 'number'\ncount: '{{ env.COUNT }}'\n---\nbody\n",
         );
 
-        let (scrubbed, _, _) = drop_invalid_optionals(source, None);
+        let (scrubbed, _, _) = drop_invalid_optionals(source, None, None);
         let value = scrubbed
             .markdown
             .frontmatter()
@@ -2258,7 +2276,7 @@ mod tests {
             "---\n$schema:\n  count: 'number'\ncount: nope\n---\nbody\n",
         );
 
-        let (scrubbed, _, _) = drop_invalid_optionals(source, None);
+        let (scrubbed, _, _) = drop_invalid_optionals(source, None, None);
         assert!(
             !scrubbed
                 .markdown
@@ -2415,7 +2433,7 @@ mod tests {
             "---\n$schema:\n  count: 'number'\ncount: nope\n---\nbody\n",
         );
 
-        let pre = pre_validate_schema(&source, None).unwrap();
+        let pre = pre_validate_schema(&source, None, None).unwrap();
         assert_eq!(pre.dropped_optionals.len(), 1);
         assert_eq!(pre.dropped_optionals[0].property, "count");
         assert_eq!(
@@ -2425,6 +2443,115 @@ mod tests {
         assert_eq!(
             pre.dropped_optionals[0].stage,
             DroppedOptionalStage::PreValidation
+        );
+    }
+
+    // ── Phase 4 regression: $schema references stay document-relative when ──
+    // ── a file-reference fallback is threaded into claudine's schema path. ──
+    //
+    // Re-affirms Phase 2B (darkmatter `DarkmatterSchemas`) at the claudine
+    // integration level: claudine's `load_effective_schema` builds
+    // `DarkmatterSchemas` with `with_file_ref_fallback_dir`, and the
+    // `$schema` REFERENCE resolution must stay document-relative while only
+    // `file`-typed property VALUES use the fallback (verification goal #6).
+
+    /// `$schema: ./schema.yaml` resolves relative to the document directory
+    /// even when `load_effective_schema` is given a fallback dir that does
+    /// NOT contain the schema file. If the fallback leaked into `$schema`
+    /// reference resolution, this would fail with `SchemaLoad`.
+    #[test]
+    fn schema_reference_stays_document_relative_through_claudine_load() {
+        let doc_dir = TempDir::new().unwrap();
+        let fallback_dir = TempDir::new().unwrap();
+        // schema.yaml lives ONLY under the document dir.
+        fs::write(
+            doc_dir.path().join("schema.yaml"),
+            "title: string(required)\n",
+        )
+        .unwrap();
+        let source = make_source(
+            &doc_dir,
+            "---\n$schema: ./schema.yaml\ntitle: Hello\n---\nbody\n",
+        );
+
+        // Fallback points at a dir WITHOUT schema.yaml.
+        let effective = load_effective_schema(&source, Some(fallback_dir.path())).unwrap();
+        assert!(
+            effective.is_some(),
+            "$schema reference must resolve from the document dir, not the fallback",
+        );
+    }
+
+    /// A root-union `$schema` with a string arm referencing a YAML file also
+    /// resolves that arm relative to the document directory, not the fallback
+    /// (verification goal #6, root-union variant through claudine's path).
+    #[test]
+    fn root_union_schema_string_arm_stays_document_relative_through_claudine_load() {
+        let doc_dir = TempDir::new().unwrap();
+        let fallback_dir = TempDir::new().unwrap();
+        fs::write(
+            doc_dir.path().join("arm-a.yaml"),
+            "kind: string(required)\n",
+        )
+        .unwrap();
+        let source = make_source(
+            &doc_dir,
+            "---\n$schema:\n  - ./arm-a.yaml\n  - fallback: string\nkind: feature\n---\nbody\n",
+        );
+
+        let effective = load_effective_schema(&source, Some(fallback_dir.path())).unwrap();
+        assert!(
+            effective.is_some(),
+            "root-union $schema string arm must resolve from the document dir, not the fallback",
+        );
+    }
+
+    /// A `file`-typed schema property value and `{{file_exists(spec)}}` agree
+    /// across prepare-time body interpolation and post-`chdir` schema
+    /// validation when both carry the same launch-area fallback
+    /// (verification goal #7, schema + body dimensions).
+    ///
+    /// The event-time dimension (`{{file_exists(spec)}}` in a lifecycle
+    /// event) is covered by `prepare_time_and_event_time_agree_on_file_reference`
+    /// in `lifecycle_executor::tests`; this test asserts the schema validator
+    /// agrees with the body interpolation path so all three surfaces align.
+    #[test]
+    fn file_property_and_file_exists_agree_across_schema_and_body() {
+        let doc_dir = TempDir::new().unwrap();
+        let fallback_dir = TempDir::new().unwrap();
+        // spec.md lives ONLY under the fallback (launch area).
+        fs::write(fallback_dir.path().join("spec.md"), "# Spec\n").unwrap();
+
+        // The prompt declares a `file`-typed `spec` property and a body
+        // `{{file_exists(spec)}}`. Both must agree: schema validation passes
+        // (spec resolves via the fallback) AND body interpolation renders true.
+        let source = make_source(
+            &doc_dir,
+            "---\n\
+             $schema:\n\
+             \x20 spec: 'file(required)'\n\
+             spec: spec.md\n\
+             ---\n\
+             result: {{file_exists(spec)}}\n",
+        );
+
+        let options = PrepareOptions {
+            file_ref_fallback_dir: Some(fallback_dir.path().to_path_buf()),
+            ..Default::default()
+        };
+
+        // Prepare threads the fallback into both Darkmatter composition
+        // (body interpolation) and DarkmatterSchemas (schema validation).
+        let prepared = prepare_direct_with_schema(&source, options).unwrap();
+
+        // Schema validation passed: spec resolved via the fallback (no
+        // SchemaValidation error was returned). The body interpolated
+        // file_exists(spec) to `true`, agreeing with the schema's verdict.
+        let prompt = &prepared.prompt;
+        assert!(
+            prompt.contains("result: true"),
+            "body `{{{{file_exists(spec)}}}}` must agree with schema validation (both true) via \
+             the shared fallback: {prompt:?}",
         );
     }
 }

@@ -198,8 +198,9 @@ pub fn pre_validate_with_interactive_collection(
     set_overrides: Option<&serde_json::Value>,
     interactive: InteractiveSchemaOptions,
     term: &Terminal,
+    file_ref_fallback_dir: Option<&std::path::Path>,
 ) -> Result<PreValidatedSchema, CompositionError> {
-    let first = pre_validate_schema(source, set_overrides);
+    let first = pre_validate_schema(source, set_overrides, file_ref_fallback_dir);
     let Err(err) = first else {
         return first;
     };
@@ -228,7 +229,7 @@ pub fn pre_validate_with_interactive_collection(
         });
     }
 
-    if let Ok(Some(report)) = build_schema_status_report(source, set_overrides) {
+    if let Ok(Some(report)) = build_schema_status_report(source, set_overrides, file_ref_fallback_dir) {
         render_status_report(&report, term);
     }
 
@@ -241,7 +242,7 @@ pub fn pre_validate_with_interactive_collection(
     }
 
     let merged = merge_overrides(set_overrides, collected);
-    pre_validate_schema(source, Some(&serde_json::Value::Object(merged)))
+    pre_validate_schema(source, Some(&serde_json::Value::Object(merged)), file_ref_fallback_dir)
 }
 
 fn merge_overrides(
@@ -792,7 +793,7 @@ mod tests {
         assert!(!interactive.allowed());
 
         let term = Terminal::default();
-        let err = pre_validate_with_interactive_collection(&source, None, interactive, &term)
+        let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None)
             .unwrap_err();
         assert!(
             matches!(err, CompositionError::MissingProperties { .. }),
@@ -820,7 +821,7 @@ mod tests {
         assert!(!interactive.allowed());
 
         let term = Terminal::default();
-        let err = pre_validate_with_interactive_collection(&source, None, interactive, &term)
+        let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None)
             .unwrap_err();
         assert!(
             matches!(err, CompositionError::MissingProperties { .. }),
@@ -848,6 +849,7 @@ mod tests {
             Some(&overrides),
             InteractiveSchemaOptions::default(),
             &term,
+            None,
         )
         .unwrap();
         let fm = pre.set_overrides.unwrap();
@@ -880,7 +882,7 @@ mod tests {
         assert!(interactive.allowed());
 
         let term = Terminal::default();
-        let err = pre_validate_with_interactive_collection(&source, None, interactive, &term)
+        let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None)
             .unwrap_err();
         assert!(
             matches!(err, CompositionError::UnsupportedInteractiveSchema { .. }),

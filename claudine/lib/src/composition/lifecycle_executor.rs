@@ -361,14 +361,25 @@ impl StackExecutionContext<'_> {
         lifecycle_injected_globals(self.err, self.timing, self.current)
     }
 
-    /// Resolution context for read-side expression functions, rooted at the
-    /// prompt's parent directory (or the current directory when unknown).
+    /// Resolution context for read-side expression functions.
+    ///
+    /// Resolution order: `base_dir` (the prompt document's parent, or the
+    /// current directory when unknown) is the primary anchor for
+    /// document-authored references; the captured launch area
+    /// (`ctx_base_dir`) is the explicit fallback for caller-supplied file
+    /// references so resolution is independent of the mutated ambient
+    /// process CWD after the wrapper's `chdir`.
     fn resolution_context(&self) -> ResolutionContext {
         let dir = self
             .base_dir
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
-        ResolutionContext::new(dir)
+        match self.ctx_base_dir {
+            Some(launch_area) => {
+                ResolutionContext::new(dir).with_file_ref_fallback_dir(launch_area.to_path_buf())
+            }
+            None => ResolutionContext::new(dir),
+        }
     }
 
     /// The early-binding `ctx.*`/`env.*` snapshot for this event.
@@ -3084,5 +3095,338 @@ mod tests {
             prompt_repo_root.to_string_lossy(),
             "lifecycle ctx.* must not resolve against the prompt's own repo"
         );
+    }
+
+    /// A caller-supplied file reference resolves against the captured launch
+    /// area (`ctx_base_dir`) after the ambient process CWD has moved away from
+    /// it — the core post-`chdir` independence contract.
+    ///
+    /// Layout: the `spec` file lives ONLY under the launch area; `base_dir`
+    /// (the prompt's parent) does not contain it, and the ambient CWD is an
+    /// unrelated directory. Pre-fix, `file_exists(spec)` returned `false`
+    /// because resolution fell back to the mutated ambient CWD instead of the
+    /// captured launch area.
+    #[serial_test::serial]
+    #[test]
+    fn file_exists_resolves_against_launch_area_after_chdir() {
+        let launch_dir = tempfile::tempdir().unwrap();
+        let prompt_dir = tempfile::tempdir().unwrap();
+        let unrelated_dir = tempfile::tempdir().unwrap();
+
+        // The caller-supplied file lives only under the launch area.
+        let spec_path = launch_dir.path().join("spec.md");
+        std::fs::write(&spec_path, "# spec\n").unwrap();
+
+        // Move the ambient CWD to an unrelated dir (mirrors the wrapper's
+        // `switch_process_cwd` to the repo root before lifecycle events fire).
+        let original_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(unrelated_dir.path()).unwrap();
+
+        let (_engine_dir, engine) = temp_engine();
+        let shell = MockShell::new(0);
+        let recorder = Recorder::default();
+        let harness = Harness::default();
+        let fm = map(json!({ "spec": "spec.md" }));
+        let source_path = prompt_dir.path().join("prompt.md");
+
+        let context = StackExecutionContext {
+            signal: LifecycleSignal::Initialize,
+            frontmatter: &fm,
+            live_frontmatter: None,
+            err: None,
+            timing: None,
+            current: None,
+            // The prompt's parent — does NOT contain spec.md.
+            base_dir: Some(prompt_dir.path()),
+            // The launch area — the one anchor spec.md is relative to.
+            ctx_base_dir: Some(launch_dir.path()),
+            prepared_context: None,
+            effect_engine: &engine,
+            shell_runner: &shell,
+            emitter: &recorder,
+            term: &harness.term,
+            source_path: &source_path,
+            repo_root: None,
+            messaging: &harness.messaging,
+            settings: &harness.settings,
+        };
+
+        let resolved = context
+            .resolve_string_value("{{file_exists(spec)}}", &fm)
+            .expect("file_exists(spec) must resolve");
+        assert_eq!(
+            resolved,
+            Value::Bool(true),
+            "file_exists must hit the launch-area fallback, not the ambient CWD"
+        );
+
+        // Restore the ambient CWD so other tests are unaffected.
+        std::env::set_current_dir(&original_cwd).unwrap();
+    }
+
+    /// Prepare-time and event-time resolution agree for the same caller-supplied
+    /// path: both anchor on the launch area. This asserts the event-time
+    /// `StackExecutionContext` path (`file_exists` → `true`) matches what the
+    /// `ResolutionContext` builder alone produces — the two paths share one
+    /// explicit anchor instead of diverging on ambient-CWD timing.
+    #[serial_test::serial]
+    #[test]
+    fn prepare_time_and_event_time_agree_on_file_reference() {
+        let launch_dir = tempfile::tempdir().unwrap();
+        let prompt_dir = tempfile::tempdir().unwrap();
+
+        let spec_path = launch_dir.path().join("plan.md");
+        std::fs::write(&spec_path, "# plan\n").unwrap();
+
+        let original_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(prompt_dir.path()).unwrap();
+
+        // Prepare-time resolution context (mirrors what ComposeOptions builds):
+        let prepare_ctx = ResolutionContext::new(prompt_dir.path().to_path_buf())
+            .with_file_ref_fallback_dir(launch_dir.path().to_path_buf());
+
+        // Event-time resolution context (built by StackExecutionContext):
+        let (_engine_dir, engine) = temp_engine();
+        let shell = MockShell::new(0);
+        let recorder = Recorder::default();
+        let harness = Harness::default();
+        let fm = map(json!({ "spec": "plan.md" }));
+        let source_path = prompt_dir.path().join("prompt.md");
+        let context = StackExecutionContext {
+            signal: LifecycleSignal::Initialize,
+            frontmatter: &fm,
+            live_frontmatter: None,
+            err: None,
+            timing: None,
+            current: None,
+            base_dir: Some(prompt_dir.path()),
+            ctx_base_dir: Some(launch_dir.path()),
+            prepared_context: None,
+            effect_engine: &engine,
+            shell_runner: &shell,
+            emitter: &recorder,
+            term: &harness.term,
+            source_path: &source_path,
+            repo_root: None,
+            messaging: &harness.messaging,
+            settings: &harness.settings,
+        };
+        let event_ctx = context.resolution_context();
+
+        // Both contexts carry the same fallback directory.
+        assert_eq!(
+            prepare_ctx.file_ref_fallback_dir, event_ctx.file_ref_fallback_dir,
+            "prepare-time and event-time must share the launch-area fallback"
+        );
+        // Both base dirs point at the prompt's parent.
+        assert_eq!(prepare_ctx.base_dir, event_ctx.base_dir);
+
+        // The event-time file_exists agrees with the prepare-time anchor.
+        let resolved = context
+            .resolve_string_value("{{file_exists(spec)}}", &fm)
+            .expect("file_exists(spec) resolves");
+        assert_eq!(resolved, Value::Bool(true));
+
+        std::env::set_current_dir(&original_cwd).unwrap();
+    }
+
+    /// `frontmatter(spec, review_iterations)` resolves against the launch-area
+    /// fallback — the mechanism behind `iteration` derivation in prompts like
+    /// `review-feature.md`. Pre-fix this returned empty/null because the spec
+    /// file resolved as missing, leaving `iteration` stuck at `1`.
+    #[serial_test::serial]
+    #[test]
+    fn frontmatter_reads_resolve_against_launch_area_fallback() {
+        let launch_dir = tempfile::tempdir().unwrap();
+        let prompt_dir = tempfile::tempdir().unwrap();
+
+        // The spec file carries a `review_iterations` frontmatter property.
+        let spec_path = launch_dir.path().join("spec.md");
+        std::fs::write(
+            &spec_path,
+            "---\nreview_iterations: 3\n---\n# spec\n",
+        )
+        .unwrap();
+
+        let original_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(prompt_dir.path()).unwrap();
+
+        let (_engine_dir, engine) = temp_engine();
+        let shell = MockShell::new(0);
+        let recorder = Recorder::default();
+        let harness = Harness::default();
+        let fm = map(json!({ "spec": "spec.md" }));
+        let source_path = prompt_dir.path().join("prompt.md");
+
+        let context = StackExecutionContext {
+            signal: LifecycleSignal::Initialize,
+            frontmatter: &fm,
+            live_frontmatter: None,
+            err: None,
+            timing: None,
+            current: None,
+            base_dir: Some(prompt_dir.path()),
+            ctx_base_dir: Some(launch_dir.path()),
+            prepared_context: None,
+            effect_engine: &engine,
+            shell_runner: &shell,
+            emitter: &recorder,
+            term: &harness.term,
+            source_path: &source_path,
+            repo_root: None,
+            messaging: &harness.messaging,
+            settings: &harness.settings,
+        };
+
+        let resolved = context
+            .resolve_string_value("{{frontmatter(spec, 'review_iterations')}}", &fm)
+            .expect("frontmatter(spec, 'review_iterations') resolves");
+        assert_eq!(
+            resolved,
+            Value::Number(3.into()),
+            "frontmatter() must read the spec via the launch-area fallback"
+        );
+
+        std::env::set_current_dir(&original_cwd).unwrap();
+    }
+
+    // ── Phase 4 regression suite ────────────────────────────────────────────
+    //
+    // These tests close the remaining verification goals from the spec with
+    // explicit regression coverage at the claudine lifecycle layer.
+
+    /// A caller-supplied file that exists ONLY under the launch area (not
+    /// under the prompt dir, not under the post-`chdir` ambient CWD which
+    /// represents the repo root) resolves through the fallback — proving the
+    /// new fallback is the source of the hit (verification goal #8).
+    ///
+    /// Three distinct anchors are materialized so the test cannot pass by
+    /// accident: `prompt_dir` (base_dir, empty), `repo_root_dir` (the
+    /// post-`chdir` ambient CWD, empty), and `launch_dir` (ctx_base_dir /
+    /// fallback, holds the only copy).
+    #[serial_test::serial]
+    #[test]
+    fn regression_path_only_under_launch_area_resolves() {
+        let launch_dir = tempfile::tempdir().unwrap();
+        let prompt_dir = tempfile::tempdir().unwrap();
+        let repo_root_dir = tempfile::tempdir().unwrap();
+
+        // The caller-supplied file lives ONLY under the launch area.
+        std::fs::write(launch_dir.path().join("unique.md"), "# unique\n").unwrap();
+        // Defensive sanity: neither other anchor holds the file.
+        assert!(!prompt_dir.path().join("unique.md").exists());
+        assert!(!repo_root_dir.path().join("unique.md").exists());
+
+        // The wrapper's `switch_process_cwd` repositions the process to the
+        // repo root before lifecycle events fire.
+        let original_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(repo_root_dir.path()).unwrap();
+
+        let (_engine_dir, engine) = temp_engine();
+        let shell = MockShell::new(0);
+        let recorder = Recorder::default();
+        let harness = Harness::default();
+        let fm = map(json!({ "spec": "unique.md" }));
+        let source_path = prompt_dir.path().join("prompt.md");
+
+        let context = StackExecutionContext {
+            signal: LifecycleSignal::Initialize,
+            frontmatter: &fm,
+            live_frontmatter: None,
+            err: None,
+            timing: None,
+            current: None,
+            base_dir: Some(prompt_dir.path()),
+            ctx_base_dir: Some(launch_dir.path()),
+            prepared_context: None,
+            effect_engine: &engine,
+            shell_runner: &shell,
+            emitter: &recorder,
+            term: &harness.term,
+            source_path: &source_path,
+            repo_root: None,
+            messaging: &harness.messaging,
+            settings: &harness.settings,
+        };
+
+        let resolved = context
+            .resolve_string_value("{{file_exists(spec)}}", &fm)
+            .expect("file_exists(spec) must resolve");
+        assert_eq!(
+            resolved,
+            Value::Bool(true),
+            "the launch-area fallback is the only anchor that holds unique.md; resolution must \
+             prove the fallback (not prompt dir, not repo root) was consulted",
+        );
+
+        std::env::set_current_dir(&original_cwd).unwrap();
+    }
+
+    /// An intentionally conflicting filename present in BOTH the prompt dir
+    /// and the launch area resolves to the prompt-dir copy — the
+    /// document-first contract holds end-to-end at the lifecycle layer
+    /// (verification goal #9, re-affirmed).
+    ///
+    /// Each copy carries a distinct `title` frontmatter property so the
+    /// `frontmatter(spec, 'title')` value identifies which file won.
+    #[serial_test::serial]
+    #[test]
+    fn regression_conflicting_filename_prompt_dir_wins() {
+        let launch_dir = tempfile::tempdir().unwrap();
+        let prompt_dir = tempfile::tempdir().unwrap();
+        let repo_root_dir = tempfile::tempdir().unwrap();
+
+        // Both anchors hold a same-named spec.md with distinct titles.
+        std::fs::write(
+            prompt_dir.path().join("spec.md"),
+            "---\ntitle: from-prompt-dir\n---\n# prompt\n",
+        )
+        .unwrap();
+        std::fs::write(
+            launch_dir.path().join("spec.md"),
+            "---\ntitle: from-launch-area\n---\n# launch\n",
+        )
+        .unwrap();
+
+        let original_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(repo_root_dir.path()).unwrap();
+
+        let (_engine_dir, engine) = temp_engine();
+        let shell = MockShell::new(0);
+        let recorder = Recorder::default();
+        let harness = Harness::default();
+        let fm = map(json!({ "spec": "spec.md" }));
+        let source_path = prompt_dir.path().join("prompt.md");
+
+        let context = StackExecutionContext {
+            signal: LifecycleSignal::Initialize,
+            frontmatter: &fm,
+            live_frontmatter: None,
+            err: None,
+            timing: None,
+            current: None,
+            base_dir: Some(prompt_dir.path()),
+            ctx_base_dir: Some(launch_dir.path()),
+            prepared_context: None,
+            effect_engine: &engine,
+            shell_runner: &shell,
+            emitter: &recorder,
+            term: &harness.term,
+            source_path: &source_path,
+            repo_root: None,
+            messaging: &harness.messaging,
+            settings: &harness.settings,
+        };
+
+        let resolved = context
+            .resolve_string_value("{{frontmatter(spec, 'title')}}", &fm)
+            .expect("frontmatter(spec, 'title') must resolve");
+        assert_eq!(
+            resolved,
+            Value::String("from-prompt-dir".to_string()),
+            "document-first contract: the prompt-dir copy must win over the launch-area fallback",
+        );
+
+        std::env::set_current_dir(&original_cwd).unwrap();
     }
 }

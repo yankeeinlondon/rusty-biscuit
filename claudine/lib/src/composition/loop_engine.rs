@@ -434,6 +434,7 @@ pub fn execute_loop_with_config(
             max_iterations,
             &last_output,
             last_exit_code,
+            None,
         )?;
         let ambient = LoopAmbient::new(
             iteration,
@@ -442,7 +443,9 @@ pub fn execute_loop_with_config(
             last_output.clone(),
             last_exit_code,
         );
-        let lookup = LoopExpressionLookup::new(&frontmatter, &ambient).with_base_dir(base_dir);
+        let lookup = LoopExpressionLookup::new(&frontmatter, &ambient)
+            .with_base_dir(base_dir)
+            .with_file_ref_fallback_dir(None);
         if !evaluate_condition(&config.condition, &lookup)? {
             return Ok(LoopExecutionResult::success(
                 frontmatter,
@@ -541,8 +544,9 @@ pub fn execute_loop_with_config(
             last_output.clone(),
             last_exit_code,
         );
-        let post_lookup =
-            LoopExpressionLookup::new(&frontmatter, &post_ambient).with_base_dir(base_dir);
+        let post_lookup = LoopExpressionLookup::new(&frontmatter, &post_ambient)
+            .with_base_dir(base_dir)
+            .with_file_ref_fallback_dir(None);
         match apply_actions(config, &frontmatter, iteration, Some(&post_lookup)) {
             Ok(next_frontmatter) => frontmatter = next_frontmatter,
             Err(error) => {
@@ -566,6 +570,7 @@ pub fn execute_loop_with_config(
                 &last_output,
                 last_exit_code,
                 base_dir,
+                None,
             )?
         {
             return Ok(LoopExecutionResult::failure(
@@ -815,7 +820,8 @@ where
             );
             let pre_mutation_lookup =
                 LoopExpressionLookup::new(&frontmatter, &pre_mutation_ambient)
-                    .with_base_dir(base_dir);
+                    .with_base_dir(base_dir)
+                    .with_file_ref_fallback_dir(lifecycle_ctx.launch_area);
             !evaluate_condition(&config.condition, &pre_mutation_lookup)?
         };
         let ambient = LoopAmbient::new(
@@ -971,6 +977,7 @@ where
                 &last_output,
                 last_exit_code,
                 base_dir,
+                lifecycle_ctx.launch_area,
             )?
         {
             return Ok(LoopExecutionResult::failure(
@@ -1137,7 +1144,9 @@ fn run_loop_gate(
         ));
     }
 
-    let lookup = LoopExpressionLookup::new(frontmatter, ambient).with_base_dir(base_dir);
+    let lookup = LoopExpressionLookup::new(frontmatter, ambient)
+        .with_base_dir(base_dir)
+        .with_file_ref_fallback_dir(lifecycle_ctx.launch_area);
     if !evaluate_condition(&config.condition, &lookup)? {
         return Ok(LoopGateOutcome::Exit);
     }
@@ -1323,6 +1332,7 @@ fn apply_actions(
     Ok(stage.commit_map())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compute_is_last(
     prompt_path: &Path,
     config: &LoopConfig,
@@ -1331,6 +1341,7 @@ fn compute_is_last(
     max_iterations: usize,
     last_output: &str,
     last_exit_code: i32,
+    file_ref_fallback_dir: Option<&Path>,
 ) -> Result<bool, CompositionError> {
     if iteration == max_iterations {
         return Ok(true);
@@ -1349,8 +1360,9 @@ fn compute_is_last(
         last_output.to_string(),
         last_exit_code,
     );
-    let speculative_lookup =
-        LoopExpressionLookup::new(frontmatter, &speculative_ambient).with_base_dir(base_dir);
+    let speculative_lookup = LoopExpressionLookup::new(frontmatter, &speculative_ambient)
+        .with_base_dir(base_dir)
+        .with_file_ref_fallback_dir(file_ref_fallback_dir);
     let Ok(next_frontmatter) =
         apply_actions(config, frontmatter, iteration, Some(&speculative_lookup))
     else {
@@ -1363,7 +1375,9 @@ fn compute_is_last(
         last_output,
         last_exit_code,
     );
-    let lookup = LoopExpressionLookup::new(&next_frontmatter, &next_ambient).with_base_dir(base_dir);
+    let lookup = LoopExpressionLookup::new(&next_frontmatter, &next_ambient)
+        .with_base_dir(base_dir)
+        .with_file_ref_fallback_dir(file_ref_fallback_dir);
     evaluate_condition(&config.condition, &lookup)
         .map(|will_continue| !will_continue)
         .map_err(|error| match error {
@@ -1382,9 +1396,12 @@ fn should_continue_after_cap(
     last_output: &str,
     last_exit_code: i32,
     base_dir: Option<&Path>,
+    file_ref_fallback_dir: Option<&Path>,
 ) -> Result<bool, CompositionError> {
     let ambient = LoopAmbient::new(next_iteration, false, true, last_output, last_exit_code);
-    let lookup = LoopExpressionLookup::new(frontmatter, &ambient).with_base_dir(base_dir);
+    let lookup = LoopExpressionLookup::new(frontmatter, &ambient)
+        .with_base_dir(base_dir)
+        .with_file_ref_fallback_dir(file_ref_fallback_dir);
     evaluate_condition(&config.condition, &lookup)
 }
 

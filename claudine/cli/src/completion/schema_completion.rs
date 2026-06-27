@@ -48,6 +48,8 @@ pub(crate) fn load_effective_schema(file_arg: &str, ctx: &ScopeContext) -> Optio
     let path = resolve_prompt_path(file_arg, ctx)?;
     let text = std::fs::read_to_string(&path).ok()?;
     let markdown: Markdown = Markdown::from(text).with_source(ComposeSource::infer_from_path(&path));
+    // Completions lack a launch-area context, so file-typed values fall back
+    // to ambient CWD here (consistent with pre-`chdir` timing).
     DarkmatterSchemas::new().effective_for(&markdown).ok()?
 }
 

@@ -57,6 +57,7 @@ pub(super) fn run_phase_1c_with_schema(
     user_set_overrides: &Option<serde_json::Value>,
     source_repo_root: Option<&std::path::Path>,
     child_cwd: &std::path::Path,
+    launch_area: Option<&std::path::Path>,
     shared: &SharedComposeArgs,
     effective_fail_fast: bool,
     inline_mode: bool,
@@ -77,6 +78,7 @@ pub(super) fn run_phase_1c_with_schema(
             &overrides,
             source_repo_root,
             child_cwd,
+            launch_area,
             shared,
             effective_fail_fast,
             inline_mode,
@@ -126,7 +128,7 @@ pub(super) fn run_phase_1c_with_schema(
                     }
                     .into());
                 }
-                let collected = match collect_sequence_missing_values(&contexts, silent) {
+                let collected = match collect_sequence_missing_values(&contexts, silent, launch_area) {
                     Ok(values) => values,
                     Err(_) => {
                         // Ctrl-C / Esc / unsupported shape — surface the
@@ -192,6 +194,7 @@ fn run_phase_1c_attempt(
     user_set_overrides: &Option<serde_json::Value>,
     source_repo_root: Option<&std::path::Path>,
     child_cwd: &std::path::Path,
+    launch_area: Option<&std::path::Path>,
     shared: &SharedComposeArgs,
     effective_fail_fast: bool,
     inline_mode: bool,
@@ -237,7 +240,7 @@ fn run_phase_1c_attempt(
         // surface a raw `SchemaValidationFailed` here, because that
         // would short-circuit aggregation across remaining steps.
         let (step_source, step_overrides) =
-            match composition::pre_validate_schema(source, Some(&step_set_overrides)) {
+            match composition::pre_validate_schema(source, Some(&step_set_overrides), launch_area) {
                 Ok(pre) => {
                     emit_dropped_optional_warnings(&pre.dropped_optionals);
                     (
@@ -305,6 +308,7 @@ fn run_phase_1c_attempt(
             // Sequence prep has no launch-area snapshot threaded here; fall back
             // to capture-at-prepare (the lib default).
             prepared_context: None,
+            file_ref_fallback_dir: launch_area.map(std::path::Path::to_path_buf),
         };
 
         // Inline steps prepare via `prepare_inline_with_schema` so the
@@ -373,6 +377,7 @@ fn run_phase_1c_attempt(
 fn collect_sequence_missing_values(
     contexts: &[StepMissingContext],
     silent: bool,
+    launch_area: Option<&std::path::Path>,
 ) -> std::io::Result<serde_json::Map<String, serde_json::Value>> {
     if !silent {
         let term = log::terminal();
@@ -389,6 +394,7 @@ fn collect_sequence_missing_values(
                 && let Ok(Some(report)) = composition::build_schema_status_report(
                     &source,
                     ctx.effective_overrides.as_ref(),
+                    launch_area,
                 )
             {
                 let status = Status::from_prose(format!(

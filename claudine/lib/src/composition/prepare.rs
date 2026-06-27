@@ -86,6 +86,17 @@ pub struct PrepareOptions {
     /// still applied to it. `None` (the default) preserves the
     /// capture-at-prepare behavior for library-only callers and tests.
     pub prepared_context: Option<ComposeContext>,
+    /// Explicit fallback directory for caller-supplied file references.
+    ///
+    /// When `Some`, body interpolation and schema validation resolve
+    /// caller-supplied paths (e.g. a CLI-supplied `spec`) against this
+    /// directory after the document dir misses, so prepare-time resolution
+    /// is independent of the ambient process CWD and agrees with event-time
+    /// resolution. CLI callers populate this from
+    /// `CompositionPrepContext::launch_workspace.launch_cwd`. `None` (the
+    /// default) preserves the legacy ambient-CWD behavior for library-only
+    /// callers and tests.
+    pub file_ref_fallback_dir: Option<PathBuf>,
 }
 
 /// Walk up from a file path to find the nearest `.git` directory.
@@ -167,6 +178,9 @@ pub fn prepare_direct(
     }
     if let Some(approved) = options.pre_approved_commands {
         compose_opts = compose_opts.with_pre_approved_commands(approved);
+    }
+    if let Some(fallback) = options.file_ref_fallback_dir.clone() {
+        compose_opts = compose_opts.with_file_ref_fallback_dir(fallback);
     }
     let (composed, report) = source
         .markdown
@@ -330,6 +344,9 @@ pub fn prepare_inline(
     }
     if let Some(approved) = options.pre_approved_commands {
         compose_opts = compose_opts.with_pre_approved_commands(approved);
+    }
+    if let Some(fallback) = options.file_ref_fallback_dir.clone() {
+        compose_opts = compose_opts.with_file_ref_fallback_dir(fallback);
     }
     let (composed, report) = temp_md
         .compose_with(compose_opts)

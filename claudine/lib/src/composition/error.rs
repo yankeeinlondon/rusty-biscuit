@@ -3098,6 +3098,7 @@ mod tests {
             source_repo_root: None,
             shell_working_directory: None,
             prepared_context: None,
+            file_ref_fallback_dir: None,
         };
 
         let err = prepare_direct(&source, options).unwrap_err();

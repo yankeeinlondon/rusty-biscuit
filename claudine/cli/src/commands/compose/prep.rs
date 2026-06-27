@@ -139,6 +139,12 @@ pub(crate) fn run_composition_inner(
     // and missing required values (non-interactive) surface as typed
     // errors here, never as Darkmatter raw errors.
     let schema_t = std::time::Instant::now();
+    // Pre-validation runs BEFORE the wrapper's `switch_process_cwd`, so the
+    // ambient CWD is still the launch area. Capture it explicitly as the
+    // `file`-typed property fallback anchor so caller-supplied area-relative
+    // paths resolve here exactly as they will at prepare time and event time,
+    // rather than depending on the soon-to-be-mutated process CWD.
+    let launch_area_fallback = std::env::current_dir().ok();
     let (source, set_overrides) = {
         let interactive_opts = resolve_interactive_options(shared.silent);
         let term = crate::log::terminal();
@@ -147,6 +153,7 @@ pub(crate) fn run_composition_inner(
             set_overrides.as_ref(),
             interactive_opts,
             &term,
+            launch_area_fallback.as_deref(),
         )
         .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
         emit_dropped_optional_warnings(&pre.dropped_optionals);
@@ -254,7 +261,13 @@ pub(crate) fn run_composition_inner(
             ctx.env_mut().insert(key.clone(), value.clone());
         }
         let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
-            .with_source_file(&source.resolved_path);
+            .with_source_file(&source.resolved_path)
+            // Anchor `file`-typed schema validation on the launch area so a
+            // caller-supplied area-relative path resolves here document-first
+            // then launch-area — exactly as the main prepare pass and the
+            // lifecycle events do. Without it the preflight's built-in schema
+            // validation would fall back to the (already-mutated) process CWD.
+            .with_file_ref_fallback_dir(prep_context.launch_workspace.launch_cwd.clone());
         if let Some(ref overrides) = set_overrides {
             opts = opts.with_set_overrides(overrides.clone());
         }
@@ -690,6 +703,7 @@ fn execute_loop_or_single(
         source_repo_root: prep_context.source_repo_root.clone(),
         shell_working_directory: Some(prep_context.launch_workspace.child_cwd.clone()),
         prepared_context: Some(prepared_context.clone()),
+        file_ref_fallback_dir: Some(prep_context.launch_workspace.launch_cwd.clone()),
     };
 
     if !shared.dry_run {
@@ -754,6 +768,7 @@ fn execute_loop_or_single(
                     prep_context.launch_workspace.child_cwd.clone(),
                 ),
                 prepared_context: Some(prepared_context.clone()),
+                file_ref_fallback_dir: Some(prep_context.launch_workspace.launch_cwd.clone()),
             },
         )
         .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?
