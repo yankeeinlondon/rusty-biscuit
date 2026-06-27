@@ -9,6 +9,8 @@
 //! overwrite it — overwriting is the latent clobber this module exists to remove.
 //! Every runtime write site routes through [`merge_overlay`].
 
+use std::ffi::OsStr;
+
 use serde_json::{Map, Value};
 
 use crate::error::{ClaudineError, Result};
@@ -56,20 +58,34 @@ pub fn yolo_permission_block() -> Value {
 /// Merge `overlay` into the current `OPENCODE_CONFIG_CONTENT` value, returning
 /// the compact JSON string to write back.
 ///
-/// `current` is the existing env value (`None` or absent starts from `{}`),
-/// which may carry a user-supplied config. The result preserves every unrelated
-/// key already present.
+/// `current` is the raw existing env value as an [`OsStr`] (`None` or absent
+/// starts from `{}`), which may carry a user-supplied config. Taking the raw
+/// `OsStr` rather than a pre-decoded `&str` keeps the UTF-8 validity decision in
+/// this one place, so all call sites reject a present-but-non-UTF-8 value
+/// identically and cannot regress into silently replacing it. The result
+/// preserves every unrelated key already present.
 ///
 /// ## Errors
 ///
-/// Returns [`ClaudineError::ConfigValidation`] when `current` is present but does
-/// not parse as a JSON **object** (parse failure or a non-object JSON value such
-/// as `"42"` or `[1,2]`). The message names `OPENCODE_CONFIG_CONTENT` but is
-/// **redacted** — it never echoes the raw value, which may contain secrets.
-pub fn merge_overlay(current: Option<&str>, overlay: Value) -> Result<String> {
+/// Returns [`ClaudineError::ConfigValidation`] when `current` is present but is
+/// either not valid UTF-8, does not parse as JSON, or parses to a non-object
+/// JSON value (such as `"42"` or `[1,2]`). Every message names
+/// `OPENCODE_CONFIG_CONTENT` but is **redacted** — it never echoes the raw value
+/// (or its bytes), which may contain secrets.
+pub fn merge_overlay(current: Option<&OsStr>, overlay: Value) -> Result<String> {
     let mut base = match current {
         None => Value::Object(Map::new()),
-        Some(raw) => {
+        Some(os) => {
+            // A non-UTF-8 value is present-but-undecodable, not absent. Rejecting
+            // it here (rather than treating `to_str() == None` as "start fresh")
+            // is what stops the user's existing config from being silently
+            // clobbered. UTF-8 is only invalid on Unix-like targets; Windows env
+            // values are Unicode.
+            let raw = os.to_str().ok_or_else(|| {
+                ClaudineError::ConfigValidation(
+                    "existing OPENCODE_CONFIG_CONTENT is not valid UTF-8".to_string(),
+                )
+            })?;
             let parsed: Value = serde_json::from_str(raw).map_err(|_| {
                 ClaudineError::ConfigValidation(
                     "existing OPENCODE_CONFIG_CONTENT is not valid JSON".to_string(),
@@ -132,7 +148,8 @@ mod tests {
     #[test]
     fn merge_overlay_preserves_unrelated_keys() {
         let current = json!({ "instructions": ["x"], "theme": "dark" }).to_string();
-        let result = merge_overlay(Some(&current), json!({ "mcp": { "srv": {} } })).unwrap();
+        let result =
+            merge_overlay(Some(OsStr::new(&current)), json!({ "mcp": { "srv": {} } })).unwrap();
         let parsed: Value = serde_json::from_str(&result).unwrap();
         assert_eq!(
             parsed,
@@ -143,7 +160,7 @@ mod tests {
     #[test]
     fn merge_overlay_rejects_malformed_json_with_redacted_message() {
         let raw = "{not valid json secret=hunter2";
-        let err = merge_overlay(Some(raw), yolo_permission_block()).unwrap_err();
+        let err = merge_overlay(Some(OsStr::new(raw)), yolo_permission_block()).unwrap_err();
         let message = err.to_string();
         assert!(message.contains("OPENCODE_CONFIG_CONTENT"));
         assert!(!message.contains("hunter2"));
@@ -153,9 +170,28 @@ mod tests {
     #[test]
     fn merge_overlay_rejects_non_object_json() {
         for raw in ["42", "[1,2]", "\"a string\""] {
-            let err = merge_overlay(Some(raw), yolo_permission_block()).unwrap_err();
+            let err = merge_overlay(Some(OsStr::new(raw)), yolo_permission_block()).unwrap_err();
             assert!(err.to_string().contains("OPENCODE_CONFIG_CONTENT"));
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn merge_overlay_rejects_non_utf8_value_without_echoing_bytes() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        // 0x80 is an invalid UTF-8 continuation byte, so this OsString is present
+        // but undecodable. It must be rejected (not silently replaced from `{}`),
+        // and the message must name the var without echoing the raw bytes.
+        let invalid = OsString::from_vec(vec![0x66, 0x80]);
+        let err = merge_overlay(Some(invalid.as_os_str()), yolo_permission_block()).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("OPENCODE_CONFIG_CONTENT"));
+        assert!(message.contains("UTF-8"));
+        // The raw bytes (including the invalid 0x80) must never be echoed.
+        assert!(!message.contains('\u{80}'));
+        assert!(!message.as_bytes().contains(&0x80));
     }
 
     #[test]

@@ -118,7 +118,8 @@ pub(crate) fn resolve_opencode_model(
 /// ## Errors
 ///
 /// Propagates [`claudine::opencode_config::merge_overlay`] failure when the
-/// existing `OPENCODE_CONFIG_CONTENT` is present but not a JSON object.
+/// existing `OPENCODE_CONFIG_CONTENT` is present but not valid UTF-8 or not a
+/// JSON object.
 pub(crate) fn apply_opencode_yolo_config_overlay(
     provider: Provider,
     yolo_enabled: bool,
@@ -131,7 +132,7 @@ pub(crate) fn apply_opencode_yolo_config_overlay(
 
     const KEY: &str = "OPENCODE_CONFIG_CONTENT";
     let key = std::ffi::OsStr::new(KEY);
-    let current = env_plan.env.get(key).and_then(|os| os.to_str());
+    let current = env_plan.env.get(key).map(|v| v.as_os_str());
     let merged = claudine::opencode_config::merge_overlay(
         current,
         claudine::opencode_config::yolo_permission_block(),
