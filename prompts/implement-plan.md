@@ -4,24 +4,21 @@ $schema:
     total_phases: number(required)
     plan: file(required)
     spec: file
-    spec_file: file
 description: |-
     Provide either `plan` or `spec` filepath as a parameter and this
     prompt will detect the number of phases in the plan and then implement
     the project phase by phase.
 plan: "{{ file_exists(spec) ? dirname(spec) + '/plan.md'  : null }}"
-phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || 1 : -1 }}"
-dirname: "{{ file_exists(plan) ? dirname(plan) : dirname(spec) }}"
+phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || 1 : null }}"
 area: "{{ ctx.area }}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
 total_phases: "{{ file_exists(plan) ? frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') : 0 }}"
-spec_file: "{{ file_exists(spec) ? spec : file_exists(join(dirname, 'spec.md')) ? join(dirname, 'spec.md')  :  '' }}"
-initialize:
-    stack:
-        - when: "phase >= total_phases"
-          action: 
-              - warn: "There was an attempt to implement a phase **<yellow>{{phase}}</yellow>** of the plan which is **too large**. This plan only has **<yellow>{{total_phases}}</yellow>** total phases!"
-              - error: "invalid phase: {{phase}} is larger than {{total_phases}}"
+spec: "{{ file_exists(plan) ? file_exists(dirname(plan) + '/spec.md') ? dirname(plan) + '/spec.md'  :  null : null }}"
+# initialize:
+#     stack:
+#         - when: "phase >= total_phases"
+#           action: 
+#               - warn: "There was an attempt to implement a phase **<yellow>{{phase}}</yellow>** of the plan which is **too large**. This plan only has **<yellow>{{total_phases}}</yellow>** total phases!"
 start:
     message: "🎬  starting the implementation of phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{ctx.area}}, **agent:** {{ctx.agent}}/{{ctx.model}})"
 success: 
@@ -54,8 +51,8 @@ Your task is to implement phase {{phase}} of the plan found in '@{{area}}/{{plan
 > **NOTE:** for context you should read the lessons learned discovered in earlier stages of this plan. You will find these lessons learned in memory/{{memory}}.md. 
 ::end-block
 
-::block when="spec_file"
-> **NOTE:** this plan is based on the specification file: {{spec_file}}
+::block when="spec"
+> **NOTE:** this plan is based on the specification file: {{spec}}
 ::end-block
 
 You are done when:
