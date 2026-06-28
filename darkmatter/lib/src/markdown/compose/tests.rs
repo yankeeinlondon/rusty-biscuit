@@ -3462,6 +3462,75 @@ mod schema_validation_integration {
             "run 3 must compute and write a fresh entry under the new baseline, got {stats3:?}"
         );
     }
+
+    /// The launch-area anchor (`file_ref_fallback_dir`) changes read-side file
+    /// resolution, so two runs that differ only in their anchor must not share a
+    /// persistent cache entry.
+    ///
+    /// The body interpolates `{{ file_exists("anchored.md") }}`. The document
+    /// dir never holds `anchored.md`, so the outcome depends entirely on the
+    /// fallback dir: run 1's fallback has the file (resolves `true`), run 2's
+    /// fallback does not (`false`). If `options_hash` ignored
+    /// `file_ref_fallback_dir`, run 2 would reuse run 1's cached `true` —
+    /// returning a stale, wrong-launch-area result.
+    #[test]
+    fn cache_does_not_reuse_across_distinct_file_ref_fallback_dirs() {
+        use crate::markdown::compose::CacheAccessMode;
+
+        let dir = tempfile::tempdir().unwrap();
+        let cache_root = dir.path().join("cache");
+        let doc_dir = dir.path().join("doc");
+        std::fs::create_dir_all(&doc_dir).unwrap();
+        let root = doc_dir.join("root.md");
+        std::fs::write(&root, "anchored exists: {{ file_exists(\"anchored.md\") }}\n").unwrap();
+
+        // Run 1's launch area HAS anchored.md; run 2's does NOT.
+        let fallback_present = dir.path().join("launch-present");
+        let fallback_absent = dir.path().join("launch-absent");
+        std::fs::create_dir_all(&fallback_present).unwrap();
+        std::fs::create_dir_all(&fallback_absent).unwrap();
+        std::fs::write(fallback_present.join("anchored.md"), "# Anchored\n").unwrap();
+
+        let mk_options = |fallback: &std::path::Path| {
+            ComposeOptions::new()
+                .with_source_file(&root)
+                .with_file_ref_fallback_dir(fallback.to_path_buf())
+                .with_cache_access_mode(CacheAccessMode::ReadWrite)
+                .with_cache_root(&cache_root)
+                .with_cache_namespace("file_ref_fallback_cache_regression")
+                .with_fail_fast(true)
+        };
+
+        // ── Run 1: cold cache, fallback HAS anchored.md → true ─────
+        let md1 = Markdown::try_from(root.as_path()).unwrap();
+        let (composed1, report1) = md1
+            .compose_with(mk_options(&fallback_present))
+            .expect("run 1 (present fallback, cold cache) should succeed");
+        assert!(
+            composed1.content().contains("anchored exists: true"),
+            "run 1 must resolve file_exists as true from its launch area: {}",
+            composed1.content(),
+        );
+        let stats1 = report1
+            .cache_stats
+            .expect("expected cache stats with cache enabled");
+        assert_eq!(
+            stats1.persistent_hits, 0,
+            "run 1 should have a cold persistent cache, got {stats1:?}"
+        );
+
+        // ── Run 2: different launch area, fallback LACKS the file ──
+        let md2 = Markdown::try_from(root.as_path()).unwrap();
+        let (composed2, _report2) = md2
+            .compose_with(mk_options(&fallback_absent))
+            .expect("run 2 (absent fallback) should succeed");
+        assert!(
+            composed2.content().contains("anchored exists: false"),
+            "run 2 must reflect its OWN launch area (file absent) — options_hash \
+             must include file_ref_fallback_dir, not reuse run 1's cached output: {}",
+            composed2.content(),
+        );
+    }
 }
 
 mod remote_transclusion_tests {
