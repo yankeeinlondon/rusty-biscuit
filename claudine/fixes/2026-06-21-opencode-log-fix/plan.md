@@ -4,6 +4,28 @@ phases: 3
 created: 2026-06-24
 start_phase: 1
 yolo: "true"
+packages:
+    - claudine
+source_files_during_phase_1:
+    - claudine/lib/src/stream/logs/opencode/errors.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2: []
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3: []
+docs_updated_during_phase_3:
+    - claudine/fixes/2026-06-21-opencode-log-fix/plan.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_code:
+    - claudine/lib/src/stream/logs/opencode/errors.rs
+    - claudine/lib/src/stream/logs/opencode/reasoning.rs
+documentation:
+    - claudine/fixes/2026-06-21-opencode-log-fix/plan.md
+    - claudine/fixes/2026-06-21-opencode-log-fix/spec.md
 ---
 
 # Execution Plan — OpenCode 1.17.8 `stream error` Usage-Cap Detection Drift
@@ -48,24 +70,24 @@ Goal: a `message="stream error"` record with no `service=` tag and a flat
 changes in one file: (a) reach the failure classifier at all, and (b) read the
 relocated error payload once there.
 
-- [ ] **1.1 (§1) Route `message="stream error"` into `classify_llm_failure`.**
+- [x] **1.1 (§1) Route `message="stream error"` into `classify_llm_failure`.**
   In `errors.rs` `classify(...)` (~`:31`), the LLM-failure path must not be
   gated solely on the literal `service` tag. Confirm an `effective_service`
   fallback reuses `infer_service_from_message` when `service` is absent
   (~`:36`–`:51`), and that `classify_llm_failure` is consulted when the
   effective service is `llm`/`provider`.
-- [ ] **1.2 (§1) Add the `"stream error"` arm to `infer_service_from_message`.**
+- [x] **1.2 (§1) Add the `"stream error"` arm to `infer_service_from_message`.**
   In `errors.rs` (~`:523`), confirm a `"stream error"` arm returns `"llm"` when
   both `providerID` and `modelID` are present, mirroring the existing `"stream"`
   (call-start) arm (~`:538`). This is what lets the *failure* record reach the
   failure classifier; the happy-path call start must stay `LlmCall`.
-- [ ] **1.3 (§2) Accept the flat `error.error` payload in `error_context`.**
+- [x] **1.3 (§2) Accept the flat `error.error` payload in `error_context`.**
   In `errors.rs` `error_context(...)` (~`:308`–`:321`), confirm `error.error`
   is a recognized source alongside `error`/`err`, and that surrounding quotes
   (present on the new flat-string form) are stripped so callers see the bare
   value. This is the single chokepoint `classify_llm_failure` uses for
   `has_error_context` and `provider_error`.
-- [ ] **1.4 (§2) Confirm the cap needle and reset-at extraction still match.**
+- [x] **1.4 (§2) Confirm the cap needle and reset-at extraction still match.**
   The `has_cap` scan in `classify_llm_failure` (~`:342`–`:346`) already runs
   over `record.raw`, so `Usage limit reached` matches the new
   `… for 5 hour …` dialect (the `for N hour` qualifier does not defeat the
@@ -75,11 +97,11 @@ relocated error payload once there.
   back to raw) plus `provider_id`/`model_id` from the `providerID`/`modelID`
   tags. Resolution order must stay: cap-with-context wins over
   retries-exhausted (~`:351`).
-- [ ] **1.5 (Impl. Notes) Note the OpenCode 1.17.8 drift source.** Confirm a
+- [x] **1.5 (Impl. Notes) Note the OpenCode 1.17.8 drift source.** Confirm a
   code comment ties the routing change to OpenCode 1.17.8 and this fix
   directory (e.g. `errors.rs:37`–`:40` and the `infer_service_from_message`
   arm), so future drift is traceable.
-- [ ] **1.6 (Validation checkpoint — classification unit tests, Tests 1–3).**
+- [x] **1.6 (Validation checkpoint — classification unit tests, Tests 1–3).**
   In the `errors.rs` test module, confirm: (1) the captured new-shape line
   classifies as `ProviderLimit { kind: UsageCap }` with `reset_at ==
   2026-06-22 13:59:38Z`, `provider_id == "zai-coding-plan"`,
@@ -102,24 +124,24 @@ error, so this backstop only catches the residual unclassified case.
 > backstop is logic on the bridge and does not depend on the classification
 > result; only its *test for unrecognized vocabulary* is independent.
 
-- [ ] **2.1 (§3) Track consecutive stream errors with a step-advance reset.**
+- [x] **2.1 (§3) Track consecutive stream errors with a step-advance reset.**
   In `reasoning.rs`, confirm the bridge holds a `consecutive_stream_errors`
   counter (~`:218`–`:223`) that increments on each `message="stream error"`
   record with no intervening step advance, and resets to `0` on a genuine step
   transition in `on_step_loop` (~`:810`–`:812`). The reset is what stops a
   healthy retry storm from tripping the guard.
-- [ ] **2.2 (§3) Add the threshold constant and trigger.** Confirm
+- [x] **2.2 (§3) Add the threshold constant and trigger.** Confirm
   `MAX_CONSECUTIVE_STREAM_ERRORS` (~`:226`–`:230`, proposed `5`) is a named
   constant with a comment tying it to this fix, and that `handle_structured`
   (~`:317`–`:324`) trips `on_repeated_stream_error` once the counter crosses the
   threshold and early termination has not already fired.
-- [ ] **2.3 (§3) Emit a terminal error + early-termination on the backstop.**
+- [x] **2.3 (§3) Emit a terminal error + early-termination on the backstop.**
   Confirm `on_repeated_stream_error` (~`:953`–`:978`) emits a terminal
   `SemanticEvent::Error { terminal: true, kind: ApiRemote }` and fires
   `EarlyTermination::RepeatedStreamError { count }`, and that `is_stream_error`
   (~`:1000`–`:1003`) recognizes the keyword in both the trailing `message`
   field and the `message` tag.
-- [ ] **2.4 (Validation checkpoint — backstop unit test, Test 5).** In the
+- [x] **2.4 (Validation checkpoint — backstop unit test, Test 5).** In the
   `reasoning.rs` test module, confirm a synthetic *unrecognized* `stream error`
   vocabulary (no cap/429/auth needles) emits a terminal error and an
   `EarlyTermination::RepeatedStreamError` once the threshold is crossed, that
@@ -135,32 +157,32 @@ Goal: prove the classification drives the *existing* terminal early-termination
 path so the wrapper aborts on the first cap error instead of spinning on
 `Awaiting subagent`, then close out against every acceptance criterion.
 
-- [ ] **3.1 (Goal 2) Verify the bridge aborts on the first cap error.** Confirm
+- [x] **3.1 (Goal 2) Verify the bridge aborts on the first cap error.** Confirm
   `on_provider_limit` marks `UsageCap` (and `RetriesExhausted`) terminal
   (`reasoning.rs:435`–`:438`) and emits `SemanticEvent::Error { terminal: true,
   kind: ApiRemote }` plus `fire_early_termination(EarlyTermination::RateLimit)`
   (`reasoning.rs:481`–`487`), idempotent via `early_terminate_fired`. The terminal abort
   must fire even when stdout has already been seen (so the wrapper does not
   continue streaming after the cap).
-- [ ] **3.2 (Validation checkpoint — semantic bridge unit test, Test 4).** In
+- [x] **3.2 (Validation checkpoint — semantic bridge unit test, Test 4).** In
   the `reasoning.rs` test module, confirm ingesting the new `stream error` line
   emits a terminal `SemanticEvent::Error { terminal: true }` requesting early
   termination — mirroring the existing early-termination-for-`UsageCap` test
   shape, including the stdout-already-seen case. Run
   `cargo nextest run -p claudine stream::logs::opencode::reasoning`.
-- [ ] **3.3 (Manual validation) Replay the captured log line.** Record one
+- [x] **3.3 (Manual validation) Replay the captured log line.** Record one
   manual check against the captured session line (or a replay fixture derived
   from it) confirming the wrapper aborts on the first cap error instead of
   spinning on `Awaiting subagent` for ~42 minutes. Source line is in
   `~/.local/share/opencode/log/opencode.log`, session `ses_1127ec2f`.
-- [ ] **3.4 (Acceptance Criteria 1–5) Walk the criteria.** Confirm: (1) the
+- [x] **3.4 (Acceptance Criteria 1–5) Walk the criteria.** Confirm: (1) the
   captured line classifies as `ProviderLimit { kind: UsageCap }` with correct
   `reset_at`/`provider_id`/`model_id`; (2) that drives a terminal
   `SemanticEvent::Error` and first-error termination; (3) the `message="stream"`
   call-start path is unchanged; (4) legacy `service=llm error={JSON}` fixtures
   still classify as `UsageCap`; (5) repeated unrecognized terminal stream errors
   trip the bounded backstop rather than hanging.
-- [ ] **3.5 (Acceptance Criterion 6) Full test + lint sweep.** Run
+- [x] **3.5 (Acceptance Criterion 6) Full test + lint sweep.** Run
   `just test` in the `claudine/` package area (lib + contract + CLI) and
   `just lint`. Confirm `cargo fmt --check` (read-only) reports no drift
   introduced by this change. Per repo policy, never run write-mode `cargo fmt`.
