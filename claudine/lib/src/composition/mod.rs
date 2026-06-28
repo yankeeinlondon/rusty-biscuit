@@ -83,7 +83,9 @@ pub use prepare::{
     PrepareOptions, bind_agent_workspace, parse_interactive_hint,
     parse_selection_hints_from_frontmatter, prepare_direct, prepare_inline,
 };
-pub use resolve::{resolve_composition_source, validate_file_permissions};
+pub use resolve::{
+    enrich_composition_source_load_error, resolve_composition_source, validate_file_permissions,
+};
 pub use schema_validation::{
     InteractiveSchemaOptions, PreValidatedSchema, PropertyState, PropertyStatus,
     SchemaStatusReport, build_schema_status_report, drop_invalid_optionals,

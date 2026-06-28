@@ -55,6 +55,39 @@ pub(crate) fn url_fetch_block(source: &reqwest::Error) -> StatusBlock {
         .hint("Verify the URL is reachable and that any required auth headers are set.")
 }
 
+/// Build the [`StatusBlock`] for [`MarkdownError::FrontmatterFenceMismatch`].
+///
+/// Highlights the offending delimiter line in the source document so the user
+/// sees exactly which fence is malformed and where to apply the fix.
+pub(crate) fn frontmatter_fence_mismatch_block(
+    ctx: SourceContext,
+    found: &str,
+    line: usize,
+) -> StatusBlock {
+    let mut body = Vec::new();
+
+    if ctx.display != std::path::Path::new("unknown") {
+        body.push(ctx.linked_path_prose());
+    }
+
+    body.push(Prose::new(format!(
+        "<dim>Fence:</dim> <b>{}</b> on line {}",
+        Prose::escape_text(found),
+        line
+    )));
+
+    body.push(Prose::new("Frontmatter fence mismatch here:"));
+    body.push(frontmatter_excerpt_prose(&ctx, line, 1));
+
+    StatusBlock::new(StatusState::Error)
+        .error_header(ErrorHeader::new(
+            "MarkdownError",
+            "frontmatter fence mismatch",
+        ))
+        .body(body)
+        .hint("Use exactly three dashes (---) for Markdown frontmatter fences.")
+}
+
 /// Build the [`StatusBlock`] for [`MarkdownError::FrontmatterParse`].
 ///
 /// When `serde_yaml_ng` reports a [`Location`](serde_yaml_ng::Location), the
@@ -448,6 +481,49 @@ mod tests {
         );
         // The opening delimiter shows as the preceding context line.
         assert!(out.contains("1 │ ---"), "expected preceding line shown: {out}");
+    }
+
+    #[test]
+    fn frontmatter_fence_mismatch_block_names_fence_and_suggests_fix() {
+        let doc = "----\ntitle: Test\n----\n# Hello\n";
+        let ctx = SourceContext::new(PathBuf::from("/test.md"), PathBuf::from("test.md"), doc);
+        let out = render_block(&frontmatter_fence_mismatch_block(ctx, "----", 1));
+
+        assert!(out.contains("MarkdownError"), "missing header type: {out}");
+        assert!(
+            out.contains("frontmatter fence mismatch"),
+            "missing summary: {out}"
+        );
+        assert!(out.contains("----"), "missing offending fence: {out}");
+        assert!(
+            out.contains("Use exactly three dashes"),
+            "missing fix hint: {out}"
+        );
+    }
+
+    #[test]
+    fn frontmatter_fence_mismatch_block_includes_source_path() {
+        let doc = "----\ntitle: Test\n----\n# Hello\n";
+        let ctx = SourceContext::new(
+            PathBuf::from("/tmp/test.md"),
+            PathBuf::from("test.md"),
+            doc,
+        );
+        let out = render_block(&frontmatter_fence_mismatch_block(ctx, "----", 1));
+
+        assert!(out.contains("test.md"), "missing source path: {out}");
+    }
+
+    #[test]
+    fn frontmatter_fence_mismatch_block_highlights_document_line_one() {
+        let doc = "----\ntitle: Test\n----\n# Hello\n";
+        let ctx = SourceContext::new(PathBuf::from("/t.md"), PathBuf::from("t.md"), doc);
+        let out = render_block(&frontmatter_fence_mismatch_block(ctx, "----", 1));
+
+        assert!(
+            out.contains("> 1 │ ----"),
+            "expected marker on document line 1: {out}"
+        );
     }
 
     /// The excerpt body carries syntax-highlight SGR (best-effort, tolerant of

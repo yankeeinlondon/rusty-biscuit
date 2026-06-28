@@ -4,6 +4,43 @@ phases: 3
 created: 2026-06-26
 start_phase: 1
 yolo: "true"
+source_files_during_phase_1:
+  - darkmatter/lib/src/markdown/types.rs
+  - darkmatter/lib/src/markdown/frontmatter.rs
+  - darkmatter/lib/src/markdown/errors/blocks.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - claudine/lib/src/composition/resolve.rs
+  - claudine/lib/src/composition/prepare.rs
+  - claudine/lib/src/composition/frontmatter_excerpt.rs
+  - claudine/lib/src/composition/error.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - darkmatter/lib/src/markdown/mod.rs
+  - claudine/cli/src/output/error_walker.rs
+  - claudine/lib/src/composition/resolve.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/claudine/SKILL.md
+source_code:
+  - darkmatter/lib/src/markdown/types.rs
+  - darkmatter/lib/src/markdown/frontmatter.rs
+  - darkmatter/lib/src/markdown/errors/blocks.rs
+  - darkmatter/lib/src/markdown/mod.rs
+  - claudine/lib/src/composition/resolve.rs
+  - claudine/lib/src/composition/prepare.rs
+  - claudine/lib/src/composition/frontmatter_excerpt.rs
+  - claudine/lib/src/composition/error.rs
+  - claudine/cli/src/output/error_walker.rs
+documentation: []
+packages:
+  - darkmatter
+  - claudine
 ---
 
 # Execution Plan — Malformed Frontmatter Fence Silently Leaks YAML Into the Agent Prompt
@@ -91,7 +128,7 @@ content are unchanged.
 
 ### Task 1.1 — Add the `FrontmatterFenceMismatch` variant
 
-- [ ] Add variant to `MarkdownError` in `darkmatter/lib/src/markdown/types.rs` (insert near the existing `FrontmatterParse` arm, ~line 27):
+- [x] Add variant to `MarkdownError` in `darkmatter/lib/src/markdown/types.rs` (insert near the existing `FrontmatterParse` arm, ~line 27):
   ```rust
   FrontmatterFenceMismatch {
       ctx: SourceContext,
@@ -110,13 +147,13 @@ fill. No new logic yet.
 
 *(Parallelizable with Task 1.3 after Task 1.1 lands — disjoint file.)*
 
-- [ ] In `darkmatter/lib/src/markdown/frontmatter.rs::parse_frontmatter` (the early-return guard at line 220), before returning "no frontmatter", detect a near-miss fence pair and raise `FrontmatterFenceMismatch`. Heuristic (all must hold):
+- [x] In `darkmatter/lib/src/markdown/frontmatter.rs::parse_frontmatter` (the early-return guard at line 220), before returning "no frontmatter", detect a near-miss fence pair and raise `FrontmatterFenceMismatch`. Heuristic (all must hold):
   1. `lines[0].trim()` is a dash-only run (`^-+$`) of length `>= 4`.
   2. A later line exists whose trimmed content is the **same** dash run (exact-match closing fence; do not normalize `----` ↔ `-----`).
   3. The strict interior between the fences is non-empty, parses as a YAML **mapping** via `serde_yaml_ng::from_str::<serde_yaml_ng::Value>`, and has `>= 1` key. Scalar / sequence / empty-map / parse-failure → treat as body (no error, unchanged behavior).
   - Do **not** reuse `parse_yaml_with_fallbacks` for this probe (keep it a conservative shape check).
   - Preserve all existing `---` behavior, including "missing closing delimiter ⇒ body text".
-- [ ] Add focused unit tests in `frontmatter.rs` (`mod tests`):
+- [x] Add focused unit tests in `frontmatter.rs` (`mod tests`):
   - `----`…`----` wrapping a YAML map → `Err(FrontmatterFenceMismatch { found: "----", line: 1 })`.
   - `-----`…`-----` wrapping a YAML map → `Err(... found: "-----" ...)`.
   - Leading `----` thematic break followed by prose (no matched closing dash run) → `Ok`, empty frontmatter, content unchanged.
@@ -131,13 +168,13 @@ repo root). All new detection tests pass; existing frontmatter tests unchanged.
 
 *(Parallelizable with Task 1.2 after Task 1.1 lands — disjoint file.)*
 
-- [ ] Add a `MarkdownError::FrontmatterFenceMismatch { ctx, found, line }` arm to `status_block` in `darkmatter/lib/src/markdown/types.rs:195` that delegates to a new `blocks::frontmatter_fence_mismatch_block(ctx, found, line)` helper.
-- [ ] Add `frontmatter_fence_mismatch_block` to `darkmatter/lib/src/markdown/errors/blocks.rs` with:
+- [x] Add a `MarkdownError::FrontmatterFenceMismatch { ctx, found, line }` arm to `status_block` in `darkmatter/lib/src/markdown/types.rs:195` that delegates to a new `blocks::frontmatter_fence_mismatch_block(ctx, found, line)` helper.
+- [x] Add `frontmatter_fence_mismatch_block` to `darkmatter/lib/src/markdown/errors/blocks.rs` with:
   - header: `MarkdownError` / `frontmatter fence mismatch`;
   - body: source path (when `ctx.display != "unknown"`, reuse `ctx.linked_path_prose()`), the offending fence, and the document line;
   - hint: `Use exactly three dashes (---) for Markdown frontmatter fences.`;
   - excerpt: highlight `line` (currently always 1) using the existing `frontmatter_excerpt_prose(ctx, line, context)` helper — note it already reads the **full document** from `ctx.content`, which is correct here because the offending token is the delimiter itself, not the YAML interior.
-- [ ] Add unit tests in `blocks.rs` (`mod tests`):
+- [x] Add unit tests in `blocks.rs` (`mod tests`):
   - The mismatch block names the offending fence (`----`) and suggests `---`.
   - The block includes the source path when `ctx` carries one.
   - The block highlights document line 1 (gutter marker `> 1 │ ----`) without relying on a YAML parser location.
@@ -160,8 +197,8 @@ excerpt with the offending fence highlighted — TTY-gated, stripped at
 
 *(Parallelizable with Tasks 2.2 and 2.3 — independent file/change.)*
 
-- [ ] In `claudine/lib/src/composition/resolve.rs::map_load_error` (line 18), add a `MarkdownError::FrontmatterFenceMismatch { .. }` arm routing to `CompositionError::FrontmatterParse(err)` (reuse is acceptable per spec — same user-facing category).
-- [ ] Add a test in `resolve.rs` (`mod tests`): a temp file fenced with `----`…`----` around a YAML map resolves to `Err(CompositionError::FrontmatterParse(_))`, **not** `MarkdownLoad`/`FileNotFound`/`PromptPropertyMissing`.
+- [x] In `claudine/lib/src/composition/resolve.rs::map_load_error` (line 18), add a `MarkdownError::FrontmatterFenceMismatch { .. }` arm routing to `CompositionError::FrontmatterParse(err)` (reuse is acceptable per spec — same user-facing category).
+- [x] Add a test in `resolve.rs` (`mod tests`): a temp file fenced with `----`…`----` around a YAML map resolves to `Err(CompositionError::FrontmatterParse(_))`, **not** `MarkdownLoad`/`FileNotFound`/`PromptPropertyMissing`.
 
 **Validation:** `just test` in `claudine/` for the resolve module.
 
@@ -169,8 +206,8 @@ excerpt with the offending fence highlighted — TTY-gated, stripped at
 
 *(Parallelizable with Tasks 2.1 and 2.3 — independent file/change.)*
 
-- [ ] Confirm `claudine/lib/src/composition/prepare.rs::map_compose_error` (line 19) already funnels `FrontmatterFenceMismatch` through `ComposeFailed(other)` with the typed source intact (it should, since it's a catch-all). No structural change expected.
-- [ ] Add a test that a transclusion/reload surface producing a `----` fence surfaces the typed `MarkdownError` in the `ComposeFailed` source chain (assert the error string names the offending fence). If no realistic transclusion fixture is reachable, document why and cover via the `try_from_content` path in Phase 3 instead.
+- [x] Confirm `claudine/lib/src/composition/prepare.rs::map_compose_error` (line 19) already funnels `FrontmatterFenceMismatch` through `ComposeFailed(other)` with the typed source intact (it should, since it's a catch-all). No structural change expected.
+- [x] Add a test that a transclusion/reload surface producing a `----` fence surfaces the typed `MarkdownError` in the `ComposeFailed` source chain (assert the error string names the offending fence). If no realistic transclusion fixture is reachable, document why and cover via the `try_from_content` path in Phase 3 instead.
 
 **Validation:** `just test` in `claudine/` for the prepare module.
 
@@ -181,9 +218,9 @@ depends on this one.**)*
 
 This closes the design gap identified in finding #6.
 
-- [ ] Add a near-miss-aware block capture helper in `claudine/lib/src/composition/frontmatter_excerpt.rs` (sibling to `capture_frontmatter_block`) that recognizes a matched dash-only (`----`+) fence pair and returns the block **including** both delimiter lines (so line 1 in the block equals line 1 in the source file).
-- [ ] Add a line-target capture constructor to `FrontmatterExcerpt`, e.g. `FrontmatterExcerpt::capture_line(source_text, line: usize, stderr_is_tty: bool) -> Option<Self>`, which uses the near-miss block capture and sets `highlight_line = Some(line)`. Do not invent a separate renderer — reuse the existing `render_appendix` (it already honors `highlight_line` and the TTY / `ColorDepth::None` gating).
-- [ ] Add unit tests:
+- [x] Add a near-miss-aware block capture helper in `claudine/lib/src/composition/frontmatter_excerpt.rs` (sibling to `capture_frontmatter_block`) that recognizes a matched dash-only (`----`+) fence pair and returns the block **including** both delimiter lines (so line 1 in the block equals line 1 in the source file).
+- [x] Add a line-target capture constructor to `FrontmatterExcerpt`, e.g. `FrontmatterExcerpt::capture_line(source_text, line: usize, stderr_is_tty: bool) -> Option<Self>`, which uses the near-miss block capture and sets `highlight_line = Some(line)`. Do not invent a separate renderer — reuse the existing `render_appendix` (it already honors `highlight_line` and the TTY / `ColorDepth::None` gating).
+- [x] Add unit tests:
   - `capture_line` on a `----`…`----` document returns `Some` with `highlight_line == Some(1)`.
   - `capture_line` on a plain-prose document (no near-miss pair) returns `None`.
   - `render_appendix` of the captured excerpt highlights the fence line in TTY output and is empty when `stderr_is_tty == false`.
@@ -194,12 +231,12 @@ This closes the design gap identified in finding #6.
 
 *(Depends on Task 2.3.)*
 
-- [ ] Extend the enrichment dispatch in `claudine/lib/src/composition/error.rs` so `FrontmatterFenceMismatch` highlights the fence line. Two viable shapes (pick the more surgical):
+- [x] Extend the enrichment dispatch in `claudine/lib/src/composition/error.rs` so `FrontmatterFenceMismatch` highlights the fence line. Two viable shapes (pick the more surgical):
   - **(a)** Broaden `frontmatter_block_spec`'s return (line 1413) from `Option<Option<String>>` to a small enum `{ Property(String), Line(usize), BlockOnly }`, and have the `FrontmatterParse` arm detect a wrapped `FrontmatterFenceMismatch` → `Line(err.line)`. Update `enrich_frontmatter` (line 1376) to dispatch `Line(n)` → `FrontmatterExcerpt::capture_line`, `Property(p)` → existing `capture`, `BlockOnly` → `capture(.., None, ..)`. This is the spec's stated preference ("`frontmatter_block_spec` must highlight the fence line").
   - **(b)** Special-case in `enrich_frontmatter`: detect `CompositionError::FrontmatterParse(MarkdownError::FrontmatterFenceMismatch { line, .. })` before the generic `frontmatter_block_spec` path and call `capture_line` directly.
   - Prefer (a) if the call-site churn is small; otherwise (b). Either way the user sees line 1 highlighted.
-- [ ] Ensure the wrapped `MarkdownError::FrontmatterFenceMismatch` is reachable through `CompositionError::FrontmatterParse(err)` for the `frontmatter_block_spec`/`enrich_frontmatter` match (the inner `err` is the typed `MarkdownError`).
-- [ ] Add unit tests in `error.rs`:
+- [x] Ensure the wrapped `MarkdownError::FrontmatterFenceMismatch` is reachable through `CompositionError::FrontmatterParse(err)` for the `frontmatter_block_spec`/`enrich_frontmatter` match (the inner `err` is the typed `MarkdownError`).
+- [x] Add unit tests in `error.rs`:
   - `enrich_frontmatter` on a `FrontmatterParse(FrontmatterFenceMismatch)` error produced from a `----` source attaches a `WithFrontmatter` excerpt (i.e. `frontmatter_excerpt()` is `Some`).
   - The excerpt's `highlight_line` is `Some(1)` (assert via the captured block / a render snapshot).
 
@@ -218,30 +255,32 @@ already append `excerpt.render_appendix`.
 
 ### Task 3.1 — Verify acceptance criteria #3 and #4 (no false positives / no regression)
 
-- [ ] Confirm (via the Phase 1 tests) that a legitimate leading `----` thematic break + prose renders unchanged (criterion #3), and that a correctly-fenced `---` document is unaffected (criterion #4). Add an explicit darkmatter regression test if Phase 1 did not already cover the `---` round-trip end-to-end through `Markdown::try_from_content`.
+- [x] Confirm (via the Phase 1 tests) that a legitimate leading `----` thematic break + prose renders unchanged (criterion #3), and that a correctly-fenced `---` document is unaffected (criterion #4). Add an explicit darkmatter regression test if Phase 1 did not already cover the `---` round-trip end-to-end through `Markdown::try_from_content`.
 
 ### Task 3.2 — Verify acceptance criterion #6 (both load paths return the typed error)
 
-- [ ] Add/confirm tests that a `----`-fenced YAML-mapping document returns `Err(MarkdownError::FrontmatterFenceMismatch)` through **both** `Markdown::try_from(path)` (`darkmatter/lib/src/markdown/mod.rs:973`) and `Markdown::try_from_content(content)` (`mod.rs:285`).
-- [ ] Confirm the infallible `From<String>` path (`mod.rs:948`) swallows the error by design (returns a `Markdown::new(content)` with the raw text) and is **not** used by Claudine's prompt-loading path (`resolve.rs:69` uses `Markdown::try_from`). Document this in a test comment so the asymmetry is not mistaken for a bug.
+- [x] Add/confirm tests that a `----`-fenced YAML-mapping document returns `Err(MarkdownError::FrontmatterFenceMismatch)` through **both** `Markdown::try_from(path)` (`darkmatter/lib/src/markdown/mod.rs:973`) and `Markdown::try_from_content(content)` (`mod.rs:285`).
+- [x] Confirm the infallible `From<String>` path (`mod.rs:948`) swallows the error by design (returns a `Markdown::new(content)` with the raw text) and is **not** used by Claudine's prompt-loading path (`resolve.rs:69` uses `Markdown::try_from`). Document this in a test comment so the asymmetry is not mistaken for a bug.
 
 ### Task 3.3 — Verify acceptance criterion #7 (non-TTY output)
 
-- [ ] Add/confirm a test that the typed error + actionable hint render in non-TTY / `ColorDepth::None` output **without** ANSI styling and **without** the TTY-only frontmatter appendix (unless `FORCE_COLOR=1`). The existing `render_appendix` gating (`stderr_is_tty == false` → empty string; `ColorDepth::None` → `strip_escape_codes`) should already enforce this — assert it holds for the fence-mismatch path.
+- [x] Add/confirm a test that the typed error + actionable hint render in non-TTY / `ColorDepth::None` output **without** ANSI styling and **without** the TTY-only frontmatter appendix (unless `FORCE_COLOR=1`). The existing `render_appendix` gating (`stderr_is_tty == false` → empty string; `ColorDepth::None` → `strip_escape_codes`) should already enforce this — assert it holds for the fence-mismatch path.
 
 ### Task 3.4 — Verify acceptance criterion #5 (shipped prompt composes cleanly)
 
-- [ ] Add a regression test that composing `prompts/cross-platform.md` (which is already `---`-fenced — see finding #1) yields non-empty frontmatter and a body beginning `# Ensuring Cross Platform Support`, with **no** `name:`/`description:` YAML leaking into the body. This locks in the already-applied workaround.
+- [x] Add a regression test that composing `prompts/cross-platform.md` (which is already `---`-fenced — see finding #1) yields non-empty frontmatter and a body beginning `# Ensuring Cross Platform Support`, with **no** `name:`/`description:` YAML leaking into the body. This locks in the already-applied workaround.
 
 ### Task 3.5 — L2 real-terminal capture (optional, per spec)
 
-- [ ] *(Optional)* Add an L2 real-terminal test proving the highlighted excerpt renders and that no YAML appears in the Agent Prompt section for a synthetic `----` fixture. Gate behind the existing L2 harness/tier conventions (`rust-testing` skill). Skip if the L1 unit coverage is judged sufficient.
+- [x] *(Optional)* Add an L2 real-terminal test proving the highlighted excerpt renders and that no YAML appears in the Agent Prompt section for a synthetic `----` fixture. Gate behind the existing L2 harness/tier conventions (`rust-testing` skill). Skip if the L1 unit coverage is judged sufficient.
 
 ### Task 3.6 — Full lint and test sweep
 
-- [ ] Run `just test darkmatter && just test claudine` from the repo root (or `just test` within each package area).
-- [ ] Run `just lint darkmatter && just lint claudine`.
-- [ ] Run doctests if touched: `just doctest darkmatter` (the `try_from_content` doc comment may be referenced).
+- [x] Run `just test darkmatter && just test claudine` from the repo root (or `just test` within each package area).
+  - `claudine`: 1764/1764 passed.
+  - `darkmatter`: 4604/4605 passed; one pre-existing unrelated failure in `darkmatter::expression_regression regression_page_block_with_has_skill` (`darkmatter/lib/tests/expression_regression.rs:712`) — outside the frontmatter-fence blast radius.
+- [x] Run lint for both package areas: `just -f darkmatter/justfile lint && just -f claudine/justfile lint`.
+- [x] Run doctests if touched: `just doctest darkmatter` (the `try_from_content` doc comment may be referenced).
 
 **Final checkpoint:** all acceptance criteria #1–#7 from the spec are satisfied
 and demonstrable via the test suite; `just test` + `just lint` are green for both

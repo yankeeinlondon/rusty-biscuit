@@ -1710,4 +1710,78 @@ title: Test
             html
         );
     }
+
+    // =========================================================================
+    // Frontmatter fence mismatch cross-package validation (Phase 3)
+    // =========================================================================
+
+    /// Acceptance criterion #4: a correctly `---`-fenced document round-trips
+    /// end-to-end through [`Markdown::try_from_content`] with frontmatter parsed
+    /// and the body starting after the closing delimiter.
+    #[test]
+    fn try_from_content_three_dash_fence_round_trips() {
+        let content = "---\ntitle: Test\n---\n# Hello\n";
+        let md = Markdown::try_from_content(content).expect("valid --- fence must parse");
+
+        let title: Option<String> = md.fm_get("title").unwrap();
+        assert_eq!(title, Some("Test".to_string()));
+        assert!(md.content().starts_with("# Hello"));
+        // The delimiter and YAML must not leak into the body.
+        assert!(!md.content().contains("---"));
+        assert!(!md.content().contains("title:"));
+    }
+
+    /// Acceptance criterion #6: a `----`-fenced YAML map loaded via
+    /// [`Markdown::try_from_content`] surfaces the typed mismatch error.
+    #[test]
+    fn try_from_content_four_dash_fence_returns_typed_error() {
+        let content = "----\nname: cross-platform\ndescription: near-miss\n----\n# Body\n";
+        let err = Markdown::try_from_content(content).expect_err("---- fence must fail");
+
+        match err {
+            MarkdownError::FrontmatterFenceMismatch { found, line, .. } => {
+                assert_eq!(found, "----");
+                assert_eq!(line, 1);
+            }
+            other => panic!("expected FrontmatterFenceMismatch, got {other:?}"),
+        }
+    }
+
+    /// Acceptance criterion #6: a `----`-fenced YAML map loaded from disk via
+    /// [`Markdown::try_from`] also surfaces the typed mismatch error, preserving
+    /// the source path in the error context.
+    #[test]
+    fn try_from_path_four_dash_fence_returns_typed_error() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "----").unwrap();
+        writeln!(file, "name: cross-platform").unwrap();
+        writeln!(file, "description: near-miss").unwrap();
+        writeln!(file, "----").unwrap();
+        writeln!(file, "# Body").unwrap();
+
+        let err = Markdown::try_from(file.path()).expect_err("---- fence must fail");
+        match err {
+            MarkdownError::FrontmatterFenceMismatch { found, line, .. } => {
+                assert_eq!(found, "----");
+                assert_eq!(line, 1);
+            }
+            other => panic!("expected FrontmatterFenceMismatch, got {other:?}"),
+        }
+    }
+
+    /// The infallible [`From<String>`] conversion intentionally swallows
+    /// frontmatter errors and returns a document whose entire source is treated
+    /// as body text. Claudine's prompt-loading path uses [`Markdown::try_from`],
+    /// not this conversion, so a malformed fence is still rejected there. This
+    /// test documents the asymmetry so it is not mistaken for a bug.
+    #[test]
+    fn from_string_swallows_frontmatter_fence_mismatch_by_design() {
+        let content = "----\nname: cross-platform\n----\n# Body\n".to_string();
+        let md: Markdown = content.into();
+
+        // The conversion succeeds with empty frontmatter; the raw text becomes body.
+        assert!(md.frontmatter().is_empty());
+        assert!(md.content().contains("name: cross-platform"));
+        assert!(md.content().contains("----"));
+    }
 }

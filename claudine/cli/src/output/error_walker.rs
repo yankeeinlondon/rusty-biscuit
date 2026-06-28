@@ -10,8 +10,10 @@
 //! If no cause implements [`BlockError`], the caller falls back to
 //! `color_eyre`'s default `Debug` output.
 
+use biscuit_terminal::discovery::detection::ColorDepth;
 use biscuit_terminal::errors::BlockError;
 use biscuit_terminal::terminal::Terminal;
+use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 use claudine::composition::{CompositionError, FrontmatterExcerpt};
 use color_eyre::eyre::Report;
 use darkmatter::markdown::errors::as_block_error;
@@ -47,6 +49,12 @@ pub(crate) fn try_render_block_report(report: &Report, term: &Terminal) -> Optio
             out.push_str(&appendix);
             out.push('\n');
         }
+    }
+
+    // Ensure plain-mode / NO_COLOR output contains no ANSI escape bytes even
+    // when the deepest block error (e.g. MarkdownError) renders with styles.
+    if matches!(term.color_depth, ColorDepth::None) {
+        out = strip_escape_codes(&out);
     }
 
     Some(out)
@@ -238,5 +246,56 @@ mod tests {
         let plain = strip_escape_codes(&rendered);
         assert!(plain.contains("frontmatter parse failed"), "got:\n{plain}");
         assert!(plain.contains("metadata.md"), "got:\n{plain}");
+    }
+
+    /// Acceptance criterion #7: the fence-mismatch path still reports the typed
+    /// error and actionable hint in non-TTY / no-color output, but withholds
+    /// the TTY-only frontmatter appendix and emits no ANSI escape bytes.
+    #[test]
+    fn fence_mismatch_non_tty_has_no_ansi_and_no_appendix() {
+        const FENCE_DOC: &str =
+            "----\nname: cross-platform\ndescription: near-miss fence\n----\n# Body\n";
+        let excerpt = FrontmatterExcerpt::capture_line(FENCE_DOC, 1, false)
+            .expect("near-miss frontmatter block");
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            PathBuf::from("metadata.md"),
+            PathBuf::from("metadata.md"),
+            FENCE_DOC.to_string(),
+        );
+        let md = MarkdownError::FrontmatterFenceMismatch {
+            ctx,
+            found: "----".to_string(),
+            line: 1,
+        };
+        let err = CompositionError::WithFrontmatter {
+            inner: Box::new(CompositionError::FrontmatterParse(md)),
+            excerpt,
+        };
+        let report: Report = eyre!(err);
+
+        let mut term = Terminal::builder()
+            .width(80)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+            .build();
+        term.is_nerd_font = Some(false);
+
+        let rendered = try_render_block_report(&report, &term).expect("block error found");
+        assert!(
+            !rendered.contains('\x1b'),
+            "plain render must contain no escape byte; got: {rendered:?}"
+        );
+        // The diagnostic text and actionable hint still reach the user.
+        assert!(
+            rendered.contains("frontmatter fence mismatch"),
+            "missing diagnostic: {rendered}"
+        );
+        assert!(
+            rendered.contains("Use exactly three dashes"),
+            "missing fix hint: {rendered}"
+        );
+        // The captured excerpt block (rendered as part of the MarkdownError
+        // status block, not the TTY-only Claudine appendix) still pinpoints the
+        // offending fence line so the user can act on it.
+        assert!(rendered.contains("> 1 │ ----"), "missing fence highlight: {rendered}");
     }
 }
