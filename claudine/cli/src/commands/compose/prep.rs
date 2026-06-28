@@ -841,6 +841,7 @@ mod tests {
             replace_system_prompt: None,
             timeout: None,
             step_timeout: None,
+            stall_timeout: None,
             operation: None,
             sandbox: false,
             repo: false,
