@@ -32,6 +32,15 @@ pub enum MarkdownError {
         source: YamlParseError,
     },
 
+    /// The document opens with a near-miss frontmatter fence (e.g. `----`)
+    /// wrapping YAML-shaped content. Frontmatter fences must be exactly `---`.
+    #[error("frontmatter fence must be exactly `---`, found `{found}` on line {line} in {}", .ctx.display.display())]
+    FrontmatterFenceMismatch {
+        ctx: SourceContext,
+        found: String,
+        line: usize,
+    },
+
     /// Failed to merge frontmatter.
     #[error("Failed to merge frontmatter: {0}")]
     FrontmatterMerge(String),
@@ -206,6 +215,9 @@ impl BlockError for MarkdownError {
             // Leaf variants own their block shape.
             MarkdownError::FrontmatterParse { ctx, source } => {
                 blocks::frontmatter_parse_block(ctx.clone(), source)
+            }
+            MarkdownError::FrontmatterFenceMismatch { ctx, found, line } => {
+                blocks::frontmatter_fence_mismatch_block(ctx.clone(), found, *line)
             }
             MarkdownError::FrontmatterMerge(message) => blocks::frontmatter_merge_block(message),
             MarkdownError::FileLoad(source) => blocks::file_load_block(source),
