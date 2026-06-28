@@ -2554,4 +2554,255 @@ mod tests {
              the shared fallback: {prompt:?}",
         );
     }
+
+    // ── Finding 2: pre-validation / drop / sequence pre-flight use the ────
+    // ── explicit launch-area fallback, not the ambient process CWD. ──────
+    //
+    // These helpers run BEFORE the wrapper's `chdir`, so on the production
+    // paths the launch area is captured and threaded in as
+    // `file_ref_fallback_dir`. The regressions below switch the process CWD
+    // to an unrelated directory to prove resolution is CWD-independent: a
+    // `file`-typed value that exists only under the fallback must be accepted
+    // (`pre_validate_schema`) or kept (`drop_invalid_optionals`), and a
+    // value that exists only under the document dir must win over a
+    // same-named fallback file (prompt-dir precedence).
+
+    /// RAII guard that captures the process CWD on construction, switches to
+    /// the requested directory, and restores the captured CWD on drop —
+    /// including on panic. Tests using it are `#[serial_test::serial]` to
+    /// avoid racing on process-global CWD with other CWD-mutating tests.
+    struct CwdGuard {
+        prior: std::path::PathBuf,
+    }
+
+    impl CwdGuard {
+        fn enter(dir: &std::path::Path) -> Self {
+            let prior = std::env::current_dir().expect("read CWD");
+            std::env::set_current_dir(dir).expect("set CWD");
+            Self { prior }
+        }
+    }
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.prior);
+        }
+    }
+
+    /// Writes a prompt document to `dir/prompt.md` and resolves it, so the
+    /// resulting source's document directory (used as the `file`-typed
+    /// validator's first anchor) is `dir`. Lets tests keep the document dir,
+    /// the fallback dir, and the ambient CWD all distinct.
+    fn make_source_in(dir: &std::path::Path, document: &str) -> ResolvedCompositionSource {
+        let file = dir.join("prompt.md");
+        fs::write(&file, document).unwrap();
+        resolve_composition_source(file.to_str().unwrap()).unwrap()
+    }
+
+    /// `pre_validate_schema` with a `file(required)` value that exists only
+    /// under the launch-area fallback (not the document dir, not the ambient
+    /// CWD) must validate. Proves the explicit fallback drives resolution, not
+    /// the process CWD. The CWD is switched to an unrelated directory.
+    #[test]
+    #[serial_test::serial(schema_validation_cwd)]
+    fn pre_validate_schema_uses_launch_area_fallback_not_cwd() {
+        let doc_dir = TempDir::new().unwrap();
+        let fallback_dir = TempDir::new().unwrap();
+        let unrelated = TempDir::new().unwrap();
+        // spec.md lives ONLY under the launch-area fallback.
+        fs::write(fallback_dir.path().join("spec.md"), "# Spec\n").unwrap();
+
+        let source = make_source_in(
+            doc_dir.path(),
+            "---\n$schema:\n  spec: 'file(required)'\nspec: spec.md\n---\nbody\n",
+        );
+
+        let _cwd = CwdGuard::enter(unrelated.path());
+        let pre = pre_validate_schema(&source, None, Some(fallback_dir.path()))
+            .expect("spec.md under the launch-area fallback must validate, CWD-independently");
+        assert!(pre.dropped_optionals.is_empty());
+    }
+
+    /// Same setup as above, but WITHOUT the fallback: with no anchor and an
+    /// unrelated ambient CWD, the literal `file(required)` value cannot
+    /// resolve and pre-validation surfaces `SchemaValidation`. Confirms the
+    /// previous test passes because of the fallback, not because the file is
+    /// reachable some other way.
+    #[test]
+    #[serial_test::serial(schema_validation_cwd)]
+    fn pre_validate_schema_without_fallback_rejects_when_only_under_launch_area() {
+        let doc_dir = TempDir::new().unwrap();
+        let fallback_dir = TempDir::new().unwrap();
+        let unrelated = TempDir::new().unwrap();
+        fs::write(fallback_dir.path().join("spec.md"), "# Spec\n").unwrap();
+
+        let source = make_source_in(
+            doc_dir.path(),
+            "---\n$schema:\n  spec: 'file(required)'\nspec: spec.md\n---\nbody\n",
+        );
+
+        let _cwd = CwdGuard::enter(unrelated.path());
+        let err = pre_validate_schema(&source, None, None)
+            .expect_err("without the fallback, spec.md is unreachable from the unrelated CWD");
+        assert!(
+            matches!(err, CompositionError::SchemaValidation { .. }),
+            "expected SchemaValidation for an unresolvable file value, got: {err:?}",
+        );
+    }
+
+    /// Prompt-dir precedence for the pre-validation path: a `file` value that
+    /// exists in BOTH the document dir and the launch-area fallback resolves
+    /// via the document dir first (document-first contract). The document-dir
+    /// copy is the only one guaranteed present; even with the CWD switched to
+    /// an unrelated directory, validation succeeds.
+    #[test]
+    #[serial_test::serial(schema_validation_cwd)]
+    fn pre_validate_schema_prefers_document_dir_over_fallback() {
+        let doc_dir = TempDir::new().unwrap();
+        let fallback_dir = TempDir::new().unwrap();
+        let unrelated = TempDir::new().unwrap();
+        // spec.md present in both dirs; document-first must win.
+        fs::write(doc_dir.path().join("spec.md"), "# doc copy\n").unwrap();
+        fs::write(fallback_dir.path().join("spec.md"), "# fallback copy\n").unwrap();
+
+        let source = make_source_in(
+            doc_dir.path(),
+            "---\n$schema:\n  spec: 'file(required)'\nspec: spec.md\n---\nbody\n",
+        );
+
+        let _cwd = CwdGuard::enter(unrelated.path());
+        pre_validate_schema(&source, None, Some(fallback_dir.path()))
+            .expect("a file value present in both dirs must validate via the document dir");
+    }
+
+    /// `drop_invalid_optionals` with an OPTIONAL `file`-typed value that
+    /// exists only under the launch-area fallback must KEEP the value (not
+    /// drop it) when the fallback is passed. Without the fallback the value
+    /// would look unresolvable and be dropped — this is the exact regression
+    /// the launch-area threading prevents. CWD switched to an unrelated dir.
+    #[test]
+    #[serial_test::serial(schema_validation_cwd)]
+    fn drop_invalid_optionals_keeps_file_under_launch_area_fallback() {
+        let doc_dir = TempDir::new().unwrap();
+        let fallback_dir = TempDir::new().unwrap();
+        let unrelated = TempDir::new().unwrap();
+        fs::write(fallback_dir.path().join("notes.md"), "# Notes\n").unwrap();
+
+        let source = make_source_in(
+            doc_dir.path(),
+            "---\n$schema:\n  notes: 'file'\nnotes: notes.md\n---\nbody\n",
+        );
+
+        let _cwd = CwdGuard::enter(unrelated.path());
+        let (scrubbed, _overrides, dropped) =
+            drop_invalid_optionals(source, None, Some(fallback_dir.path()));
+
+        assert!(
+            scrubbed
+                .markdown
+                .frontmatter()
+                .as_map()
+                .contains_key("notes"),
+            "optional `notes` resolves via the launch-area fallback and must be kept",
+        );
+        assert!(
+            dropped.iter().all(|d| d.property != "notes"),
+            "no drop diagnostic should be emitted for a value that resolves via the fallback",
+        );
+    }
+
+    /// Companion negative: WITHOUT the fallback, the same optional `file`
+    /// value is unresolvable from the unrelated CWD and IS dropped. Confirms
+    /// the keep above is due to the fallback, not because the file happens to
+    /// be reachable.
+    #[test]
+    #[serial_test::serial(schema_validation_cwd)]
+    fn drop_invalid_optionals_drops_file_when_no_fallback() {
+        let doc_dir = TempDir::new().unwrap();
+        let fallback_dir = TempDir::new().unwrap();
+        let unrelated = TempDir::new().unwrap();
+        fs::write(fallback_dir.path().join("notes.md"), "# Notes\n").unwrap();
+
+        let source = make_source_in(
+            doc_dir.path(),
+            "---\n$schema:\n  notes: 'file'\nnotes: notes.md\n---\nbody\n",
+        );
+
+        let _cwd = CwdGuard::enter(unrelated.path());
+        let (scrubbed, _overrides, dropped) = drop_invalid_optionals(source, None, None);
+
+        assert!(
+            !scrubbed
+                .markdown
+                .frontmatter()
+                .as_map()
+                .contains_key("notes"),
+            "without the fallback, an unresolvable optional file value is dropped",
+        );
+        assert!(
+            dropped.iter().any(|d| d.property == "notes"),
+            "expected a drop diagnostic for the unresolvable optional file value",
+        );
+    }
+
+    /// Sequence phase 1C analog: each sequence step pre-validates via
+    /// `pre_validate_schema(source, Some(step_overrides), launch_area)` before
+    /// per-step prepare (see `wrap::sequence::phase1c`). A step whose `file`
+    /// value comes through the per-step overlay (`set_overrides`) and exists
+    /// only under the launch area must pass pre-validation, CWD-independently.
+    #[test]
+    #[serial_test::serial(schema_validation_cwd)]
+    fn sequence_step_pre_validation_uses_launch_area_fallback() {
+        let doc_dir = TempDir::new().unwrap();
+        let fallback_dir = TempDir::new().unwrap();
+        let unrelated = TempDir::new().unwrap();
+        // The overlay-supplied spec exists only under the launch area.
+        fs::write(fallback_dir.path().join("step-spec.md"), "# Step Spec\n").unwrap();
+
+        // The document declares a required `file` but supplies no value; the
+        // per-step overlay (`set_overrides`) provides it, mirroring how
+        // phase1c feeds `overlay.as_set_overrides(...)` into pre-validation.
+        let source = make_source_in(
+            doc_dir.path(),
+            "---\n$schema:\n  spec: 'file(required)'\n---\nbody\n",
+        );
+        let step_overrides = serde_json::json!({ "spec": "step-spec.md" });
+
+        let _cwd = CwdGuard::enter(unrelated.path());
+        pre_validate_schema(&source, Some(&step_overrides), Some(fallback_dir.path()))
+            .expect("a per-step file value under the launch area must pass sequence pre-validation");
+    }
+
+    /// `build_schema_status_report` reports a `file`-typed value that resolves
+    /// only under the launch-area fallback as `Valid`, not `Invalid` — so the
+    /// pre-prompt diagnostic agrees with the prepare pipeline instead of
+    /// flagging a value that will in fact validate. CWD-independent.
+    #[test]
+    #[serial_test::serial(schema_validation_cwd)]
+    fn status_report_marks_fallback_file_valid() {
+        let doc_dir = TempDir::new().unwrap();
+        let fallback_dir = TempDir::new().unwrap();
+        let unrelated = TempDir::new().unwrap();
+        fs::write(fallback_dir.path().join("spec.md"), "# Spec\n").unwrap();
+
+        let source = make_source_in(
+            doc_dir.path(),
+            "---\n$schema:\n  spec: 'file(required)'\nspec: spec.md\n---\nbody\n",
+        );
+
+        let _cwd = CwdGuard::enter(unrelated.path());
+        let report = build_schema_status_report(&source, None, Some(fallback_dir.path()))
+            .unwrap()
+            .unwrap();
+        let spec = report
+            .required
+            .iter()
+            .find(|s| s.name == "spec")
+            .expect("spec listed");
+        assert_eq!(
+            spec.state,
+            PropertyState::Valid,
+            "a file value resolvable via the launch-area fallback must report Valid: {spec:?}",
+        );
+    }
 }
