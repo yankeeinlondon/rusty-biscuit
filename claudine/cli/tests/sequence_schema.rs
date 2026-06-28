@@ -420,3 +420,82 @@ Step {{state}} with tier {{tier}}.
     // Silence unused linter for the predicates import that other tests use.
     let _ = contains("");
 }
+
+#[cfg(unix)]
+#[test]
+fn sequence_malformed_step_document_preserves_frontmatter_mismatch() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let count_path = workspace.path().join("call-count.txt");
+
+    let valid_doc = workspace.path().join("valid.md");
+    fs::write(&valid_doc, "---\ntitle: Valid\n---\n# Valid\n").unwrap();
+
+    let malformed_doc = workspace.path().join("bad.md");
+    fs::write(
+        &malformed_doc,
+        "----\ntitle: Bad step document\n----\n# Should not compose\n",
+    )
+    .unwrap();
+
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        format!(
+            r#"---
+sequence:
+  - name: valid
+    doc: {}
+  - name: malformed
+    doc: {}
+loaded_title: "{{{{ frontmatter(state.doc, 'title') }}}}"
+---
+Step {{{{ state.name }}}}: {{{{ loaded_title }}}}
+"#,
+            valid_doc.display(),
+            malformed_doc.display()
+        ),
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\necho touched >> {count}\nexit 0\n",
+            count = count_path.display()
+        ),
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["sequence", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("frontmatter fence must be exactly")
+            || plain.contains("FrontmatterFenceMismatch")
+            || plain.contains("exactly three dashes"),
+        "expected typed malformed-fence error from the step document; stderr:\n{plain}"
+    );
+    assert!(
+        plain.contains("bad.md"),
+        "expected the malformed step document path in the error; stderr:\n{plain}"
+    );
+    assert!(
+        !plain.contains("missing properties")
+            && !plain.contains("No model specified")
+            && !plain.contains("No runnable providers"),
+        "malformed step document must not degrade to a generic sequence/provider error; stderr:\n{plain}"
+    );
+    assert!(
+        !count_path.exists(),
+        "no provider session should launch when a step document is malformed"
+    );
+}

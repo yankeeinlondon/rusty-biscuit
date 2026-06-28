@@ -72,6 +72,38 @@ fn sequence_errors_when_source_has_no_sequence_property() {
     );
 }
 
+#[test]
+fn sequence_malformed_root_frontmatter_fence_surfaces_typed_parse_error() {
+    let workspace = tempdir().unwrap();
+    let md_file = workspace.path().join("malformed-sequence.md");
+    fs::write(
+        &md_file,
+        "----\nsequence:\n  - alpha\ndescription: near-miss fence\n----\nStep {{state}}\n",
+    )
+    .unwrap();
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["sequence", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.to_lowercase().contains("frontmatter"),
+        "expected frontmatter parse context; stderr:\n{plain}"
+    );
+    assert!(
+        plain.contains("exactly three dashes") || plain.contains("FrontmatterFenceMismatch"),
+        "expected malformed-fence hint or typed fence mismatch; stderr:\n{plain}"
+    );
+    assert!(
+        !plain.contains("No model specified") && !plain.contains("No runnable providers"),
+        "source-load failures must not degrade into provider/model errors; stderr:\n{plain}"
+    );
+}
+
 // ============================================================================
 // fail-fast semantics
 // ============================================================================
