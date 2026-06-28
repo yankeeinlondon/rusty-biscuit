@@ -1,6 +1,6 @@
 //! Composition-specific error types.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::status::StatusState;
@@ -772,6 +772,34 @@ pub enum CompositionError {
         reason: String,
     },
 
+    /// A late-binding lifecycle expression *raised* at event time — a `when:`
+    /// guard, a top-level communication string, or an action-value
+    /// interpolation that threw (an unknown root under DM2 strict mode, a
+    /// malformed `{{ … }}` span, or a read-side function error).
+    ///
+    /// Unlike a side-effect **dispatch** failure (which honors `no_error: true`
+    /// and the per-phase routing policy), an evaluation error halts on **every**
+    /// event phase and is surfaced to the user. A terminal-phase event
+    /// (`success`/`failure`/`finalize`/`loop`) produces this and exits non-zero
+    /// without retroactively firing `failure`; a setup-phase event
+    /// (`initialize`/`start`/`blocked`) routes it through `failure`/`finalize`
+    /// like any other setup failure.
+    #[error(
+        "lifecycle `{event}` evaluation error in `{surface}`: {message} ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleEvaluationError {
+        /// The prompt file whose lifecycle event raised the error.
+        source_path: PathBuf,
+        /// The lifecycle event name (e.g. `success`, `finalize`, `loop`).
+        event: String,
+        /// The offending surface — `when`, `interpolation`, or an action verb
+        /// (taken from the raised [`super::lifecycle_context::LifecycleErrorInfo::variant`]).
+        surface: String,
+        /// The raised expression's message.
+        message: String,
+    },
+
     // -- Sequence errors -------------------------------------------------------
     /// The `sequence` frontmatter value is not a valid type (must be a list or a string).
     #[error("invalid sequence definition: {0}")]
@@ -1137,6 +1165,22 @@ pub enum CompositionError {
         /// The captured frontmatter block, appended after the inner diagnostic.
         excerpt: FrontmatterExcerpt,
     },
+
+    /// A lifecycle evaluation error whose styled block was already rendered to
+    /// stderr at its catch point (Decision #2), before any catch events
+    /// (`failure`/`finalize`) fired.
+    ///
+    /// Constructed by [`already_emitted`](CompositionError::already_emitted)
+    /// once the early emit has happened, so the outer CLI renderer recognizes
+    /// the error has been surfaced and suppresses the duplicate styled block —
+    /// while still propagating a non-zero exit. `Display` delegates to `inner`
+    /// so any plain-text fallback keeps the original message.
+    #[error("{inner}")]
+    LifecycleEvaluationAlreadyEmitted {
+        /// The original evaluation error (a
+        /// [`Self::LifecycleEvaluationError`]).
+        inner: Box<CompositionError>,
+    },
 }
 
 /// A single required schema property that is missing from frontmatter.
@@ -1366,6 +1410,82 @@ pub struct SequenceSelectionFailure {
 }
 
 impl CompositionError {
+    /// Build a [`Self::LifecycleEvaluationError`] from the raised lifecycle
+    /// error snapshot.
+    ///
+    /// `event` is the lifecycle event whose stack raised (e.g. `success`); the
+    /// offending surface and message are lifted from `info` so a single
+    /// snapshot constructed at the executor layer renders consistently
+    /// regardless of which orchestrator caught it.
+    pub fn lifecycle_evaluation(
+        event: impl Into<String>,
+        source_path: impl Into<PathBuf>,
+        info: &super::lifecycle_context::LifecycleErrorInfo,
+    ) -> Self {
+        Self::LifecycleEvaluationError {
+            source_path: source_path.into(),
+            event: event.into(),
+            surface: info.variant.clone(),
+            message: info.msg.clone(),
+        }
+    }
+
+    /// Surface the evaluation error that halts the run after the catch events
+    /// (`failure` and/or `finalize`) ran for an earlier raise.
+    ///
+    /// Precedence: a raise inside `finalize` beats a raise inside `failure`
+    /// beats the original error — the user sees the *latest* lifecycle crash,
+    /// not the one that triggered the catch. The callers are responsible for
+    /// threading the active error into `finalize` (a `failure` raise becomes
+    /// the `err` carried into `finalize`); this helper only decides which
+    /// outcome surfaces.
+    ///
+    /// `failure_outcome`/`finalize_outcome` are `None` when the corresponding
+    /// catch event did not run (e.g. a terminal-phase catch skips `failure`).
+    pub fn catch_evaluation_error(
+        source_path: &Path,
+        original_event: &str,
+        original_info: &super::lifecycle_context::LifecycleErrorInfo,
+        failure_outcome: Option<&super::lifecycle_executor::LifecycleEventOutcome>,
+        finalize_outcome: Option<&super::lifecycle_executor::LifecycleEventOutcome>,
+    ) -> Self {
+        if let Some(fin) = finalize_outcome
+            && let Some(fin_info) = fin.evaluation_error.as_ref()
+        {
+            return Self::lifecycle_evaluation("finalize", source_path, fin_info);
+        }
+        if let Some(fail) = failure_outcome
+            && let Some(fail_info) = fail.evaluation_error.as_ref()
+        {
+            return Self::lifecycle_evaluation("failure", source_path, fail_info);
+        }
+        Self::lifecycle_evaluation(original_event, source_path, original_info)
+    }
+
+    /// Mark this evaluation error as already styled-emitted to stderr at its
+    /// catch point (Decision #2).
+    ///
+    /// Wraps `self` in [`Self::LifecycleEvaluationAlreadyEmitted`] so the outer
+    /// CLI renderer suppresses the duplicate styled block while preserving the
+    /// non-zero exit. Idempotent: an already-marked error is returned as-is.
+    /// `self` is expected to be a [`Self::LifecycleEvaluationError`]; any other
+    /// variant is wrapped unchanged (suppression is keyed on the wrapper, not
+    /// the inner shape).
+    pub fn already_emitted(self) -> Self {
+        if matches!(self, CompositionError::LifecycleEvaluationAlreadyEmitted { .. }) {
+            return self;
+        }
+        CompositionError::LifecycleEvaluationAlreadyEmitted {
+            inner: Box::new(self),
+        }
+    }
+
+    /// Whether this error was already styled-emitted at its catch point, so the
+    /// outer renderer must not re-render it.
+    pub fn is_already_emitted(&self) -> bool {
+        matches!(self, CompositionError::LifecycleEvaluationAlreadyEmitted { .. })
+    }
+
     /// Attach a captured frontmatter excerpt to a frontmatter-rooted error.
     ///
     /// Called at the render boundary — after all control-flow `match`es on the
@@ -1472,6 +1592,9 @@ impl BlockError for CompositionError {
     fn status_block(&self, term: &Terminal) -> StatusBlock {
         match self {
             CompositionError::WithFrontmatter { inner, .. } => inner.status_block(term),
+            CompositionError::LifecycleEvaluationAlreadyEmitted { inner } => {
+                inner.status_block(term)
+            }
             CompositionError::LifecycleInvalid {
                 property,
                 message,
@@ -1595,6 +1718,33 @@ impl BlockError for CompositionError {
                     .hint(
                         "Define the variable in frontmatter, prefix a runtime value with \
                          `ctx.`/`env.`, or supply a fallback (`{{ var || 'default' }}`).",
+                    )
+            }
+            CompositionError::LifecycleEvaluationError {
+                source_path,
+                event,
+                surface,
+                message,
+            } => {
+                let file_link = render_file_link(source_path);
+                let surface_label = lifecycle_evaluation_surface_label(surface);
+                let body = format!(
+                    "A late-binding expression raised while the <cyan>`{event}`</cyan> \
+                     lifecycle event was firing, in {surface_label} ({file_link}).\n\n\
+                     <b>Reason:</b> {}",
+                    escape_prose_path(message)
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "lifecycle evaluation error",
+                    ))
+                    .body(body)
+                    .hint(
+                        "This is a crashed expression, not a clean `false` guard: the run \
+                         halts and exits non-zero. Fix the expression (resolve the missing \
+                         path or variable, correct the function call) or guard it with a \
+                         fallback so it evaluates instead of raising.",
                     )
             }
             CompositionError::RemovedValidationKey {
@@ -2178,6 +2328,21 @@ fn pointer_to_dotted(pointer: &str) -> String {
     }
 }
 
+/// Human-readable label for the late-binding surface that raised a
+/// [`CompositionError::LifecycleEvaluationError`].
+///
+/// `surface` is the raised
+/// [`LifecycleErrorInfo::variant`](super::lifecycle_context::LifecycleErrorInfo::variant):
+/// `when` for a guard, `interpolation` for a communication/action string, or an
+/// action verb (`shell`, `set_frontmatter`, …) for a side-effect argument.
+fn lifecycle_evaluation_surface_label(surface: &str) -> String {
+    match surface {
+        "when" => "the `when:` guard".to_string(),
+        "interpolation" => "an interpolated string".to_string(),
+        verb => format!("the `{verb}` action value"),
+    }
+}
+
 /// Render an absolute OSC8 hyperlink to `path` showing its relative form
 /// where possible (falling back to the full display).
 ///
@@ -2425,6 +2590,32 @@ mod tests {
         let source = source_from("---\ntitle: x\n---\nbody\n");
         let err = CompositionError::NoRunnableProviders.enrich_frontmatter(&source, true);
         assert!(matches!(err, CompositionError::NoRunnableProviders));
+    }
+
+    #[test]
+    fn already_emitted_wraps_once_and_delegates_display() {
+        let err = CompositionError::LifecycleEvaluationError {
+            source_path: PathBuf::from("review.md"),
+            event: "success".to_string(),
+            surface: "when".to_string(),
+            message: "boom".to_string(),
+        };
+        let display = err.to_string();
+        let marked = err.already_emitted();
+        assert!(marked.is_already_emitted());
+        // Display still delegates to the inner evaluation error.
+        assert_eq!(marked.to_string(), display);
+        // Idempotent: re-marking does not double-wrap.
+        let again = marked.already_emitted();
+        match &again {
+            CompositionError::LifecycleEvaluationAlreadyEmitted { inner } => {
+                assert!(
+                    !inner.is_already_emitted(),
+                    "must not nest the already-emitted wrapper"
+                );
+            }
+            other => panic!("expected LifecycleEvaluationAlreadyEmitted, got {other:?}"),
+        }
     }
 
     #[test]
