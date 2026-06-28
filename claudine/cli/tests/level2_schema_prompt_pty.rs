@@ -239,20 +239,21 @@ fn level2_pty_schema_prompt_number_retries_on_invalid_input() {
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
     let pre = wait_for_marker(&mut session, "count", Duration::from_secs(10));
-    wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
+    let pre = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
 
     // First, submit a non-numeric value. The parse-and-retry loop in
-    // `collect_number` must re-prompt with an inline validation error
-    // and keep the previous buffer. (The retry's submission waits on the
-    // widget-rendered validation error below, which already implies raw
-    // mode for the second prompt iteration.)
+    // `collect_number` must reject it and re-prompt, keeping the previous
+    // buffer.
     session.write_all(b"not-a-number\r").expect("write bad value");
     session.flush().ok();
 
-    // Wait for the re-prompt to render the validation error. The error
-    // text is built from the parse_number helper as `\`<raw>\` is not a
-    // valid integer`.
-    wait_for_marker(&mut session, "not a valid integer", Duration::from_secs(5));
+    // Wait for the prompt to re-enter raw mode: a fresh `run_standalone`
+    // iteration is the deterministic proof the invalid value was rejected
+    // and `collect_number` looped. (Scraping the re-rendered validation
+    // error glyphs is unreliable here — a bare PTY has no emulator to
+    // answer the inline viewport's cursor probe with a real position, so
+    // the error/hint rows cannot be laid out deterministically.)
+    let _ = wait_for_raw_mode_reentry(&mut session, pre, Duration::from_secs(5));
 
     // Clear the previous buffer so the next submission contains only the
     // good value. Backspace (`\x7f` DEL) is what crossterm reports as
