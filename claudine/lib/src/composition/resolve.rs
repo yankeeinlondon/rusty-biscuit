@@ -17,7 +17,8 @@ use super::types::ResolvedCompositionSource;
 /// [`CompositionError::MarkdownLoad`] string.
 fn map_load_error(path: &Path, err: MarkdownError) -> CompositionError {
     match err {
-        MarkdownError::FrontmatterParse { .. } => CompositionError::FrontmatterParse(err),
+        MarkdownError::FrontmatterParse { .. }
+        | MarkdownError::FrontmatterFenceMismatch { .. } => CompositionError::FrontmatterParse(err),
         other => CompositionError::MarkdownLoad(format!("{}: {other}", path.display())),
     }
 }
@@ -76,6 +77,41 @@ pub fn resolve_composition_source(
     })
 }
 
+/// Enrich a source-load error with the authored frontmatter block.
+///
+/// Source-load failures can happen after the file has resolved and been read
+/// but before a [`ResolvedCompositionSource`] exists. This helper reconstructs
+/// the resolved source text for the CLI render boundary and leaves the error
+/// unchanged when the file cannot be resolved/read again or the error is not
+/// frontmatter-rooted.
+pub fn enrich_composition_source_load_error(
+    file_ref: &str,
+    error: CompositionError,
+    stderr_is_tty: bool,
+) -> CompositionError {
+    let Some(source_text) = read_source_text_for_enrichment(file_ref) else {
+        return error;
+    };
+    error.enrich_frontmatter_text(&source_text, stderr_is_tty)
+}
+
+fn read_source_text_for_enrichment(file_ref: &str) -> Option<String> {
+    let reference = FileReference::new(file_ref)
+        .ok()?
+        .with_package_area_magic_path();
+    let resolved_path = reference.resolve().ok()??;
+
+    let ext = resolved_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    if !matches!(ext.to_ascii_lowercase().as_str(), "md" | "markdown") {
+        return None;
+    }
+
+    fs::read_to_string(resolved_path).ok()
+}
+
 /// Validate that the resolved file is readable and writable.
 ///
 /// This is a cross-provider pre-flight check: regardless of which agent
@@ -108,6 +144,7 @@ pub fn is_markdown_path(path: &Path) -> bool {
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::PathBuf;
     use tempfile::TempDir;
 
     #[test]
@@ -159,6 +196,61 @@ mod tests {
             matches!(err, CompositionError::FrontmatterParse(_)),
             "expected FrontmatterParse, got: {err:?}"
         );
+    }
+
+    #[test]
+    fn resolve_four_dash_fence_maps_to_frontmatter_parse() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("four-dash.md");
+        fs::write(
+            &file,
+            "----\nname: cross-platform\ndescription: near-miss fence\n----\n# Body\n",
+        )
+        .unwrap();
+
+        let err = resolve_composition_source(file.to_str().unwrap()).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::FrontmatterParse(_)),
+            "expected FrontmatterParse for ---- fence, got: {err:?}"
+        );
+        assert!(
+            !matches!(err, CompositionError::MarkdownLoad(_)),
+            "must not fall back to MarkdownLoad: {err:?}"
+        );
+        assert!(
+            !matches!(err, CompositionError::FileNotFound(_)),
+            "must not report file not found: {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("----"),
+            "error message should name the offending fence: {msg}"
+        );
+    }
+
+    #[test]
+    fn load_error_enrichment_wraps_actual_four_dash_source() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("four-dash.md");
+        fs::write(
+            &file,
+            "----\nname: cross-platform\ndescription: near-miss fence\n----\n# Body\n",
+        )
+        .unwrap();
+
+        let err = resolve_composition_source(file.to_str().unwrap()).unwrap_err();
+        let err = enrich_composition_source_load_error(file.to_str().unwrap(), err, true);
+
+        match err {
+            CompositionError::WithFrontmatter { inner, excerpt } => {
+                assert!(
+                    matches!(*inner, CompositionError::FrontmatterParse(_)),
+                    "inner error should remain FrontmatterParse"
+                );
+                assert_eq!(excerpt.highlight_line(), Some(1));
+            }
+            other => panic!("expected WithFrontmatter, got: {other:?}"),
+        }
     }
 
     #[test]
@@ -224,5 +316,44 @@ mod tests {
         assert!(is_markdown_path(Path::new("test.MD")));
         assert!(!is_markdown_path(Path::new("test.txt")));
         assert!(!is_markdown_path(Path::new("test")));
+    }
+
+    /// Acceptance criterion #5: the shipped `prompts/cross-platform.md` prompt
+    /// (already fixed to `---` fences) loads as a composition source with
+    /// non-empty frontmatter and a body that begins with the real heading. No
+    /// YAML keys from the frontmatter may leak into the body.
+    #[test]
+    fn cross_platform_prompt_composes_cleanly() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let workspace_root = manifest_dir
+            .parent()
+            .expect("claudine/lib parent")
+            .parent()
+            .expect("workspace root");
+        let path = workspace_root.join("prompts/cross-platform.md");
+
+        let source = resolve_composition_source(path.to_str().unwrap())
+            .expect("cross-platform.md should resolve and parse cleanly");
+
+        assert!(
+            !source.markdown.frontmatter().is_empty(),
+            "frontmatter should be parsed and non-empty"
+        );
+        let name: Option<String> = source.markdown.fm_get("name").unwrap();
+        assert_eq!(name, Some("cross-platform".to_string()));
+
+        let content = source.markdown.content();
+        assert!(
+            content.starts_with("# Ensuring Cross Platform Support"),
+            "body should start with the real heading; got: {content}"
+        );
+        assert!(
+            !content.contains("name: cross-platform"),
+            "frontmatter YAML must not leak into body: {content}"
+        );
+        assert!(
+            !content.contains("description:"),
+            "frontmatter YAML must not leak into body: {content}"
+        );
     }
 }

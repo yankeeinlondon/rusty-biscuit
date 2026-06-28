@@ -1617,4 +1617,43 @@ mod tests {
             other => panic!("expected LifecycleShellResolution, got: {other:?}"),
         }
     }
+
+    #[test]
+    fn compose_error_preserves_frontmatter_fence_mismatch_source() {
+        // `map_compose_error` is a catch-all for non-shell MarkdownErrors.
+        // A compose-time (transclusion/reload) surface that produces a
+        // `FrontmatterFenceMismatch` must keep the typed error in the chain so
+        // the CLI walker can render the rich Darkmatter block instead of a flat
+        // string.
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            PathBuf::from("nested.md"),
+            PathBuf::from("nested.md"),
+            "----\nname: x\n----\n".to_string(),
+        );
+        let md_err = MarkdownError::FrontmatterFenceMismatch {
+            ctx,
+            found: "----".to_string(),
+            line: 1,
+        };
+        let path = PathBuf::from("nested.md");
+        let composed = map_compose_error(&path, md_err);
+
+        match composed {
+            CompositionError::ComposeFailed(inner) => {
+                let msg = inner.to_string();
+                assert!(
+                    msg.contains("----"),
+                    "typed error must name the offending fence: {msg}"
+                );
+                assert!(
+                    matches!(
+                        inner,
+                        MarkdownError::FrontmatterFenceMismatch { ref found, .. } if found == "----"
+                    ),
+                    "inner MarkdownError must be FrontmatterFenceMismatch: {inner:?}"
+                );
+            }
+            other => panic!("expected ComposeFailed, got: {other:?}"),
+        }
+    }
 }

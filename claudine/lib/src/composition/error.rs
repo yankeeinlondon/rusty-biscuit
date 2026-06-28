@@ -1378,14 +1378,32 @@ impl CompositionError {
         source: &ResolvedCompositionSource,
         stderr_is_tty: bool,
     ) -> Self {
+        self.enrich_frontmatter_text(&source.original_text, stderr_is_tty)
+    }
+
+    /// Attach a captured frontmatter excerpt from raw source text.
+    ///
+    /// This is used for source-load failures where parsing failed before a
+    /// [`ResolvedCompositionSource`] could be built.
+    pub fn enrich_frontmatter_text(self, source_text: &str, stderr_is_tty: bool) -> Self {
         if matches!(self, CompositionError::WithFrontmatter { .. }) {
             return self;
         }
-        let Some(property) = self.frontmatter_block_spec() else {
+        let Some(spec) = self.frontmatter_block_spec() else {
             return self;
         };
-        match FrontmatterExcerpt::capture(&source.original_text, property.as_deref(), stderr_is_tty)
-        {
+        let excerpt = match spec {
+            FrontmatterHighlight::Line(line) => {
+                FrontmatterExcerpt::capture_line(source_text, line, stderr_is_tty)
+            }
+            FrontmatterHighlight::Property(property) => {
+                FrontmatterExcerpt::capture(source_text, Some(&property), stderr_is_tty)
+            }
+            FrontmatterHighlight::BlockOnly => {
+                FrontmatterExcerpt::capture(source_text, None, stderr_is_tty)
+            }
+        };
+        match excerpt {
             Some(excerpt) => CompositionError::WithFrontmatter {
                 inner: Box::new(self),
                 excerpt,
@@ -1402,16 +1420,15 @@ impl CompositionError {
         }
     }
 
-    /// Whether this error should carry a frontmatter excerpt, and the dotted
-    /// property to highlight within it.
-    ///
-    /// Returns `None` to skip the excerpt entirely; `Some(None)` to show the
-    /// block with no highlighted line; `Some(Some(prop))` to highlight the
-    /// `prop` key. Body-composition errors (`ComposeFailed`,
-    /// `ShellExpansionFailed`) show the frontmatter as context with no
-    /// highlight, since their anchor is in the body.
-    fn frontmatter_block_spec(&self) -> Option<Option<String>> {
+    /// How a frontmatter-rooted error should be excerpted.
+    fn frontmatter_block_spec(&self) -> Option<FrontmatterHighlight> {
         match self {
+            CompositionError::FrontmatterParse(md_err) => match md_err {
+                MarkdownError::FrontmatterFenceMismatch { line, .. } => {
+                    Some(FrontmatterHighlight::Line(*line))
+                }
+                _ => Some(FrontmatterHighlight::BlockOnly),
+            },
             CompositionError::LifecycleInterpolationLeak { property, .. }
             | CompositionError::LifecycleUndefinedVariable { property, .. }
             | CompositionError::LifecycleInvalid { property, .. }
@@ -1429,43 +1446,69 @@ impl CompositionError {
             | CompositionError::LifecycleActionOrder { property, .. }
             | CompositionError::LifecycleInvalidArgs { property, .. }
             | CompositionError::LifecycleErrNotAvailable { property, .. } => {
-                Some(Some(property.clone()))
+                Some(FrontmatterHighlight::Property(property.clone()))
             }
             CompositionError::LifecycleSayConflict(property)
-            | CompositionError::LifecycleUnknownEffect(property, _) => Some(Some(property.clone())),
-            CompositionError::RemovedValidationKey { key, .. } => Some(Some(key.clone())),
-            CompositionError::PromptPropertyMissing
-            | CompositionError::PromptPropertyWrongType(_) => Some(Some("prompt".to_string())),
-            CompositionError::AgentHintWrongType(_)
-            | CompositionError::AgentResolutionFailed { .. } => Some(Some("agent".to_string())),
-            CompositionError::ModelHintWrongType(_) => Some(Some("model".to_string())),
-            CompositionError::InteractiveHintWrongType(_) => {
-                Some(Some("interactive".to_string()))
+            | CompositionError::LifecycleUnknownEffect(property, _) => {
+                Some(FrontmatterHighlight::Property(property.clone()))
             }
-            CompositionError::SchemaLoad { .. } => Some(Some("$schema".to_string())),
-            CompositionError::InlineHashMalformed(_) => Some(Some("hash".to_string())),
+            CompositionError::RemovedValidationKey { key, .. } => {
+                Some(FrontmatterHighlight::Property(key.clone()))
+            }
+            CompositionError::PromptPropertyMissing
+            | CompositionError::PromptPropertyWrongType(_) => {
+                Some(FrontmatterHighlight::Property("prompt".to_string()))
+            }
+            CompositionError::AgentHintWrongType(_)
+            | CompositionError::AgentResolutionFailed { .. } => {
+                Some(FrontmatterHighlight::Property("agent".to_string()))
+            }
+            CompositionError::ModelHintWrongType(_) => {
+                Some(FrontmatterHighlight::Property("model".to_string()))
+            }
+            CompositionError::InteractiveHintWrongType(_) => {
+                Some(FrontmatterHighlight::Property("interactive".to_string()))
+            }
+            CompositionError::SchemaLoad { .. } => {
+                Some(FrontmatterHighlight::Property("$schema".to_string()))
+            }
+            CompositionError::InlineHashMalformed(_) => {
+                Some(FrontmatterHighlight::Property("hash".to_string()))
+            }
             CompositionError::UnsupportedInteractiveSchema { property, .. } => {
-                Some(Some(property.clone()))
+                Some(FrontmatterHighlight::Property(property.clone()))
             }
             CompositionError::MissingProperties {
                 missing,
                 pointer_paths,
                 ..
             } => match (missing.split_first(), pointer_paths.split_first()) {
-                (Some((only, [])), _) => Some(Some(only.name.clone())),
-                (_, Some((only, []))) => Some(Some(pointer_to_dotted(only))),
-                _ => Some(None),
+                (Some((only, [])), _) => Some(FrontmatterHighlight::Property(only.name.clone())),
+                (_, Some((only, []))) => {
+                    Some(FrontmatterHighlight::Property(pointer_to_dotted(only)))
+                }
+                _ => Some(FrontmatterHighlight::BlockOnly),
             },
             CompositionError::SchemaValidation { problems, .. } => match problems.split_first() {
-                Some((only, [])) => Some(Some(pointer_to_dotted(only))),
-                _ => Some(None),
+                Some((only, [])) => Some(FrontmatterHighlight::Property(pointer_to_dotted(only))),
+                _ => Some(FrontmatterHighlight::BlockOnly),
             },
             CompositionError::InlineComposeSequenceMismatch { .. }
             | CompositionError::ComposeFailed(_)
-            | CompositionError::ShellExpansionFailed { .. } => Some(None),
+            | CompositionError::ShellExpansionFailed { .. } => Some(FrontmatterHighlight::BlockOnly),
             _ => None,
         }
     }
+}
+
+/// How a frontmatter-rooted error should be highlighted in the captured excerpt.
+enum FrontmatterHighlight {
+    /// Highlight a dotted frontmatter property key.
+    Property(String),
+    /// Highlight a 1-based document line (used for delimiter-level errors).
+    Line(usize),
+    /// Show the frontmatter block with no line highlighted.
+    BlockOnly,
 }
 
 impl BlockError for CompositionError {
@@ -2440,6 +2483,80 @@ mod tests {
             }
             other => panic!("expected WithFrontmatter, got: {other:?}"),
         }
+    }
+
+    #[test]
+    fn enrich_frontmatter_fence_mismatch_attaches_excerpt() {
+        let source = source_from(
+            "----\nname: cross-platform\ndescription: near-miss fence\n----\n# Body\n",
+        );
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            PathBuf::from("review.md"),
+            PathBuf::from("review.md"),
+            source.original_text.clone(),
+        );
+        let md_err = MarkdownError::FrontmatterFenceMismatch {
+            ctx,
+            found: "----".to_string(),
+            line: 1,
+        };
+        let err = CompositionError::FrontmatterParse(md_err).enrich_frontmatter(&source, true);
+
+        assert!(
+            matches!(err, CompositionError::WithFrontmatter { .. }),
+            "expected WithFrontmatter wrapper, got: {err:?}"
+        );
+        assert!(err.frontmatter_excerpt().is_some(), "expected excerpt attached");
+    }
+
+    #[test]
+    fn enrich_frontmatter_fence_mismatch_highlights_line_one() {
+        let source = source_from(
+            "----\nname: cross-platform\ndescription: near-miss fence\n----\n# Body\n",
+        );
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            PathBuf::from("review.md"),
+            PathBuf::from("review.md"),
+            source.original_text.clone(),
+        );
+        let md_err = MarkdownError::FrontmatterFenceMismatch {
+            ctx,
+            found: "----".to_string(),
+            line: 1,
+        };
+        let err = CompositionError::FrontmatterParse(md_err).enrich_frontmatter(&source, true);
+        let excerpt = err.frontmatter_excerpt().expect("excerpt attached");
+        assert_eq!(
+            excerpt.highlight_line(),
+            Some(1),
+            "line 1 should be highlighted"
+        );
+    }
+
+    #[test]
+    fn enrich_frontmatter_parse_regular_error_gets_block_only_excerpt() {
+        let source = source_from("---\nprompt: |-\n    four spaces\n   three spaces\n---\nbody\n");
+        let yaml_err: biscuit_file::YamlParseError =
+            biscuit_file::serde_yaml_ng::from_str::<biscuit_file::serde_yaml_ng::Value>(
+                "prompt: |-\n    four spaces\n   three spaces\n",
+            )
+            .expect_err("malformed YAML should fail to parse");
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            PathBuf::from("review.md"),
+            PathBuf::from("review.md"),
+            source.original_text.clone(),
+        );
+        let md_err = MarkdownError::FrontmatterParse {
+            ctx,
+            source: yaml_err,
+        };
+        let err = CompositionError::FrontmatterParse(md_err).enrich_frontmatter(&source, true);
+
+        assert!(
+            matches!(err, CompositionError::WithFrontmatter { .. }),
+            "expected WithFrontmatter wrapper, got: {err:?}"
+        );
+        assert!(err.frontmatter_excerpt().is_some(), "expected excerpt attached");
     }
 
     #[test]

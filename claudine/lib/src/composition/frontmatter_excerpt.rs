@@ -54,6 +54,25 @@ impl FrontmatterExcerpt {
         })
     }
 
+    /// Capture a near-miss frontmatter excerpt by line number.
+    ///
+    /// Recognizes a matched dash-only (`----`+) fence pair at the top of the
+    /// document and returns the block with the requested line highlighted.
+    /// This is used for errors like `FrontmatterFenceMismatch` where the
+    /// offending token is the delimiter itself, not a YAML property.
+    ///
+    /// ## Returns
+    ///
+    /// `None` when `source_text` has no matched near-miss dash-only fence pair.
+    pub fn capture_line(source_text: &str, line: usize, stderr_is_tty: bool) -> Option<Self> {
+        let block = capture_near_miss_frontmatter_block(source_text)?;
+        Some(Self {
+            block,
+            highlight_line: Some(line),
+            stderr_is_tty,
+        })
+    }
+
     /// Render the excerpt as a trailing appendix for an error report.
     ///
     /// Returns an empty string in non-TTY output (privacy gating). Otherwise
@@ -78,6 +97,14 @@ impl FrontmatterExcerpt {
             rendered
         };
         format!("\n\n{}", body.trim_end_matches('\n'))
+    }
+}
+
+#[cfg(test)]
+impl FrontmatterExcerpt {
+    /// Test-only accessor for the captured highlight line.
+    pub fn highlight_line(&self) -> Option<usize> {
+        self.highlight_line
     }
 }
 
@@ -111,6 +138,43 @@ pub fn capture_frontmatter_block(text: &str) -> Option<String> {
     }
 
     None
+}
+
+/// Capture a near-miss frontmatter block **including** its `----`+ delimiter lines.
+///
+/// This is the counterpart to [`capture_frontmatter_block`] for the malformed
+/// dash-only fence case. It recognizes a matched pair of four-or-more dash
+/// fences (`----`/`-----`/...) and returns the full block, delimiters included,
+/// so line 1 in the captured block equals line 1 in the source file.
+///
+/// ## Returns
+///
+/// `None` when `text` has no matched near-miss dash-only fence pair at the top
+/// of the document.
+pub fn capture_near_miss_frontmatter_block(text: &str) -> Option<String> {
+    let mut lines = text.split_inclusive('\n');
+
+    let opening = lines.next()?;
+    let opening_trimmed = opening.trim();
+    if !is_dash_only_fence(opening_trimmed) || opening_trimmed.len() < 4 {
+        return None;
+    }
+
+    let mut end = opening.len();
+    for line in lines {
+        end += line.len();
+        if line.trim() == opening_trimmed {
+            let block = &text[..end];
+            return Some(block.strip_suffix('\n').unwrap_or(block).to_string());
+        }
+    }
+
+    None
+}
+
+/// Returns `true` when `text` is non-empty and contains only `-` characters.
+fn is_dash_only_fence(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|b| b == b'-')
 }
 
 /// Locate the 1-based line of a dotted frontmatter property within a captured
@@ -287,5 +351,42 @@ mod tests {
             !rendered.contains('\x1b'),
             "plain appendix must have no escape bytes; got: {rendered:?}"
         );
+    }
+
+    const NEAR_MISS_DOC: &str = "----\nname: cross-platform\ndescription: near-miss fence\n----\n# Body\n";
+
+    #[test]
+    fn capture_line_recognizes_four_dash_fence() {
+        let excerpt = FrontmatterExcerpt::capture_line(NEAR_MISS_DOC, 1, true).unwrap();
+        assert_eq!(excerpt.highlight_line, Some(1));
+        assert!(excerpt.block.starts_with("----\n"), "block must include opening fence");
+        assert!(excerpt.block.ends_with("\n----"), "block must include closing fence");
+    }
+
+    #[test]
+    fn capture_line_none_for_plain_prose() {
+        assert!(FrontmatterExcerpt::capture_line("no frontmatter here\n", 1, true).is_none());
+    }
+
+    #[test]
+    fn capture_line_none_for_valid_three_dash_fence() {
+        assert!(FrontmatterExcerpt::capture_line(DOC, 1, true).is_none());
+    }
+
+    #[test]
+    fn capture_line_appendix_empty_when_not_tty() {
+        let excerpt = FrontmatterExcerpt::capture_line(NEAR_MISS_DOC, 1, false).unwrap();
+        let term = Terminal::new_optimistic(80);
+        assert_eq!(excerpt.render_appendix(&term), "");
+    }
+
+    #[test]
+    fn capture_line_appendix_highlights_fence_line() {
+        let excerpt = FrontmatterExcerpt::capture_line(NEAR_MISS_DOC, 1, true).unwrap();
+        assert_eq!(excerpt.highlight_line, Some(1));
+        let term = Terminal::new_optimistic(80);
+        let rendered = strip_escape_codes(excerpt.render_appendix(&term));
+        assert!(rendered.contains("name:"), "yaml block missing: {rendered}");
+        assert!(rendered.contains("----"), "fence line missing: {rendered}");
     }
 }
