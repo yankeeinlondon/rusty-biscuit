@@ -37,6 +37,7 @@ Lifecycle strings keep their authored `{{ … }}` spans through the prepare stag
 
 - **Communication and action bodies** (`say`, `message`, `notify`, `stderr`, `info`, side-effect args, …) resolve at the instant the event fires, against the live document state plus the in-scope late-binding globals. Resolution is **just-in-time**, not a single snapshot: a `set_frontmatter` run by stack action #1 is visible to action #2 in the same event's stack.
 - **Resolution fails closed.** A malformed expression, an unknown function, an unknown root (a typo), or a late-binding global used outside its legal event fails the event with a typed error *before any side effect is dispatched* — a lifecycle string never silently renders empty for these cases. A *known* surface (a declared frontmatter key, `ctx`/`env`/`doc`, or an in-scope late-binding global) that resolves to `null`/empty still renders empty, as today. To tolerate an *unknown* optional name, opt in with explicit fallback syntax: `{{ maybe || '' }}`.
+- **An evaluation error halts the run on every phase.** This fail-closed raise is an *expression-layer* error (a crashed `when:` guard or interpolation), distinct from a side-effect dispatch failure (below). It is surfaced to stderr as a styled error **at the point of error — before the catch events (`failure`/`finalize`) fire — and exactly once**, so the original crash is visible ahead of any catch-event output rather than buried beneath it. The run exits non-zero. On terminal-phase events (`success`/`failure`/`finalize`/`loop`) it does **not** retroactively fire `failure` (the provider already ran) but does fire `finalize` once with the error exposed as the `err` global, so an author can catch it. If a catch event *itself* raises a new evaluation error, that later crash is the surfaced (and exit-determining) one. A raise inside `finalize` itself surfaces and halts without re-entering `finalize`. A `when:` that evaluates cleanly to `false` is *not* a raise — it just skips its item, unchanged.
 
 ### The `shell` exception
 
@@ -77,7 +78,7 @@ A `stack` is an ordered list of conditional actions executed after the top-level
 
 - `when` — an optional Darkmatter condition expression. Omitted means the item always runs.
 - `action` — a single action or a list of actions.
-- `no_error` — when `true`, an errored action is logged but does not stop the stack or change the composition outcome.
+- `no_error` — when `true`, a side-effect **dispatch** failure (a channel/TTS/shell action that evaluated fine but whose effect failed) is logged but does not stop the stack or change the composition outcome. It does **not** suppress an expression-layer evaluation error (a crashed `when:` or interpolation) — those always halt.
 
 ```yaml
 success:
@@ -247,7 +248,7 @@ start:
 
 ### `no_error`
 
-The `no_error` flag can be set on any action category. When `true`, an unintentional action error is logged but does not stop the stack or change the composition outcome.
+The `no_error` flag can be set on any action category. When `true`, an unintentional side-effect **dispatch** failure is logged but does not stop the stack or change the composition outcome. Its scope is the side-effect layer only: an expression-layer evaluation error (a crashed `when:` guard or a `{{ … }}` interpolation that raised) always halts and is never suppressed by `no_error`.
 
 ```yaml
 start:
