@@ -58,3 +58,81 @@ The importance of this task means that finding the "right solution" over the "ex
 > Note: remember we do not have an installed user base for Claudine and Darkmatter yet so we have the freedom to make breaking changes where necessary to achieve our goals. That doesn't mean we should strive for doing things in a breaking manner but if doing so provides notable benefits then this solution should be considered.
 
 ## Task
+
+The fix is **not** a better string for the one failure above — it is a structural change to
+how **Darkmatter** and **Claudine** produce, carry, render, and classify errors, so that
+every error in the class becomes (a) legible to a human and (b) handleable by a program. The
+full design lives in the companion documents below; this section states the goal, scope, and
+acceptance criteria, and indexes those documents.
+
+### Two axes
+
+1. **Rendering (legibility).** Report the user's real mistake as the primary error — a
+   cause-named headline, a *focused* context excerpt (only the involved keys plus their
+   `$schema` parent), OSC8-linked paths, and a cause-specific "did you mean?" hint — never
+   the mechanism ("transform failed") that surfaced it. Designed in
+   [`integrated-design.md`](./integrated-design.md).
+2. **Handleability (classification).** Expose every error through stable facets
+   (`category` / `code` / `disposition` / `origin` / `detail`) so an API caller or a prompt
+   author can react to it — tap a pattern, target a code, or target an instance. Contract
+   **ratified and locked** in [`error-catalog.md`](./error-catalog.md).
+
+The two axes share **one taxonomy**: the typed error is the single source of truth for both.
+There is no parallel string-matched classification layer — building one would recreate the
+control-flow-by-string bug (`is_fatal_eval_error`) this effort exists to remove.
+
+### Scope
+
+- **Both libraries.** Darkmatter owns the diagnostic substrate (typed causes, the focused
+  excerpt, file suggestions, the `Diagnostic` facet trait); Claudine *preserves and
+  transports* typed errors via `#[from]`/`#[source]`, never flattening them to `String`.
+- **Breaking changes are acceptable** where they remove lossy boundaries (no installed user
+  base yet); prefer non-breaking where it costs nothing.
+- We **extend** the existing `BlockError` / `StatusBlock` / `SourceContext` substrate — no
+  `miette` or new diagnostic framework.
+
+### Related design documents
+
+- [`error-patterns.md`](./error-patterns.md) — the eleven recurring anti-patterns (the *why*).
+- [`design-1.md`](./design-1.md) · [`design-2.md`](./design-2.md) — the two architect proposals.
+- [`design-transcript.md`](./design-transcript.md) — how the two were synthesized.
+- [`integrated-design.md`](./integrated-design.md) — **the chosen design**: type model,
+  rendering contract, the fatality correctness gate, and phasing. *Start here for
+  implementation.*
+- [`error-structure.md`](./error-structure.md) — the handleability model and the structural
+  requirements recovery imposes (absolute-time `reset_at`; `detail` rich enough to author a
+  corrective `resume` message now or hand it to a human later).
+- [`error-catalog.md`](./error-catalog.md) — the **ratified, locked** contract: the facet
+  enums (12 categories · 5 dispositions · 5 origins · 3 severities), the ~38 dotted codes,
+  and each code's `detail` schema.
+
+### Delivery
+
+Phased and independently shippable; the sequence and rationale are in
+[`integrated-design.md`](./integrated-design.md) §13. Phases 1–3 resolve the literal example
+above; 4–6 generalize the rendering to the whole class; 7 adds handleability by implementing
+the ratified [`error-catalog.md`](./error-catalog.md); 8 closes the late-binding corners.
+
+### Success criteria
+
+(full list in [`integrated-design.md`](./integrated-design.md) §15)
+
+- The reference failure renders with a root-cause headline ("invalid file path"), names the
+  receiving frontmatter key, links the prompt file (OSC8 where capable), shows a *focused*
+  excerpt (`$schema`/`spec`/`iteration`), and suggests likely files — **identically in
+  `md compose` and `claudine compose`**.
+- Fatal-vs-warn behavior is provably unchanged by the typing refactor (characterization
+  matrix green).
+- No new string-only lower-layer error variants; the DM↔Claudine boundary lint passes.
+- The win generalizes across `absolute()` / `relative()` / `load_markdown` via the shared
+  `FileReferenceDiagnostic`.
+- Every handleable error exposes the ratified `category`/`code`/`disposition`/`origin`/
+  `detail` facets via `Diagnostic`, projected to `err.*`, so a handler can tap a pattern,
+  target a code, or target an instance — with no string-message parsing.
+
+### Non-goals
+
+- The handler/dispatch mechanism and the rendezvous daemon. (The `until: <timestamp>`
+  recovery dimension is *noted* in [`integrated-design.md`](./integrated-design.md) §13 and
+  [`error-structure.md`](./error-structure.md) §11, but designed elsewhere.)
+- The postcondition *checks* that raise the `document.*` / `vcs.*` expectation errors.

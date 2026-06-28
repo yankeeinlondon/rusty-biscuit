@@ -6,8 +6,12 @@
 > grounded in [`error-patterns.md`](./error-patterns.md) and the target in
 > [`spec.md`](./spec.md). Every code claim below was verified against the tree.
 >
-> Companion: [`design-transcript.md`](./design-transcript.md) records *why* each
-> piece was kept, dropped, or invented.
+> Companions: [`design-transcript.md`](./design-transcript.md) records *why* each piece
+> was kept, dropped, or invented; [`error-structure.md`](./error-structure.md) designs the
+> *handleability* axis (classifying errors so callers/authors can react to them);
+> [`error-catalog.md`](./error-catalog.md) is the **ratified, locked** contract — the final
+> facet enums, dotted-code list, and `detail` schemas. Their impacts are folded into this
+> document (§2 principle 6, §3, §5, §5.5, §9, §13).
 
 ---
 
@@ -52,6 +56,11 @@ decision currently made by string-prefix-matching.
    and did-you-mean run only when a block is actually rendered; the hot eval loop stays cold.
 5. **Behavior changes are gated by characterization tests, not assumed safe.** Especially
    the fatal-vs-warn decision (§5).
+6. **One taxonomy serves rendering *and* handling.** The same typed error that renders is
+   the source of truth for *classification* (§5.5). Handlers bind to a projection of the
+   typed error (`err.*`), never to a parallel string-matched layer — building one would
+   recreate the exact control-flow-by-string bug (`is_fatal_eval_error`) this effort exists
+   to remove. See [`error-structure.md`](./error-structure.md).
 
 ---
 
@@ -118,6 +127,11 @@ Why this shape:
   `Ok(None)` (valid-but-absent) and already has `base_dir`/`fallback_dir` in scope — it
   currently `format!`s them away. The typed variant simply *keeps what it already has*.
   No new plumbing for P6/P11.
+
+  **Dual role (handleability, §5.5):** `FileReferenceDiagnostic` is also the `detail`
+  payload for the diagnostic code `composition.invalid_file_reference`. Its fields project
+  directly to `err.detail.reference`/`.kind`/`.suggestions` — the render fields and the
+  handle fields are *the same fields*, captured once.
 
 - **`Other` catch-all (kept from Design 1, missing in Design 2).** Verified: ~80 builtins
   return `Result<Value, String>`. Typing all of them in one change is a giant, risky diff.
@@ -195,12 +209,66 @@ Mandatory sequence (do not reorder):
    returns `true` only for the variants the matrix says are fatal today (`UnknownFunction`).
    The matrix re-run proves no drift.
 
+**Fatality is a projection of `disposition` (§5.5), not a bespoke predicate.** "Fatal in
+lenient compose mode" ≡ "this error's `disposition` halts composition." `UnknownFunction`
+is `Correctable`+`origin=Author` and halts; missing-file is *also* `Correctable`+`Author`
+but warns — so the matrix above is literally measuring two same-disposition errors with
+different halting behavior, which is exactly the drift to pin. Define
+`is_authoring_fatal()` *in terms of* the disposition facet rather than alongside it, so the
+correctness gate and the handling taxonomy can never disagree.
+
 **Product decision to surface, not silently make:** *should a missing-file reference be
 fatal in lenient (non-`fail_fast`) body interpolation?* Today it is a warning. Promoting it
 to fatal is defensible (a missing file is almost always a real mistake) but it is a
 *behavior change with a blast radius*, not a refactor. Recommendation: **preserve current
 behavior in the typing phase; raise the promotion as its own deliberate, separately-tested
 phase.** Flag for Ken's call.
+
+---
+
+## 5.5. Handleability — errors are classified, not only rendered
+
+Full treatment in [`error-structure.md`](./error-structure.md); the impacts on *this*
+design are:
+
+**A `Diagnostic` supertrait of `BlockError`.** Every handleable error gains, alongside
+`status_block()`, five classification facets:
+
+```rust
+pub trait Diagnostic: BlockError {
+    fn category(&self) -> Category;        // closed enum — coarse domain (unifies SemanticErrorKind ∪ BadgeCategory)
+    fn code(&self) -> &'static str;        // stable dotted id, e.g. "composition.invalid_file_reference" — API contract
+    fn disposition(&self) -> Disposition;  // Transient | Throttled | Correctable | NeedsInput | Unrecoverable
+    fn origin(&self) -> Origin;            // Provider | Author | Caller | Environment | Internal
+    fn detail(&self) -> ErrorDetail;       // typed instance payload → err.detail.*
+    fn severity(&self) -> Severity { /* default from disposition */ }
+}
+```
+
+These are *not* a new system: they unify the three partial taxonomies already in the tree
+(`SemanticErrorKind`, `BadgeCategory`+`BadgeSeverity`, `RateLimitInfo`) and expose them
+uniformly. The throttle-timing data Ken wants (*"when the cap lifts"*) already exists as
+`RateLimitInfo.reset_at` — it just needs surfacing on `err.detail`. **The concrete enum
+values, the full dotted-code list, and each code's `detail` schema are ratified and locked
+in [`error-catalog.md`](./error-catalog.md)** (12 categories, 5 dispositions, 5 origins,
+3 severities, ~38 codes); this section is the trait shape, that file is the contract.
+
+**Same chain, one walk.** Classification delegates through transparent wrappers to the
+meaningful cause by the *identical* rule as rendering (§9). So the deepest-cause the
+renderer picks is the same error a handler binds to — `Diagnostic: BlockError` makes this
+structural, not a second registry.
+
+**Impacts already absorbed elsewhere in this doc:**
+- `ExpressionError`/`FileReferenceDiagnostic` (§3) double as the `detail` payload for
+  `composition.*` codes — render fields = handle fields, captured once.
+- `is_authoring_fatal()` (§5) becomes a projection of `disposition`.
+
+**New constraint this introduces: codes are a public contract.** Unlike `Display` strings
+(free to change), `category`/`code`/`disposition`/`origin` values and `detail` field names
+become versioned API the moment an author writes `when: err.code == "…"`. This needs a
+single-source registry (modeled on the `Described` catalog) and additive-only evolution —
+a discipline the render-only work did not require. The boundary lint (§10) extends to also
+flag a new error variant that does not implement `Diagnostic`.
 
 ---
 
@@ -311,6 +379,11 @@ So the block is *composed from cause + scope*, not pure-forwarded. This is a sma
 explicit change to the delegation contract in `as_block_error`/`status_block` and gets its
 own test so a generic wrapper never shadows the useful leaf.
 
+**The same delegation governs classification (§5.5).** A transparent wrapper forwards its
+cause's `category`/`code`/`disposition`/`origin`/`detail`; a layer that deliberately
+classifies (e.g. the provider layer deciding "this is `cap.plan_limit`") owns its facets
+and does not delegate. One cause-chain walk serves both render and handle.
+
 No new top-level renderer is introduced; `BlockError` → `as_block_error` → deepest-block
 walk stays the shared boundary, and it *already converges* the two CLIs (verified). Once
 causes survive, both improve by construction (kills P10).
@@ -389,11 +462,25 @@ anywhere**.
 4. **File did-you-mean + auto-linked fields (§8).** Highest user-visible payoff per line.
 5. **`SourceContext::focused_yaml_excerpt` (§7).** The P5 fix; `md` CLI benefits too.
 6. **Boundary transport cleanup + anti-pattern lint (§10).** Lock the boundary.
-7. **Excerpt convergence + `SourceRef::Effective` late-binding path (§6, §7).** Hardest
+7. **`Diagnostic` trait + `err.*` projection + taxonomy unification (§5.5).** Implement the
+   facets on the typed errors (folding in `SemanticErrorKind`/`BadgeCategory`/
+   `RateLimitInfo`), the code registry, and the introspection surface (`claudine errors`).
+   Needs the typed substrate from phases 2–3, so it lands here. The *enum/code design is
+   already ratified and locked* in [`error-catalog.md`](./error-catalog.md) — implement to
+   that contract; evolve it additively only.
+8. **Excerpt convergence + `SourceRef::Effective` late-binding path (§6, §7).** Hardest
    corners, last, on a typed substrate.
 
-Phases 1–3 resolve the literal spec example; 4–6 generalize to the whole class; 7 closes
-the corners.
+Phases 1–3 resolve the literal spec example; 4–6 generalize the *rendering* to the whole
+class; 7 adds *handleability*; 8 closes the corners.
+
+**Downstream of phase 7 (handler-side, out of scope here):** consuming the facets in
+recovery requires a control-action **`when` dimension** — `defer`/`retry`/`resume` accepting
+`until: <timestamp>` (absolute) alongside today's relative `delay`, so a `throttled` error
+can "resume at `err.reset_at`." This is a handler/rendezvous concern, not error structure;
+the structural prerequisites it depends on (a serializable absolute `reset_at`; a `detail`
+schema rich enough to author a corrective `resume` message now or hand it to a human later)
+are specified in [`error-structure.md`](./error-structure.md) §11.
 
 ---
 
@@ -409,6 +496,11 @@ the corners.
   behavior; real regression risk.
 - **Parser typing** — deferred behind `Parse(String)`; revisit only if parser errors prove
   a meaningful share of author confusion.
+- **Taxonomy ratification (§5.5)** — ✅ **resolved.** The `category`/`disposition`/`origin`/
+  `severity` enums, the dotted-code list, and each code's `detail` schema are ratified and
+  locked in [`error-catalog.md`](./error-catalog.md) (all 8 decisions confirmed); evolution
+  is additive-only. Detail representation is recommended serde→Value (error-structure §2.3),
+  with the typed-enum alternative noted but not chosen.
 
 ---
 
@@ -423,3 +515,7 @@ the corners.
 - No new string-only lower-layer error variants; the boundary lint passes.
 - The win generalizes: `absolute()`/`relative()`/`load_markdown` failures inherit the same
   diagnostic from the shared `FileReferenceDiagnostic`.
+- Each handleable error exposes stable `category`/`code`/`disposition`/`origin`/`detail`
+  facets via `Diagnostic`, projected to `err.*`, so a handler can tap a pattern
+  (`err.disposition == "throttled"`), target a code (`err.code == "cap.plan_limit"`), or
+  target an instance (`err.detail.property == "status"`) — with no string-message parsing.
