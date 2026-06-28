@@ -1875,7 +1875,7 @@ mod tests {
     fn distinct_stream_errors_do_not_trip_backstop() {
         let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
         let mut bridge =
-            OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx));
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx), None);
 
         // MAX distinct errors in one step: each resets the counter to 1, so the
         // threshold is never crossed and the channel stays quiet.
@@ -1895,7 +1895,7 @@ mod tests {
     fn fingerprint_change_resets_run_then_new_run_can_trip() {
         let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
         let mut bridge =
-            OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx));
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx), None);
         let first = distinct_stream_error(1);
         let second = distinct_stream_error(2);
 
