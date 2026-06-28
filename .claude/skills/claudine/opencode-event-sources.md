@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-34278ee005d403b5
-last_updated: 2026-06-21
+hash: ef46db3751d8e999-07c437d227c79e76
+last_updated: 2026-06-27
 ---
 
 # OpenCode Event Sources
@@ -128,6 +128,62 @@ OpenCode's unbounded backoff retries so a *future* error vocabulary the
 classifier does not recognize as terminal still degrades to a bounded abort
 rather than an indefinite hang. The counter resets on any genuine step
 transition. See [`fixes/2026-06-21-opencode-log-fix`](../../../claudine/fixes/2026-06-21-opencode-log-fix/spec.md).
+
+### Stalled-generation backstop (live-but-dead guard)
+
+A second, independent stderr backstop catches the **live-but-dead** shape: a
+run that keeps retrying a *dropped generation*. OpenCode re-emits a
+`service=llm ... stream` (`LlmCall` with `is_stream == true`) record on every
+retry, and those retries keep the byte heartbeat alive, so `step_timeout`
+never fires — yet no assistant text, tool call, or step advance is produced.
+The classifier sees no terminal error, so `RepeatedStreamError` does not fire
+either; the run is alive on the wire but producing nothing.
+
+The bridge counts streamed `LlmCall` records since the last progress event in
+`generation_count_since_progress`. The guard trips only when **both**
+conditions hold on the same `llm_call_start`:
+
+1. **Retry churn** — `generation_count_since_progress >= MAX_GENERATIONS_WITHOUT_PROGRESS` (`4`).
+2. **Progress silence** — `now - last_progress_at >= stall_timeout` (default `10m`).
+
+Either condition alone never fires — the count condition exempts a single
+legitimately-slow generation, and a long tool emitting **no** `LlmCall`
+records never trips even past `stall_timeout`. The two conditions are
+anti-correlated with healthy output: any stdout-origin progress would reset
+the count before it could reach the threshold.
+
+**Reset taxonomy.** The two progress clocks (`last_progress_at` +
+`generation_count_since_progress`) live in a shared `StalledGenerationProgress`
+cell so both producers can clear them. On the **stderr** bridge,
+`reset_stalled_generation_progress` advances `last_progress_at` and zeroes the
+count on the bridge-visible progress class — a genuine `StepLoop` advance
+(after the `(session_id, step)` dedup passes), `StepExit`, and subagent
+lifecycle (`SubagentStart` / `SubagentStop`). On the **stdout** NDJSON stream
+(a different reader thread), a `StalledProgressObserverSink` built from the same
+cell resets it for each progress-class semantic event
+(`SemanticEvent::is_stdout_progress_class`: `OutputText`, `Reasoning`,
+`ToolCall`, `ToolResult`, `SubagentStart`, `SubagentStop`, `FileChange`,
+`PlanUpdate`). Without the stdout-side reset a run could make real stdout
+progress and still trip on a later `llm_call_start`, because the stderr bridge
+never sees stdout events. Liveness-only events do **not** reset on either
+producer: another `LlmCall`, a deduped/repeated `StepLoop` for the same
+`(session_id, step)`, `http_response`, `permission_evaluated`, `service=bus`
+lines, raw bytes, and the stdout `Info`/`Warning`/`Error`/session-turn-envelope
+events.
+
+On trip the bridge emits a terminal `SemanticEvent::Error`
+(`SemanticErrorKind::AgentNative`, label **"Stalled Generation"**, carrying
+`generation_count` and the stall duration plus safe OpenCode metadata —
+session id, step, agent, provider id, model id, mode; never prompt text or
+tool payloads) and fires `EarlyTermination::StalledGeneration`
+(`error_kind = "stalled_generation"`, maps to `ProcessTermination::Aborted` →
+fail-fast `AgentFailure`, **never** `handle_timeout:`). The two backstops are
+fully independent: `LlmCall` churn never clears `consecutive_stream_errors`,
+and a `stream error` never clears `generation_count_since_progress`. Both
+share the bridge's single `fire_early_termination` idempotency, so at most one
+terminal abort is emitted per bridge. See
+[timeouts.md — OpenCode stalled-generation backstop](../../../claudine/docs/topics/timeouts.md#opencode-stalled-generation-backstop)
+and the [spec](../../../claudine/features/2026-06-22-live-but-dead/spec.md).
 
 ### The `kimi-for-coding` gap
 

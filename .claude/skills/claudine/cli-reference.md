@@ -1,5 +1,5 @@
 ---
-hash: ef46db3751d8e999-78665c4e30346eb0
+hash: ef46db3751d8e999-cd86eb7d6e54dbfb
 last_updated: 2026-06-27
 ---
 # Claudine CLI Reference
@@ -321,6 +321,7 @@ Opt-in flag (composition commands and the provider wrappers) that prints a **rec
 - `-m, --model <MODEL>`
 - `-s, --system-prompt <PROMPT|FILE>`
 - `-t, --timeout <DURATION>`
+- `--stall-timeout <DURATION>` (OpenCode-only stalled-generation backstop; `0s` disables; env `CLAUDINE_OPENCODE_STALL_TIMEOUT`, frontmatter `stall_timeout`, built-in `10m`)
 - `--dry-run`, `-q, --quiet`, `--silent`, `--perf`
 
 ---
@@ -395,6 +396,7 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 | `--asp <FILE>` | Append a system prompt from a file (alias: `--append-system-prompt`) |
 | `--rsp <FILE>` | Replace the provider's system prompt with contents from a file (alias: `--replace-system-prompt`) |
 | `-t, --timeout <DURATION>` | Wall-clock timeout like 30s, 5m, 2h (non-interactive only) |
+| `--stall-timeout <DURATION>` | OpenCode-only stalled-generation backstop (live-but-dead retry-churn guard); built-in `10m`, `0s` disables. Inert config on non-OpenCode providers. See [Timeouts](../../../claudine/docs/topics/timeouts.md#opencode-stalled-generation-backstop) |
 | `-o, --output <FORMAT>` | Set output format (json, text, stream) |
 | `--include <ENV_NAME>` | Keep a sensitive env var name that would otherwise be filtered |
 | `--mcp` | Compose a Claudine-managed MCP session from the effective defaults |
@@ -644,6 +646,7 @@ Rich formatting uses biscuit-terminal components (Table, Prose with `{{bold}}` /
 | Variable | Description |
 |----------|-------------|
 | `RUST_LOG` | Diagnostic tracing level (also set via the `--debug <LEVEL>` flag) |
+| `CLAUDINE_OPENCODE_STALL_TIMEOUT` | OpenCode stalled-generation backstop default (duration string; `0s` disables). Overridden by `--stall-timeout` / frontmatter `stall_timeout`; built-in `10m` |
 | `HOME` | Used for path resolution |
 | `PATH` | Must include `claudine` binary |
 | `AGENT` | Injected by wrapper: provider name |
