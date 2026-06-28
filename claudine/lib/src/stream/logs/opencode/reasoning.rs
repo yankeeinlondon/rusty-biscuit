@@ -215,12 +215,23 @@ pub struct OpenCodeLogBridge<S: SemanticEventSink> {
     /// HTTP-span boundary inside the same reasoning step, so we suppress
     /// repeats and only re-emit when `step` actually advances.
     last_step_per_session: BTreeMap<String, u32>,
-    /// Count of consecutive `message="stream error"` records observed with no
-    /// intervening step advance. Bounds OpenCode's unbounded backoff retries so
-    /// an error vocabulary the classifier does not recognize as terminal still
-    /// degrades to a fail-fast abort instead of an indefinite hang. Reset to 0
-    /// on any genuine step transition (see [`Self::on_step_loop`]).
+    /// Count of consecutive *identical* `message="stream error"` records
+    /// observed with no intervening step advance. Bounds OpenCode's unbounded
+    /// backoff retries of the **same** terminal failure so an error vocabulary
+    /// the classifier does not recognize as terminal still degrades to a
+    /// fail-fast abort instead of an indefinite hang. Only repeats whose
+    /// fingerprint (see [`stream_error_fingerprint`]) matches
+    /// [`Self::last_stream_error_fingerprint`] accumulate; a genuinely different
+    /// stream error resets the run to 1. Reset to 0 on any genuine step
+    /// transition (see [`Self::on_step_loop`]).
     consecutive_stream_errors: u32,
+    /// Fingerprint of the most recent `stream error` record, used to decide
+    /// whether the next stream error continues the current run (matching
+    /// fingerprint → increment) or starts a fresh one (changed fingerprint →
+    /// reset to 1). `None` until the first stream error and after a step
+    /// transition. See [`stream_error_fingerprint`] for what the fingerprint
+    /// captures (and why the per-line timestamp is excluded).
+    last_stream_error_fingerprint: Option<String>,
 }
 
 /// Consecutive unrecognized `stream error` records tolerated before the bridge
@@ -261,6 +272,7 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             child_sessions: BTreeMap::new(),
             last_step_per_session: BTreeMap::new(),
             consecutive_stream_errors: 0,
+            last_stream_error_fingerprint: None,
         }
     }
 
@@ -310,13 +322,23 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         // Defense-in-depth backstop. A `stream error` record that the
         // classifier already deemed terminal fires early-termination through
         // its own handler below (idempotent via `early_terminate_fired`). This
-        // guard catches the residual case: repeated stream errors the
-        // classifier treats as non-terminal (or an unknown future shape), which
-        // OpenCode would retry under unbounded backoff. Count consecutive
-        // failures and force a fail-fast abort once the threshold is crossed.
+        // guard catches the residual case: repeated *identical* stream errors
+        // the classifier treats as non-terminal (or an unknown future shape),
+        // which OpenCode would retry the same failure under unbounded backoff.
+        // Only consecutive identical failures accumulate — a genuinely
+        // different stream error starts a fresh run (count = 1), so five
+        // distinct one-off errors in a step do not trip the abort.
         if is_stream_error(&record) {
-            self.consecutive_stream_errors =
-                self.consecutive_stream_errors.saturating_add(1);
+            let fingerprint = stream_error_fingerprint(&record);
+            if self.last_stream_error_fingerprint.as_ref() == Some(&fingerprint) {
+                self.consecutive_stream_errors =
+                    self.consecutive_stream_errors.saturating_add(1);
+            } else {
+                // New (or first) fingerprint: this error is the first of a new
+                // run rather than a continuation of the previous one.
+                self.consecutive_stream_errors = 1;
+            }
+            self.last_stream_error_fingerprint = Some(fingerprint);
             if self.consecutive_stream_errors >= MAX_CONSECUTIVE_STREAM_ERRORS
                 && !self.early_terminate_fired
             {
@@ -808,8 +830,11 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
 
         // A genuine step transition is forward progress: clear the
         // stream-error backstop counter so transient retries that eventually
-        // succeed do not accumulate toward a false abort.
+        // succeed do not accumulate toward a false abort. Drop the fingerprint
+        // too, so a post-step error identical to a pre-step one starts a fresh
+        // run rather than resuming the old count.
         self.consecutive_stream_errors = 0;
+        self.last_stream_error_fingerprint = None;
 
         let mut extra_map = base_extra(record, "step_loop");
         extra_map.insert("session_id".into(), Value::String(session_id.clone()));
@@ -1000,6 +1025,26 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
 fn is_stream_error(record: &OpenCodeLogRecord) -> bool {
     record.message == "stream error"
         || record.tags.get("message").map(|v| v.trim_matches('"')) == Some("stream error")
+}
+
+/// Stable identity of a `stream error` record for the consecutive-repeat
+/// backstop. Two real retries of the *same* terminal failure must share a
+/// fingerprint; two genuinely different failures must not.
+///
+/// Built from the identifying tags (`providerID`, `modelID`, `session.id`) plus
+/// the provider error text ([`error_context`]). The raw line is deliberately
+/// **not** used: it carries a per-record `timestamp=`/`+Nms` prefix that differs
+/// on every retry, which would make two otherwise-identical backoff retries look
+/// distinct and defeat the backstop.
+fn stream_error_fingerprint(record: &OpenCodeLogRecord) -> String {
+    let tag = |key: &str| record.tags.get(key).map(String::as_str).unwrap_or("");
+    format!(
+        "{}\u{1f}{}\u{1f}{}\u{1f}{}",
+        tag("providerID"),
+        tag("modelID"),
+        tag("session.id"),
+        error_context(record).unwrap_or_default(),
+    )
 }
 
 /// Render the inline message string for a `service=llm ... stream` event.
@@ -1435,6 +1480,68 @@ mod tests {
             rx.try_recv().is_err(),
             "step advance should have reset the backstop counter",
         );
+    }
+
+    /// Build a distinct (non-identical) `stream error` line whose error text
+    /// varies by `n`. Used to prove the backstop only accumulates *identical*
+    /// failures; the cap needles do not match `transient glitch N`.
+    fn distinct_stream_error(n: usize) -> String {
+        format!(
+            r#"timestamp=2026-06-22T04:07:15.161Z level=ERROR run=da37e0dd message="stream error" providerID=acme modelID=m1 session.id=ses_x small=false agent=build mode=primary error.error="AI_APICallError: transient glitch {n}""#,
+        )
+    }
+
+    #[test]
+    fn distinct_stream_errors_do_not_trip_backstop() {
+        let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
+        let mut bridge =
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx));
+
+        // MAX distinct errors in one step: each resets the counter to 1, so the
+        // threshold is never crossed and the channel stays quiet.
+        for n in 0..MAX_CONSECUTIVE_STREAM_ERRORS {
+            assert_eq!(
+                bridge.ingest(&distinct_stream_error(n as usize)),
+                StderrIngestOutcome::Consumed,
+            );
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "distinct stream errors must not accumulate toward the backstop",
+        );
+    }
+
+    #[test]
+    fn fingerprint_change_resets_run_then_new_run_can_trip() {
+        let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
+        let mut bridge =
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx));
+        let first = distinct_stream_error(1);
+        let second = distinct_stream_error(2);
+
+        // (MAX-1) identical "first" errors — one short of the threshold.
+        for _ in 0..(MAX_CONSECUTIVE_STREAM_ERRORS - 1) {
+            bridge.ingest(&first);
+        }
+        // One different error resets the run to 1.
+        bridge.ingest(&second);
+        // (MAX-1) more identical-to-"second" errors bring the new run to MAX-1.
+        for _ in 0..(MAX_CONSECUTIVE_STREAM_ERRORS - 2) {
+            bridge.ingest(&second);
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "fingerprint change must reset the counter mid-run",
+        );
+
+        // One more matching "second" reaches MAX of the new fingerprint and trips.
+        bridge.ingest(&second);
+        match rx.try_recv() {
+            Ok(EarlyTermination::RepeatedStreamError { count }) => {
+                assert_eq!(count, MAX_CONSECUTIVE_STREAM_ERRORS);
+            }
+            other => panic!("expected RepeatedStreamError, got {other:?}"),
+        }
     }
 
     #[test]
