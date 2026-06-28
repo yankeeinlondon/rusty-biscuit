@@ -272,16 +272,12 @@ fn run_phase_1c_attempt(
                 Err(other) => return Err(other.into()),
             };
 
-        let compose_options = {
-            let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
-            for (key, value) in &env_overrides {
-                ctx.env_mut().insert(key.clone(), value.clone());
-            }
-            let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
-                .with_source_file(&step_source.resolved_path);
-            opts = opts.with_set_overrides(step_overrides.clone());
-            opts
-        };
+        let compose_options = build_template_preflight_options(
+            &env_overrides,
+            &step_source.resolved_path,
+            &step_overrides,
+            launch_area,
+        );
 
         let approval_options = super::super::build_harness_shell_options_with_cache(
             &step_source.resolved_path,
@@ -453,6 +449,35 @@ pub(super) fn find_first_unsupported(
     None
 }
 
+/// Build the Darkmatter `ComposeOptions` for a step's template SHELL preflight.
+///
+/// The launch-area fallback is anchored on `file`-typed schema validation and
+/// read-side interpolation so an area-relative path resolves document-first then
+/// launch-area — matching this step's `pre_validate_schema` call and the final
+/// `PrepareOptions.file_ref_fallback_dir`. Without it the preflight compose would
+/// fall back to the (already-mutated) process CWD and could discover different
+/// shell commands or pass/fail schema validation inconsistently with the
+/// corrected prepare path. The fallback is applied only when `launch_area` is
+/// present, matching `PrepareOptions`'s `launch_area.map(...)`.
+fn build_template_preflight_options(
+    env_overrides: &BTreeMap<String, String>,
+    source_path: &std::path::Path,
+    set_overrides: &serde_json::Value,
+    launch_area: Option<&std::path::Path>,
+) -> darkmatter::markdown::compose::ComposeOptions {
+    let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
+    for (key, value) in env_overrides {
+        ctx.env_mut().insert(key.clone(), value.clone());
+    }
+    let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
+        .with_source_file(source_path);
+    if let Some(launch_area) = launch_area {
+        opts = opts.with_file_ref_fallback_dir(launch_area.to_path_buf());
+    }
+    opts = opts.with_set_overrides(set_overrides.clone());
+    opts
+}
+
 fn merge_overrides(
     base: Option<&serde_json::Value>,
     collected: serde_json::Map<String, serde_json::Value>,
@@ -465,4 +490,154 @@ fn merge_overrides(
         out.insert(k, v);
     }
     serde_json::Value::Object(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_template_preflight_options;
+    use std::collections::BTreeMap;
+
+    use darkmatter::markdown::Markdown;
+
+    use claudine::composition::resolve_shell_approvals;
+    use claudine::harness::ShellApprovalOptions;
+
+    /// RAII guard that switches the process CWD and restores it on drop
+    /// (including on panic). Tests using it are serialized to avoid racing on
+    /// process-global CWD with other CWD-mutating tests.
+    struct CwdGuard {
+        prior: std::path::PathBuf,
+    }
+
+    impl CwdGuard {
+        fn enter(dir: &std::path::Path) -> Self {
+            let prior = std::env::current_dir().expect("read CWD");
+            std::env::set_current_dir(dir).expect("set CWD");
+            Self { prior }
+        }
+    }
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.prior);
+        }
+    }
+
+    /// Regression for the Phase 1c template-preflight fallback omission.
+    ///
+    /// A sequence step with a `::shell` directive whose `{{ … }}` argument
+    /// depends on a read-side `file_exists` against a launch-area-relative file
+    /// must see
+    /// that file during the template SHELL preflight — exactly as the per-step
+    /// `pre_validate_schema` and the final `PrepareOptions.file_ref_fallback_dir`
+    /// already do. The launch-area-only file is reachable ONLY via the threaded
+    /// fallback, and the resolved/approved command must be CWD-independent.
+    #[test]
+    #[serial_test::serial(preflight_cwd)]
+    fn template_preflight_resolves_via_launch_area_fallback() {
+        let doc_dir = tempfile::TempDir::new().unwrap();
+        let launch_dir = tempfile::TempDir::new().unwrap();
+        let unrelated = tempfile::TempDir::new().unwrap();
+
+        // `spec.md` exists ONLY under the launch-area fallback — not the prompt
+        // (document) directory, not the ambient CWD.
+        std::fs::write(launch_dir.path().join("spec.md"), "# Spec\n").unwrap();
+
+        let source_path = doc_dir.path().join("prompt.md");
+        std::fs::write(
+            &source_path,
+            "::shell echo {{ file_exists(spec) }}\n",
+        )
+        .unwrap();
+
+        // Whitelist `echo` so preflight approves without an interactive handler.
+        std::fs::write(
+            doc_dir.path().join(".darkmatter-shell-whitelist"),
+            "prefix echo\n",
+        )
+        .unwrap();
+
+        let md = Markdown::try_from(source_path.as_path()).unwrap();
+        let overrides = serde_json::json!({ "spec": "spec.md" });
+        let approval_options = ShellApprovalOptions {
+            policy_root: Some(doc_dir.path().to_path_buf()),
+            approval_handler: None,
+            ..Default::default()
+        };
+
+        // Switch ambient CWD elsewhere to prove resolution is independent of any
+        // post-launch chdir.
+        let _cwd = CwdGuard::enter(unrelated.path());
+
+        let env_overrides: BTreeMap<String, String> = BTreeMap::new();
+        let opts = build_template_preflight_options(
+            &env_overrides,
+            &source_path,
+            &overrides,
+            Some(launch_dir.path()),
+        );
+        let result =
+            resolve_shell_approvals(Some(&md), Some(&opts), &approval_options, None, None).unwrap();
+
+        assert!(
+            result.approved_commands.contains("echo true"),
+            "template preflight must resolve file_exists(spec) via the launch-area \
+             fallback; approved: {:?}",
+            result.approved_commands,
+        );
+    }
+
+    /// Companion proving the assertion above turns on the fallback specifically.
+    /// WITHOUT the fallback (the pre-fix behavior), the launch-only `spec.md` is
+    /// unreachable from the prompt dir or the unrelated CWD, so `file_exists`
+    /// resolves to `false` and the approved command differs — the exact
+    /// preflight/prepare disagreement the fix closes.
+    #[test]
+    #[serial_test::serial(preflight_cwd)]
+    fn template_preflight_without_fallback_misses_launch_area_file() {
+        let doc_dir = tempfile::TempDir::new().unwrap();
+        let launch_dir = tempfile::TempDir::new().unwrap();
+        let unrelated = tempfile::TempDir::new().unwrap();
+
+        std::fs::write(launch_dir.path().join("spec.md"), "# Spec\n").unwrap();
+
+        let source_path = doc_dir.path().join("prompt.md");
+        std::fs::write(
+            &source_path,
+            "::shell echo {{ file_exists(spec) }}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            doc_dir.path().join(".darkmatter-shell-whitelist"),
+            "prefix echo\n",
+        )
+        .unwrap();
+
+        let md = Markdown::try_from(source_path.as_path()).unwrap();
+        let overrides = serde_json::json!({ "spec": "spec.md" });
+        let approval_options = ShellApprovalOptions {
+            policy_root: Some(doc_dir.path().to_path_buf()),
+            approval_handler: None,
+            ..Default::default()
+        };
+
+        let _cwd = CwdGuard::enter(unrelated.path());
+
+        let env_overrides: BTreeMap<String, String> = BTreeMap::new();
+        let opts = build_template_preflight_options(&env_overrides, &source_path, &overrides, None);
+        let result =
+            resolve_shell_approvals(Some(&md), Some(&opts), &approval_options, None, None).unwrap();
+
+        assert!(
+            result.approved_commands.contains("echo false"),
+            "without the fallback the launch-only spec.md is unreachable, so \
+             file_exists(spec) resolves false; approved: {:?}",
+            result.approved_commands,
+        );
+        assert!(
+            !result.approved_commands.contains("echo true"),
+            "no-fallback path must NOT see the launch-area file; approved: {:?}",
+            result.approved_commands,
+        );
+    }
 }
