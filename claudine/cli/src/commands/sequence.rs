@@ -1,5 +1,7 @@
 //! Top-level `claudine sequence <file>` command.
 
+use std::io::IsTerminal;
+
 use clap::Args;
 use claudine::composition::{
     self, CompositionError, ResolvedCompositionSource, SequenceExecutionOptions,
@@ -172,6 +174,8 @@ fn run_sequence_inner(
     let file = parsed.file_ref.ok_or_else(|| {
         eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
     })?;
+    let stderr_is_tty = std::io::stderr().is_terminal()
+        || std::env::var_os("FORCE_COLOR").is_some();
 
     let source = match resolve_sequence_source(&file) {
         Ok(source) => source,
@@ -180,9 +184,19 @@ fn run_sequence_inner(
                 &file,
                 crate::completion::scopes::ComposeMode::Sequence,
             )?;
-            resolve_sequence_source(&selected)?
+            resolve_sequence_source(&selected).map_err(|e| {
+                composition::enrich_composition_source_load_error(
+                    &selected,
+                    e,
+                    stderr_is_tty,
+                )
+            })?
         }
-        Err(e) => return Err(e.into()),
+        Err(e) => {
+            return Err(
+                composition::enrich_composition_source_load_error(&file, e, stderr_is_tty).into(),
+            );
+        }
     };
 
     reject_sequence_interactive(&source)?;
@@ -246,6 +260,44 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
+    fn shared_args() -> SharedComposeArgs {
+        SharedComposeArgs {
+            provider: None,
+            claude: false,
+            codex: false,
+            gemini: false,
+            goose: false,
+            kimicode: false,
+            opencode: false,
+            qwen: false,
+            roo: false,
+            exclude: Vec::new(),
+            yolo: false,
+            interactive: false,
+            no_interactive: false,
+            include: Vec::new(),
+            model: None,
+            output: None,
+            append_system_prompt: None,
+            replace_system_prompt: None,
+            timeout: None,
+            step_timeout: None,
+            operation: None,
+            sandbox: false,
+            repo: false,
+            dry_run: false,
+            quiet: false,
+            silent: true,
+            set: None,
+            mcp: false,
+            mcp_use: Vec::new(),
+            strict: false,
+            perf: false,
+            max_iterations: None,
+            on_rate_limit: None,
+        }
+    }
+
     fn source_with_frontmatter(
         dir: &TempDir,
         frontmatter: &[(&str, serde_json::Value)],
@@ -304,5 +356,36 @@ mod tests {
             matches!(err, CompositionError::InteractiveHintWrongType(_)),
             "expected InteractiveHintWrongType, got {err:?}"
         );
+    }
+
+    #[test]
+    fn sequence_source_load_error_is_frontmatter_enriched() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("malformed.md");
+        fs::write(
+            &file,
+            "----\nsequence:\n  - step.md\ndescription: near-miss fence\n----\n# Body\n",
+        )
+        .unwrap();
+
+        let args = SequenceArgs {
+            shared: shared_args(),
+            args: vec![file.to_string_lossy().into_owned()],
+            fail_fast: None,
+        };
+        let report = run_sequence_inner(args, 0, None).unwrap_err();
+        let err = report
+            .downcast::<CompositionError>()
+            .expect("report should carry CompositionError");
+
+        match err {
+            CompositionError::WithFrontmatter { inner, .. } => {
+                assert!(
+                    matches!(*inner, CompositionError::FrontmatterParse(_)),
+                    "inner error should remain FrontmatterParse"
+                );
+            }
+            other => panic!("expected WithFrontmatter, got: {other:?}"),
+        }
     }
 }

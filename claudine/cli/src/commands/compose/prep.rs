@@ -362,6 +362,8 @@ fn resolve_composition_source(
     kind: CompositionKind,
     shared: &SharedComposeArgs,
 ) -> Result<ResolvedCompositionSource> {
+    let stderr_is_tty = std::io::stderr().is_terminal()
+        || std::env::var_os("FORCE_COLOR").is_some();
     match claudine::composition::resolve_composition_source(file) {
         Ok(source) => Ok(source),
         Err(CompositionError::FileNotFound(_)) => {
@@ -373,9 +375,21 @@ fn resolve_composition_source(
             };
             let selected =
                 crate::completion::operation_file::autocomplete_operation_file(file, mode)?;
-            claudine::composition::resolve_composition_source(&selected).map_err(|e| e.into())
+            claudine::composition::resolve_composition_source(&selected).map_err(|e| {
+                claudine::composition::enrich_composition_source_load_error(
+                    &selected,
+                    e,
+                    stderr_is_tty,
+                )
+                .into()
+            })
         }
         Err(e) => {
+            let e = claudine::composition::enrich_composition_source_load_error(
+                file,
+                e,
+                stderr_is_tty,
+            );
             if kind.is_inline() {
                 // Only a genuine reference-resolution failure means the file
                 // was not found. A file that resolved but failed to load/parse
@@ -795,4 +809,96 @@ fn execute_loop_or_single(
     }
 
     execute_composition_request(request, verbose, startup_timings, shared.perf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn shared_args() -> SharedComposeArgs {
+        SharedComposeArgs {
+            provider: None,
+            claude: false,
+            codex: false,
+            gemini: false,
+            goose: false,
+            kimicode: false,
+            opencode: false,
+            qwen: false,
+            roo: false,
+            exclude: Vec::new(),
+            yolo: false,
+            interactive: false,
+            no_interactive: false,
+            include: Vec::new(),
+            model: None,
+            output: None,
+            append_system_prompt: None,
+            replace_system_prompt: None,
+            timeout: None,
+            step_timeout: None,
+            operation: None,
+            sandbox: false,
+            repo: false,
+            dry_run: false,
+            quiet: false,
+            silent: true,
+            set: None,
+            mcp: false,
+            mcp_use: Vec::new(),
+            strict: false,
+            perf: false,
+            max_iterations: None,
+            on_rate_limit: None,
+        }
+    }
+
+    fn malformed_prompt(dir: &TempDir) -> String {
+        let file = dir.path().join("malformed.md");
+        fs::write(
+            &file,
+            "----\nname: malformed\ndescription: near-miss fence\n----\n# Body\n",
+        )
+        .unwrap();
+        file.to_string_lossy().into_owned()
+    }
+
+    fn assert_frontmatter_enriched(report: color_eyre::Report) {
+        let err = report
+            .downcast::<CompositionError>()
+            .expect("report should carry CompositionError");
+        match err {
+            CompositionError::WithFrontmatter { inner, .. } => {
+                assert!(
+                    matches!(*inner, CompositionError::FrontmatterParse(_)),
+                    "inner error should remain FrontmatterParse"
+                );
+            }
+            other => panic!("expected WithFrontmatter, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compose_source_load_error_is_frontmatter_enriched() {
+        let dir = TempDir::new().unwrap();
+        let file = malformed_prompt(&dir);
+
+        let report =
+            resolve_composition_source(&file, CompositionKind::Direct, &shared_args()).unwrap_err();
+
+        assert_frontmatter_enriched(report);
+    }
+
+    #[test]
+    fn inline_compose_source_load_error_is_frontmatter_enriched() {
+        let dir = TempDir::new().unwrap();
+        let file = malformed_prompt(&dir);
+
+        let report =
+            resolve_composition_source(&file, CompositionKind::Inline, &shared_args()).unwrap_err();
+
+        assert_frontmatter_enriched(report);
+    }
 }
