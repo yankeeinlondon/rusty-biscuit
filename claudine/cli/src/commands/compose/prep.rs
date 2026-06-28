@@ -93,6 +93,7 @@ pub(crate) fn run_composition_inner(
 
     validate_timeout_flags(&shared)?;
     shared.step_timeout_secs()?;
+    shared.stall_timeout_secs()?;
     let set_overrides = merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
     let system_prompt_args = shared.system_prompt_args();
 
@@ -618,6 +619,7 @@ fn build_execution_request(
         system_prompt_args: system_prompt_args.clone(),
         timeout: shared.timeout.clone(),
         step_timeout: shared.step_timeout.clone(),
+        stall_timeout: shared.stall_timeout.clone(),
         operation: shared.operation.clone(),
         sandbox: shared.sandbox,
         repo: shared.repo,

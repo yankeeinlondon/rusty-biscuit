@@ -85,6 +85,12 @@ pub struct WrapperArgs {
     #[arg(long = "step-timeout", value_name = "DURATION")]
     pub step_timeout: Option<String>,
 
+    /// OpenCode stalled-generation backstop budget (e.g. `10m`). Aborts when
+    /// OpenCode repeatedly drops generations with no progress for this long.
+    /// OpenCode-scoped, structured-stream only; `0s` disables. Default `10m`.
+    #[arg(long = "stall-timeout", value_name = "DURATION")]
+    pub stall_timeout: Option<String>,
+
     /// Show what would be executed without launching the child.
     #[arg(long)]
     pub dry_run: bool,
@@ -252,6 +258,7 @@ pub(crate) fn print_wrapper_help(provider: Provider) {
           \x20     --asp <FILE>             Append a system prompt from a file\n\
            \x20     --rsp <FILE>             Replace the provider's system prompt with contents from a file\n\
             \x20 -t, --timeout <DURATION>  Wall-clock timeout like 30s, 5m, 2h (non-interactive only)\n\
+         \x20     --stall-timeout <DURATION>  OpenCode stalled-generation backstop like 10m; 0s disables\n\
          \x20     --dry-run             Show what would be executed without launching the child\n\
          \x20 -q, --quiet              Suppress env details and info; still show the system prompt when set\n\
          \x20     --silent              Suppress all Claudine preflight output\n\

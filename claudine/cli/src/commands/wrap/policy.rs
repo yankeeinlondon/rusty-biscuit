@@ -96,6 +96,7 @@ pub(crate) fn build_structured_plumbing(
     provider: Provider,
     sink: super::live_semantic_sink::LiveSemanticSink,
     parser_config: claudine::stream::ParserConfig,
+    stall_timeout: Option<std::time::Duration>,
 ) -> (
     super::exec::SemanticParserBuilder,
     Option<claudine::stream::logs::StderrBridgeHandle>,
@@ -104,7 +105,9 @@ pub(crate) fn build_structured_plumbing(
     use claudine::stream::logs::StderrBridgeHandle;
     use claudine::stream::logs::codex::CodexLogBridge;
     use claudine::stream::logs::opencode::{OpenCodeLogBridge, merge_stderr_state_into_summary};
-    use claudine::stream::semantic::{ObservedSemanticSink, SharedSemanticSink};
+    use claudine::stream::semantic::{
+        ObservedSemanticSink, SharedSemanticSink, StalledProgressObserverSink,
+    };
     use std::sync::atomic::AtomicBool;
 
     // Whether the run wants a content-detector trip channel (Phase 6). True
@@ -115,6 +118,16 @@ pub(crate) fn build_structured_plumbing(
     // the detector's trip sender and (for OpenCode) the stderr bridge's
     // sender are clones feeding one receiver the wait loop polls.
     let detector_armed = sink.wants_content_channel();
+
+    // The stalled-generation backstop is OpenCode-only. A resolved budget on
+    // any other provider is inert config (the key is provider-neutral for
+    // portable prompt files); trace it at debug level and never warn.
+    if provider != Provider::OpenCode && stall_timeout.is_some() {
+        tracing::debug!(
+            %provider,
+            "stall_timeout is OpenCode-scoped; ignored for this provider",
+        );
+    }
 
     if provider == Provider::OpenCode {
         let shared = SharedSemanticSink::new(sink);
@@ -129,9 +142,19 @@ pub(crate) fn build_structured_plumbing(
         {
             inner.set_trip_sender(early_tx.clone());
         }
-        let bridge =
-            OpenCodeLogBridge::new(shared.clone(), Arc::clone(&stdout_seen), Some(early_tx));
+        // The resolved stalled-generation backstop budget (CLI > frontmatter
+        // > env > built-in `10m`). `None` disables the guard.
+        let bridge = OpenCodeLogBridge::new(
+            shared.clone(),
+            Arc::clone(&stdout_seen),
+            Some(early_tx),
+            stall_timeout,
+        );
         let bridge_state = bridge.shared_state();
+        // Share the bridge's stalled-generation progress clocks with the stdout
+        // path so stdout-origin progress (OutputText/ToolCall/…) resets the same
+        // counter the stderr `llm_call_start` churn accumulates against.
+        let stalled_progress = bridge.stalled_generation_progress();
         let finalize: claudine::stream::logs::SummaryFinalizer = Box::new(move |summary| {
             merge_stderr_state_into_summary(&bridge_state, summary);
         });
@@ -141,7 +164,8 @@ pub(crate) fn build_structured_plumbing(
             early_terminate: Some(early_rx),
         });
 
-        let stdout_sink = ObservedSemanticSink::new(shared, stdout_seen);
+        let progress_observed = StalledProgressObserverSink::new(shared, stalled_progress);
+        let stdout_sink = ObservedSemanticSink::new(progress_observed, stdout_seen);
         let build_parser: super::exec::SemanticParserBuilder =
             Box::new(move |output_cb, _reasoning_cb, agent_pid| {
                 if let Ok(mut inner) = live_sink_inner.lock() {

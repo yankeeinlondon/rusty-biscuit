@@ -336,6 +336,71 @@ fn interactive_and_no_interactive_are_mutually_exclusive() {
     );
 }
 
+// ── stall_timeout_secs validation gate ───────────────────────────
+
+fn shared_from(extra: &[&str]) -> SharedComposeArgs {
+    use clap::Parser;
+
+    #[derive(Debug, clap::Parser)]
+    struct Probe {
+        #[command(flatten)]
+        shared: SharedComposeArgs,
+    }
+
+    let mut argv = vec!["probe"];
+    argv.extend_from_slice(extra);
+    Probe::try_parse_from(argv)
+        .expect("probe must parse")
+        .shared
+}
+
+#[test]
+fn stall_timeout_secs_none_when_flag_absent() {
+    assert_eq!(shared_from(&[]).stall_timeout_secs().unwrap(), None);
+}
+
+#[test]
+fn stall_timeout_secs_zero_literal_is_disable_sentinel() {
+    assert_eq!(
+        shared_from(&["--stall-timeout", "0s"])
+            .stall_timeout_secs()
+            .unwrap(),
+        Some(0)
+    );
+}
+
+#[test]
+fn stall_timeout_secs_accepts_fractional() {
+    // 0.5s is a valid 500ms budget; integer-seconds truncation yields 0, but
+    // the value is accepted (not rejected) by the validation gate.
+    assert!(
+        shared_from(&["--stall-timeout", "0.5s"])
+            .stall_timeout_secs()
+            .is_ok()
+    );
+}
+
+#[test]
+fn stall_timeout_secs_accepts_positive() {
+    assert_eq!(
+        shared_from(&["--stall-timeout", "10m"])
+            .stall_timeout_secs()
+            .unwrap(),
+        Some(600)
+    );
+}
+
+#[test]
+fn stall_timeout_secs_rejects_invalid() {
+    let err = shared_from(&["--stall-timeout", "nope"])
+        .stall_timeout_secs()
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("invalid --stall-timeout value"),
+        "got: {err}"
+    );
+}
+
 // ── SIGINT / Ctrl+C during prep (Phase 5) ────────────────────────
 
 #[cfg(unix)]

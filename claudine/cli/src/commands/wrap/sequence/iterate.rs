@@ -140,6 +140,7 @@ pub(super) fn run_sequence_steps(
                 system_prompt_args,
                 timeout: shared.timeout.clone(),
                 step_timeout: shared.step_timeout.clone(),
+                stall_timeout: shared.stall_timeout.clone(),
                 operation: shared.operation.clone(),
                 sandbox: shared.sandbox,
                 repo: shared.repo,

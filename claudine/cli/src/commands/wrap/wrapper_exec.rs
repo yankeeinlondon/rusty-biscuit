@@ -79,8 +79,12 @@ pub(crate) fn run_structured_stream_session(
     // Codex-final-stdout emission uses this handle so every section
     // transition shares the same tracker state.
     let section_stream = sink.section_stream();
+    // Resolve the OpenCode stalled-generation backstop for the direct wrapper
+    // path (CLI > env > built-in `10m`; no frontmatter layer here). Only the
+    // OpenCode branch of `build_structured_plumbing` consumes it.
+    let stall_timeout = composition::resolve_stall_timeout(args.stall_timeout.clone(), None);
     let (build_parser, stderr_bridge, content_early_rx) =
-        policy::build_structured_plumbing(provider, sink, parser_config);
+        policy::build_structured_plumbing(provider, sink, parser_config, stall_timeout);
     let mut _spawned = false;
     let stream_result = if let Some(wire_prompt) = wire_prompt.clone() {
         let runtime_context =
