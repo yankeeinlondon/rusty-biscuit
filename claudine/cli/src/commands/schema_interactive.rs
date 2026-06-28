@@ -429,7 +429,11 @@ fn collect_number(
             state = state.with_value(&buf);
             state.set_validation_error(err);
         }
-        let raw: String = run_standalone(TextInput::new(), state, inline_height(3))?;
+        // Height 4 (label, input, error, hint) keeps the inline viewport's
+        // bottom-row help-hint overlay off the validation-error row
+        // (`inner_area.y + 1`). At height 3 the hint and error collide on the
+        // last row and the hint wins, hiding the parse error on a retry.
+        let raw: String = run_standalone(TextInput::new(), state, inline_height(4))?;
         match parse_number(&raw, integer, min, max) {
             Ok(value) => return Ok(value),
             Err(message) => {
