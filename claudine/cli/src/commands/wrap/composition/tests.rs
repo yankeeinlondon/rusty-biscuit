@@ -1060,7 +1060,7 @@ fn emit_preflight_blocked_and_finalize_runs_top_level_and_stack_for_both_events(
     );
 
     let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
-    emit_preflight_blocked_and_finalize(
+    let outcome = emit_preflight_blocked_and_finalize(
         &mut guard,
         &effect_engine,
         &emitter,
@@ -1075,6 +1075,10 @@ fn emit_preflight_blocked_and_finalize_runs_top_level_and_stack_for_both_events(
         &frontmatter,
         std::time::Instant::now(),
         err_info,
+    );
+    assert!(
+        matches!(outcome, PreflightBlockedOutcome::Control(None)),
+        "no evaluation error and no flow-control action → Control(None); got {outcome:?}"
     );
 
     let calls = emitter.stderr_calls();
@@ -1163,7 +1167,7 @@ fn emit_preflight_blocked_and_finalize_propagates_err_msg_into_blocked_stack() {
     let frontmatter = serde_json::Map::new();
 
     let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
-    emit_preflight_blocked_and_finalize(
+    let outcome = emit_preflight_blocked_and_finalize(
         &mut guard,
         &effect_engine,
         &emitter,
@@ -1182,6 +1186,10 @@ fn emit_preflight_blocked_and_finalize_propagates_err_msg_into_blocked_stack() {
             "shell command 'rm' is blacklisted".to_string(),
         ),
     );
+    assert!(
+        matches!(outcome, PreflightBlockedOutcome::Control(None)),
+        "no evaluation error and no flow-control action → Control(None); got {outcome:?}"
+    );
     drop(guard);
 
     let calls = emitter.stderr_calls();
@@ -1198,6 +1206,394 @@ fn emit_preflight_blocked_and_finalize_propagates_err_msg_into_blocked_stack() {
             .iter()
             .any(|t| t.contains("shell command 'rm' is blacklisted")),
         "blocked.stack must see err.msg; got {calls:?}"
+    );
+}
+
+/// A late-binding evaluation error raised by the `blocked` stack (here a
+/// `when:` guard referencing an undefined root under DM2 strict mode) takes
+/// precedence over the original pre-flight failure: the helper surfaces the
+/// typed `LifecycleEvaluationError` for the `blocked` event and runs
+/// `finalize` carrying the evaluation error as `err` (proven by the
+/// finalize stack seeing the evaluation error's message, not the original
+/// pre-flight message).
+#[test]
+fn emit_preflight_blocked_and_finalize_surfaces_blocked_evaluation_error() {
+    use claudine::composition::{
+        LifecycleErrorInfo, LifecycleRunGuard, LifecycleRuntimeContext, parse_lifecycle_config,
+    };
+    use serde_json::json;
+
+    let dir = tempfile::tempdir().unwrap();
+    let source_path = dir.path().join("test.md");
+    let log_path = dir.path().join("events.log");
+    // The `blocked` stack's `when:` references an undefined root, so it
+    // *raises* at event time rather than evaluating cleanly to false. The
+    // `failure` and `finalize` stacks each append a marker so we can prove
+    // both events fired carrying the evaluation error as `err`.
+    let fm = json!({
+        "blocked": {
+            "stack": [{"when": "missing_root == true", "action": {"stderr": "unreachable"}}]
+        },
+        "failure": {
+            "stack": [{"when": "err", "action": {"append_line": ["events.log", "failure-saw-err"]}}]
+        },
+        "finalize": {
+            "stack": [{"when": "err", "action": {"append_line": ["events.log", "{{err.msg}}"]}}]
+        }
+    });
+    let config = parse_lifecycle_config(&fm, &source_path).unwrap();
+    let settings = claudine::events::GlobalSettings::default();
+    let messaging = claudine::messaging::RuntimeMessagingSettings {
+        user: None,
+        repo: None,
+    };
+    let term = Terminal::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &settings,
+        messaging: &messaging,
+        term: &term,
+        source_path: &source_path,
+        repo_root: Some(dir.path()),
+        launch_area: None,
+        context: None,
+    };
+    let emitter = PreflightRecordingEmitter::new();
+    let effect_engine = darkmatter::effects::EffectEngine::builder()
+        .mutation_root(dir.path())
+        .auto_rehash(false)
+        .build();
+    let frontmatter = serde_json::Map::new();
+    let err_info = LifecycleErrorInfo::from_action_failure(
+        "harness_plan",
+        "original-preflight-failure-message".to_string(),
+    );
+
+    let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
+    let outcome = emit_preflight_blocked_and_finalize(
+        &mut guard,
+        &effect_engine,
+        &emitter,
+        &settings,
+        &messaging,
+        &term,
+        &source_path,
+        Some(dir.path()),
+        Some(dir.path()),
+        None,
+        None,
+        &frontmatter,
+        std::time::Instant::now(),
+        err_info,
+    );
+    drop(guard);
+
+    let ce = match outcome {
+        PreflightBlockedOutcome::EvaluationError(ce) => ce,
+        other => panic!("expected EvaluationError, got {other:?}"),
+    };
+    let msg = ce.to_string();
+    assert!(
+        msg.contains("lifecycle"),
+        "error must mention lifecycle; got: {msg}"
+    );
+    assert!(
+        msg.contains("evaluation error"),
+        "error must mention evaluation error; got: {msg}"
+    );
+    assert!(
+        msg.contains("`blocked`"),
+        "error must name the blocked event; got: {msg}"
+    );
+
+    // The failure stack ran and saw `err` (the evaluation error), proving the
+    // helper routed through `failure` — not just `finalize`. Without the
+    // `redesignate_terminal_to_failure` fix, `execute_event(Failure)` would
+    // be a no-op (the terminal slot was already taken by Blocked) and this
+    // marker would be absent.
+    let log = std::fs::read_to_string(&log_path).unwrap();
+    assert!(
+        log.contains("failure-saw-err"),
+        "failure stack must have fired with the evaluation error as err; got: {log}"
+    );
+
+    // The finalize stack also ran and saw the *evaluation error* as `err` — its
+    // message references `missing_root`, which only the raised `when:` guard
+    // produces, not the original pre-flight `err_info` ("original-preflight-
+    // failure-message"). This is the load-bearing assertion: without the
+    // fix, finalize would run with the original pre-flight error instead.
+    assert!(
+        log.contains("missing_root"),
+        "finalize must have run with the evaluation error as err (msg should mention \
+         missing_root); got: {log}"
+    );
+    assert!(
+        !log.contains("original-preflight-failure-message"),
+        "finalize must NOT have run with the original pre-flight err; got: {log}"
+    );
+}
+
+/// Precedence: a `blocked.when` raise followed by a catch `finalize.when`
+/// raise must surface the `finalize` raise — the latest lifecycle crash —
+/// not the original `blocked` raise. Previously the blocked raise hid the
+/// finalize raise behind it because the catch path discarded the finalize
+/// outcome.
+#[test]
+fn emit_preflight_blocked_and_finalize_blocked_raise_then_finalize_raise_surfaces_finalize() {
+    use claudine::composition::{
+        LifecycleErrorInfo, LifecycleRunGuard, LifecycleRuntimeContext, parse_lifecycle_config,
+    };
+    use serde_json::json;
+
+    let dir = tempfile::tempdir().unwrap();
+    let source_path = dir.path().join("test.md");
+    let log_path = dir.path().join("events.log");
+    // The `blocked` stack's `when:` raises (undefined root), triggering the
+    // catch path (failure + finalize). The `failure` stack is clean so we
+    // isolate the precedence to blocked-raise vs finalize-raise. The
+    // `finalize` stack's `when:` also raises, so the surfaced error must name
+    // `finalize`.
+    let fm = json!({
+        "blocked": {
+            "stack": [{"when": "missing_root == true", "action": {"stderr": "unreachable"}}]
+        },
+        "failure": {
+            "stack": [{"when": "err", "action": {"append_line": ["events.log", "failure-ran"]}}]
+        },
+        "finalize": {
+            "stack": [{"when": "also_missing == true", "action": {"stderr": "unreachable"}}]
+        }
+    });
+    let config = parse_lifecycle_config(&fm, &source_path).unwrap();
+    let settings = claudine::events::GlobalSettings::default();
+    let messaging = claudine::messaging::RuntimeMessagingSettings {
+        user: None,
+        repo: None,
+    };
+    let term = Terminal::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &settings,
+        messaging: &messaging,
+        term: &term,
+        source_path: &source_path,
+        repo_root: Some(dir.path()),
+        launch_area: None,
+        context: None,
+    };
+    let emitter = PreflightRecordingEmitter::new();
+    let effect_engine = darkmatter::effects::EffectEngine::builder()
+        .mutation_root(dir.path())
+        .auto_rehash(false)
+        .build();
+    let frontmatter = serde_json::Map::new();
+    let err_info = LifecycleErrorInfo::from_action_failure(
+        "harness_plan",
+        "original-preflight-failure-message".to_string(),
+    );
+
+    let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
+    let outcome = emit_preflight_blocked_and_finalize(
+        &mut guard,
+        &effect_engine,
+        &emitter,
+        &settings,
+        &messaging,
+        &term,
+        &source_path,
+        Some(dir.path()),
+        Some(dir.path()),
+        None,
+        None,
+        &frontmatter,
+        std::time::Instant::now(),
+        err_info,
+    );
+    drop(guard);
+
+    let ce = match outcome {
+        PreflightBlockedOutcome::EvaluationError(ce) => ce,
+        other => panic!("expected EvaluationError, got {other:?}"),
+    };
+    let msg = ce.to_string();
+    assert!(
+        msg.contains("`finalize`"),
+        "error must name the finalize event (latest crash); got: {msg}"
+    );
+    assert!(
+        !msg.contains("`blocked`"),
+        "error must NOT name the blocked event (hidden behind finalize raise); got: {msg}"
+    );
+
+    // The catch path ran `failure` (no raise authored) carrying the blocked
+    // evaluation error as `err`.
+    let log = std::fs::read_to_string(&log_path).unwrap();
+    assert!(
+        log.contains("failure-ran"),
+        "failure stack ran with the blocked evaluation error as err: {log}"
+    );
+}
+
+/// A late-binding evaluation error raised by the `finalize` stack itself
+/// surfaces as the typed `LifecycleEvaluationError` for the `finalize` event
+/// without re-entering `finalize` (the re-entry guard from Decision #3).
+/// `finalize` runs exactly once: the raise halts the run; the helper does
+/// not loop back into `finalize`.
+#[test]
+fn emit_preflight_blocked_and_finalize_surfaces_finalize_evaluation_error_without_reentry() {
+    use claudine::composition::{
+        LifecycleErrorInfo, LifecycleRunGuard, LifecycleRuntimeContext, parse_lifecycle_config,
+    };
+    use serde_json::json;
+
+    let dir = tempfile::tempdir().unwrap();
+    let source_path = dir.path().join("test.md");
+    let log_path = dir.path().join("events.log");
+    // The blocked stack is clean (appends a marker so we can prove it ran);
+    // the finalize stack's `when:` raises, so `finalize` runs exactly once
+    // and the helper returns the typed error without re-entering finalize.
+    let fm = json!({
+        "blocked": {
+            "stack": [{"action": {"append_line": ["events.log", "blocked-ran"]}}]
+        },
+        "finalize": {
+            "stack": [{"when": "missing_root == true", "action": {"stderr": "unreachable"}}]
+        }
+    });
+    let config = parse_lifecycle_config(&fm, &source_path).unwrap();
+    let settings = claudine::events::GlobalSettings::default();
+    let messaging = claudine::messaging::RuntimeMessagingSettings {
+        user: None,
+        repo: None,
+    };
+    let term = Terminal::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &settings,
+        messaging: &messaging,
+        term: &term,
+        source_path: &source_path,
+        repo_root: Some(dir.path()),
+        launch_area: None,
+        context: None,
+    };
+    let emitter = PreflightRecordingEmitter::new();
+    let effect_engine = darkmatter::effects::EffectEngine::builder()
+        .mutation_root(dir.path())
+        .auto_rehash(false)
+        .build();
+    let frontmatter = serde_json::Map::new();
+    let err_info =
+        LifecycleErrorInfo::from_action_failure("harness_plan", "preflight-failure".to_string());
+
+    let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
+    let outcome = emit_preflight_blocked_and_finalize(
+        &mut guard,
+        &effect_engine,
+        &emitter,
+        &settings,
+        &messaging,
+        &term,
+        &source_path,
+        Some(dir.path()),
+        Some(dir.path()),
+        None,
+        None,
+        &frontmatter,
+        std::time::Instant::now(),
+        err_info,
+    );
+    drop(guard);
+
+    let ce = match outcome {
+        PreflightBlockedOutcome::EvaluationError(ce) => ce,
+        other => panic!("expected EvaluationError, got {other:?}"),
+    };
+    let msg = ce.to_string();
+    assert!(
+        msg.contains("`finalize`"),
+        "error must name the finalize event; got: {msg}"
+    );
+
+    // The blocked stack ran (its marker is in the log); finalize raised and
+    // did not re-enter, so the blocked marker appears exactly once. The
+    // finalize stack's `stderr` action never ran (its `when:` raised before
+    // the action could execute), proving the re-entry guard held.
+    let log = std::fs::read_to_string(&log_path).unwrap();
+    assert_eq!(
+        log.lines().filter(|l| *l == "blocked-ran").count(),
+        1,
+        "blocked stack ran exactly once; got: {log}"
+    );
+}
+
+/// The happy path: when neither the `blocked` nor the `finalize` stack
+/// raises an evaluation error, the helper returns the blocked stack's
+/// flow-control action (here `None`) unchanged. Verifies the fix does not
+/// regress the no-evaluation-error path.
+#[test]
+fn emit_preflight_blocked_and_finalize_returns_control_when_no_evaluation_error() {
+    use claudine::composition::{
+        LifecycleErrorInfo, LifecycleRunGuard, LifecycleRuntimeContext, parse_lifecycle_config,
+    };
+    use serde_json::json;
+
+    let dir = tempfile::tempdir().unwrap();
+    let source_path = dir.path().join("test.md");
+    let fm = json!({
+        "blocked": {
+            "stderr": "blocked",
+            "stack": [{"action": {"stderr": "blocked-stack"}}]
+        },
+        "finalize": {
+            "stderr": "finalize",
+            "stack": [{"action": {"stderr": "finalize-stack"}}]
+        }
+    });
+    let config = parse_lifecycle_config(&fm, &source_path).unwrap();
+    let settings = claudine::events::GlobalSettings::default();
+    let messaging = claudine::messaging::RuntimeMessagingSettings {
+        user: None,
+        repo: None,
+    };
+    let term = Terminal::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &settings,
+        messaging: &messaging,
+        term: &term,
+        source_path: &source_path,
+        repo_root: Some(dir.path()),
+        launch_area: None,
+        context: None,
+    };
+    let emitter = PreflightRecordingEmitter::new();
+    let effect_engine = darkmatter::effects::EffectEngine::builder()
+        .mutation_root(dir.path())
+        .auto_rehash(false)
+        .build();
+    let frontmatter = serde_json::Map::new();
+    let err_info =
+        LifecycleErrorInfo::from_action_failure("harness_plan", "preflight-failure".to_string());
+
+    let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
+    let outcome = emit_preflight_blocked_and_finalize(
+        &mut guard,
+        &effect_engine,
+        &emitter,
+        &settings,
+        &messaging,
+        &term,
+        &source_path,
+        Some(dir.path()),
+        Some(dir.path()),
+        None,
+        None,
+        &frontmatter,
+        std::time::Instant::now(),
+        err_info,
+    );
+    drop(guard);
+
+    assert!(
+        matches!(outcome, PreflightBlockedOutcome::Control(None)),
+        "no evaluation error and no flow-control action → Control(None); got {outcome:?}"
     );
 }
 

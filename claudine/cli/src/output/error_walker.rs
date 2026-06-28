@@ -12,10 +12,12 @@
 
 use biscuit_terminal::errors::BlockError;
 use biscuit_terminal::terminal::Terminal;
+use claudine::composition::lifecycle_context::LifecycleErrorInfo;
 use claudine::composition::{CompositionError, FrontmatterExcerpt};
 use color_eyre::eyre::Report;
 use darkmatter::markdown::errors::as_block_error;
 use std::error::Error as StdError;
+use std::path::Path;
 
 /// Try to render `report` as a darkmatter [`BlockError`] report.
 ///
@@ -50,6 +52,72 @@ pub(crate) fn try_render_block_report(report: &Report, term: &Terminal) -> Optio
     }
 
     Some(out)
+}
+
+/// Render a lifecycle evaluation error to stderr **at its catch point**,
+/// before any catch events (`failure`/`finalize`) fire (Decision #2).
+///
+/// Builds the original [`CompositionError::lifecycle_evaluation`] block and
+/// renders it through the same styled `BlockError` surface the outer CLI
+/// renderer uses, so TTY-gating and `ColorDepth::None` escape-stripping are
+/// shared (no hand-rolled ANSI). Returns the same error wrapped in
+/// [`CompositionError::already_emitted`] so the caller can thread it on and the
+/// outer renderer suppresses the duplicate styled block.
+///
+/// Emits exactly once per call; callers invoke it once, before running catch
+/// events, so the original crash is visible ahead of any `finalize` output.
+pub(crate) fn emit_lifecycle_evaluation_error_early(
+    source_path: &Path,
+    event: &str,
+    info: &LifecycleErrorInfo,
+    term: &Terminal,
+) -> CompositionError {
+    let error = CompositionError::lifecycle_evaluation(event, source_path, info);
+    let rendered = error.report_block_error(term);
+    crate::log::message("");
+    crate::log::message(&rendered);
+    crate::log::message("");
+    error.already_emitted()
+}
+
+/// Render a lifecycle evaluation error's styled block to stderr at its catch
+/// point and return it marked already-emitted (Decision #2).
+///
+/// Use at any catch/surface site that is about to return a
+/// [`CompositionError::LifecycleEvaluationError`] to the run's outer renderer,
+/// when no further lifecycle events fire afterwards (a raise inside the catch
+/// `failure`/`finalize` event, or a loop-engine error consumed by the CLI). The
+/// styled block goes through the same `BlockError` surface and TTY/`NO_COLOR`
+/// gating as the outer renderer. Any error that is **not** an un-emitted
+/// `LifecycleEvaluationError` (including one already marked) is returned
+/// unchanged, so this is safe to apply uniformly.
+pub(crate) fn emit_lifecycle_evaluation_error_block(
+    error: CompositionError,
+    term: &Terminal,
+) -> CompositionError {
+    if matches!(error, CompositionError::LifecycleEvaluationError { .. }) {
+        let rendered = error.report_block_error(term);
+        crate::log::message("");
+        crate::log::message(&rendered);
+        crate::log::message("");
+        return error.already_emitted();
+    }
+    error
+}
+
+/// Whether the report's cause chain carries an already-emitted lifecycle
+/// evaluation error, so the outer renderer must not re-render its styled block.
+pub(crate) fn evaluation_error_already_emitted(report: &Report) -> bool {
+    let mut current: Option<&(dyn StdError + 'static)> = Some(report.as_ref());
+    while let Some(err) = current {
+        if let Some(comp) = err.downcast_ref::<CompositionError>()
+            && comp.is_already_emitted()
+        {
+            return true;
+        }
+        current = err.source();
+    }
+    false
 }
 
 /// Find the first [`CompositionError::WithFrontmatter`] in the cause chain,
@@ -214,6 +282,76 @@ mod tests {
         // The authored frontmatter is shown as a YAML block.
         assert!(plain.contains("prompt: Do it"), "yaml block missing: {plain}");
         assert!(plain.contains("sequence:"), "yaml block missing: {plain}");
+    }
+
+    #[test]
+    fn renders_lifecycle_evaluation_error_for_success_when() {
+        // A `success.when` guard that *raised* (vs. cleanly evaluating to
+        // `false`) renders the styled lifecycle-evaluation block: the event
+        // name, the offending surface, the raised reason, and — critically —
+        // text that distinguishes a crashed guard from a clean false guard.
+        let err = CompositionError::LifecycleEvaluationError {
+            source_path: PathBuf::from("review.md"),
+            event: "success".to_string(),
+            surface: "when".to_string(),
+            message: "frontmatter(review_file,'ready') raised: path did not resolve".to_string(),
+        };
+        let report: Report = eyre!(err);
+        let rendered = try_render_block_report(&report, &width80()).expect("block error found");
+        let plain = strip_escape_codes(&rendered);
+
+        assert!(plain.contains("lifecycle evaluation error"), "header missing:\n{plain}");
+        assert!(plain.contains("success"), "event name missing:\n{plain}");
+        assert!(plain.contains("when:"), "surface label missing:\n{plain}");
+        assert!(plain.contains("did not resolve"), "reason missing:\n{plain}");
+        // Distinguish a crashed guard from a clean false guard.
+        assert!(
+            plain.contains("crashed expression") && plain.contains("false"),
+            "crashed-vs-false distinction missing:\n{plain}"
+        );
+    }
+
+    #[test]
+    fn renders_lifecycle_evaluation_error_for_finalize() {
+        // An evaluation error raised *inside* `finalize` itself is still
+        // surfaced (visible, not swallowed). Non-recursion is enforced in the
+        // orchestrator (see `loop_control` L1 tests); here we prove the
+        // user-facing render is produced.
+        let err = CompositionError::LifecycleEvaluationError {
+            source_path: PathBuf::from("review.md"),
+            event: "finalize".to_string(),
+            surface: "interpolation".to_string(),
+            message: "unknown root `missing_root`".to_string(),
+        };
+        let report: Report = eyre!(err);
+        let rendered = try_render_block_report(&report, &width80()).expect("block error found");
+        let plain = strip_escape_codes(&rendered);
+
+        assert!(plain.contains("lifecycle evaluation error"), "header missing:\n{plain}");
+        assert!(plain.contains("finalize"), "event name missing:\n{plain}");
+        assert!(plain.contains("interpolated string"), "surface label missing:\n{plain}");
+        assert!(plain.contains("missing_root"), "reason missing:\n{plain}");
+    }
+
+    #[test]
+    fn lifecycle_evaluation_error_is_plain_without_color() {
+        // Non-TTY / NO_COLOR follows the existing CLI error rendering
+        // convention: `report_block_error` strips escapes at `ColorDepth::None`.
+        let err = CompositionError::LifecycleEvaluationError {
+            source_path: PathBuf::from("review.md"),
+            event: "success".to_string(),
+            surface: "when".to_string(),
+            message: "boom".to_string(),
+        };
+        let report: Report = eyre!(err);
+        let mut term = Terminal::new_optimistic(80);
+        term.color_depth = biscuit_terminal::discovery::detection::ColorDepth::None;
+        let rendered = try_render_block_report(&report, &term).expect("block error found");
+        assert!(
+            !rendered.contains('\u{1b}'),
+            "ANSI escapes leaked into NO_COLOR output:\n{rendered}"
+        );
+        assert!(rendered.contains("lifecycle evaluation error"), "got:\n{rendered}");
     }
 
     #[test]

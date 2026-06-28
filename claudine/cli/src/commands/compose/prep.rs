@@ -740,6 +740,15 @@ fn execute_loop_or_single(
                     emit_rate_limit_halt(&error);
                     return Ok(claudine::composition::LOOP_RATE_LIMITED_EXIT_CODE);
                 }
+                // A late-binding evaluation error surfaced by the loop engine
+                // (`initialize` / `loop` gate) has no stderr renderer in the
+                // lib; emit its styled block here, at the consumption boundary,
+                // before returning (no further lifecycle events fire). Marks it
+                // already-emitted so the outer renderer does not double-emit.
+                let error = crate::output::error_walker::emit_lifecycle_evaluation_error_block(
+                    error,
+                    &wrap_terminal(),
+                );
                 return Err(error.enrich_frontmatter(&source, stderr_is_tty).into());
             }
             return Ok(loop_result.final_exit_code);
