@@ -241,6 +241,7 @@ pub fn prepare_direct(
         &effective_frontmatter,
         &ctx,
         &source.resolved_path,
+        options.file_ref_fallback_dir.as_deref(),
     )?;
     // Lifecycle communication/action strings are deferred by design (C1): they
     // keep their `{{ }}` spans through prepare and resolve at event-time via
@@ -393,6 +394,7 @@ pub fn prepare_inline(
         &effective_frontmatter,
         &ctx,
         &source.resolved_path,
+        options.file_ref_fallback_dir.as_deref(),
     )?;
     // Deferred lifecycle strings resolve at event-time (C2); the prepare-time
     // leak / undefined-variable scans do not run over them. See `prepare_direct`.

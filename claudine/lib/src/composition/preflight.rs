@@ -231,6 +231,7 @@ pub fn resolve_lifecycle_shell_commands(
     effective_frontmatter: &serde_json::Value,
     context: &ComposeContext,
     source_path: &Path,
+    file_ref_fallback_dir: Option<&Path>,
 ) -> Result<(), CompositionError> {
     let frontmatter: HashMap<String, serde_json::Value> = effective_frontmatter
         .as_object()
@@ -251,14 +252,20 @@ pub fn resolve_lifecycle_shell_commands(
         })?;
 
     // Read-side functions (`parent_dir`, `dirname`, `file_exists`, …) resolve
-    // against the prompt's parent directory, matching the early-binding lookup
-    // contract.
-    let resolution_ctx = ResolutionContext::new(
+    // against the prompt's parent directory first (document-first contract),
+    // then fall back to the launch-area anchor when supplied — matching the
+    // event-time lifecycle lookup so a launch-relative read-side reference
+    // (`file_exists(spec)`) resolves identically at pre-flight and event-time
+    // instead of depending on the prompt-only anchor.
+    let mut resolution_ctx = ResolutionContext::new(
         source_path
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| std::path::PathBuf::from(".")),
     );
+    if let Some(fallback) = file_ref_fallback_dir {
+        resolution_ctx = resolution_ctx.with_file_ref_fallback_dir(fallback.to_path_buf());
+    }
 
     for signal in LifecycleSignal::ALL {
         let event_name = signal.property_name();
@@ -916,6 +923,144 @@ iteration: \"{{ file_exists('design.md') ? 2 : 1 }}\"\n\
         assert!(
             req.origin.line_number() > 0,
             "line should be the real line number, not 0"
+        );
+    }
+
+    // --- Lifecycle shell read-side resolution: launch-area fallback ---------
+    //
+    // A lifecycle `shell` command whose `{{ }}` span calls a read-side
+    // filesystem function (`file_exists`) against a launch-area-relative path
+    // must resolve via the threaded `file_ref_fallback_dir`, not the prompt
+    // directory alone. The regression below keeps the prompt dir, the
+    // launch-area fallback, and the ambient CWD all distinct, with `spec.md`
+    // present ONLY under the fallback, and proves the resolved (stamped)
+    // command depends on the fallback being supplied — independently of the
+    // post-launch process CWD.
+
+    use darkmatter::markdown::compose::ComposeContext;
+
+    /// RAII guard that switches the process CWD and restores it on drop
+    /// (including on panic). Tests using it are `#[serial_test::serial]` to
+    /// avoid racing on process-global CWD with other CWD-mutating tests.
+    struct CwdGuard {
+        prior: std::path::PathBuf,
+    }
+
+    impl CwdGuard {
+        fn enter(dir: &std::path::Path) -> Self {
+            let prior = std::env::current_dir().expect("read CWD");
+            std::env::set_current_dir(dir).expect("set CWD");
+            Self { prior }
+        }
+    }
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.prior);
+        }
+    }
+
+    /// Builds a `start` lifecycle config with a single positional `shell`
+    /// action whose command interpolates `file_exists(spec)`, plus the
+    /// effective frontmatter that supplies `spec`.
+    fn lifecycle_with_file_exists_shell()
+    -> (crate::composition::lifecycle::LifecycleConfig, serde_json::Value) {
+        let frontmatter = serde_json::json!({ "spec": "spec.md" });
+        let fm_with_event = serde_json::json!({
+            "spec": "spec.md",
+            "start": {
+                "stack": [{"action": {"shell": "echo {{ file_exists(spec) }}"}}]
+            }
+        });
+        let config = crate::composition::lifecycle::parse_lifecycle_config(
+            &fm_with_event,
+            Path::new("<test>"),
+        )
+        .expect("lifecycle config parses");
+        (config, frontmatter)
+    }
+
+    /// Reads the resolved (stamped) command string from the first `start`
+    /// stack action.
+    fn resolved_start_shell_command(
+        config: &crate::composition::lifecycle::LifecycleConfig,
+    ) -> String {
+        let stack = config
+            .stack(LifecycleSignal::Start)
+            .expect("start stack present");
+        match &stack[0].actions[0].kind {
+            LifecycleActionKind::Shell(shell) => match &shell.command {
+                Expr::StringLiteral(s) => s.clone(),
+                other => panic!("expected string-literal command, got: {other:?}"),
+            },
+            other => panic!("expected shell action, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial(preflight_cwd)]
+    fn lifecycle_shell_read_side_resolves_via_launch_area_fallback() {
+        let doc_dir = tempfile::TempDir::new().unwrap();
+        let launch_dir = tempfile::TempDir::new().unwrap();
+        let unrelated = tempfile::TempDir::new().unwrap();
+        // spec.md exists ONLY under the launch-area fallback — not the prompt
+        // (document) directory, not the ambient CWD.
+        std::fs::write(launch_dir.path().join("spec.md"), "# Spec\n").unwrap();
+
+        let source_path = doc_dir.path().join("prompt.md");
+        let (mut config, frontmatter) = lifecycle_with_file_exists_shell();
+
+        // Switch the ambient CWD elsewhere to prove resolution is independent
+        // of any post-launch chdir.
+        let _cwd = CwdGuard::enter(unrelated.path());
+
+        resolve_lifecycle_shell_commands(
+            &mut config,
+            &frontmatter,
+            &ComposeContext::capture(),
+            &source_path,
+            Some(launch_dir.path()),
+        )
+        .expect("resolution with the launch-area fallback must succeed");
+
+        assert_eq!(
+            resolved_start_shell_command(&config),
+            "echo true",
+            "file_exists(spec) must see spec.md via the launch-area fallback",
+        );
+    }
+
+    /// Same setup WITHOUT the fallback: `file_exists(spec)` cannot find the
+    /// launch-only file via the prompt dir or the unrelated CWD, so it resolves
+    /// to `false`. This confirms the test above passes because of the fallback,
+    /// not because the file is reachable some other way. Before the fix this
+    /// was the only code path, so the launch-relative reference resolved wrong.
+    #[test]
+    #[serial_test::serial(preflight_cwd)]
+    fn lifecycle_shell_read_side_without_fallback_misses_launch_area_file() {
+        let doc_dir = tempfile::TempDir::new().unwrap();
+        let launch_dir = tempfile::TempDir::new().unwrap();
+        let unrelated = tempfile::TempDir::new().unwrap();
+        std::fs::write(launch_dir.path().join("spec.md"), "# Spec\n").unwrap();
+
+        let source_path = doc_dir.path().join("prompt.md");
+        let (mut config, frontmatter) = lifecycle_with_file_exists_shell();
+
+        let _cwd = CwdGuard::enter(unrelated.path());
+
+        resolve_lifecycle_shell_commands(
+            &mut config,
+            &frontmatter,
+            &ComposeContext::capture(),
+            &source_path,
+            None,
+        )
+        .expect("resolution still succeeds; file just resolves to absent");
+
+        assert_eq!(
+            resolved_start_shell_command(&config),
+            "echo false",
+            "without the fallback the launch-only spec.md is unreachable",
         );
     }
 }
