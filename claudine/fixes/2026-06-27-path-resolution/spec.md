@@ -6,7 +6,7 @@ area: claudine
 packages:
     - claudine
     - darkmatter
-review_iterations: 1
+review_iterations: 2
 ---
 
 # Lifecycle File-Reference Resolution Ignores the Launch Area
