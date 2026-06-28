@@ -177,6 +177,12 @@ fn main() -> Result<()> {
 /// (preserving the styled `Error:` label) when no cause in the chain
 /// implements `BlockError`.
 fn render_top_level_error(report: &Report) {
+    // A lifecycle evaluation error already rendered its styled block to stderr
+    // at its catch point (Decision #2), before any catch events fired. Suppress
+    // the duplicate styled block here while still exiting non-zero.
+    if output::error_walker::evaluation_error_already_emitted(report) {
+        return;
+    }
     let term = log::terminal();
     if let Some(rendered) = output::error_walker::try_render_block_report(report, &term) {
         log::message("");

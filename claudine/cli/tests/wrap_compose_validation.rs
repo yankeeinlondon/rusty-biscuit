@@ -337,6 +337,206 @@ fn compose_dry_run_quiet_and_silent_are_no_op() {
     }
 }
 
+/// Late-binding lifecycle evaluation error (process-level, non-interactive):
+/// an `initialize` stack whose `when:` guard references an undefined root
+/// *raises* at event time. Under DM2 strict mode this is a crashed expression,
+/// not a clean `false` guard, so the run must surface a styled
+/// `lifecycle evaluation error` to **stderr** and exit **non-zero** — never a
+/// silent success. This is the setup-phase end-to-end proof for the
+/// late-binding-error fix (the terminal-phase paths need a real provider run
+/// and are covered by the L1 orchestration tests).
+#[cfg(unix)]
+#[test]
+fn compose_initialize_when_evaluation_error_exits_non_zero() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("prompt.md");
+    fs::write(
+        &md_file,
+        "---\nname: late-bind\nagent: goose\ninitialize:\n  stack:\n    \
+         - when: \"missing_root == true\"\n      action: {stderr: \"ready\"}\n---\nBODY_MARKER_QQQ\n",
+    )
+    .unwrap();
+
+    // A stub provider must exist on PATH for preflight, but the initialize
+    // raise halts the run before it is ever launched.
+    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--goose", md_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "a late-binding evaluation error must exit non-zero; stderr was:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(
+        stderr.contains("evaluation error") && stderr.contains("initialize"),
+        "stderr must name the lifecycle evaluation error and the event; stderr was:\n{stderr}"
+    );
+    // Distinguishes a crashed guard from a clean `false` — the user must not
+    // confuse a swallowed raise with a deliberately-skipped branch.
+    assert!(
+        stderr.contains("crashed expression"),
+        "stderr must distinguish a crashed guard from a clean false; stderr was:\n{stderr}"
+    );
+    // The provider was never launched: the composed body never reached stdout.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("BODY_MARKER_QQQ"),
+        "the body must not be sent after an initialize raise; stdout was:\n{stdout}"
+    );
+}
+
+/// Late-binding lifecycle evaluation error swallowing — regression for the
+/// previously-broken explicit-`error(...)` catch path. When `initialize.error`
+/// routes the run to `failure` and the catch `failure.when:` guard references
+/// an undefined root, the run must surface the FAILURE evaluation error (the
+/// latest lifecycle crash) to stderr and exit non-zero — not swallow it and
+/// return only the original `error(...)` reason. This is the explicit-control
+/// counterpart to `compose_initialize_when_evaluation_error_exits_non_zero`
+/// (which covers the evaluation-error-triggered path).
+#[cfg(unix)]
+#[test]
+fn compose_initialize_error_with_failure_raise_surfaces_failure_evaluation_error() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("prompt.md");
+    fs::write(
+        &md_file,
+        "---\nname: explicit-error\nagent: goose\ninitialize:\n  stack:\n    \
+         - action: {error: \"preflight refused\"}\nfailure:\n  stderr: \"fail\"\n  stack:\n    \
+         - when: \"missing_root == true\"\n      action: {stderr: \"unreachable\"}\n---\nBODY_MARKER_QQQ\n",
+    )
+    .unwrap();
+
+    // A stub provider must exist on PATH for preflight, but the initialize
+    // error + failure raise halts the run before it is ever launched.
+    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--goose", md_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "an evaluation error in the failure catch event must exit non-zero; stderr was:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(
+        stderr.contains("evaluation error"),
+        "stderr must mention the lifecycle evaluation error; stderr was:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("failure"),
+        "stderr must name the failure event (the catch event that raised); stderr was:\n{stderr}"
+    );
+    // The original `error(...)` reason alone must NOT be the only thing on
+    // stderr — the catch-event raise replaces it as the surfaced error.
+    assert!(
+        stderr.contains("crashed expression"),
+        "stderr must distinguish the crashed guard from a clean false; stderr was:\n{stderr}"
+    );
+    // The provider was never launched: the composed body never reached stdout.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("BODY_MARKER_QQQ"),
+        "the body must not be sent after an initialize error + failure raise; stdout was:\n{stdout}"
+    );
+}
+
+/// Decision #2 ordering proof (process-level): a terminal-phase `success.when`
+/// that *raises* must surface its styled `lifecycle evaluation error` to stderr
+/// **at the point of error — before the catch `finalize` event fires** — and
+/// exactly **once**. The provider runs and exits 0 (so `success` fires), the
+/// first `success` guard references an undefined root (a crashed expression),
+/// and `finalize.stderr` writes a recognizable marker. The assertion is a byte
+/// offset ordering: the evaluation-error text must appear earlier in captured
+/// stderr than the `finalize` marker, proving the original crash is visible
+/// before any `finalize` output. Also asserts a non-zero exit and a single
+/// emission (count == 1), proving the outer renderer does not double-emit.
+#[cfg(unix)]
+#[test]
+fn compose_success_when_evaluation_error_surfaces_before_finalize_marker() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("prompt.md");
+    // `success` first guard raises (undefined root under DM2 strict mode);
+    // `finalize.stderr` emits a marker the catch event prints to stderr.
+    fs::write(
+        &md_file,
+        "---\nname: late-bind-success\nagent: goose\nsuccess:\n  stack:\n    \
+         - when: \"missing_root == true\"\n      action: {stderr: \"unreachable\"}\n\
+         finalize:\n  stderr: \"FINALIZE_MARKER_ZZZ\"\n---\nBODY_MARKER_QQQ\n",
+    )
+    .unwrap();
+
+    // The provider runs and exits 0, so the terminal `success` event fires and
+    // its first `when:` guard raises.
+    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--goose", md_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "a terminal-phase evaluation error must exit non-zero; stderr was:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+
+    // The styled evaluation-error block names the event and the surface.
+    let eval_offset = stderr.find("evaluation error").unwrap_or_else(|| {
+        panic!("stderr must carry the lifecycle evaluation error; stderr was:\n{stderr}")
+    });
+    let marker_offset = stderr.find("FINALIZE_MARKER_ZZZ").unwrap_or_else(|| {
+        panic!("the finalize catch event must run and write its marker; stderr was:\n{stderr}")
+    });
+
+    // Decision #2: the crash is emitted at the point of error, ahead of any
+    // `finalize` output — earlier byte offset proves the ordering.
+    assert!(
+        eval_offset < marker_offset,
+        "the lifecycle evaluation error must be emitted BEFORE the finalize marker \
+         (eval@{eval_offset}, finalize@{marker_offset}); stderr was:\n{stderr}"
+    );
+
+    // Exactly one styled emission — the early emit suppresses the outer
+    // renderer's duplicate.
+    let header_count = stderr.matches("lifecycle evaluation error").count();
+    assert_eq!(
+        header_count, 1,
+        "the lifecycle evaluation error must be emitted exactly once; got {header_count}; \
+         stderr was:\n{stderr}"
+    );
+}
+
 /// Error surface (compose): a missing source file under `--dry-run` renders
 /// the error to **stderr**, exits **non-zero**, and leaves stdout clean.
 ///

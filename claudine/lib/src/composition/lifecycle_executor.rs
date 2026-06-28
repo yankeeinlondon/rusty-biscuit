@@ -19,11 +19,23 @@
 //!
 //! ## Error propagation
 //!
-//! An action that errors (and is not marked `no_error: true`) stops the stack
-//! and is logged. At a setup-phase event (`initialize`/`start`/`blocked`) the
-//! error routes the run to `failure`; at a terminal-phase event
-//! (`success`/`failure`/`finalize`/`loop`) the composition outcome is
-//! unchanged. The explicit `Error` lifecycle action is distinct — it is a
+//! Two distinct failure channels are reported, because they have different
+//! halting policies:
+//!
+//! - A side-effect **dispatch** failure — a channel/TTS/shell/effect-engine
+//!   error after the expression layer resolved cleanly — populates
+//!   [`LifecycleEventOutcome::action_error`]. It honors `no_error: true` and
+//!   the per-phase routing policy: at a setup-phase event
+//!   (`initialize`/`start`/`blocked`) it routes the run to `failure`; at a
+//!   terminal-phase event (`success`/`failure`/`finalize`/`loop`) the
+//!   composition outcome is unchanged.
+//! - A late-binding **evaluation** error — a `when:` guard, an interpolation,
+//!   or any event-time expression that *raised* — populates
+//!   [`LifecycleEventOutcome::evaluation_error`]. It is **not** suppressible by
+//!   `no_error` and halts on every phase (the orchestration wiring lives in the
+//!   composition runtime).
+//!
+//! The explicit `Error` lifecycle action is distinct from both — it is a
 //! deliberate author choice surfaced as [`StackControl::Error`] for the
 //! runtime to act on.
 
@@ -118,20 +130,44 @@ pub struct LifecycleEventOutcome {
     /// `None` means the stack ran to completion (or there was no stack).
     pub control: Option<StackControl>,
 
-    /// Set when an unintentional (non-`no_error`) action error stopped the
-    /// stack. Carries the error snapshot so a routed-to `failure` event can
-    /// expose `err.kind`/`err.variant`/`err.msg`.
+    /// Set when a side-effect **dispatch** failure (a channel/TTS/shell/effect
+    /// engine error that was *not* an expression-layer raise, and not marked
+    /// `no_error: true`) stopped the stack. Subject to the existing per-phase
+    /// routing policy via [`Self::routes_to_failure`]. Carries the error
+    /// snapshot so a routed-to `failure` event can expose
+    /// `err.kind`/`err.variant`/`err.msg`.
     pub action_error: Option<LifecycleErrorInfo>,
+
+    /// Set when a late-binding **expression-layer evaluation** raised — a
+    /// `when:` guard, a top-level or action-string interpolation, or any
+    /// event-time expression that threw. Unlike [`Self::action_error`], this is
+    /// **not** suppressible by `no_error` and is **not** gated by
+    /// [`LifecycleSignal::routes_action_error_to_failure`]: an evaluation error
+    /// must surface and halt on every event phase, including terminal-phase
+    /// events. Orchestration consults it via [`Self::has_evaluation_error`].
+    pub evaluation_error: Option<LifecycleErrorInfo>,
 }
 
 impl LifecycleEventOutcome {
     /// Whether the unintentional action error recorded by this outcome must
     /// route the run to `failure`.
     ///
-    /// True only when an action error occurred **and** `signal` is a
-    /// setup-phase event ([`LifecycleSignal::routes_action_error_to_failure`]).
+    /// True only when a side-effect dispatch [`Self::action_error`] occurred
+    /// **and** `signal` is a setup-phase event
+    /// ([`LifecycleSignal::routes_action_error_to_failure`]). Evaluation errors
+    /// are deliberately excluded — they halt on every phase regardless of this
+    /// setup-phase policy (see [`Self::has_evaluation_error`]).
     pub fn routes_to_failure(&self, signal: LifecycleSignal) -> bool {
         self.action_error.is_some() && signal.routes_action_error_to_failure()
+    }
+
+    /// Whether this outcome carries a late-binding expression-layer evaluation
+    /// error.
+    ///
+    /// Evaluation errors surface and halt regardless of event phase, so
+    /// orchestration checks this independently of [`Self::routes_to_failure`].
+    pub fn has_evaluation_error(&self) -> bool {
+        self.evaluation_error.is_some()
     }
 }
 
@@ -235,18 +271,50 @@ enum ActionStep {
     Continue,
     /// A lifecycle control action fired; terminate the event's stack.
     Control(StackControl),
-    /// An action errored (not suppressed by `no_error`); stop the stack.
+    /// A side-effect dispatch failure (not suppressed by `no_error`); stop the
+    /// stack and report it as an [`LifecycleEventOutcome::action_error`].
     Errored(LifecycleErrorInfo),
+    /// An expression-layer evaluation raise; stop the stack and report it as an
+    /// [`LifecycleEventOutcome::evaluation_error`]. Never suppressed by
+    /// `no_error`.
+    EvaluationErrored(LifecycleErrorInfo),
+}
+
+/// Which layer an action error originated in.
+///
+/// The stack loop routes the two to different outcome channels: an
+/// [`ActionFailure::Evaluation`] (an expression/binding raise) halts on every
+/// phase and ignores `no_error`; an [`ActionFailure::Dispatch`] (a side-effect
+/// that failed after a clean evaluation) keeps the existing `no_error` /
+/// per-phase policy.
+enum ActionFailure {
+    /// An expression/binding raise: control-argument evaluation, message/shell
+    /// interpolation, or side-effect argument evaluation.
+    Evaluation(LifecycleErrorInfo),
+    /// A side-effect dispatch failure: shell non-zero, an effect-engine error,
+    /// or an invalid resolved effect name.
+    Dispatch(LifecycleErrorInfo),
+}
+
+impl ActionFailure {
+    /// Borrow the underlying error snapshot regardless of layer.
+    fn info(&self) -> &LifecycleErrorInfo {
+        match self {
+            ActionFailure::Evaluation(info) | ActionFailure::Dispatch(info) => info,
+        }
+    }
 }
 
 impl StackExecutionContext<'_> {
     /// Run the event: top-level communication first, then the stack.
     pub fn execute_event(&self, config: &LifecycleConfig) -> LifecycleEventOutcome {
         if let Some(notification) = config.get(self.signal) {
-            // Top-level emission fails closed: a resolution error becomes an
-            // action error so the event halts before its stack runs, mirroring
-            // a stack-action failure (C4).
-            if let Err(info) = self.emit_top_level(notification) {
+            // Top-level emission fails closed: a resolution failure halts the
+            // event before its stack runs, mirroring a stack-action failure
+            // (C4). An interpolation raise is an evaluation error; an invalid
+            // resolved effect name is a dispatch failure.
+            if let Err(failure) = self.emit_top_level(notification) {
+                let info = failure.info();
                 warn!(
                     signal = ?self.signal,
                     kind = info.kind,
@@ -254,9 +322,15 @@ impl StackExecutionContext<'_> {
                     message = %info.msg,
                     "lifecycle top-level emission failed closed"
                 );
-                return LifecycleEventOutcome {
-                    control: None,
-                    action_error: Some(info),
+                return match failure {
+                    ActionFailure::Evaluation(info) => LifecycleEventOutcome {
+                        evaluation_error: Some(info),
+                        ..Default::default()
+                    },
+                    ActionFailure::Dispatch(info) => LifecycleEventOutcome {
+                        action_error: Some(info),
+                        ..Default::default()
+                    },
                 };
             }
         }
@@ -282,12 +356,20 @@ impl StackExecutionContext<'_> {
     /// already run a stack once (e.g. to inspect its [`StackControl`] before
     /// committing to a terminal signal) uses this to fire the communication
     /// surface without re-running the stack's side effects.
-    pub fn emit_top_level_for_signal(&self, config: &LifecycleConfig) {
+    ///
+    /// Returns the late-binding **evaluation** error (a raised top-level
+    /// interpolation) when one occurs, so a terminal-phase caller can halt the
+    /// run on it. A side-effect **dispatch** failure (an invalid resolved
+    /// `effect` name) is logged and skipped — the terminal slot is already
+    /// taken, so it follows the terminal-phase log-and-continue policy and is
+    /// not returned.
+    pub fn emit_top_level_for_signal(
+        &self,
+        config: &LifecycleConfig,
+    ) -> Option<LifecycleErrorInfo> {
         if let Some(notification) = config.get(self.signal) {
-            // This path is used only for a terminal slot the caller has already
-            // recorded (success/blocked), so there is no event left to fail; a
-            // resolution error is logged rather than dispatched as raw text.
-            if let Err(info) = self.emit_top_level(notification) {
+            if let Err(failure) = self.emit_top_level(notification) {
+                let info = failure.info();
                 warn!(
                     signal = ?self.signal,
                     kind = info.kind,
@@ -295,8 +377,13 @@ impl StackExecutionContext<'_> {
                     message = %info.msg,
                     "lifecycle top-level emission failed; field skipped"
                 );
+                return match failure {
+                    ActionFailure::Evaluation(info) => Some(info),
+                    ActionFailure::Dispatch(_) => None,
+                };
             }
         }
+        None
     }
 
     /// Return a copy of this context targeting a different lifecycle signal.
@@ -492,11 +579,12 @@ impl StackExecutionContext<'_> {
     /// main compose), so each is interpolated **at event-time** against the live
     /// document state plus the late-binding globals (`err`/`timing`/`current`).
     ///
-    /// Fails closed (C4): a resolution error (malformed/unknown root) or an
-    /// unknown resolved `effect` name aborts emission with a
-    /// [`LifecycleErrorInfo`] before the offending field is sent, so no side
-    /// effect dispatches silently-empty or raw operational text.
-    fn emit_top_level(&self, n: &LifecycleNotification) -> Result<(), LifecycleErrorInfo> {
+    /// Fails closed (C4): a resolution raise (malformed/unknown root) becomes an
+    /// [`ActionFailure::Evaluation`] and an unknown resolved `effect` name an
+    /// [`ActionFailure::Dispatch`], aborting emission before the offending field
+    /// is sent, so no side effect dispatches silently-empty or raw operational
+    /// text.
+    fn emit_top_level(&self, n: &LifecycleNotification) -> Result<(), ActionFailure> {
         if let Some(text) = self.resolve_emit(n.stdout.as_deref())? {
             self.emitter.emit_stdout(&text, self.term);
         }
@@ -529,7 +617,8 @@ impl StackExecutionContext<'_> {
                 }
                 super::lifecycle::AudioPhase::Effect(name) => {
                     if let Some(name) = self.resolve_emit(Some(&name))? {
-                        self.validate_effect_name(&name)?;
+                        self.validate_effect_name(&name)
+                            .map_err(ActionFailure::Dispatch)?;
                         self.emitter.emit_effect(&name);
                     }
                 }
@@ -542,10 +631,10 @@ impl StackExecutionContext<'_> {
     ///
     /// `None` input (absent field) yields `Ok(None)`. A field with no `{{ … }}`
     /// span is emitted verbatim. A field carrying interpolation is resolved
-    /// through DM2 (strict) against [`Self::frontmatter`]; a resolution failure
-    /// is returned as a [`LifecycleErrorInfo`] so the caller fails the event
-    /// closed rather than dispatching silently-empty or raw template text.
-    fn resolve_emit(&self, text: Option<&str>) -> Result<Option<String>, LifecycleErrorInfo> {
+    /// through DM2 (strict) against [`Self::frontmatter`]; a resolution raise is
+    /// returned as an [`ActionFailure::Evaluation`] so the caller fails the
+    /// event closed rather than dispatching silently-empty or raw template text.
+    fn resolve_emit(&self, text: Option<&str>) -> Result<Option<String>, ActionFailure> {
         let Some(text) = text else { return Ok(None) };
         if !text.contains("{{") {
             return Ok(Some(text.to_string()));
@@ -557,7 +646,12 @@ impl StackExecutionContext<'_> {
         let fm = borrowed.as_deref().unwrap_or(self.frontmatter);
         self.resolve_string_value(text, fm)
             .map(|value| Some(scalar_string(&value)))
-            .map_err(|e| LifecycleErrorInfo::from_action_failure("interpolation", e))
+            .map_err(|e| {
+                ActionFailure::Evaluation(LifecycleErrorInfo::from_action_failure(
+                    "interpolation",
+                    e,
+                ))
+            })
     }
 
     /// Process the typed stack top to bottom.
@@ -600,10 +694,12 @@ impl StackExecutionContext<'_> {
             match self.when_matches(item.when.as_ref(), working) {
                 Ok(true) => {}
                 Ok(false) => continue,
+                // A `when:` guard that raised is an expression-layer evaluation
+                // error, not a side-effect dispatch failure.
                 Err(info) => {
                     return LifecycleEventOutcome {
-                        control: None,
-                        action_error: Some(info),
+                        evaluation_error: Some(info),
+                        ..Default::default()
                     };
                 }
             }
@@ -613,13 +709,19 @@ impl StackExecutionContext<'_> {
                     ActionStep::Control(control) => {
                         return LifecycleEventOutcome {
                             control: Some(control),
-                            action_error: None,
+                            ..Default::default()
                         };
                     }
                     ActionStep::Errored(info) => {
                         return LifecycleEventOutcome {
-                            control: None,
                             action_error: Some(info),
+                            ..Default::default()
+                        };
+                    }
+                    ActionStep::EvaluationErrored(info) => {
+                        return LifecycleEventOutcome {
+                            evaluation_error: Some(info),
+                            ..Default::default()
                         };
                     }
                 }
@@ -660,11 +762,25 @@ impl StackExecutionContext<'_> {
     }
 
     /// Run one action, applying the `no_error` escape hatch.
+    ///
+    /// `no_error` is scoped to side-effect **dispatch** failures only: an
+    /// expression-layer **evaluation** raise always halts the stack and
+    /// surfaces, because a thrown guard/interpolation is a defect the author
+    /// cannot meaningfully "tolerate" the way a flaky channel send can be.
     fn run_action(&self, action: &LifecycleAction, working: &mut Map<String, Value>) -> ActionStep {
         match self.execute_action_inner(action, working) {
             Ok(None) => ActionStep::Continue,
             Ok(Some(control)) => ActionStep::Control(control),
-            Err(info) => {
+            Err(ActionFailure::Evaluation(info)) => {
+                warn!(
+                    kind = info.kind,
+                    variant = %info.variant,
+                    message = %info.msg,
+                    "lifecycle action evaluation error"
+                );
+                ActionStep::EvaluationErrored(info)
+            }
+            Err(ActionFailure::Dispatch(info)) => {
                 if action.no_error {
                     warn!(
                         kind = info.kind,
@@ -689,26 +805,39 @@ impl StackExecutionContext<'_> {
     /// Execute one action's body against the evolving `working` frontmatter.
     ///
     /// Returns `Ok(None)` to continue, `Ok(Some(control))` when a lifecycle
-    /// control action fired, or `Err(info)` on an action error.
+    /// control action fired, or `Err(ActionFailure)` on an action error — tagged
+    /// [`ActionFailure::Evaluation`] for an expression-layer raise (which always
+    /// halts) and [`ActionFailure::Dispatch`] for a side-effect failure (subject
+    /// to `no_error` and the per-phase policy).
     fn execute_action_inner(
         &self,
         action: &LifecycleAction,
         working: &mut Map<String, Value>,
-    ) -> Result<Option<StackControl>, LifecycleErrorInfo> {
+    ) -> Result<Option<StackControl>, ActionFailure> {
         match &action.kind {
             LifecycleActionKind::LifecycleControl(control) => self
                 .resolve_control(control, working)
                 .map(Some)
-                .map_err(|msg| LifecycleErrorInfo::from_action_failure(control.verb(), msg)),
+                .map_err(|msg| {
+                    ActionFailure::Evaluation(LifecycleErrorInfo::from_action_failure(
+                        control.verb(),
+                        msg,
+                    ))
+                }),
             LifecycleActionKind::Communication(comm) => {
-                let message = self
-                    .render_message(&comm.message, working)
-                    .map_err(|msg| LifecycleErrorInfo::from_action_failure(comm.channel.verb(), msg))?;
+                let message = self.render_message(&comm.message, working).map_err(|msg| {
+                    ActionFailure::Evaluation(LifecycleErrorInfo::from_action_failure(
+                        comm.channel.verb(),
+                        msg,
+                    ))
+                })?;
                 // Deferred effect validation (C4): an `effect` positional
                 // action's name is only known after interpolation, so validate
-                // the resolved name before dispatch.
+                // the resolved name before dispatch. The interpolation already
+                // succeeded, so an invalid catalog name is a dispatch failure.
                 if comm.channel == CommunicationChannel::Effect {
-                    self.validate_effect_name(&message)?;
+                    self.validate_effect_name(&message)
+                        .map_err(ActionFailure::Dispatch)?;
                 }
                 self.emit_communication(comm.channel, &message);
                 Ok(None)
@@ -718,8 +847,7 @@ impl StackExecutionContext<'_> {
             }
             LifecycleActionKind::SideEffect(effect) => self
                 .dispatch_side_effect(&effect.verb, &effect.args, working)
-                .map(|_| None)
-                .map_err(|msg| LifecycleErrorInfo::from_action_failure(effect.verb.clone(), msg)),
+                .map(|_| None),
             LifecycleActionKind::ExpressionFunction(func) => {
                 // A positional action whose verb is a known side effect was
                 // parsed as an expression-function action; route it to the
@@ -727,15 +855,15 @@ impl StackExecutionContext<'_> {
                 if is_known_side_effect(&func.function) {
                     return self
                         .dispatch_side_effect(&func.function, &func.args, working)
-                        .map(|_| None)
-                        .map_err(|msg| {
-                            LifecycleErrorInfo::from_action_failure(func.function.clone(), msg)
-                        });
+                        .map(|_| None);
                 }
                 self.invoke_expression_function(&func.function, &func.args, working)
                     .map(|_| None)
                     .map_err(|msg| {
-                        LifecycleErrorInfo::from_action_failure(func.function.clone(), msg)
+                        ActionFailure::Evaluation(LifecycleErrorInfo::from_action_failure(
+                            func.function.clone(),
+                            msg,
+                        ))
                     })
             }
         }
@@ -790,17 +918,18 @@ impl StackExecutionContext<'_> {
         }
     }
 
-    /// Run a shell action. A non-zero exit is an action error (unless
-    /// `no_error` suppresses it upstream); `on_error` is emitted as a warning
-    /// status line before the error propagates.
+    /// Run a shell action. A failed command-string interpolation is an
+    /// evaluation error; a non-zero exit or spawn failure is a dispatch error
+    /// (subject to `no_error` upstream). `on_error` is emitted as a warning
+    /// status line before a dispatch error propagates.
     fn run_shell_action(
         &self,
         shell: &super::lifecycle_actions::ShellAction,
         fm: &Map<String, Value>,
-    ) -> Result<(), LifecycleErrorInfo> {
-        let command = self
-            .render_message(&shell.command, fm)
-            .map_err(|msg| LifecycleErrorInfo::from_action_failure("shell", msg))?;
+    ) -> Result<(), ActionFailure> {
+        let command = self.render_message(&shell.command, fm).map_err(|msg| {
+            ActionFailure::Evaluation(LifecycleErrorInfo::from_action_failure("shell", msg))
+        })?;
         match self.shell_runner.run(&command) {
             Ok(0) => Ok(()),
             Ok(code) => {
@@ -809,14 +938,16 @@ impl StackExecutionContext<'_> {
                         self.emitter.emit_warn(&text, self.term);
                     }
                 }
-                Err(LifecycleErrorInfo::from_action_failure(
+                Err(ActionFailure::Dispatch(LifecycleErrorInfo::from_action_failure(
                     "shell",
                     format!("command `{command}` exited with code {code}"),
-                ))
+                )))
             }
-            Err(spawn_err) => Err(LifecycleErrorInfo::from_action_failure(
-                "shell",
-                format!("command `{command}` failed to run: {spawn_err}"),
+            Err(spawn_err) => Err(ActionFailure::Dispatch(
+                LifecycleErrorInfo::from_action_failure(
+                    "shell",
+                    format!("command `{command}` failed to run: {spawn_err}"),
+                ),
             )),
         }
     }
@@ -834,7 +965,9 @@ impl StackExecutionContext<'_> {
         verb: &str,
         args: &[Expr],
         working: &mut Map<String, Value>,
-    ) -> Result<Value, String> {
+    ) -> Result<Value, ActionFailure> {
+        // Argument evaluation/interpolation is the expression layer: a raise
+        // here is an evaluation error.
         let values = args
             .iter()
             .map(|expr| {
@@ -846,19 +979,26 @@ impl StackExecutionContext<'_> {
                 }
                 Ok(value)
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, String>>()
+            .map_err(|msg| {
+                ActionFailure::Evaluation(LifecycleErrorInfo::from_action_failure(verb, msg))
+            })?;
+        // From here on, an error is a side-effect dispatch failure (a missing
+        // argument, an unknown verb, or an effect-engine error).
+        let dispatch_err =
+            |msg: String| ActionFailure::Dispatch(LifecycleErrorInfo::from_action_failure(verb, msg));
         let engine = self.effect_engine;
-        let s = |idx: usize| -> Result<String, String> {
+        let s = |idx: usize| -> Result<String, ActionFailure> {
             values
                 .get(idx)
                 .map(scalar_string)
-                .ok_or_else(|| format!("`{verb}` is missing a required argument"))
+                .ok_or_else(|| dispatch_err(format!("`{verb}` is missing a required argument")))
         };
-        let v = |idx: usize| -> Result<Value, String> {
+        let v = |idx: usize| -> Result<Value, ActionFailure> {
             values
                 .get(idx)
                 .cloned()
-                .ok_or_else(|| format!("`{verb}` is missing a required argument"))
+                .ok_or_else(|| dispatch_err(format!("`{verb}` is missing a required argument")))
         };
 
         let result = match verb {
@@ -880,9 +1020,9 @@ impl StackExecutionContext<'_> {
             "append_line" => engine.append_line(&s(0)?, &s(1)?).map(Value::String),
             "append_jsonl" => engine.append_jsonl(&s(0)?, v(1)?).map(Value::String),
             "http_post" => engine.http_post(&s(0)?, s(1)?.into_bytes()),
-            other => return Err(format!("unknown side effect `{other}`")),
+            other => return Err(dispatch_err(format!("unknown side effect `{other}`"))),
         };
-        let out = result.map_err(|e| e.to_string())?;
+        let out = result.map_err(|e| dispatch_err(e.to_string()))?;
         self.mirror_frontmatter_mutation(verb, &values, working);
         Ok(out)
     }
@@ -1602,8 +1742,12 @@ mod tests {
         );
         let outcome = context.execute_event(&config);
         assert!(
-            outcome.action_error.is_some(),
-            "unknown `when:` root must fail closed"
+            outcome.evaluation_error.is_some(),
+            "unknown `when:` root must fail closed through the evaluation channel"
+        );
+        assert!(
+            outcome.action_error.is_none(),
+            "a guard raise is an evaluation error, not a dispatch failure"
         );
         assert!(
             recorder.events().is_empty(),
@@ -1915,6 +2059,47 @@ mod tests {
         let outcome = context.execute_event(&config);
         assert_eq!(outcome, LifecycleEventOutcome::default());
         assert_eq!(recorder.events(), vec![Emitted::Info("reached".to_string())]);
+    }
+
+    /// `no_error` is scoped to side-effect dispatch failures: an action whose
+    /// message interpolation *raises* (an unknown root) must still surface as an
+    /// evaluation error and halt the stack even when `no_error: true` is set.
+    #[test]
+    fn no_error_does_not_suppress_evaluation_raise() {
+        let config = parse_lifecycle_config(
+            &json!({
+                "start": {
+                    "stack": [
+                        {"action": {"action": "message", "message": "{{spec_fil}}", "no_error": true}},
+                        {"action": {"info": "unreached"}}
+                    ]
+                }
+            }),
+            Path::new("t.md"),
+        )
+        .unwrap();
+        let fm = map(json!({"spec_file": "x"}));
+        let (_dir, engine) = temp_engine();
+        let shell = MockShell::new(0);
+        let recorder = Recorder::default();
+        let harness = Harness::default();
+        let context = ctx(
+            LifecycleSignal::Start,
+            &fm,
+            None,
+            &engine,
+            &shell,
+            &recorder,
+            &harness,
+            Path::new("t.md"),
+        );
+        let outcome = context.execute_event(&config);
+        assert!(
+            outcome.evaluation_error.is_some(),
+            "an evaluation raise halts despite no_error"
+        );
+        assert!(outcome.action_error.is_none());
+        assert!(recorder.events().is_empty(), "the stack stopped at the raise");
     }
 
     #[test]
@@ -2801,7 +2986,11 @@ mod tests {
             Path::new("t.md"),
         );
         let outcome = context.execute_event(&config);
-        assert!(outcome.action_error.is_some(), "typo must fail closed");
+        assert!(
+            outcome.evaluation_error.is_some(),
+            "typo must fail closed through the evaluation channel"
+        );
+        assert!(outcome.action_error.is_none());
         assert!(recorder.events().is_empty(), "nothing dispatched");
     }
 
@@ -2830,7 +3019,11 @@ mod tests {
             Path::new("t.md"),
         );
         let outcome = context.execute_event(&config);
-        assert!(outcome.action_error.is_some());
+        assert!(
+            outcome.evaluation_error.is_some(),
+            "a top-level interpolation raise is an evaluation error"
+        );
+        assert!(outcome.action_error.is_none());
         assert!(recorder.events().is_empty());
     }
 
@@ -2862,7 +3055,11 @@ mod tests {
             Path::new("t.md"),
         );
         let outcome = context.execute_event(&config);
-        assert!(outcome.action_error.is_some(), "surviving span must fail");
+        assert!(
+            outcome.evaluation_error.is_some(),
+            "surviving span is an evaluation-layer failure"
+        );
+        assert!(outcome.action_error.is_none());
         assert!(recorder.events().is_empty(), "no side effect dispatched");
     }
 
