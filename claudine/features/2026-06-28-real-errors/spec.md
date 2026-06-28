@@ -1,3 +1,8 @@
+---
+status: "ready for planning and implementation"
+reviewed: true
+---
+
 ## An Example of Poor Error Messages
 
 Today we have errors like this:
@@ -11,7 +16,9 @@ Today we have errors like this:
 ┃ Review the transform pipeline inputs and any configured rules.
 ```
 
-This error basically comes down to a file reference NOT being valid but it's so dense in it's explanation that a user has to really focus on what's going on to understand what's wrong.
+This error basically comes down to a file reference not being valid, but the
+current report is dense enough that the user has to study implementation detail
+before they can see the mistake.
 
 What we need to do in these situations is:
 
@@ -20,9 +27,9 @@ What we need to do in these situations is:
 ```sh
  MarkdownError: invalid file path
 ┃
-┃ The invalid file reference <orange>features/2026-06-21-opencode-log-fix/spec.md</a></orange> was assigned
+┃ The invalid file reference <orange>features/2026-06-21-opencode-log-fix/spec.md</orange> was assigned
 ┃ to the <inverse>iteration</inverse> Frontmatter property when using the
-┃ <blue><a href>{prompt}</a></blue> prompt file.
+┃ <blue>{prompt}</blue> prompt file.
 ┃
 ┃ ```yaml
 ┃ $schema: 
@@ -37,23 +44,33 @@ What we need to do in these situations is:
 ┃ - `{suggestion-2}`
 ```
 
-Let's review some of the fundamental differences which this new error provides:
+The target report differs from the current one in a few fundamental ways:
 
-1. Identifies the REAL problem (e.g., an invalid file reference) and makes that the FOCUS of the error message
-2. Shows the variables in the underlying schema definition which are relevant
-    - rather than show no YAML -- as we did in the original error -- or show ALL the YAML -- as we do in many other cases -- we instead recognize the variables which are involved in the error and focus on those variables!
-    - this shows the variables which are relevant not just a big dump of information
-    - Note: we not only show the _lines_ which are relevant but we show the parent `$schema` line too so that user can see the "shape/structure" of that the problematic 
-3. The prompt file is not just "mentioned" but a OSC8 hyperlink is provided so that the caller can easily get back to prompt file to understand the file and/or make changes to it
-4. A missing file is almost always a typo on the callers part and we should help them identify the file "they meant" where ever possible. To do this we will need some string subset and similarity semantics to bring up a small list of suggestions that feel like the most likely intended files
+1. It identifies the real problem (for example, an invalid file reference) and
+   makes that the focus of the error message.
+2. It shows the frontmatter properties involved in the failure, not no YAML and
+   not the whole frontmatter block. The excerpt includes structural parents such
+   as `$schema` so the user can see the relevant shape.
+3. It links the prompt file with OSC8 when the terminal supports it, so the user
+   can jump back to the file that needs attention.
+4. It suggests likely intended files when the missing file looks like a typo,
+   using a bounded similarity search over nearby filesystem candidates.
 
 ## Context
 
-There is no point in trying to solve this _specific_ problem! We must identify the pattern which problem represents as well as look for similar patterns which are also providing dense, hard to understand error messages. Once we're able to see the patterns of bad reporting we can start to apply strategic solutions.
+There is no point in solving only this specific failure. We must identify the
+pattern it represents and the similar patterns that also produce dense,
+hard-to-understand error messages. Once the bad reporting patterns are visible,
+we can apply a structural solution.
 
-Having clear error messages is absolutely essential for not only Claudine but also Darkmatter. These two libraries and CLI's provide a powerful toolset and new users WILL make mistakes so it's super important that we help callers to quickly and painlessly **understand** the mistake they've made so it can be fixed without the user having to scour through documentation or blindly trying different options until something works.
+Clear error messages are essential for both Claudine and Darkmatter. These
+libraries and CLIs provide a powerful toolset, and new users will make mistakes.
+The error system must help callers quickly understand the mistake and fix it
+without scouring documentation or trying random changes.
 
-The importance of this task means that finding the "right solution" over the "expediant solution" is an absolute requirement. The scope of this improvement must address these issues in Darkmatter and in Claudine.
+The importance of this task means the right solution matters more than the
+expedient solution. The scope of this improvement must address these issues in
+Darkmatter and in Claudine.
 
 > Note: remember we do not have an installed user base for Claudine and Darkmatter yet so we have the freedom to make breaking changes where necessary to achieve our goals. That doesn't mean we should strive for doing things in a breaking manner but if doing so provides notable benefits then this solution should be considered.
 
@@ -81,6 +98,16 @@ The two axes share **one taxonomy**: the typed error is the single source of tru
 There is no parallel string-matched classification layer — building one would recreate the
 control-flow-by-string bug (`is_fatal_eval_error`) this effort exists to remove.
 
+Reader's note: this is a design tightening from review. The existing documents sometimes
+talk about compose fatality as if it were fully determined by `disposition`. That would be
+too coarse for the current contract: `composition.unknown_function` and
+`composition.invalid_file_reference` are both `correctable` author errors, but today's
+lenient compose behavior treats unknown functions as fatal and missing files as warnings.
+The classification facets remain the single source of truth for handling and rendering;
+the compose fatal/warn policy is a separate projection that must be characterized and
+preserved during the typing refactor unless the open product decision below explicitly
+changes it.
+
 ### Scope
 
 - **Both libraries.** Darkmatter owns the diagnostic substrate (typed causes, the focused
@@ -90,6 +117,18 @@ control-flow-by-string bug (`is_fatal_eval_error`) this effort exists to remove.
   base yet); prefer non-breaking where it costs nothing.
 - We **extend** the existing `BlockError` / `StatusBlock` / `SourceContext` substrate — no
   `miette` or new diagnostic framework.
+- **Public contract authority.** [`error-catalog.md`](./error-catalog.md) is the locked
+  contract for category, code, disposition, origin, severity, and detail field names. If a
+  companion document still has older open-question language about those values, treat the
+  catalog as authoritative and update the companion text during implementation rather than
+  reopening the ratified choices.
+- **Error provenance survives process and crate boundaries.** Any error intended for
+  lifecycle `err.*`, API callers, persisted recovery records, or CLI rendering must preserve
+  its typed cause chain and serializable detail payload. A `Display` string is presentation
+  only and must not be used as the durable representation.
+- **Terminal output remains component-based.** New human-facing reports must render through
+  the existing `TerminalRenderable`/`BlockError`/`StatusBlock` path, preserving TTY gating,
+  `NO_COLOR`/`FORCE_COLOR` behavior, OSC8 capability checks, and non-TTY ANSI stripping.
 
 ### Related design documents
 
@@ -113,6 +152,12 @@ Phased and independently shippable; the sequence and rationale are in
 above; 4–6 generalize the rendering to the whole class; 7 adds handleability by implementing
 the ratified [`error-catalog.md`](./error-catalog.md); 8 closes the late-binding corners.
 
+Implementation must preserve the existing behavior before improving it: phase 1 adds the
+fatal/warn characterization matrix, phase 2 keeps `Display` output behavior-neutral while
+typing the engine, and only later phases are allowed to change user-visible rendering. Any
+intentional behavior change must be called out as such and tested separately from the typing
+refactor.
+
 ### Success criteria
 
 (full list in [`integrated-design.md`](./integrated-design.md) §15)
@@ -129,6 +174,41 @@ the ratified [`error-catalog.md`](./error-catalog.md); 8 closes the late-binding
 - Every handleable error exposes the ratified `category`/`code`/`disposition`/`origin`/
   `detail` facets via `Diagnostic`, projected to `err.*`, so a handler can tap a pattern,
   target a code, or target an instance — with no string-message parsing.
+- The legacy lifecycle fields `err.kind`, `err.variant`, and `err.msg` remain available
+  during migration, with `err.kind` and `err.variant` treated as deprecated aliases for the
+  new `err.category` and `err.code` fields. New documentation and examples must use the new
+  faceted names.
+
+### Open Questions
+
+#### Should missing file references become fatal in lenient compose mode?
+
+Current behavior treats an unknown expression function as fatal in lenient mode but turns a
+missing file reference into a warning. The new diagnostics make missing file references much
+clearer, but changing warn/fatal behavior is a product decision, not a side effect of the
+typing refactor.
+
+Suggested solutions:
+
+1. **Preserve current behavior for this spec.**
+   Pros: isolates the structural typing/rendering work, keeps the characterization matrix
+   honest, and avoids surprising existing prompt documents. Cons: a clearly invalid file
+   reference may still be swallowed as a warning in body interpolation.
+2. **Promote missing file references to fatal everywhere.**
+   Pros: matches the intuition that a referenced file is required input and prevents hidden
+   prompt degradation. Cons: behavior change across Darkmatter and Claudine, likely requiring
+   migration notes and new tests for prompt documents that intentionally tolerate absent
+   references.
+3. **Promote only whole-value frontmatter file references to fatal.**
+   Pros: aligns with the existing whole-value frontmatter strictness rule for executable
+   state while preserving lenient body interpolation. Cons: more policy surface and more
+   cases for users to learn.
+
+Recommendation: choose option 1 for this implementation and track option 3 as the likely
+future behavior change. The current spec is already large and cross-crate; preserving
+fatality behavior during the typing refactor gives implementation a clean correctness gate.
+If we later decide missing references should be fatal, whole-value frontmatter is the safest
+first promotion because the repo already treats that surface as executable state.
 
 ### Non-goals
 
@@ -136,3 +216,6 @@ the ratified [`error-catalog.md`](./error-catalog.md); 8 closes the late-binding
   recovery dimension is *noted* in [`integrated-design.md`](./integrated-design.md) §13 and
   [`error-structure.md`](./error-structure.md) §11, but designed elsewhere.)
 - The postcondition *checks* that raise the `document.*` / `vcs.*` expectation errors.
+- Rewriting unrelated existing diagnostics that are already typed, readable, and outside the
+  lossy Darkmatter/Claudine boundary. Those can adopt `Diagnostic` facets when touched, but
+  they are not blockers for the reference failure.
