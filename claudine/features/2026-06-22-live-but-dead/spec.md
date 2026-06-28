@@ -5,6 +5,7 @@ area: claudine
 packages:
     - claudine
 reviewed: true
+review_iterations: 3
 ---
 
 # Live-but-Dead Guard: Stalled-Generation Detection

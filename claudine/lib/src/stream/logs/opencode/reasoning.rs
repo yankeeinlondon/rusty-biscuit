@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use serde_json::{Map, Value, json};
@@ -63,6 +63,32 @@ pub struct StuckSubagentInfo {
     pub name: Option<String>,
     /// Wall-clock duration since the subagent last reported progress.
     pub elapsed_since_progress: Duration,
+}
+
+/// Safe OpenCode metadata captured at the last attempted generation, carried
+/// by [`EarlyTermination::StalledGeneration`] so the rendered error block and
+/// `guard_context` can name the run without re-parsing the stream.
+///
+/// Every field is optional — OpenCode does not always tag every value on a
+/// `service=llm` record. The struct deliberately stores **only** safe
+/// metadata: there is no field for prompt text, tool inputs/outputs, HTTP
+/// URLs, authorization headers, or raw stderr lines, and none must ever be
+/// added. The guard needs identity, not payloads.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct StalledGenerationContext {
+    /// OpenCode session id (`session.id` tag) of the stalled generation.
+    pub session_id: Option<String>,
+    /// Reasoning step the stall was observed on, from the bridge's per-session
+    /// dedup state when known.
+    pub step: Option<u32>,
+    /// Agent name driving the generation (e.g. `rust-developer`).
+    pub agent: Option<String>,
+    /// Provider id of the model attempting the generation.
+    pub provider_id: Option<String>,
+    /// Model id attempting the generation.
+    pub model_id: Option<String>,
+    /// OpenCode generation mode (e.g. `primary`, `all`).
+    pub mode: Option<String>,
 }
 
 /// Reason the bridge wants `run_child_stream_semantic(...)` to terminate
@@ -154,6 +180,86 @@ pub enum EarlyTermination {
     /// Synthesized summary marks `error_kind = "repeated_stream_error"`.
     /// `count` is the consecutive-failure count at trip time (≥ the threshold).
     RepeatedStreamError { count: u32 },
+    /// OpenCode kept launching fresh generations (`llm_call_start`) without ever
+    /// making forward progress — the live-but-dead retry-churn fingerprint. The
+    /// provider returned neither a response nor an error envelope, so every
+    /// liveness clock (`step_timeout`'s event/byte heartbeats) and the
+    /// [`Self::RepeatedStreamError`] backstop are defeated; only repeated
+    /// generation attempts with zero intervening progress remain on the wire.
+    /// The wrapper terminates the child and maps the outcome to
+    /// [`crate::harness::ProcessTermination::Aborted`] so
+    /// [`crate::harness::classify_failure`] yields
+    /// [`crate::harness::FailureEvent::AgentFailure`] (fail-fast, **never** the
+    /// `handle_timeout:` retry path that would reproduce the stall).
+    ///
+    /// ## Notes
+    ///
+    /// Synthesized summary marks `error_kind = "stalled_generation"`. Fires
+    /// only when **both** conditions hold: retry churn
+    /// (`generation_count >= MAX_GENERATIONS_WITHOUT_PROGRESS`) **and**
+    /// progress silence (`stall_duration >= stall_timeout`). Either condition
+    /// alone never trips, so a single legitimately slow generation is exempt.
+    /// `generation_count` is the count of generation attempts since the last
+    /// progress-class event, `stall_duration` is the elapsed progress silence
+    /// at trip time, and `context` carries only safe identity metadata (no
+    /// prompt text or tool payloads).
+    StalledGeneration {
+        generation_count: u32,
+        stall_duration: Duration,
+        context: StalledGenerationContext,
+    },
+}
+
+/// Progress half of the stalled-generation backstop, shared across the two
+/// producers that can observe forward progress.
+///
+/// The stderr [`OpenCodeLogBridge`] owns the counting and trip logic, but
+/// genuine forward progress also arrives on **stdout** as semantic events
+/// (`OutputText`, `ToolCall`, …). The stdout NDJSON parser runs on a different
+/// thread, so the two clocks this guard reads live behind an `Arc<Mutex<…>>`:
+/// the bridge resets them on its own progress-class stderr records, and a
+/// stdout-side progress observer (see
+/// [`StalledProgressObserverSink`](crate::stream::semantic::StalledProgressObserverSink))
+/// resets the same cell when a progress-class stdout event is forwarded.
+/// Without that shared cell, stdout-origin progress would never clear the
+/// counter and a later `llm_call_start` could trip the guard on a run that was
+/// in fact progressing.
+///
+/// Each method takes `now: Instant` so the detector stays testable without
+/// real sleeps. The critical section never emits a [`SemanticEvent`], so the
+/// lock is always released before any sink call — there is no nested-lock
+/// ordering between this `Mutex` and the shared semantic-sink `Mutex`.
+#[derive(Debug)]
+pub struct StalledGenerationProgress {
+    /// Monotonic instant of the last progress-class event observed on either
+    /// the stderr bridge or the stdout semantic stream.
+    last_progress_at: Instant,
+    /// Streamed `llm_call_start` records observed since the last progress-class
+    /// event. One half of the two-condition trip.
+    generation_count_since_progress: u32,
+}
+
+impl StalledGenerationProgress {
+    /// Seed both clocks at `now`. Called at bridge construction so the silence
+    /// budget starts ticking immediately (the live-but-dead incident occurred
+    /// entirely while stderr was active, before any stdout NDJSON).
+    fn new(now: Instant) -> Self {
+        Self {
+            last_progress_at: now,
+            generation_count_since_progress: 0,
+        }
+    }
+
+    /// Mark forward progress: advance the silence clock to `now` and clear the
+    /// generation churn counter. Idempotent — a second progress event in the
+    /// same instant simply re-stamps the clock.
+    ///
+    /// Public so the stdout-side progress observer can reset the shared cell
+    /// when it forwards a progress-class semantic event.
+    pub fn mark_progress(&mut self, now: Instant) {
+        self.last_progress_at = now;
+        self.generation_count_since_progress = 0;
+    }
 }
 
 /// Shared stderr-side state accumulated by the bridge as it parses lines.
@@ -232,6 +338,23 @@ pub struct OpenCodeLogBridge<S: SemanticEventSink> {
     /// transition. See [`stream_error_fingerprint`] for what the fingerprint
     /// captures (and why the per-line timestamp is excluded).
     last_stream_error_fingerprint: Option<String>,
+    /// Stall-timeout budget for the stalled-generation backstop. `None`
+    /// disables the guard entirely (the `0s`-disables contract resolves to
+    /// `None` upstream); when `Some(d)`, a trip additionally requires progress
+    /// silence to reach `d`.
+    stall_timeout: Option<Duration>,
+    /// Progress clocks for the stalled-generation backstop (last progress
+    /// instant + generation churn count), shared with the stdout-side progress
+    /// observer. Seeded at construction so the silence budget starts ticking at
+    /// bridge creation, not at first stdout NDJSON. Behind an `Arc<Mutex<…>>`
+    /// because stdout-origin progress arrives on a different thread; see
+    /// [`StalledGenerationProgress`].
+    progress: Arc<Mutex<StalledGenerationProgress>>,
+    /// Safe metadata from the most recent streamed `LlmCall`. Retained across a
+    /// progress reset so a later trip message can still name the last attempted
+    /// generation. Bridge-local (only the stderr side knows generation
+    /// identity), so it stays outside the shared progress cell.
+    last_generation_context: Option<StalledGenerationContext>,
 }
 
 /// Consecutive unrecognized `stream error` records tolerated before the bridge
@@ -239,6 +362,20 @@ pub struct OpenCodeLogBridge<S: SemanticEventSink> {
 /// drift (see fixes/2026-06-21-opencode-log-fix); the classifier handles known
 /// terminal caps on the first error, so this only catches future/unknown shapes.
 const MAX_CONSECUTIVE_STREAM_ERRORS: u32 = 5;
+
+/// Generation attempts (`llm_call_start`) tolerated since the last
+/// progress-class event before the stalled-generation backstop may trip.
+/// Mirrors [`MAX_CONSECUTIVE_STREAM_ERRORS`] in shipping as a constant rather
+/// than a knob.
+///
+/// This count is one half of a two-condition defense against false positives:
+/// a trip additionally requires progress silence to exceed `stall_timeout`.
+/// Because the count condition is mandatory, a single legitimately slow
+/// generation (one `llm_call_start` that takes >10m on a struggling endpoint)
+/// is exempt — only genuine retry churn, where OpenCode relaunches the same
+/// dropped generation again and again with no forward progress, accumulates
+/// toward the threshold.
+const MAX_GENERATIONS_WITHOUT_PROGRESS: u32 = 4;
 
 /// Bookkeeping for an OpenCode child session observed on the stderr stream.
 ///
@@ -255,12 +392,20 @@ struct ChildSessionInfo {
 }
 
 impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
-    /// Build a new bridge wired to a shared sink, an observation gate, and
-    /// an optional early-termination channel.
+    /// Build a new bridge wired to a shared sink, an observation gate, an
+    /// optional early-termination channel, and the stalled-generation
+    /// backstop budget.
+    ///
+    /// `stall_timeout` is `None` to disable the live-but-dead guard (the
+    /// `0s`-disables contract resolves to `None` upstream); `Some(d)` arms it
+    /// with a `d` progress-silence threshold. The progress clock
+    /// (`last_progress_at`) is seeded to `Instant::now()` here so the silence
+    /// budget starts ticking at bridge creation, not at first stdout NDJSON.
     pub fn new(
         sink: S,
         stdout_event_seen: Arc<AtomicBool>,
         early_terminate: Option<Sender<EarlyTermination>>,
+        stall_timeout: Option<Duration>,
     ) -> Self {
         Self {
             sink,
@@ -273,7 +418,40 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             last_step_per_session: BTreeMap::new(),
             consecutive_stream_errors: 0,
             last_stream_error_fingerprint: None,
+            stall_timeout,
+            progress: Arc::new(Mutex::new(StalledGenerationProgress::new(Instant::now()))),
+            last_generation_context: None,
         }
+    }
+
+    /// Clone handle into the shared stalled-generation progress clocks.
+    ///
+    /// The stdout NDJSON parser runs on a separate thread and cannot reach the
+    /// bridge directly, so it resets these clocks through a
+    /// [`StalledProgressObserverSink`](crate::stream::semantic::StalledProgressObserverSink)
+    /// built from this handle. Returns the same cell the bridge mutates, so a
+    /// stdout-origin progress event and a stderr-bridge progress event clear one
+    /// shared counter.
+    pub fn stalled_generation_progress(&self) -> Arc<Mutex<StalledGenerationProgress>> {
+        Arc::clone(&self.progress)
+    }
+
+    /// Generation churn count currently held in the shared progress cell.
+    #[cfg(test)]
+    fn generation_count_since_progress(&self) -> u32 {
+        self.progress
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .generation_count_since_progress
+    }
+
+    /// Last-progress instant currently held in the shared progress cell.
+    #[cfg(test)]
+    fn last_progress_at(&self) -> Instant {
+        self.progress
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .last_progress_at
     }
 
     /// Create a new early-termination channel. Returns the sender for the
@@ -718,6 +896,11 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
 
         match parent_id {
             Some(parent) => {
+                // A child session starting is forward progress: the run is
+                // dispatching real work, not spinning on dropped generations.
+                // Reset the stalled-generation backstop so the subagent gets a
+                // fresh silence baseline.
+                self.reset_stalled_generation_progress(Instant::now());
                 self.child_sessions.insert(
                     id.clone(),
                     ChildSessionInfo {
@@ -810,6 +993,28 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             message: rendered_message,
             extra: Value::Object(extra_map),
         });
+
+        // Stalled-generation backstop: only streamed generations count toward
+        // the retry-churn fingerprint. A non-streamed call (e.g. a title/summary
+        // helper) is not the live-but-dead loop.
+        if is_stream {
+            let session_id = record.tags.get("session.id").cloned();
+            let step = session_id
+                .as_ref()
+                .and_then(|sid| self.last_step_per_session.get(sid).copied());
+            let ctx = StalledGenerationContext {
+                session_id,
+                step,
+                agent,
+                provider_id: non_empty(provider_id),
+                model_id: non_empty(model_id),
+                mode: non_empty(mode),
+            };
+            let now = Instant::now();
+            if let Some(termination) = self.record_llm_call_and_check_trip(now, ctx) {
+                return self.on_stalled_generation(record, termination);
+            }
+        }
         StderrIngestOutcome::Consumed
     }
 
@@ -832,9 +1037,13 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         // stream-error backstop counter so transient retries that eventually
         // succeed do not accumulate toward a false abort. Drop the fingerprint
         // too, so a post-step error identical to a pre-step one starts a fresh
-        // run rather than resuming the old count.
+        // run rather than resuming the old count. The same advance is progress
+        // for the stalled-generation backstop — reset its churn count and
+        // silence clock. Deduped repeats returned early above, so they do not
+        // reach this reset.
         self.consecutive_stream_errors = 0;
         self.last_stream_error_fingerprint = None;
+        self.reset_stalled_generation_progress(Instant::now());
 
         let mut extra_map = base_extra(record, "step_loop");
         extra_map.insert("session_id".into(), Value::String(session_id.clone()));
@@ -853,8 +1062,11 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         session_id: String,
     ) -> StderrIngestOutcome {
         // Drop the dedup entry so a follow-up prompt on the same session
-        // starts fresh.
+        // starts fresh. A step exit is forward progress for the stalled-
+        // generation backstop: reset its churn count and silence clock so a
+        // follow-up prompt is evaluated from a clean baseline.
         self.last_step_per_session.remove(&session_id);
+        self.reset_stalled_generation_progress(Instant::now());
 
         let mut extra_map = base_extra(record, "step_exit");
         extra_map.insert("session_id".into(), Value::String(session_id.clone()));
@@ -1002,6 +1214,120 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         StderrIngestOutcome::Consumed
     }
 
+    /// Mark forward progress for the stalled-generation backstop: advance the
+    /// silence clock to `now` and clear the generation churn counter. The last
+    /// captured generation context is deliberately retained so a later trip
+    /// message can still name the most recent attempted generation.
+    ///
+    /// Resets the **shared** progress cell, so a stdout-origin progress event
+    /// observing the same cell and a stderr-bridge progress event converge on
+    /// one counter.
+    fn reset_stalled_generation_progress(&mut self, now: Instant) {
+        self.progress
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .mark_progress(now);
+    }
+
+    /// Record one streamed `llm_call_start` and evaluate the two-condition
+    /// trip. Increments the generation churn counter and stores `ctx` as the
+    /// last attempted generation, then returns
+    /// [`EarlyTermination::StalledGeneration`] only when **both** conditions
+    /// hold: the guard is armed (`stall_timeout` is `Some`), churn has reached
+    /// [`MAX_GENERATIONS_WITHOUT_PROGRESS`], and progress silence has reached
+    /// the configured budget. The first `LlmCall` after progress never trips on
+    /// its own — the count condition protects a legitimately slow generation.
+    fn record_llm_call_and_check_trip(
+        &mut self,
+        now: Instant,
+        ctx: StalledGenerationContext,
+    ) -> Option<EarlyTermination> {
+        self.last_generation_context = Some(ctx);
+
+        let mut progress = self
+            .progress
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        progress.generation_count_since_progress =
+            progress.generation_count_since_progress.saturating_add(1);
+
+        let stall_timeout = self.stall_timeout?;
+        if progress.generation_count_since_progress < MAX_GENERATIONS_WITHOUT_PROGRESS {
+            return None;
+        }
+        let stall_duration = now.duration_since(progress.last_progress_at);
+        if stall_duration < stall_timeout {
+            return None;
+        }
+        let generation_count = progress.generation_count_since_progress;
+        drop(progress);
+        Some(EarlyTermination::StalledGeneration {
+            generation_count,
+            stall_duration,
+            // The retained context names the last attempted generation; it was
+            // just overwritten above, so it is the current call's metadata.
+            context: self.last_generation_context.clone().unwrap_or_default(),
+        })
+    }
+
+    /// Emit the terminal live-stderr badge for a stalled-generation trip and
+    /// request a fail-fast abort exactly once. The badge carries the
+    /// generation-attempt count, the elapsed progress silence, and any safe
+    /// context (session id, step, agent, provider id, model id, mode) — never
+    /// prompt text or tool payloads. Uses [`SemanticErrorKind::AgentNative`] so
+    /// color/style match other agent-native failures.
+    fn on_stalled_generation(
+        &mut self,
+        record: &OpenCodeLogRecord,
+        termination: EarlyTermination,
+    ) -> StderrIngestOutcome {
+        let EarlyTermination::StalledGeneration {
+            generation_count,
+            stall_duration,
+            context,
+        } = &termination
+        else {
+            return StderrIngestOutcome::Consumed;
+        };
+
+        let message = render_stalled_generation_badge(*generation_count, *stall_duration, context);
+
+        let mut extra_map = base_extra(record, "stalled_generation");
+        extra_map.insert("label".into(), Value::String("Stalled Generation".into()));
+        extra_map.insert("generation_count".into(), json!(generation_count));
+        extra_map.insert(
+            "stall_duration_ms".into(),
+            json!(duration_as_millis_u64(*stall_duration)),
+        );
+        if let Some(session_id) = &context.session_id {
+            extra_map.insert("session_id".into(), Value::String(session_id.clone()));
+        }
+        if let Some(step) = context.step {
+            extra_map.insert("step".into(), json!(step));
+        }
+        if let Some(agent) = &context.agent {
+            extra_map.insert("agent".into(), Value::String(agent.clone()));
+        }
+        if let Some(provider_id) = &context.provider_id {
+            extra_map.insert("provider_id".into(), Value::String(provider_id.clone()));
+        }
+        if let Some(model_id) = &context.model_id {
+            extra_map.insert("model_id".into(), Value::String(model_id.clone()));
+        }
+        if let Some(mode) = &context.mode {
+            extra_map.insert("mode".into(), Value::String(mode.clone()));
+        }
+
+        self.sink.on_semantic_event(SemanticEvent::Error {
+            message,
+            terminal: true,
+            kind: SemanticErrorKind::AgentNative,
+            extra: Value::Object(extra_map),
+        });
+        self.fire_early_termination(termination);
+        StderrIngestOutcome::Consumed
+    }
+
     fn fire_early_termination(&mut self, termination: EarlyTermination) {
         if self.early_terminate_fired {
             return;
@@ -1045,6 +1371,60 @@ fn stream_error_fingerprint(record: &OpenCodeLogRecord) -> String {
         tag("session.id"),
         error_context(record).unwrap_or_default(),
     )
+}
+
+/// Map an owned tag value to `None` when empty so absent OpenCode tags don't
+/// surface as blank context fields.
+fn non_empty(value: String) -> Option<String> {
+    if value.is_empty() { None } else { Some(value) }
+}
+
+/// Saturating `Duration` → milliseconds as `u64`. `Duration::as_millis`
+/// returns `u128`; clamp to `u64::MAX` rather than truncate so a pathological
+/// duration cannot wrap into a small value in the JSONL `extra` map.
+fn duration_as_millis_u64(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
+/// Render the live-stderr badge message for a stalled-generation trip. Mirrors
+/// the CLI-side `render_stalled_generation_message` shape: the generation-
+/// attempt count, the elapsed progress silence in seconds, and any available
+/// safe context. Never includes prompt text or tool payloads.
+fn render_stalled_generation_badge(
+    generation_count: u32,
+    stall_duration: Duration,
+    context: &StalledGenerationContext,
+) -> String {
+    let seconds = stall_duration.as_secs();
+    let mut message = format!(
+        "stalled generation: {generation_count} attempts over {seconds}s with no progress; \
+         aborting the live-but-dead retry loop"
+    );
+
+    let mut details: Vec<String> = Vec::new();
+    if let Some(session_id) = &context.session_id {
+        details.push(format!("session={session_id}"));
+    }
+    if let Some(step) = context.step {
+        details.push(format!("step={step}"));
+    }
+    if let Some(agent) = &context.agent {
+        details.push(format!("agent={agent}"));
+    }
+    if let Some(provider_id) = &context.provider_id {
+        details.push(format!("provider={provider_id}"));
+    }
+    if let Some(model_id) = &context.model_id {
+        details.push(format!("model={model_id}"));
+    }
+    if let Some(mode) = &context.mode {
+        details.push(format!("mode={mode}"));
+    }
+    if !details.is_empty() {
+        message.push_str(&format!(" ({})", details.join(", ")));
+    }
+
+    message
 }
 
 /// Render the inline message string for a `service=llm ... stream` event.
@@ -1278,7 +1658,7 @@ mod tests {
         // when they don't classify into a promoted semantic event we
         // suppress the raw line so it doesn't leak to the user's terminal
         // as debug output.
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let outcome = bridge.ingest("INFO 2026-04-15T21:28:30 +0ms service=default msg=hello");
         assert_eq!(outcome, StderrIngestOutcome::Consumed);
         assert_eq!(bridge.sink.events.len(), 0);
@@ -1288,7 +1668,7 @@ mod tests {
 
     #[test]
     fn unstructured_noise_returns_not_consumed_and_is_not_counted() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let outcome = bridge.ingest("just some chatter");
         assert_eq!(outcome, StderrIngestOutcome::NotConsumed);
         let state = bridge.state.lock().unwrap();
@@ -1298,7 +1678,7 @@ mod tests {
 
     #[test]
     fn malformed_command_emits_warning_and_consumes() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let line = "ERROR 2026-04-15T21:28:30 +315ms service=config command=/tmp/foo.md err=ENOENT failed to load command";
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         assert_eq!(bridge.sink.events.len(), 1);
@@ -1326,7 +1706,7 @@ mod tests {
     #[test]
     fn usage_cap_after_stdout_emits_terminal_error_and_early_terminate() {
         let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx));
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx), None);
         let line = r#"ERROR 2026-04-15T19:26:02 +3054ms service=llm providerID=zai-coding-plan modelID=glm-5.1 error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"code\":\"1308\",\"message\":\"Usage limit reached. Your limit will reset at 2026-04-16 04:18:56\"}}"}]}}"#;
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         assert_eq!(bridge.sink.events.len(), 1);
@@ -1361,7 +1741,7 @@ mod tests {
     fn usage_cap_before_stdout_emits_terminal_error_and_early_terminate() {
         let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
         let mut bridge =
-            OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), Some(tx));
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), Some(tx), None);
         let line = r#"ERROR 2026-04-15T19:26:02 +3054ms service=llm error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"code\":\"1308\",\"message\":\"Usage limit reached. Your limit will reset at 2026-04-16 04:18:56\"}}"}]}}"#;
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         match &bridge.sink.events[0] {
@@ -1400,7 +1780,7 @@ mod tests {
     fn opencode_1178_stream_error_usage_cap_terminates() {
         let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
         let mut bridge =
-            OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx));
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx), None);
         let line = r#"timestamp=2026-06-22T04:07:15.161Z level=ERROR run=da37e0dd message="stream error" providerID=zai-coding-plan modelID=glm-5.2 session.id=ses_1127ec2fdffepaJc2kEnX093eo small=false agent=build mode=primary error.error="AI_APICallError: Usage limit reached for 5 hour. Your limit will reset at 2026-06-22 13:59:38""#;
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         match &bridge.sink.events[0] {
@@ -1434,7 +1814,7 @@ mod tests {
     fn repeated_stream_errors_trip_backstop_and_terminate() {
         let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
         let mut bridge =
-            OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx));
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx), None);
 
         // First MAX-1 errors are non-fatal warnings; the channel stays quiet.
         for _ in 0..(MAX_CONSECUTIVE_STREAM_ERRORS - 1) {
@@ -1463,7 +1843,7 @@ mod tests {
     fn step_advance_resets_stream_error_backstop() {
         let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
         let mut bridge =
-            OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx));
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx), None);
         let step_line = r#"timestamp=2026-06-22T04:07:20.000Z level=INFO run=da37e0dd message=loop session.id=ses_x step=7"#;
 
         // One below threshold, then a genuine step transition clears the count.
@@ -1548,7 +1928,7 @@ mod tests {
     fn provider_limit_fires_early_termination_only_once() {
         let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
         let mut bridge =
-            OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), Some(tx));
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), Some(tx), None);
         let line = r#"ERROR 2026-04-15T19:26:02 +10ms service=llm error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[{"name":"AI_APICallError","statusCode":429}]}}"#;
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
@@ -1561,7 +1941,7 @@ mod tests {
 
     #[test]
     fn auth_failure_emits_terminal_error() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let line = r#"ERROR 2026-04-15T19:26:02 +5ms service=llm error={"error":{"name":"AuthenticationError","message":"Invalid API key"}}"#;
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         match &bridge.sink.events[0] {
@@ -1584,7 +1964,7 @@ mod tests {
 
     #[test]
     fn api_failure_emits_warning_if_not_fatal() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let line = r#"ERROR 2026-04-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_APICallError","message":"upstream boom","statusCode":500}}"#;
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         match &bridge.sink.events[0] {
@@ -1605,7 +1985,7 @@ mod tests {
 
     #[test]
     fn uncaught_structured_error_emits_unknown_error_event() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let line = "ERROR 2026-04-15T21:28:30 +33ms service=default name=TypeError message=U.split is not a function fatal";
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         match &bridge.sink.events[0] {
@@ -1628,7 +2008,7 @@ mod tests {
 
     #[test]
     fn raw_ansi_error_line_emits_unknown_error_event() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let line = "\u{1b}[91m\u{1b}[1mError: \u{1b}[0mUnexpected error, check log file";
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         match &bridge.sink.events[0] {
@@ -1657,7 +2037,7 @@ mod tests {
         let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
         drop(rx);
         let mut bridge =
-            OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), Some(tx));
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), Some(tx), None);
         let line = r#"ERROR 2026-04-15T19:26:02 +10ms service=llm error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[]}}"#;
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
     }
@@ -1773,7 +2153,7 @@ mod tests {
         // about. Bus lines are counted in diagnostics but produce no
         // semantic event and must NEVER leak to the user as raw stderr —
         // so the bridge returns `Consumed` to suppress raw passthrough.
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let line = "INFO 2026-04-15T21:28:30 +5ms service=bus msg=internal chatter";
         let outcome = bridge.ingest(line);
         assert_eq!(outcome, StderrIngestOutcome::Consumed);
@@ -1791,7 +2171,7 @@ mod tests {
 
     #[test]
     fn non_bus_line_classifies_normally_after_bus_filter() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         // First, a bus line that is silently dropped (but still consumed
         // so it never reaches raw stderr passthrough).
         let bus_line = "INFO 2026-04-15T21:28:30 +5ms service=bus msg=ignored";
@@ -1809,7 +2189,7 @@ mod tests {
     fn new_format_bridge_consumes_lifecycle_lines() {
         let fixture =
             include_str!("../../../../tests/fixtures/logs/opencode-new-format-lifecycle.txt");
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), None, None);
 
         for line in fixture.lines() {
             assert_eq!(
@@ -1871,7 +2251,7 @@ mod tests {
     fn new_format_bridge_consumes_serviceless_lifecycle_lines() {
         let fixture =
             include_str!("../../../../tests/fixtures/logs/opencode-new-format-serviceless.txt");
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), None, None);
 
         for line in fixture.lines() {
             assert_eq!(
@@ -1937,7 +2317,7 @@ mod tests {
     fn session_created_without_parent_emits_session_start() {
         // Phase 4 dedup gate: bridge emits a primary SessionStart only
         // when stdout has not yet produced any semantic event.
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), None, None);
         let line = "INFO  2026-05-12T20:00:12 +20ms service=session id=ses_primary slug=happy-panda version=1.14.48 title=New session created";
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         assert_eq!(bridge.sink.events.len(), 1);
@@ -1959,7 +2339,7 @@ mod tests {
 
     #[test]
     fn duplicate_primary_session_created_is_not_re_emitted() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), None, None);
         let line = "INFO  2026-05-12T20:00:12 +20ms service=session id=ses_primary title=A created";
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         let line2 =
@@ -1974,7 +2354,7 @@ mod tests {
 
     #[test]
     fn session_created_with_parent_emits_subagent_start() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let line = "INFO  2026-05-12T20:05:26 +1ms service=session id=ses_child slug=lucky-orchid version=1.14.48 parentID=ses_parent title=Count letters in 'banana' created";
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         assert_eq!(bridge.sink.events.len(), 1);
@@ -1993,7 +2373,7 @@ mod tests {
 
     #[test]
     fn llm_call_emits_info_event_with_provider_model_mode() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let line = "INFO  2026-05-12T20:00:12 +0ms service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_a small=false agent=build mode=primary stream";
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         match &bridge.sink.events[0] {
@@ -2015,7 +2395,7 @@ mod tests {
 
     #[test]
     fn step_loop_emits_info_event() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let line = "INFO  2026-05-12T20:00:12 +0ms service=session.prompt session.id=ses_a step=3 logSpan.http.span.4=55ms loop";
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         match &bridge.sink.events[0] {
@@ -2030,7 +2410,7 @@ mod tests {
 
     #[test]
     fn step_loop_dedups_repeated_step_in_same_session() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let same_step = "INFO  2026-05-12T20:00:12 +0ms service=session.prompt session.id=ses_a step=0 logSpan.http.span.4=55ms loop";
         let later_span = "INFO  2026-05-12T20:00:13 +0ms service=session.prompt session.id=ses_a step=0 logSpan.http.span.4=2143ms loop";
         let new_step = "INFO  2026-05-12T20:00:14 +0ms service=session.prompt session.id=ses_a step=1 logSpan.http.span.4=2200ms loop";
@@ -2061,7 +2441,7 @@ mod tests {
 
     #[test]
     fn step_loop_dedup_resets_after_step_exit() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let first = "INFO  2026-05-12T20:00:12 +0ms service=session.prompt session.id=ses_a step=0 logSpan.http.span.4=55ms loop";
         let exit = "INFO  2026-05-12T20:00:19 +0ms service=session.prompt session.id=ses_a logSpan.http.span.4=7437ms exiting loop";
         let after = "INFO  2026-05-12T20:01:00 +0ms service=session.prompt session.id=ses_a step=0 logSpan.http.span.5=10ms loop";
@@ -2081,7 +2461,7 @@ mod tests {
 
     #[test]
     fn step_exit_for_non_child_session_emits_only_info_event() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let line = "INFO  2026-05-12T20:00:19 +1ms service=session.prompt session.id=ses_a logSpan.http.span.4=7437ms exiting loop";
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         assert_eq!(bridge.sink.events.len(), 1);
@@ -2096,7 +2476,7 @@ mod tests {
 
     #[test]
     fn step_exit_for_child_session_emits_info_then_subagent_stop() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
 
         let start = "INFO  2026-05-12T20:05:26 +1ms service=session id=ses_child parentID=ses_parent title=Count created";
         assert_eq!(bridge.ingest(start), StderrIngestOutcome::Consumed);
@@ -2131,7 +2511,7 @@ mod tests {
 
     #[test]
     fn step_exit_for_child_session_emits_subagent_stop_only_once() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
 
         let start = "INFO  2026-05-12T20:05:26 +1ms service=session id=ses_child parentID=ses_parent title=Count created";
         assert_eq!(bridge.ingest(start), StderrIngestOutcome::Consumed);
@@ -2153,7 +2533,7 @@ mod tests {
 
     #[test]
     fn permission_evaluated_emits_info_event() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let line = r#"INFO  2026-05-12T20:05:26 +160ms service=permission permission=task pattern=general action={"permission":"*","action":"allow","pattern":"*"} evaluated"#;
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         match &bridge.sink.events[0] {
@@ -2168,7 +2548,7 @@ mod tests {
 
     #[test]
     fn http_response_emits_info_event() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let line = "INFO  2026-05-12T20:05:54 +0ms service=default http.method=POST http.url=/session/x/message http.status=500 logSpan.http.span.4=99ms Sent HTTP response";
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         match &bridge.sink.events[0] {
@@ -2190,7 +2570,7 @@ mod tests {
         // `has_trailing_keyword`). Either shape — a clean trailing message
         // OR an absorbed tag value — must surface enough context for the
         // user to know which snapshot subsystem operation failed.
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         // JSON-array `files=[…]` form: parser cleanly separates trailing message.
         let line = r#"WARN  2026-05-12T20:05:26 +0ms service=snapshot session.id=ses_a files=["/repo/.env",".npmrc"] failed to add snapshot files"#;
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
@@ -2223,7 +2603,7 @@ mod tests {
         // the rendered Warning must still surface enough information for
         // the operator to know what was being snapshotted — the file path
         // and the absorbed diagnostic both ride along in the tag summary.
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let line = "WARN  2026-05-12T20:05:26 +0ms service=snapshot session.id=ses_a file=/repo/.env failed to add snapshot files";
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         match &bridge.sink.events[0] {
@@ -2247,7 +2627,7 @@ mod tests {
         // carry no user-actionable signal; only WARN/ERROR-level
         // snapshot lines (`failed to add snapshot files`, etc.) surface
         // as Warning events.
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let lines = [
             r#"INFO  2026-05-12T20:05:26 +0ms service=snapshot id=snap_abc files=["/repo/x.rs"] taking snapshot"#,
             "INFO  2026-05-12T20:05:27 +0ms service=snapshot prune=7.days cleanup",
@@ -2276,7 +2656,7 @@ mod tests {
         // own session event remains the anchor). It still must NOT be
         // proxied to the user's terminal — return `Consumed` so the raw
         // stderr passthrough does not echo it as debug output.
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let line = "INFO  2026-05-12T20:00:11 +97ms service=default version=1.14.48 args=[\"run\"] opencode";
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         assert_eq!(bridge.sink.events.len(), 0);
@@ -2290,7 +2670,7 @@ mod tests {
 
     #[test]
     fn primary_llm_call_captures_provider_and_model_on_first_observation() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let line = "INFO  2026-05-12T20:00:12 +0ms service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_a small=false agent=build mode=primary stream";
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
 
@@ -2304,7 +2684,7 @@ mod tests {
 
     #[test]
     fn primary_llm_call_only_captures_first_mode_primary_observation() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let first = "INFO  2026-05-12T20:00:12 +0ms service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_a mode=primary stream";
         let second = "INFO  2026-05-12T20:01:00 +0ms service=llm providerID=anthropic modelID=claude-4 session.id=ses_a mode=primary stream";
         assert_eq!(bridge.ingest(first), StderrIngestOutcome::Consumed);
@@ -2320,7 +2700,7 @@ mod tests {
 
     #[test]
     fn non_primary_llm_call_does_not_capture_provider_and_model() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let line = "INFO  2026-05-12T20:00:12 +0ms service=llm providerID=kimi-for-coding modelID=k2p6-small session.id=ses_a mode=subagent stream";
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
 
@@ -2388,7 +2768,7 @@ mod tests {
         // must be dropped. The `primary_session_emitted` flag is still set
         // so subsequent stderr session_created lines for other ids are
         // also suppressed.
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let line =
             "INFO  2026-05-12T20:00:12 +20ms service=session id=ses_primary title=Primary created";
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
@@ -2409,7 +2789,7 @@ mod tests {
         // child session_created lines must always promote to SubagentStart
         // because the stdout NDJSON stream no longer synthesizes them
         // (Phase 4 removed the synthesis path).
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let line = "INFO  2026-05-12T20:05:26 +1ms service=session id=ses_child parentID=ses_parent title=Count created";
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         assert_eq!(bridge.sink.events.len(), 1);
@@ -2423,7 +2803,7 @@ mod tests {
     fn usage_cap_without_retry_error_still_terminates() {
         let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
         let mut bridge =
-            OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), Some(tx));
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), Some(tx), None);
 
         // This is a 1308 but NOT wrapped in AI_RetryError
         let line = r#"ERROR 2026-04-15T19:26:02 +3054ms service=llm error={"error":{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"code\":\"1308\",\"message\":\"Usage limit reached.\"}}"}}"#;
@@ -2454,7 +2834,7 @@ mod tests {
 
     #[test]
     fn overload_emits_warning_no_early_terminate() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let line = r#"ERROR 2026-05-15T19:26:02 +3054ms service=llm providerID=kimi-for-coding modelID=k2p6 error={"error":{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"type\":\"rate_limit_error\",\"message\":\"The engine is currently overloaded, please try again later\"}}","isRetryable":true}}"#;
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         assert_eq!(bridge.sink.events.len(), 1);
@@ -2476,7 +2856,7 @@ mod tests {
 
     #[test]
     fn throttled_emits_warning_no_early_terminate() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let line = r#"ERROR 2026-05-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_APICallError","statusCode":429,"message":"Too many requests"}}"#;
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         assert_eq!(bridge.sink.events.len(), 1);
@@ -2500,7 +2880,7 @@ mod tests {
     fn retries_exhausted_emits_terminal_error_and_early_terminate() {
         let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
         let mut bridge =
-            OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), Some(tx));
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), Some(tx), None);
         let line = r#"ERROR 2026-05-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[{"name":"AI_APICallError","statusCode":429}]}}"#;
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         assert_eq!(bridge.sink.events.len(), 1);
@@ -2535,7 +2915,7 @@ mod tests {
     fn exceeded_quota_emits_terminal_error_and_early_terminate() {
         let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
         let mut bridge =
-            OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), Some(tx));
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), Some(tx), None);
         let line = r#"ERROR 2026-05-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"type\":\"exceeded_current_quota_error\",\"message\":\"Quota exceeded\"}}"}}"#;
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         assert_eq!(bridge.sink.events.len(), 1);
@@ -2562,7 +2942,7 @@ mod tests {
 
     #[test]
     fn cap_phrase_without_error_tag_emits_advisory_warning_no_terminate() {
-        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
         let line = "ERROR 2026-05-15T19:26:02 +100ms service=llm dummy={} Usage limit reached for k2p6";
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         assert_eq!(bridge.sink.events.len(), 1);
@@ -2585,7 +2965,7 @@ mod tests {
     fn cap_wins_over_retries_exhausted_in_bridge() {
         let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
         let mut bridge =
-            OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), Some(tx));
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), Some(tx), None);
         let line = r#"ERROR 2026-05-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"code\":\"1308\",\"message\":\"Usage limit reached\"}}"}]}}"#;
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         assert_eq!(bridge.sink.events.len(), 1);
@@ -2686,5 +3066,645 @@ mod tests {
         assert_ne!(exit, rate);
         assert_ne!(rep, rate);
         assert_ne!(vol, rate);
+    }
+
+    // --- Stalled-generation detector (Phase 2 sanity; full matrix in Phase 5) ---
+    //
+    // These exercise the two private detector helpers directly with an
+    // injected `now: Instant` so no real time passes. The `on_llm_call`
+    // handler reads `Instant::now()` itself; the count/time logic it delegates
+    // to is what these lock down.
+
+    const STALL_BUDGET: Duration = Duration::from_secs(600);
+
+    fn armed_bridge() -> OpenCodeLogBridge<RecordingSink> {
+        OpenCodeLogBridge::new(
+            RecordingSink::default(),
+            stdout_seen(),
+            None,
+            Some(STALL_BUDGET),
+        )
+    }
+
+    #[test]
+    fn four_streamed_generations_past_budget_trip_stalled_generation() {
+        let mut bridge = armed_bridge();
+        let base = Instant::now();
+        bridge.reset_stalled_generation_progress(base);
+        let past = base + STALL_BUDGET + Duration::from_secs(1);
+        let ctx = StalledGenerationContext {
+            session_id: Some("ses_a".into()),
+            ..Default::default()
+        };
+
+        // First three accumulate churn but the count condition is not yet met.
+        for _ in 0..(MAX_GENERATIONS_WITHOUT_PROGRESS - 1) {
+            assert!(
+                bridge
+                    .record_llm_call_and_check_trip(past, ctx.clone())
+                    .is_none()
+            );
+        }
+        match bridge.record_llm_call_and_check_trip(past, ctx.clone()) {
+            Some(EarlyTermination::StalledGeneration {
+                generation_count,
+                stall_duration,
+                context,
+            }) => {
+                assert_eq!(generation_count, MAX_GENERATIONS_WITHOUT_PROGRESS);
+                assert!(stall_duration >= STALL_BUDGET);
+                assert_eq!(context.session_id.as_deref(), Some("ses_a"));
+            }
+            other => panic!("expected StalledGeneration, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn three_generations_past_budget_do_not_trip() {
+        let mut bridge = armed_bridge();
+        let base = Instant::now();
+        bridge.reset_stalled_generation_progress(base);
+        let past = base + STALL_BUDGET + Duration::from_secs(1);
+        let ctx = StalledGenerationContext::default();
+
+        for _ in 0..(MAX_GENERATIONS_WITHOUT_PROGRESS - 1) {
+            assert!(
+                bridge
+                    .record_llm_call_and_check_trip(past, ctx.clone())
+                    .is_none(),
+                "count condition must remain unmet below the threshold",
+            );
+        }
+    }
+
+    #[test]
+    fn four_generations_under_budget_do_not_trip() {
+        let mut bridge = armed_bridge();
+        let base = Instant::now();
+        bridge.reset_stalled_generation_progress(base);
+        let recent = base + Duration::from_secs(60);
+        let ctx = StalledGenerationContext::default();
+
+        for _ in 0..MAX_GENERATIONS_WITHOUT_PROGRESS {
+            assert!(
+                bridge
+                    .record_llm_call_and_check_trip(recent, ctx.clone())
+                    .is_none(),
+                "progress-silence condition must remain unmet under the budget",
+            );
+        }
+    }
+
+    #[test]
+    fn progress_reset_restarts_the_generation_count() {
+        let mut bridge = armed_bridge();
+        let base = Instant::now();
+        bridge.reset_stalled_generation_progress(base);
+        let past = base + STALL_BUDGET + Duration::from_secs(1);
+        let ctx = StalledGenerationContext::default();
+
+        // Churn up to one below the threshold, then a progress event resets.
+        for _ in 0..(MAX_GENERATIONS_WITHOUT_PROGRESS - 1) {
+            bridge.record_llm_call_and_check_trip(past, ctx.clone());
+        }
+        bridge.reset_stalled_generation_progress(past);
+
+        // A fresh run of (threshold - 1) calls must stay under the count even
+        // though wall-clock silence since the reset is now zero.
+        for _ in 0..(MAX_GENERATIONS_WITHOUT_PROGRESS - 1) {
+            assert!(
+                bridge
+                    .record_llm_call_and_check_trip(past, ctx.clone())
+                    .is_none(),
+                "reset should have cleared the churn count",
+            );
+        }
+    }
+
+    #[test]
+    fn disabled_guard_never_trips_even_with_churn_past_budget() {
+        // `None` stall_timeout disables the guard. Encodes Design Decision 3's
+        // anti-correlation lock at the unit level: churn alone never terminates.
+        let mut bridge =
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
+        let base = Instant::now();
+        bridge.reset_stalled_generation_progress(base);
+        let past = base + STALL_BUDGET + Duration::from_secs(1);
+        let ctx = StalledGenerationContext::default();
+
+        for _ in 0..(MAX_GENERATIONS_WITHOUT_PROGRESS + 2) {
+            assert!(
+                bridge
+                    .record_llm_call_and_check_trip(past, ctx.clone())
+                    .is_none(),
+                "a disabled guard must never trip regardless of churn",
+            );
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Phase-5 stalled-generation spec matrix (ingest-level)
+    //
+    // The helper-level count/time logic is locked above with an injected
+    // `now`. These exercise the full `ingest` path so the reset taxonomy, the
+    // terminal-event shape, the long-tool exemption, and independence from the
+    // `RepeatedStreamError` backstop are proven end-to-end. `on_llm_call` reads
+    // `Instant::now()` itself, so the time condition is forced two ways:
+    // a generous `STALL_BUDGET` keeps the guard from tripping while we observe
+    // counter/clock state, and a `Duration::ZERO` budget makes the
+    // progress-silence condition trivially true so a trip turns purely on the
+    // (still-mandatory) churn count.
+    // ------------------------------------------------------------------
+
+    const STREAMED_LLM_CALL: &str = "INFO  2026-05-12T20:00:12 +0ms service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_a small=false agent=build mode=primary stream";
+
+    /// Bridge armed with a `Duration::ZERO` budget: the progress-silence
+    /// condition is trivially satisfied, so a trip turns purely on the churn
+    /// count reaching `MAX_GENERATIONS_WITHOUT_PROGRESS` (which stays
+    /// mandatory). Used to make the count-driven event path deterministic
+    /// without advancing the monotonic clock.
+    fn count_only_bridge(
+        tx: Sender<EarlyTermination>,
+    ) -> OpenCodeLogBridge<RecordingSink> {
+        OpenCodeLogBridge::new(
+            RecordingSink::default(),
+            stdout_seen(),
+            Some(tx),
+            Some(Duration::ZERO),
+        )
+    }
+
+    #[test]
+    fn genuine_step_advance_via_ingest_resets_generation_count() {
+        let mut bridge = armed_bridge();
+        // Two streamed generations accumulate churn; the generous budget keeps
+        // the guard from tripping while we observe the counter.
+        assert_eq!(bridge.ingest(STREAMED_LLM_CALL), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.ingest(STREAMED_LLM_CALL), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.generation_count_since_progress(), 2);
+
+        let step = "INFO  2026-05-12T20:00:13 +0ms service=session.prompt session.id=ses_a step=5 logSpan.http.span.4=55ms loop";
+        assert_eq!(bridge.ingest(step), StderrIngestOutcome::Consumed);
+        assert_eq!(
+            bridge.generation_count_since_progress(), 0,
+            "a genuine step advance must reset the churn count",
+        );
+    }
+
+    #[test]
+    fn deduped_step_loop_does_not_reset_but_genuine_advance_does() {
+        let mut bridge = armed_bridge();
+        let step0 = "INFO  2026-05-12T20:00:12 +0ms service=session.prompt session.id=ses_a step=0 logSpan.http.span.4=55ms loop";
+        let step0_again = "INFO  2026-05-12T20:00:13 +0ms service=session.prompt session.id=ses_a step=0 logSpan.http.span.4=99ms loop";
+        let step1 = "INFO  2026-05-12T20:00:14 +0ms service=session.prompt session.id=ses_a step=1 logSpan.http.span.4=120ms loop";
+
+        // Establish step=0 (resets), then churn two generations.
+        assert_eq!(bridge.ingest(step0), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.ingest(STREAMED_LLM_CALL), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.ingest(STREAMED_LLM_CALL), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.generation_count_since_progress(), 2);
+
+        // A deduped repeat of the same (session, step) returns early and must
+        // NOT reset the churn count.
+        assert_eq!(bridge.ingest(step0_again), StderrIngestOutcome::Consumed);
+        assert_eq!(
+            bridge.generation_count_since_progress(), 2,
+            "a deduped step-loop repeat must not reset the churn count",
+        );
+
+        // A genuine step advance does reset.
+        assert_eq!(bridge.ingest(step1), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.generation_count_since_progress(), 0);
+    }
+
+    #[test]
+    fn liveness_only_events_do_not_reset_stalled_generation_state() {
+        let mut bridge = armed_bridge();
+        assert_eq!(bridge.ingest(STREAMED_LLM_CALL), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.ingest(STREAMED_LLM_CALL), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.generation_count_since_progress(), 2);
+        let progress_at_before = bridge.last_progress_at();
+
+        // None of these handler paths are progress-class events, so neither the
+        // churn count nor the silence clock may move.
+        let http = "INFO  2026-05-12T20:05:54 +0ms service=default http.method=POST http.url=/session/x/message http.status=200 logSpan.http.span.4=99ms Sent HTTP response";
+        let permission = r#"INFO  2026-05-12T20:05:26 +160ms service=permission permission=task pattern=general action={"permission":"*","action":"allow","pattern":"*"} evaluated"#;
+        let bus = "INFO 2026-04-15T21:28:30 +5ms service=bus msg=internal chatter";
+        assert_eq!(bridge.ingest(http), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.ingest(permission), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.ingest(bus), StderrIngestOutcome::Consumed);
+        // Raw, unstructured stderr bytes likewise leave the state untouched.
+        assert_eq!(bridge.ingest("just some chatter"), StderrIngestOutcome::NotConsumed);
+
+        assert_eq!(
+            bridge.generation_count_since_progress(), 2,
+            "liveness-only events and raw bytes must not reset the churn count",
+        );
+        assert_eq!(
+            bridge.last_progress_at(), progress_at_before,
+            "liveness-only events and raw bytes must not advance the silence clock",
+        );
+    }
+
+    #[test]
+    fn long_tool_shape_never_trips_even_past_budget() {
+        // AC6: a long-running tool that emits step loops and HTTP responses but
+        // no `llm_call_start` records must never trip this guard, even when the
+        // progress-silence condition is trivially satisfied (ZERO budget).
+        let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
+        let mut bridge = count_only_bridge(tx);
+
+        let step = "INFO  2026-05-12T20:00:12 +0ms service=session.prompt session.id=ses_a step=0 logSpan.http.span.4=55ms loop";
+        let http = "INFO  2026-05-12T20:05:54 +0ms service=default http.method=POST http.url=/session/x/message http.status=200 logSpan.http.span.4=99ms Sent HTTP response";
+        for _ in 0..(MAX_GENERATIONS_WITHOUT_PROGRESS + 4) {
+            assert_eq!(bridge.ingest(step), StderrIngestOutcome::Consumed);
+            assert_eq!(bridge.ingest(http), StderrIngestOutcome::Consumed);
+        }
+
+        assert_eq!(
+            bridge.generation_count_since_progress(), 0,
+            "no llm_call_start means the churn count never accumulates",
+        );
+        assert!(
+            !bridge
+                .sink
+                .events
+                .iter()
+                .any(|e| matches!(e, SemanticEvent::Error { .. })),
+            "long-tool shape must not emit a terminal error",
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "long-tool shape must not request early termination",
+        );
+    }
+
+    #[test]
+    fn stalled_generation_emits_agent_native_terminal_event_with_safe_context() {
+        let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
+        let mut bridge = count_only_bridge(tx);
+
+        // The count condition is still mandatory: only the fourth streamed
+        // generation crosses MAX_GENERATIONS_WITHOUT_PROGRESS.
+        for _ in 0..(MAX_GENERATIONS_WITHOUT_PROGRESS - 1) {
+            assert_eq!(bridge.ingest(STREAMED_LLM_CALL), StderrIngestOutcome::Consumed);
+        }
+        assert_eq!(bridge.ingest(STREAMED_LLM_CALL), StderrIngestOutcome::Consumed);
+
+        let error = bridge
+            .sink
+            .events
+            .iter()
+            .rev()
+            .find_map(|e| match e {
+                SemanticEvent::Error {
+                    message,
+                    terminal,
+                    kind,
+                    extra,
+                } => Some((message, *terminal, *kind, extra)),
+                _ => None,
+            })
+            .expect("a terminal stalled-generation error must be emitted");
+        let (message, terminal, kind, extra) = error;
+        assert!(terminal, "stalled-generation error must be terminal");
+        assert_eq!(kind, SemanticErrorKind::AgentNative);
+        assert!(
+            message.to_lowercase().contains("stalled generation"),
+            "message must classify the failure: {message}",
+        );
+        assert_string(extra, "classification", "stalled_generation");
+        assert_string(extra, "label", "Stalled Generation");
+        assert_eq!(
+            extra.get("generation_count"),
+            Some(&json!(MAX_GENERATIONS_WITHOUT_PROGRESS)),
+        );
+        assert!(
+            extra.get("stall_duration_ms").and_then(Value::as_u64).is_some(),
+            "stall_duration_ms must be a number: {extra}",
+        );
+        // Safe context only — identity, never payloads.
+        assert_string(extra, "session_id", "ses_a");
+        assert_string(extra, "agent", "build");
+        assert_string(extra, "provider_id", "kimi-for-coding");
+        assert_string(extra, "model_id", "k2p6");
+        assert_string(extra, "mode", "primary");
+        let extra_obj = extra.as_object().expect("extra is an object");
+        for forbidden in ["prompt", "prompt_text", "tool", "tool_input", "tool_output", "input"] {
+            assert!(
+                !extra_obj.contains_key(forbidden),
+                "extra must not leak `{forbidden}`: {extra}",
+            );
+        }
+
+        match rx.try_recv() {
+            Ok(EarlyTermination::StalledGeneration {
+                generation_count,
+                context,
+                ..
+            }) => {
+                assert_eq!(generation_count, MAX_GENERATIONS_WITHOUT_PROGRESS);
+                assert_eq!(context.session_id.as_deref(), Some("ses_a"));
+                assert_eq!(context.agent.as_deref(), Some("build"));
+            }
+            other => panic!("expected EarlyTermination::StalledGeneration, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn repeated_stream_error_is_independent_of_llm_call_churn() {
+        // The two backstops keep separate counters. Interleaving streamed
+        // generations between `stream error` records must NOT clear the
+        // consecutive-stream-error count (only a genuine step advance does),
+        // and a `stream error` must NOT clear the stalled-generation count.
+        // A generous budget keeps the stalled guard from firing so we observe
+        // the RepeatedStreamError path in isolation.
+        let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
+        let mut bridge = OpenCodeLogBridge::new(
+            RecordingSink::default(),
+            stdout_seen(),
+            Some(tx),
+            Some(STALL_BUDGET),
+        );
+
+        // Below threshold: alternate a generation with a stream error. The
+        // generation must not reset the stream-error count.
+        for _ in 0..(MAX_CONSECUTIVE_STREAM_ERRORS - 1) {
+            bridge.ingest(STREAMED_LLM_CALL);
+            bridge.ingest(GENERIC_STREAM_ERROR);
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "interleaved generations must not let the backstop fire early",
+        );
+        let churn_before_error = bridge.generation_count_since_progress();
+        assert!(churn_before_error > 0, "generations should have accumulated");
+
+        // The threshold-crossing stream error trips RepeatedStreamError; it
+        // must not have been reset by the interleaved generations.
+        bridge.ingest(GENERIC_STREAM_ERROR);
+        match rx.try_recv() {
+            Ok(EarlyTermination::RepeatedStreamError { count }) => {
+                assert_eq!(count, MAX_CONSECUTIVE_STREAM_ERRORS);
+            }
+            other => panic!("expected RepeatedStreamError, got {other:?}"),
+        }
+        assert_eq!(
+            bridge.generation_count_since_progress(), churn_before_error,
+            "a stream error must not clear the stalled-generation churn count",
+        );
+    }
+
+    #[test]
+    fn early_termination_fires_at_most_once_when_both_guards_could_trip() {
+        // With a ZERO budget the stalled guard trips on the fourth generation;
+        // a flood of stream errors afterward could also trip RepeatedStreamError,
+        // but `early_terminate_fired` idempotency must hold — exactly one signal.
+        let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
+        let mut bridge = count_only_bridge(tx);
+
+        for _ in 0..MAX_GENERATIONS_WITHOUT_PROGRESS {
+            bridge.ingest(STREAMED_LLM_CALL);
+        }
+        assert!(
+            matches!(
+                rx.try_recv(),
+                Ok(EarlyTermination::StalledGeneration { .. })
+            ),
+            "the stalled guard should have fired first",
+        );
+
+        // A subsequent stream-error flood must not re-fire the channel.
+        for _ in 0..(MAX_CONSECUTIVE_STREAM_ERRORS + 2) {
+            bridge.ingest(GENERIC_STREAM_ERROR);
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "fire_early_termination must fire at most once per bridge",
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // Stdout-origin progress reset (real producer/sink wiring)
+    //
+    // AC5: ANY progress-class event resets the generation count and moves
+    // `last_progress_at` forward — including stdout NDJSON semantic events
+    // (`OutputText`, `ToolCall`, …) that never touch the stderr bridge. These
+    // exercise the *real* wiring: the `StalledProgressObserverSink` built from
+    // the bridge's shared progress cell, exactly as `policy.rs` wires it, rather
+    // than the private bridge reset helper.
+    // ------------------------------------------------------------------
+
+    /// Build the stdout-side observer over the bridge's shared progress cell,
+    /// mirroring the `policy.rs` plumbing. Events forwarded through the returned
+    /// sink reset the same counter the bridge accumulates against.
+    fn stdout_progress_observer(
+        bridge: &OpenCodeLogBridge<RecordingSink>,
+    ) -> crate::stream::semantic::StalledProgressObserverSink<RecordingSink> {
+        crate::stream::semantic::StalledProgressObserverSink::new(
+            RecordingSink::default(),
+            bridge.stalled_generation_progress(),
+        )
+    }
+
+    #[test]
+    fn stdout_progress_event_resets_stalled_generation_state() {
+        use crate::stream::semantic::SemanticEventSink;
+
+        let mut bridge = armed_bridge();
+        let mut stdout = stdout_progress_observer(&bridge);
+
+        // Accumulate retry churn on the stderr side.
+        assert_eq!(bridge.ingest(STREAMED_LLM_CALL), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.ingest(STREAMED_LLM_CALL), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.generation_count_since_progress(), 2);
+        let progress_before = bridge.last_progress_at();
+
+        // A genuine stdout-origin progress event — model output — must reset the
+        // shared counter and advance the silence clock even though it arrives on
+        // a different producer than the stderr bridge.
+        stdout.on_semantic_event(SemanticEvent::OutputText {
+            text: "real progress".into(),
+            extra: Value::Null,
+        });
+
+        assert_eq!(
+            bridge.generation_count_since_progress(),
+            0,
+            "stdout-origin progress must reset the churn count",
+        );
+        assert!(
+            bridge.last_progress_at() >= progress_before,
+            "stdout-origin progress must advance the silence clock",
+        );
+    }
+
+    #[test]
+    fn stdout_tool_lifecycle_events_reset_stalled_generation_state() {
+        use crate::stream::semantic::SemanticEventSink;
+
+        // Each progress-class stdout variant in the spec's reset taxonomy must
+        // clear churn accumulated on the stderr side.
+        let progress_events = [
+            SemanticEvent::OutputText {
+                text: "t".into(),
+                extra: Value::Null,
+            },
+            SemanticEvent::Reasoning {
+                text: "r".into(),
+                extra: Value::Null,
+            },
+            SemanticEvent::ToolCall {
+                name: Some("bash".into()),
+                id: None,
+                input: None,
+                extra: Value::Null,
+            },
+            SemanticEvent::ToolResult {
+                name: Some("bash".into()),
+                id: None,
+                status: None,
+                exit_code: None,
+                output: None,
+                extra: Value::Null,
+            },
+            SemanticEvent::FileChange {
+                path: Some("a.rs".into()),
+                change_kind: None,
+                extra: Value::Null,
+            },
+            SemanticEvent::PlanUpdate {
+                message: None,
+                extra: Value::Null,
+            },
+            SemanticEvent::SubagentStart {
+                name: None,
+                id: None,
+                extra: Value::Null,
+            },
+            SemanticEvent::SubagentStop {
+                name: None,
+                id: None,
+                status: None,
+                extra: Value::Null,
+            },
+        ];
+
+        for event in progress_events {
+            let kind = event.kind_str();
+            let mut bridge = armed_bridge();
+            let mut stdout = stdout_progress_observer(&bridge);
+            bridge.ingest(STREAMED_LLM_CALL);
+            bridge.ingest(STREAMED_LLM_CALL);
+            assert_eq!(bridge.generation_count_since_progress(), 2);
+
+            stdout.on_semantic_event(event);
+            assert_eq!(
+                bridge.generation_count_since_progress(),
+                0,
+                "stdout {kind} must reset the churn count",
+            );
+        }
+    }
+
+    #[test]
+    fn stdout_liveness_only_events_do_not_reset_stalled_generation_state() {
+        use crate::stream::semantic::SemanticEventSink;
+
+        let mut bridge = armed_bridge();
+        let mut stdout = stdout_progress_observer(&bridge);
+        bridge.ingest(STREAMED_LLM_CALL);
+        bridge.ingest(STREAMED_LLM_CALL);
+        assert_eq!(bridge.generation_count_since_progress(), 2);
+        let progress_before = bridge.last_progress_at();
+
+        // Liveness-only stdout events (diagnostics, session/turn envelope) must
+        // not reset the guard — only forward progress does.
+        let liveness = [
+            SemanticEvent::Info {
+                message: "heartbeat".into(),
+                extra: Value::Null,
+            },
+            SemanticEvent::Warning {
+                message: "soft warning".into(),
+                extra: Value::Null,
+            },
+            SemanticEvent::Error {
+                message: "non-terminal".into(),
+                terminal: false,
+                kind: SemanticErrorKind::Unknown,
+                extra: Value::Null,
+            },
+            SemanticEvent::TurnStart { extra: Value::Null },
+            SemanticEvent::SessionStart {
+                session_id: None,
+                model: None,
+                extra: Value::Null,
+            },
+        ];
+        for event in liveness {
+            stdout.on_semantic_event(event);
+        }
+
+        assert_eq!(
+            bridge.generation_count_since_progress(),
+            2,
+            "liveness-only stdout events must not reset the churn count",
+        );
+        assert_eq!(
+            bridge.last_progress_at(),
+            progress_before,
+            "liveness-only stdout events must not advance the silence clock",
+        );
+    }
+
+    #[test]
+    fn stdout_progress_keeps_a_progressing_run_from_tripping_the_guard() {
+        // The end-to-end finding: a run accumulates churn, makes REAL stdout
+        // progress, and must NOT trip on a later `llm_call_start`. With a ZERO
+        // budget the progress-silence condition is trivially true, so only the
+        // (mandatory) churn count can trip — and the stdout reset is what keeps
+        // it below the threshold.
+        use crate::stream::semantic::SemanticEventSink;
+
+        let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
+        let mut bridge = count_only_bridge(tx);
+        let mut stdout = stdout_progress_observer(&bridge);
+
+        // Churn up to one below the threshold, then make stdout progress.
+        for _ in 0..(MAX_GENERATIONS_WITHOUT_PROGRESS - 1) {
+            bridge.ingest(STREAMED_LLM_CALL);
+        }
+        stdout.on_semantic_event(SemanticEvent::ToolResult {
+            name: Some("bash".into()),
+            id: None,
+            status: Some("ok".into()),
+            exit_code: Some(0),
+            output: None,
+            extra: Value::Null,
+        });
+        assert_eq!(
+            bridge.generation_count_since_progress(),
+            0,
+            "stdout progress must have reset the churn count",
+        );
+
+        // A fresh run of (threshold - 1) generations must stay under the count,
+        // so the guard does not trip on the progressing run.
+        for _ in 0..(MAX_GENERATIONS_WITHOUT_PROGRESS - 1) {
+            bridge.ingest(STREAMED_LLM_CALL);
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "a run that made stdout progress must not trip the stalled-generation guard",
+        );
+
+        // One more generation (no intervening progress) reaches the threshold
+        // and now trips, proving the guard is still armed after the reset.
+        bridge.ingest(STREAMED_LLM_CALL);
+        assert!(
+            matches!(rx.try_recv(), Ok(EarlyTermination::StalledGeneration { .. })),
+            "the guard must still trip once churn resumes past the threshold",
+        );
     }
 }

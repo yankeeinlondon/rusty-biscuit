@@ -38,7 +38,7 @@ fn replay_with_events(stdout_seen: bool) -> Vec<SemanticEvent> {
     let sink = SharedSink {
         events: Arc::clone(&events),
     };
-    let mut bridge = OpenCodeLogBridge::new(sink, Arc::new(AtomicBool::new(stdout_seen)), None);
+    let mut bridge = OpenCodeLogBridge::new(sink, Arc::new(AtomicBool::new(stdout_seen)), None, None);
     for line in fixture().lines() {
         let _ = bridge.ingest(line);
     }
@@ -189,7 +189,7 @@ fn structured_log_records_are_always_consumed_even_when_unclassified_or_bus() {
     let sink = SharedSink {
         events: Arc::clone(&events),
     };
-    let mut bridge = OpenCodeLogBridge::new(sink, Arc::new(AtomicBool::new(false)), None);
+    let mut bridge = OpenCodeLogBridge::new(sink, Arc::new(AtomicBool::new(false)), None, None);
 
     // Each of these is a well-formed structured stderr line that the
     // previous implementation leaked: `bus` (filtered), `skill`

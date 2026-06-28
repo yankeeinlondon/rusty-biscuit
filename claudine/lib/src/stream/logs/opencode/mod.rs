@@ -25,6 +25,7 @@ pub use events::{
     AssetType, LogClassification, LogLevel, OpenCodeLogRecord, ParsedOpenCodeStderrLine, parse_line,
 };
 pub use reasoning::{
-    EarlyTermination, OpenCodeLogBridge, SharedStderrState, StderrIngestOutcome, StuckSubagentInfo,
+    EarlyTermination, OpenCodeLogBridge, SharedStderrState, StalledGenerationContext,
+    StalledGenerationProgress, StderrIngestOutcome, StuckSubagentInfo,
     merge_stderr_state_into_summary,
 };

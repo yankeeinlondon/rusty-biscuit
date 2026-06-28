@@ -1152,6 +1152,7 @@ pub(crate) fn run_harness_loop(
     effective_non_interactive: bool,
     cli_timeout: Option<String>,
     cli_step_timeout: Option<String>,
+    cli_stall_timeout: Option<String>,
     base_args: &[String],
     base_env: &HashMap<OsString, OsString>,
     prompt_state: &mut HarnessPromptState,
@@ -1687,6 +1688,8 @@ pub(crate) fn run_harness_loop(
             plan.timeout,
             cli_step_timeout.clone(),
             plan.step_timeout,
+            cli_stall_timeout.clone(),
+            plan.stall_timeout,
         )
         .inspect_err(|e| {
             let err_info = LifecycleErrorInfo::from_action_failure("harness_launch", e.to_string());

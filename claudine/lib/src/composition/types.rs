@@ -628,6 +628,12 @@ pub struct CompositionExecutionRequest {
     /// child is killed with `TimedOut`. Ignored in capture and passthrough
     /// modes (warning emitted). `None` means no silence deadline is applied.
     pub step_timeout: Option<String>,
+    /// OpenCode stalled-generation backstop budget as a duration string
+    /// (e.g. `10m`). Honored only by the OpenCode bridge in structured-stream
+    /// mode; provider-neutral so portable prompt files may carry it. `None`
+    /// falls through to the built-in `10m` default during resolution; a `0s`
+    /// literal disables the backstop.
+    pub stall_timeout: Option<String>,
     /// OPERATION env var value for the composed session.
     pub operation: Option<String>,
     /// Enable provider-specific sandboxing.

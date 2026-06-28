@@ -71,6 +71,16 @@ pub(crate) fn parse_cli_timeouts(args: &WrapperArgs) -> Result<Option<std::time:
         }
     }
 
+    // Validate --stall-timeout on the direct-wrapper path. Mirrors the
+    // --step-timeout validation but accepts `0s` as the disable sentinel
+    // (`parse_timeout_allow_zero`), so a typo (`nope`, `5x`) FAILS here
+    // instead of silently falling through to the `10m` built-in during
+    // `resolve_stall_timeout`.
+    if let Some(raw) = args.stall_timeout.as_deref() {
+        claudine::harness::parse_timeout_allow_zero(raw, Path::new("<--stall-timeout>"))
+            .map_err(|e| eyre!("invalid --stall-timeout value: {e}"))?;
+    }
+
     Ok(cli_timeout_duration)
 }
 
@@ -509,6 +519,7 @@ pub(crate) fn run_execution_stage(
             effective_non_interactive,
             args.timeout.clone(),
             cli_step_timeout.clone(),
+            args.stall_timeout.clone(),
             &harness_base_args,
             &env_plan.env,
             &mut prompt_state,
@@ -606,6 +617,49 @@ pub(crate) fn run_execution_stage(
 mod tests {
     use super::*;
     use serde_json::Value;
+
+    /// Parse a `WrapperArgs` from a bare arg list via a clap probe so the
+    /// `--stall-timeout` validation can be exercised without constructing the
+    /// struct by hand.
+    fn wrapper_args_from(extra: &[&str]) -> WrapperArgs {
+        use clap::Parser;
+
+        // `WrapperArgs` declares its own `help` field, so the auto-generated
+        // `--help` must be disabled to avoid a duplicate-argument panic.
+        #[derive(Debug, clap::Parser)]
+        #[command(disable_help_flag = true)]
+        struct Probe {
+            #[command(flatten)]
+            args: WrapperArgs,
+        }
+
+        let mut argv = vec!["probe"];
+        argv.extend_from_slice(extra);
+        Probe::try_parse_from(argv)
+            .expect("probe must parse")
+            .args
+    }
+
+    #[test]
+    fn parse_cli_timeouts_rejects_invalid_stall_timeout() {
+        let args = wrapper_args_from(&["--stall-timeout", "nope"]);
+        let err = parse_cli_timeouts(&args).unwrap_err();
+        assert!(
+            err.to_string().contains("invalid --stall-timeout value"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_cli_timeouts_accepts_zero_and_valid_stall_timeout() {
+        for value in ["0s", "0.5s", "10m"] {
+            let args = wrapper_args_from(&["--stall-timeout", value]);
+            assert!(
+                parse_cli_timeouts(&args).is_ok(),
+                "--stall-timeout {value} should be accepted"
+            );
+        }
+    }
 
     const KEY: &str = "OPENCODE_CONFIG_CONTENT";
 

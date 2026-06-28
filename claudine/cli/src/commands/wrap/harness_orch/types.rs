@@ -82,4 +82,14 @@ pub(crate) struct AttemptLaunch {
     /// True when `step_timeout` came from CLI, frontmatter, or a valid env
     /// value instead of Claudine's built-in default.
     pub(crate) step_timeout_user_configured: bool,
+    /// Resolved OpenCode stalled-generation backstop budget (CLI >
+    /// frontmatter > env > built-in `10m`). `None` disables the backstop.
+    /// Honored only by the OpenCode bridge in structured-stream mode; passed
+    /// to `build_structured_plumbing`, ignored on every other path.
+    pub(crate) stall_timeout: Option<std::time::Duration>,
+    /// True when `stall_timeout` came from CLI, frontmatter, or a valid env
+    /// value instead of Claudine's built-in `10m` default. Drives the
+    /// "only enforced in structured-stream mode" warning on non-structured
+    /// attempts.
+    pub(crate) stall_timeout_user_configured: bool,
 }

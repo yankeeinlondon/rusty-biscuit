@@ -169,6 +169,7 @@ fn run_sequence_inner(
             .map_err(|e| eyre!("invalid --timeout value: {e}"))?;
     }
     shared.step_timeout_secs()?;
+    shared.stall_timeout_secs()?;
 
     let parsed = super::compose::parse_composition_positionals(&args)?;
     let file = parsed.file_ref.ok_or_else(|| {

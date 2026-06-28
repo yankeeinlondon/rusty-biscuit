@@ -60,7 +60,7 @@ pub(crate) use target::{
 };
 pub(crate) use timeouts::{
     TimeoutResolutionInput, build_prompt_timing_context, format_interactive_timeout_conflict,
-    frontmatter_timeout_duration, resolve_single_timeout, resolve_timeouts,
+    frontmatter_timeout_duration, resolve_single_timeout, resolve_stall_timeout, resolve_timeouts,
 };
 #[cfg(test)]
 pub(crate) use target::{picker_scope_for_state, resolve_live_target_with_tty};
@@ -1569,6 +1569,7 @@ fn execute_composition_request_inner_with_guard(
             effective_non_interactive,
             request.timeout.clone(),
             request.step_timeout.clone(),
+            request.stall_timeout.clone(),
             &harness_base_args,
             &env_plan.env,
             &mut prompt_state,

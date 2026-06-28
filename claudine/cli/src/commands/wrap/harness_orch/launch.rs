@@ -19,6 +19,8 @@ pub(crate) fn build_harness_launch(
     plan_timeout: Option<std::time::Duration>,
     cli_step_timeout: Option<String>,
     plan_step_timeout: Option<std::time::Duration>,
+    cli_stall_timeout: Option<String>,
+    plan_stall_timeout: Option<std::time::Duration>,
 ) -> Result<AttemptLaunch> {
     let mut args = if let Some(session_id) = state.next_resume_session_id.take() {
         let mut args = super::super::resume::normalize_resume_args(
@@ -58,6 +60,13 @@ pub(crate) fn build_harness_launch(
     let step_timeout_user_configured =
         step_timeout_user_configured(cli_step_timeout.as_deref(), plan_step_timeout);
 
+    let stall_timeout = super::super::composition::resolve_stall_timeout(
+        cli_stall_timeout.clone(),
+        plan_stall_timeout,
+    );
+    let stall_timeout_user_configured =
+        stall_timeout_user_configured(cli_stall_timeout.as_deref(), plan_stall_timeout);
+
     Ok(AttemptLaunch {
         args,
         env,
@@ -65,7 +74,26 @@ pub(crate) fn build_harness_launch(
         wire_prompt,
         timeout_config,
         step_timeout_user_configured,
+        stall_timeout,
+        stall_timeout_user_configured,
     })
+}
+
+/// Mirror of [`step_timeout_user_configured`] for the stalled-generation
+/// backstop: `true` when the budget came from the CLI flag, frontmatter, or a
+/// valid non-zero `CLAUDINE_OPENCODE_STALL_TIMEOUT` env value rather than the
+/// built-in `10m` default.
+fn stall_timeout_user_configured(cli: Option<&str>, frontmatter: Option<Duration>) -> bool {
+    if cli.is_some() || frontmatter.is_some() {
+        return true;
+    }
+    let Ok(raw) = std::env::var("CLAUDINE_OPENCODE_STALL_TIMEOUT") else {
+        return false;
+    };
+    let trimmed = raw.trim();
+    !trimmed.is_empty()
+        && !is_zero_duration_literal(trimmed)
+        && claudine::harness::parse_timeout(trimmed, std::path::Path::new("<env>")).is_ok()
 }
 
 fn step_timeout_user_configured(cli: Option<&str>, frontmatter: Option<Duration>) -> bool {
@@ -81,16 +109,19 @@ fn step_timeout_user_configured(cli: Option<&str>, frontmatter: Option<Duration>
         && claudine::harness::parse_timeout(trimmed, std::path::Path::new("<env>")).is_ok()
 }
 
+/// True only when the numeric component is exactly `0.0` (`0`, `0s`, `0.0s`,
+/// `0m`). A fractional value like `0.5s` is non-zero, so the `.` is included in
+/// the numeric prefix and parsed as `f64`.
 fn is_zero_duration_literal(value: &str) -> bool {
     let trimmed = value.trim();
-    let digits_end = trimmed
-        .find(|c: char| !c.is_ascii_digit())
+    let num_end = trimmed
+        .find(|c: char| !c.is_ascii_digit() && c != '.')
         .unwrap_or(trimmed.len());
-    if digits_end == 0 {
+    if num_end == 0 {
         return false;
     }
-    let (digits, _rest) = trimmed.split_at(digits_end);
-    digits.parse::<u64>().is_ok_and(|n| n == 0)
+    let (num, _rest) = trimmed.split_at(num_end);
+    num.parse::<f64>().is_ok_and(|n| n == 0.0)
 }
 
 #[cfg(test)]
@@ -164,5 +195,19 @@ mod tests {
             let _guard = EnvGuard::set("CLAUDINE_STEP_TIMEOUT", "not a duration");
             assert!(!step_timeout_user_configured(None, None));
         }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn fractional_env_stall_timeout_is_user_configured() {
+        let _guard = EnvGuard::set("CLAUDINE_OPENCODE_STALL_TIMEOUT", "0.5s");
+        assert!(stall_timeout_user_configured(None, None));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn zero_env_stall_timeout_is_not_user_configured() {
+        let _guard = EnvGuard::set("CLAUDINE_OPENCODE_STALL_TIMEOUT", "0s");
+        assert!(!stall_timeout_user_configured(None, None));
     }
 }
