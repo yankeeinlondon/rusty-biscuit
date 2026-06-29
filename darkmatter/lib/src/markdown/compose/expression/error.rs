@@ -76,6 +76,20 @@ impl FileRefFailure {
             _ => FileRefFailure::NotFound,
         }
     }
+
+    /// The catalog snake_case slug for this failure kind.
+    ///
+    /// This is the wire form the `composition.invalid_file_reference` `detail`
+    /// payload serializes `kind` as (`err.detail.kind == "not_found"`), distinct
+    /// from the `Debug` rendering (`"NotFound"`). Locked by error-catalog §2.7.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FileRefFailure::Malformed => "malformed",
+            FileRefFailure::NotFound => "not_found",
+            FileRefFailure::FoundElsewhere => "found_elsewhere",
+            FileRefFailure::RemoteNotEnabled => "remote_not_enabled",
+        }
+    }
 }
 
 /// A reusable diagnostic for a file-reference resolution failure.
@@ -234,25 +248,38 @@ impl ExpressionError {
     /// Whether this error halts lenient (non-`fail_fast`) composition.
     ///
     /// This is the checked-`match` replacement for the string-prefix
-    /// `is_fatal_eval_error` gate (design §5). Only [`UnknownFunction`] is
-    /// authoring-fatal today: an unknown symbol can never resolve, so it must be
-    /// surfaced rather than demoted to a warning that leaves the literal
-    /// `{{ … }}` in place. Every other variant — including a missing file
-    /// reference — is demoted to a `ComposeWarning` in lenient body
-    /// interpolation, preserving the Phase 1 characterization matrix.
+    /// `is_fatal_eval_error` gate (design §5). Two classes of failure are
+    /// authoring-fatal even in lenient body interpolation:
+    ///
+    /// - [`UnknownFunction`] — an unknown symbol can never resolve, so it must be
+    ///   surfaced rather than demoted to a warning that leaves the literal
+    ///   `{{ … }}` in place.
+    /// - A [`FileReference`] failure that is [`Malformed`], [`NotFound`], or
+    ///   [`FoundElsewhere`] — a *present* file reference that fails to resolve is
+    ///   almost always a real authoring mistake, not a tolerated absence. A
+    ///   required property must resolve, and an optional property carrying a
+    ///   reference must be either null/undefined or a *valid* reference. Authors
+    ///   opt a reference out by guarding with `file_exists`/a ternary so no
+    ///   resolution is attempted; a reference that is actually evaluated and
+    ///   misses is surfaced rather than silently swallowed.
+    ///
+    /// Every other variant (arity, arg-type, parse, arithmetic, …) is demoted to
+    /// a `ComposeWarning` in lenient body interpolation. [`RemoteNotEnabled`] is
+    /// also non-fatal here: it is a v1 capability gap governed by its own "remote
+    /// not supported" policy, not an error in the reference itself.
     ///
     /// [`UnknownFunction`]: ExpressionError::UnknownFunction
+    /// [`FileReference`]: ExpressionError::FileReference
+    /// [`Malformed`]: FileRefFailure::Malformed
+    /// [`NotFound`]: FileRefFailure::NotFound
+    /// [`FoundElsewhere`]: FileRefFailure::FoundElsewhere
+    /// [`RemoteNotEnabled`]: FileRefFailure::RemoteNotEnabled
     pub fn is_authoring_fatal(&self) -> bool {
         match self {
             ExpressionError::UnknownFunction { .. } => true,
-            // Ratified (real-errors finding #1): a *present* file reference that
-            // fails to resolve is fatal — a required property must resolve, and
-            // an optional property carrying a reference must be either null/
-            // undefined or a *valid* reference. Authors opt a reference out by
-            // guarding with `file_exists`/a ternary so no resolution is attempted;
-            // a reference that is actually evaluated and misses is a real mistake.
-            // `RemoteNotEnabled` is excluded: it is a v1 capability gap governed by
-            // its own "remote not supported" policy, not an error in the reference.
+            // A present file reference that fails to resolve is fatal (see the
+            // doc comment for the WHY). `RemoteNotEnabled` is deliberately *not*
+            // in this set: it is a v1 capability gap, not a reference mistake.
             ExpressionError::FileReference(diagnostic) => matches!(
                 diagnostic.kind,
                 FileRefFailure::Malformed
@@ -327,6 +354,20 @@ mod tests {
                 name: "HOME".to_string(),
             };
             assert_eq!(FileRefFailure::classify(&err), FileRefFailure::NotFound);
+        }
+
+        #[test]
+        fn as_str_is_snake_case_not_debug() {
+            // The detail-payload contract (error-catalog §2.7) locks the wire
+            // form to snake_case, never the Debug rendering.
+            assert_eq!(FileRefFailure::Malformed.as_str(), "malformed");
+            assert_eq!(FileRefFailure::NotFound.as_str(), "not_found");
+            assert_eq!(FileRefFailure::FoundElsewhere.as_str(), "found_elsewhere");
+            assert_eq!(
+                FileRefFailure::RemoteNotEnabled.as_str(),
+                "remote_not_enabled"
+            );
+            assert_ne!(FileRefFailure::NotFound.as_str(), "NotFound");
         }
     }
 

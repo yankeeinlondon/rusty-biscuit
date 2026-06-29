@@ -1,27 +1,32 @@
 //! Characterization matrix for compose-time expression-failure fatality.
 //!
-//! Phase 1 of the "real errors" effort
-//! (`claudine/features/2026-06-28-real-errors/plan.md`) requires locking the
-//! *current* fatal-vs-warn behavior of the interpolation engine **before** any
-//! typed-error refactor can change it. The refactor will replace the
+//! The "real errors" effort
+//! (`claudine/features/2026-06-28-real-errors/plan.md`) replaced the
 //! string-prefix gate [`is_fatal_eval_error`] with a checked `match` over typed
-//! causes; these tests pin the observed outcome for every
-//! (failure kind × compose mode × interpolation surface) cell so a later change
-//! that silently flips a cell fails loudly.
+//! causes ([`is_authoring_fatal`]). These tests pin the
+//! disposition for every (failure kind × compose mode × interpolation surface)
+//! cell so a later change that silently flips a cell fails loudly.
 //!
-//! ## The contract being characterized (not changed)
+//! ## The ratified policy this matrix locks
 //!
-//! - **Body interpolation** ([`interpolate_text`]): in lenient
-//!   (`fail_fast = false`) mode only an **unknown function** is fatal — it is
-//!   the sole [`is_fatal_eval_error`] case. Every other failure (missing file,
-//!   malformed path, arity, arg-type, parse) is demoted to a `ComposeWarning`
-//!   with the original `{{ … }}` left in place. Under `fail_fast = true` every
-//!   failure is fatal.
+//! - **Body interpolation** ([`interpolate_text`]): under `fail_fast = true`
+//!   every failure is fatal. In lenient (`fail_fast = false`) mode, **two**
+//!   classes are fatal — an **unknown function** and a **present file reference
+//!   that fails to resolve** (missing file or malformed path). A present file
+//!   reference that does not resolve is treated as a real authoring mistake
+//!   rather than a tolerated absence (real-errors finding #1, ratified). The
+//!   remaining failures (arity, arg-type, parse) are demoted to a
+//!   `ComposeWarning` with the original `{{ … }}` left in place.
 //! - **Frontmatter whole-value span** ([`interpolate_value`]): a value whose
 //!   trimmed content is exactly one `{{ expr }}` is executable state, so *every*
 //!   parse/eval failure is fatal regardless of `fail_fast`.
 //!
+//! The file-reference fatality promotion is the one **intentional** behavior
+//! change in this effort; it is characterized here and tested separately from
+//! the behavior-neutral typing refactor.
+//!
 //! [`is_fatal_eval_error`]: super::rewrite
+//! [`is_authoring_fatal`]: crate::markdown::compose::expression::ExpressionError::is_authoring_fatal
 //! [`interpolate_text`]: super::rewrite::interpolate_text
 //! [`interpolate_value`]: super::rewrite::interpolate_value
 
@@ -76,9 +81,9 @@ struct Case {
 /// The six failure kinds from the integrated-design §5 matrix.
 ///
 /// `missing-file` and `malformed-path` share the `invalid file path` fragment
-/// and the same current disposition, but are listed separately because the
-/// typing refactor splits them into distinct typed causes
-/// (`FileRefFailure::NotFound` vs the malformed/`InvalidSyntax` case).
+/// and the same (now fatal) lenient-body disposition, but are listed separately
+/// because they map to distinct typed causes
+/// (`FileRefFailure::NotFound` vs the malformed/`Malformed` case).
 const CASES: &[Case] = &[
     Case {
         kind: "unknown-function",
@@ -184,7 +189,7 @@ fn join_warnings(warnings: &[crate::markdown::compose::ComposeWarning]) -> Strin
         .join("\n")
 }
 
-/// The current (pre-refactor) expected disposition for a cell.
+/// The ratified expected disposition for a cell.
 ///
 /// This function *is* the locked matrix — keep it the single source of truth so
 /// a refactor that changes a verdict has exactly one place to (deliberately)

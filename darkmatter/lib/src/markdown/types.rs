@@ -244,6 +244,50 @@ impl From<crate::markdown::reference::ReferenceError> for MarkdownError {
 /// Result type for markdown operations.
 pub type MarkdownResult<T> = Result<T, MarkdownError>;
 
+impl MarkdownError {
+    /// Anchors a [`MarkdownError::Interpolation`] to a real on-disk frontmatter
+    /// region so the rendered block can show an OSC8-linked prompt file and a
+    /// focused YAML excerpt.
+    ///
+    /// The interpolation error is built deep in the engine with a
+    /// [`SourceRef::Effective`] placeholder, because the engine has only the
+    /// expression text — not the document's [`SourceContext`]. This method is
+    /// called at the compose-pipeline boundary, where the document *is* in
+    /// scope, to upgrade that placeholder to [`SourceRef::OnDisk`]. A
+    /// `SourceContext` whose `display` path is `"unknown"` (in-memory/stdin
+    /// compose with no file locus) leaves the error untouched so the renderer
+    /// keeps the late-binding presentation rather than linking a non-file.
+    ///
+    /// Errors that are not `Interpolation`, or whose `source` is already
+    /// `OnDisk`, pass through unchanged.
+    pub(crate) fn with_on_disk_source(self, ctx: &SourceContext) -> Self {
+        match self {
+            MarkdownError::Interpolation {
+                key,
+                expression,
+                source,
+                cause,
+            } => {
+                let source = match *source {
+                    SourceRef::Effective { .. }
+                        if ctx.display != std::path::Path::new("unknown") =>
+                    {
+                        Box::new(SourceRef::OnDisk(ctx.clone()))
+                    }
+                    other => Box::new(other),
+                };
+                MarkdownError::Interpolation {
+                    key,
+                    expression,
+                    source,
+                    cause,
+                }
+            }
+            other => other,
+        }
+    }
+}
+
 impl BlockError for MarkdownError {
     fn status_block(&self, term: &Terminal) -> StatusBlock {
         match self {
@@ -275,11 +319,9 @@ impl BlockError for MarkdownError {
             MarkdownError::Interpolation {
                 key,
                 expression,
-                // The on-disk excerpt is layered on by the file-reference render
-                // path; the leaf block renders cause + scope.
-                source: _,
+                source,
                 cause,
-            } => blocks::interpolation_block(key.as_deref(), expression, cause),
+            } => blocks::interpolation_block(key.as_deref(), expression, source, cause),
             MarkdownError::RenderTree(source) => blocks::render_tree_block(&source.to_string()),
             MarkdownError::MalformedStoredHash { property, reason } => {
                 blocks::malformed_stored_hash_block(property, reason)
