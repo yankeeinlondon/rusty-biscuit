@@ -1168,12 +1168,13 @@ fn level2_lifecycle_proxy_target_harness_plan_failure_routes_blocked_finalize_wi
         "a pre-provider harness-plan parse failure must not launch the provider; \
          got {lines:?}; pane:\n{pane}"
     );
-    // The target's blocked.stack fired and observed the typed err payload — the
-    // HarnessError surfaced as a LifecycleAction-kinded err with the harness
-    // error's variant.
+    // The target's blocked.stack fired and observed the typed err payload. The
+    // typed HarnessError (`InvalidTimeout` → `composition.lifecycle_invalid`) is
+    // classifiable, so the deprecated `err.kind` alias now reads as its
+    // `err.category` facet (`composition`), not the internal Rust type name.
     assert!(
-        lines.iter().any(|l| l == "blocked-err-kind=HarnessError"),
-        "blocked.stack must fire and observe err.kind='HarnessError'; \
+        lines.iter().any(|l| l == "blocked-err-kind=composition"),
+        "blocked.stack must fire and observe err.kind='composition' (alias of err.category); \
          got {lines:?}; pane:\n{pane}"
     );
     assert!(
@@ -1232,10 +1233,13 @@ fn level2_lifecycle_proxy_target_lifecycle_parse_failure_routes_blocked_finalize
         "a target lifecycle parse failure must not launch the provider; \
          got {lines:?}; pane:\n{pane}"
     );
+    // The typed CompositionError (`LifecycleStackInvalidShape` →
+    // `composition.lifecycle_invalid`) is classifiable, so the deprecated
+    // `err.kind` alias now reads as its `err.category` facet (`composition`).
     assert!(
-        lines.iter().any(|l| l == "blocked-err-kind=CompositionError"),
-        "the proxying document's blocked.stack must fire with err.kind='CompositionError'; \
-         got {lines:?}; pane:\n{pane}"
+        lines.iter().any(|l| l == "blocked-err-kind=composition"),
+        "the proxying document's blocked.stack must fire with err.kind='composition' \
+         (alias of err.category); got {lines:?}; pane:\n{pane}"
     );
     assert!(
         lines.iter().any(|l| l.starts_with("finalize-err-msg=") && l.len() > "finalize-err-msg=".len()),
