@@ -1,0 +1,52 @@
+# check-error-transport.allow — intentional / not-yet-converted exceptions for
+# scripts/check-error-transport.sh.
+#
+# One trimmed Rust source line per entry (leading whitespace removed). A line
+# flagged by the guard whose trimmed text appears here is suppressed. Comment
+# lines (`#`) and blank lines are ignored. Keep each entry NARROW (the exact
+# offending line) and grouped under a reason, per the real-errors Phase 6 plan.
+#
+# Membership is matched on the trimmed line text only (not the file path), so
+# the entry survives line-number drift. Two distinct files sharing an identical
+# trimmed collapse line are covered by one entry — acceptable for a heuristic
+# review guard scoped to claudine/lib/src/composition.
+#
+# ── Reason A: Phase 6 conversion targets (real-errors plan, Phase 6 tasks 2–5)
+#    These collapse a typed lower-layer cause (biscuit_file::FileReferenceError,
+#    std::io::Error, a typed harness error) into a String-carrying
+#    CompositionError variant. They are slated to carry the typed `#[source]`
+#    instead, but that conversion is downstream of the un-landed Phase 2/3 typed
+#    substrate and changes enum signatures (exhaustive-match cascade in the CLI
+#    error walker) that cannot be verified without `cargo`. Allowlisted as
+#    known-pending until that interactive conversion sweep lands.
+#
+# resolve.rs — invalid file reference (FileReferenceError → String), x2 sites
+.map_err(|e| CompositionError::InvalidReference(format!("{file_ref}: {e}")))?
+# resolve.rs — markdown read failure (std::io::Error → String)
+.map_err(|e| CompositionError::MarkdownLoad(format!("{}: {e}", resolved_path.display())))?;
+# sequence.rs — external sequence load (FileReferenceError → String), x2 sites
+.map_err(|e| CompositionError::SequenceExternalLoad(format!("`{raw}`: {e}")))?;
+.map_err(|e| CompositionError::SequenceExternalLoad(format!("`{raw}`: {e}")))?
+# closure.rs — atomic write failure (std::io::Error → String)
+.map_err(|e| CompositionError::AtomicWriteFailed(e.to_string()))?;
+# lifecycle_control.rs — proxy-target harness resolution (typed harness error → String)
+crate::harness::resolve_harness_path(target, &ctx).map_err(|e| e.to_string())?;
+#
+# ── Reason B: internal `Result<_, String>` helper boundaries (outside the
+#    Phase 6 named-conversion scope). These are intra-module helper returns
+#    whose surfaced CompositionError already carries richer context, or where
+#    the upstream value (`evaluate` returns Result<_, String>) is already a
+#    String, so no typed cause is lost. Documented exceptions, not transport
+#    regressions.
+#
+# closure.rs — rewrite_inline_document() Result<String, String> helper
+.map_err(|e| format!("failed to update last_updated: {e}"))?;
+# lifecycle_executor.rs — spawned-command io::Error surfaced through its own typed wrapper
+let status = cmd.status().map_err(|e| e.to_string())?;
+# lifecycle_executor.rs — evaluate() already returns Result<_, String> (no typed cause to lose)
+evaluate(expr, &lookup).map_err(|e| e.to_string())
+.map_err(|e| e.to_string())?;
+# lifecycle_executor.rs — dispatch error re-wrap (String in, String out)
+let out = result.map_err(|e| dispatch_err(e.to_string()))?;
+# lifecycle.rs — whole-value expression parse, surfaced with its own context
+.map_err(|e| format!("whole-value expression is not valid: {e}"))
