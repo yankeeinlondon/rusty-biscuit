@@ -101,6 +101,10 @@ fn groups() -> Vec<CommandGroup> {
                     "context",
                     "Show Darkmatter runtime context, expression engine, and side effects",
                 ),
+                cmd(
+                    "errors",
+                    "Show the diagnostic error-code contract (codes, dispositions, details)",
+                ),
             ],
         },
     ]
