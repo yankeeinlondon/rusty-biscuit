@@ -69,6 +69,33 @@ iteration: \"{{ frontmatter(spec, 'review_iterations') ? frontmatter(spec, 'revi
 // distance 1 (`spec.md` → `specs.md`), so it is guaranteed to be suggested.
 const SIBLING_CANDIDATE_NAME: &str = "specs.md";
 
+// Stale-directory reference fixture (the motivating real-errors case): the
+// prompt references `features/2026-06-21-opencode-log-fix/spec.md`, but the
+// real sibling under the nearest existing ancestor (`features/`) is
+// `features/2026-06-28-real-errors/spec.md`. The render-time suggestion logic
+// walks up from the missing parent to `features/`, enumerates sibling
+// directories, requires `spec.md` to exist inside a candidate, and ranks by
+// directory-name similarity — so the rendered report should append a
+// "Did you mean?" section naming the relative path `2026-06-28-real-errors/spec.md`.
+const STALE_DIRECTORY_REFERENCE_DOC: &str = "\
+---
+agent: \"codex\"
+spec: \"features/2026-06-21-opencode-log-fix/spec.md\"
+iteration: \"{{ frontmatter(spec, 'review_iterations') ? frontmatter(spec, 'review_iterations') : 1 }}\"
+---
+# Body
+";
+
+// Real on-disk sibling (relative to the workspace root) for the stale-directory
+// reference above. The dated folder name is dissimilar enough from the missing
+// segment that the strict filename gate would reject it; leaf-existence
+// (`spec.md` inside the folder) is the quality signal that lets the suggestion
+// through.
+const STALE_DIRECTORY_FIXTURE_REL: &str = "features/2026-06-28-real-errors/spec.md";
+
+// Rendered form of the suggestion (relative to the nearest existing ancestor).
+const STALE_DIRECTORY_SUGGESTION: &str = "2026-06-28-real-errors/spec.md";
+
 // Same top-level failing interpolation (`iteration` referencing `spec`), but the
 // document ALSO declares a `$schema:` block typing `spec`/`iteration`. Frontmatter
 // interpolation runs BEFORE schema validation in the compose pipeline, so the
@@ -135,6 +162,29 @@ fn stage_with(
 
 fn stage(name: &str) -> Staged {
     stage_with(name, "plan.md", INVALID_FILE_REFERENCE_DOC, None)
+}
+
+/// Like [`stage_with`] but stages multiple sibling files at arbitrary paths
+/// relative to the workspace root (creating parent directories as needed) and
+/// no top-level sibling. Used to exercise the stale-directory "Did you mean?"
+/// suggestion path, which walks up from a missing parent directory to the
+/// nearest existing ancestor — so nested sibling fixtures must exist on disk
+/// during the capture.
+fn stage_with_nested_siblings(
+    name: &str,
+    doc_name: &str,
+    doc_body: &str,
+    siblings: &[(&str, &str)],
+) -> Staged {
+    let staged = stage_with(name, doc_name, doc_body, None);
+    for (rel, body) in siblings {
+        let target = staged.workspace.path().join(rel);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&target, body).unwrap();
+    }
+    staged
 }
 
 fn write_provider_stub(bin_dir: &Path) {
@@ -320,6 +370,64 @@ fn level2_invalid_file_reference_renders_did_you_mean_suggestion_in_tmux() {
     assert!(
         frame.plain.contains(SIBLING_CANDIDATE_NAME),
         "expected the candidate filename {SIBLING_CANDIDATE_NAME:?} in the suggestions.\nplain:\n{}",
+        frame.plain
+    );
+
+    assert!(
+        frame.raw.contains('\u{1b}'),
+        "suggestion report should carry styling through tmux.\nraw:\n{}",
+        frame.raw
+    );
+    assert!(
+        !staged.launch_count.exists(),
+        "invalid file reference should fail before provider launch"
+    );
+}
+
+/// Level 2 capture for the file-reference "Did you mean?" suggestion on the
+/// STALE-DIRECTORY shape: drives `claudine compose` against a fixture whose
+/// `spec:` references `features/2026-06-21-opencode-log-fix/spec.md` (a stale
+/// dated directory) while the real sibling `features/2026-06-28-real-errors/spec.md`
+/// lives under the nearest existing ancestor (`features/`). Captures the live
+/// tmux pane and verifies the rendered report appends a "Did you mean?" section
+/// naming the suggested relative path `2026-06-28-real-errors/spec.md`. Mirrors
+/// the Darkmatter `level2_stale_directory_reference_renders_did_you_mean_suggestion`
+/// capture so the suggestion is proven identical through both binaries
+/// (real-errors spec requirement).
+#[test]
+#[serial(level2_terminal)]
+fn level2_stale_directory_reference_renders_did_you_mean_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    let staged = stage_with_nested_siblings(
+        "claudine-stale-dir-ref-l2",
+        "plan.md",
+        STALE_DIRECTORY_REFERENCE_DOC,
+        &[(STALE_DIRECTORY_FIXTURE_REL, "siblings: []\n")],
+    );
+    let frame = capture_command(&mut harness, &staged);
+
+    // Same authoring-fatal headline — the suggestion is an addition to the
+    // report, not a replacement for the root cause.
+    assert!(
+        frame.plain.contains("invalid file path"),
+        "expected root-cause headline 'invalid file path'.\nplain:\n{}",
+        frame.plain
+    );
+
+    // The "Did you mean?" section header survives to the rendered pane.
+    assert!(
+        frame.plain.contains("Did you mean?"),
+        "expected the 'Did you mean?' suggestions section.\nplain:\n{}",
+        frame.plain
+    );
+
+    // The relative path of the real sibling (sibling_dir/leaf) is named as a
+    // candidate.
+    assert!(
+        frame.plain.contains(STALE_DIRECTORY_SUGGESTION),
+        "expected the candidate relative path {STALE_DIRECTORY_SUGGESTION:?} in the suggestions.\nplain:\n{}",
         frame.plain
     );
 

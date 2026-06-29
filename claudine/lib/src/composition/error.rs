@@ -4351,4 +4351,62 @@ mod tests {
             "err.detail.suggestions must equal the rendered did-you-mean set"
         );
     }
+
+    #[test]
+    fn file_reference_detail_suggestions_match_rendered_for_stale_directory() {
+        // Stale-directory case (the motivating real-errors failure): the
+        // reference's parent directory does not exist, so the suggestion logic
+        // walks up to the nearest existing ancestor and ranks sibling
+        // directories that contain the leaf file. The detail `suggestions`
+        // must be NON-empty and carry the suggested relative path
+        // (sibling_dir/leaf), matching the render-time computation byte-for-byte.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let features = dir.path().join("features");
+        std::fs::create_dir_all(features.join("2026-06-28-real-errors")).unwrap();
+        std::fs::write(
+            features.join("2026-06-28-real-errors").join("spec.md"),
+            b"x",
+        )
+        .unwrap();
+
+        let diagnostic = FileReferenceDiagnostic {
+            function: "frontmatter",
+            reference: "features/2026-06-21-opencode-log-fix/spec.md".to_string(),
+            kind: FileRefFailure::NotFound,
+            base_dir: dir.path().to_path_buf(),
+            fallback_dir: None,
+            source: None,
+        };
+        let err = file_ref_compose_error(diagnostic.clone());
+        let detail = err.detail();
+
+        // The same computation the renderer runs (errors/blocks.rs).
+        let expected_path = diagnostic.base_dir.join(&diagnostic.reference);
+        let rendered = suggest_sibling_files(&expected_path, DEFAULT_MAX_SUGGESTIONS);
+
+        assert_eq!(
+            rendered,
+            vec!["2026-06-28-real-errors/spec.md".to_string()],
+            "fixture sanity: stale-directory arm must surface the real sibling path"
+        );
+        assert_eq!(
+            detail["suggestions"],
+            json!(rendered),
+            "err.detail.suggestions must equal the rendered did-you-mean set for the stale-directory case"
+        );
+        // Non-empty + carries the suggested relative path explicitly.
+        let suggestions = detail["suggestions"]
+            .as_array()
+            .expect("suggestions is an array");
+        assert!(
+            !suggestions.is_empty(),
+            "stale-directory case must surface at least one suggestion"
+        );
+        assert!(
+            suggestions.iter().any(|v| v
+                .as_str()
+                .is_some_and(|s| s.contains("2026-06-28-real-errors/spec.md"))),
+            "stale-directory suggestion must carry the sibling/leaf relative path: {suggestions:?}"
+        );
+    }
 }
