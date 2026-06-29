@@ -70,6 +70,29 @@ fn errors_default_exits_zero_and_lists_representative_codes() {
 }
 
 #[test]
+fn errors_default_lists_every_code_contiguously() {
+    // Each `err.code` is the copyable string an author pastes into a `when:`
+    // clause, so the human report must contain it as one unbroken substring —
+    // never wrapped across the `Code` cell. Guards against any future code being
+    // silently split out of the introspection surface.
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("COLUMNS", "200")
+        .current_dir(repo_root())
+        .args(["errors"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    for code in claudine::diagnostics::CODES.iter().map(|spec| spec.code) {
+        assert!(
+            stdout.contains(code),
+            "errors report must list `{code}` as a contiguous string; got:\n{stdout}"
+        );
+    }
+}
+
+#[test]
 fn errors_default_groups_by_category() {
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")

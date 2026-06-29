@@ -70,8 +70,12 @@ fn render_report() {
     log::data("");
 
     // The widest code drives the first-column pin so every category section
-    // aligns, mirroring the context report's shared-width contract.
-    let code_width = function_first_column_width("Code", CODES.iter().map(|spec| spec.code));
+    // aligns, mirroring the context report's shared-width contract. Cells render
+    // backticked (and the backticks stay visible under NO_COLOR), so the pin must
+    // measure the backticked form or the longest code wraps out of the copyable
+    // surface.
+    let backticked: Vec<String> = CODES.iter().map(|spec| format!("`{}`", spec.code)).collect();
+    let code_width = function_first_column_width("Code", backticked.iter().map(String::as_str));
 
     for (category, specs) in &groups {
         let heading = Prose::new(format!("<blue><b>{}</b></blue>", category.as_str()));
