@@ -234,6 +234,16 @@ mod tests {
     }
 
     #[test]
+    fn severity_as_str_matches_serde() {
+        // The `err.severity` facet projects this string; lock it to the wire
+        // form so the projection cannot drift.
+        for &severity in &[Severity::Info, Severity::Warning, Severity::Error] {
+            let json = serde_json::to_string(&severity).unwrap();
+            assert_eq!(json, format!("\"{}\"", severity.as_str()));
+        }
+    }
+
+    #[test]
     fn category_as_str_is_stable() {
         // Locking the contract strings — a rename is a breaking change and
         // must fail this test deliberately, mirroring

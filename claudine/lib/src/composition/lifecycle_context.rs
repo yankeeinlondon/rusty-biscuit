@@ -17,8 +17,12 @@
 //! ## `err`
 //!
 //! Carries the active failure (if any) into `blocked`, `failure`, and the
-//! optional-error `finalize` events. Exposed as `err.kind`, `err.variant`,
-//! `err.msg`. Parse-time validation (see
+//! optional-error `finalize` events. Exposed through the [`Diagnostic`] facets
+//! `err.code` / `err.category` / `err.disposition` / `err.origin` /
+//! `err.severity` / `err.detail.*` (when the source error is classifiable),
+//! plus the deprecated aliases `err.kind` / `err.variant` / `err.msg` —
+//! `err.kind` / `err.variant` are deprecated spellings of `err.category` /
+//! `err.code`. Parse-time validation (see
 //! [`super::lifecycle::validate_no_err_in_no_error_events`]) rejects `err`
 //! references in `initialize`, `start`, `success`, and `loop`.
 //!
@@ -50,23 +54,32 @@ use crate::harness::error::HarnessError;
 /// `kind` field names the source error type, `variant` names the enum arm,
 /// and `msg` carries the human-readable message.
 ///
-/// Visible in lifecycle stack expressions as `err.kind`, `err.variant`,
-/// `err.msg` (legacy aliases, always present) plus the [`Diagnostic`] facets
-/// `err.code`, `err.category`, `err.disposition`, `err.origin`, and
-/// `err.detail.*` when the source error is classifiable. When facets are
-/// present the promoted handleability conveniences (error-catalog §2.6) project
-/// too — the predicate sugar `err.is_transient` / `err.is_throttled` /
-/// `err.is_correctable` and `err.reset_at` / `err.retry_after_ms` lifted from
-/// `detail` — as terse aliases over the canonical `disposition`/`detail.*`. A
-/// bare `err` resolves to the whole object.
+/// Visible in lifecycle stack expressions as the deprecated legacy aliases
+/// `err.kind` / `err.variant` / `err.msg` plus the [`Diagnostic`] facets
+/// `err.code`, `err.category`, `err.disposition`, `err.origin`,
+/// `err.severity`, and `err.detail.*` when the source error is classifiable.
+/// `err.msg` is always present. `err.kind` / `err.variant` are the deprecated
+/// *spellings* of `err.category` / `err.code` (spec success criteria): for a
+/// classifiable error they mirror those facet values, and for a facet-less
+/// action failure they fall back to the internal source-type / enum-arm labels.
+/// When facets are present the promoted handleability conveniences
+/// (error-catalog §2.6) project too — the predicate sugar `err.is_transient` /
+/// `err.is_throttled` / `err.is_correctable` and `err.reset_at` /
+/// `err.retry_after_ms` lifted from `detail` — as terse aliases over the
+/// canonical `disposition`/`detail.*`. A bare `err` resolves to the whole
+/// object.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LifecycleErrorInfo {
     /// The source error type name (e.g. `"ClaudineError"`,
-    /// `"HarnessError"`, `"CompositionError"`).
+    /// `"HarnessError"`, `"CompositionError"`). Projected under the deprecated
+    /// `err.kind` alias **only** for a facet-less action failure; a classifiable
+    /// error projects its `category` there instead (see [`Self::to_value`]).
     pub kind: &'static str,
 
     /// The enum variant name (e.g. `"Io"`, `"ShellCommandDenied"`,
-    /// `"LifecycleInvalid"`).
+    /// `"LifecycleInvalid"`). Projected under the deprecated `err.variant` alias
+    /// **only** for a facet-less action failure; a classifiable error projects
+    /// its `code` there instead (see [`Self::to_value`]).
     pub variant: String,
 
     /// The human-readable error message (the `Display` rendering of the
@@ -88,7 +101,7 @@ pub struct LifecycleErrorInfo {
 
 /// The [`Diagnostic`] facets captured from a typed error, projected into the
 /// lifecycle `err` global as `err.code` / `err.category` / `err.disposition` /
-/// `err.origin` / `err.detail.*`.
+/// `err.origin` / `err.severity` / `err.detail.*`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DiagnosticFacets {
     /// Stable dotted code (`composition.invalid_file_reference`).
@@ -99,6 +112,9 @@ pub struct DiagnosticFacets {
     pub disposition: &'static str,
     /// Who must remediate (`author`).
     pub origin: &'static str,
+    /// Operator-facing severity slug (`info`/`warning`/`error`), defaulted from
+    /// the disposition and overridable per code (error-catalog §1).
+    pub severity: &'static str,
     /// Typed per-instance payload, projected to `err.detail.*`.
     pub detail: Value,
 }
@@ -111,6 +127,9 @@ impl DiagnosticFacets {
             category: err.category().as_str(),
             disposition: err.disposition().as_str(),
             origin: err.origin().as_str(),
+            // Disambiguate from the `BlockError::severity` supertrait method
+            // (`Diagnostic: BlockError`) — we want the projected facet severity.
+            severity: Diagnostic::severity(err).as_str(),
             detail: err.detail(),
         }
     }
@@ -132,6 +151,7 @@ impl DiagnosticFacets {
             category: spec.category.as_str(),
             disposition: spec.disposition.as_str(),
             origin: spec.origin.as_str(),
+            severity: spec.severity().as_str(),
             detail: Value::Null,
         })
     }
@@ -207,8 +227,14 @@ impl LifecycleErrorInfo {
     /// Render the snapshot as a JSON object for evaluation lookups.
     ///
     /// The legacy `kind`/`variant`/`msg` aliases are always present; the
-    /// [`Diagnostic`] facets (`code`/`category`/`disposition`/`origin`/`detail`)
-    /// are added only when the source error was classifiable.
+    /// [`Diagnostic`] facets
+    /// (`code`/`category`/`disposition`/`origin`/`severity`/`detail`) are added
+    /// only when the source error was classifiable.
+    ///
+    /// `kind`/`variant` are the deprecated spellings of `category`/`code`: for a
+    /// classifiable error they project the `category`/`code` facet values, and
+    /// only a facet-less action failure falls back to the internal
+    /// source-type/verb labels stored on the snapshot.
     ///
     /// When facets are present, the promoted handleability conveniences from
     /// error-catalog §2.6 project alongside them: the predicate sugar
@@ -220,14 +246,31 @@ impl LifecycleErrorInfo {
     /// facet-less generic action verb keeps projecting only the legacy aliases.
     pub fn to_value(&self) -> Value {
         let mut obj = serde_json::Map::new();
-        obj.insert("kind".to_string(), Value::from(self.kind));
-        obj.insert("variant".to_string(), Value::from(self.variant.clone()));
+        // Legacy aliases: when the error is classifiable, `err.kind` /
+        // `err.variant` are the *deprecated spellings* of `err.category` /
+        // `err.code` (spec success criteria), so they mirror those facet values
+        // rather than the internal Rust source-type / enum-arm labels. A
+        // facet-less action failure (a generic `shell`/`set_frontmatter` verb
+        // that maps to no diagnostic code) has no faceted equivalent, so the
+        // aliases fall back to the internal labels — these residual cases are
+        // exactly the unclassifiable ones the faceted contract does not cover.
+        match &self.facets {
+            Some(facets) => {
+                obj.insert("kind".to_string(), Value::from(facets.category));
+                obj.insert("variant".to_string(), Value::from(facets.code));
+            }
+            None => {
+                obj.insert("kind".to_string(), Value::from(self.kind));
+                obj.insert("variant".to_string(), Value::from(self.variant.clone()));
+            }
+        }
         obj.insert("msg".to_string(), Value::from(self.msg.clone()));
         if let Some(facets) = &self.facets {
             obj.insert("code".to_string(), Value::from(facets.code));
             obj.insert("category".to_string(), Value::from(facets.category));
             obj.insert("disposition".to_string(), Value::from(facets.disposition));
             obj.insert("origin".to_string(), Value::from(facets.origin));
+            obj.insert("severity".to_string(), Value::from(facets.severity));
             obj.insert("detail".to_string(), facets.detail.clone());
 
             // Promoted handleability conveniences (error-catalog §2.6): sugar
@@ -515,27 +558,68 @@ mod tests {
             message: "bad".to_string(),
         };
         let value = LifecycleErrorInfo::from_composition_error(&err).to_value();
-        // Legacy aliases stay present.
-        assert_eq!(value.get("kind"), Some(&json!("CompositionError")));
-        assert_eq!(value.get("variant"), Some(&json!("SchemaLoad")));
+        // Legacy aliases stay present, but now read as the deprecated spellings
+        // of the faceted contract: `kind` mirrors `category`, `variant` mirrors
+        // `code` (spec success criteria), not the internal Rust type/arm names.
+        assert_eq!(value.get("kind"), Some(&json!("composition")));
+        assert_eq!(value.get("variant"), Some(&json!("composition.schema_load")));
         assert!(value.get("msg").is_some());
         // New typed facets project alongside.
         assert_eq!(value.get("code"), Some(&json!("composition.schema_load")));
         assert_eq!(value.get("category"), Some(&json!("composition")));
         assert_eq!(value.get("disposition"), Some(&json!("correctable")));
         assert_eq!(value.get("origin"), Some(&json!("author")));
+        assert_eq!(value.get("severity"), Some(&json!("error")));
         assert_eq!(value["detail"]["source_path"], json!("p.md"));
+        // The deprecated aliases are exactly the faceted fields they alias.
+        assert_eq!(value.get("kind"), value.get("category"));
+        assert_eq!(value.get("variant"), value.get("code"));
+    }
+
+    #[test]
+    fn legacy_aliases_mirror_category_and_code_across_classifiable_sources() {
+        // The spec contract: for every classifiable source, `err.kind` reads as
+        // `err.category` and `err.variant` reads as `err.code`. Cover all three
+        // typed-Diagnostic builders plus the label-only `from_code` path.
+        let classifiable = [
+            LifecycleErrorInfo::from_composition_error(&CompositionError::NoRunnableProviders),
+            LifecycleErrorInfo::from_harness_error(&HarnessError::ShellCommandDenied {
+                command: "rm -rf /".to_string(),
+            }),
+            LifecycleErrorInfo::from_claudine_error(&ClaudineError::ProviderNotAvailable(
+                "codex".to_string(),
+            )),
+            LifecycleErrorInfo::from_action_failure("rate_limit", "slow down"),
+        ];
+        for info in classifiable {
+            let value = info.to_value();
+            assert_eq!(
+                value.get("kind"),
+                value.get("category"),
+                "err.kind must alias err.category"
+            );
+            assert_eq!(
+                value.get("variant"),
+                value.get("code"),
+                "err.variant must alias err.code"
+            );
+        }
     }
 
     #[test]
     fn generic_action_verb_projects_only_legacy_aliases() {
         // A generic lifecycle action verb (not an error_kind) is not
         // classifiable, so no facet keys appear — only the legacy aliases.
+        // Compatibility decision: with no faceted equivalent to alias,
+        // `err.kind`/`err.variant` fall back to the internal source-type/verb
+        // labels so the failure stays observable during migration.
         let info = LifecycleErrorInfo::from_action_failure("set_frontmatter", "boom");
         let value = info.to_value();
-        assert!(value.get("kind").is_some());
-        assert!(value.get("variant").is_some());
+        assert_eq!(value.get("kind"), Some(&json!("LifecycleAction")));
+        assert_eq!(value.get("variant"), Some(&json!("set_frontmatter")));
         assert!(value.get("code").is_none(), "no facets for a generic verb");
+        assert!(value.get("category").is_none());
+        assert!(value.get("severity").is_none(), "severity is facet-gated");
         assert!(value.get("detail").is_none());
         // The promoted sugar derives from facets, so it is absent too — a
         // facet-less verb projects only the legacy aliases (catalog §2.6).
@@ -553,12 +637,14 @@ mod tests {
             command: "rm -rf /".to_string(),
         });
         let value = info.to_value();
-        assert_eq!(value.get("kind"), Some(&json!("HarnessError")));
-        assert_eq!(value.get("variant"), Some(&json!("ShellCommandDenied")));
+        // `kind`/`variant` are the deprecated aliases of `category`/`code`.
+        assert_eq!(value.get("kind"), Some(&json!("composition")));
+        assert_eq!(value.get("variant"), Some(&json!("composition.shell_expansion")));
         assert_eq!(value.get("code"), Some(&json!("composition.shell_expansion")));
         assert_eq!(value.get("category"), Some(&json!("composition")));
         assert_eq!(value.get("disposition"), Some(&json!("correctable")));
         assert_eq!(value.get("origin"), Some(&json!("author")));
+        assert_eq!(value.get("severity"), Some(&json!("error")));
         assert_eq!(value["detail"]["command"], json!("rm -rf /"));
     }
 
@@ -569,7 +655,8 @@ mod tests {
             "codex".to_string(),
         ));
         let value = info.to_value();
-        assert_eq!(value.get("kind"), Some(&json!("ClaudineError")));
+        // `kind` is the deprecated alias of `category`.
+        assert_eq!(value.get("kind"), Some(&json!("provider")));
         assert_eq!(value.get("code"), Some(&json!("provider.unavailable")));
         assert_eq!(value.get("category"), Some(&json!("provider")));
         assert_eq!(value.get("origin"), Some(&json!("environment")));
@@ -628,6 +715,21 @@ mod tests {
     }
 
     #[test]
+    fn severity_projects_for_classifiable_errors() {
+        // Typed-Diagnostic path: a correctable composition error defaults to
+        // `error` severity (catalog §1).
+        let value =
+            LifecycleErrorInfo::from_composition_error(&CompositionError::NoRunnableProviders)
+                .to_value();
+        assert_eq!(value.get("severity"), Some(&json!("error")));
+
+        // Label-only `from_code` path: a throttled cap defaults to `warning`.
+        let value = LifecycleErrorInfo::from_action_failure("rate_limit", "slow down").to_value();
+        assert_eq!(value.get("disposition"), Some(&json!("throttled")));
+        assert_eq!(value.get("severity"), Some(&json!("warning")));
+    }
+
+    #[test]
     fn throttled_cap_promotes_is_throttled_and_null_cap_fields() {
         // A rate-limit cap reaches `err` via `from_action_failure`, so its
         // facets come from the `from_code` path → `detail` is `Null`. The
@@ -682,6 +784,7 @@ mod tests {
                 category: "cap",
                 disposition: "throttled",
                 origin: "provider",
+                severity: "warning",
                 detail: json!({
                     "provider": "claude",
                     "reset_at": "2026-06-28T17:30:00Z",
@@ -712,6 +815,7 @@ mod tests {
                 category: "document",
                 disposition: "correctable",
                 origin: "provider",
+                severity: "error",
                 detail: json!({ "doc": "spec.md", "property": "status" }),
             })),
         };

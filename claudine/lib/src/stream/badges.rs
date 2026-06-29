@@ -34,6 +34,18 @@ pub enum BadgeSeverity {
     Error,
 }
 
+impl BadgeSeverity {
+    /// Stable snake_case identifier — matches the serde projection, so the
+    /// `err.severity` facet string cannot silently drift from the wire form.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BadgeSeverity::Info => "info",
+            BadgeSeverity::Warning => "warning",
+            BadgeSeverity::Error => "error",
+        }
+    }
+}
+
 /// A single diagnostic badge attached to a session summary.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionBadge {
