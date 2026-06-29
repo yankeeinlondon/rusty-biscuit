@@ -123,6 +123,32 @@ fn capture_command(harness: &mut TmuxHarness, staged: &Staged) -> CapturedFrame 
     frame
 }
 
+/// The `48;2;R;G;B` truecolor background SGR codes present on the single captured
+/// pane row whose visible text contains `needle`.
+///
+/// The frontmatter excerpt's offending line is highlighted by painting a
+/// distinct background color — the `CodeBlock` appendix does not use a `>` gutter
+/// glyph — so a highlighted row carries a background its unhighlighted siblings
+/// do not. The row is located by its escape-stripped text, then the original
+/// (escapes-intact) row is scanned for background codes.
+fn row_truecolor_backgrounds(raw: &str, needle: &str) -> Vec<String> {
+    let row = raw
+        .lines()
+        .find(|line| biscuit_test_harness::strip_ansi(line).contains(needle))
+        .unwrap_or_else(|| panic!("no captured row contains {needle:?}.\nraw:\n{raw}"));
+
+    let mut backgrounds = Vec::new();
+    let mut rest = row;
+    while let Some(pos) = rest.find("\u{1b}[48;2;") {
+        // Skip the `\x1b[` prefix; capture the `48;2;…` body up to the `m`.
+        let body = &rest[pos + 2..];
+        let Some(end) = body.find('m') else { break };
+        backgrounds.push(body[..end].to_string());
+        rest = &body[end + 1..];
+    }
+    backgrounds
+}
+
 #[test]
 #[serial(level2_terminal)]
 fn level2_schema_parse_renders_highlighted_excerpt_in_tmux() {
@@ -146,12 +172,26 @@ fn level2_schema_parse_renders_highlighted_excerpt_in_tmux() {
     }
 
     // The offending `$schema.spec` line (file line 3) is highlighted in the
-    // appended excerpt: the gutter carries the `>` highlight marker on line 3,
-    // matching the line-highlight rendering the malformed-fence capture asserts.
+    // appended excerpt by painting a distinct background — the `CodeBlock`
+    // appendix highlights with color, not a gutter glyph. So the `spec:`
+    // type-string row carries a truecolor background its unhighlighted
+    // `spec: "x"` sibling row does not.
+    let offending_backgrounds =
+        row_truecolor_backgrounds(&frame.raw, "spec: file(required, match(**/*spec*.md))");
+    let sibling_backgrounds = row_truecolor_backgrounds(&frame.raw, "spec: \"x\"");
     assert!(
-        frame.plain.contains("> 3 ") || frame.plain.contains(">  3 "),
-        "expected the line-3 highlight marker in the excerpt gutter.\nplain:\n{}",
-        frame.plain
+        !offending_backgrounds.is_empty(),
+        "the offending `$schema.spec` row should carry a code-block background.\nraw:\n{}",
+        frame.raw
+    );
+    assert!(
+        offending_backgrounds
+            .iter()
+            .any(|bg| !sibling_backgrounds.contains(bg)),
+        "the offending `$schema.spec` row (file line 3) should be highlighted with a \
+         background distinct from its unhighlighted `spec: \"x\"` sibling row.\n\
+         offending: {offending_backgrounds:?}\nsibling: {sibling_backgrounds:?}\nraw:\n{}",
+        frame.raw
     );
     assert!(
         frame.raw.contains('\u{1b}'),
