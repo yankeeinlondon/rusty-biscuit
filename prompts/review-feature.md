@@ -1,7 +1,7 @@
 ---
 $schema:
-    spec: string(required)
-    design: string
+    spec: file(required)
+    design: file
     iteration: number
 description: "Reviews a _feature specification_ to make sure that the specification has been fully implemented. This prompt is also aware of the likelihood of more than one review being necessary and therefore names the reviews `review-{iteration}.md` in the same folder where the feature was specified.\n\nThe caller can pass in the **iteration** number but it should be detected automatically."
 initialize: 
@@ -10,7 +10,7 @@ initialize:
 dir: "{{dirname(spec || design)}}"
 design: "{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}"
 iteration: "{{ file_exists(spec) ? (frontmatter(spec, 'review_iterations') || 0) + 1  : 1   }}"
-review_file: "{{ctx.area}}/{{dir}}/review-{{iteration}}.md"
+review_file: "{{dir}}/review-{{iteration}}.md"
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 start:
     message: "👓 starting {{feature_or_fix}} review #{{iteration}} of `{{parent_dir(spec)}}` (_in the **{{ctx.area}}** package area_)"
