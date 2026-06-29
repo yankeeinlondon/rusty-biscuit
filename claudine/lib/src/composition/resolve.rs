@@ -1,9 +1,9 @@
 //! File reference resolution for composition sources.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use biscuit_file::FileReference;
+use biscuit_file::{FileReference, PathPosition, find_git_root, find_package_area, home_dir};
 use darkmatter::markdown::{Markdown, MarkdownError};
 
 use super::error::CompositionError;
@@ -29,9 +29,9 @@ fn map_load_error(path: &Path, err: MarkdownError) -> CompositionError {
 /// that the resolved file has a `.md` or `.markdown` extension.
 ///
 /// When invoked from inside a Cargo workspace package area (common for
-/// monorepo prompts like `@prompts/commit.md`), the package area is added
-/// as a prepended magic search root so package-local prompts are found
-/// before repo-wide or HOME-scoped ones.
+/// monorepo prompts like `@prompts/commit.md`), the package area and the
+/// convention prompt directories are added as prepended magic search roots
+/// so a bare `@<file>` resolves to the closest matching prompt.
 pub fn resolve_composition_source(
     file_ref: &str,
 ) -> Result<ResolvedCompositionSource, CompositionError> {
@@ -39,9 +39,10 @@ pub fn resolve_composition_source(
     // resolution phase so trace inspection / `--perf` reporting can see
     // when the `biscuit-file` resolver dominates compose prep cost.
     let _span = tracing::info_span!("compose_prep.file_reference", file = %file_ref).entered();
-    let reference = FileReference::new(file_ref)
-        .map_err(|e| CompositionError::InvalidReference(format!("{file_ref}: {e}")))?
-        .with_package_area_magic_path();
+    let reference = with_prompt_magic_paths(
+        FileReference::new(file_ref)
+            .map_err(|e| CompositionError::InvalidReference(format!("{file_ref}: {e}")))?,
+    );
 
     let resolved_path = reference
         .resolve()
@@ -75,6 +76,65 @@ pub fn resolve_composition_source(
         original_text,
         markdown,
     })
+}
+
+/// Register the convention prompt directories as magic (`@`) search roots.
+///
+/// Mirrors the completion engine's magic scope set so a value the user
+/// tab-completed to `@<file>` resolves at launch: the roots are the
+/// package-area, repo, and HOME `prompts/` directories, registered
+/// **closest-first**. Because [`FileReference::resolve`] returns the first
+/// existing candidate, the nearest prompt wins.
+///
+/// The package area is also registered as a bare root (replacing
+/// `with_package_area_magic_path`), so the single `cargo metadata` probe
+/// serves both the bare `@<file>` form and the path-shaped
+/// `@prompts/<file>` form.
+fn with_prompt_magic_paths(reference: FileReference) -> FileReference {
+    let Ok(cwd) = std::env::current_dir() else {
+        return reference;
+    };
+    let git_root = find_git_root(&cwd).ok().flatten();
+    let package_area = git_root
+        .as_deref()
+        .and_then(|root| find_package_area(root, &cwd).ok().flatten());
+
+    prompt_magic_roots(
+        git_root.as_deref(),
+        package_area.as_deref(),
+        home_dir().as_deref(),
+    )
+    .into_iter()
+    .fold(reference, |reference, root| {
+        reference.add_magic_path(root, PathPosition::Start)
+    })
+}
+
+/// The convention prompt directories, **closest-first**: package area, then
+/// repo (`prompts/` then `.claudine/prompts/`), then HOME `~/.claudine/
+/// prompts`. The bare package-area root is included first so the single
+/// `cargo metadata` probe also serves the path-shaped `@prompts/<file>` form.
+///
+/// Pure (no IO) so the ordering is unit-testable; the IO that discovers the
+/// anchors lives in [`with_prompt_magic_paths`].
+fn prompt_magic_roots(
+    git_root: Option<&Path>,
+    package_area: Option<&Path>,
+    home: Option<&Path>,
+) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if let Some(area) = package_area {
+        roots.push(area.to_path_buf());
+        roots.push(area.join("prompts"));
+    }
+    if let Some(root) = git_root {
+        roots.push(root.join("prompts"));
+        roots.push(root.join(".claudine").join("prompts"));
+    }
+    if let Some(home) = home {
+        roots.push(home.join(".claudine").join("prompts"));
+    }
+    roots
 }
 
 /// Enrich a source-load error with the authored frontmatter block.
@@ -146,6 +206,42 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
     use tempfile::TempDir;
+
+    #[test]
+    fn prompt_magic_roots_are_closest_first() {
+        // Package area before repo before HOME; the bare area root precedes
+        // its `prompts/` child so the path-shaped `@prompts/x.md` form still
+        // resolves via the existing join. `resolve_direct` returns the first
+        // existing candidate, so this order encodes "closest wins".
+        let area = Path::new("/repo/claudine");
+        let repo = Path::new("/repo");
+        let home = Path::new("/home/u");
+        let got = prompt_magic_roots(Some(repo), Some(area), Some(home));
+        assert_eq!(
+            got,
+            vec![
+                PathBuf::from("/repo/claudine"),
+                PathBuf::from("/repo/claudine/prompts"),
+                PathBuf::from("/repo/prompts"),
+                PathBuf::from("/repo/.claudine/prompts"),
+                PathBuf::from("/home/u/.claudine/prompts"),
+            ],
+        );
+    }
+
+    #[test]
+    fn prompt_magic_roots_skip_absent_anchors() {
+        // No package area, no HOME: only the repo roots are registered.
+        let got = prompt_magic_roots(Some(Path::new("/repo")), None, None);
+        assert_eq!(
+            got,
+            vec![
+                PathBuf::from("/repo/prompts"),
+                PathBuf::from("/repo/.claudine/prompts"),
+            ],
+        );
+        assert!(prompt_magic_roots(None, None, None).is_empty());
+    }
 
     #[test]
     fn resolve_absolute_markdown_file() {
