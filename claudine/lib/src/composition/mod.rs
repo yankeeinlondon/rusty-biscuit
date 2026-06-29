@@ -40,8 +40,8 @@ pub use agent_message::{agent_state_breakdown, invalid_agent_message};
 pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
 pub use error::{
     CompositionError, DroppedOptional, DroppedOptionalSource, DroppedOptionalStage,
-    InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE, MissingProperty,
-    SequenceMissingPropertiesStep, SequenceSelectionFailure, TextFormat,
+    InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE, MarkdownLoadCause, MissingProperty,
+    SequenceLoadCause, SequenceMissingPropertiesStep, SequenceSelectionFailure, TextFormat,
 };
 pub use file_detail::{FileDetail, extract_markdown_detail, extract_yaml_sequence_detail};
 pub use frontmatter_excerpt::FrontmatterExcerpt;

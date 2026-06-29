@@ -131,8 +131,22 @@ test-real *args="":
     CLAUDINE_CONTRACT_REAL=1 cargo test -p claudine-cli --test real_opencode_yolo_subagent {{ args }} || rc=$?
     exit $rc
 
+# Guard against typed lower-layer errors collapsing to strings at the
+# Darkmatter→Claudine / BlockError transport boundary (real-errors Phase 6).
+# Pure grep heuristic — no cargo — so it runs even when the toolchain is gated.
+lint-transport:
+    @../scripts/check-error-transport.sh
+
+# Guard new lifecycle docs onto the faceted `err.*` contract, keeping the
+# deprecated err.kind/err.variant/err.msg aliases out of fresh examples.
+# Pure grep heuristic — no cargo — so it runs even when the toolchain is gated.
+lint-lifecycle-doc-facets:
+    @../scripts/check-lifecycle-doc-facets.sh
+
 # Lint the library, contract adapter, and CLI
 lint:
+    @just lint-transport
+    @just lint-lifecycle-doc-facets
     @just _lint claudine
     @just _lint claudine-contract
     @just _lint claudine-cli

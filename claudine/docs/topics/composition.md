@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-47ec16a6dcbca472
-last_updated: 2026-06-28
+hash: ef46db3751d8e999-ddc8a530571dc9a5
+last_updated: 2026-06-25
 ---
 # Claudine Composition
 
@@ -368,7 +368,7 @@ Dry-run output follows Unix stream conventions so `claudine compose --dry-run do
 - **stdout** — the composed document body (the data product).
 - **stderr** — the finalized YAML frontmatter (syntax-highlighted) followed by a metadata table.
 
-The metadata table rows, in order: **Document** (frontmatter `name`, or the relative path, rendered as a blue OSC8 link), **Description** (italic + dim, only when set), **Agent** (the resolved provider name when one is selected, or a classified resolution breakdown — no-agent, invalid frontmatter hint, not-installed hint, multi-suggestion list, auto-selected single suggestion, or zero-installed list — rendered as a multi-line cell), **Model** (the resolved model, or `default`), **YOLO** (`true`/`false`), **Session** (`interactive` or `non-interactive` with the resolved source in parentheses, e.g. `interactive (frontmatter)` or `non-interactive (--no-interactive)`), **Area** (the focused monorepo area, only when inside a monorepo), and **Deferred** (the lifecycle event keys left raw in the YAML block above because they interpolate at event-time, only when at least one such key is present — so a raw `{{err.msg}}` span there reads as intentional, not as an unresolved-variable bug).
+The metadata table rows, in order: **Document** (frontmatter `name`, or the relative path, rendered as a blue OSC8 link), **Description** (italic + dim, only when set), **Agent** (the resolved provider name when one is selected, or a classified resolution breakdown — no-agent, invalid frontmatter hint, not-installed hint, multi-suggestion list, auto-selected single suggestion, or zero-installed list — rendered as a multi-line cell), **Model** (the resolved model, or `default`), **YOLO** (`true`/`false`), **Session** (`interactive` or `non-interactive` with the resolved source in parentheses, e.g. `interactive (frontmatter)` or `non-interactive (--no-interactive)`), **Area** (the focused monorepo area, only when inside a monorepo), and **Deferred** (the lifecycle event keys left raw in the YAML block above because they interpolate at event-time, only when at least one such key is present — so a raw `{{err.code}}` span there reads as intentional, not as an unresolved-variable bug).
 
 `--quiet` and `--silent` have **no effect** in dry-run mode: the full output is always rendered.
 

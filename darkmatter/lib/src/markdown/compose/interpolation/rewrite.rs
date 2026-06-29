@@ -6,19 +6,30 @@
 //! (skipping code regions) and plain-text scanning.
 
 use super::{EvalResult, Evaluator, ExpressionFinder, ExpressionLocation, parse};
-use crate::markdown::compose::expression::{EvaluationLookup, UNKNOWN_FUNCTION_PREFIX};
+use crate::markdown::compose::expression::{EvaluationLookup, ExpressionError};
 use crate::markdown::compose::ComposeWarning;
-use crate::markdown::types::MarkdownError;
+use crate::markdown::types::{MarkdownError, SourceRef};
 use serde_json::Value;
 
-/// Whether an evaluation error is fatal even in non-fail-fast mode.
+/// Wraps a typed evaluation `cause` in [`MarkdownError::Interpolation`], the
+/// single construction point for the live compose interpolation path.
 ///
-/// An unknown function is an authoring mistake, not a data-dependent miss
-/// (unlike an undefined variable, which resolves to an empty string by design).
-/// Tolerating it would leave the literal `{{ … }}` text in place to poison a
-/// later consumer with an unrelated error, so it is always surfaced here.
-fn is_fatal_eval_error(message: &str) -> bool {
-    message.starts_with(UNKNOWN_FUNCTION_PREFIX)
+/// The `key` is left `None` here (body interpolation has none); frontmatter
+/// whole-value callers attach it afterward via `key_scoped_error`. The `source`
+/// starts as [`SourceRef::Effective`] — the on-disk excerpt is layered on at the
+/// pipeline boundary where the document's [`SourceContext`] is in scope.
+///
+/// [`SourceContext`]: biscuit_terminal::errors::SourceContext
+fn interpolation_error(expression: &str, cause: ExpressionError) -> MarkdownError {
+    MarkdownError::Interpolation {
+        key: None,
+        expression: expression.to_string(),
+        source: Box::new(SourceRef::Effective {
+            rendered: expression.to_string(),
+            origin_key: None,
+        }),
+        cause: Box::new(cause),
+    }
 }
 
 /// Controls how `interpolate_text` scans for `{{ }}` expressions.
@@ -116,27 +127,24 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
                         output.replace_range(loc.start..loc.end, &replacement);
                         count += 1;
                     }
-                    EvalResult::Error { message, .. }
-                        if fail_fast || is_fatal_eval_error(&message) =>
+                    EvalResult::Error { error, .. }
+                        if fail_fast || error.is_authoring_fatal() =>
                     {
-                        return Err(MarkdownError::Transform(format!(
-                            "Interpolation evaluation failed for '{}': {}",
-                            loc.expression, message
-                        )));
+                        return Err(interpolation_error(&loc.expression, error));
                     }
-                    EvalResult::Error { message, original } => {
+                    EvalResult::Error { error, original } => {
                         warnings.push(ComposeWarning::new(
                             warning_stage,
-                            format!("failed to evaluate '{}': {}", original, message),
+                            format!("failed to evaluate '{}': {}", original, error),
                         ));
                     }
                 }
                 }
                 Err(e) if fail_fast => {
-                    return Err(MarkdownError::Transform(format!(
-                        "Interpolation parse failed for '{}': {}",
-                        loc.expression, e
-                    )));
+                    return Err(interpolation_error(
+                        &loc.expression,
+                        ExpressionError::Parse(e.to_string()),
+                    ));
                 }
                 Err(e) => {
                     warnings.push(ComposeWarning::new(
@@ -206,22 +214,16 @@ pub(crate) fn interpolate_value<L: EvaluationLookup>(
 ) -> Result<(Value, usize, Vec<ComposeWarning>), MarkdownError> {
     if let Some(loc) = whole_value_span(input) {
         let expr = parse(&loc.expression).map_err(|e| {
-            MarkdownError::Transform(format!(
-                "Interpolation parse failed for '{}': {}",
-                loc.expression, e
-            ))
+            interpolation_error(&loc.expression, ExpressionError::Parse(e.to_string()))
         })?;
         // The whole-value path bypasses `interpolate_text`, so it must still run
         // the context-typo check on its single parsed expression — otherwise
         // `phase: "{{ ctx.toady }}"` (resolving to null) would warn in body text
         // but stay silent in frontmatter.
         let warnings = evaluator.collect_context_warnings(&expr, warning_stage);
-        let value = evaluator.eval_json(&expr).map_err(|message| {
-            MarkdownError::Transform(format!(
-                "Interpolation evaluation failed for '{}': {}",
-                loc.expression, message
-            ))
-        })?;
+        let value = evaluator
+            .eval_json(&expr)
+            .map_err(|cause| interpolation_error(&loc.expression, cause))?;
         return Ok((value, 1, warnings));
     }
     let result = interpolate_text(input, evaluator, ScanMode::Plain, fail_fast, warning_stage)?;

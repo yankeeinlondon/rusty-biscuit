@@ -20,7 +20,7 @@ Legacy prompts that only configure `start`, `success`, `blocked`, and `failure` 
 
 ## Binding Time: Early vs Late
 
-Every frontmatter property of a lifecycle event interpolates **when that event fires**, not during the initial compose. This is what lets a lifecycle message report the state at the moment it runs — including the runtime globals (`err`, `timing`, `current`) that do not exist at compose time. So `failure.message: "❌️  {{err.msg}}"` renders the real error, and a `failure` stack `message: "❌️  {{err.msg}}"` does too.
+Every frontmatter property of a lifecycle event interpolates **when that event fires**, not during the initial compose. This is what lets a lifecycle message report the state at the moment it runs — including the runtime globals (`err`, `timing`, `current`) that do not exist at compose time. So `failure.message: "❌️  {{err.code}}"` renders the real error's code, and a `failure` stack `message: "❌️  {{err.code}}"` does too.
 
 The variables a lifecycle `{{ … }}` span can read fall into two groups:
 
@@ -266,18 +266,51 @@ Stack expressions have access to three lifecycle-only globals in addition to fro
 
 | Global | Available in | Fields |
 |--------|--------------|--------|
-| `err` | `blocked`, `failure`, `finalize` | `kind`, `variant`, `msg` |
+| `err` | `blocked`, `failure`, `finalize` | faceted fields below (`code`, `category`, `disposition`, `origin`, `detail.*`, plus promoted conveniences) |
 | `timing` | every event | `document_ms`, `total_ms`, `step_ms` (all optional) |
 | `current` | every event | `current.ctx.*`, `current.env.*` (lazy snapshots at event time) |
 
 `err` is only meaningful in events that can carry an error. Using bare `err` (or `err.*`) in `initialize`, `start`, `success`, or `loop` is rejected at parse time.
 
+### `err` Fields
+
+Match handlers on these **faceted** fields — a stable, versioned contract (see the [error catalog](../../features/2026-06-28-real-errors/error-catalog.md)). Matching on these instead of human prose is what makes a lifecycle handler portable across providers and codes.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `err.code` | string | Stable dotted code, e.g. `composition.invalid_file_reference`, `cap.plan_limit`, `timeout.step_silence`. The most specific handle. |
+| `err.category` | string | Coarse domain — the dotted prefix of `code` (`composition`, `cap`, `timeout`, `provider`, `document`, `vcs`, `io`, `config`, `usage`, `runaway`, `auth`, `internal`). |
+| `err.disposition` | string | Generic remediation strategy: `transient`, `throttled`, `correctable`, `needs_input`, or `unrecoverable`. |
+| `err.origin` | string | Who remediates: `provider`, `author`, `caller`, `environment`, or `internal`. |
+| `err.severity` | string | Operator-facing severity: `info`, `warning`, or `error`. Defaulted from `disposition` (`transient`/`throttled`/`needs_input` → `warning`, `correctable`/`unrecoverable` → `error`) and overridable per code. |
+| `err.detail.*` | typed | Per-instance payload — the fields that vary per occurrence (`err.detail.reference`, `err.detail.property`, `err.detail.reset_at`, …). Shape depends on `code`; an absent field reads as `null`. |
+
+Promoted conveniences (sugar over the canonical fields, present only when the error is classifiable):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `err.is_transient` / `err.is_throttled` / `err.is_correctable` | bool | Predicate sugar derived from `err.disposition`. |
+| `err.reset_at` | string | RFC 3339 timestamp lifted from `err.detail.reset_at` (cap codes); `null` otherwise. |
+| `err.retry_after_ms` | number | Suggested wait lifted from `err.detail.retry_after_ms` (cap codes); `null` otherwise. |
+
 ```yaml
 failure:
   stack:
-    - when: "err.variant == 'ShellCommandDenied'"
+    - when: "err.code == 'composition.shell_expansion'"
       action: { notify: "Shell command was denied" }
 ```
+
+#### Deprecated aliases
+
+The original `err` fields remain available for backward compatibility but are **deprecated** — new documents should match the faceted fields above.
+
+`err.kind` and `err.variant` are the deprecated *spellings* of `err.category` and `err.code`: for a classifiable error they carry exactly those facet values, so prefer the faceted names directly. They fall back to Claudine's internal Rust error labels **only** for a facet-less action failure (a generic `shell`/`set_frontmatter` verb that maps to no diagnostic code), where there is no faceted equivalent — those residual values describe the internal shape, drift, and are not portable.
+
+| Deprecated field | Type | Description |
+|------------------|------|-------------|
+| `err.kind` | string | Deprecated alias of `err.category`. Mirrors the category for a classifiable error; falls back to the internal Rust error *type* name (`ClaudineError`, `HarnessError`, `CompositionError`) only for a facet-less action failure. |
+| `err.variant` | string | Deprecated alias of `err.code`. Mirrors the code for a classifiable error; falls back to the internal Rust enum *arm* name (`Io`, `ShellCommandDenied`, `SchemaLoad`) only for a facet-less action failure. |
+| `err.msg` | string | The human-readable `Display` rendering of the error. Prose; matching on it is discouraged. |
 
 ### `doc.err` Escape Hatch
 
@@ -356,7 +389,7 @@ finalize:
 ---
 failure:
   stack:
-    - when: "err.kind == 'CompositionError'"
+    - when: "err.category == 'composition'"
       action: { notify: "Composition failed" }
     - action: { say: "Something went wrong" }
 ---
@@ -407,7 +440,7 @@ loop:
 
 ### Recover from a usage cap by switching providers
 
-When a provider hits a usage cap or rate limit, the failure surfaces in the `failure` event with that classification in `err.variant` — the provider's raw `error_kind` (e.g. `usage_limit_reached`, `quota_exceeded`, `rate_limit`). There is no in-place "switch provider" action; instead `proxy` hands the same task off to a sibling prompt that pins a different agent.
+When a provider hits a usage cap or rate limit, the failure surfaces in the `failure` event classified into the locked `cap.*` codes — `cap.rate_limit`, `cap.plan_limit`, or `cap.billing`. The classifier folds each provider's raw label into one of these, so the guard matches the **contract**, not provider-specific strings. There is no in-place "switch provider" action; instead `proxy` hands the same task off to a sibling prompt that pins a different agent.
 
 ```yaml
 ---
@@ -415,14 +448,14 @@ agent: claude
 prompt: "Implement the feature described in @spec.md"
 failure:
   stack:
-    - when: "err.variant == 'usage_limit_reached' || err.variant == 'quota_exceeded' || err.variant == 'rate_limit'"
+    - when: "err.category == 'cap'"
       action:
         - warn: "Claude usage cap reached — handing off to Codex"
         - proxy: "@prompts/feature-codex.md"
 ---
 ```
 
-`@prompts/feature-codex.md` is the same task with `agent: codex` in its frontmatter; `proxy` starts it fresh at its own `initialize`. Because `err.variant` carries the provider's raw `error_kind`, widen the guard to match the kinds your provider emits — run the prompt once to observe the value, or read it off the session badge.
+`@prompts/feature-codex.md` is the same task with `agent: codex` in its frontmatter; `proxy` starts it fresh at its own `initialize`. Matching `err.category == 'cap'` catches every cap — rate limit, plan/usage quota, and billing stop. To react only to the *waitable* caps (rate limit and plan/usage quota, which auto-lift) and not a hard billing stop, match `err.is_throttled` instead; to target one code, use `err.code == 'cap.rate_limit'`.
 
 ### Verify an artifact on success, then retry once from `finalize`
 
@@ -449,7 +482,7 @@ On the retried attempt the agent runs again and `success` re-verifies the file. 
 
 ### Resume after a timeout
 
-Both the wall-clock `timeout` and the step-silence `step_timeout` surface in the `failure` event with `err.variant` of `timeout` or `step_timeout`. `resume` continues the **same** agent session — context intact — with a follow-up message, which is usually better than `retry` for a timeout (retry re-runs the invocation from scratch).
+Both the wall-clock `timeout` and the step-silence `step_timeout` surface in the `failure` event under the locked `timeout.*` codes — `timeout.wall_clock` and `timeout.step_silence`. `resume` continues the **same** agent session — context intact — with a follow-up message, which is usually better than `retry` for a timeout (retry re-runs the invocation from scratch).
 
 ```yaml
 ---
@@ -458,10 +491,12 @@ timeout: 20m
 step_timeout: 5m
 failure:
   stack:
-    - when: "err.variant == 'timeout' || err.variant == 'step_timeout'"
+    - when: "err.category == 'timeout'"
       action: { resume: "You were stopped by a timeout. Continue from where you left off and finish the task." }
 ---
 ```
+
+`err.category == 'timeout'` matches both kinds; to distinguish them, match `err.code == 'timeout.wall_clock'` or `err.code == 'timeout.step_silence'`.
 
 `resume` is valid only in `failure` and defaults to a single attempt (`max_attempts: 1`). Its string argument binds to the required `message:` parameter.
 
@@ -565,7 +600,7 @@ success:
 ```yaml
 start:
   stack:
-    - action: { stderr: "{{err.msg}}" }  # ERROR: err not available in start
+    - action: { stderr: "{{err.code}}" }  # ERROR: err not available in start
 ```
 
 ### Empty String Normalization

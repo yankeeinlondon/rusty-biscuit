@@ -1330,11 +1330,11 @@ fn evaluate_ternary_condition(
         )
     })?;
 
-    let value = evaluate(&parsed, state).map_err(|message| {
+    let value = evaluate(&parsed, state).map_err(|error| {
         frontmatter_parse_error(
             key,
             ctx,
-            format!("Frontmatter shell ternary condition must be a boolean expression: {message}"),
+            format!("Frontmatter shell ternary condition must be a boolean expression: {error}"),
         )
     })?;
 
@@ -1505,12 +1505,12 @@ fn evaluate_value_branch(
         )
     })?;
 
-    let value = evaluate(&parsed, state).map_err(|message| {
+    let value = evaluate(&parsed, state).map_err(|error| {
         frontmatter_parse_error(
             key,
             ctx,
             format!(
-                "Frontmatter shell ternary {} evaluation failed: {message}",
+                "Frontmatter shell ternary {} evaluation failed: {error}",
                 position.name()
             ),
         )

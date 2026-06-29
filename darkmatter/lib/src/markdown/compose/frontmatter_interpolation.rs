@@ -32,7 +32,7 @@ use super::expression::{EvaluationLookup, Expr, ExpressionFinder, ResolutionCont
 use super::interpolation::{Evaluator, interpolate_value};
 use super::{ComposeContext, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
-use crate::markdown::types::MarkdownError;
+use crate::markdown::types::{MarkdownError, SourceRef};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
@@ -209,15 +209,31 @@ fn rewrite_value<L: EvaluationLookup>(
     }
 }
 
-/// Prepends the frontmatter key to a rewrite error so a whole-value
-/// interpolation failure names the offending key alongside the expression text
-/// the underlying error already carries. Non-`Transform` errors pass through
+/// Attaches the receiving frontmatter `key` to a whole-value interpolation
+/// failure so the rendered error names the offending property as structured
+/// scope rather than as a prose prefix. Non-`Interpolation` errors pass through
 /// untouched.
 fn key_scoped_error(key: &str, err: MarkdownError) -> MarkdownError {
     match err {
-        MarkdownError::Transform(msg) => {
-            MarkdownError::Transform(format!("frontmatter key '{key}': {msg}"))
-        }
+        MarkdownError::Interpolation {
+            expression,
+            source,
+            cause,
+            ..
+        } => MarkdownError::Interpolation {
+            key: Some(key.to_string()),
+            expression,
+            // Record the origin key on the late-binding fallback; the on-disk
+            // excerpt (when available) is layered on at the pipeline boundary.
+            source: match *source {
+                SourceRef::Effective { rendered, .. } => Box::new(SourceRef::Effective {
+                    rendered,
+                    origin_key: Some(key.to_string()),
+                }),
+                on_disk => Box::new(on_disk),
+            },
+            cause,
+        },
         other => other,
     }
 }
@@ -1432,7 +1448,10 @@ mod tests {
             // A frontmatter value that is exactly one malformed `{{ … }}` is
             // executable state: it must abort composition on a parse failure
             // even when fail_fast is off, instead of leaking the raw template
-            // downstream. The error names the offending key and the expression.
+            // downstream. The receiving key is captured as structured scope (no
+            // prose prefix), and the typed cause is a parse error.
+            use crate::markdown::compose::expression::ExpressionError;
+
             let mut fm = fm_from_json(json!({
                 "bad": "{{ > invalid }}"
             }));
@@ -1440,11 +1459,13 @@ mod tests {
             let Err(err) = result else {
                 panic!("malformed whole-value interpolation must abort");
             };
-            let msg = err.to_string();
-            assert!(msg.contains("'bad'"), "error must name the key, got: {msg}");
+            let MarkdownError::Interpolation { key, cause, .. } = &err else {
+                panic!("expected Interpolation error, got: {err:?}");
+            };
+            assert_eq!(key.as_deref(), Some("bad"), "error must capture the key");
             assert!(
-                msg.contains("Interpolation parse failed"),
-                "error must mention the parse failure, got: {msg}"
+                matches!(cause.as_ref(), ExpressionError::Parse(_)),
+                "cause must be a parse error, got: {cause:?}"
             );
         }
 

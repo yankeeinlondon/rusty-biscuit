@@ -735,15 +735,21 @@ where
                     lifecycle_ctx.repo_root,
                 ) {
                     Ok(path) => path,
-                    Err(message) => {
+                    Err(err) => {
                         // Resolution failure (missing file, unresolvable
                         // `@repo/…` reference) is reported as an initialize
-                        // failure so the user sees the underlying cause.
-                        return Ok(route_init_failure(
+                        // failure so the user sees the underlying cause. The
+                        // typed `HarnessError`'s Diagnostic facets are threaded
+                        // through so `err.code` / `err.detail.*` reach a
+                        // `failure`/`finalize` stack.
+                        let reason =
+                            format!("proxy target `{target}` could not be resolved: {err}");
+                        return Ok(route_init_failure_typed(
                             &mut guard,
                             &init_ctx,
                             prompt_path,
-                            format!("proxy target `{target}` could not be resolved: {message}"),
+                            LifecycleErrorInfo::from_harness_error(&err),
+                            reason,
                         ));
                     }
                 };
@@ -1050,6 +1056,36 @@ fn route_init_failure(
     reason: String,
 ) -> LoopExecutionResult {
     let action_error = LifecycleErrorInfo::from_action_failure("error", reason.clone());
+    route_init_failure_with(guard, init_ctx, prompt_path, action_error, reason)
+}
+
+/// Route an `initialize` failure built from an already-typed error snapshot,
+/// preserving the source error's `Diagnostic` facets on the `err` global.
+///
+/// Used where the initialize-phase failure carries a typed cause (e.g. a
+/// `Proxy` target that fails to resolve via [`crate::harness::HarnessError`]):
+/// threading [`LifecycleErrorInfo::from_harness_error`] through here keeps
+/// `err.code` / `err.detail.*` projecting for a `failure`/`finalize` stack
+/// instead of flattening to a bare message. `fallback_reason` populates the
+/// terminal [`CompositionError::LifecycleInitializeFailed`] when neither catch
+/// event raised.
+fn route_init_failure_typed(
+    guard: &mut LifecycleRunGuard<'_>,
+    init_ctx: &StackExecutionContext<'_>,
+    prompt_path: &Path,
+    action_error: LifecycleErrorInfo,
+    fallback_reason: String,
+) -> LoopExecutionResult {
+    route_init_failure_with(guard, init_ctx, prompt_path, action_error, fallback_reason)
+}
+
+fn route_init_failure_with(
+    guard: &mut LifecycleRunGuard<'_>,
+    init_ctx: &StackExecutionContext<'_>,
+    prompt_path: &Path,
+    action_error: LifecycleErrorInfo,
+    reason: String,
+) -> LoopExecutionResult {
     let failure_outcome =
         guard.execute_event(LifecycleSignal::Failure, &init_ctx.with_error(&action_error));
     // If `failure` raised, thread its error (not the original) into finalize so

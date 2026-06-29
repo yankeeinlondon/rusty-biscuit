@@ -4,7 +4,7 @@ use std::io::IsTerminal;
 
 use clap::Args;
 use claudine::composition::{
-    self, CompositionError, ResolvedCompositionSource, SequenceExecutionOptions,
+    self, CompositionError, MarkdownLoadCause, ResolvedCompositionSource, SequenceExecutionOptions,
     parse_interactive_hint,
 };
 use color_eyre::eyre::{Result, eyre};
@@ -95,11 +95,17 @@ fn resolve_sequence_source(file_ref: &str) -> Result<ResolvedCompositionSource, 
 
     // YAML sequence files are treated as frontmatter without a Markdown body.
     let reference = biscuit_file::FileReference::new(file_ref)
-        .map_err(|e| CompositionError::InvalidReference(format!("{file_ref}: {e}")))?
+        .map_err(|e| CompositionError::InvalidReference {
+            reference: file_ref.to_string(),
+            source: e,
+        })?
         .with_package_area_magic_path();
     let resolved_path = reference
         .resolve()
-        .map_err(|e| CompositionError::InvalidReference(format!("{file_ref}: {e}")))?
+        .map_err(|e| CompositionError::InvalidReference {
+            reference: file_ref.to_string(),
+            source: e,
+        })?
         .ok_or_else(|| CompositionError::FileNotFound(file_ref.to_string()))?;
 
     let ext = resolved_path
@@ -111,13 +117,14 @@ fn resolve_sequence_source(file_ref: &str) -> Result<ResolvedCompositionSource, 
     }
 
     let yaml = biscuit_file::Yaml::new(&resolved_path).map_err(|e| {
-        CompositionError::MarkdownLoad(format!("{}: {e}", resolved_path.display()))
+        CompositionError::MarkdownLoad {
+            path: resolved_path.clone(),
+            source: MarkdownLoadCause::Yaml(e),
+        }
     })?;
-    let json_value = yaml.as_json().map_err(|e| {
-        CompositionError::MarkdownLoad(format!(
-            "YAML-to-JSON conversion failed for {}: {e}",
-            resolved_path.display()
-        ))
+    let json_value = yaml.as_json().map_err(|e| CompositionError::MarkdownLoad {
+        path: resolved_path.clone(),
+        source: MarkdownLoadCause::Yaml(e),
     })?;
     let root = json_value.as_object().ok_or_else(|| {
         CompositionError::SequenceExternalWrongType(
@@ -128,12 +135,19 @@ fn resolve_sequence_source(file_ref: &str) -> Result<ResolvedCompositionSource, 
     let mut frontmatter = darkmatter::markdown::Frontmatter::new();
     for (key, value) in root {
         frontmatter.insert(key, value.clone()).map_err(|e| {
-            CompositionError::MarkdownLoad(format!("{}: {e}", resolved_path.display()))
+            CompositionError::MarkdownLoad {
+                path: resolved_path.clone(),
+                source: MarkdownLoadCause::Parse(e),
+            }
         })?;
     }
 
-    let original_text = std::fs::read_to_string(&resolved_path)
-        .map_err(|e| CompositionError::MarkdownLoad(format!("{}: {e}", resolved_path.display())))?;
+    let original_text = std::fs::read_to_string(&resolved_path).map_err(|e| {
+        CompositionError::MarkdownLoad {
+            path: resolved_path.clone(),
+            source: MarkdownLoadCause::Read(e),
+        }
+    })?;
     let markdown = darkmatter::markdown::Markdown::with_frontmatter(frontmatter, "");
 
     Ok(ResolvedCompositionSource {

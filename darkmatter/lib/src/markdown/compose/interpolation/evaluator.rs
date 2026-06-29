@@ -73,13 +73,15 @@
 
 use crate::catalog::{describe_for_error, suggest};
 use crate::markdown::compose::context::catalog::CONTEXT_VARIABLE_DESCRIPTORS;
-use crate::markdown::compose::expression::{EvaluationLookup, Expr, evaluate, scalar_string};
+use crate::markdown::compose::expression::{
+    EvaluationLookup, Expr, ExpressionError, evaluate, scalar_string,
+};
 use crate::markdown::compose::ComposeWarning;
 use serde_json::Value;
 use tracing::{debug, trace};
 
 /// Result of evaluating an expression.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum EvalResult {
     /// Successful evaluation producing a string.
     Value(String),
@@ -89,8 +91,8 @@ pub enum EvalResult {
     /// The `original` field contains the expression string representation
     /// for error recovery (e.g., preserving unprocessed expressions).
     Error {
-        /// Human-readable error message.
-        message: String,
+        /// Typed expression error.
+        error: ExpressionError,
         /// Original expression for error recovery.
         original: String,
     },
@@ -246,8 +248,8 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
 
         match evaluate(expr, self.state) {
             Ok(value) => EvalResult::Value(scalar_string(&value)),
-            Err(message) => EvalResult::Error {
-                message,
+            Err(error) => EvalResult::Error {
+                error,
                 original: expr.to_string(),
             },
         }
@@ -282,7 +284,7 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
     /// interpolation uses it to keep a single `{{ expr }}` value typed instead
     /// of collapsing it to a string. The `Err` is the evaluator's message, so
     /// callers can fall back to the string path on failure.
-    pub fn eval_json(&self, expr: &Expr) -> Result<Value, String> {
+    pub fn eval_json(&self, expr: &Expr) -> Result<Value, ExpressionError> {
         evaluate(expr, self.state)
     }
 
@@ -396,7 +398,7 @@ mod tests {
         #[test]
         fn unwrap_or_original_error() {
             let result = EvalResult::Error {
-                message: "test error".to_string(),
+                error: ExpressionError::Parse("test error".to_string()),
                 original: "foo || bar".to_string(),
             };
             assert_eq!(result.unwrap_or_original(), "{{ foo || bar }}");
@@ -406,7 +408,7 @@ mod tests {
         fn is_value() {
             let value = EvalResult::Value("x".to_string());
             let error = EvalResult::Error {
-                message: "e".to_string(),
+                error: ExpressionError::Parse("e".to_string()),
                 original: "o".to_string(),
             };
 
@@ -526,7 +528,7 @@ mod tests {
 
             match evaluator.eval(&expr) {
                 EvalResult::Value(s) => assert_eq!(s, "Alice"),
-                EvalResult::Error { message, .. } => panic!("Expected Value, got error: {message}"),
+                EvalResult::Error { error, .. } => panic!("Expected Value, got error: {error}"),
             }
         }
 
@@ -1762,8 +1764,8 @@ mod tests {
             let expr = parse("unknown(x)").unwrap();
 
             match evaluator.eval(&expr) {
-                EvalResult::Error { message, original } => {
-                    assert!(message.contains("Unknown function"));
+                EvalResult::Error { error, original } => {
+                    assert!(error.to_string().contains("Unknown function"));
                     assert!(original.contains("unknown"));
                 }
                 _ => panic!("Expected Error"),
@@ -1903,8 +1905,8 @@ mod tests {
             let expr = parse(source).unwrap_or_else(|e| panic!("parse {source:?}: {e}"));
             match evaluator.eval(&expr) {
                 EvalResult::Value(s) => s,
-                EvalResult::Error { message, .. } => {
-                    panic!("eval {source:?} returned error: {message}")
+                EvalResult::Error { error, .. } => {
+                    panic!("eval {source:?} returned error: {error}")
                 }
             }
         }

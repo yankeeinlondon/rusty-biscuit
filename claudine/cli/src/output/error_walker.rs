@@ -292,6 +292,63 @@ mod tests {
         assert!(plain.contains("sequence:"), "yaml block missing: {plain}");
     }
 
+    const SCHEMA_DOC: &str =
+        "---\n$schema:\n    spec: file(required, match(**/*spec*.md))\nspec: \"x\"\n---\nbody\n";
+
+    fn schema_parse_with_frontmatter(stderr_is_tty: bool) -> CompositionError {
+        let excerpt = FrontmatterExcerpt::capture_schema_span(
+            SCHEMA_DOC,
+            Some("$schema.spec"),
+            14,
+            stderr_is_tty,
+        )
+        .expect("frontmatter block");
+        CompositionError::WithFrontmatter {
+            inner: Box::new(CompositionError::SchemaParse {
+                source_path: PathBuf::from("review.md"),
+                property: Some("spec".to_string()),
+                message: "expected `;` between constraints".to_string(),
+                span: Some(14..15),
+            }),
+            excerpt,
+        }
+    }
+
+    #[test]
+    fn schema_parse_appends_highlighted_frontmatter_and_links_file_on_tty() {
+        let report: Report = eyre!(schema_parse_with_frontmatter(true));
+        let term = width80();
+        let rendered = try_render_block_report(&report, &term).expect("block error found");
+        let plain = strip_escape_codes(&rendered);
+
+        // The primary diagnostic still renders from the inner SchemaParse error.
+        assert!(plain.contains("invalid schema"), "header missing:\n{plain}");
+        assert!(plain.contains("spec"), "property name missing:\n{plain}");
+        // The appended excerpt shows the offending `$schema.spec` line.
+        assert!(
+            plain.contains("spec: file(required, match(**/*spec*.md))"),
+            "offending frontmatter line missing:\n{plain}"
+        );
+        // The OSC8 link to the prompt file survives at optimistic color depth.
+        assert!(
+            rendered.contains("\u{1b}]8;;"),
+            "expected an OSC8 link to the prompt file; raw:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn schema_parse_withholds_frontmatter_block_when_not_tty() {
+        let report: Report = eyre!(schema_parse_with_frontmatter(false));
+        let rendered = try_render_block_report(&report, &width80()).expect("block error found");
+        let plain = strip_escape_codes(&rendered);
+        assert!(plain.contains("invalid schema"), "header missing:\n{plain}");
+        // Non-TTY output must not expose the frontmatter body.
+        assert!(
+            !plain.contains("file(required, match"),
+            "frontmatter excerpt leaked to non-tty:\n{plain}"
+        );
+    }
+
     #[test]
     fn renders_lifecycle_evaluation_error_for_success_when() {
         // A `success.when` guard that *raised* (vs. cleanly evaluating to

@@ -854,7 +854,7 @@ mod tests {
 
     fn evaluate_example(invocation: &str, lookup: &FixtureLookup) -> Result<String, String> {
         let expr = parse(invocation).map_err(|e| e.message)?;
-        let value = evaluate(&expr, lookup)?;
+        let value = evaluate(&expr, lookup).map_err(|error| error.to_string())?;
         Ok(render_value(&value))
     }
 

@@ -1,6 +1,7 @@
 ---
 status: "ready for planning and implementation"
 reviewed: true
+review_iterations: 11
 ---
 
 ## An Example of Poor Error Messages
@@ -101,12 +102,13 @@ control-flow-by-string bug (`is_fatal_eval_error`) this effort exists to remove.
 Reader's note: this is a design tightening from review. The existing documents sometimes
 talk about compose fatality as if it were fully determined by `disposition`. That would be
 too coarse for the current contract: `composition.unknown_function` and
-`composition.invalid_file_reference` are both `correctable` author errors, but today's
-lenient compose behavior treats unknown functions as fatal and missing files as warnings.
-The classification facets remain the single source of truth for handling and rendering;
-the compose fatal/warn policy is a separate projection that must be characterized and
-preserved during the typing refactor unless the open product decision below explicitly
-changes it.
+`composition.invalid_file_reference` are both `correctable` author errors, but lenient
+compose policy treats both as fatal in body interpolation (see the resolved open question
+below — a present file reference that fails to resolve is fatal). The classification facets
+remain the single source of truth for handling and rendering; the compose fatal/warn policy
+is a separate projection. That projection is held behavior-neutral during the typing refactor
+**except** for the one ratified, intentional promotion (file-reference fatality), which is
+characterized and tested separately.
 
 ### Scope
 
@@ -156,7 +158,10 @@ Implementation must preserve the existing behavior before improving it: phase 1 
 fatal/warn characterization matrix, phase 2 keeps `Display` output behavior-neutral while
 typing the engine, and only later phases are allowed to change user-visible rendering. Any
 intentional behavior change must be called out as such and tested separately from the typing
-refactor.
+refactor. There is exactly one such intentional behavior change in this effort: promoting a
+present-but-unresolvable file reference to fatal in lenient body interpolation (the resolved
+open question below). The characterization matrix encodes this promotion explicitly, so the
+typing refactor is still provably behavior-neutral against the matrix it locks.
 
 ### Success criteria
 
@@ -167,7 +172,8 @@ refactor.
   excerpt (`$schema`/`spec`/`iteration`), and suggests likely files — **identically in
   `md compose` and `claudine compose`**.
 - Fatal-vs-warn behavior is provably unchanged by the typing refactor (characterization
-  matrix green).
+  matrix green), with the single ratified exception of file-reference fatality, which the
+  matrix encodes and tests as its own intentional cell.
 - No new string-only lower-layer error variants; the DM↔Claudine boundary lint passes.
 - The win generalizes across `absolute()` / `relative()` / `load_markdown` via the shared
   `FileReferenceDiagnostic`.
@@ -179,36 +185,38 @@ refactor.
   new `err.category` and `err.code` fields. New documentation and examples must use the new
   faceted names.
 
-### Open Questions
+### Resolved Decisions
 
-#### Should missing file references become fatal in lenient compose mode?
+#### Missing file references are fatal in lenient compose mode (RESOLVED)
 
-Current behavior treats an unknown expression function as fatal in lenient mode but turns a
-missing file reference into a warning. The new diagnostics make missing file references much
-clearer, but changing warn/fatal behavior is a product decision, not a side effect of the
-typing refactor.
+The prior behavior treated an unknown expression function as fatal in lenient mode but turned
+a present-but-unresolvable file reference into a warning. The new diagnostics make file
+reference failures much clearer; whether to also change warn/fatal behavior was a product
+decision, not a side effect of the typing refactor.
 
-Suggested solutions:
+**Decision (ratified):** a file reference that is *present* but fails to resolve — malformed,
+not-found, or found-elsewhere — is **fatal**, in both `fail_fast` and lenient body
+interpolation, alongside the always-fatal unknown function. This generalizes the existing
+whole-value frontmatter strictness rule (which already treats referenced files as required
+executable input) to body interpolation: an evaluated reference that misses is almost always
+a real authoring mistake, not a tolerated absence. Authors who genuinely want to tolerate an
+absent file guard the reference with `file_exists`/a ternary so no resolution is attempted; a
+reference that *is* evaluated and misses is surfaced rather than silently demoted to a warning
+that leaves the literal `{{ … }}` in place. `RemoteNotEnabled` is excluded — it is a v1
+capability gap governed by its own "remote not supported" policy, not a reference error.
 
-1. **Preserve current behavior for this spec.**
-   Pros: isolates the structural typing/rendering work, keeps the characterization matrix
-   honest, and avoids surprising existing prompt documents. Cons: a clearly invalid file
-   reference may still be swallowed as a warning in body interpolation.
-2. **Promote missing file references to fatal everywhere.**
-   Pros: matches the intuition that a referenced file is required input and prevents hidden
-   prompt degradation. Cons: behavior change across Darkmatter and Claudine, likely requiring
-   migration notes and new tests for prompt documents that intentionally tolerate absent
-   references.
-3. **Promote only whole-value frontmatter file references to fatal.**
-   Pros: aligns with the existing whole-value frontmatter strictness rule for executable
-   state while preserving lenient body interpolation. Cons: more policy surface and more
-   cases for users to learn.
+This is the **one intentional behavior change** in this effort (a superset of the previously
+recommended option 3, extended to body interpolation per ratified direction). It is
+characterized and tested separately from the behavior-neutral typing refactor: the fatality
+characterization matrix
+(`darkmatter/lib/src/markdown/compose/interpolation/fatality_characterization.rs`) encodes
+the fatal cells explicitly, and the gate itself lives in
+`ExpressionError::is_authoring_fatal`
+(`darkmatter/lib/src/markdown/compose/expression/error.rs`).
 
-Recommendation: choose option 1 for this implementation and track option 3 as the likely
-future behavior change. The current spec is already large and cross-crate; preserving
-fatality behavior during the typing refactor gives implementation a clean correctness gate.
-If we later decide missing references should be fatal, whole-value frontmatter is the safest
-first promotion because the repo already treats that surface as executable state.
+The options considered (preserve warn behavior; promote everywhere; promote only whole-value
+frontmatter) are retained in the design history; the chosen direction makes present, evaluated
+file references fatal wherever they occur.
 
 ### Non-goals
 

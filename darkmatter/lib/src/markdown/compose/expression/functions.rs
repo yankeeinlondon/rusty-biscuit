@@ -11,11 +11,15 @@
 use chrono::{Datelike, Local, NaiveDate, NaiveDateTime, Utc};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 
-use super::{json_number, scalar_string, to_number, to_number_coerce};
+use super::{
+    ExpressionError, FileRefFailure, FileReferenceDiagnostic, json_number, scalar_string,
+    to_number, to_number_coerce,
+};
 use super::resolve_ctx::{
     ResolutionContext, is_remote_url, normalize_path_arg, resolve_file_ref_with_fallback,
 };
@@ -938,10 +942,60 @@ pub fn is_this_year_utc(args: &[Value]) -> Result<Value, String> {
 /// - `Err` when the reference string itself is invalid.
 ///
 /// [`resolve_file_ref_with_fallback`]: super::resolve_ctx::resolve_file_ref_with_fallback
-fn resolve_arg(raw: &str, ctx: &ResolutionContext) -> Result<Option<PathBuf>, String> {
+fn expression_other(function: &'static str, message: String) -> ExpressionError {
+    ExpressionError::Other {
+        function: function.to_string(),
+        message,
+    }
+}
+
+fn require_args_expr(
+    function: &'static str,
+    args: &[Value],
+    expected: usize,
+) -> Result<(), ExpressionError> {
+    require_args(function, args, expected).map_err(|message| expression_other(function, message))
+}
+
+fn require_string_expr<'a>(
+    function: &'static str,
+    value: &'a Value,
+) -> Result<&'a str, ExpressionError> {
+    require_string(function, value).map_err(|message| expression_other(function, message))
+}
+
+fn file_reference_error(
+    function: &'static str,
+    raw: &str,
+    ctx: &ResolutionContext,
+    kind: FileRefFailure,
+    source: Option<biscuit_file::FileReferenceError>,
+) -> ExpressionError {
+    ExpressionError::FileReference(FileReferenceDiagnostic {
+        function,
+        reference: raw.to_string(),
+        kind,
+        base_dir: ctx.base_dir.clone(),
+        fallback_dir: ctx.file_ref_fallback_dir.clone(),
+        source: source.map(Arc::new),
+    })
+}
+
+fn resolve_arg(
+    function: &'static str,
+    raw: &str,
+    ctx: &ResolutionContext,
+) -> Result<Option<PathBuf>, ExpressionError> {
     let normalized = normalize_path_arg(raw);
-    let mut file_ref = biscuit_file::FileReference::new(&normalized)
-        .map_err(|e| format!("invalid file path {raw:?}: {e}"))?;
+    let mut file_ref = biscuit_file::FileReference::new(&normalized).map_err(|e| {
+        file_reference_error(
+            function,
+            raw,
+            ctx,
+            FileRefFailure::classify(&e),
+            Some(e),
+        )
+    })?;
     for (path, position) in &ctx.magic_paths {
         file_ref = file_ref.add_magic_path(path, *position);
     }
@@ -950,27 +1004,41 @@ fn resolve_arg(raw: &str, ctx: &ResolutionContext) -> Result<Option<PathBuf>, St
         &ctx.base_dir,
         ctx.file_ref_fallback_dir.as_deref(),
     )
-    .map_err(|e| format!("invalid file path {raw:?}: {e}"))
+    .map_err(|e| {
+        file_reference_error(
+            function,
+            raw,
+            ctx,
+            FileRefFailure::classify(&e),
+            Some(e),
+        )
+    })
 }
 
 /// `absolute(file) -> file | Error::InvalidFilePath`
-pub fn absolute_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
-    require_args("absolute", args, 1)?;
+pub fn absolute_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("absolute", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
-    let raw = require_string("absolute", &args[0])?;
-    match resolve_arg(raw, ctx)? {
+    let raw = require_string_expr("absolute", &args[0])?;
+    match resolve_arg("absolute", raw, ctx)? {
         Some(p) => Ok(Value::String(p.to_string_lossy().to_string())),
-        None => Err(format!("absolute() invalid file path: {raw:?}")),
+        None => Err(file_reference_error(
+            "absolute",
+            raw,
+            ctx,
+            FileRefFailure::NotFound,
+            None,
+        )),
     }
 }
 
 /// `file_exists(file) -> bool` — invalid local paths return `false`, never
 /// error. A remote URL argument errors when the resolution context is
 /// local-only (no remote runtime); see the URL branch below.
-pub fn file_exists_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
-    require_args("file_exists", args, 1)?;
+pub fn file_exists_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("file_exists", args, 1)?;
     if any_null(args) {
         return Ok(Value::Bool(false));
     }
@@ -986,14 +1054,14 @@ pub fn file_exists_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, 
     if is_remote_url(raw) {
         return match ctx.fetch_remote_text(raw) {
             Ok(Some(_)) => Ok(Value::Bool(true)),
-            Ok(None) => Err(format!(
+            Ok(None) => Err(expression_other("file_exists", format!(
                 "file_exists() cannot read remote URL {raw:?}: this resolution \
                  context is local-only (no remote runtime)"
-            )),
+            ))),
             Err(_) => Ok(Value::Bool(false)),
         };
     }
-    let exists = match resolve_arg(raw, ctx) {
+    let exists = match resolve_arg("file_exists", raw, ctx) {
         Ok(Some(p)) => p.exists(),
         _ => false,
     };
@@ -1020,15 +1088,23 @@ fn make_relative(abs: &Path, base_dir: &Path) -> String {
 }
 
 /// `relative(file) -> file | Error::InvalidFilePath`
-pub fn relative_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
-    require_args("relative", args, 1)?;
+pub fn relative_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("relative", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
-    let raw = require_string("relative", &args[0])?;
-    let abs = match resolve_arg(raw, ctx)? {
+    let raw = require_string_expr("relative", &args[0])?;
+    let abs = match resolve_arg("relative", raw, ctx)? {
         Some(p) => p,
-        None => return Err(format!("relative() invalid file path: {raw:?}")),
+        None => {
+            return Err(file_reference_error(
+                "relative",
+                raw,
+                ctx,
+                FileRefFailure::NotFound,
+                None,
+            ));
+        }
     };
     Ok(Value::String(make_relative(&abs, &ctx.base_dir)))
 }
@@ -1041,8 +1117,12 @@ pub fn relative_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Str
 /// the reference kind and the base directory. This lets path-component
 /// functions operate on missing files and directories without checking
 /// `Path::exists()`.
-fn resolve_path_arg(name: &str, value: &Value, ctx: &ResolutionContext) -> Result<PathBuf, String> {
-    let raw = require_string(name, value)?;
+fn resolve_path_arg(
+    name: &'static str,
+    value: &Value,
+    ctx: &ResolutionContext,
+) -> Result<PathBuf, ExpressionError> {
+    let raw = require_string_expr(name, value)?;
     resolve_path_shape(name, raw, ctx)
 }
 
@@ -1050,13 +1130,20 @@ fn resolve_path_arg(name: &str, value: &Value, ctx: &ResolutionContext) -> Resul
 ///
 /// See [`resolve_path_arg`]. Exposed separately so `join()` can validate its
 /// computed result without constructing a temporary [`Value`].
-fn resolve_path_shape(name: &str, raw: &str, ctx: &ResolutionContext) -> Result<PathBuf, String> {
+fn resolve_path_shape(
+    name: &'static str,
+    raw: &str,
+    ctx: &ResolutionContext,
+) -> Result<PathBuf, ExpressionError> {
     if is_remote_url(raw) {
-        return Err(format!("{name}() does not accept HTTP(S) URLs"));
+        return Err(expression_other(
+            name,
+            format!("{name}() does not accept HTTP(S) URLs"),
+        ));
     }
     // Existing `FileReference` resolution handles existing files, magic paths,
     // package paths, git-root fallbacks, and absolute references.
-    if let Ok(Some(p)) = resolve_arg(raw, ctx) {
+    if let Ok(Some(p)) = resolve_arg(name, raw, ctx) {
         return Ok(p);
     }
     // No existing match: build a deterministic path shape without touching
@@ -1086,7 +1173,10 @@ fn resolve_path_shape(name: &str, raw: &str, ctx: &ResolutionContext) -> Result<
         return Ok(ctx.base_dir.join(rest));
     }
     if normalized.starts_with("vault:") {
-        return Err(format!("{name}() vault references require an existing file"));
+        return Err(expression_other(
+            name,
+            format!("{name}() vault references require an existing file"),
+        ));
     }
     Ok(ctx.base_dir.join(path))
 }
@@ -1140,8 +1230,8 @@ fn path_display_components(path: &Path, base_dir: &Path) -> (Vec<String>, String
 
 /// `is_indexed_file(file) -> bool` — true when the filename stem matches the
 /// indexed grammar (`base-NNN`).
-pub fn is_indexed_file_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
-    require_args("is_indexed_file", args, 1)?;
+pub fn is_indexed_file_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("is_indexed_file", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
@@ -1152,8 +1242,8 @@ pub fn is_indexed_file_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Val
 }
 
 /// `file_index(file) -> number` — the parsed index, or `-1` when non-indexed.
-pub fn file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
-    require_args("file_index", args, 1)?;
+pub fn file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("file_index", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
@@ -1168,8 +1258,8 @@ pub fn file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, S
 
 /// `increment_file_index(file) -> string` — bumps the numeric suffix, starting
 /// at `2` for non-indexed files. Preserves zero-padding width for indexed stems.
-pub fn increment_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
-    require_args("increment_file_index", args, 1)?;
+pub fn increment_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("increment_file_index", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
@@ -1197,8 +1287,8 @@ pub fn increment_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
 
 /// `decrement_file_index(file) -> string` — decrements the numeric suffix,
 /// clamped at `0`. Non-indexed files start at `0` and preserve no padding.
-pub fn decrement_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
-    require_args("decrement_file_index", args, 1)?;
+pub fn decrement_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("decrement_file_index", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
@@ -1225,8 +1315,8 @@ pub fn decrement_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
 }
 
 /// `basename(file) -> string` — the final path component including extension.
-pub fn basename_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
-    require_args("basename", args, 1)?;
+pub fn basename_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("basename", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
@@ -1237,8 +1327,8 @@ pub fn basename_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Str
 
 /// `basename_without_index(file) -> string` — removes an indexed suffix from
 /// the stem. Non-indexed basenames pass through unchanged.
-pub fn basename_without_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
-    require_args("basename_without_index", args, 1)?;
+pub fn basename_without_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("basename_without_index", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
@@ -1259,8 +1349,8 @@ pub fn basename_without_index_fn(args: &[Value], ctx: &ResolutionContext) -> Res
 }
 
 /// `dirname(file) -> string` — the directory portion of the display path.
-pub fn dirname_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
-    require_args("dirname", args, 1)?;
+pub fn dirname_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("dirname", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
@@ -1275,8 +1365,8 @@ pub fn dirname_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Stri
 
 /// `ext(file) -> string` — the final extension without the leading dot, or an
 /// empty string when there is none.
-pub fn ext_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
-    require_args("ext", args, 1)?;
+pub fn ext_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("ext", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
@@ -1287,8 +1377,8 @@ pub fn ext_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> 
 
 /// `parent_dir(file) -> string` — the directory segment immediately above the
 /// basename, or an empty string when there is none.
-pub fn parent_dir_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
-    require_args("parent_dir", args, 1)?;
+pub fn parent_dir_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("parent_dir", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
@@ -1299,8 +1389,8 @@ pub fn parent_dir_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, S
 
 /// `file_trailing(file) -> string` — the last directory segment plus the
 /// basename, or just the basename when there is no directory.
-pub fn file_trailing_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
-    require_args("file_trailing", args, 1)?;
+pub fn file_trailing_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("file_trailing", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
@@ -1314,8 +1404,8 @@ pub fn file_trailing_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value
 
 /// `dir_leading(file) -> string` — the directory path before the last segment,
 /// or an empty string when there is no leading directory.
-pub fn dir_leading_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
-    require_args("dir_leading", args, 1)?;
+pub fn dir_leading_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("dir_leading", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
@@ -1331,15 +1421,18 @@ pub fn dir_leading_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, 
 /// `join(left, right) -> string` — joins two path strings, normalizing leading
 /// and duplicate separators. Validates the result through the shared FS-path
 /// rules and rejects HTTP(S) arguments.
-pub fn join_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
-    require_args("join", args, 2)?;
+pub fn join_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("join", args, 2)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
-    let left_raw = require_string("join", &args[0])?;
-    let right_raw = require_string("join", &args[1])?;
+    let left_raw = require_string_expr("join", &args[0])?;
+    let right_raw = require_string_expr("join", &args[1])?;
     if is_remote_url(left_raw) || is_remote_url(right_raw) {
-        return Err("join() does not accept HTTP(S) URLs".to_string());
+        return Err(expression_other(
+            "join",
+            "join() does not accept HTTP(S) URLs".to_string(),
+        ));
     }
     let left = resolve_path_arg("join", &args[0], ctx)?;
     let right = right_raw.trim_start_matches(['/', '\\']);
@@ -1390,18 +1483,19 @@ fn format_markdown_link(text: &str, destination: &str) -> String {
 ///   rejected because a description is required.
 /// - Two arguments: `target` may be a local file reference or an HTTP(S) URL;
 ///   `desc` must be a string and is used as the link text.
-pub fn link_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+pub fn link_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     match args.len() {
         1 => {
             if args[0].is_null() {
                 return Ok(Value::Null);
             }
-            let raw = require_string("link", &args[0])?;
+            let raw = require_string_expr("link", &args[0])?;
             if is_remote_url(raw) {
-                return Err(
+                return Err(expression_other(
+                    "link",
                     "link() one-argument form does not accept HTTP(S) URLs; use link(target, desc)"
                         .to_string(),
-                );
+                ));
             }
             let path = resolve_path_arg("link", &args[0], ctx)?;
             let desc = make_relative(&path, &ctx.base_dir).replace('\\', "/");
@@ -1412,11 +1506,12 @@ pub fn link_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String>
             if any_null(args) {
                 return Ok(Value::Null);
             }
-            let target_raw = require_string("link", &args[0])?;
-            let desc = require_string("link", &args[1])?;
+            let target_raw = require_string_expr("link", &args[0])?;
+            let desc = require_string_expr("link", &args[1])?;
             let dest = if is_remote_url(target_raw) {
-                url::Url::parse(target_raw)
-                    .map_err(|e| format!("link() invalid URL {target_raw:?}: {e}"))?;
+                url::Url::parse(target_raw).map_err(|e| {
+                    expression_other("link", format!("link() invalid URL {target_raw:?}: {e}"))
+                })?;
                 target_raw.to_string()
             } else {
                 let path = resolve_path_arg("link", &args[0], ctx)?;
@@ -1424,7 +1519,10 @@ pub fn link_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String>
             };
             Ok(Value::String(format_markdown_link(desc, &dest)))
         }
-        _ => Err("link() requires 1 or 2 arguments".to_string()),
+        _ => Err(expression_other(
+            "link",
+            "link() requires 1 or 2 arguments".to_string(),
+        )),
     }
 }
 
@@ -1443,16 +1541,17 @@ fn skill_exists_in_roots(roots: &[PathBuf], name: &str) -> bool {
 
 /// `has_skill(name)` — `true` when a direct child directory named `name` exists
 /// in any user-scoped or local-scoped skill root for the executing agent.
-pub fn has_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
-    require_args("has_skill", args, 1)?;
+pub fn has_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("has_skill", args, 1)?;
     if args[0].is_null() {
         return Ok(Value::Null);
     }
-    let name = require_string("has_skill", &args[0])?;
+    let name = require_string_expr("has_skill", &args[0])?;
     if !validate_skill_name(name) {
-        return Err(
+        return Err(expression_other(
+            "has_skill",
             "has_skill() skill name must be a basename without path separators".to_string(),
-        );
+        ));
     }
     let agent = ctx.agent();
     let home_dir = ctx.home_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -1464,17 +1563,18 @@ pub fn has_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, St
 
 /// `has_local_skill(name)` — `true` when a direct child directory named `name`
 /// exists in any local-scoped skill root for the executing agent.
-pub fn has_local_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
-    require_args("has_local_skill", args, 1)?;
+pub fn has_local_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("has_local_skill", args, 1)?;
     if args[0].is_null() {
         return Ok(Value::Null);
     }
-    let name = require_string("has_local_skill", &args[0])?;
+    let name = require_string_expr("has_local_skill", &args[0])?;
     if !validate_skill_name(name) {
-        return Err(
+        return Err(expression_other(
+            "has_local_skill",
             "has_local_skill() skill name must be a basename without path separators"
                 .to_string(),
-        );
+        ));
     }
     let agent = ctx.agent();
     let local_root = crate::markdown::compose::find_git_root_from(&ctx.base_dir)
@@ -1485,31 +1585,66 @@ pub fn has_local_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Val
 
 /// Loads a Markdown file via the resolution context. `Err` if the path is
 /// invalid or unreadable.
-fn load_markdown(raw: &str, ctx: &ResolutionContext, fname: &str) -> Result<Markdown, String> {
+fn load_markdown(
+    raw: &str,
+    ctx: &ResolutionContext,
+    fname: &'static str,
+) -> Result<Markdown, ExpressionError> {
     // HTTP(S) arguments read from the run's remote-fetch cache instead of disk,
     // mirroring how `::file`/`::code` directives resolve remote targets.
     if is_remote_url(raw) {
-        return match ctx.fetch_remote_text(raw)? {
-            Some(body) => Markdown::try_from_content(body)
-                .map_err(|e| format!("{fname}() failed to parse {raw:?}: {e}")),
-            None => Err(format!("{fname}() remote reads are not enabled for {raw:?}")),
+        return match ctx
+            .fetch_remote_text(raw)
+            .map_err(|message| expression_other(fname, message))?
+        {
+            Some(body) => Markdown::try_from_content(body).map_err(|e| {
+                expression_other(fname, format!("{fname}() failed to parse {raw:?}: {e}"))
+            }),
+            None => Err(file_reference_error(
+                fname,
+                raw,
+                ctx,
+                FileRefFailure::RemoteNotEnabled,
+                None,
+            )),
         };
     }
-    let path = resolve_arg(raw, ctx)?.ok_or_else(|| format!("{fname}() invalid file path: {raw:?}"))?;
-    let content = std::fs::read_to_string(&path)
-        .map_err(|e| format!("{fname}() invalid file path {raw:?}: {e}"))?;
-    Markdown::try_from_content(content).map_err(|e| format!("{fname}() failed to parse {raw:?}: {e}"))
+    let path = resolve_arg(fname, raw, ctx)?.ok_or_else(|| {
+        file_reference_error(fname, raw, ctx, FileRefFailure::NotFound, None)
+    })?;
+    // A reference that resolved but cannot be read (permissions, a race delete)
+    // is still a file-reference failure: surface it through the shared
+    // diagnostic carrying the typed `Io` cause, not an opaque `Other` string, so
+    // it renders identically to a missing reference and `frontmatter()` /
+    // `markdown_title()` / siblings all inherit the same report.
+    let content = std::fs::read_to_string(&path).map_err(|e| {
+        file_reference_error(
+            fname,
+            raw,
+            ctx,
+            FileRefFailure::NotFound,
+            Some(biscuit_file::FileReferenceError::Io {
+                path: path.clone(),
+                source: e,
+            }),
+        )
+    })?;
+    Markdown::try_from_content(content)
+        .map_err(|e| expression_other(fname, format!("{fname}() failed to parse {raw:?}: {e}")))
 }
 
 /// `frontmatter(file)` → object; `frontmatter(file, prop)` → value | null.
-pub fn frontmatter_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+pub fn frontmatter_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     if args.is_empty() || args.len() > 2 {
-        return Err("frontmatter() requires 1 or 2 arguments".to_string());
+        return Err(expression_other(
+            "frontmatter",
+            "frontmatter() requires 1 or 2 arguments".to_string(),
+        ));
     }
     if matches!(args.first(), Some(Value::Null)) {
         return Ok(Value::Null);
     }
-    let raw = require_string("frontmatter", &args[0])?;
+    let raw = require_string_expr("frontmatter", &args[0])?;
     let md = load_markdown(raw, ctx, "frontmatter")?;
     let map = md.frontmatter().as_map();
     if args.len() == 1 {
@@ -1517,29 +1652,29 @@ pub fn frontmatter_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, 
             map.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         return Ok(Value::Object(obj));
     }
-    let prop = require_string("frontmatter", &args[1])?;
+    let prop = require_string_expr("frontmatter", &args[1])?;
     Ok(map.get(prop).cloned().unwrap_or(Value::Null))
 }
 
 /// `markdown_body_empty(file) -> bool | Error` — body has only whitespace.
-pub fn markdown_body_empty_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
-    require_args("markdown_body_empty", args, 1)?;
+pub fn markdown_body_empty_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("markdown_body_empty", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
-    let raw = require_string("markdown_body_empty", &args[0])?;
+    let raw = require_string_expr("markdown_body_empty", &args[0])?;
     let md = load_markdown(raw, ctx, "markdown_body_empty")?;
     Ok(Value::Bool(md.content().trim().is_empty()))
 }
 
 /// `markdown_title(file) -> string | null | Error` — frontmatter `title`,
 /// else first H1. Multiple H1s: first wins, warning to STDERR.
-pub fn markdown_title_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
-    require_args("markdown_title", args, 1)?;
+pub fn markdown_title_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("markdown_title", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
-    let raw = require_string("markdown_title", &args[0])?;
+    let raw = require_string_expr("markdown_title", &args[0])?;
     let md = load_markdown(raw, ctx, "markdown_title")?;
     if let Some(t) = md.frontmatter().as_map().get("title").and_then(Value::as_str) {
         return Ok(Value::String(t.to_string()));
@@ -1568,14 +1703,17 @@ pub fn markdown_title_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Valu
 /// document itself rather than the supplied object; validating an arbitrary
 /// object against the document's schema requires a dedicated
 /// [`DarkmatterSchemas`] entry point that does not yet exist.
-pub fn validate_schema_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+pub fn validate_schema_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     if args.is_empty() || args.len() > 2 {
-        return Err("validate_schema() requires 1 or 2 arguments".to_string());
+        return Err(expression_other(
+            "validate_schema",
+            "validate_schema() requires 1 or 2 arguments".to_string(),
+        ));
     }
     if matches!(args.first(), Some(Value::Null)) {
         return Ok(Value::Null);
     }
-    let raw = require_string("validate_schema", &args[0])?;
+    let raw = require_string_expr("validate_schema", &args[0])?;
     let md = load_markdown(raw, ctx, "validate_schema")?;
     // No `$schema` → always valid (per spec).
     if !md.frontmatter().as_map().contains_key("$schema") {
@@ -1584,7 +1722,10 @@ pub fn validate_schema_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Val
     let schemas = DarkmatterSchemas::new();
     let report = schemas
         .validate(&md)
-        .map_err(|e| format!("validate_schema() error for {raw:?}: {e}"))?;
+        .map_err(|e| expression_other(
+            "validate_schema",
+            format!("validate_schema() error for {raw:?}: {e}"),
+        ))?;
     Ok(Value::Bool(report.valid))
 }
 
@@ -1672,7 +1813,7 @@ pub fn round_fn(args: &[Value]) -> Result<Value, String> {
 /// Signature of a pure expression function (fully-evaluated `Value` args).
 pub type PureFn = fn(&[Value]) -> Result<Value, String>;
 /// Signature of a context-aware (filesystem/document) expression function.
-pub type FsFn = fn(&[Value], &ResolutionContext) -> Result<Value, String>;
+pub type FsFn = fn(&[Value], &ResolutionContext) -> Result<Value, ExpressionError>;
 
 /// One pure (context-free) expression function registration.
 pub struct PureFunction {
@@ -1896,7 +2037,7 @@ pub fn dispatch_fs(
     name: &str,
     args: &[Value],
     ctx: &ResolutionContext,
-) -> Option<Result<Value, String>> {
+) -> Option<Result<Value, ExpressionError>> {
     for f in FS_FUNCTIONS {
         if f.canonical == name || f.aliases.contains(&name) {
             return Some((f.handler)(args, ctx));
@@ -2414,6 +2555,37 @@ mod tests {
 
             // Invalid filepath → error.
             assert!(frontmatter_fn(&[json!("does-not-exist.md")], &ctx).is_err());
+        }
+
+        #[test]
+        #[cfg(unix)]
+        fn load_markdown_unreadable_file_yields_typed_file_reference() {
+            use std::os::unix::fs::PermissionsExt;
+            // A reference that resolves to a real file but cannot be read
+            // (permission denied) must surface through the shared FileReference
+            // diagnostic carrying the typed `Io` cause — not an opaque `Other`
+            // string — so it renders like any other invalid reference (finding #4).
+            let dir = tempfile::TempDir::new().unwrap();
+            let path = dir.path().join("locked.md");
+            std::fs::write(&path, "---\ntitle: T\n---\n").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+            // Running as root bypasses the permission bits — skip rather than flake.
+            if std::fs::read_to_string(&path).is_ok() {
+                return;
+            }
+            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+
+            match frontmatter_fn(&[json!("locked.md")], &ctx).unwrap_err() {
+                ExpressionError::FileReference(diagnostic) => {
+                    assert_eq!(diagnostic.function, "frontmatter");
+                    assert!(
+                        diagnostic.source.is_some(),
+                        "the typed Io cause must be preserved"
+                    );
+                }
+                other => panic!("expected a FileReference diagnostic, got: {other:?}"),
+            }
         }
 
         #[test]

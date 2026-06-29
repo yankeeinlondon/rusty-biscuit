@@ -1032,14 +1032,23 @@ mod tests {
         };
 
         let err = prepare_direct(&source, options).unwrap_err();
-        let msg = err.to_string();
-        assert!(
-            msg.contains("spec_path"),
-            "error must name the offending key, got: {msg}"
+        // The offending key is captured as structured scope (not Display prose),
+        // and the typed cause is an interpolation parse failure.
+        let CompositionError::ComposeFailed(MarkdownError::Interpolation { key, cause, .. }) = &err
+        else {
+            panic!("expected ComposeFailed(Interpolation), got: {err:?}");
+        };
+        assert_eq!(
+            key.as_deref(),
+            Some("spec_path"),
+            "error must capture the offending key"
         );
         assert!(
-            msg.contains("Interpolation parse failed"),
-            "error must report the interpolation parse failure, got: {msg}"
+            matches!(
+                cause.as_ref(),
+                darkmatter::markdown::compose::expression::ExpressionError::Parse(_)
+            ),
+            "cause must be an interpolation parse failure, got: {cause:?}"
         );
     }
 

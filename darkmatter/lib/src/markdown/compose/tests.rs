@@ -731,7 +731,7 @@ fn test_interpolation_parse_error_fail_fast_returns_error() {
         .with_fail_fast(true);
 
     let err = md.compose_with(options).unwrap_err();
-    assert!(matches!(err, MarkdownError::Transform(_)));
+    assert!(matches!(err, MarkdownError::Interpolation { .. }));
 }
 
 #[test]
@@ -3779,7 +3779,11 @@ mod remote_transclusion_tests {
             .expect_err("a whole-value remote-URL file_exists in frontmatter must abort composition");
 
         let msg = err.to_string();
-        assert!(msg.contains("present"), "error must name the key, got: {msg}");
+        // The receiving key is captured as structured scope, not Display prose.
+        let MarkdownError::Interpolation { key, .. } = &err else {
+            panic!("expected Interpolation error, got: {err:?}");
+        };
+        assert_eq!(key.as_deref(), Some("present"), "error must capture the key");
         assert!(
             msg.contains("local-only"),
             "expected a local-only frontmatter diagnostic for file_exists, got: {msg}"

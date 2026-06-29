@@ -4,6 +4,7 @@ pub mod agents;
 pub mod badges;
 pub mod composition;
 pub mod config;
+pub mod diagnostics;
 pub mod dispatch;
 pub mod error;
 pub mod events;

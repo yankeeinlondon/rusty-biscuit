@@ -95,3 +95,34 @@ fn test_compose_frontmatter_nested_quotes_in_interpolation() {
         .stdout(predicate::str::contains("---\n---").not());
 }
 
+/// The real-errors reference failure, through the binary (non-TTY → optimistic
+/// render keeps SGR/OSC8): a present-but-missing file reference is
+/// authoring-fatal, so `md compose` exits non-zero and renders the cause-driven
+/// report — root-cause headline, the receiving key, and the focused excerpt that
+/// includes the involved keys (`spec`, `iteration`) but not unrelated ones.
+///
+/// Composing a real file (not stdin) so the `frontmatter()` call resolves its
+/// path argument against the file's directory.
+#[test]
+fn test_compose_invalid_file_reference_reports_cause_not_mechanism() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("prompt.md");
+    std::fs::write(
+        &path,
+        "---\nagent: \"codex\"\nspec: \"does-not-exist-spec.md\"\niteration: \"{{ frontmatter(spec, 'review_iterations') ? frontmatter(spec, 'review_iterations') : 1 }}\"\n---\n# Body\n",
+    )
+    .unwrap();
+
+    md_cmd()
+        .args(["compose", path.to_str().unwrap()])
+        .assert()
+        .failure()
+        // Root cause, not the mechanism word.
+        .stderr(predicate::str::contains("invalid file path"))
+        .stderr(predicate::str::contains("transform failed").not())
+        // Names the receiving frontmatter key and the involved sibling key.
+        .stderr(predicate::str::contains("iteration"))
+        .stderr(predicate::str::contains("spec:"))
+        // Links the prompt file by name.
+        .stderr(predicate::str::contains("prompt.md"));
+}

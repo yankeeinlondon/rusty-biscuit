@@ -570,16 +570,21 @@ fn level2_lifecycle_failure_stack_observes_err_payload() {
     let pane = run_compose_in_tmux(&staged, "finalize");
 
     let lines = event_lines(&staged);
+    // `agent_failure` is a classifiable error_kind (→ `provider.exited`), so the
+    // deprecated `err.kind`/`err.variant` aliases now read as the faceted
+    // `err.category`/`err.code` values (`provider` / `provider.exited`), not the
+    // internal `LifecycleAction` / `agent_failure` labels.
     assert!(
-        lines.iter().any(|l| l == "err-kind=LifecycleAction"),
-        "err.kind must reach the failure stack as 'LifecycleAction'; \
+        lines.iter().any(|l| l == "err-kind=provider"),
+        "err.kind must reach the failure stack as 'provider' (alias of err.category); \
          events.log was {lines:?}; pane:\n{pane}"
     );
     assert!(
-        lines.iter().any(|l| l == "err-variant=agent_failure"),
-        "err.variant must reach the failure stack as 'agent_failure' \
-         (outcome.error_kind defaults to 'agent_failure' for a plain non-zero \
-         exit); events.log was {lines:?}; pane:\n{pane}"
+        lines.iter().any(|l| l == "err-variant=provider.exited"),
+        "err.variant must reach the failure stack as 'provider.exited' \
+         (alias of err.code; outcome.error_kind defaults to 'agent_failure' for a \
+         plain non-zero exit, which classifies to provider.exited); \
+         events.log was {lines:?}; pane:\n{pane}"
     );
     assert!(
         lines

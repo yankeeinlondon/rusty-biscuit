@@ -153,6 +153,10 @@ impl Markdown {
             // those keys against the shell-expanded values.
             if options.is_enabled(ComposeOperation::FrontmatterInterpolation) {
                 let fm_start = perf.is_enabled().then(std::time::Instant::now);
+                // Capture the on-disk locus before borrowing frontmatter so a
+                // file-reference failure can render an OSC8 link + focused
+                // excerpt instead of the late-binding fallback.
+                let fm_source_ctx = self.full_source_context_for_errors();
                 let fm_report = frontmatter_interpolation::interpolate_frontmatter(
                     self.frontmatter_mut(),
                     options.context(),
@@ -160,7 +164,8 @@ impl Markdown {
                     shell_expansion_enabled,
                     Some(options.frontmatter_resolution_context()),
                     &options.exclude_keys,
-                )?;
+                )
+                .map_err(|e| e.with_on_disk_source(&fm_source_ctx))?;
                 report.frontmatter_interpolations_applied = fm_report.replacements;
                 report.warnings.extend(fm_report.warnings);
                 if let Some(start) = fm_start {
@@ -262,6 +267,7 @@ impl Markdown {
                     && fse_report.replacements > 0
                 {
                     let fm_start = perf.is_enabled().then(std::time::Instant::now);
+                    let fm_source_ctx = self.full_source_context_for_errors();
                     let fm_report = frontmatter_interpolation::interpolate_frontmatter(
                         self.frontmatter_mut(),
                         options.context(),
@@ -269,7 +275,8 @@ impl Markdown {
                         false,
                         Some(options.frontmatter_resolution_context()),
                         &options.exclude_keys,
-                    )?;
+                    )
+                    .map_err(|e| e.with_on_disk_source(&fm_source_ctx))?;
                     report.frontmatter_interpolations_applied += fm_report.replacements;
                     report.warnings.extend(fm_report.warnings);
                     if let Some(start) = fm_start {

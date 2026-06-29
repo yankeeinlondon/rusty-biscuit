@@ -910,7 +910,7 @@ mod tests {
     fn dispatch_error_arity(name: &str, arity: usize, lookup: &FsLookup) -> Option<String> {
         let args = vec!["0"; arity].join(", ");
         let expr = parse(&format!("{name}({args})")).expect("descriptor signature must parse");
-        evaluate(&expr, lookup).err()
+        evaluate(&expr, lookup).err().map(|error| error.to_string())
     }
 
     /// Convenience: exercise a name with two arguments.
